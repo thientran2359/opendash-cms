@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { PluginRunResult, PluginSettingsSnapshot, PluginSummary } from '../types.ts';
 import { requestJson, requestText } from './client.ts';
 
@@ -5,7 +6,7 @@ export async function getPlugins(signal?: AbortSignal): Promise<PluginSummary[]>
   return requestJson<PluginSummary[]>('/api/admin/plugins', {
     method: 'GET',
     signal,
-    defaultErrorMessage: 'Không thể tải danh sách plugin.',
+    defaultErrorMessage: tStatic('api.plugins.load_plugins'),
   });
 }
 
@@ -18,8 +19,8 @@ export async function installPlugin(
     csrfToken,
     contentType: 'application/zip',
     body: file,
-    defaultErrorMessage: 'Lỗi khi cài đặt plugin.',
-    oversizeErrorMessage: 'Tập tin ZIP quá lớn (vượt quá giới hạn 5 MiB của plugin).',
+    defaultErrorMessage: tStatic('api.plugins.install_the_plugin'),
+    oversizeErrorMessage: tStatic('api.plugins.the_zip_file_exceeds_the_5_mib_plugin_limit'),
   });
 }
 
@@ -33,8 +34,8 @@ export async function runPlugin(
     csrfToken,
     contentType: 'application/json',
     body: inputJson || '{}',
-    defaultErrorMessage: 'Lỗi khi chạy plugin.',
-    oversizeErrorMessage: 'Payload quá lớn (vượt quá giới hạn 1 MiB cho JSON input).',
+    defaultErrorMessage: tStatic('api.plugins.run_the_plugin'),
+    oversizeErrorMessage: tStatic('api.plugins.the_payload_exceeds_the_1_mib_json_input_limit'),
   });
 }
 
@@ -42,7 +43,7 @@ export async function disablePlugin(id: string, csrfToken: string): Promise<void
   await requestText(`/api/admin/plugins/${encodeURIComponent(id)}/disable`, {
     method: 'POST',
     csrfToken,
-    defaultErrorMessage: 'Không thể vô hiệu hóa plugin.',
+    defaultErrorMessage: tStatic('api.plugins.disable_the_plugin'),
   });
 }
 
@@ -50,7 +51,7 @@ export async function enablePlugin(id: string, csrfToken: string): Promise<void>
   await requestText(`/api/admin/plugins/${encodeURIComponent(id)}/enable`, {
     method: 'POST',
     csrfToken,
-    defaultErrorMessage: 'Không thể kích hoạt plugin.',
+    defaultErrorMessage: tStatic('api.plugins.enable_the_plugin'),
   });
 }
 
@@ -61,7 +62,7 @@ export async function getPluginUiSchema(
   return requestJson<unknown>(`/api/admin/plugins/${encodeURIComponent(id)}/ui-schema`, {
     method: 'GET',
     signal,
-    defaultErrorMessage: 'Không tải được declarative UI.',
+    defaultErrorMessage: tStatic('api.plugins.load_the_declarative_ui'),
   });
 }
 
@@ -80,7 +81,7 @@ export async function invokePluginAction(
       contentType: 'application/json',
       body: JSON.stringify(payload ?? {}),
       signal,
-      defaultErrorMessage: 'Lỗi thực thi action.',
+      defaultErrorMessage: tStatic('api.plugins.execute_the_action'),
     },
   );
 }
@@ -99,7 +100,7 @@ export async function runPluginAction(
       csrfToken,
       contentType: 'application/json',
       body: JSON.stringify(payload ?? {}),
-      defaultErrorMessage: 'Lỗi khi thực thi action của plugin.',
+      defaultErrorMessage: tStatic('api.plugins.execute_the_plugin_action'),
     },
   );
 }
@@ -112,7 +113,7 @@ export function getPluginSettings(
     `/api/admin/plugins/${encodeURIComponent(id)}/settings`,
     {
       signal,
-      defaultErrorMessage: 'Không thể tải cài đặt plugin.',
+      defaultErrorMessage: tStatic('api.plugins.load_plugin_settings'),
     },
   );
 }
@@ -131,7 +132,7 @@ export function savePluginSettings(
       ifMatchVersion: version,
       contentType: 'application/json',
       body: JSON.stringify({ values }),
-      defaultErrorMessage: 'Không thể lưu cài đặt plugin.',
+      defaultErrorMessage: tStatic('api.plugins.save_plugin_settings'),
     },
   );
 }

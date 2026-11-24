@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 import type { Role } from '../types.ts';
 
@@ -16,7 +17,7 @@ export interface UpdateProfileInput {
 
 export function getProfile(): Promise<UserProfile> {
   return requestJson('/api/admin/profile', {
-    defaultErrorMessage: 'Không thể tải hồ sơ cá nhân.',
+    defaultErrorMessage: tStatic('api.users.load_your_profile'),
   });
 }
 
@@ -31,6 +32,6 @@ export function updateProfile(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể cập nhật hồ sơ cá nhân.',
+    defaultErrorMessage: tStatic('api.users.update_your_profile'),
   });
 }

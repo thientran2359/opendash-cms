@@ -1,3 +1,4 @@
+import { useI18n, tStatic } from '../i18n/index.tsx';
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
 import { type BuilderDocument, type BuilderViewport, VIEWPORT_WIDTHS, locate } from './document.ts';
@@ -45,8 +46,10 @@ const BRIDGE_SCRIPT = [
   'var gear=document.createElement("button");',
   'gear.type="button";gear.className="od-canvas-gear";',
   'gear.setAttribute("data-od-gear",nodeId);',
-  'gear.setAttribute("aria-label","Thao tác "+(kind==="section"?"Section":"Element"));',
-  'gear.setAttribute("title","Thao tác với block");',
+  'var labelMeta=document.querySelector(kind==="section"?\'meta[name="od-studio-gear-section"]\':\'meta[name="od-studio-gear-element"]\');',
+  'var titleMeta=document.querySelector(\'meta[name="od-studio-gear-title"]\');',
+  'gear.setAttribute("aria-label",labelMeta?labelMeta.getAttribute("content")||"":"Block actions");',
+  'gear.setAttribute("title",titleMeta?titleMeta.getAttribute("content")||"":"Block actions");',
   'var icon=document.createElementNS("http://www.w3.org/2000/svg","svg");',
   'icon.setAttribute("viewBox","0 0 24 24");',
   'icon.setAttribute("width","16");icon.setAttribute("height","16");',
@@ -128,7 +131,7 @@ const BRIDGE_SCRIPT = [
   '})();',
 ].join('\n');
 
-const BRIDGE_SCRIPT_SHA256 = 'nzPczuMVqg+QdOmrKjWUN+X5syrEZGTU7QeepWyHY68=';
+const BRIDGE_SCRIPT_SHA256 = 'cSCTsWih/Rgol2yZrAzuk3bDAqtf38Y4+/IPQYma/zQ=';
 
 function generateStudioNonce(): string {
   const bytes = new Uint8Array(16);
@@ -201,7 +204,7 @@ export async function preparePreviewMarkup(
   let skipped = Math.max(0, mediaPaths.length - MEDIA_PREVIEW_LIMIT);
   let bytes = 0;
   for (const path of mediaPaths.slice(0, MEDIA_PREVIEW_LIMIT)) {
-    if (signal.aborted) throw new DOMException('Preview đã hủy.', 'AbortError');
+    if (signal.aborted) throw new DOMException(tStatic('builder.builder_preview_frame.abort'), 'AbortError');
     let blob: Blob;
     try {
       blob = await api.getPrivatePreviewMedia(path, signal);
@@ -223,8 +226,8 @@ export async function preparePreviewMarkup(
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error ?? new Error('Không đọc được ảnh Preview.'));
-      reader.onabort = () => reject(new DOMException('Preview đã hủy.', 'AbortError'));
+      reader.onerror = () => reject(reader.error ?? new Error(tStatic('builder.builder_preview_frame.image_error')));
+      reader.onabort = () => reject(new DOMException(tStatic('builder.builder_preview_frame.abort'), 'AbortError'));
       if (signal.aborted) reader.abort();
       else reader.readAsDataURL(blob);
     });
@@ -308,6 +311,18 @@ export async function preparePreviewMarkup(
     scrollMeta.setAttribute('content', `${scrollX},${scrollY}`);
     head.appendChild(scrollMeta);
 
+    // Keep the bridge script constant; translated strings travel as inert metadata.
+    for (const [name, label] of [
+      ['section', tStatic('builder.builder_preview_frame.gear_section')],
+      ['element', tStatic('builder.builder_preview_frame.gear_element')],
+      ['title', tStatic('builder.builder_preview_frame.gear_title')],
+    ]) {
+      const labelMeta = parsed.createElement('meta');
+      labelMeta.setAttribute('name', 'od-studio-gear-' + name);
+      labelMeta.setAttribute('content', label);
+      head.appendChild(labelMeta);
+    }
+
     if (options.selectedId) {
       const selMeta = parsed.createElement('meta');
       selMeta.setAttribute('name', 'od-studio-selected');
@@ -362,11 +377,12 @@ export function BuilderPreviewFrame({
   onOpenNodeMenu,
   onHoverNode,
   onApiError,
-  title = 'Preview Builder (sandbox opaque)',
+  title,
   className = '',
   frameClassName = '!h-[650px] !border-0',
   onPrepared,
 }: BuilderPreviewFrameProps) {
+  const { t } = useI18n();
   const [preparedHtml, setPreparedHtml] = useState<string>('');
   const [preparedSeq, setPreparedSeq] = useState<number>(0);
   const [preparing, setPreparing] = useState<boolean>(false);
@@ -418,7 +434,7 @@ export function BuilderPreviewFrame({
       .catch(cause => {
         if (controller.signal.aborted || seq !== seqRef.current) return;
         setPreparedHtml('');
-        onApiErrorRef.current?.(cause, 'Không thể chuẩn bị dữ liệu Preview.');
+        onApiErrorRef.current?.(cause, t('builder.builder_preview_frame.prepare_error'));
       })
       .finally(() => {
         if (seq === seqRef.current) setPreparing(false);
@@ -426,7 +442,7 @@ export function BuilderPreviewFrame({
     return () => {
       controller.abort();
     };
-  }, [html, interactive]);
+  }, [html, interactive, t]);
 
   useEffect(() => {
     if (!interactive) return;
@@ -537,7 +553,7 @@ export function BuilderPreviewFrame({
           key={`${interactive ? 'interactive' : 'static'}-${preparedSeq}`}
           ref={iframeRef}
           id="canvas"
-          title={title}
+          title={title ?? t('builder.builder_preview_frame.title')}
           sandbox={interactive ? 'allow-scripts' : ''}
           referrerPolicy="no-referrer"
           onLoad={sendHighlight}
@@ -560,7 +576,7 @@ export function BuilderPreviewFrame({
           }}
           data-testid="builder-preview-preparing"
         >
-          Đang chuẩn bị bản xem trước…
+          {t('builder.builder_preview_frame.preparing')}
         </div>
       )}
     </div>

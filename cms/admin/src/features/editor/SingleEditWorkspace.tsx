@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createEntryComposite,
@@ -141,6 +142,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   onDirtyChange,
   onNavigateHash,
 }) => {
+  useI18n();
   const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
   const [entryLocale, setEntryLocale] = useState<string>(defaultLocaleCode);
   const [translations, setTranslations] = useState<TranslationLinkSummary[]>([]);
@@ -457,9 +459,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         setDirty(Boolean(restored?.dirty_fields.length));
         setConfig(freshCfg);
         if (layoutUnavailable) {
-          setStatusNote('Không tải được danh sách template từ theme. Bản nội dung và lựa chọn cũ vẫn được giữ; không thể chọn template mới cho đến khi tải lại.');
+          setStatusNote(tStatic("feature.editor.singleeditworkspace.could_not_load_theme_templates_content_and_the_previous"));
         } else if (restored && restored.schema_token_at_edit !== freshCfg.schema_token) {
-          setStatusNote('Schema đã thay đổi. Nháp được giữ; Lưu sẽ kiểm tra schema token cũ để tránh ghi đè.');
+          setStatusNote(tStatic("feature.editor.singleeditworkspace.schema_changed_your_draft_is_retained_saving_checks_the"));
         }
       } catch (err) {
         if (!active) return;
@@ -471,7 +473,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         baselineRef.current = null;
         draftRef.current = null;
         setDirty(false);
-        onApiError(err, 'Không thể tải dữ liệu màn hình chỉnh sửa.');
+        onApiError(err, tStatic("feature.editor.singleeditworkspace.could_not_load_editor_screen_data"));
       }
     })();
 
@@ -512,15 +514,15 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     const requestEpoch = editorDraftStore.getSessionEpoch();
     const expectedSchemaToken = schemaTokenRef.current;
     const nextErrors: Record<string, string> = {};
-    if (!snapshot.title.trim()) nextErrors.title = 'Tiêu đề không được để trống.';
-    if (!snapshot.slug.trim()) nextErrors.slug = 'Slug không được để trống.';
+    if (!snapshot.title.trim()) nextErrors.title = tStatic("feature.editor.singleeditworkspace.title_cannot_be_empty");
+    if (!snapshot.slug.trim()) nextErrors.slug = tStatic("feature.editor.singleeditworkspace.slug_cannot_be_empty");
 
     for (const [fk, eff] of Object.entries(config.effective_fields)) {
       if (eff.effective_required && eff.editable && supportAllowsField(typeKey, fk, effectiveSettings)) {
         const v = snapshot.values[fk];
         const empty = snapshot.cleared_fields.includes(fk) || v === undefined || v === null || (typeof v === 'string' && !v.trim());
         if (empty) {
-          nextErrors[fk] = `Trường "${eff.definition.label}" là bắt buộc.`;
+          nextErrors[fk] = tStatic("feature.editor.singleeditworkspace.field_value_is_required", { value1: eff.definition.label });
         }
       }
     }
@@ -644,7 +646,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               activeDraftKeyRef.current === draftKey &&
               activeMediaScopeRef.current === mediaScopeKey &&
               error instanceof ApiClientError && error.status === 401) {
-            onApiError(error, 'Phiên đăng nhập hết hạn khi tải URL công khai.');
+            onApiError(error, tStatic("feature.editor.singleeditworkspace.your_session_expired_while_loading_the_public_url"));
           }
         });
       }
@@ -677,8 +679,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         setDirty(changed.length > 0 || themeKeyDirtyRef.current);
       }
       setStatusNote(hasNewerChanges
-        ? `Đã lưu snapshot v${res.entry.version}; chỉnh sửa mới hơn vẫn chưa lưu.`
-        : `Đã lưu thành công (v${res.entry.version}).`);
+        ? tStatic("feature.editor.singleeditworkspace.saved_snapshot_vvalue_newer_edits_remain_unsaved", { value1: res.entry.version })
+        : tStatic("feature.editor.singleeditworkspace.saved_successfully_vvalue", { value1: res.entry.version }));
       if (entryId === null && navigateOnCreate) {
         onNavigateHash(`${listHashPrefix}/${res.entry.id}/edit`);
       }
@@ -690,11 +692,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         editorDraftStore.quarantineAll();
       }
       if (err instanceof ApiClientError && err.status === 412) {
-        setStatusNote('Có xung đột version hoặc schema (412). Nháp vẫn được giữ để xử lý.');
+        setStatusNote(tStatic("feature.editor.singleeditworkspace.version_or_schema_conflict_412_your_draft_is_retained"));
       } else if (err instanceof ApiClientError && err.status === 409) {
-        setStatusNote('Xung đột đường dẫn tĩnh hoặc slug (409). Hãy chọn đường dẫn khác hoặc xem chi tiết xung đột. Nháp vẫn được giữ.');
+        setStatusNote(tStatic("feature.editor.singleeditworkspace.static_path_or_slug_conflict_409_choose_another_path"));
       }
-      onApiError(err, 'Không thể lưu nội dung.');
+      onApiError(err, tStatic("api.postPage.save_the_entry"));
       return null;
     } finally {
       saveInFlightRef.current = false;
@@ -705,9 +707,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   if (isPattern) {
     if (!isActive || !user) return null;
     return <div className="od-admin-card space-y-3" role="status">
-      <p className="text-sm text-slate-700">Pattern là nội dung riêng tư, dùng chung qua Visual Builder.</p>
+      <p className="text-sm text-slate-700">{tStatic("feature.editor.singleeditworkspace.patterns_are_private_content_shared_through_visual_builder")}</p>
       <button type="button" onClick={() => onNavigateHash(entryId === null
-        ? '#/patterns' : `#/patterns/${entryId}/edit`)}>Mở quản lý Pattern</button>
+        ? '#/patterns' : `#/patterns/${entryId}/edit`)}>{tStatic("feature.editor.singleeditworkspace.open_pattern_management")}</button>
     </div>;
   }
 
@@ -719,7 +721,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   }
 
   if (!config) {
-    return <p className="text-sm text-slate-600">Đang tải cấu hình trình chỉnh sửa...</p>;
+    return <p className="text-sm text-slate-600">{tStatic("feature.editor.singleeditworkspace.loading_editor_configuration")}</p>;
   }
 
   // Public URLs must come from the server route authority. Never derive a URL
@@ -762,16 +764,16 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
           }}
         >
-          <option value="">Theo theme mặc định</option>
+          <option value="">{tStatic("feature.editor.singleeditworkspace.theme_default")}</option>
           {templateChoices.map(choice => (
             <option key={choice.key} value={choice.key}>{choice.label}</option>
           ))}
           {selectedThemeKey && !templateChoices.some(choice => choice.key === selectedThemeKey) && (
-            <option value={selectedThemeKey}>{selectedThemeKey} (theme hiện tại không còn cung cấp — được bảo toàn)</option>
+            <option value={selectedThemeKey}>{selectedThemeKey} {tStatic("feature.editor.singleeditworkspace.no_longer_provided_by_current_theme_preserved")}</option>
           )}
         </select>
       </label>
-      {themeKeyDirty && <p className="text-xs font-medium text-amber-700">● Chưa lưu</p>}
+      {themeKeyDirty && <p className="text-xs font-medium text-amber-700">{tStatic("feature.editor.panelregionrenderer.unsaved")}</p>}
     </div>
   ) : null;
 
@@ -804,9 +806,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       if (error instanceof ApiClientError) {
         setTranslationError(error.message);
       } else {
-        setTranslationError('Không thể tạo bản dịch.');
+        setTranslationError(tStatic("feature.editor.singleeditworkspace.could_not_create_translation"));
       }
-      onApiError(error, 'Không thể tạo bản dịch');
+      onApiError(error, tStatic("feature.editor.singleeditworkspace.could_not_create_translation_2"));
     } finally {
       setCreatingTranslation(false);
     }
@@ -816,7 +818,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     <div className="space-y-2.5" data-testid="entry-translations-panel">
       {entryId === null ? (
         <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-locale-select">
-          <span>Ngôn ngữ nội dung</span>
+          <span>{tStatic("shell.locale_content")}</span>
           <select
             id="entry-locale-select"
             data-testid="entry-locale-select"
@@ -831,7 +833,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           >
             {localeState.allLocales.map(loc => (
               <option key={loc.code} value={loc.code}>
-                {loc.label} ({loc.code}){loc.is_default ? ' — Mặc định' : ''}
+                {loc.label} ({loc.code}){loc.is_default ? tStatic("feature.editor.singleeditworkspace.default") : ''}
               </option>
             ))}
           </select>
@@ -839,14 +841,14 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       ) : (
         <>
           <div className="flex items-center justify-between text-xs">
-            <span className="font-medium text-zinc-700">Ngôn ngữ</span>
+            <span className="font-medium text-zinc-700">{tStatic("feature.content.entrylistpage.language")}</span>
             <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-zinc-800" data-testid="entry-locked-locale">
               {entryLocale || defaultLocaleCode}
             </span>
           </div>
           {translations.length > 0 && (
             <div className="space-y-1">
-              <p className="text-xs font-medium text-zinc-600">Bản dịch liên kết</p>
+              <p className="text-xs font-medium text-zinc-600">{tStatic("feature.editor.singleeditworkspace.linked_translations")}</p>
               <ul className="space-y-1">
                 {translations.map(tr => (
                   <li key={tr.id} className="flex items-center justify-between gap-2 text-xs">
@@ -868,7 +870,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           )}
           {missingTranslationLocales.length > 0 && (
             <div className="space-y-1 pt-1">
-              <p className="text-xs font-medium text-zinc-600">Tạo bản dịch</p>
+              <p className="text-xs font-medium text-zinc-600">{tStatic("feature.editor.singleeditworkspace.create_translation")}</p>
               <div className="flex flex-wrap gap-1.5">
                 {missingTranslationLocales.map(loc => (
                   <button
@@ -884,7 +886,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
                     data-testid={`create-translation-${loc.code}`}
                     className="inline-flex h-7 items-center rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    + Tạo bản dịch ({loc.code})
+                    {tStatic("feature.editor.singleeditworkspace.create_translation_2")}{loc.code})
                   </button>
                 ))}
               </div>
@@ -898,7 +900,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const handleDelete = async () => {
     const version = baselineRef.current?.version;
     if (entryId === null || version === null || version === undefined || !csrfToken || saving) return;
-    if (!window.confirm('Xóa vĩnh viễn nội dung này? Hành động này không thể hoàn tác.')) return;
+    if (!window.confirm(tStatic("feature.editor.singleeditworkspace.permanently_delete_this_content_this_cannot_be_undone"))) return;
     setSaving(true);
     try {
       await deleteContentEntry(typeKey, entryId, version, csrfToken);
@@ -907,7 +909,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       onDirtyChange(false);
       onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)));
     } catch (err) {
-      onApiError(err, 'Không thể xóa nội dung.');
+      onApiError(err, tStatic("api.postPage.delete_the_entry"));
     } finally {
       setSaving(false);
     }
@@ -1051,7 +1053,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             );
             setActionOutputs(prev => ({ ...prev, [panelId]: JSON.stringify(res, null, 2) }));
           } catch (err) {
-            onApiError(err, 'Lỗi khi chạy plugin action.');
+            onApiError(err, tStatic("feature.editor.singleeditworkspace.error_running_plugin_action"));
           } finally {
             setActionBusy(prev => ({ ...prev, [panelId]: false }));
           }
@@ -1060,7 +1062,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         canOpenBuilder={!isPattern && Boolean(settings?.supports.includes('builder'))}
         onOpenBuilder={() => {
           if (isPattern || !settings?.supports.includes('builder')) {
-            setStatusNote('Loại nội dung này chưa hỗ trợ Trình dựng trang.');
+            setStatusNote(tStatic("feature.editor.singleeditworkspace.this_content_type_does_not_support_builder_yet"));
             return;
           }
           if (dirty) {
@@ -1068,7 +1070,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             return;
           }
           if (entryId === null) {
-            setStatusNote('Vui lòng Lưu nội dung trước khi mở Trình dựng trang.');
+            setStatusNote(tStatic("feature.editor.singleeditworkspace.save_the_content_before_opening_builder"));
             return;
           }
           onNavigateHash(entryBuilderHash);
@@ -1083,10 +1085,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       >
         <style>{'dialog.od-confirm-dialog:modal{overscroll-behavior:contain} dialog.od-confirm-dialog::backdrop{overflow:hidden;overscroll-behavior:contain;background:rgba(9,9,11,0.45)}'}</style>
         <h2 id="builder-unsaved-title" className="text-base font-semibold text-zinc-950">
-          Có thay đổi chưa lưu trong trình soạn thảo
+          {tStatic("feature.editor.singleeditworkspace.unsaved_editor_changes")}
         </h2>
         <p className="mt-2 text-sm text-zinc-600">
-          Bạn muốn lưu các chỉnh sửa hiện tại trước khi mở Tùy chỉnh giao diện (Trình dựng trang) không?
+          {tStatic("feature.editor.singleeditworkspace.do_you_want_to_save_your_current_edits_before")}
         </p>
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           {entryId !== null && (
@@ -1103,7 +1105,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               data-testid="builder-prompt-discard"
               className="inline-flex h-9 items-center rounded-md border border-rose-200 bg-rose-50 px-3 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
             >
-              Bỏ thay đổi &amp; mở
+              {tStatic("feature.editor.singleeditworkspace.discard_changes_open")}
             </button>
           )}
           <button
@@ -1114,7 +1116,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             data-testid="builder-prompt-cancel"
             className="inline-flex h-9 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
           >
-            Hủy
+            {tStatic("multilingual.cancel")}
           </button>
           <button
             type="button"
@@ -1132,7 +1134,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             data-testid="builder-prompt-save"
             className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
           >
-            {saving ? 'Đang lưu…' : 'Lưu & mở Trình dựng trang'}
+            {saving ? tStatic("reading.saving") : tStatic("feature.editor.singleeditworkspace.save_open_builder")}
           </button>
         </div>
       </dialog>
@@ -1174,29 +1176,29 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         >
           <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl space-y-4">
             <h3 className="text-base font-semibold text-zinc-900">
-              Tạo bản dịch ({translationModalLocale})
+              {tStatic("feature.editor.singleeditworkspace.create_translation_3")}{translationModalLocale})
             </h3>
             <p className="text-xs text-zinc-600">
-              Hệ thống sẽ sao chép nội dung, custom fields, taxonomy terms cùng ngôn ngữ và media tham chiếu sang bản dịch mới ở trạng thái nháp.
+              {tStatic("feature.editor.singleeditworkspace.the_system_copies_content_custom_fields_matching_language_taxonomy")}
             </p>
             <div className="space-y-3">
               <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-                <span>Tiêu đề (tùy chọn)</span>
+                <span>{tStatic("feature.editor.singleeditworkspace.title_optional")}</span>
                 <input
                   type="text"
                   value={translationTitle}
                   onChange={e => setTranslationTitle(e.target.value)}
-                  placeholder={title || 'Để trống để sao chép tiêu đề gốc'}
+                  placeholder={title || tStatic("feature.editor.singleeditworkspace.leave_empty_to_copy_the_original_title")}
                   className="h-9 rounded-md border border-zinc-300 px-2.5 text-sm text-zinc-900"
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-                <span>Slug (tùy chọn)</span>
+                <span>{tStatic("feature.editor.singleeditworkspace.slug_optional")}</span>
                 <input
                   type="text"
                   value={translationSlug}
                   onChange={e => setTranslationSlug(e.target.value)}
-                  placeholder="Để trống để tự sinh theo tiêu đề"
+                  placeholder={tStatic("feature.editor.singleeditworkspace.leave_empty_to_generate_from_title")}
                   className="h-9 rounded-md border border-zinc-300 px-2.5 text-sm text-zinc-900"
                 />
               </label>
@@ -1211,7 +1213,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
                 onClick={() => setTranslationModalLocale(null)}
                 className="inline-flex h-9 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
               >
-                Hủy
+                {tStatic("multilingual.cancel")}
               </button>
               <button
                 type="button"
@@ -1220,7 +1222,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
                 data-testid="confirm-create-translation"
                 className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
               >
-                {creatingTranslation ? 'Đang tạo…' : 'Tạo bản dịch'}
+                {creatingTranslation ? tStatic("feature.editor.singleeditworkspace.creating") : tStatic("feature.editor.singleeditworkspace.create_translation")}
               </button>
             </div>
           </div>

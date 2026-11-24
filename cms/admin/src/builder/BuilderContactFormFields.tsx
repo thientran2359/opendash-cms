@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n/index.tsx';
 import { useEffect, useState } from 'react';
 import { listContactForms, type ContactFormRecord } from '../api/contact.ts';
 import type { BuilderElement } from './document.ts';
@@ -9,9 +10,10 @@ interface Props {
 }
 
 export function BuilderContactFormFields({ element, onChange, onError }: Props) {
+  const { t } = useI18n();
   const [forms, setForms] = useState<ContactFormRecord[]>([]);
   const formId = Number(element.props.form_id ?? 1);
-  const submitLabel = String(element.props.submit_label ?? 'Gửi liên hệ');
+  const submitLabel = String(element.props.submit_label ?? t('builder.builder_contact_form_fields.submit_default'));
 
   useEffect(() => {
     let active = true;
@@ -20,7 +22,7 @@ export function BuilderContactFormFields({ element, onChange, onError }: Props) 
         if (active) setForms(list);
       })
       .catch((err) => {
-        if (active) onError(err, 'Không thể tải danh sách form liên hệ.');
+        if (active) onError(err, t('builder.builder_contact_form_fields.load_error'));
       });
     return () => {
       active = false;
@@ -29,9 +31,9 @@ export function BuilderContactFormFields({ element, onChange, onError }: Props) 
 
   return (
     <div className="mt-4 space-y-3 border-t border-slate-200 pt-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Form liên hệ</h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t('builder.builder_contact_form_fields.heading')}</h3>
       <label className="block text-sm">
-        <span className="mb-1 block font-medium text-slate-700">Chọn form</span>
+        <span className="mb-1 block font-medium text-slate-700">{t('builder.builder_contact_form_fields.choose')}</span>
         <select
           className="w-full rounded border border-slate-300 px-3 py-1.5 text-sm"
           value={String(formId)}
@@ -46,7 +48,7 @@ export function BuilderContactFormFields({ element, onChange, onError }: Props) 
         </select>
       </label>
       <label className="block text-sm">
-        <span className="mb-1 block font-medium text-slate-700">Nhãn nút gửi</span>
+        <span className="mb-1 block font-medium text-slate-700">{t('builder.builder_contact_form_fields.submit_label')}</span>
         <input
           type="text"
           maxLength={80}
@@ -55,8 +57,7 @@ export function BuilderContactFormFields({ element, onChange, onError }: Props) 
           onChange={(e) => onChange(element.id, 'submit_label', e.target.value)}
         />
       </label>
-      <p className="text-xs text-slate-500">
-        Quản lý trường và xem thư tại mục Cài đặt → Form liên hệ &amp; Hộp thư.
+      <p className="text-xs text-slate-500">{t('builder.builder_contact_form_fields.manage')}
       </p>
     </div>
   );

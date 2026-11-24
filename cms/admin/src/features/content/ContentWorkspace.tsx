@@ -1,3 +1,5 @@
+import { formatNumber } from '../../i18n/format.ts';
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   createContentEntry,
@@ -67,28 +69,28 @@ function blankDraft(): EntryDraft {
 
 function entryInput(draft: EntryDraft, schema: ContentTypeDefinition): ContentEntryInput {
   if (!draft.title.trim() || draft.title.length > 200) {
-    throw new Error('Tiêu đề bắt buộc và tối đa 200 ký tự.');
+    throw new Error(tStatic("feature.content.contentworkspace.title_is_required_and_must_be_at_most_200"));
   }
   if (!/^[a-z][a-z0-9-]{0,63}$/.test(draft.slug)) {
-    throw new Error('Slug phải bắt đầu bằng chữ thường, chỉ chứa a-z, 0-9, dấu -, tối đa 64 ký tự.');
+    throw new Error(tStatic("feature.content.contentworkspace.the_slug_must_start_with_a_lowercase_letter_contain"));
   }
   const values: Record<string, ContentFieldValue> = {};
   for (const field of schema.fields) {
     const raw = draft.values[field.key] ?? '';
     if (!raw.trim()) {
-      if (field.required) throw new Error(`Cần nhập "${field.label}".`);
+      if (field.required) throw new Error(tStatic("feature.content.contentworkspace.enter_value", { value1: field.label }));
       continue;
     }
     if (field.type === 'number') {
       const number = Number(raw);
-      if (!Number.isFinite(number)) throw new Error(`Field "${field.label}" phải là số hợp lệ.`);
+      if (!Number.isFinite(number)) throw new Error(tStatic("feature.content.contentworkspace.field_value_must_be_a_valid_number", { value1: field.label }));
       values[field.key] = number;
     } else if (field.type === 'boolean') {
-      if (raw !== 'true' && raw !== 'false') throw new Error(`Field "${field.label}" phải chọn Bật hoặc Tắt.`);
+      if (raw !== 'true' && raw !== 'false') throw new Error(tStatic("feature.content.contentworkspace.field_value_must_be_set_to_on_or_off", { value1: field.label }));
       values[field.key] = raw === 'true';
     } else if (field.type === 'gallery') {
       const ids = raw.split(/[\n,]+/).map(item => item.trim()).filter(Boolean);
-      if (ids.length > 50) throw new Error(`Field "${field.label}" tối đa 50 mã ảnh.`);
+      if (ids.length > 50) throw new Error(tStatic("feature.content.contentworkspace.field_value_supports_at_most_50_image_ids", { value1: field.label }));
       values[field.key] = ids;
     } else {
       values[field.key] = raw;
@@ -99,7 +101,7 @@ function entryInput(draft: EntryDraft, schema: ContentTypeDefinition): ContentEn
 
 function slugFromTitle(title: string): string {
   return title
-    .replace(/[đĐ]/g, 'd')
+    .replace(/[\u0111\u0110]/g, 'd')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -112,6 +114,7 @@ function slugFromTitle(title: string): string {
 export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
   user, csrfToken, onApiError, onDirtyChange,
 }) => {
+  useI18n();
   const [types, setTypes] = useState<OwnedContentType[]>([]);
   const [selectedTypeKey, setSelectedTypeKey] = useState('');
   const [entries, setEntries] = useState<ContentEntryRecord[]>([]);
@@ -205,7 +208,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
             : (list[0]?.descriptor.key ?? ''),
         );
       })
-      .catch(cause => { if (active) reportError(cause, 'Không thể tải danh sách CPT.'); })
+      .catch(cause => { if (active) reportError(cause, tStatic("feature.content.contentworkspace.could_not_load_the_cpt_list")); })
       .finally(() => { if (active) setLoadingTypes(false); });
     return () => { active = false; };
   }, [user?.id]);
@@ -228,13 +231,13 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
     setLoadingEntries(true);
     listContentEntries(selectedTypeKey, ENTRIES_PAGE_SIZE, offset, filters)
       .then(list => { if (active) setEntries(list); })
-      .catch(cause => { if (active) reportError(cause, 'Không thể tải danh sách entry.'); })
+      .catch(cause => { if (active) reportError(cause, tStatic("feature.content.contentworkspace.could_not_load_the_entry_list")); })
       .finally(() => { if (active) setLoadingEntries(false); });
     return () => { active = false; };
   }, [user?.id, selectedTypeKey, offset, filters]);
 
   const confirmDiscard = (): boolean =>
-    !entryDirty || window.confirm('Bản nháp entry chưa lưu sẽ bị bỏ. Tiếp tục?');
+    !entryDirty || window.confirm(tStatic("feature.content.contentworkspace.the_unsaved_entry_draft_will_be_discarded_continue"));
 
   const switchType = (key: string) => {
     if (processing || !confirmDiscard()) return;
@@ -271,7 +274,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
     try {
       input = entryInput(draft, selectedType.descriptor);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Giá trị không hợp lệ.');
+      setError(cause instanceof Error ? cause.message : tStatic("feature.content.contentworkspace.invalid_value"));
       return;
     }
     setProcessing(true);
@@ -282,10 +285,10 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
       const next = draftFromEntry(result);
       setDraft(next);
       setBaseline(JSON.stringify(next));
-      setNotice('Đã lưu entry. Nội dung được cập nhật ngay trên trang công khai.');
+      setNotice(tStatic("feature.content.contentworkspace.entry_saved_public_content_is_updated_immediately"));
       await refreshEntries(selectedTypeKey, offset);
     } catch (cause) {
-      reportError(cause, 'Không thể lưu entry.');
+      reportError(cause, tStatic("feature.content.contentworkspace.could_not_save_the_entry"));
     } finally {
       setProcessing(false);
     }
@@ -293,8 +296,8 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
 
   const removeEntry = async () => {
     if (!user || !csrfToken || !draft || draft.id === null || draft.version === null || processing) return;
-    const warning = entryDirty ? 'Entry có thay đổi chưa lưu. Xóa sẽ bỏ bản nháp và xóa nội dung trên server. Bạn chắc chắn?' :
-      'Bạn chắc chắn muốn xóa entry này? Thao tác không thể hoàn tác.';
+    const warning = entryDirty ? tStatic("feature.content.contentworkspace.this_entry_has_unsaved_changes_deleting_it_discards_the") :
+      tStatic("feature.content.contentworkspace.are_you_sure_you_want_to_delete_this_entry");
     if (!window.confirm(warning)) return;
     setProcessing(true);
     setError('');
@@ -303,10 +306,10 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
       setDraft(null);
       setBaseline('');
       setStaleVersion(false);
-      setNotice('Đã xóa entry.');
+      setNotice(tStatic("feature.content.contentworkspace.entry_deleted"));
       await refreshEntries(selectedTypeKey, offset);
     } catch (cause) {
-      reportError(cause, 'Không thể xóa entry.');
+      reportError(cause, tStatic("feature.content.contentworkspace.could_not_delete_the_entry"));
     } finally {
       setProcessing(false);
     }
@@ -314,7 +317,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
 
   const loadFreshEntry = async () => {
     if (!user || !draft || draft.id === null || processing) return;
-    if (entryDirty && !window.confirm('Tải bản từ server sẽ bỏ toàn bộ sửa đổi chưa lưu. Tiếp tục?')) return;
+    if (entryDirty && !window.confirm(tStatic("feature.content.contentworkspace.loading_from_the_server_discards_all_unsaved_edits_continue"))) return;
     setProcessing(true);
     try {
       const result = await getContentEntry(selectedTypeKey, draft.id);
@@ -323,9 +326,9 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
       setBaseline(JSON.stringify(next));
       setStaleVersion(false);
       setError('');
-      setNotice('Đã tải phiên bản mới nhất.');
+      setNotice(tStatic("feature.content.contentworkspace.loaded_the_latest_version"));
     } catch (cause) {
-      reportError(cause, 'Không thể tải phiên bản mới.');
+      reportError(cause, tStatic("feature.content.contentworkspace.could_not_load_the_latest_version"));
     } finally {
       setProcessing(false);
     }
@@ -333,7 +336,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
 
   const createType = async (schema: ContentTypeDefinition): Promise<boolean> => {
     if (!user || user.role !== 'admin' || !csrfToken || processing) return false;
-    if (entryDirty && !window.confirm('Entry hiện tại chưa lưu. Tạo CPT mới sẽ bỏ bản nháp này. Tiếp tục?')) {
+    if (entryDirty && !window.confirm(tStatic("feature.content.contentworkspace.the_current_entry_is_unsaved_creating_a_new_cpt"))) {
       return false;
     }
     setProcessing(true);
@@ -346,10 +349,10 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
       setDraft(null);
       setBaseline('');
       setShowTypeForm(false);
-      setNotice(`Đã tạo CPT "${schema.label}".`);
+      setNotice(tStatic("feature.content.contentworkspace.created_cpt_value", { value1: schema.label }));
       return true;
     } catch (cause) {
-      reportError(cause, 'Không thể tạo CPT.');
+      reportError(cause, tStatic("feature.content.contentworkspace.could_not_create_the_cpt"));
       return false;
     } finally {
       setProcessing(false);
@@ -360,8 +363,8 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
     <div className="content-workspace" id="content-workspace">
       <header className="content-header">
         <div>
-          <h2>Nội dung &amp; Custom Post Types</h2>
-          <p>Quản lý nội dung trong SQLite. Lưu entry sẽ cập nhật trang công khai theo URL và template hiện có.</p>
+          <h2>{tStatic("feature.content.contentworkspace.content_custom_post_types")}</h2>
+          <p>{tStatic("feature.content.contentworkspace.manage_content_in_sqlite_saving_an_entry_updates_public")}</p>
         </div>
         {user?.role === 'admin' && (
           <button
@@ -370,7 +373,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
             onClick={() => setShowTypeForm(previous => !previous)}
             disabled={processing}
           >
-            {showTypeForm ? 'Ẩn form CPT' : '+ Tạo loại nội dung'}
+            {showTypeForm ? tStatic("feature.content.contentworkspace.hide_cpt_form") : tStatic("feature.content.contentworkspace.create_content_type")}
           </button>
         )}
         <button
@@ -379,7 +382,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
           disabled={!user}
           onClick={() => setPickerTarget({ mode: 'browse', fieldKey: null })}
         >
-          Media Library
+          {tStatic("feature.common.media_library")}
         </button>
       </header>
 
@@ -388,7 +391,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
           {error || notice}
         </p>
       )}
-      {dirty && <p className="content-unsaved">● Có dữ liệu chưa lưu</p>}
+      {dirty && <p className="content-unsaved">{tStatic("feature.content.contentworkspace.unsaved_changes")}</p>}
 
       {/* Keep the schema form mounted across a 401 so its draft survives relogin. */}
       <div className={!user || user.role !== 'admin' || !showTypeForm ? 'hidden' : 'content-card'}>
@@ -403,21 +406,21 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
       <div className="content-columns">
         <aside className="content-card content-types-pane">
           <div className="content-section-heading">
-            <h3>Loại nội dung ({types.length})</h3>
+            <h3>{tStatic("feature.content.contentworkspace.content_types")}{types.length})</h3>
             <button
               type="button"
               className="btn-secondary"
               disabled={loadingTypes || !user}
-              onClick={() => refreshTypes().catch(cause => reportError(cause, 'Không thể tải CPT.'))}
+              onClick={() => refreshTypes().catch(cause => reportError(cause, tStatic("feature.content.contentworkspace.could_not_load_the_cpt")))}
             >
-              Tải lại
+              {tStatic("reading.reload")}
             </button>
           </div>
-          {loadingTypes && <p className="content-help">Đang tải CPT…</p>}
+          {loadingTypes && <p className="content-help">{tStatic("feature.content.contentworkspace.loading_cpts")}</p>}
           {!loadingTypes && types.length === 0 && (
-            <p className="content-help">Chưa có CPT. Quản trị viên có thể tạo một loại nội dung mới.</p>
+            <p className="content-help">{tStatic("feature.content.contentworkspace.no_cpts_yet_administrators_can_create_a_new_content")}</p>
           )}
-          <div className="content-type-list" role="list" aria-label="Các loại nội dung">
+          <div className="content-type-list" role="list" aria-label={tStatic("feature.content.contentworkspace.content_types_2")}>
             {types.map(type => (
               <div role="listitem" key={type.descriptor.key}>
                 <button
@@ -429,11 +432,11 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                 >
                   <strong>{type.descriptor.label}</strong>
                   <code>{type.descriptor.key}</code>
-                  <small>{type.descriptor.fields.length} trường · {type.owner.kind}
+                  <small>{type.descriptor.fields.length} {tStatic("feature.content.contentworkspace.fields")}{' '}{type.owner.kind}
                     {type.owner.id ? ` (${type.owner.id})` : ''}
                   </small>
                   {type.status === 'provider_inactive' && (
-                    <span className="content-warning">Nguồn cung cấp đã tắt — dữ liệu vẫn sửa được</span>
+                    <span className="content-warning">{tStatic("feature.content.contentworkspace.provider_disabled_data_remains_editable")}</span>
                   )}
                 </button>
               </div>
@@ -441,15 +444,15 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
           </div>
           {selectedType && (
             <div className="content-schema-summary">
-              <h4>Schema hiện tại</h4>
+              <h4>{tStatic("feature.content.contentworkspace.current_schema")}</h4>
               {selectedType.descriptor.fields.length === 0
-                ? <p className="content-help">Chưa có custom field.</p>
+                ? <p className="content-help">{tStatic("feature.content.contentworkspace.no_custom_fields")}</p>
                 : (
                   <ul>
                     {selectedType.descriptor.fields.map(field => (
                       <li key={field.key}>
                         {field.label} <code>{field.key}</code>
-                        <small> · {field.type}{field.required ? ' · bắt buộc' : ''}</small>
+                        <small> · {field.type}{field.required ? tStatic("feature.content.contentworkspace.required") : ''}</small>
                       </li>
                     ))}
                   </ul>
@@ -460,19 +463,19 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
 
         <section className="content-card content-entries-pane">
           {!selectedType ? (
-            <p className="content-help">Chọn hoặc tạo CPT để bắt đầu quản lý entry.</p>
+            <p className="content-help">{tStatic("feature.content.contentworkspace.select_or_create_a_cpt_to_start_managing_entries")}</p>
           ) : (
             <>
               <div className="content-section-heading">
                 <div>
-                  <h3>Entry: {selectedType.descriptor.label}</h3>
-                  <p className="content-help">Slug duy nhất trong từng CPT.</p>
+                  <h3>{tStatic("feature.common.entry")}: {selectedType.descriptor.label}</h3>
+                  <p className="content-help">{tStatic("feature.content.contentworkspace.the_slug_is_unique_within_each_cpt")}</p>
                   <a
                     href={`/content/${encodeURIComponent(selectedTypeKey)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Xem danh sách công khai
+                    {tStatic("feature.content.contentworkspace.view_public_archive")}
                   </a>
                 </div>
                 <div className="content-header-actions">
@@ -481,12 +484,12 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                     className="btn-secondary"
                     disabled={!user || loadingEntries || processing}
                     onClick={() => refreshEntries(selectedTypeKey, offset)
-                      .catch(cause => reportError(cause, 'Không thể tải lại entry.'))}
+                      .catch(cause => reportError(cause, tStatic("feature.content.contentworkspace.could_not_reload_the_entry")))}
                   >
-                    Tải lại danh sách
+                    {tStatic("feature.plugins.pluginspanel.reload_list")}
                   </button>
                   <button type="button" disabled={!user || processing} onClick={() => openDraft(blankDraft())}>
-                    + Tạo entry
+                    {tStatic("feature.content.contentworkspace.create_entry")}
                   </button>
                 </div>
               </div>
@@ -495,7 +498,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                   userId={user?.id ?? null}
                   value={filters}
                   disabled={!user || processing}
-                  onApiError={(error) => reportError(error, 'Lỗi route/SEO.')}
+                  onApiError={(error) => reportError(error, tStatic("feature.content.contentworkspace.route_seo_error"))}
                   onChange={next => {
                     setFilters(next);
                     setOffset(0);
@@ -503,9 +506,9 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                   }}
                 />
               </div>
-              <div className="content-entry-list" aria-label="Danh sách entry">
-                {loadingEntries && <p className="content-help">Đang tải entry…</p>}
-                {!loadingEntries && entries.length === 0 && <p className="content-help">Chưa có entry trong trang này.</p>}
+              <div className="content-entry-list" aria-label={tStatic("feature.content.contentworkspace.entry_list")}>
+                {loadingEntries && <p className="content-help">{tStatic("feature.content.contentworkspace.loading_entries")}</p>}
+                {!loadingEntries && entries.length === 0 && <p className="content-help">{tStatic("feature.content.contentworkspace.no_entries_on_this_page")}</p>}
                 {entries.map(entry => (
                   <button
                     type="button"
@@ -526,36 +529,36 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                   disabled={offset === 0 || loadingEntries || processing}
                   onClick={() => setOffset(previous => Math.max(0, previous - ENTRIES_PAGE_SIZE))}
                 >
-                  Trang trước
+                  {tStatic("feature.content.contentworkspace.previous_page")}
                 </button>
-                <span>Trang {Math.floor(offset / ENTRIES_PAGE_SIZE) + 1}</span>
+                <span>{tStatic("feature.common.page_number", { page: formatNumber(Math.floor(offset / ENTRIES_PAGE_SIZE) + 1) })}</span>
                 <button
                   type="button"
                   className="btn-secondary"
                   disabled={entries.length < ENTRIES_PAGE_SIZE || loadingEntries || processing}
                   onClick={() => setOffset(previous => previous + ENTRIES_PAGE_SIZE)}
                 >
-                  Trang sau
+                  {tStatic("feature.common.next_page")}
                 </button>
               </div>
 
               {draft && (
                 <form className="content-entry-form" onSubmit={save}>
                   <div className="content-section-heading">
-                    <h3>{draft.id === null ? 'Tạo entry mới' : `Chỉnh sửa entry #${draft.id} (v${draft.version})`}</h3>
+                    <h3>{draft.id === null ? tStatic("feature.content.contentworkspace.create_entry_2") : tStatic("feature.content.contentworkspace.edit_entry_value_vvalue", { value1: String(draft.id), value2: String(draft.version) })}</h3>
                     <button type="button" className="btn-secondary" disabled={processing} onClick={() => {
                       if (confirmDiscard()) {
                         setDraft(null);
                         setBaseline('');
                         setError('');
                       }
-                    }}>Đóng form</button>
+                    }}>{tStatic("feature.content.contentworkspace.close_form")}</button>
                   </div>
                   <div className="content-form-grid">
                     <TextField
                       id="content-entry-title"
                       name="title"
-                      label="Tiêu đề *"
+                      label={tStatic("feature.content.contentworkspace.title")}
                       value={draft.title}
                       maxLength={200}
                       disabled={!user || processing}
@@ -565,7 +568,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                       <TextField
                         id="content-entry-slug"
                         name="slug"
-                        label="Slug *"
+                        label={tStatic("feature.common.ui_slug")}
                         value={draft.slug}
                         maxLength={64}
                         disabled={!user || processing}
@@ -577,10 +580,10 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                         disabled={!user || processing || !draft.title.trim()}
                         onClick={() => setDraft(previous => previous
                           ? { ...previous, slug: slugFromTitle(previous.title) } : previous)}
-                      >Tạo slug từ tiêu đề</button>
+                      >{tStatic("feature.content.contentworkspace.generate_slug_from_title")}</button>
                     </div>
                   </div>
-                  <h4>Custom fields</h4>
+                  <h4>{tStatic("feature.common.custom_fields")}</h4>
                   <div className="content-form-grid">
                     {selectedType.descriptor.fields.map((field: ContentFieldDefinition) => (
                       <FieldValueInput
@@ -596,26 +599,26 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                       />
                     ))}
                   </div>
-                  {selectedType.descriptor.fields.length === 0 && <p className="content-help">CPT này không có trường bổ sung.</p>}
-                  <h4>Danh mục &amp; Thẻ</h4>
+                  {selectedType.descriptor.fields.length === 0 && <p className="content-help">{tStatic("feature.content.contentworkspace.this_cpt_has_no_additional_fields")}</p>}
+                  <h4>{tStatic("feature.content.contentworkspace.categories_tags")}</h4>
                   <TermPicker
                     userId={user?.id ?? null}
                     selectedIds={draft.termIds}
                     disabled={!user || processing}
-                    onApiError={(error) => reportError(error, 'Lỗi route/SEO.')}
+                    onApiError={(error) => reportError(error, tStatic("feature.content.contentworkspace.route_seo_error"))}
                     onChange={termIds => setDraft(previous => previous ? { ...previous, termIds } : previous)}
                   />
                   {staleVersion && draft.id !== null && (
                     <div className="content-alert error">
-                      Server đã có phiên bản mới. Bản nháp của bạn được giữ nguyên.
+                      {tStatic("feature.content.contentworkspace.a_newer_version_exists_on_the_server_your_draft")}
                       <button type="button" className="btn-secondary" disabled={!user || processing} onClick={loadFreshEntry}>
-                        Tải bản mới (bỏ bản nháp)
+                        {tStatic("feature.content.contentworkspace.load_latest_version_discard_draft")}
                       </button>
                     </div>
                   )}
                   <div className="content-form-actions">
                     <button type="submit" disabled={!user || !csrfToken || processing}>
-                      {processing ? 'Đang lưu…' : 'Lưu entry'}
+                      {processing ? tStatic("reading.saving") : tStatic("feature.content.contentworkspace.save_entry")}
                     </button>
                     {draft.id !== null && (
                       <button
@@ -623,7 +626,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                         className="btn-danger"
                         disabled={!user || !csrfToken || processing}
                         onClick={removeEntry}
-                      >Xóa entry</button>
+                      >{tStatic("feature.content.contentworkspace.delete_entry")}</button>
                     )}
                     {savedSlug && (
                       <a
@@ -631,10 +634,10 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        Xem trang công khai (bản đã lưu)
+                        {tStatic("feature.content.contentworkspace.view_public_page_saved_version")}
                       </a>
                     )}
-                    <span className="content-help">Lưu thành công sẽ cập nhật nội dung công khai ngay.</span>
+                    <span className="content-help">{tStatic("feature.content.contentworkspace.saving_updates_public_content_immediately")}</span>
                   </div>
                 </form>
               )}
@@ -646,7 +649,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                   csrfToken={csrfToken}
                   disabled={!user || processing}
                   onVersionUpdated={(newVersion) => setDraft(previous => previous ? { ...previous, version: newVersion } : previous)}
-                  onApiError={(error) => reportError(error, 'Lỗi route/SEO.')}
+                  onApiError={(error) => reportError(error, tStatic("feature.content.contentworkspace.route_seo_error"))}
                 />
               )}
             </>

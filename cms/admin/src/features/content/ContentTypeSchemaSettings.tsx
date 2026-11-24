@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createContentType,
@@ -84,7 +85,7 @@ const settingsDiffer = (
 // api/content.ts; use the canonical routes here without changing shared APIs.
 function getConfiguredTaxonomies(typeKey: string, signal?: AbortSignal): Promise<ConfiguredTaxonomies> {
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
-    signal, defaultErrorMessage: 'Không thể tải taxonomy đã cấu hình.',
+    signal, defaultErrorMessage: tStatic("feature.content.contenttypeschemasettings.could_not_load_configured_taxonomies"),
   });
 }
 
@@ -92,7 +93,7 @@ function putTaxonomyEligibility(typeKey: string, version: number, taxonomies: st
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
     method: 'PUT', csrfToken: token, ifMatchVersion: version, contentType: 'application/json',
     body: JSON.stringify({ taxonomies, expected_version: version }),
-    defaultErrorMessage: 'Không thể cập nhật taxonomy áp dụng.',
+    defaultErrorMessage: tStatic("api.content.update_assigned_taxonomies"),
   });
 }
 
@@ -114,6 +115,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   onContentTypesChanged,
   onDirtyChange,
 }) => {
+  useI18n();
   const createScope = scopeKey(siteInstanceId, user, '__new_cpt__');
   const latestCreateScopeRef = useRef(createScope);
   latestCreateScopeRef.current = createScope;
@@ -178,7 +180,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       setCreateOpenState({ scope: createScope, open: true });
       return;
     }
-    if (createDirty && !window.confirm('Bỏ bản nhập tạo loại nội dung mới chưa lưu?')) return;
+    if (createDirty && !window.confirm(tStatic("feature.content.contenttypeschemasettings.discard_the_unsaved_new_content_type_form"))) return;
     createFormEpochRef.current += 1;
     // Explicit close/discard is destructive; a 401 unmount deliberately does
     // not call this handler so same-account reauthentication can restore.
@@ -195,7 +197,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         onSelectTypeKey(list[0].descriptor.key);
       }
     } catch (err) {
-      onApiError(err, 'Không thể tải danh sách loại nội dung.');
+      onApiError(err, tStatic("feature.content.contenttypeschemasettings.could_not_load_the_content_type_list"));
     }
   };
 
@@ -303,21 +305,21 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         setTaxonomyDraft([...remembered.selected]);
         setTaxonomyState({ identity: currentIdentity, available,
           applied: [...remembered.baseline], baseVersion: remembered.baseVersion, stale });
-        if (stale) setTaxonomyNotice('Bản chọn đã khôi phục, nhưng CPT hoặc cấu hình taxonomy trên máy chủ đã thay đổi. Hãy đối chiếu trước khi lưu.');
-        else setTaxonomyNotice('Đã khôi phục lựa chọn taxonomy chưa lưu của tài khoản này.');
+        if (stale) setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.your_selection_was_recovered_but_the_cpt_or_taxonomy"));
+        else setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.recovered_this_account_s_unsaved_taxonomy_selection"));
       } else {
         setTaxonomyDraft([...applied.taxonomies]);
         setTaxonomyState({ identity: currentIdentity, available,
           applied: [...applied.taxonomies], baseVersion: applied.type_version,
           stale: activeType!.version !== applied.type_version });
         if (activeType!.version !== applied.type_version) {
-          setTaxonomyNotice('CPT đã thay đổi trong lúc tải dữ liệu. Hãy đối chiếu phiên bản mới trước khi lưu.');
+          setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.the_cpt_changed_while_loading_review_the_latest_version"));
         }
       }
     }).catch(error => {
       if (!active || controller.signal.aborted) return;
-      setTaxonomyError(error instanceof Error ? error.message : 'Không thể tải liên kết taxonomy.');
-      onApiError(error, 'Không thể tải liên kết taxonomy.');
+      setTaxonomyError(error instanceof Error ? error.message : tStatic("feature.content.contenttypeschemasettings.could_not_load_taxonomy_associations"));
+      onApiError(error, tStatic("feature.content.contenttypeschemasettings.could_not_load_taxonomy_associations"));
     });
     return () => { active = false; controller.abort(); };
   }, [activeKey, currentIdentity, revision, isPattern, selectedScope]);
@@ -327,7 +329,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     if (!activeType || !taxonomyLoaded || !canEditTaxonomies || isPattern || taxonomyBusy
       || savingSettings || !csrfToken || taxonomyLoaded.stale || !taxonomyChanged) return;
     if (settingsChanged && !window.confirm(
-      'Lưu taxonomy sẽ tải lại phiên bản CPT. Phần cấu hình chung chưa lưu có thể bị bỏ. Tiếp tục?',
+      tStatic("feature.content.contenttypeschemasettings.saving_taxonomies_reloads_the_cpt_version_unsaved_general_configuration"),
     )) return;
     const initialScope = selectedScope;
     const initialType = activeKey;
@@ -344,7 +346,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       setTaxonomyDraft(chosen);
       setTaxonomyState({ identity: `${activeKey}:${updated.version}`, available: taxonomyLoaded.available,
         applied: chosen, baseVersion: updated.version, stale: false });
-      setTaxonomyNotice('Đã lưu taxonomy áp dụng thành công.');
+      setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.applicable_taxonomies_saved_successfully"));
       setRevision(prev => prev + 1);
       onContentTypesChanged();
     } catch (error) {
@@ -361,10 +363,10 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           ? { ...previous, stale: true } : previous);
       }
       const suffix = error instanceof ApiClientError && error.status === 412
-        ? '412 — Schema CPT đã thay đổi. Lựa chọn đang nhập được giữ; đối chiếu với máy chủ trước khi lưu lại.'
+        ? tStatic("feature.content.contenttypeschemasettings.412_cpt_schema_changed_your_selection_is_retained_review")
         : error instanceof ApiClientError && error.status === 403
-          ? '403 — Bạn không có quyền cập nhật taxonomy.'
-          : error instanceof Error ? error.message : 'Không thể lưu taxonomy.';
+          ? tStatic("feature.content.contenttypeschemasettings.403_you_do_not_have_permission_to_update_taxonomies")
+          : error instanceof Error ? error.message : tStatic("feature.content.contenttypeschemasettings.could_not_save_taxonomies");
       setTaxonomyError(suffix);
       if (error instanceof ApiClientError && error.status === 401) onApiError(error, suffix);
     } finally {
@@ -375,7 +377,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   const rebaseTaxonomyDraft = async () => {
     if (!taxonomyLoaded || !activeKey || taxonomyBusy || savingSettings) return;
     if (settingsChanged && !window.confirm(
-      'Đối chiếu taxonomy sẽ tải phiên bản CPT mới và bỏ phần cấu hình chung chưa lưu. Tiếp tục?',
+      tStatic("feature.content.contenttypeschemasettings.reviewing_taxonomies_reloads_the_latest_cpt_version_and_discards"),
     )) return;
     const startingScope = selectedScope;
     const startingType = activeKey;
@@ -391,14 +393,14 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       if (latestScopeRef.current !== startingScope || latestTypeRef.current !== startingType) return;
       const fresh = freshTypes.find(item => item.descriptor.key === activeKey);
       if (!fresh) {
-        setTaxonomyError('Loại nội dung đã bị xóa. Bản nháp vẫn được giữ nhưng không thể lưu.');
+        setTaxonomyError(tStatic("feature.content.contenttypeschemasettings.the_content_type_was_deleted_your_draft_is_retained"));
         return;
       }
       if (fresh.version !== configured.type_version) {
         // These two HTTP calls may themselves straddle a concurrent edit.
         // Never pair pre-edit associations with the post-edit CAS version.
         setTaxonomyState(previous => previous ? { ...previous, stale: true } : previous);
-        setTaxonomyError('CPT thay đổi trong lúc đối chiếu. Bản nhập vẫn được giữ; hãy thử lại để lấy cùng một phiên bản.');
+        setTaxonomyError(tStatic("feature.content.contenttypeschemasettings.the_cpt_changed_during_review_your_input_is_retained"));
         return;
       }
       const selectedBefore = new Set(previousSelection);
@@ -420,13 +422,13 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       setContentTypes(freshTypes);
       setTaxonomyState(nextState);
       setTaxonomyDraft(merged);
-      setTaxonomyNotice('Đã lấy phiên bản CPT mới và áp dụng lại các lựa chọn bạn đã sửa. Kiểm tra trước khi lưu.');
+      setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.loaded_the_latest_cpt_version_and_reapplied_your_changed"));
     } catch (cause) {
       if (!mountedRef.current) return;
       if (latestScopeRef.current !== startingScope || latestTypeRef.current !== startingType) return;
-      setTaxonomyError(cause instanceof Error ? cause.message : 'Không thể đối chiếu cấu hình mới.');
+      setTaxonomyError(cause instanceof Error ? cause.message : tStatic("feature.content.contenttypeschemasettings.could_not_review_the_latest_configuration"));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onApiError(cause, 'Phiên đăng nhập đã hết hạn khi đối chiếu taxonomy.');
+        onApiError(cause, tStatic("feature.content.contenttypeschemasettings.your_session_expired_while_reviewing_taxonomies"));
     } finally {
       setTaxonomyBusy(false);
     }
@@ -440,7 +442,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     setTaxonomyState(null);
     setTaxonomyDraft([]);
     setTaxonomyError('');
-    setTaxonomyNotice('Đã bỏ lựa chọn taxonomy chưa lưu; đang tải cấu hình máy chủ.');
+    setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.discarded_unsaved_taxonomy_selections_loading_the_server_configuration"));
     setRevision(old => old + 1);
   };
 
@@ -455,7 +457,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         setEditSettings({ ...saved.settings, supports: [...saved.settings.supports] });
         const stale = saved.stale || saved.baseVersion !== activeType.version;
         setSettingsStale(stale);
-        if (stale) setSettingsError('Phiên bản CPT đã thay đổi. Bản nhập được giữ; đối chiếu phiên bản trước khi lưu.');
+        if (stale) setSettingsError(tStatic("feature.content.contenttypeschemasettings.the_cpt_version_changed_your_input_is_retained_review"));
       } else {
         setDraftIdentity(`${activeType.descriptor.key}:${activeType.version}`);
         setEditLabel(activeType.descriptor.label);
@@ -472,7 +474,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     // currently selected CPT. Refuse before the POST rather than prompting
     // after the server has already committed the new CPT.
     if (settingsChanged || taxonomyChanged) {
-      setSettingsError('Hãy lưu hoặc hủy các thay đổi CPT/taxonomy hiện tại trước khi tạo loại nội dung mới.');
+      setSettingsError(tStatic("feature.content.contenttypeschemasettings.save_or_discard_the_current_cpt_taxonomy_changes_before"));
       return false;
     }
     const requestScope = createScope;
@@ -498,7 +500,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           setCreateDirtyState({ scope: requestScope, dirty: false });
           setCreateOpenState({ scope: requestScope, open: false });
         }
-        const message = `Đã tạo CPT ${created.descriptor.key}, nhưng có thay đổi khác chưa lưu. Bản nhập được giữ; hãy lưu hoặc bỏ thay đổi trước khi chuyển màn hình.`;
+        const message = tStatic("feature.content.contenttypeschemasettings.created_cpt_value_but_other_changes_remain_unsaved_your", { value1: created.descriptor.key });
         setSettingsError(message);
         // Provider-owned CPTs have no editable schema form; show the receipt
         // outside that branch so the post-201 success cannot be invisible.
@@ -511,13 +513,13 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       // committed the state change above, so clear only the completed create
       // draft now, before navigating to the newly committed CPT.
       onDirtyChange?.(false);
-      setCreateNoticeState({ scope: requestScope, message: `Đã tạo CPT ${created.descriptor.key}.` });
+      setCreateNoticeState({ scope: requestScope, message: tStatic("feature.content.contenttypeschemasettings.created_cpt_value", { value1: created.descriptor.key }) });
       onSelectTypeKey(created.descriptor.key);
       return true;
     } catch (cause) {
       if (mountedRef.current && latestCreateScopeRef.current === requestScope &&
           cause instanceof ApiClientError && cause.status === 401) {
-        onApiError(cause, 'Phiên đăng nhập đã hết hạn khi tạo CPT; bản nhập chưa lưu được giữ.');
+        onApiError(cause, tStatic("feature.content.contenttypeschemasettings.your_session_expired_while_creating_the_cpt_unsaved_input"));
       }
       throw cause;
     }
@@ -568,11 +570,11 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           const saved = settingsDraftMemory.get(requestScope);
           if (saved) settingsDraftMemory.set(requestScope, { ...saved, stale: true });
         }
-        setSettingsError('Cấu hình đã thay đổi ở nơi khác (412). Bản nhập vẫn được giữ; tải phiên bản mới trước khi lưu lại.');
+        setSettingsError(tStatic("feature.content.contenttypeschemasettings.the_configuration_changed_elsewhere_412_your_input_is_retained"));
       } else if (err instanceof ApiClientError && err.status === 409) {
-        setSettingsError(`Xung đột cấu hình (409): ${err.message}. Cấu hình đang nhập vẫn được giữ.`);
+        setSettingsError(tStatic("feature.content.contenttypeschemasettings.configuration_conflict_409_value_your_current_input_is_retained", { value1: err.message }));
       } else {
-        onApiError(err, 'Không thể cập nhật loại nội dung.');
+        onApiError(err, tStatic("api.content.update_the_content_type"));
       }
     } finally {
       if (mountedRef.current && latestScopeRef.current === requestScope) setSavingSettings(false);
@@ -588,12 +590,12 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       if (!mountedRef.current || latestScopeRef.current !== requestScope) return;
       const fresh = types.find(item => item.descriptor.key === activeKey);
       if (!fresh) {
-        setSettingsError('CPT đã bị xóa; bản nhập vẫn được giữ để sao chép.');
+        setSettingsError(tStatic("feature.content.contenttypeschemasettings.the_cpt_was_deleted_your_input_is_retained_for"));
         return;
       }
       const saved = settingsDraftMemory.get(requestScope);
       if (!saved) {
-        setSettingsError('Không còn bản nhập CPT để đối chiếu; hãy dùng Tải lại từ máy chủ.');
+        setSettingsError(tStatic("feature.content.contenttypeschemasettings.there_is_no_cpt_draft_to_review_use_reload"));
         return;
       }
       const newSettings = effectiveContentTypeSettings(activeKey, fresh.descriptor.settings);
@@ -613,7 +615,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         ...(changed.supports && !sameKeys(newSettings.supports, prev.supports) ? ['supports'] : []),
       ];
       if (conflicts.length && !window.confirm(
-        `Máy chủ cũng thay đổi ${conflicts.join(', ')}. Giữ các giá trị bạn đang nhập khi đối chiếu CPT mới?`,
+        tStatic("feature.content.contenttypeschemasettings.the_server_also_changed_value_keep_your_current_values", { value1: conflicts.join(', ') }),
       )) return;
       const mergedSettings: ContentTypeSettings = {
         public: changed.public ? saved.settings.public : newSettings.public,
@@ -631,12 +633,12 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       setEditLabel(mergedLabel); setEditSettings(mergedSettings);
       setDraftIdentity(`${activeKey}:${fresh.version}`);
       setSettingsStale(false);
-      setSettingsError('Đã đối chiếu phiên bản CPT mới; các thay đổi đang nhập được giữ. Kiểm tra trước khi lưu.');
+      setSettingsError(tStatic("feature.content.contenttypeschemasettings.reviewed_the_latest_cpt_version_your_changes_are_retained"));
     } catch (cause) {
       if (!mountedRef.current || latestScopeRef.current !== requestScope) return;
-      setSettingsError(cause instanceof Error ? cause.message : 'Không thể đối chiếu phiên bản CPT.');
+      setSettingsError(cause instanceof Error ? cause.message : tStatic("feature.content.contenttypeschemasettings.could_not_review_the_cpt_version"));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onApiError(cause, 'Phiên đăng nhập hết hạn khi đối chiếu cấu hình CPT.');
+        onApiError(cause, tStatic("feature.content.contenttypeschemasettings.your_session_expired_while_reviewing_the_cpt_configuration"));
     } finally {
       if (mountedRef.current && latestScopeRef.current === requestScope) setSavingSettings(false);
     }
@@ -646,14 +648,14 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     <section className="space-y-6" data-testid="content-type-schema-settings">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">Cấu trúc / Loại nội dung</p>
-          <h2 className="mt-1 text-xl font-bold tracking-tight text-zinc-950">Loại nội dung &amp; Trường</h2>
+          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{tStatic("feature.content.contenttypeschemasettings.structure_content_types")}</p>
+          <h2 className="mt-1 text-xl font-bold tracking-tight text-zinc-950">{tStatic("shell.content_types")}</h2>
           <p className="mt-1 text-sm text-zinc-600">
-            Cấu hình schema, nhóm trường mở rộng và bố cục Single Edit cho từng loại nội dung.
+            {tStatic("feature.content.contenttypeschemasettings.configure_schema_extension_field_groups_and_single_edit_layout")}
           </p>
         </div>
         <AdminButton variant={showCreateForm ? 'secondary' : 'primary'} size="md" onClick={toggleCreateForm}>
-          {showCreateForm ? 'Đóng form tạo CPT' : '+ Tạo loại nội dung mới'}
+          {showCreateForm ? tStatic("feature.content.contenttypeschemasettings.close_cpt_creation_form") : tStatic("feature.content.contenttypeschemasettings.create_content_type")}
         </AdminButton>
       </div>
 
@@ -671,12 +673,12 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           />
           {createDirty && <p role="status" className="mt-3 text-xs text-zinc-600">
             {createScope
-              ? 'Bản nhập CPT chưa lưu được giữ trong RAM theo website và tài khoản khi hết phiên đăng nhập. Tải lại trình duyệt sẽ xóa nháp.'
-              : 'Không xác minh được website/tài khoản để khôi phục nháp; hãy lưu trước khi rời màn hình.'}
+              ? tStatic("feature.content.contenttypeschemasettings.unsaved_cpt_input_is_retained_in_memory_by_site")
+              : tStatic("feature.content.contenttypeschemasettings.the_site_account_could_not_be_verified_for_draft")}
           </p>}
           <div className="mt-3">
             <AdminButton variant="secondary" size="sm" onClick={toggleCreateForm}>
-              Đóng form / bỏ bản nhập chưa lưu
+              {tStatic("feature.content.contenttypeschemasettings.close_form_discard_unsaved_input")}
             </AdminButton>
           </div>
         </div>
@@ -714,89 +716,89 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-100 pb-3">
               <div>
                 <h3 className="text-base font-semibold text-zinc-950">
-                  Thông tin Schema: {activeType.descriptor.label}
+                  {tStatic("feature.content.contenttypeschemasettings.schema_information")}{' '}{activeType.descriptor.label}
                 </h3>
                 <p className="mt-0.5 text-xs text-zinc-500">
-                  Key: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> · Chủ sở hữu: {activeType.owner.kind}
+                  {tStatic("feature.common.key")}: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> {tStatic("feature.content.contenttypeschemasettings.owner")}{' '}{activeType.owner.kind}
                 </p>
               </div>
               <AdminBadge tone="neutral">v{activeType.version}</AdminBadge>
             </div>
             <div className="mt-3 text-xs text-zinc-600">
-              Base fields ({activeType.descriptor.fields.length}):{' '}
-              {activeType.descriptor.fields.map(f => f.key).join(', ') || 'Chưa có'}
+              {tStatic("feature.common.base_fields")} ({activeType.descriptor.fields.length}):{' '}
+              {activeType.descriptor.fields.map(f => f.key).join(', ') || tStatic("feature.content.contenttypeschemasettings.none")}
             </div>
             {canEditSettings ? (
-              <form onSubmit={handleUpdateSettings} className="mt-5 space-y-4" aria-label="Cấu hình loại nội dung">
+              <form onSubmit={handleUpdateSettings} className="mt-5 space-y-4" aria-label={tStatic("feature.content.contenttypeschemasettings.content_type_configuration")}>
                 {activeType.owner.kind === 'user' && (
                   <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-                    <span>Tên hiển thị</span>
+                    <span>{tStatic("multilingual.label")}</span>
                     <input type="text" value={editLabel} required maxLength={100}
                       disabled={!csrfToken || savingSettings} onChange={event => changeEditLabel(event.target.value)}
                       className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent" />
                   </label>
                 )}
                 <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
-                  <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">Hiển thị công khai</legend>
+                  <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeschemasettings.public_visibility")}</legend>
                   <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.public}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => changeEditSettings({ public: event.target.checked })} />
-                    Công khai nội dung (public)
+                    {tStatic("feature.content.contenttypeschemasettings.public_content_public")}
                   </label>
                   <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.has_archive}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => changeEditSettings({ has_archive: event.target.checked })} />
-                    Cho phép trang danh sách (has_archive)
+                    {tStatic("feature.content.contenttypeform.enable_archive_has_archive")}
                   </label>
                   <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-                    <span>Cơ chế xuất bản</span>
+                    <span>{tStatic("feature.content.contenttypeform.publishing_workflow")}</span>
                     <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
                       value={editSettings.publication} disabled={!csrfToken || savingSettings || isBuiltin}
                       onChange={event => changeEditSettings({
                         publication: event.target.value as ContentPublicationPolicy,
                       })}>
-                      <option value="immediate">Lưu là xuất bản (immediate)</option>
-                      <option value="draft_publish">Lưu nháp / Xuất bản (draft_publish)</option>
+                      <option value="immediate">{tStatic("feature.content.contenttypeform.save_publishes_immediately_immediate")}</option>
+                      <option value="draft_publish">{tStatic("feature.content.contenttypeform.save_draft_publish_draft_publish")}</option>
                     </select>
                   </label>
-                  {isBuiltin && <p className="text-xs text-zinc-500">Post và Page luôn dùng Lưu nháp / Xuất bản.</p>}
+                  {isBuiltin && <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.posts_and_pages_always_use_save_draft_publish")}</p>}
                 </fieldset>
                 <fieldset className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
-                  <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">Thành phần màn hình chỉnh sửa</legend>
+                  <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeform.editor_screen_features")}</legend>
                   <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.supports.includes('editor')}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => toggleSupport('editor', event.target.checked)} />
-                    Trình soạn thảo (editor)
+                    {tStatic("feature.content.contenttypeform.editor_editor")}
                   </label>
                   <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.supports.includes('featured_image')}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => toggleSupport('featured_image', event.target.checked)} />
-                    Ảnh đại diện (featured_image)
+                    {tStatic("feature.content.contenttypeform.featured_image_featured_image")}
                   </label>
                   <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.supports.includes('builder')}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => toggleSupport('builder', event.target.checked)} />
-                    Visual Builder (builder)
+                    {tStatic("feature.common.visual_builder")}
                   </label>
-                  <p className="text-xs text-zinc-500">Bật Builder cho phép thiết kế riêng từng bản ghi. Tắt thành phần không xóa văn bản, ảnh hay thiết kế Builder đã lưu.</p>
+                  <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.enable_builder_to_design_individual_entries_disabling_a_feature")}</p>
                 </fieldset>
                 {settingsError && <AdminAlert tone="error">{settingsError}</AdminAlert>}
                 {settingsStale && <AdminAlert tone="warning" role="alert" className="space-y-2">
-                  <p>Phiên bản CPT đã thay đổi. Bản nhập được giữ nhưng không thể lưu bằng CAS cũ.</p>
+                  <p>{tStatic("feature.content.contenttypeschemasettings.the_cpt_version_changed_your_input_is_retained_but")}</p>
                   <AdminButton variant="secondary" size="sm"
                     disabled={savingSettings || taxonomyBusy} onClick={() => void rebaseSettingsDraft()}>
-                    Đối chiếu CPT mới, giữ thay đổi đang nhập
+                    {tStatic("feature.content.contenttypeschemasettings.review_latest_cpt_and_keep_current_changes")}
                   </AdminButton>
                 </AdminAlert>}
                 <div className="flex flex-wrap items-center gap-2">
                   <AdminButton type="submit" variant="primary" size="md"
                     disabled={!settingsChanged || settingsStale || !csrfToken || savingSettings || taxonomyBusy}>
-                    {savingSettings ? 'Đang lưu...' : 'Lưu cấu hình'}
+                    {savingSettings ? tStatic("feature.users.userprofilepanel.saving") : tStatic("feature.content.contenttypeschemasettings.save_configuration")}
                   </AdminButton>
                   <AdminButton variant="secondary" size="md" disabled={savingSettings || taxonomyBusy}
                     onClick={() => {
@@ -810,25 +812,25 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                       setRevision(r => r + 1);
                       setSettingsError('');
                     }}>
-                    Tải lại từ máy chủ (bỏ chỉnh sửa)
+                    {tStatic("feature.content.contenttypeschemasettings.reload_from_server_discard_edits")}
                   </AdminButton>
                 </div>
               </form>
             ) : (
               <p className="mt-4 text-sm text-zinc-600">
-                {isPattern ? 'Pattern là loại nội dung riêng tư và không cho phép thay đổi cấu hình công khai.'
-                  : 'Cấu hình thuộc quyền sở hữu của nhà cung cấp; chỉ có thể xem tại đây.'}
+                {isPattern ? tStatic("feature.content.contenttypeschemasettings.pattern_is_a_private_content_type_and_its_public")
+                  : tStatic("feature.content.contenttypeschemasettings.this_configuration_is_provider_owned_and_read_only_here")}
               </p>
             )}
           </div>
 
-          <section className="rounded-xl border border-zinc-200 bg-white p-5" aria-label="Taxonomy áp dụng cho loại nội dung">
-            <h3 className="text-base font-semibold text-zinc-950">Taxonomy áp dụng</h3>
+          <section className="rounded-xl border border-zinc-200 bg-white p-5" aria-label={tStatic("feature.content.contenttypeschemasettings.taxonomies_applicable_to_the_content_type")}>
+            <h3 className="text-base font-semibold text-zinc-950">{tStatic("feature.content.contenttypeschemasettings.applicable_taxonomies")}</h3>
             <p className="mt-1 text-sm text-zinc-600">
-              Chọn taxonomy được phép gắn vào {activeType.descriptor.label}. Bỏ chọn không xóa liên kết đã lưu.
+              {tStatic("feature.content.contenttypeschemasettings.select_taxonomies_that_may_be_associated_with")}{' '}{activeType.descriptor.label}{tStatic("feature.content.contenttypeschemasettings.clearing_a_selection_does_not_delete_saved_associations")}
             </p>
-            {isPattern ? <p className="mt-3 text-sm text-zinc-600">Pattern không hỗ trợ taxonomy.</p>
-              : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-zinc-600">Đang tải taxonomy áp dụng…</p>
+            {isPattern ? <p className="mt-3 text-sm text-zinc-600">{tStatic("feature.content.contenttypeschemasettings.patterns_do_not_support_taxonomies")}</p>
+              : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-zinc-600">{tStatic("feature.content.contenttypeschemasettings.loading_applicable_taxonomies")}</p>
                 : <form className="mt-3.5 space-y-3.5" onSubmit={handleUpdateTaxonomies}>
                     <div className="grid gap-2.5 sm:grid-cols-2">
                       {taxonomyLoaded.available.filter(def =>
@@ -848,9 +850,9 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                               setTaxonomyNotice('');
                             }} />
                           <span><strong className="block font-medium text-zinc-900">{def.label}</strong>
-                            <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700">{def.key}</code> · <span className="text-xs text-zinc-500">{def.hierarchical ? 'Phân cấp' : 'Không phân cấp'}</span>
+                            <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700">{def.key}</code> · <span className="text-xs text-zinc-500">{def.hierarchical ? tStatic("feature.content.contenttypeschemasettings.hierarchical") : tStatic("feature.content.contenttypeschemasettings.non_hierarchical")}</span>
                             {(def.provider_status !== 'active' || def.declaration_state !== 'declared')
-                              && <span className="mt-0.5 block text-xs text-amber-700">Provider không hoạt động hoặc khai báo đã rút; lựa chọn đã lưu được giữ lại.</span>}
+                              && <span className="mt-0.5 block text-xs text-amber-700">{tStatic("feature.content.contenttypeschemasettings.the_provider_is_inactive_or_its_declaration_was_withdrawn")}</span>}
                           </span>
                         </label>
                       ))}
@@ -862,34 +864,34 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                               setTaxonomyDraft(next);
                               rememberTaxonomyDraft(taxonomyLoaded, next);
                             }} />
-                          <span>{key} — Taxonomy không còn trong danh sách hiện tại. Bỏ chọn để gỡ khóa đã lưu.</span>
+                          <span>{key} {tStatic("feature.content.contenttypeschemasettings.taxonomy_no_longer_exists_in_the_current_list_clear")}</span>
                         </label>
                       ))}
                     </div>
-                    {!canEditTaxonomies && <p className="text-xs text-zinc-500">Chỉ quản trị viên có thể thay đổi taxonomy; Pattern không hỗ trợ.</p>}
+                    {!canEditTaxonomies && <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.only_administrators_can_change_taxonomies_patterns_do_not_support")}</p>}
                     {taxonomyChanged && <p className="text-xs text-zinc-500" role="status">
                       {selectedScope
-                        ? 'Bản chọn taxonomy chưa lưu được giữ trong bộ nhớ phiên này theo tài khoản, website và loại nội dung khi bạn chuyển màn hình hoặc đăng nhập lại. Tải lại trang sẽ xóa bản nháp.'
-                        : 'Bản chọn chưa lưu sẽ bị mất khi rời màn hình hoặc hết phiên đăng nhập; chỉ lưu được bản nháp khi xác định đủ website và tài khoản.'}
+                        ? tStatic("feature.content.contenttypeschemasettings.unsaved_taxonomy_selections_are_kept_in_this_session_s")
+                        : tStatic("feature.content.contenttypeschemasettings.unsaved_selections_will_be_lost_when_leaving_the_screen")}
                     </p>}
                     {taxonomyNotice && <AdminAlert tone="info">{taxonomyNotice}</AdminAlert>}
                     {taxonomyLoaded.stale && <AdminAlert tone="warning" className="space-y-2">
-                      <p role="alert">Version/schema CPT hoặc cấu hình taxonomy đã đổi. Bản chọn vẫn được giữ; không lưu với CAS cũ.</p>
+                      <p role="alert">{tStatic("feature.content.contenttypeschemasettings.the_cpt_version_schema_or_taxonomy_configuration_changed_your")}</p>
                       <AdminButton variant="secondary" size="sm"
                         disabled={taxonomyBusy || savingSettings || !csrfToken}
                         onClick={() => void rebaseTaxonomyDraft()}>
-                        Đối chiếu với máy chủ, giữ lựa chọn đang sửa
+                        {tStatic("feature.content.contenttypeschemasettings.review_server_version_and_keep_current_selections")}
                       </AdminButton>
                     </AdminAlert>}
                     {taxonomyError && <AdminAlert tone="error">{taxonomyError}</AdminAlert>}
                     <div className="flex flex-wrap gap-2">
                       <AdminButton type="submit" variant="primary" size="md"
                         disabled={!canEditTaxonomies || !taxonomyChanged || taxonomyBusy || savingSettings || !csrfToken || taxonomyLoaded.stale}>
-                        {taxonomyBusy ? 'Đang lưu…' : 'Lưu taxonomy áp dụng'}
+                        {taxonomyBusy ? tStatic("reading.saving") : tStatic("feature.content.contenttypeschemasettings.save_applicable_taxonomies")}
                       </AdminButton>
                       <AdminButton variant="secondary" size="md"
                         disabled={taxonomyBusy || savingSettings} onClick={discardTaxonomyDraft}>
-                        Hủy lựa chọn chưa lưu
+                        {tStatic("feature.content.contenttypeschemasettings.discard_unsaved_selections")}
                       </AdminButton>
                     </div>
                   </form>}

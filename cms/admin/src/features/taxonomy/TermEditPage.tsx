@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { createTaxonomyTerm, getTaxonomyTerm, getEffectiveTermConfig, getTaxonomyDefinition,
@@ -55,7 +56,7 @@ const fieldClass = 'h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-whit
 const selectClass = 'h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50';
 
 function slugFromName(name: string): string {
-  return name.replace(/[đĐ]/g, 'd').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return name.replace(/[\u0111\u0110]/g, 'd').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0,64).replace(/-+$/g,'');
 }
 
@@ -85,6 +86,7 @@ function allowedParents(terms: TaxonomyTerm[], targetId: number | null): Taxonom
 /** A full-route editor; extension mount slots intentionally contain no fake fields. */
 export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToken,
   localeState = EMPTY_ADMIN_LOCALE_STATE, onApiError, onDirtyChange, onNavigateHash}: TermEditProps) {
+  useI18n();
   const scope = termScope(siteInstanceId, user, kind, mode, termId);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -206,14 +208,14 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
             // fresh record/schema; never submit an old draft with a new token.
             setConflict(true);
             setLatest(null);
-            setError('Term hoặc schema đã đổi trong lúc đăng xuất. Nháp được giữ; hãy đối chiếu phiên bản mới.');
+            setError(tStatic("feature.taxonomy.termeditpage.the_term_or_schema_changed_while_signed_out_your"));
           }
         }
       } catch (cause) {
         if (signal.aborted) return;
         if (cause instanceof ApiClientError && cause.status === 404) setNotFound(true);
-        else { setError(cause instanceof Error ? cause.message : 'Không thể tải term.');
-          onErrorRef.current(cause, 'Không thể tải term.'); }
+        else { setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.termeditpage.could_not_load_term"));
+          onErrorRef.current(cause, tStatic("feature.taxonomy.termeditpage.could_not_load_term")); }
       } finally {
         if (!signal.aborted) setLoading(false);
       }
@@ -250,8 +252,8 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
     } catch (cause) {
       if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 404) setNotFound(true);
-      else { setError(cause instanceof Error ? cause.message : 'Không thể đọc bản mới.');
-        onErrorRef.current(cause, 'Không thể đọc bản mới.'); }
+      else { setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.termeditpage.could_not_read_latest_version"));
+        onErrorRef.current(cause, tStatic("feature.taxonomy.termeditpage.could_not_read_latest_version")); }
     } finally { setBusy(false); }
   };
 
@@ -262,18 +264,18 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
       .filter(field => form[field] !== baseline[field]);
     const overlaps = changed.filter(field => currentServer[field] !== baseline[field]);
     if (overlaps.length && !window.confirm(
-      `Máy chủ cũng thay đổi ${overlaps.join(', ')}. Giữ giá trị đang nhập trên phiên bản mới?`,
+      tStatic("feature.taxonomy.termeditpage.the_server_also_changed_value_keep_current_input_on", { value1: overlaps.join(', ') }),
     )) return;
     const merged = { ...currentServer };
     for (const field of changed) merged[field] = form[field];
     setBaseline(currentServer); setForm(merged);
     setVersion(latest.version); setConflict(false); setLatest(null); setError('');
-    setNotice(`Đã đối chiếu v${latest.version}. Trường đã sửa vẫn được giữ; kiểm tra rồi Lưu.`);
+    setNotice(tStatic("feature.taxonomy.termeditpage.reviewed_vvalue_edited_fields_are_retained_review_and_save", { value1: latest.version }));
     recoveredRef.current = null;
   };
 
   const discardAndBack = () => {
-    if (dirty && !window.confirm('Bỏ bản nhập taxonomy chưa lưu và về danh sách?')) return;
+    if (dirty && !window.confirm(tStatic("feature.taxonomy.termeditpage.discard_unsaved_taxonomy_input_and_return_to_list"))) return;
     if (scope) termDrafts.delete(scope);
     recoveredRef.current = null;
     setForm(baseline); setExtensions(extensionBaseline);
@@ -291,13 +293,13 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
     const slug = form.slug.trim();
     if (!name || [...name].length > 120 || /[\u0000-\u001f\u007f]/.test(name)
       || !/^[a-z][a-z0-9-]{0,63}$/.test(slug)) {
-      setError('Tên hoặc slug không hợp lệ (tên 1–120 ký tự, slug kebab-case tối đa 64).');
+      setError(tStatic("feature.taxonomy.termeditpage.invalid_name_or_slug_name_1_120_characters_kebab"));
       return;
     }
     const parentId = hierarchical && form.parentId ? Number(form.parentId) : null;
     if (canEditCore && parentId !== null &&
       (!Number.isSafeInteger(parentId) || !parentOptions.some(t => t.id === parentId))) {
-      setError('Term cha không hợp lệ hoặc vượt quá 8 cấp.'); return;
+      setError(tStatic("feature.taxonomy.termeditpage.invalid_parent_term_or_hierarchy_exceeds_8_levels")); return;
     }
     savingRef.current = true;
     setBusy(true); setError(''); setNotice('');
@@ -335,7 +337,7 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
               changes.schema_token = extensionConfig.schema_token;
             }
           }
-          if (!Object.keys(changes).length) { setNotice('Không có thay đổi cần lưu.'); return; }
+          if (!Object.keys(changes).length) { setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.no_changes_to_save")); return; }
           saved = await updateTaxonomyTerm(current.id, version, changes, csrfToken);
         }
         if (!mountedRef.current) return;
@@ -348,17 +350,17 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
         if (scope) termDrafts.delete(scope);
         recoveredRef.current = null;
         reportDirtyRef.current(false);
-        setNotice(`Đã lưu term ${definition?.label ?? kind} #${saved.id} (v${saved.version}).`);
+        setNotice(tStatic("feature.taxonomy.termeditpage.saved_term_value_value_vvalue", { value1: definition?.label ?? kind, value2: saved.id, value3: saved.version }));
         if (mode === 'new') onNavigateHash(`${listHash}/${saved.id}/edit`);
       } catch (cause) {
         if (!mountedRef.current) return;
         if (cause instanceof ApiClientError && (cause.status === 412 || cause.status === 409)) {
           setConflict(true);
           setError(cause.status === 412 ?
-            'Phiên bản đã thay đổi (412). Bản nhập chưa lưu vẫn được giữ.' :
-            'Cấu hình provider đã thay đổi (409). Bản nhập chưa lưu vẫn được giữ.');
-        } else { setError(cause instanceof Error ? cause.message : 'Không thể lưu term.'); }
-        onErrorRef.current(cause, 'Không thể lưu term.');
+            tStatic("feature.taxonomy.termeditpage.version_changed_412_unsaved_input_is_retained") :
+            tStatic("feature.taxonomy.termeditpage.provider_configuration_changed_409_unsaved_input_is_retained"));
+        } else { setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.termeditpage.could_not_save_term")); }
+        onErrorRef.current(cause, tStatic("feature.taxonomy.termeditpage.could_not_save_term"));
       } finally { savingRef.current = false; setBusy(false); }
     })();
   };
@@ -366,44 +368,44 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
   if (!user) return null;
   if (notFound) return (
     <section data-testid="term-not-found" className="space-y-3">
-      <h2 className="text-xl font-bold text-zinc-950">404 Không tìm thấy term {kind}</h2>
-      <p className="text-sm text-zinc-600">ID không tồn tại hoặc thuộc loại taxonomy khác.</p>
+      <h2 className="text-xl font-bold text-zinc-950">{tStatic("feature.taxonomy.termeditpage.404_term_not_found")}{' '}{kind}</h2>
+      <p className="text-sm text-zinc-600">{tStatic("feature.taxonomy.termeditpage.id_does_not_exist_or_belongs_to_another_taxonomy")}</p>
       {recoveredRef.current && <AdminAlert tone="warning" className="space-y-2">
-        <p role="status">Bản nháp từ phiên trước vẫn được giữ để sao chép, nhưng đích lưu hiện không còn khả dụng.</p>
+        <p role="status">{tStatic("feature.taxonomy.termeditpage.your_previous_draft_is_retained_for_copying_but_the")}</p>
         <pre className="max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-white/80 p-2 font-mono text-xs">{JSON.stringify({ form, extensions }, null, 2)}</pre>
       </AdminAlert>}
-      <AdminButton variant="secondary" size="md" onClick={discardAndBack}>Bỏ bản nhập / Về danh sách</AdminButton>
+      <AdminButton variant="secondary" size="md" onClick={discardAndBack}>{tStatic("feature.taxonomy.termeditpage.discard_input_return_to_list")}</AdminButton>
     </section>
   );
-  if (loading) return <p role="status" className="text-sm text-zinc-600">Đang tải màn hình chỉnh sửa taxonomy...</p>;
+  if (loading) return <p role="status" className="text-sm text-zinc-600">{tStatic("feature.taxonomy.termeditpage.loading_taxonomy_editor")}</p>;
 
   return (
     <section className="mx-auto w-full min-w-0 max-w-4xl space-y-5" data-testid="term-edit-page"
       data-term-kind={kind} data-term-id={current?.id ?? ''}>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">Nội dung / {definition?.label ?? kind}</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{tStatic("feature.posts.postpageworkspace.content")}{' '}{definition?.label ?? kind}</p>
           <h2 className="mt-1 text-xl font-bold tracking-tight text-zinc-950">
-            {mode === 'new' ? `Thêm term ${definition?.label ?? kind}` : `Chỉnh sửa term ${definition?.label ?? kind} #${current?.id}`}
+            {mode === 'new' ? tStatic("feature.taxonomy.termeditpage.add_value_term", { value1: definition?.label ?? kind }) : tStatic("feature.taxonomy.termeditpage.edit_value_term_value", { value1: definition?.label ?? kind, value2: String(current?.id) })}
           </h2>
-          {current && <p className="mt-0.5 text-xs text-zinc-500">ID #{current.id} · Phiên bản v{version} · {dirty ? 'Chưa lưu' : 'Đã đồng bộ'}</p>}
+          {current && <p className="mt-0.5 text-xs text-zinc-500">ID #{current.id} {tStatic("feature.taxonomy.termeditpage.version_v")}{version} · {dirty ? tStatic("feature.taxonomy.termeditpage.unsaved") : tStatic("feature.taxonomy.termeditpage.synced")}</p>}
         </div>
         <AdminButton variant="secondary" size="sm" disabled={busy} onClick={discardAndBack}>
-          Hủy / Về danh sách
+          {tStatic("feature.taxonomy.termeditpage.cancel_return_to_list")}
         </AdminButton>
       </header>
 
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {providerUnavailable && <AdminAlert tone="warning">
-        Taxonomy này không còn hoạt động hoặc đã rút khai báo. Có thể giữ/chỉnh sửa term hiện có; không tạo term mới.
+        {tStatic("feature.taxonomy.termeditpage.this_taxonomy_is_inactive_or_its_declaration_was_withdrawn")}
       </AdminAlert>}
 
       <div data-extension-slot="term-before-core" aria-hidden="true" />
       <form onSubmit={submit} className="min-w-0 space-y-4 rounded-xl border border-zinc-200 bg-white p-5"
-        aria-label="Biểu mẫu chỉnh sửa taxonomy">
+        aria-label={tStatic("feature.taxonomy.termeditpage.taxonomy_edit_form")}>
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-name">
-          <span>Tên *</span>
+          <span>{tStatic("feature.taxonomy.termeditpage.name")}</span>
           <input id="term-name" className={fieldClass} maxLength={120} required disabled={busy || user.role !== 'admin'}
             value={form.name} onChange={event => setForm(previous => ({
               ...previous, name: event.target.value,
@@ -411,15 +413,15 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
             }))} />
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-slug">
-          <span>Slug *</span>
+          <span>{tStatic("feature.common.ui_slug")}</span>
           <input id="term-slug" className={fieldClass} maxLength={64} required
             pattern="[a-z](?:[a-z0-9]|-)*" disabled={busy || user.role !== 'admin'} value={form.slug}
             onChange={event => { setManualSlug(true); setForm(previous => ({...previous, slug: event.target.value})); }} />
-          <span className="text-xs font-normal text-zinc-500">Slug duy nhất trong loại, bắt đầu bằng a-z, tối đa 64 ký tự.</span>
+          <span className="text-xs font-normal text-zinc-500">{tStatic("feature.taxonomy.termeditpage.slug_unique_within_the_type_starts_with_a_z")}</span>
         </label>
         {localeState.hasMultipleLocales && (
           <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-locale">
-            <span>Ngôn ngữ</span>
+            <span>{tStatic("feature.content.entrylistpage.language")}</span>
             <select
               id="term-locale"
               className={selectClass}
@@ -439,21 +441,21 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
             </select>
             <span className="text-xs font-normal text-zinc-500">
               {mode === 'new'
-                ? 'Ngôn ngữ của term được cố định sau khi tạo.'
-                : 'Ngôn ngữ không thể đổi sau khi tạo.'}
+                ? tStatic("feature.taxonomy.termeditpage.term_language_is_fixed_after_creation")
+                : tStatic("feature.taxonomy.termeditpage.language_cannot_be_changed_after_creation")}
             </span>
           </label>
         )}
         {hierarchical && <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-parent">
-          <span>Term cha</span>
+          <span>{tStatic("feature.common.parent_term")}</span>
           <select id="term-parent" className={selectClass} value={form.parentId} disabled={busy || user.role !== 'admin'}
             onChange={event => setForm(previous => ({...previous, parentId: event.target.value}))}>
-            <option value="">Không có (term gốc)</option>
+            <option value="">{tStatic("feature.taxonomy.termeditpage.none_root_term")}</option>
             {parentOptions.map(term => <option key={term.id} value={term.id}>{term.name} (#{term.id})</option>)}
             {form.parentId && !parentOptions.some(term => String(term.id) === form.parentId) &&
-              <option value={form.parentId} disabled>Cha không còn hợp lệ (#{form.parentId})</option>}
+              <option value={form.parentId} disabled>{tStatic("feature.taxonomy.termeditpage.parent_no_longer_valid")}{form.parentId})</option>}
           </select>
-          <span className="text-xs font-normal text-zinc-500">Không thể chọn hậu duệ hoặc chuyển nhánh vượt 8 cấp.</span>
+          <span className="text-xs font-normal text-zinc-500">{tStatic("feature.taxonomy.termeditpage.cannot_select_a_descendant_or_move_a_branch_beyond")}</span>
         </label>}
 
         {mode === 'edit' && extensionConfig && <AdminTermPanels config={extensionConfig}
@@ -464,22 +466,22 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
           }))} />}
 
         {conflict && <AdminAlert tone="warning" className="space-y-2">
-          <p role="status">Dữ liệu máy chủ thay đổi. Các trường đã nhập vẫn được giữ.</p>
+          <p role="status">{tStatic("feature.taxonomy.termeditpage.server_data_changed_your_input_is_retained")}</p>
           {!latest ? <AdminButton variant="secondary" size="sm" disabled={busy}
-            onClick={() => void inspectConflict()}>Tải bản mới để so sánh</AdminButton> : <>
-            <p className="text-xs">Bản trên máy chủ: v{latest.version} · {latest.name} · /{latest.slug}</p>
+            onClick={() => void inspectConflict()}>{tStatic("feature.taxonomy.termeditpage.load_latest_version_to_compare")}</AdminButton> : <>
+            <p className="text-xs">{tStatic("feature.taxonomy.termeditpage.server_version_v")}{latest.version} · {latest.name} · /{latest.slug}</p>
             <AdminButton variant="secondary" size="sm" disabled={busy} onClick={continueWithLatest}>
-              Tiếp tục với v{latest.version} (giữ trường đã sửa)
+              {tStatic("feature.taxonomy.termeditpage.continue_with_v")}{latest.version} {tStatic("feature.taxonomy.termeditpage.retain_edited_fields")}
             </AdminButton>
           </>}
         </AdminAlert>}
         <div className="flex flex-wrap gap-2.5 pt-1">
           <AdminButton type="submit" variant="primary" size="md"
             disabled={busy || conflict || !csrfToken || (mode === 'new' && (user.role !== 'admin' || providerUnavailable))}>
-            {busy ? 'Đang lưu...' : mode === 'new' ? 'Tạo mới' : 'Lưu thay đổi'}
+            {busy ? tStatic("feature.users.userprofilepanel.saving") : mode === 'new' ? tStatic("feature.editor.panelregionrenderer.create_new") : tStatic("feature.users.userspanel.save_changes")}
           </AdminButton>
           <AdminButton variant="secondary" size="md" disabled={busy} onClick={discardAndBack}>
-            Hủy sửa
+            {tStatic("feature.taxonomy.termeditpage.cancel_edits")}
           </AdminButton>
         </div>
       </form>

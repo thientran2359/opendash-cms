@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 export type TlsMode = 'starttls' | 'implicit_tls';
@@ -41,7 +42,7 @@ export interface NotificationAttemptPublic {
 
 export function getSmtpSettings(): Promise<SmtpSettingsPublic> {
   return requestJson<SmtpSettingsPublic>('/api/admin/settings/smtp', {
-    defaultErrorMessage: 'Không thể tải cấu hình SMTP.',
+    defaultErrorMessage: tStatic('api.smtp.load_smtp_settings'),
   });
 }
 
@@ -56,7 +57,7 @@ export function updateSmtpSettings(
     contentType: 'application/json',
     ifMatchVersion: version,
     body: JSON.stringify(payload),
-    defaultErrorMessage: 'Không thể lưu cấu hình SMTP.',
+    defaultErrorMessage: tStatic('api.smtp.save_smtp_settings'),
   });
 }
 
@@ -64,7 +65,7 @@ export function testSmtpSettings(csrfToken: string | null): Promise<{ ok: boolea
   return requestJson<{ ok: boolean }>('/api/admin/settings/smtp/test', {
     method: 'POST',
     csrfToken,
-    defaultErrorMessage: 'Không thể gửi email kiểm tra SMTP.',
+    defaultErrorMessage: tStatic('api.smtp.send_the_smtp_test_email'),
   });
 }
 
@@ -80,6 +81,6 @@ export function notifyContactSubmission(
     contentType: 'application/json',
     ifMatchVersion: attemptVersion,
     body: JSON.stringify({ acknowledge_duplicate_risk: acknowledgeDuplicateRisk }),
-    defaultErrorMessage: 'Không thể gửi lại thông báo SMTP.',
+    defaultErrorMessage: tStatic('api.smtp.resend_the_smtp_notification'),
   });
 }

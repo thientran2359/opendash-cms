@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../i18n/index.tsx';
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
 import * as builderApi from '../api/builder.ts';
@@ -27,11 +28,6 @@ import { StudioBlockTree, type StudioMenuRequest } from '../studio/StudioBlockTr
 import { StudioBlockCatalog } from '../studio/StudioBlockCatalog.tsx';
 
 const BLOCK_CATEGORY_ORDER = ['layout', 'media', 'interactive', 'content', 'marketing', 'plugin'] as const;
-const BLOCK_CATEGORY_LABELS: Record<string, string> = {
-  layout: 'Bố cục', media: 'Media', interactive: 'Tương tác',
-  content: 'Nội dung', marketing: 'Marketing', plugin: 'Plugin',
-};
-
 function availableSchemas(catalog: BlockCatalogItemDto[]): BlockCatalogItemDto[] {
   return catalog.filter(item => item.status === 'active' && item.declaration_state === 'declared');
 }
@@ -39,9 +35,14 @@ function availableSchemas(catalog: BlockCatalogItemDto[]): BlockCatalogItemDto[]
 function BlockTypeOptions({
   catalog, legacyTypes,
 }: { catalog: BlockCatalogItemDto[]; legacyTypes: InsertableElementType[] }) {
+  const { t } = useI18n();
+  const BLOCK_CATEGORY_LABELS: Record<string, string> = {
+    layout: t('builder.builder_workspace.category_layout'), media: t('builder.builder_workspace.media_tab'), interactive: t('builder.builder_workspace.category_interactive'),
+    content: t('builder.builder_workspace.category_content'), marketing: 'Marketing', plugin: 'Plugin',
+  };
   const available = availableSchemas(catalog);
   return <>
-    <optgroup label="Khối chuẩn">
+    <optgroup label={t('builder.builder_workspace.core_blocks')}>
       {legacyTypes.map(type => <option key={type} value={type}>
         {type === 'core/pattern_ref' ? 'Reusable Pattern'
           : type === 'core/content_slot' ? 'Content Slot'
@@ -146,6 +147,7 @@ export function BuilderEditorCore({
   onMessage,
   onApiError,
 }: BuilderEditorCoreProps) {
+  const { t } = useI18n();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [mediaTargetParentId, setMediaTargetParentId] = useState<string | null | undefined>(undefined);
   const [blockSchemas, setBlockSchemas] = useState<BlockCatalogItemDto[]>([]);
@@ -176,7 +178,7 @@ export function BuilderEditorCore({
     const refresh = () => {
       void builderApi.getBlockSchemas()
         .then(items => { if (alive) setBlockSchemas(items); })
-        .catch(cause => { if (alive) onApiError(cause, 'Không thể tải danh mục block.'); });
+        .catch(cause => { if (alive) onApiError(cause, t('builder.builder_workspace.catalog_error')); });
     };
     refresh();
     window.addEventListener('focus', refresh);
@@ -186,11 +188,11 @@ export function BuilderEditorCore({
   const applyUpdate = (next: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
     if (!next) return false;
     if (!preservesAnchors(draft, next, registry, removedId, blockSchemas)) {
-      onMessage?.('Node không resolve cần giữ nguyên vị trí, ancestor và nội dung.', true);
+      onMessage?.(t('builder.builder_workspace.protected'), true);
       return false;
     }
     if (allNodes(next).length > 512 || JSON.stringify(next).length > 256 * 1024) {
-      onMessage?.('Builder vượt giới hạn 512 node hoặc 256 KiB.', true);
+      onMessage?.(t('builder.builder_workspace.limits'), true);
       return false;
     }
     return onChangeDocument(next, nextSelected, removedId);
@@ -223,25 +225,25 @@ export function BuilderEditorCore({
     if (disabled) return;
     if (kind === 'element') {
       if (!allowPatternRef && selectedType === 'core/pattern_ref') {
-        onMessage?.('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+        onMessage?.(t('builder.builder_workspace.pattern_entry_only'), true);
         return;
       }
       if (!allowList && selectedType === 'core/list') {
-        onMessage?.('Pattern không được chứa Danh sách nội dung.', true);
+        onMessage?.(t('builder.builder_workspace.pattern_no_list'), true);
         return;
       }
       if (selectedType === 'core/content_slot') {
         if (!allowContentSlot) {
-          onMessage?.('Loại target này không cho phép thêm core/content_slot.', true);
+          onMessage?.(t('builder.builder_workspace.slot_target'), true);
           return;
         }
         if (countElementsByType(draft, 'core/content_slot') >= 1) {
-          onMessage?.('Template chỉ được chứa tối đa 1 core/content_slot.', true);
+          onMessage?.(t('builder.builder_workspace.slot_max'), true);
           return;
         }
       }
       if (selectedType === 'core/template_part' && !allowTemplatePart) {
-        onMessage?.('Chỉ được chèn Template Part trong Mode Dựng Template.', true);
+        onMessage?.(t('builder.builder_workspace.part_target'), true);
         return;
       }
     }
@@ -251,7 +253,7 @@ export function BuilderEditorCore({
     if (kind === 'element' && (parentId === null || parentLoc?.kind === 'section' || parentLoc?.kind === 'column')) {
       const next = appendFreeformElement(draft, parentId, selectedType, { blockSchema: schema });
       if (!next) {
-        onMessage?.('Vị trí thêm node không hợp lệ.', true);
+        onMessage?.(t('builder.builder_workspace.insert_position'), true);
         return;
       }
       finishInsert(next.document, next.id, true);
@@ -259,7 +261,7 @@ export function BuilderEditorCore({
     }
     const next = appendNode(draft, parentId, kind, selectedType, { blockSchema: schema });
     if (!next) {
-      onMessage?.('Vị trí thêm node không hợp lệ.', true);
+      onMessage?.(t('builder.builder_workspace.insert_position'), true);
       return;
     }
     finishInsert(next.document, next.id, kind === 'element');
@@ -269,21 +271,21 @@ export function BuilderEditorCore({
     if (disabled) return;
     const next = appendRowWithColumns(draft, parentId, count);
     if (next) finishInsert(next.document, next.id);
-    else onMessage?.('Không thể thêm Row tại vị trí này.', true);
+    else onMessage?.(t('builder.builder_workspace.row_position'), true);
   };
 
   const duplicate = (id: string) => {
     if (disabled) return;
     const result = duplicateNode(draft, id, registry, blockSchemas);
     if (result) finishInsert(result.document, result.id);
-    else onMessage?.('Không thể nhân bản node bị khóa hoặc vượt giới hạn Builder.', true);
+    else onMessage?.(t('builder.builder_workspace.duplicate_error'), true);
   };
 
   const copyOptions = (id: string) => {
     if (disabled) return;
     const result = copyNodeOptions(draft, id, registry, blockSchemas);
     if (result) onClipboardChange(result);
-    else onMessage?.('Node này không cho phép sao chép thuộc tính.', true);
+    else onMessage?.(t('builder.builder_workspace.copy_error'), true);
   };
 
   const canPaste = (id: string) => {
@@ -295,13 +297,13 @@ export function BuilderEditorCore({
   const pasteOptions = (id: string) => {
     if (disabled || !clipboard || !canPaste(id)) return;
     const next = pasteNodeOptions(draft, id, clipboard);
-    if (!applyUpdate(next, id)) onMessage?.('Thuộc tính sao chép không hợp lệ ở node này.', true);
+    if (!applyUpdate(next, id)) onMessage?.(t('builder.builder_workspace.paste_error'), true);
   };
 
   const reorderSibling = (sourceId: string, targetId: string, position: 'before' | 'after') => {
     if (disabled) return;
     const next = reorderSiblingNode(draft, sourceId, targetId, position, registry, blockSchemas);
-    if (!applyUpdate(next, sourceId)) onMessage?.('Không thể di chuyển qua node được bảo vệ.', true);
+    if (!applyUpdate(next, sourceId)) onMessage?.(t('builder.builder_workspace.move_error'), true);
   };
 
   const reorder = (id: string, direction: -1 | 1) => {
@@ -313,7 +315,7 @@ export function BuilderEditorCore({
   const remove = (id: string) => {
     if (disabled) return;
     if (!canDeleteElement(draft, id, { requiresContentSlot })) {
-      onMessage?.('Bắt buộc giữ ít nhất 1 core/content_slot trong template này.', true);
+      onMessage?.(t('builder.builder_workspace.slot_min'), true);
       return;
     }
     const entry = locate(draft, id);
@@ -321,7 +323,7 @@ export function BuilderEditorCore({
     const next = removeNode(draft, id);
     if (!next) return;
     if (!preservesAnchors(draft, next, registry, id, blockSchemas)) {
-      onMessage?.('Không thể xóa riêng node này vì sẽ dịch chuyển block chưa resolve. Hãy xóa cả container chứa các block liên quan.', true);
+      onMessage?.(t('builder.builder_workspace.delete_protected'), true);
       return;
     }
     const lockedCount = allNodes(draft).filter(node =>
@@ -330,8 +332,8 @@ export function BuilderEditorCore({
       && isLockedElement(node.node as BuilderElement, registry, blockSchemas)
     ).length;
     const prompt = lockedCount
-      ? 'Node chứa ' + lockedCount + ' block chưa resolve. Xóa vĩnh viễn khỏi Builder hiện tại?'
-      : 'Xóa node này và toàn bộ node con?';
+      ? t('builder.builder_workspace.delete_locked', { count: lockedCount })
+      : t('builder.builder_workspace.delete_confirm');
     if (!window.confirm(prompt)) return;
     applyUpdate(next, entry.parentId, id);
   };
@@ -356,7 +358,7 @@ export function BuilderEditorCore({
     if (disabled) return;
     const next = setContainerBoxSpacing(draft, id, target, kind, spacing);
     if (!next) {
-      onMessage?.('Thuộc tính khoảng cách (padding/margin) không hợp lệ.', true);
+      onMessage?.(t('builder.builder_workspace.spacing_invalid'), true);
       return;
     }
     applyUpdate(next, id);
@@ -366,7 +368,7 @@ export function BuilderEditorCore({
     if (disabled) return;
     const next = setSectionStyle(draft, id, patch);
     if (!next) {
-      onMessage?.('Thuộc tính Section không hợp lệ.', true);
+      onMessage?.(t('builder.builder_workspace.section_invalid'), true);
       return;
     }
     applyUpdate(next, id);
@@ -392,7 +394,7 @@ export function BuilderEditorCore({
     if (disabled) return;
     const next = setResponsiveField(draft, id, target, field, value);
     if (!next) {
-      onMessage?.('Thuộc tính responsive không hợp lệ.', true);
+      onMessage?.(t('builder.builder_workspace.responsive_invalid'), true);
       return;
     }
     applyUpdate(next, id);
@@ -407,20 +409,20 @@ export function BuilderEditorCore({
   const insertThemePattern = (sourceDocument: BuilderDocument, title: string, appendAtEnd = false): boolean => {
     if (!csrfToken || disabled) return false;
     if (sourceDocument.schema_version !== draft.schema_version || !sourceDocument.sections.length) {
-      onMessage?.('Mẫu từ theme không có bố cục Builder tương thích.', true);
+      onMessage?.(t('builder.builder_workspace.theme_pattern_invalid'), true);
       return false;
     }
     const sourceNodes = allNodes(sourceDocument);
     if (!allowList && sourceNodes.some(node => node.kind === 'element'
         && (node.node as BuilderElement).type === 'core/list')) {
-      onMessage?.('Target này không cho phép Danh sách nội dung.', true);
+      onMessage?.(t('builder.builder_workspace.list_target'), true);
       return false;
     }
     const existingNodes = allNodes(draft);
     const combinedListCount = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
       && (node.node as BuilderElement).type === 'core/list').length;
     if (combinedListCount > 8) {
-      onMessage?.('Builder chỉ hỗ trợ tối đa 8 Danh sách nội dung.', true);
+      onMessage?.(t('builder.builder_workspace.list_limit'), true);
       return false;
     }
     const refs = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
@@ -428,7 +430,7 @@ export function BuilderEditorCore({
       .map(node => Number((node.node as BuilderElement).props.pattern_id));
     if ((!allowPatternRef && refs.length > 0) || refs.some(id => !Number.isSafeInteger(id) || id <= 0)
         || new Set(refs).size > 16) {
-      onMessage?.('Mẫu không phù hợp với target hoặc giới hạn 16 Reusable Pattern.', true);
+      onMessage?.(t('builder.builder_workspace.pattern_limit'), true);
       return false;
     }
     const copy = cloneWithFreshNodeIds(sourceDocument, draft);
@@ -443,7 +445,7 @@ export function BuilderEditorCore({
       ],
     };
     if (!finishInsert(next, copy.sections[0].id)) return false;
-    onMessage?.('Đã chèn bản sao “' + title + '”. Chưa lưu lên website.');
+    onMessage?.(t('builder.builder_workspace.copy_inserted', { title }));
     return true;
   };
 
@@ -470,7 +472,7 @@ export function BuilderEditorCore({
     }
     setShowMediaPicker(false);
     setMediaTargetParentId(undefined);
-    onMessage?.('Đã chèn ảnh từ Media Library vào bản nháp. Chưa lưu lên website.');
+    onMessage?.(t('builder.builder_workspace.media_inserted'));
   };
 
   const openMedia = (parentId: string | null | undefined = undefined) => {
@@ -481,8 +483,8 @@ export function BuilderEditorCore({
   const selectedLoc = locate(draft, selectedId);
   const addParentLoc = locate(draft, addTargetParentId);
   const inTreeHeaderTitle = builderView === 'properties'
-    ? (selectedLoc ? nodeTitle(selectedLoc, blockSchemas) : 'Chỉnh sửa Block')
-    : (addParentLoc ? `Thêm vào ${nodeTitle(addParentLoc, blockSchemas)}` : 'Thêm Block');
+    ? (selectedLoc ? nodeTitle(selectedLoc, blockSchemas) : t('builder.builder_workspace.edit_block'))
+    : (addParentLoc ? t('builder.builder_workspace.add_to', { title: nodeTitle(addParentLoc, blockSchemas) }) : t('builder.builder_workspace.add_block'));
 
   return (
     <div className="od-studio-builder-core space-y-3" data-testid="studio-builder-core">
@@ -506,14 +508,14 @@ export function BuilderEditorCore({
 
       {(hadFreeformWrap || hadRecovery) && (
         <div role="status" className="rounded-lg border border-sky-200 bg-sky-50 p-2.5 text-xs text-sky-900" data-testid="studio-block-notice">
-          {hadFreeformWrap && <p>Nội dung văn bản thuần trước đó đã được tự động bọc thành khối Trình dựng trang để chỉnh sửa.</p>}
-          {hadRecovery && <p>Một phần comment block cũ bị sai cú pháp đã được phục hồi an toàn thành khối văn bản.</p>}
+          {hadFreeformWrap && <p>{t('builder.builder_workspace.freeform_wrap')}</p>}
+          {hadRecovery && <p>{t('builder.builder_workspace.recovered')}</p>}
         </div>
       )}
 
       {diagnostics.length > 0 && (
         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900" data-testid="studio-diagnostics-banner">
-          <strong>Chẩn đoán khối:</strong>
+          <strong>{t('builder.builder_workspace.block_diagnostics')}</strong>
           <ul className="mt-1 list-disc pl-4 space-y-0.5">
             {diagnostics.map((d, idx) => (
               <li key={`${d.node_id}-${idx}`}>{d.node_id}: {d.message ?? d.code}</li>
@@ -625,6 +627,7 @@ export function BuilderEditorCore({
 export function BuilderWorkspace({
   route, active, onNavigateHash, user, csrfToken, resetToken, themeRevision, onDirtyChange, onApiError,
 }: Props) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<BuilderDocument>(EMPTY_DOCUMENT);
   const draftRef = useRef<BuilderDocument>(EMPTY_DOCUMENT);
   // The accepted route owns the target identity. Never change this independently
@@ -679,7 +682,7 @@ export function BuilderWorkspace({
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [conflict, setConflict] = useState(false);
-  const [notice, setNotice] = useState('Mở Builder để chỉnh template hoặc bố cục Page.');
+  const [notice, setNotice] = useState(t('builder.builder_workspace.initial_notice'));
   const [error, setError] = useState(false);
   const [patterns, setPatterns] = useState<PatternRecord[]>([]);
   const [patternsLoaded, setPatternsLoaded] = useState(false);
@@ -708,7 +711,7 @@ export function BuilderWorkspace({
     const refresh = () => {
       void builderApi.getBlockSchemas()
         .then(items => { if (alive) setBlockSchemas(items); })
-        .catch(cause => { if (alive) onApiError(cause, 'Không thể tải danh mục block.'); });
+        .catch(cause => { if (alive) onApiError(cause, t('builder.builder_workspace.catalog_error')); });
     };
     refresh();
     window.addEventListener('focus', refresh);
@@ -732,7 +735,7 @@ export function BuilderWorkspace({
       return { document: opened.document ?? EMPTY_DOCUMENT, version: opened.version,
         exists: opened.document !== null, sharedId: null, contentMode: opened.content_mode };
     }
-    if (!sharedTarget) throw new Error('Target Builder không hợp lệ.');
+    if (!sharedTarget) throw new Error(t('builder.builder_workspace.invalid_target'));
     const { items } = await builderApi.getTemplateOverrides();
     const opened = items.find(item => item.canonical_target_key === sharedKey);
     return { document: opened?.ast_json ?? EMPTY_DOCUMENT, version: opened?.version ?? 0,
@@ -810,7 +813,7 @@ export function BuilderWorkspace({
       setPatterns(data.items);
       setPatternsLoaded(true);
     }).catch(cause => {
-      if (seq === patternSeq.current) onApiError(cause, 'Không tải được danh sách Pattern.');
+      if (seq === patternSeq.current) onApiError(cause, t('builder.builder_workspace.pattern_load'));
     });
     return () => { patternSeq.current += 1; };
   }, [active, route.rawHash, user?.id, user?.role, csrfToken, resetToken]);
@@ -822,7 +825,7 @@ export function BuilderWorkspace({
     listPatterns().then(data => {
       if (seq === patternSeq.current) { setPatterns(data.items); setPatternsLoaded(true); }
     }).catch(cause => {
-      if (seq === patternSeq.current) onApiError(cause, 'Không thể làm mới danh sách Pattern.');
+      if (seq === patternSeq.current) onApiError(cause, t('builder.builder_workspace.pattern_refresh'));
     });
   };
 
@@ -881,13 +884,12 @@ export function BuilderWorkspace({
         registryRef.current = descriptors;
         loadedRef.current = true;
         setConflict(retainDraft && versionRef.current !== opened.version);
-        message(retainDraft ? 'Đã khôi phục nháp chưa lưu. Version cũ vẫn được giữ để kiểm tra xung đột.' : 'Đã mở ' + (scopedEntry ? `${scopeTypeKey} #${scopeEntryId}` : targetRole)
-          + ' (ETag "v' + opened.version + '").');
+        message(retainDraft ? t('builder.builder_workspace.draft_recovered') : t('builder.builder_workspace.opened', { target: scopedEntry ? `${scopeTypeKey} #${scopeEntryId}` : targetRole, version: opened.version }));
       })
       .catch(cause => {
         if (alive && requestId === loadSeq.current && authorityRef.current === authority) {
-          message('Không thể tải Builder cho target này.', true);
-          onApiError(cause, 'Không thể mở Builder.');
+          message(t('builder.builder_workspace.target_load_error'), true);
+          onApiError(cause, t('builder.builder_workspace.open_error'));
         }
       })
       .finally(() => { if (alive && requestId === loadSeq.current) setLoading(false); });
@@ -905,18 +907,18 @@ export function BuilderWorkspace({
       .then(result => {
         if (alive) { registryRef.current = result; setRegistry(result); }
       })
-      .catch(cause => { if (alive) onApiError(cause, 'Không cập nhật được registry.'); });
+      .catch(cause => { if (alive) onApiError(cause, t('builder.builder_workspace.registry_error')); });
     return () => { alive = false; };
   }, [themeRevision, user?.id]);
 
   const changeDraft = (updated: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
     if (!updated) return false;
     if (!preservesAnchors(draftRef.current, updated, registryRef.current, removedId, blockSchemasRef.current)) {
-      message('Node không resolve cần giữ nguyên vị trí, ancestor và nội dung.', true);
+      message(t('builder.builder_workspace.protected'), true);
       return false;
     }
     if (allNodes(updated).length > 512 || JSON.stringify(updated).length > 256 * 1024) {
-      message('Builder vượt giới hạn 512 node hoặc 256 KiB.', true);
+      message(t('builder.builder_workspace.limits'), true);
       return false;
     }
     draftRef.current = updated;
@@ -926,28 +928,28 @@ export function BuilderWorkspace({
     invalidatePreview();
     setMode('canvas');
     if (nextSelected !== undefined) setSelectedId(nextSelected);
-    message('Có thay đổi chưa lưu.');
+    message(t('builder.builder_workspace.dirty_notice'));
     return true;
   };
 
   const insertThemePattern = (sourceDocument: BuilderDocument, title: string): boolean => {
     if (!active || !user || !csrfToken || !loadedRef.current || savingRef.current) return false;
     if (sourceDocument.schema_version !== draftRef.current.schema_version || !sourceDocument.sections.length) {
-      message('Mẫu từ theme không có bố cục Builder tương thích.', true);
+      message(t('builder.builder_workspace.theme_pattern_invalid'), true);
       return false;
     }
     const sourceNodes = allNodes(sourceDocument);
     if (scopedPattern && sourceNodes.some(node => node.kind === 'element'
         && ['core/pattern_ref', 'core/list'].includes(
           (node.node as import('./document.ts').BuilderElement).type))) {
-      message('Pattern CPT không cho phép lồng Reusable Pattern hoặc Danh sách nội dung.', true);
+      message(t('builder.builder_workspace.pattern_no_nested'), true);
       return false;
     }
     const existingNodes = allNodes(draftRef.current);
     const combinedListCount = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
       && (node.node as import('./document.ts').BuilderElement).type === 'core/list').length;
     if (combinedListCount > 8) {
-      message('Builder chỉ hỗ trợ tối đa 8 Danh sách nội dung.', true);
+      message(t('builder.builder_workspace.list_limit'), true);
       return false;
     }
     const refs = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
@@ -955,7 +957,7 @@ export function BuilderWorkspace({
       .map(node => Number((node.node as import('./document.ts').BuilderElement).props.pattern_id));
     if ((!scopedEntry && refs.length > 0) || refs.some(id => !Number.isSafeInteger(id) || id <= 0)
         || new Set(refs).size > 16) {
-      message('Mẫu không phù hợp với target hoặc giới hạn 16 Reusable Pattern.', true);
+      message(t('builder.builder_workspace.pattern_limit'), true);
       return false;
     }
     const copy = cloneWithFreshNodeIds(sourceDocument, draftRef.current);
@@ -970,9 +972,7 @@ export function BuilderWorkspace({
       ...draftRef.current.sections.slice(insertionIndex),
     ] };
     if (!changeDraft(next, copy.sections[0].id)) return false;
-    message('Đã chèn bản sao “' + title + '” ' +
-      (selectedSection === undefined ? 'vào cuối canvas.' : 'sau Section được chọn.') +
-      ' Chưa lưu lên website.');
+    message(t('builder.builder_workspace.copy_position', { title, position: selectedSection === undefined ? t('builder.builder_workspace.position_end') : t('builder.builder_workspace.position_after') }));
     return true;
   };
 
@@ -1026,20 +1026,20 @@ export function BuilderWorkspace({
       if (!changeDraft(populated, inserted.id)) return;
     }
     setShowMediaPicker(false);
-    message('Đã chèn ảnh từ Media Library vào bản nháp. Chưa lưu lên website.');
+    message(t('builder.builder_workspace.media_inserted'));
   };
 
   const add = (parentId: string | null, kind: NodeKind) => {
     if (!scopedEntry && kind === 'element' && elementType === 'core/pattern_ref') {
-      return message('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+      return message(t('builder.builder_workspace.pattern_entry_only'), true);
     }
     if (scopedPattern && kind === 'element' && (elementType === 'core/pattern_ref' || elementType === 'core/list')) {
-      return message('Pattern không được chứa Reusable Pattern hoặc Danh sách nội dung.', true);
+      return message(t('builder.builder_workspace.pattern_no_nested2'), true);
     }
     const schema = blockSchemasRef.current.find(item => item.block_id === elementType
       && item.status === 'active' && item.declaration_state === 'declared')?.schema;
     const next = appendNode(draftRef.current, parentId, kind, elementType as InsertableElementType, { blockSchema: schema });
-    if (!next) return message('Vị trí thêm node không hợp lệ.', true);
+    if (!next) return message(t('builder.builder_workspace.insert_position'), true);
     changeDraft(next.document, next.id);
   };
   const reorder = (id: string, direction: -1 | 1) => {
@@ -1052,7 +1052,7 @@ export function BuilderWorkspace({
     const next = removeNode(draftRef.current, id);
     if (!next) return;
     if (!preservesAnchors(draftRef.current, next, registryRef.current, id, blockSchemasRef.current)) {
-      message('Không thể xóa riêng node này vì sẽ dịch chuyển block chưa resolve. Hãy xóa cả container chứa các block liên quan.', true);
+      message(t('builder.builder_workspace.delete_protected'), true);
       return;
     }
     const lockedCount = allNodes(draftRef.current).filter(node =>
@@ -1061,8 +1061,8 @@ export function BuilderWorkspace({
       && isLockedElement(node.node as import('./document.ts').BuilderElement, registryRef.current, blockSchemasRef.current)
     ).length;
     const prompt = lockedCount
-      ? 'Node chứa ' + lockedCount + ' block chưa resolve. Xóa vĩnh viễn khỏi Builder hiện tại?'
-      : 'Xóa node này và toàn bộ node con?';
+      ? t('builder.builder_workspace.delete_locked', { count: lockedCount })
+      : t('builder.builder_workspace.delete_confirm');
     if (!window.confirm(prompt)) return;
     changeDraft(next, entry.parentId, id);
   };
@@ -1080,12 +1080,12 @@ export function BuilderWorkspace({
     id: string, target: BuilderViewport, kind: 'padding' | 'margin', spacing: BoxSpacing | null,
   ) => {
     const next = setContainerBoxSpacing(draftRef.current, id, target, kind, spacing);
-    if (!next) return message('Thuộc tính khoảng cách không hợp lệ.', true);
+    if (!next) return message(t('builder.builder_workspace.spacing_error'), true);
     changeDraft(next, id);
   };
   const editSectionStyle = (id: string, patch: Partial<SectionStyle>) => {
     const next = setSectionStyle(draftRef.current, id, patch);
-    if (!next) return message('Thuộc tính Section không hợp lệ.', true);
+    if (!next) return message(t('builder.builder_workspace.section_invalid'), true);
     changeDraft(next, id);
   };
   // D1 (#104): typed binding objects cannot be passed through the static
@@ -1107,7 +1107,7 @@ export function BuilderWorkspace({
     value: number | ResponsiveAlign | null,
   ) => {
     const next = setResponsiveField(draftRef.current, id, target, field, value);
-    if (!next) return message('Thuộc tính responsive không hợp lệ.', true);
+    if (!next) return message(t('builder.builder_workspace.responsive_invalid'), true);
     changeDraft(next, id);
   };
   const syncResponsiveField = (id: string, property: ResponsiveField | 'padding' | 'margin') => {
@@ -1127,7 +1127,7 @@ export function BuilderWorkspace({
     const accountId = user.id;
     const requestAuthority = authority;
     setPreviewing(true);
-    message('Đang tạo bản Preview từ nháp...');
+    message(t('builder.builder_workspace.creating_preview'));
     try {
       const result = scopedEntry && scopeEntryId !== null
             ? await builderApi.previewEntryBuilder(scopeTypeKey, scopeEntryId, snapshot, csrfToken, controller.signal)
@@ -1137,21 +1137,21 @@ export function BuilderWorkspace({
                     ? { type_key: scopeTypeKey, entry_id: scopeEntryId } : undefined,
                   snapshotVersion !== null && snapshotVersion > 0 ? snapshotVersion : undefined,
                   controller.signal)
-              : (() => { throw new Error('Target Builder không hợp lệ.'); })();
+              : (() => { throw new Error(t('builder.builder_workspace.invalid_target')); })();
       if (current !== previewSeq.current || revisionRef.current !== snapshotRevision
           || ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
       setPreviewHtml(result.html);
       setDiagnostics(result.diagnostics);
       setMode('preview');
-      message('Đang chuẩn bị Preview nháp...');
+      message(t('builder.builder_workspace.preparing_preview'));
     } catch (cause) {
       if (controller.signal.aborted || current !== previewSeq.current || authorityRef.current !== requestAuthority) return;
       if (sharedTarget && cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
-        message('Bố cục đã thay đổi từ phiên khác (412). Nháp của bạn vẫn còn.', true);
+        message(t('builder.builder_workspace.preview_conflict'), true);
       } else {
-        message('Preview thất bại.', true);
-        onApiError(cause, 'Không thể xem trước Builder.');
+        message(t('builder.builder_workspace.preview_failed'), true);
+        onApiError(cause, t('builder.builder_workspace.preview_error'));
       }
     } finally {
       if (current === previewSeq.current) setPreviewing(false);
@@ -1164,26 +1164,25 @@ export function BuilderWorkspace({
       node.kind === 'element' && (node.node as import('./document.ts').BuilderElement).type === 'core/pattern_ref')
       .map(node => Number((node.node as import('./document.ts').BuilderElement).props.pattern_id));
     if (!scopedEntry && refs.length > 0) {
-      message('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+      message(t('builder.builder_workspace.pattern_entry_only'), true);
       return;
     }
     if (refs.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(refs).size > 16) {
-      message('Mỗi Reusable Pattern cần một Pattern hợp lệ; tối đa 16 Pattern duy nhất trên một trang.', true);
+      message(t('builder.builder_workspace.pattern_valid'), true);
       return;
     }
     if (patternsLoaded && refs.some(id => !patterns.some(pattern => pattern.id === id))) {
-      message('Một Pattern đã bị xóa. Hãy chọn Pattern thay thế trong Inspector trước khi lưu.', true);
+      message(t('builder.builder_workspace.pattern_deleted'), true);
       return;
     }
     if (scopedPattern && allNodes(draftRef.current).some(node =>
       node.kind === 'element' && ['core/list', 'core/pattern_ref'].includes(
         (node.node as import('./document.ts').BuilderElement).type))) {
-      message('Pattern không được chứa Reusable Pattern hoặc danh sách nội dung.', true);
+      message(t('builder.builder_workspace.pattern_no_nested3'), true);
       return;
     }
     if (scopedEntry && !scopedPattern && entryModeRef.current !== 'builder' && !window.confirm(
-      'Thiết kế mới sẽ thay phần thân nội dung đang hiển thị sau khi Lưu. ' +
-      'Nội dung văn bản hiện tại vẫn được giữ để khôi phục khi Reset. Tiếp tục?'
+      t('builder.builder_workspace.replace_confirm')
     )) return;
     savingRef.current = true;
     setSaving(true);
@@ -1193,13 +1192,13 @@ export function BuilderWorkspace({
     const snapshotVersion = versionRef.current;
     const accountId = user.id;
     const requestAuthority = authority;
-    message('Đang lưu snapshot (If-Match "v' + snapshotVersion + '")...');
+    message(t('builder.builder_workspace.saving_snapshot', { version: String(snapshotVersion) }));
     try {
       const result = scopedEntry && scopeEntryId !== null
             ? await builderApi.saveEntryBuilder(scopeTypeKey, scopeEntryId, snapshot, snapshotVersion, csrfToken)
             : sharedTarget
               ? await builderApi.putTemplateOverride(sharedTarget, snapshot, csrfToken, snapshotVersion || undefined)
-              : (() => { throw new Error('Target Builder không hợp lệ.'); })();
+              : (() => { throw new Error(t('builder.builder_workspace.invalid_target')); })();
       if (ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
       versionRef.current = result.version;
       setVersion(result.version);
@@ -1220,19 +1219,19 @@ export function BuilderWorkspace({
       }
       message(snapshotRevision === revisionRef.current
         ? scopedPattern
-          ? 'Đã lưu Pattern đồng bộ; mọi nội dung tham chiếu sẽ hiển thị bố cục mới.'
+          ? t('builder.builder_workspace.pattern_saved')
           : scopedEntry && pageDetails?.status === 'draft'
-          ? 'Đã lưu bố cục nháp. Nội dung vẫn chưa xuất bản.'
-          : 'Đã lưu và cập nhật website công khai.'
-        : 'Snapshot đã lưu. Các chỉnh sửa mới hơn vẫn chưa được lưu.');
+          ? t('builder.builder_workspace.draft_saved')
+          : t('builder.builder_workspace.public_saved')
+        : t('builder.builder_workspace.snapshot_saved'));
     } catch (cause) {
       if (ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
       if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
-        message('Bố cục đã được lưu từ phiên khác (412). Nháp của bạn vẫn còn.', true);
+        message(t('builder.builder_workspace.save_conflict'), true);
       } else {
-        message('Lưu thất bại; nháp vẫn được giữ.', true);
-        onApiError(cause, 'Không thể lưu Builder.');
+        message(t('builder.builder_workspace.save_failed'), true);
+        onApiError(cause, t('builder.builder_workspace.save_error'));
       }
     } finally {
       if (authorityRef.current === requestAuthority) {
@@ -1245,7 +1244,7 @@ export function BuilderWorkspace({
   const loadRoleTarget = async (confirmDiscard = true) => {
     if (!active || !user || !csrfToken) return;
     if (confirmDiscard && revisionRef.current !== savedRevision
-        && !window.confirm('Bỏ nháp chưa lưu và tải bản trên server?')) return;
+        && !window.confirm(t('builder.builder_workspace.discard_confirm'))) return;
     const accountId = user.id;
     const requestAuthority = authority;
     const requestId = ++loadSeq.current;
@@ -1270,11 +1269,11 @@ export function BuilderWorkspace({
       setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
       setConflict(false);
       loadedRef.current = true;
-      message('Đã tải lại ' + targetRole + ' (ETag "v' + opened.version + '").');
+      message(t('builder.builder_workspace.reloaded', { target: targetRole, version: opened.version }));
     } catch (cause) {
       if (requestId === loadSeq.current && ownerRef.current === accountId && authorityRef.current === requestAuthority) {
-        message('Không thể tải lại Builder.', true);
-        onApiError(cause, 'Không thể tải lại template.');
+        message(t('builder.builder_workspace.reload_error'), true);
+        onApiError(cause, t('builder.builder_workspace.reload_template_error'));
       }
     } finally {
       if (requestId === loadSeq.current) setLoading(false);
@@ -1286,8 +1285,8 @@ export function BuilderWorkspace({
   const resetRoleOverride = async () => {
     if (!active || scopedPattern || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
     if (revisionRef.current !== savedRevision
-        && !window.confirm('Reset sẽ bỏ nháp chưa lưu. Tiếp tục?')) return;
-    if (!window.confirm('Reset bố cục ' + targetRole + ' để sử dụng nội dung dự phòng?')) return;
+        && !window.confirm(t('builder.builder_workspace.reset_confirm'))) return;
+    if (!window.confirm(t('builder.builder_workspace.reset_role', { target: targetRole }))) return;
     const requestAuthority = authority;
     if (savingRef.current) return;
     savingRef.current = true;
@@ -1300,19 +1299,19 @@ export function BuilderWorkspace({
         if (authorityRef.current !== requestAuthority) return;
         await loadRoleTarget(false);
         if (authorityRef.current !== requestAuthority) return;
-        message('Đã reset bố cục ' + targetRole + '. Nguồn hiện tại: ' + result.next_effective_source.label);
+        message(t('builder.builder_workspace.reset_source', { target: targetRole, source: result.next_effective_source.label }));
         return;
       }
       if (authorityRef.current !== requestAuthority) return;
       await loadRoleTarget(false);
       if (authorityRef.current !== requestAuthority) return;
-      message('Đã reset bố cục ' + targetRole + '.');
+      message(t('builder.builder_workspace.reset_done', { target: targetRole }));
     } catch (cause) {
       if (authorityRef.current !== requestAuthority) return;
       if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
-        message('Reset xung đột version (412). Nháp của bạn vẫn còn.', true);
-      } else onApiError(cause, 'Không thể reset bố cục.');
+        message(t('builder.builder_workspace.reset_conflict'), true);
+      } else onApiError(cause, t('builder.builder_workspace.reset_error'));
     } finally {
       if (authorityRef.current === requestAuthority) {
         savingRef.current = false;
@@ -1334,14 +1333,14 @@ export function BuilderWorkspace({
             {scopedEntry ? `${scopeTypeKey === 'page' ? 'Page' : scopedPattern ? 'Pattern' : scopeTypeKey} Builder #${scopeEntryId}` : 'Override: ' + targetRole}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            Nguồn: {source} · ETag: {version === null ? 'Chưa tải' : '"v' + version + '"'}
-            {dirty && <span className="ml-2 font-semibold text-amber-700">● Chưa lưu</span>}
+            {t('builder.builder_workspace.source_etag', { source, etag: version === null ? t('builder.builder_workspace.not_loaded') : '"v' + version + '"' })}
+            {dirty && <span className="ml-2 font-semibold text-amber-700">{t('builder.builder_workspace.unsaved')}</span>}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor="builder-role-target" className="text-sm font-medium text-slate-600">Role</label>
+          <label htmlFor="builder-role-target" className="text-sm font-medium text-slate-600">{t('builder.builder_workspace.role')}</label>
 
-          <select id="builder-role-target" aria-label="Role Builder" className="text-sm"
+          <select id="builder-role-target" aria-label={tStatic("feature.common.ui_role_builder")} className="text-sm"
             disabled={user.role !== 'admin' || scopedEntry}
             value={targetRole} onChange={event => {
               const next = event.target.value as OverrideRole | 'entry';
@@ -1350,7 +1349,7 @@ export function BuilderWorkspace({
             }}>
 
             <option value="page" disabled={!scopedPage}>page</option>
-            <option value="entry" disabled={!scopedEntry || scopedPage}>entry · riêng theo CPT</option>
+            <option value="entry" disabled={!scopedEntry || scopedPage}>{t('builder.builder_workspace.entry_role')}</option>
 
             <option value="header">header</option>
 
@@ -1369,7 +1368,7 @@ export function BuilderWorkspace({
 
             <input type="text" className="w-28 text-sm" placeholder="type_key"
 
-              aria-label="Scope type_key" value={scopeTypeInput}
+              aria-label={tStatic("feature.common.ui_scope_type_key")} value={scopeTypeInput}
               onChange={event => setScopeTypeInput(event.target.value)}
               onBlur={() => {
                 if (scopeTypeInput === scopeTypeKey) return;
@@ -1379,78 +1378,78 @@ export function BuilderWorkspace({
 
           )}
 
-          <label htmlFor="builder-viewport" className="text-sm font-medium text-slate-600">Viewport</label>
-          <select id="builder-viewport" aria-label="Viewport Builder" className="text-sm"
+          <label htmlFor="builder-viewport" className="text-sm font-medium text-slate-600">{t('builder.builder_workspace.viewport')}</label>
+          <select id="builder-viewport" aria-label={tStatic("feature.common.ui_viewport_builder")} className="text-sm"
             value={viewport} onChange={event => setViewport(event.target.value as BuilderViewport)}>
             {(['desktop', 'tablet', 'mobile'] as BuilderViewport[]).map(key =>
               <option key={key} value={key}>{VIEWPORT_LABELS[key]} · {VIEWPORT_WIDTHS[key]}px</option>)}
           </select>
           <button type="button" className="btn-secondary" disabled={loading || saving || !user} onClick={() => void reload()}>
-            Tải bản server
+            {t('builder.builder_workspace.reload_server')}
           </button>
           <button id="preview" type="button" className="btn-secondary"
             disabled={!user || loading || previewing || !loadedRef.current || (Boolean(sharedTarget) && user.role !== 'admin')}
-            onClick={() => void preview()}>Xem trước</button>
+            onClick={() => void preview()}>{t('builder.builder_workspace.preview')}</button>
           <button id="save" type="button" disabled={!user || loading || saving || !loadedRef.current || !dirty}
-            onClick={() => void save()}> {saving ? 'Đang lưu…' : scopedPattern ? 'Lưu Pattern' : scopedPage ? 'Lưu Page' : scopedEntry ? 'Lưu nội dung' : 'Lưu override'} </button>
+            onClick={() => void save()}> {saving ? t('builder.builder_workspace.saving') : scopedPattern ? t('builder.builder_workspace.save_pattern') : scopedPage ? t('builder.builder_workspace.save_page') : scopedEntry ? t('builder.builder_workspace.save_content') : t('builder.builder_workspace.save_override')} </button>
           {!scopedPattern && overrideExists && (
             <button type="button" className="btn-secondary" disabled={!user || loading || saving}
-              onClick={() => void resetRoleOverride()}>Reset mặc định</button>
+              onClick={() => void resetRoleOverride()}>{t('builder.builder_workspace.reset_default')}</button>
           )}
           {scopedEntry && <button type="button" className="btn-secondary"
             onClick={() => onNavigateHash(scopedPattern ? `#/patterns/${scopeEntryId}/edit`
               : scopeTypeKey === 'page' ? `#/pages/${scopeEntryId}/edit`
               : scopeTypeKey === 'post' ? `#/posts/${scopeEntryId}/edit`
-                : `#/cpt/${encodeURIComponent(scopeTypeKey)}/${scopeEntryId}/edit`)}>{scopedPattern ? 'Trở lại Pattern' : scopedPage ? 'Trở lại Page' : 'Trở lại nội dung'}</button>}
+                : `#/cpt/${encodeURIComponent(scopeTypeKey)}/${scopeEntryId}/edit`)}>{scopedPattern ? t('builder.builder_workspace.back_pattern') : scopedPage ? t('builder.builder_workspace.back_page') : t('builder.builder_workspace.back_content')}</button>}
           {!scopedPattern && (scopedEntry ? pageDetails?.status === 'published' && Boolean(pageDetails.url) : true) && (
             <a href={scopedEntry ? pageDetails?.url : '/'} target="_blank" rel="noopener noreferrer"
               className="rounded border border-slate-200 px-3 py-2 text-sm text-sky-700">
-              {scopedEntry ? 'Xem nội dung công khai' : 'Trang công khai'}
+              {scopedEntry ? t('builder.builder_workspace.view_public') : t('builder.builder_workspace.public_page')}
             </a>
           )}
         </div>
       </header>
       <div role={error ? 'alert' : 'status'} className={'rounded-lg border p-3 text-sm ' +
         (error ? 'border-red-200 bg-red-50 text-red-800' : 'border-slate-200 bg-white text-slate-600')}>
-        {loading ? 'Đang tải Builder… ' : ''}{notice}
+        {loading ? t('builder.builder_workspace.loading') : ''}{notice}
         {scopedEntry && !scopedPattern && pageDetails?.status === 'draft' &&
-          <p className="mt-1">Page đang là bản nháp. Lưu bố cục sẽ không xuất bản Page.</p>}
-        {sharedTarget && <p className="mt-1">Preview hiển thị template đang chỉnh sửa; chưa cập nhật website công khai.</p>}
-        {scopedPattern && <p className="mt-1">Pattern không có URL public. Mỗi lần lưu Builder, các trang tham chiếu sẽ dùng bố cục mới. Không thể lồng Reusable Pattern hoặc danh sách nội dung bên trong Pattern.</p>}
+          <p className="mt-1">{t('builder.builder_workspace.draft_page')}</p>}
+        {sharedTarget && <p className="mt-1">{t('builder.builder_workspace.template_preview')}</p>}
+        {scopedPattern && <p className="mt-1">{t('builder.builder_workspace.pattern_public_notice')}</p>}
         {scopedEntry && !scopedPattern && !overrideExists && loadedRef.current &&
-          <p className="mt-1">Chưa có thiết kế Page riêng. Nội dung văn bản hiện tại vẫn được dùng cho đến khi bạn lưu thiết kế mới. Lưu thiết kế sẽ thay phần thân hiển thị, và Reset sẽ khôi phục phần thân văn bản.</p>}
+          <p className="mt-1">{t('builder.builder_workspace.page_design_notice')}</p>}
         {conflict && <button type="button" className="btn-secondary ml-3" onClick={() => void reload()}>
-          Xem bản server (cần xác nhận bỏ nháp)
+          {t('builder.builder_workspace.server_conflict')}
         </button>}
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(245px,0.8fr)_minmax(360px,1.6fr)_minmax(255px,0.9fr)]">
         <div className="min-w-0">
-          <div className="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-white p-1" role="tablist" aria-label="Builder sidebar">
+          <div className="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-white p-1" role="tablist" aria-label={tStatic("feature.common.ui_builder_sidebar")}>
             <button type="button" role="tab" aria-selected={sidebarTab === 'blocks'} aria-controls="builder-sidebar-blocks"
               className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
                 (sidebarTab === 'blocks' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
-              onClick={() => setSidebarTab('blocks')}>Blocks</button>
+              onClick={() => setSidebarTab('blocks')}>{t('builder.builder_workspace.blocks_tab')}</button>
             <button type="button" role="tab" aria-selected={sidebarTab === 'patterns'} aria-controls="builder-sidebar-patterns"
               className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
                 (sidebarTab === 'patterns' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
-              onClick={() => setSidebarTab('patterns')}>Patterns</button>
+              onClick={() => setSidebarTab('patterns')}>{t('builder.builder_workspace.patterns_tab')}</button>
             <button type="button" role="tab" aria-selected={sidebarTab === 'media'} aria-controls="builder-sidebar-media"
               className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
                 (sidebarTab === 'media' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
-              onClick={() => setSidebarTab('media')}>Media</button>
+              onClick={() => setSidebarTab('media')}>{t('builder.builder_workspace.media_tab')}</button>
           </div>
           <div id="builder-sidebar-blocks" role="tabpanel" hidden={sidebarTab !== 'blocks'}>
             <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
-              <label htmlFor="builder-element-type" className="text-xs text-slate-500">Element mới</label>
+              <label htmlFor="builder-element-type" className="text-xs text-slate-500">{t('builder.builder_workspace.new_element')}</label>
               <select id="builder-element-type" className="min-w-0 flex-1 text-xs"
                 value={elementType} onChange={event => setElementType(event.target.value)}>
                 <BlockTypeOptions catalog={blockSchemas} legacyTypes={insertableTypes} />
               </select>
             </div>
             {scopedEntry && !scopedPattern && <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-pattern-help">
-              <strong className="text-xs">Reusable Pattern</strong>
-              <p className="mt-1 text-xs text-slate-600">Chọn “Reusable Pattern” ở Element mới, thêm vào Column, rồi chọn Pattern trong Inspector để tham chiếu đồng bộ.</p>
-              <p className="mt-1 text-xs text-slate-600">{patternsLoaded ? `${patterns.length} Pattern sẵn dùng` : 'Đang tải danh sách Pattern…'}</p>
+              <strong className="text-xs">{tStatic("feature.common.ui_reusable_pattern")}</strong>
+              <p className="mt-1 text-xs text-slate-600">{t('builder.builder_workspace.pattern_help')}</p>
+              <p className="mt-1 text-xs text-slate-600">{patternsLoaded ? t('builder.builder_workspace.patterns_available', { count: patterns.length }) : t('builder.builder_workspace.patterns_loading')}</p>
             </section>}
             <BuilderTree document={draft} selectedId={selectedId} elementType={elementType as ElementType}
               registry={registry} blockSchemas={blockSchemas}
@@ -1458,31 +1457,31 @@ export function BuilderWorkspace({
           </div>
           {sidebarTab === 'patterns' && <section id="builder-sidebar-patterns" role="tabpanel"
             className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="!m-0 text-sm font-semibold text-slate-900">Pattern Library</h3>
-            <p className="text-sm text-slate-600">Khám phá mẫu từ theme v3 và chèn bản sao sau Section được chọn. Nếu không chọn node, mẫu sẽ nằm ở cuối canvas. Bản gốc trong theme không thay đổi.</p>
+            <h3 className="!m-0 text-sm font-semibold text-slate-900">{t('builder.builder_workspace.pattern_library')}</h3>
+            <p className="text-sm text-slate-600">{t('builder.builder_workspace.pattern_library_help')}</p>
             <button type="button" className="w-full" data-testid="open-pattern-library"
               disabled={loading || saving || !loadedRef.current}
-              onClick={() => setShowPatternLibrary(true)}>Explore all patterns</button>
+              onClick={() => setShowPatternLibrary(true)}>{t('builder.builder_workspace.explore')}</button>
             {scopedEntry && !scopedPattern && <p className="text-xs text-slate-600">
-              Cần đồng bộ giữa nhiều trang? Dùng block Reusable Pattern ở tab Blocks.
+              {t('builder.builder_workspace.pattern_sync_help')}
             </p>}
           </section>}
           {sidebarTab === 'media' && <section id="builder-sidebar-media" role="tabpanel"
             className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="!m-0 text-sm font-semibold text-slate-900">Media Library</h3>
-            <p className="text-sm text-slate-600">Chọn ảnh để chèn vào bố cục hiện tại hoặc thay ảnh đang chọn. Thay đổi được giữ trong bản nháp cho đến khi Lưu.</p>
+            <h3 className="!m-0 text-sm font-semibold text-slate-900">{t('builder.builder_workspace.media_library')}</h3>
+            <p className="text-sm text-slate-600">{t('builder.builder_workspace.media_help')}</p>
             <button type="button" className="w-full" data-testid="builder-open-media-picker"
               disabled={loading || saving || !loadedRef.current || !csrfToken}
-              onClick={() => setShowMediaPicker(true)}>Chọn ảnh từ Media Library</button>
+              onClick={() => setShowMediaPicker(true)}>{t('builder.builder_workspace.choose_media')}</button>
           </section>}
         </div>
-        <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Trình chỉnh sửa canvas">
+        <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label={t('builder.builder_workspace.canvas_editor')}>
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-3">
             <button type="button" className={mode === 'canvas' ? '' : 'btn-secondary'}
-              aria-pressed={mode === 'canvas'} onClick={() => setMode('canvas')}>Canvas cấu trúc</button>
+              aria-pressed={mode === 'canvas'} onClick={() => setMode('canvas')}>{t('builder.builder_workspace.structure_canvas')}</button>
             <button type="button" className={mode === 'preview' ? '' : 'btn-secondary'}
               disabled={!previewHtml} aria-pressed={mode === 'preview'}
-              onClick={() => setMode('preview')}>Preview HTML</button>
+              onClick={() => setMode('preview')}>{t('builder.builder_workspace.preview_html')}</button>
           </div>
           <div className={mode === 'canvas' ? 'block overflow-x-auto' : 'hidden'}
             data-testid="builder-structural-viewport">
@@ -1499,13 +1498,13 @@ export function BuilderWorkspace({
               onApiError={onApiError}
               onPrepared={({ skipped }) => {
                 message(skipped
-                  ? 'Preview nháp — ' + skipped + ' ảnh riêng tư chưa hiển thị. Chưa ghi dữ liệu.'
-                  : 'Preview nháp — chưa ghi dữ liệu lên website.');
+                  ? t('builder.builder_workspace.preview_skipped', { count: skipped })
+                  : t('builder.builder_workspace.draft_preview'));
               }}
             />
           )}
           {diagnostics.length > 0 && <div className="border-t border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            <strong>Chẩn đoán renderer:</strong>
+            <strong>{t('builder.builder_workspace.renderer_diagnostics')}</strong>
             <ul className="mt-2 list-disc pl-5">
               {diagnostics.map((item, index) => <li key={item.node_id + index}>{item.node_id}: {item.code}</li>)}
             </ul>

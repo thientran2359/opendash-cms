@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import type { PluginSettingsSnapshot, PluginSummary } from '../../types.ts';
 import { ApiClientError } from '../../api/client.ts';
@@ -36,7 +37,7 @@ function permissionDetails(plugin: PluginSummary): string[] {
 }
 
 function readableError(error: unknown): string {
-  return error instanceof Error ? error.message : 'Không thể tải danh sách plugin.';
+  return error instanceof Error ? error.message : tStatic('api.plugins.load_plugins');
 }
 
 /**
@@ -60,6 +61,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   csrfToken,
   onUnauthorized,
 }) => {
+  const { t: translate } = useI18n();
   const [visiblePlugins, setVisiblePlugins] = useState<PluginSummary[]>(plugins);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -140,7 +142,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
         }
         setSettingsSnapshot(null);
         setSettingsError(
-          cause instanceof Error ? cause.message : 'Không thể tải cài đặt plugin.',
+          cause instanceof Error ? cause.message : tStatic('api.plugins.load_plugin_settings'),
         );
       })
       .finally(() => {
@@ -190,34 +192,34 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
     const file = event.currentTarget.files?.[0];
     if (!file || pendingRef.current || isProcessing) return;
     if (!file.name.toLowerCase().endsWith('.zip')) {
-      setNotice('Chỉ chấp nhận tệp .zip của plugin.');
+      setNotice(tStatic('feature.plugins.pluginspanel.only_plugin_zip_files_are_accepted'));
       event.currentTarget.value = '';
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      setNotice('Gói plugin vượt giới hạn tải lên 5 MiB.');
+      setNotice(tStatic('feature.plugins.pluginspanel.the_plugin_package_exceeds_the_5_mib_upload_limit'));
       event.currentTarget.value = '';
       return;
     }
     // The install endpoint is replace-and-enable, not a dry-run. Warn before
     // submitting whenever an existing plugin might be replaced.
     if (visiblePlugins.length > 0 &&
-        !window.confirm('Cài ZIP sẽ tự kích hoạt plugin. Nếu ID trùng plugin đã cài, phiên bản hiện tại sẽ bị THAY THẾ và BẬT LẠI. Bạn có muốn tiếp tục?')) {
+        !window.confirm(tStatic('feature.plugins.pluginspanel.installing_a_zip_automatically_enables_the_plugin_if_its_id_matches_an_installed'))) {
       event.currentTarget.value = '';
       return;
     }
-    void invoke('Đang cài đặt plugin ZIP...', () => onPluginUpload(event));
+    void invoke(tStatic('feature.plugins.pluginspanel.installing_the_plugin_zip'), () => onPluginUpload(event));
   };
 
   const enable = (plugin: PluginSummary) => {
     const grants = permissionDetails(plugin);
-    const permissionText = grants.length > 0 ? grants.join('\n') : 'Không khai báo quyền SQLite hoặc HTTP.';
-    if (!window.confirm('Bật plugin ' + plugin.name + ' (' + plugin.id + ')?\n\nQuyền theo manifest:\n' + permissionText)) return;
-    void invoke('Đang bật ' + plugin.name + '...', () => onEnablePlugin(plugin.id));
+    const permissionText = grants.length > 0 ? grants.join('\n') : tStatic('feature.plugins.pluginspanel.no_sqlite_or_http_permissions_declared');
+    if (!window.confirm(tStatic('feature.plugins.pluginspanel.enable_confirm', { name: plugin.name, id: plugin.id, permissions: permissionText }))) return;
+    void invoke(tStatic('feature.plugins.pluginspanel.enabling', { name: plugin.name }), () => onEnablePlugin(plugin.id));
   };
 
   const disable = (plugin: PluginSummary) => {
-    void invoke('Đang tắt ' + plugin.name + '...', () => onDisablePlugin(plugin.id));
+    void invoke(tStatic('feature.plugins.pluginspanel.disabling', { name: plugin.name }), () => onDisablePlugin(plugin.id));
   };
 
   const handleSaveSettings = async () => {
@@ -235,20 +237,20 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       );
       setSettingsSnapshot(saved);
       setSettingsDraft(saved.values);
-      setSettingsNotice('Đã lưu cài đặt plugin.');
+      setSettingsNotice(tStatic('feature.plugins.pluginspanel.plugin_settings_saved'));
     } catch (cause) {
       if (cause instanceof ApiClientError && cause.status === 401) {
         onUnauthorized?.();
         setSettingsError(
-          'Phiên đăng nhập đã hết hạn (401). Thay đổi chưa lưu vẫn được giữ lại.',
+          tStatic('feature.plugins.pluginspanel.your_session_has_expired_401_unsaved_changes_have_been_retained'),
         );
       } else if (cause instanceof ApiClientError && cause.status === 412) {
         setSettingsError(
-          'Cài đặt plugin đã thay đổi ở phiên khác (412). Dữ liệu bạn vừa sửa vẫn được giữ lại.',
+          tStatic('feature.plugins.pluginspanel.plugin_settings_changed_in_another_session_412_your_changes_have_been_retained'),
         );
       } else {
         setSettingsError(
-          cause instanceof Error ? cause.message : 'Không thể lưu cài đặt plugin.',
+          cause instanceof Error ? cause.message : tStatic('api.plugins.save_plugin_settings'),
         );
       }
     } finally {
@@ -271,26 +273,23 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
     <div id="plugin-management-section" className="min-w-0 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">{mode === 'install' ? 'Cài đặt plugin' : 'Quản lý Plugins'}</h2>
+          <h2 className="text-base font-semibold text-zinc-950">{mode === 'install' ? translate('feature.plugins.pluginspanel.install_plugin') : translate('feature.plugins.pluginspanel.manage_plugins')}</h2>
           <p className="mt-0.5 text-sm text-zinc-600">
             {mode === 'install'
-              ? 'Cài gói plugin ZIP. Gói đã cài sẽ được tự bật sau khi được xác thực.'
-              : 'Kiểm tra quyền, cấu hình cài đặt và bật hoặc tắt plugin chạy trong Wasmi sandbox.'}
+              ? translate('feature.plugins.pluginspanel.install_a_plugin_zip_package_the_installed_package_is_automatically_enabled_afte')
+              : translate('feature.plugins.pluginspanel.review_permissions_configure_settings_and_enable_or_disable_plugins_running_in_t')}
           </p>
         </div>
         <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>
-          {loading ? 'Đang tải...' : 'Tải lại danh sách'}
+          {loading ? translate('feature.dashboard.dashboardpage.loading') : translate('feature.plugins.pluginspanel.reload_list')}
         </AdminButton>
       </div>
 
       {mode === 'install' && <section className="max-w-2xl rounded-xl border border-zinc-200 bg-zinc-50 p-4 sm:p-5" aria-labelledby="plugin-upload-heading">
-        <h3 id="plugin-upload-heading" className="mb-2 text-sm font-semibold text-zinc-950">Cài đặt plugin</h3>
-        <ZipUploadField id="plugin-zip" label="Chọn tệp plugin ZIP (tối đa 5 MiB)" onChange={upload}
+        <h3 id="plugin-upload-heading" className="mb-2 text-sm font-semibold text-zinc-950">{translate('feature.plugins.pluginspanel.install_plugin')}</h3>
+        <ZipUploadField id="plugin-zip" label={translate('feature.plugins.pluginspanel.select_plugin_zip_up_to_5_mib')} onChange={upload}
           disabled={busy || loading || Boolean(loadError)} />
-        <p className="mt-2.5 text-xs leading-5 text-amber-800">
-          Lưu ý: tải ZIP sẽ tự bật plugin. Nếu ID đã tồn tại, hệ thống thay thế gói cũ và bật lại plugin đó.
-          Hãy kiểm tra quyền trong danh sách trước khi bật plugin đã tắt.
-        </p>
+        <p className="mt-2.5 text-xs leading-5 text-amber-800">{translate('feature.plugins.pluginspanel.uploading_a_zip_automatically_enables_the_plugin_if_the_id_already_exists_the_pa')}</p>
       </section>}
 
       {pendingAction && <AdminAlert tone="info" aria-live="polite">{pendingAction}</AdminAlert>}
@@ -299,23 +298,18 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       {mode === 'list' && <>
       <section className="space-y-3" aria-labelledby="plugin-list-heading">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id="plugin-list-heading" className="text-sm font-semibold text-zinc-900">
-            Plugins đã cài ({visiblePlugins.length})
+          <h3 id="plugin-list-heading" className="text-sm font-semibold text-zinc-900">{translate('feature.plugins.pluginspanel.installed_plugins')}{visiblePlugins.length})
           </h3>
-          {loading && <span role="status" className="text-xs text-zinc-500">Đang đồng bộ với máy chủ...</span>}
+          {loading && <span role="status" className="text-xs text-zinc-500">{translate('feature.plugins.pluginspanel.synchronizing_with_the_server')}</span>}
         </div>
         {loadError && (
           <AdminAlert tone="error" className="space-y-2">
-            <p>Không cập nhật được danh sách: {loadError}</p>
-            <AdminButton variant="secondary" size="sm" disabled={busy || loading} onClick={() => void refresh()}>
-              Thử tải lại
-            </AdminButton>
+            <p>{translate('feature.plugins.pluginspanel.could_not_refresh_the_list')}{' '}{loadError}</p>
+            <AdminButton variant="secondary" size="sm" disabled={busy || loading} onClick={() => void refresh()}>{translate('general.retry')}</AdminButton>
           </AdminAlert>
         )}
         {!loading && visiblePlugins.length === 0 && !loadError && (
-          <p className="rounded-xl border border-dashed border-zinc-300 p-5 text-sm text-zinc-500">
-            Chưa có plugin nào. Chọn gói ZIP để cài đặt.
-          </p>
+          <p className="rounded-xl border border-dashed border-zinc-300 p-5 text-sm text-zinc-500">{translate('feature.plugins.pluginspanel.no_plugins_yet_select_a_zip_package_to_install')}</p>
         )}
         <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
           {visiblePlugins.map(plugin => {
@@ -329,38 +323,37 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
                     <p className="mt-0.5 break-all text-xs text-zinc-500">{plugin.id} · v{plugin.version}</p>
                   </div>
                   <AdminBadge tone={plugin.enabled ? 'success' : 'neutral'}>
-                    {plugin.enabled ? 'Đang bật' : 'Đã tắt'}
+                    {plugin.enabled ? translate('multilingual.active') : translate('multilingual.inactive')}
                   </AdminBadge>
                 </div>
                 {plugin.description && <p className="mt-2.5 break-words text-sm text-zinc-600">{plugin.description}</p>}
                 <div className="mt-3 rounded-lg border border-zinc-100 bg-zinc-50 p-3">
-                  <h5 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Quyền theo manifest</h5>
+                  <h5 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{translate('feature.plugins.pluginspanel.manifest_permissions_2')}</h5>
                   {grants.length === 0
-                    ? <p className="mt-1 text-xs text-zinc-500">Không yêu cầu quyền SQLite hoặc HTTP.</p>
+                    ? <p className="mt-1 text-xs text-zinc-500">{translate('feature.plugins.pluginspanel.no_sqlite_or_http_permissions_required')}</p>
                     : <ul className="mt-1.5 space-y-1 text-xs text-zinc-700">
                         {grants.map((grant, index) => <li key={index} className="break-all">{grant}</li>)}
                       </ul>}
                 </div>
                 {plugin.last_error && (
-                  <AdminAlert tone="error" role="status" className="mt-3 break-words text-xs">
-                    Lỗi gần nhất: {plugin.last_error}
+                  <AdminAlert tone="error" role="status" className="mt-3 break-words text-xs">{translate('feature.plugins.pluginspanel.last_error')}{' '}{plugin.last_error}
                   </AdminAlert>
                 )}
                 <div className="mt-3.5 flex flex-wrap gap-2">
                   {plugin.enabled
                     ? <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => disable(plugin)}
-                        aria-label={'Tắt plugin ' + plugin.name}>Tắt</AdminButton>
+                        aria-label={translate('feature.plugins.pluginspanel.disable_plugin', { name: plugin.name })}>{translate('multilingual.disable')}</AdminButton>
                     : <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => enable(plugin)}
-                        aria-label={'Bật plugin ' + plugin.name}>Bật / Thử lại</AdminButton>}
+                        aria-label={translate('feature.plugins.pluginspanel.enable_plugin', { name: plugin.name })}>{translate('feature.plugins.pluginspanel.enable_retry')}</AdminButton>}
                   <AdminButton
                     variant={isSettingsOpen ? 'primary' : 'secondary'}
                     size="sm"
                     disabled={busy}
                     onClick={() => setSettingsPluginId(plugin.id)}
                     aria-pressed={isSettingsOpen}
-                    aria-label={'Cài đặt plugin ' + plugin.name}
+                    aria-label={translate('feature.plugins.pluginspanel.plugin_settings_2', { name: plugin.name })}
                   >
-                    {isSettingsOpen ? 'Đang cấu hình' : 'Cài đặt'}
+                    {isSettingsOpen ? translate('feature.plugins.pluginspanel.configuring') : translate('multilingual.settings')}
                   </AdminButton>
                   <AdminButton variant={selectedPluginId === plugin.id ? 'primary' : 'secondary'} size="sm" disabled={busy || !plugin.enabled}
                     onClick={() => {
@@ -368,7 +361,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
                       onSelectPlugin(plugin.id);
                     }}
                     aria-pressed={selectedPluginId === plugin.id}>
-                    {selectedPluginId === plugin.id ? 'Đã chọn để chạy' : 'Chọn chạy'}
+                    {selectedPluginId === plugin.id ? translate('feature.plugins.pluginspanel.selected_to_run') : translate('feature.plugins.pluginspanel.select_to_run')}
                   </AdminButton>
                 </div>
               </article>
@@ -380,34 +373,29 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       {settingsTargetPlugin && (
         <section className="min-w-0 max-w-2xl space-y-3 border-t border-zinc-200 pt-5" aria-labelledby="plugin-settings-heading">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 id="plugin-settings-heading" className="text-sm font-semibold text-zinc-950">
-              Cài đặt plugin: {settingsTargetPlugin.name} ({settingsTargetPlugin.id})
+            <h3 id="plugin-settings-heading" className="text-sm font-semibold text-zinc-950">{translate('feature.plugins.pluginspanel.plugin_settings_3')}{' '}{settingsTargetPlugin.name} ({settingsTargetPlugin.id})
             </h3>
             <AdminButton
               variant="secondary"
               size="sm"
               disabled={settingsLoading || settingsSaving}
               onClick={() => setSettingsReloadTick(n => n + 1)}
-            >
-              Tải lại từ máy chủ
-            </AdminButton>
+            >{translate('general.reload')}</AdminButton>
           </div>
           {settingsLoading && (
-            <p role="status" className="text-sm text-zinc-600">Đang tải cài đặt plugin…</p>
+            <p role="status" className="text-sm text-zinc-600">{translate('feature.plugins.pluginspanel.loading_plugin_settings')}</p>
           )}
           {!settingsLoading && !settingsSnapshot && settingsError && (
             <AdminAlert tone="error">{settingsError}</AdminAlert>
           )}
           {!settingsLoading && settingsSnapshot && settingsSnapshot.schema.length === 0 && (
-            <p className="text-xs text-zinc-500">
-              Plugin này không khai báo schema cài đặt (settings_schema).
-            </p>
+            <p className="text-xs text-zinc-500">{translate('feature.plugins.pluginspanel.this_plugin_does_not_declare_a_settings_schema_settings_schema')}</p>
           )}
           {!settingsLoading && settingsSnapshot && settingsSnapshot.schema.length > 0 && (
             <OwnerOptionsForm
               ownerKind="plugin"
               ownerId={settingsSnapshot.plugin_id}
-              title={`Cài đặt plugin (${settingsTargetPlugin.name})`}
+              title={translate('feature.plugins.pluginspanel.plugin_settings_value1', { value1: settingsTargetPlugin.name })}
               schema={settingsSnapshot.schema}
               values={settingsDraft}
               savedValues={settingsSnapshot.values}
@@ -416,7 +404,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
               saving={settingsSaving}
               notice={settingsNotice}
               error={settingsError}
-              submitLabel={settingsSaving ? 'Đang lưu…' : 'Lưu cài đặt'}
+              submitLabel={settingsSaving ? translate('general.saving') : translate('general.save')}
               testId="plugin-settings-form"
               onChange={(next) => {
                 setSettingsDraft(next);
@@ -431,24 +419,24 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       )}
 
       <section className="min-w-0 max-w-2xl space-y-3 border-t border-zinc-200 pt-5" aria-labelledby="plugin-run-heading">
-        <h3 id="plugin-run-heading" className="text-sm font-semibold text-zinc-950">Thử thực thi plugin</h3>
+        <h3 id="plugin-run-heading" className="text-sm font-semibold text-zinc-950">{translate('feature.plugins.pluginspanel.test_plugin_execution')}</h3>
         {selected
-          ? <p className="break-all text-xs text-zinc-600">Plugin đã chọn: <strong className="text-zinc-900">{selected.name}</strong> ({selected.id})</p>
-          : <p className="text-xs text-zinc-500">Chưa chọn plugin để chạy.</p>}
+          ? <p className="break-all text-xs text-zinc-600">{translate('feature.plugins.pluginspanel.selected_plugin')}{' '}<strong className="text-zinc-900">{selected.name}</strong> ({selected.id})</p>
+          : <p className="text-xs text-zinc-500">{translate('feature.plugins.pluginspanel.no_plugin_selected_to_run')}</p>}
         {selected && !selected.enabled && (
-          <p role="status" className="text-xs text-amber-800">Plugin đang tắt. Có thể bật lại sau khi kiểm tra quyền.</p>
+          <p role="status" className="text-xs text-amber-800">{translate('feature.plugins.pluginspanel.the_plugin_is_disabled_you_can_re_enable_it_after_reviewing_its_permissions')}</p>
         )}
         <label htmlFor="plugin-input-json" className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-          <span>Payload JSON</span>
+          <span>{translate('feature.plugins.pluginspanel.json_payload')}</span>
           <textarea id="plugin-input-json" rows={4} className="w-full min-w-0 rounded-md border border-zinc-300 bg-white p-2.5 font-mono text-xs text-zinc-900"
             value={pluginInputJson} onChange={event => onPluginInputChange(event.target.value)}
-            disabled={busy} placeholder='{"text": "Dữ liệu mẫu"}' />
+            disabled={busy} placeholder={translate('feature.plugins.pluginspanel.text_sample_data')} />
         </label>
-        <AdminButton id="btn-run-plugin" variant="primary" onClick={() => void invoke('Đang thực thi plugin...', onRunPlugin)}
-          disabled={!canRun}>Chạy Plugin</AdminButton>
+        <AdminButton id="btn-run-plugin" variant="primary" onClick={() => void invoke(translate('feature.plugins.pluginspanel.running_plugin'), onRunPlugin)}
+          disabled={!canRun}>{translate('feature.plugins.pluginspanel.run_plugin')}</AdminButton>
         {pluginRunOutput && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold text-zinc-700">Kết quả</p>
+            <p className="mb-1.5 text-xs font-semibold text-zinc-700">{translate('feature.plugins.pluginspanel.result')}</p>
             <pre id="plugin-output" className="max-h-48 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-800">{pluginRunOutput}</pre>
           </div>
         )}

@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import type { BlockCatalogItemDto } from '../types.ts';
 import {
@@ -21,6 +22,7 @@ export function BuilderTree({
   document, selectedId, elementType, registry = {}, blockSchemas = [],
   onSelect, onAdd, onMove, onDelete,
 }: Props) {
+  const { t } = useI18n();
   const nodes = allNodes(document);
   const [focusedId, setFocusedId] = useState<string | null>(selectedId);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
@@ -64,7 +66,7 @@ export function BuilderTree({
     if (target) focusAndSelect(target);
   };
   const renderLevel = (parentId: string | null, depth: number): React.ReactNode => (
-    <ul role={parentId ? 'group' : 'tree'} aria-label={parentId ? undefined : 'Cấu trúc Builder'} className="space-y-1">
+    <ul role={parentId ? 'group' : 'tree'} aria-label={parentId ? undefined : t('builder.builder_tree.structure')} className="space-y-1">
       {nodes.filter(entry => entry.parentId === parentId).map(item => {
         const nextKind = ({ section: 'row', row: 'column', column: 'element' } as const)[item.kind as 'section' | 'row' | 'column'];
         const label = nodeTitle(item, blockSchemas);
@@ -92,22 +94,22 @@ export function BuilderTree({
                   (selectedId === item.node.id ? 'bg-sky-700 text-white' : 'bg-transparent text-slate-700')}
               >
                 <span aria-hidden="true" className="mr-2 text-slate-400">{item.kind === 'element' ? '▣' : '▾'}</span>{label}
-                {locked && <span className="ml-2 text-[10px]" title="Node chỉ đọc, giữ nguyên vị trí">🔒</span>}
+                {locked && <span className="ml-2 text-[10px]" title={t('builder.builder_tree.locked')}>🔒</span>}
               </button>
               </div>
               {selectedId === item.node.id && (
                 <div className="mt-1 flex min-w-0 flex-wrap justify-end gap-1">
                   {nextKind && <button type="button" className="btn-secondary !px-2 !py-1 text-xs"
-                    aria-label={'Thêm ' + nextKind + ' vào ' + label}
-                    title={'Thêm ' + nextKind} onClick={() => onAdd(item.node.id, nextKind)}>+</button>}
-                  <button type="button" className="btn-secondary !px-1.5 !py-1 text-xs" title="Di chuyển lên (Alt+↑)"
+                    aria-label={t('builder.builder_tree.add_to', { kind: nextKind, label })}
+                    title={t('builder.builder_tree.add_kind', { kind: nextKind })} onClick={() => onAdd(item.node.id, nextKind)}>+</button>}
+                  <button type="button" className="btn-secondary !px-1.5 !py-1 text-xs" title={t('builder.builder_tree.up')}
                     disabled={protectedNode}
-                    aria-label={'Di chuyển ' + label + ' lên'} onClick={() => onMove(item.node.id, -1)}>↑</button>
-                  <button type="button" className="btn-secondary !px-1.5 !py-1 text-xs" title="Di chuyển xuống (Alt+↓)"
+                    aria-label={t('builder.builder_tree.move_up', { label })} onClick={() => onMove(item.node.id, -1)}>↑</button>
+                  <button type="button" className="btn-secondary !px-1.5 !py-1 text-xs" title={t('builder.builder_tree.down')}
                     disabled={protectedNode}
-                    aria-label={'Di chuyển ' + label + ' xuống'} onClick={() => onMove(item.node.id, 1)}>↓</button>
+                    aria-label={t('builder.builder_tree.move_down', { label })} onClick={() => onMove(item.node.id, 1)}>↓</button>
                   <button type="button" className="btn-danger !px-1.5 !py-1 text-xs"
-                    aria-label={'Xóa ' + label} onClick={() => onDelete(item.node.id)}>×</button>
+                    aria-label={t('builder.builder_tree.delete', { label })} onClick={() => onDelete(item.node.id)}>×</button>
                 </div>
               )}
             </div>
@@ -118,18 +120,17 @@ export function BuilderTree({
     </ul>
   );
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-3" aria-label="Cây cấu trúc">
+    <section className="rounded-xl border border-slate-200 bg-white p-3" aria-label={t('builder.builder_tree.tree')}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="!m-0 text-sm font-semibold text-slate-900">Cấu trúc trang</h2>
+        <h2 className="!m-0 text-sm font-semibold text-slate-900">{t('builder.builder_tree.page_structure')}</h2>
         <button type="button" className="btn-secondary !px-2 !py-1.5 text-xs"
-          onClick={() => onAdd(null, 'section')}>+ Section</button>
+          onClick={() => onAdd(null, 'section')}>{tStatic("feature.common.ui_section_add")}</button>
       </div>
       {document.sections.length ? renderLevel(null, 0) : (
-        <p className="text-sm text-slate-500">Chưa có Section. Chọn “+ Section” để bắt đầu.</p>
+        <p className="text-sm text-slate-500">{t('builder.builder_tree.empty')}</p>
       )}
       <p className="mt-3 text-xs leading-relaxed text-slate-500">
-        Dùng ↑/↓ chọn node, ←/→ đi giữa các tầng, Alt+↑/↓ đổi thứ tự.
-        Element mới dùng loại “{elementType}”.
+        {t('builder.builder_tree.keyboard', { type: elementType })}
       </p>
     </section>
   );

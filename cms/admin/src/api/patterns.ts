@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { requestJson, requestText } from './client.ts';
 import type { BuilderDocument } from '../builder/document.ts';
 
@@ -24,26 +25,26 @@ const root = '/api/admin/patterns';
 const itemUrl = (id: number) => `${root}/${id}`;
 
 export const listPatterns = () => requestJson<PatternList>(root, {
-  defaultErrorMessage: 'Không tải được danh sách Pattern.',
+  defaultErrorMessage: tStatic('api.patterns.load_patterns'),
 });
 export const getPattern = (id: number) => requestJson<PatternRecord>(itemUrl(id), {
-  defaultErrorMessage: 'Không tải được Pattern.',
+  defaultErrorMessage: tStatic('api.patterns.load_the_pattern'),
 });
 export const createPattern = (input: PatternInput, csrfToken: string) => requestJson<PatternRecord>(root, {
   method: 'POST', csrfToken, contentType: 'application/json', body: JSON.stringify(input),
-  defaultErrorMessage: 'Không tạo được Pattern.',
+  defaultErrorMessage: tStatic('api.patterns.create_the_pattern'),
 });
 export const updatePattern = (id: number, input: PatternInput, version: number, csrfToken: string) =>
   requestJson<PatternRecord>(itemUrl(id), {
     method: 'PUT', csrfToken, contentType: 'application/json', ifMatchVersion: version,
-    body: JSON.stringify(input), defaultErrorMessage: 'Không cập nhật được Pattern.',
+    body: JSON.stringify(input), defaultErrorMessage: tStatic('api.patterns.update_the_pattern'),
   });
 /** requestText preserves the conflict JSON in ApiClientError.message for a
  * precise confirmation of all pages affected by a forced deletion. */
 export const deletePattern = (id: number, version: number, csrfToken: string, force = false) =>
   requestText(itemUrl(id) + (force ? '?force=true' : ''), {
     method: 'DELETE', csrfToken, ifMatchVersion: version,
-    defaultErrorMessage: 'Không xóa được Pattern.',
+    defaultErrorMessage: tStatic('api.patterns.delete_the_pattern'),
   });
 
 /** Theme patterns are immutable COPY sources; they are distinct from the
@@ -71,12 +72,12 @@ export function listThemePatterns(category = 'all', q = '', signal?: AbortSignal
   if (q.trim()) params.set('q', q.trim());
   const query = params.toString();
   return requestJson(root + '/library' + (query ? '?' + query : ''), {
-    signal, defaultErrorMessage: 'Không tải được thư viện mẫu của theme.',
+    signal, defaultErrorMessage: tStatic('api.patterns.load_the_theme_pattern_library'),
   });
 }
 
 export function getThemePattern(key: string, signal?: AbortSignal): Promise<ThemePatternDocument> {
   return requestJson(root + '/library/theme/' + encodeURIComponent(key), {
-    signal, defaultErrorMessage: 'Không tải được nội dung mẫu từ theme.',
+    signal, defaultErrorMessage: tStatic('api.patterns.load_the_theme_pattern_content'),
   });
 }

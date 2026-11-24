@@ -5,9 +5,9 @@ import path from 'node:path';
 const scriptDir = path.dirname(decodeURIComponent(new URL(import.meta.url).pathname).replace(/^\/([A-Za-z]:\/)/, '$1'));
 const cms = path.resolve(scriptDir, '..');
 const src = path.join(cms, 'admin', 'src');
-const mode = process.argv.slice(2);
+const mode = process.argv.length === 2 ? ['--strict'] : process.argv.slice(2);
 if (mode.length !== 1 || !['--mode=s03', '--strict'].includes(mode[0])) {
-  console.error('Usage: node cms/scripts/check-i18n.mjs --mode=s03 | --strict');
+  console.error('Usage: node cms/scripts/check-i18n.mjs [--strict | --mode=s03]');
   process.exit(2);
 }
 

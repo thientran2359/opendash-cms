@@ -1,4 +1,5 @@
 import React from 'react';
+import { tStatic, useI18n } from '../i18n/index.tsx';
 import type { BuilderColumn, BuilderDocument, BuilderElement, BuilderRow, BuilderSection, BuilderViewport } from './document.ts';
 import { effectiveResponsive, isLockedElement, rowUsesGrid } from './document.ts';
 import type { PatternRecord } from '../api/patterns.ts';
@@ -19,16 +20,15 @@ function ElementContent({ element, registry, blockSchemas, patterns, patternsLoa
   element: BuilderElement; registry: Props['registry']; blockSchemas: BlockCatalogItemDto[];
   patterns: PatternRecord[]; patternsLoaded: boolean;
 }) {
+  const { t } = useI18n();
   if (isLockedElement(element, registry, blockSchemas)) {
     return <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-      Block chưa resolve hoặc provider không hoạt động:
-      {' '}{element.type === 'plugin/block' ? String(element.props?.block_id ?? '') : (element.type || 'Block chưa xác định')}
-      {' '}(giữ dữ liệu gốc và vị trí)
+      {t('builder.builder_canvas.locked', { block: element.type === 'plugin/block' ? String(element.props?.block_id ?? '') : (element.type || t('builder.builder_canvas.unknown')) })}
     </div>;
   }
   if (element.props.binding) {
     return <div className="rounded bg-indigo-50 p-3 text-sm text-indigo-800">
-      {element.type} · Nội dung liên kết (xem kết quả thực tế ở tab Preview)
+      {t('builder.builder_canvas.binding', { type: element.type })}
     </div>;
   }
   switch (element.type) {
@@ -37,19 +37,18 @@ function ElementContent({ element, registry, blockSchemas, patterns, patternsLoa
       const found = patterns.find(pattern => pattern.id === id);
       return <div className={'rounded border p-3 text-sm ' +
         (patternsLoaded && !found ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-indigo-300 bg-indigo-50 text-indigo-900')}>
-        {found ? `Reusable Pattern: ${found.title} (#${id}) · đồng bộ`
-          : id > 0 && patternsLoaded ? `Pattern #${id} không còn tồn tại · xem Inspector để thay thế`
-            : id > 0 ? `Đang tải Pattern #${id}…` : 'Chưa chọn Pattern · mở Inspector'}
+        {found ? t('builder.builder_canvas.pattern', { title: found.title, id })
+          : id > 0 && patternsLoaded ? t('builder.builder_canvas.pattern_missing', { id })
+            : id > 0 ? t('builder.builder_canvas.pattern_loading', { id }) : t('builder.builder_canvas.pattern_empty')}
       </div>;
     }
     case 'core/contact_form':
       return <div className="rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
-        Form liên hệ #{String(element.props.form_id ?? 1)} · Nút: {String(element.props.submit_label ?? 'Gửi liên hệ')}
+        {t('builder.builder_canvas.contact', { id: String(element.props.form_id ?? 1), label: String(element.props.submit_label ?? t('builder.builder_canvas.submit')) })}
       </div>;
     case 'core/list':
       return <div className="rounded border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900">
-        Danh sách {String(element.props.type_key ?? '')} · {String(element.props.page_size ?? 6)} mục/trang
-        · Chỉ hiển thị dữ liệu published trong Preview và public
+        {t('builder.builder_canvas.list', { type: String(element.props.type_key ?? ''), size: String(element.props.page_size ?? 6) })}
       </div>;
     case 'core/heading':
       return <div className="font-bold text-slate-900" style={{
@@ -63,7 +62,7 @@ function ElementContent({ element, registry, blockSchemas, patterns, patternsLoa
         src={'/api/admin/media/' + encodeURIComponent(id) + '/file'}
         alt={String(element.props.alt ?? '')} /> :
         <div className="rounded border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">
-          Chưa chọn ảnh · Nhập Media ID trong Inspector
+          {t('builder.builder_canvas.image_empty')}
         </div>;
     }
     case 'core/button':
@@ -72,14 +71,14 @@ function ElementContent({ element, registry, blockSchemas, patterns, patternsLoa
       </span>;
     case 'legacy/block':
       return <div className="rounded border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-700">
-        Theme block: {String(element.props.block_id ?? '')} · Xem HTML ở tab Preview
+        {t('builder.builder_canvas.theme', { id: String(element.props.block_id ?? '') })}
       </div>;
     case 'plugin/block': {
       const blockId = String(element.props.block_id);
       const schema = blockSchemas.find(item => item.block_id === blockId)?.schema;
       return <div className="rounded border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
         <span className="block font-semibold">{schema?.title ?? blockId}</span>
-        <span className="mt-1 block break-all text-xs">{blockId} · Chỉnh thuộc tính trong Inspector, xem kết quả ở tab Preview</span>
+        <span className="mt-1 block break-all text-xs">{t('builder.builder_canvas.plugin', { id: blockId })}</span>
       </div>;
     }
     default: return null;
@@ -89,6 +88,7 @@ function ElementContent({ element, registry, blockSchemas, patterns, patternsLoa
 export function BuilderCanvas({
   document, selectedId, registry, blockSchemas = [], patterns, patternsLoaded, viewport, onSelect,
 }: Props) {
+  const { t } = useI18n();
   const selectProps = (id: string) => ({
     type: 'button' as const,
     'data-canvas-id': id,
@@ -103,7 +103,7 @@ export function BuilderCanvas({
   });
   const renderElement = (element: BuilderElement) => (
     <button key={element.id} {...selectProps(element.id)}
-      aria-label={'Chọn element ' + element.type + ' ' + element.id}>
+      aria-label={t('builder.builder_canvas.select_element', { type: element.type, id: element.id })}>
       <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{element.type}</span>
       <ElementContent element={element} registry={registry} blockSchemas={blockSchemas}
         patterns={patterns} patternsLoaded={patternsLoaded} />
@@ -115,18 +115,18 @@ export function BuilderCanvas({
         padding: effectiveResponsive(column, viewport).padding_px,
         textAlign: effectiveResponsive(column, viewport).text_align,
       }}>
-      <button {...selectProps(column.id)} aria-label={'Chọn column ' + column.id}>
-        <span className="text-[10px] font-medium text-slate-500">Column</span>
+      <button {...selectProps(column.id)} aria-label={t('builder.builder_canvas.select_column', { id: column.id })}>
+        <span className="text-[10px] font-medium text-slate-500">{tStatic("feature.common.ui_column")}</span>
       </button>
       {column.children.map(renderElement)}
-      {column.children.length === 0 && <p className="p-3 text-center text-xs text-slate-400">Column trống</p>}
+      {column.children.length === 0 && <p className="p-3 text-center text-xs text-slate-400">{t('builder.builder_canvas.empty_column')}</p>}
     </div>
   );
   const renderRow = (row: BuilderRow) => (
     <div key={row.id} className="space-y-2 rounded-lg border border-slate-200 bg-white p-2"
       style={{ padding: effectiveResponsive(row, viewport).padding_px }}>
-      <button {...selectProps(row.id)} aria-label={'Chọn row ' + row.id}>
-        <span className="text-[10px] font-medium text-slate-500">Row</span>
+      <button {...selectProps(row.id)} aria-label={t('builder.builder_canvas.select_row', { id: row.id })}>
+        <span className="text-[10px] font-medium text-slate-500">{tStatic("feature.common.ui_row")}</span>
       </button>
       <div data-structural-grid={rowUsesGrid(row) ? 'true' : 'false'}
         className={rowUsesGrid(row) ? 'grid min-w-0' : 'flex min-w-0 flex-wrap items-stretch gap-2'}
@@ -136,25 +136,25 @@ export function BuilderCanvas({
         } : undefined}>
         {row.children.map(column => renderColumn(column, rowUsesGrid(row)))}
       </div>
-      {row.children.length === 0 && <p className="p-3 text-center text-xs text-slate-400">Row trống</p>}
+      {row.children.length === 0 && <p className="p-3 text-center text-xs text-slate-400">{t('builder.builder_canvas.empty_row')}</p>}
     </div>
   );
   const renderSection = (section: BuilderSection) => (
     <section key={section.id} className="space-y-2 rounded-xl border border-slate-200 bg-slate-100 p-3"
       style={{ padding: effectiveResponsive(section, viewport).padding_px }}>
-      <button {...selectProps(section.id)} aria-label={'Chọn section ' + section.id}>
-        <span className="text-[10px] font-medium text-slate-500">Section</span>
+      <button {...selectProps(section.id)} aria-label={t('builder.builder_canvas.select_section', { id: section.id })}>
+        <span className="text-[10px] font-medium text-slate-500">{tStatic("feature.common.ui_section")}</span>
       </button>
       {section.children.map(renderRow)}
-      {section.children.length === 0 && <p className="p-4 text-center text-xs text-slate-400">Section trống</p>}
+      {section.children.length === 0 && <p className="p-4 text-center text-xs text-slate-400">{t('builder.builder_canvas.empty_section')}</p>}
     </section>
   );
   return (
     <div data-testid="builder-structural-canvas" className="space-y-3 rounded-lg bg-white p-4"
-      aria-label="Canvas cấu trúc">
+      aria-label={t('builder.builder_canvas.structure')}>
       {document.sections.map(renderSection)}
       {document.sections.length === 0 && (
-        <p className="p-12 text-center text-sm text-slate-500">Homepage trống. Thêm Section từ cây để thiết kế trang.</p>
+        <p className="p-12 text-center text-sm text-slate-500">{t('builder.builder_canvas.empty')}</p>
       )}
     </div>
   );

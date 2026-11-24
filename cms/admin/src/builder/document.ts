@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import type { BlockCatalogItemDto, BlockPropValue, BlockSchemaV1 } from '../types.ts';
 
 /** Homepage AST v1. The server validates every Save; this client preserves
@@ -357,20 +358,20 @@ export function nodeTypeTitle(location: NodeLocation, blockCatalog: BlockCatalog
   if (element.type === 'core/template_part') {
     const key = typeof element.props?.part_key === 'string' && element.props.part_key
       ? element.props.part_key : 'part';
-    return `Template Part (${key})`;
+    return tStatic('builder.document.template_part', { key });
   }
   if (element.type === 'plugin/block') {
     const blockId = typeof element.props?.block_id === 'string' ? element.props.block_id : '';
     const schema = blockCatalog.find(item => item.block_id === blockId);
-    return schema?.schema.title || (blockId ? `Block (${blockId})` : 'Block chưa nhận diện');
+    return schema?.schema.title || (blockId ? tStatic('builder.document.block', { id: blockId }) : tStatic('builder.document.unknown'));
   }
   return ({
-    'core/heading': 'Tiêu đề', 'core/text': 'Văn bản',
-    'core/image': 'Hình ảnh', 'core/video': 'Video', 'core/button': 'Nút', 'core/list': 'Danh sách', 'core/contact_form': 'Form liên hệ',
-    'core/pattern_ref': 'Reusable Pattern',
-    'core/content_slot': 'Khung nội dung (Content Slot)',
-    'legacy/block': 'Block theme',
-  } as Record<string, string>)[element.type] || 'Block chưa nhận diện';
+    'core/heading': tStatic('builder.document.heading'), 'core/text': tStatic('builder.document.text'),
+    'core/image': tStatic('builder.document.image'), 'core/video': tStatic('builder.document.video'), 'core/button': tStatic('builder.document.button'), 'core/list': tStatic('builder.document.list'), 'core/contact_form': tStatic('builder.document.contact'),
+    'core/pattern_ref': tStatic('builder.document.pattern'),
+    'core/content_slot': tStatic('builder.document.content_slot'),
+    'legacy/block': tStatic('builder.document.theme'),
+  } as Record<string, string>)[element.type] || tStatic('builder.document.unknown');
 }
 
 export function nodeTitle(location: NodeLocation, blockCatalog: BlockCatalogItemDto[] = []): string {
@@ -605,13 +606,13 @@ export function appendNode(
   if (declarative && (!blockSchema || blockSchema.schema_version !== 1)) return null;
   const id = newNodeId(kind, next);
   const defaults: Record<string, Record<string, unknown>> = {
-    'core/heading': { level: 2, text: 'Tiêu đề mới' },
-    'core/text': { text: 'Nội dung mới' },
+    'core/heading': { level: 2, text: tStatic('builder.document.new_heading') },
+    'core/text': { text: tStatic('builder.document.new_content') },
     'core/image': { media_id: '', alt: '' },
     'core/video': { media_id: '', controls: true, muted: false },
-    'core/button': { label: 'Nút mới', url: '/' },
+    'core/button': { label: tStatic('builder.document.new_button'), url: '/' },
     'core/list': { type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6 },
-    'core/contact_form': { form_id: 1, submit_label: 'Gửi liên hệ' },
+    'core/contact_form': { form_id: 1, submit_label: tStatic('builder.document.submit') },
     'core/pattern_ref': { pattern_id: 0 },
     'core/content_slot': {},
     'core/template_part': { part_key: 'header' },

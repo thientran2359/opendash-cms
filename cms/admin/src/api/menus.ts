@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { requestJson, requestText } from './client.ts';
 
 export type MenuTargetKind = 'entry' | 'term' | 'external';
@@ -80,7 +81,7 @@ export interface MenuSlotsSnapshot {
 export function listMenus(limit = 20, offset = 0, signal?: AbortSignal): Promise<MenuListPage> {
   return requestJson<MenuListPage>(`/api/admin/menus?limit=${limit}&offset=${offset}`, {
     signal,
-    defaultErrorMessage: 'Không tải được danh sách menu.',
+    defaultErrorMessage: tStatic('api.menus.load_menus'),
   });
 }
 
@@ -94,14 +95,14 @@ export function createMenu(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify({ menu_key: menuKey, title }),
-    defaultErrorMessage: 'Không tạo được menu.',
+    defaultErrorMessage: tStatic('api.menus.create_the_menu'),
   });
 }
 
 export function getMenu(id: number, signal?: AbortSignal): Promise<MenuWithItems> {
   return requestJson<MenuWithItems>(`/api/admin/menus/${id}`, {
     signal,
-    defaultErrorMessage: 'Không tải được chi tiết menu.',
+    defaultErrorMessage: tStatic('api.menus.load_menu_details'),
   });
 }
 
@@ -118,7 +119,7 @@ export function updateMenu(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify({ title, items }),
-    defaultErrorMessage: 'Không lưu được menu.',
+    defaultErrorMessage: tStatic('api.menus.save_the_menu'),
   });
 }
 
@@ -127,7 +128,7 @@ export async function deleteMenu(id: number, version: number, csrfToken: string)
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: 'Không xóa được menu.',
+    defaultErrorMessage: tStatic('api.menus.delete_the_menu'),
   });
 }
 
@@ -142,7 +143,7 @@ export function previewMenu(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify({ title, items }),
-    defaultErrorMessage: 'Không preview được menu.',
+    defaultErrorMessage: tStatic('api.menus.preview_the_menu'),
   });
 }
 
@@ -156,7 +157,7 @@ export function getMenuSlots(
     `/api/admin/menu-slots/${encodeURIComponent(themeId)}${query}`,
     {
       signal,
-      defaultErrorMessage: 'Không tải được slot menu của theme.',
+      defaultErrorMessage: tStatic('api.menus.load_theme_menu_slots'),
     },
   );
 }
@@ -177,7 +178,7 @@ export function putMenuSlots(
       ifMatchVersion: version,
       contentType: 'application/json',
       body: JSON.stringify({ assignments }),
-      defaultErrorMessage: 'Không lưu được gắn slot menu.',
+      defaultErrorMessage: tStatic('api.menus.save_menu_slot_assignments'),
     },
   );
 }

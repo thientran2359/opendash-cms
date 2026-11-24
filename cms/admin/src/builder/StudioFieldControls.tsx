@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n/index.tsx';
 import { useEffect, useId, useState } from 'react';
 import { queryContentEntryTable } from '../api/content.ts';
 import { mediaThumbnailUrl } from '../api/media.ts';
@@ -71,10 +72,11 @@ export interface ResponsiveDotInfo {
 }
 
 export function ResponsiveDot({ info }: { info?: ResponsiveDotInfo }) {
+  const { t } = useI18n();
   if (!info?.differs) return null;
   const actionHint = info.viewport === 'desktop'
-    ? 'Click để đồng bộ 3 màn hình'
-    : 'Click để bỏ override màn này';
+    ? t('builder.studio_field_controls.sync')
+    : t('builder.studio_field_controls.unset');
   const tipText = `${info.summary} — ${actionHint}`;
   return (
     <span className="group relative inline-flex items-center">
@@ -137,7 +139,7 @@ export function ToggleSwitchControl({
 
 export function RangeNumberControl({
   id, label, readout, badge, value, fallbackValue, min = 0, max = 100, step = 1, unit, placeholder,
-  disabled = false, responsiveInfo, onChange, onReset, resetLabel = 'Mặc định',
+  disabled = false, responsiveInfo, onChange, onReset, resetLabel,
 }: {
   id?: string;
   label: string;
@@ -156,6 +158,7 @@ export function RangeNumberControl({
   onReset?: () => void;
   resetLabel?: string;
 }) {
+  const { t } = useI18n();
   const autoId = useId();
   const inputId = id ?? autoId;
   const effective = value ?? fallbackValue;
@@ -175,7 +178,7 @@ export function RangeNumberControl({
           {readout && <span className="font-mono text-[11px] text-zinc-500">{readout}</span>}
           {onReset && (
             <button type="button" disabled={disabled} className={RESET_BTN_CLASS} onClick={onReset}>
-              {resetLabel}
+              {resetLabel ?? t('builder.studio_field_controls.default')}
             </button>
           )}
         </div>
@@ -234,6 +237,7 @@ export function TailwindGapControl({
   onChange: (px: number) => void;
   testIdPrefix?: string;
 }) {
+  const { t } = useI18n();
   const autoId = useId();
   const inputId = id ?? autoId;
   const matchedStep = pxToTwStep(value, TW_GAP_STEPS);
@@ -332,7 +336,7 @@ export function TailwindGapControl({
             }}
             className="h-7 w-24 rounded-md border border-zinc-300 bg-white px-2 font-mono text-xs text-zinc-900 tabular-nums focus-visible:outline-2 focus-visible:outline-sky-600"
           />
-          <span className="text-[11px] text-zinc-500">px (tự do ngoài thang Tailwind)</span>
+          <span className="text-[11px] text-zinc-500">{t('builder.studio_field_controls.free_px')}</span>
         </div>
       )}
     </div>
@@ -340,7 +344,7 @@ export function TailwindGapControl({
 }
 
 export function SegmentedButtonsControl({
-  label, readout, badge, value, options, disabled = false, responsiveInfo, onChange, onReset, resetLabel = 'Mặc định', testIdPrefix,
+  label, readout, badge, value, options, disabled = false, responsiveInfo, onChange, onReset, resetLabel, testIdPrefix,
 }: {
   label: string;
   readout?: string;
@@ -354,6 +358,7 @@ export function SegmentedButtonsControl({
   resetLabel?: string;
   testIdPrefix?: string;
 }) {
+  const { t } = useI18n();
   const colsClass = options.length <= 2
     ? 'grid-cols-2'
     : options.length === 3
@@ -377,7 +382,7 @@ export function SegmentedButtonsControl({
           {readout && <span className="font-mono text-[11px] text-zinc-500">{readout}</span>}
           {onReset && (
             <button type="button" disabled={disabled} className={RESET_BTN_CLASS} onClick={onReset}>
-              {resetLabel}
+              {resetLabel ?? t('builder.studio_field_controls.default')}
             </button>
           )}
         </div>
@@ -408,22 +413,6 @@ export function SegmentedButtonsControl({
   );
 }
 
-const HEX_SWATCHES = [
-  { value: 'transparent', title: 'Trong suốt (transparent)' },
-  { value: '#0f172a', title: 'Đen xám (#0f172a)' },
-  { value: '#ffffff', title: 'Trắng (#ffffff)' },
-  { value: '#f8fafc', title: 'Xám sáng (#f8fafc)' },
-  { value: '#0284c7', title: 'Xanh chủ đạo (#0284c7)' },
-  { value: '#e11d48', title: 'Đỏ nhấn (#e11d48)' },
-];
-
-const TOKEN_SWATCHES = [
-  { value: 'var(--od-token-primary)', label: 'Primary' },
-  { value: 'var(--od-token-accent)', label: 'Accent' },
-  { value: 'var(--od-token-surface)', label: 'Surface' },
-  { value: 'var(--od-token-text)', label: 'Text' },
-];
-
 export function ColorSwatchControl({
   id, label, value, disabled = false, onChange,
 }: {
@@ -433,6 +422,22 @@ export function ColorSwatchControl({
   disabled?: boolean;
   onChange: (next: string) => void;
 }) {
+  const { t } = useI18n();
+  const HEX_SWATCHES = [
+    { value: 'transparent', title: t('builder.studio_field_controls.transparent') },
+    { value: '#0f172a', title: t('builder.studio_field_controls.dark') },
+    { value: '#ffffff', title: t('builder.studio_field_controls.white') },
+    { value: '#f8fafc', title: t('builder.studio_field_controls.light') },
+    { value: '#0284c7', title: t('builder.studio_field_controls.primary') },
+    { value: '#e11d48', title: t('builder.studio_field_controls.accent') },
+  ];
+
+  const TOKEN_SWATCHES = [
+    { value: 'var(--od-token-primary)', label: 'Primary' },
+    { value: 'var(--od-token-accent)', label: 'Accent' },
+    { value: 'var(--od-token-surface)', label: 'Surface' },
+    { value: 'var(--od-token-text)', label: 'Text' },
+  ];
   const autoId = useId();
   const inputId = id ?? autoId;
   const hexValue = /^#[0-9a-fA-F]{6}$/.test(value) ? value : '#0284c7';
@@ -449,11 +454,11 @@ export function ColorSwatchControl({
             onClick={() => setShowTokens(v => !v)}
             className={RESET_BTN_CLASS}
           >
-            {showTokens ? 'Ẩn token' : 'Theme tokens'}
+            {showTokens ? t('builder.studio_field_controls.hide_tokens') : 'Theme tokens'}
           </button>
           {value && (
             <button type="button" disabled={disabled} className={RESET_BTN_CLASS} onClick={() => onChange('')}>
-              Xóa
+              {t('builder.studio_field_controls.clear')}
             </button>
           )}
         </div>
@@ -481,12 +486,12 @@ export function ColorSwatchControl({
           );
         })}
 
-        <label className="relative flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-zinc-300 bg-white" title="Chọn màu bất kỳ">
+        <label className="relative flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-zinc-300 bg-white" title={t('builder.studio_field_controls.any_color')}>
           <input
             type="color"
             value={hexValue}
             disabled={disabled}
-            aria-label={`Chọn màu cho ${label}`}
+            aria-label={t('builder.studio_field_controls.color_for', { label })}
             onChange={e => onChange(e.target.value)}
             className="h-8 w-8 cursor-pointer border-0 bg-transparent p-0"
           />
@@ -497,7 +502,7 @@ export function ColorSwatchControl({
           type="text"
           value={value}
           disabled={disabled}
-          placeholder="#hex hoặc var(--od-token-...)"
+          placeholder={t('builder.studio_field_controls.hex')}
           onChange={e => onChange(e.target.value)}
           className="h-7 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 font-mono text-[11px] text-zinc-800 focus-visible:outline-2 focus-visible:outline-sky-600"
         />
@@ -540,11 +545,12 @@ export function MediaCardControl({
   onClear: () => void;
   testId?: string;
 }) {
+  const { t } = useI18n();
   const [imgBroken, setImgBroken] = useState(false);
   useEffect(() => setImgBroken(false), [value]);
 
   const showImageThumb = Boolean(value) && acceptKind !== 'video' && !imgBroken;
-  const kindText = acceptKind === 'video' ? 'Video MP4' : 'Hình ảnh';
+  const kindText = acceptKind === 'video' ? 'Video MP4' : t('builder.studio_field_controls.image');
 
   return (
     <div className="space-y-1.5" data-testid={testId}>
@@ -565,12 +571,12 @@ export function MediaCardControl({
           )
         ) : (
           <div className="flex h-11 w-14 shrink-0 items-center justify-center rounded border border-dashed border-zinc-300 bg-white text-[10px] text-zinc-400">
-            Trống
+            {t('builder.studio_field_controls.empty')}
           </div>
         )}
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-zinc-800">
-            {value ? `${kindText} đã chọn` : `Chưa chọn ${kindText.toLowerCase()}`}
+            {value ? t('builder.studio_field_controls.selected', { kind: kindText }) : t('builder.studio_field_controls.not_selected', { kind: kindText.toLowerCase() })}
           </p>
           {value && (
             <p className="truncate font-mono text-[10px] text-zinc-400" title={value}>
@@ -585,7 +591,7 @@ export function MediaCardControl({
               onClick={onPick}
               className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-45"
             >
-              {value ? 'Thay đổi' : `Chọn ${kindText.toLowerCase()}`}
+              {value ? t('builder.studio_field_controls.change') : t('builder.studio_field_controls.choose', { kind: kindText.toLowerCase() })}
             </button>
             {value && (
               <button
@@ -594,7 +600,7 @@ export function MediaCardControl({
                 onClick={onClear}
                 className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-rose-700 hover:bg-rose-50 disabled:opacity-45"
               >
-                Xóa
+                {t('builder.studio_field_controls.clear')}
               </button>
             )}
           </div>
@@ -624,6 +630,7 @@ export function SpacingBoxControl({
   resetLabel?: string;
   testIdPrefix?: string;
 }) {
+  const { t } = useI18n();
   const baseSteps = min < 0 ? TW_MARGIN_STEPS : TW_PADDING_STEPS;
   const twSteps = baseSteps.filter(step => step * 4 >= min && step * 4 <= max);
   const allowTw = allowTailwind && unit === 'px' && twSteps.length > 0;
@@ -739,9 +746,9 @@ export function SpacingBoxControl({
         <div className="flex flex-wrap items-center gap-1">
           <div className="inline-flex rounded border border-zinc-200 bg-zinc-100/80 p-0.5">
             {([
-              { id: 'equal', label: 'Đều' },
+              { id: 'equal', label: t('builder.studio_field_controls.equal') },
               { id: 'xy', label: 'X · Y' },
-              { id: 'sides', label: '4 cạnh' },
+              { id: 'sides', label: t('builder.studio_field_controls.sides') },
             ] as const).map(opt => (
               <button
                 key={opt.id}
@@ -786,11 +793,11 @@ export function SpacingBoxControl({
       {mode === 'equal' && (
         <label className="flex items-center gap-2">
           <span className="shrink-0 text-[11px] text-zinc-500">
-            4 cạnh ({unitMode === 'tw' && allowTw ? `${propPrefix}-*` : unit}):
+            {t('builder.studio_field_controls.equal_unit', { unit: unitMode === 'tw' && allowTw ? `${propPrefix}-*` : unit })}
           </span>
           <div className="min-w-0 flex-1">
             {renderTwOrPxField(
-              `${label} đều 4 cạnh`,
+              t('builder.studio_field_controls.equal_label', { label }),
               curT,
               v => emitBox(v, v, v, v),
               testIdPrefix ? `${testIdPrefix}-all` : undefined,
@@ -803,10 +810,10 @@ export function SpacingBoxControl({
         <div className="grid grid-cols-2 gap-2">
           <label className="space-y-0.5">
             <span className="block text-[10px] text-zinc-500">
-              Ngang ({unitMode === 'tw' && allowTw ? `${propPrefix}x-*` : unit})
+              {t('builder.studio_field_controls.horizontal_unit', { unit: unitMode === 'tw' && allowTw ? `${propPrefix}x-*` : unit })}
             </span>
             {renderTwOrPxField(
-              `${label} ngang`,
+              t('builder.studio_field_controls.horizontal_label', { label }),
               curL,
               v => emitBox(curT, v, curB, v),
               testIdPrefix ? `${testIdPrefix}-x` : undefined,
@@ -814,10 +821,10 @@ export function SpacingBoxControl({
           </label>
           <label className="space-y-0.5">
             <span className="block text-[10px] text-zinc-500">
-              Dọc ({unitMode === 'tw' && allowTw ? `${propPrefix}y-*` : unit})
+              {t('builder.studio_field_controls.vertical_unit', { unit: unitMode === 'tw' && allowTw ? `${propPrefix}y-*` : unit })}
             </span>
             {renderTwOrPxField(
-              `${label} dọc`,
+              t('builder.studio_field_controls.vertical_label', { label }),
               curT,
               v => emitBox(v, curR, v, curL),
               testIdPrefix ? `${testIdPrefix}-y` : undefined,
@@ -829,10 +836,10 @@ export function SpacingBoxControl({
       {mode === 'sides' && (
         <div className="grid grid-cols-4 gap-1.5">
           {([
-            { key: 'top', label: 'Trên', val: curT, apply: (v: number) => emitBox(v, curR, curB, curL) },
-            { key: 'right', label: 'Phải', val: curR, apply: (v: number) => emitBox(curT, v, curB, curL) },
-            { key: 'bottom', label: 'Dưới', val: curB, apply: (v: number) => emitBox(curT, curR, v, curL) },
-            { key: 'left', label: 'Trái', val: curL, apply: (v: number) => emitBox(curT, curR, curB, v) },
+            { key: 'top', label: t('builder.studio_field_controls.top'), val: curT, apply: (v: number) => emitBox(v, curR, curB, curL) },
+            { key: 'right', label: t('builder.studio_field_controls.right'), val: curR, apply: (v: number) => emitBox(curT, v, curB, curL) },
+            { key: 'bottom', label: t('builder.studio_field_controls.bottom'), val: curB, apply: (v: number) => emitBox(curT, curR, v, curL) },
+            { key: 'left', label: t('builder.studio_field_controls.left'), val: curL, apply: (v: number) => emitBox(curT, curR, curB, v) },
           ] as const).map(side => (
             <label key={side.key} className="space-y-0.5 text-center">
               <span className="block text-[10px] text-zinc-500">{side.label}</span>
@@ -851,7 +858,7 @@ export function SpacingBoxControl({
 }
 
 export function LinkControl({
-  id, label, value, placeholder = 'https://... hoặc /duong-dan', showFlags = true,
+  id, label, value, placeholder, showFlags = true,
   disabled = false, onChange,
 }: {
   id?: string;
@@ -862,6 +869,7 @@ export function LinkControl({
   disabled?: boolean;
   onChange: (next: BlockLinkValue) => void;
 }) {
+  const { t } = useI18n();
   const autoId = useId();
   const inputId = id ?? autoId;
   const [showInternal, setShowInternal] = useState(false);
@@ -887,7 +895,7 @@ export function LinkControl({
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <label htmlFor={inputId} className="text-xs font-semibold text-zinc-800">
-          {label ?? 'Đường dẫn'}
+          {label ?? t('builder.studio_field_controls.url')}
         </label>
         <button
           type="button"
@@ -895,7 +903,7 @@ export function LinkControl({
           onClick={toggleInternal}
           className={RESET_BTN_CLASS}
         >
-          {showInternal ? 'Đóng danh sách' : 'Chọn trang/bài…'}
+          {showInternal ? t('builder.studio_field_controls.close_list') : t('builder.studio_field_controls.choose_entry')}
         </button>
       </div>
 
@@ -904,7 +912,7 @@ export function LinkControl({
         type="text"
         maxLength={2048}
         value={value.url}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('builder.studio_field_controls.url_placeholder')}
         disabled={disabled}
         onChange={e => onChange({ ...value, url: e.target.value })}
         className={STUDIO_INPUT_CLASS}
@@ -912,7 +920,7 @@ export function LinkControl({
 
       {showInternal && (
         <select
-          aria-label="Chọn trang hoặc bài viết đã xuất bản"
+          aria-label={t('builder.studio_field_controls.choose_published')}
           disabled={disabled || loadingEntries}
           value=""
           onChange={e => {
@@ -924,7 +932,7 @@ export function LinkControl({
           className={STUDIO_INPUT_CLASS}
         >
           <option value="">
-            {loadingEntries ? 'Đang tải danh sách…' : entries.length ? 'Chọn đường dẫn nội bộ…' : 'Chưa có nội dung xuất bản'}
+            {loadingEntries ? t('builder.studio_field_controls.loading') : entries.length ? t('builder.studio_field_controls.choose_internal') : t('builder.studio_field_controls.no_published')}
           </option>
           {entries.map(row => {
             const href = row.public_url ?? (row.type_key === 'page' ? `/${row.slug}/` : `/${row.type_key}/${row.slug}/`);
@@ -940,13 +948,13 @@ export function LinkControl({
       {showFlags && (
         <div className="space-y-1.5 pt-0.5">
           <ToggleSwitchControl
-            label="Mở trong tab mới"
+            label={t('builder.studio_field_controls.new_tab')}
             checked={Boolean(value.new_tab)}
             disabled={disabled}
             onChange={new_tab => onChange({ ...value, new_tab })}
           />
           <ToggleSwitchControl
-            label="Thuộc tính rel=&quot;nofollow&quot;"
+            label={t('builder.studio_field_controls.nofollow')}
             checked={Boolean(value.nofollow)}
             disabled={disabled}
             onChange={nofollow => onChange({ ...value, nofollow })}
@@ -958,7 +966,7 @@ export function LinkControl({
 }
 
 export function LightboxRichTextTrigger({
-  id, label, value, placeholder = 'Chưa có nội dung văn bản…', maxBytes,
+  id, label, value, placeholder, maxBytes,
   disabled = false, onChange,
 }: {
   id?: string;
@@ -969,6 +977,7 @@ export function LightboxRichTextTrigger({
   disabled?: boolean;
   onChange: (nextHtml: string) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const preview = stripRichHtmlToPreview(value);
 
@@ -979,7 +988,7 @@ export function LightboxRichTextTrigger({
       </div>
       <div className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/70 p-2.5">
         <p className={'!m-0 line-clamp-2 text-xs ' + (preview ? 'text-zinc-700' : 'italic text-zinc-400')}>
-          {preview || placeholder}
+          {preview || placeholder || t('builder.studio_field_controls.no_text')}
         </p>
         <button
           id={id}
@@ -990,7 +999,7 @@ export function LightboxRichTextTrigger({
           className="flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-50 disabled:opacity-45"
         >
           <span aria-hidden="true">✎</span>
-          <span>Mở Text Editor</span>
+          <span>{t('builder.studio_field_controls.text_editor')}</span>
         </button>
       </div>
       <StudioRichTextLightbox

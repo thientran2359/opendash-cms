@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { ApiClientError, requestJson } from './client.ts';
 
 export type MediaKind = 'image' | 'video';
@@ -62,7 +63,7 @@ export async function deleteMedia(
       method: 'DELETE',
       csrfToken,
       ifMatch: `"gv${generation}-v${version}"`,
-      defaultErrorMessage: 'Không thể xóa media.',
+      defaultErrorMessage: tStatic('api.media.delete_media'),
     });
   } catch (err) {
     if (err instanceof ApiClientError && err.status === 409) {
@@ -74,11 +75,11 @@ export async function deleteMedia(
       }
       if (body?.pins) {
         throw new MediaDeleteConflictError(
-          body.error || 'Media đang được sử dụng; không thể xóa.',
+          body.error || tStatic('api.media.this_media_is_in_use_and_cannot_be_deleted'),
           body.pins,
         );
       }
-      throw new Error(body?.error || 'Media đang bận hoặc đang trong quá trình xóa.');
+      throw new Error(body?.error || tStatic('api.media.this_media_is_busy_or_being_deleted'));
     }
     throw err;
   }
@@ -103,7 +104,7 @@ export function listMedia(
     params.set('kind', kind);
   }
   return requestJson<MediaAsset[]>(`/api/admin/media?${params.toString()}`, {
-    defaultErrorMessage: 'Không thể tải thư viện media.',
+    defaultErrorMessage: tStatic('api.media.load_the_media_library'),
   });
 }
 
@@ -114,8 +115,8 @@ export function uploadMedia(file: File, csrfToken: string): Promise<MediaAsset> 
     contentType: file.type,
     uploadFilename: file.name,
     body: file,
-    defaultErrorMessage: 'Không thể upload ảnh.',
-    oversizeErrorMessage: 'File ảnh vượt quá 8 MiB.',
+    defaultErrorMessage: tStatic('api.media.upload_the_image'),
+    oversizeErrorMessage: tStatic('api.media.the_image_exceeds_8_mib'),
   });
 }
 
@@ -126,7 +127,7 @@ export function uploadVideo(file: File, csrfToken: string): Promise<MediaAsset> 
     contentType: file.type || 'video/mp4',
     uploadFilename: file.name,
     body: file,
-    defaultErrorMessage: 'Không thể upload video MP4.',
-    oversizeErrorMessage: 'File video vượt quá 100 MiB.',
+    defaultErrorMessage: tStatic('api.media.upload_the_mp4_video'),
+    oversizeErrorMessage: tStatic('api.media.the_video_exceeds_100_mib'),
   });
 }

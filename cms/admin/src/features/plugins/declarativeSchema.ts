@@ -1,3 +1,4 @@
+import { tStatic } from '../../i18n/index.tsx';
 export const UI_SCHEMA_VERSION = 1;
 export const MAX_UI_SCREENS = 20;
 export const MAX_UI_DEPTH = 8;
@@ -41,34 +42,34 @@ function containsDisallowedMarkup(text: string): boolean {
 
 function validateNode(node: UiNode, depth: number, counter: { count: number }): void {
   if (depth > MAX_UI_DEPTH) {
-    throw new Error('Declarative UI schema vượt quá độ sâu tối đa (8).');
+    throw new Error(tStatic('feature.plugins.declarativeschema.the_declarative_ui_schema_exceeds_the_maximum_depth_8'));
   }
   counter.count += 1;
   if (counter.count > MAX_UI_NODES) {
-    throw new Error('Declarative UI schema vượt quá số node tối đa (200).');
+    throw new Error(tStatic('feature.plugins.declarativeschema.the_declarative_ui_schema_exceeds_the_maximum_node_count_200'));
   }
   if (!node.id || containsDisallowedMarkup(node.id)) {
-    throw new Error('Node id không hợp lệ.');
+    throw new Error(tStatic('feature.plugins.declarativeschema.invalid_node_id'));
   }
   if (node.label && containsDisallowedMarkup(node.label)) {
-    throw new Error('Label không được chứa HTML/JS.');
+    throw new Error(tStatic('feature.plugins.declarativeschema.labels_must_not_contain_html_javascript'));
   }
   if (!ALLOWED_KINDS.has(node.kind)) {
-    throw new Error(`Node kind '${node.kind}' không thuộc schema v1.`);
+    throw new Error(tStatic('feature.plugins.declarativeschema.node_kind_value1_is_not_part_of_schema_v1', { value1: node.kind }));
   }
   if ((node.kind === 'table' || node.kind === 'list') && node.page_size != null) {
     if (node.page_size <= 0 || node.page_size > MAX_UI_PAGE_SIZE) {
-      throw new Error('page_size vượt quá giới hạn 100.');
+      throw new Error(tStatic('feature.plugins.declarativeschema.page_size_exceeds_the_limit_of_100'));
     }
   }
   if (node.kind === 'field') {
     const ft = node.field_type ?? 'text';
     if (!ALLOWED_FIELD_TYPES.has(ft)) {
-      throw new Error(`Field type '${ft}' bị cấm hoặc không được hỗ trợ.`);
+      throw new Error(tStatic('feature.plugins.declarativeschema.field_type_value1_is_prohibited_or_unsupported', { value1: ft }));
     }
   }
   if (node.kind === 'button' && !node.action_id) {
-    throw new Error('Button bắt buộc phải gắn action_id.');
+    throw new Error(tStatic('feature.plugins.declarativeschema.buttons_must_have_an_action_id'));
   }
   for (const child of node.children ?? []) {
     validateNode(child, depth + 1, counter);
@@ -77,19 +78,19 @@ function validateNode(node: UiNode, depth: number, counter: { count: number }): 
 
 export function validateDeclarativeSchemaV1(raw: unknown): DeclarativeUiSchemaV1 {
   if (!raw || typeof raw !== 'object') {
-    throw new Error('Schema không hợp lệ.');
+    throw new Error(tStatic('feature.plugins.declarativeschema.invalid_schema'));
   }
   const schema = raw as DeclarativeUiSchemaV1;
   if (schema.schema_version !== UI_SCHEMA_VERSION) {
-    throw new Error('Chỉ hỗ trợ declarative UI schema_version 1.');
+    throw new Error(tStatic('feature.plugins.declarativeschema.only_declarative_ui_schema_version_1_is_supported'));
   }
   if (!Array.isArray(schema.screens) || schema.screens.length > MAX_UI_SCREENS) {
-    throw new Error('Danh sách screen không hợp lệ hoặc vượt quá 20.');
+    throw new Error(tStatic('feature.plugins.declarativeschema.invalid_screen_list_or_more_than_20_screens'));
   }
   const counter = { count: 0 };
   for (const screen of schema.screens) {
     if (!screen.id || containsDisallowedMarkup(screen.title ?? '')) {
-      throw new Error('Screen không hợp lệ.');
+      throw new Error(tStatic('feature.plugins.declarativeschema.invalid_screen'));
     }
     for (const node of screen.nodes ?? []) {
       validateNode(node, 1, counter);

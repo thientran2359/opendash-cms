@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../i18n/index.tsx';
 import { useState } from 'react';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
 import type { BlockCatalogItemDto, BlockPropValue } from '../types.ts';
@@ -159,12 +160,13 @@ export function BuilderInspector({
   onSectionStyleChange,
   onError,
 }: Props) {
+  const { t } = useI18n();
   const [showPicker, setShowPicker] = useState<'image' | 'video' | 'poster' | 'section-bg' | null>(null);
   const item = locate(document, selectedId);
   if (!item) return (
-    <section className={hideHeader ? 'px-1 py-2' : 'rounded-xl border border-slate-200 bg-white p-4'} aria-label="Inspector">
-      {!hideHeader && <h2 className="!mt-0 text-base font-semibold">Thuộc tính</h2>}
-      <p className="text-sm text-slate-500">Chọn một node trong Tree hoặc Canvas để chỉnh sửa.</p>
+    <section className={hideHeader ? 'px-1 py-2' : 'rounded-xl border border-slate-200 bg-white p-4'} aria-label={tStatic("feature.common.ui_inspector")}>
+      {!hideHeader && <h2 className="!mt-0 text-base font-semibold">{t('builder.builder_inspector.properties')}</h2>}
+      <p className="text-sm text-slate-500">{t('builder.builder_inspector.select')}</p>
     </section>
   );
   const element = isElement(item.node) ? item.node : null;
@@ -257,16 +259,16 @@ export function BuilderInspector({
     });
   };
   return (
-    <section className={hideHeader ? 'space-y-4 px-1 py-1' : 'space-y-4 rounded-xl border border-slate-200 bg-white p-4'} aria-label="Inspector">
+    <section className={hideHeader ? 'space-y-4 px-1 py-1' : 'space-y-4 rounded-xl border border-slate-200 bg-white p-4'} aria-label={tStatic("feature.common.ui_inspector")}>
       {!hideHeader && <div>
-        <h2 className="!m-0 text-base font-semibold text-slate-900">Thuộc tính</h2>
+        <h2 className="!m-0 text-base font-semibold text-slate-900">{t('builder.builder_inspector.properties')}</h2>
         <p className="mt-1 text-sm text-slate-600">{nodeTitle(item, blockSchemas)}</p>
         <code className="block break-all text-[11px] text-slate-400">{item.node.id}</code>
       </div>}
       {!locked && onMetaChange && (
         <div className="grid grid-cols-1 gap-2.5 pb-1" data-testid="inspector-meta-identity">
           <label className="block space-y-1">
-            <span className="block text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Name (Tên block)</span>
+            <span className="block text-[11px] font-semibold uppercase tracking-wide text-zinc-600">{t('builder.builder_inspector.name')}</span>
             <input
               type="text"
               maxLength={80}
@@ -284,7 +286,7 @@ export function BuilderInspector({
               maxLength={64}
               data-testid="inspector-meta-id"
               value={item.node.meta?.html_id ?? ''}
-              placeholder="vd: hero-section"
+              placeholder={tStatic("feature.common.ui_vd_hero_section")}
               onChange={event => {
                 const clean = event.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
                 onMetaChange(item.node.id, { html_id: clean });
@@ -295,19 +297,19 @@ export function BuilderInspector({
         </div>
       )}
       {sectionNode && !locked && onSectionStyleChange && (
-        <div role="group" className="space-y-3 border-t border-zinc-200 pt-3" aria-label="Section Background & Layout" data-testid="inspector-section-style">
+        <div role="group" className="space-y-3 border-t border-zinc-200 pt-3" aria-label={tStatic("feature.common.ui_section_background_layout")} data-testid="inspector-section-style">
           <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">
-            Section · Nền & Bố cục
+            {t('builder.builder_inspector.background_layout')}
           </h3>
           <ColorSwatchControl
             id="section-bg-color"
-            label="Màu nền (Background Color)"
+            label={t('builder.builder_inspector.background_color')}
             value={sectionNode.style?.background_color ?? ''}
             onChange={color => onSectionStyleChange(sectionNode.id, { background_color: color || undefined })}
           />
           <MediaCardControl
             id="section-bg-media"
-            label="Ảnh nền (Background Image)"
+            label={t('builder.builder_inspector.background_image')}
             value={sectionNode.style?.background_media_id ?? ''}
             acceptKind="image"
             testId="inspector-section-bg-image"
@@ -315,13 +317,13 @@ export function BuilderInspector({
             onClear={() => onSectionStyleChange(sectionNode.id, { background_media_id: undefined })}
           />
           <SegmentedButtonsControl
-            label="Độ rộng nội dung (Content Width)"
+            label={t('builder.builder_inspector.content_width')}
             value={sectionNode.style?.content_width ?? ''}
             options={[
-              { value: '', label: 'Mặc định', title: 'Theo theme' },
-              { value: 'boxed', label: 'Boxed', title: 'Giới hạn container' },
-              { value: 'wide', label: 'Wide', title: 'Rộng hơn container' },
-              { value: 'full', label: 'Full', title: '100% toàn màn hình' },
+              { value: '', label: t('builder.builder_inspector.default'), title: t('builder.builder_inspector.theme') },
+              { value: 'boxed', label: 'Boxed', title: t('builder.builder_inspector.boxed') },
+              { value: 'wide', label: 'Wide', title: t('builder.builder_inspector.wide') },
+              { value: 'full', label: 'Full', title: t('builder.builder_inspector.full') },
             ]}
             testIdPrefix="inspector-section-width"
             onChange={val => onSectionStyleChange(sectionNode.id, {
@@ -347,14 +349,14 @@ export function BuilderInspector({
         const alCur = effCurrent.text_align ?? 'start';
 
         return (
-          <div role="group" className="space-y-3 border-t border-zinc-200 pt-3" aria-label="Bố cục và Khoảng cách">
+          <div role="group" className="space-y-3 border-t border-zinc-200 pt-3" aria-label={t('builder.builder_inspector.layout_group')}>
             <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">
-              Bố cục &amp; Khoảng cách
+              {t('builder.builder_inspector.layout')}
             </h3>
             {item.kind === 'row' && (
               <>
                 <SegmentedButtonsControl
-                  label="Số cột mỗi hàng"
+                  label={t('builder.builder_inspector.columns')}
                   readout={`grid-cols-${colCur}`}
                   value={String(colCur)}
                   options={[
@@ -376,7 +378,7 @@ export function BuilderInspector({
                 />
                 <TailwindGapControl
                   id="responsive-gap_px"
-                  label="Gap"
+                  label={tStatic("feature.common.ui_gap")}
                   value={gapCur}
                   testIdPrefix="responsive-gap"
                   responsiveInfo={{
@@ -392,14 +394,14 @@ export function BuilderInspector({
             )}
             {item.kind === 'column' && (
               <SegmentedButtonsControl
-                label="Căn chữ (Text Align)"
+                label={t('builder.builder_inspector.align')}
                 readout={ALIGN_CLASS_MAP[alCur]}
                 value={alCur}
                 options={[
-                  { value: 'start', label: 'Trái', title: 'Start' },
-                  { value: 'center', label: 'Giữa', title: 'Center' },
-                  { value: 'end', label: 'Phải', title: 'End' },
-                  { value: 'justify', label: 'Đều', title: 'Justify' },
+                  { value: 'start', label: t('builder.builder_inspector.left'), title: 'Start' },
+                  { value: 'center', label: t('builder.builder_inspector.center'), title: 'Center' },
+                  { value: 'end', label: t('builder.builder_inspector.right'), title: 'End' },
+                  { value: 'justify', label: t('builder.builder_inspector.justify'), title: 'Justify' },
                 ]}
                 testIdPrefix="responsive-text-align"
                 responsiveInfo={{
@@ -414,7 +416,7 @@ export function BuilderInspector({
             )}
             <SpacingBoxControl
               key={`${item.node.id}:padding`}
-              label="Padding"
+              label={tStatic("feature.common.ui_padding")}
               propPrefix="p"
               unit="px"
               min={0}
@@ -442,7 +444,7 @@ export function BuilderInspector({
             {onBoxSpacingChange && (
               <SpacingBoxControl
                 key={`${item.node.id}:margin`}
-                label="Margin"
+                label={tStatic("feature.common.ui_margin")}
                 propPrefix="m"
                 unit="px"
                 min={-128}
@@ -467,15 +469,14 @@ export function BuilderInspector({
       })()}
       {locked && (
         <p role="status" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          Node không resolve được hoặc provider đã mất. Nội dung và vị trí được bảo toàn;
-          chỉ có thể xóa sau khi xác nhận.
+          {t('builder.builder_inspector.locked')}
         </p>
       )}
       {element?.type === 'legacy/block' && !locked && (
-        <p className="text-xs text-slate-500">Block theme: {String(element.props.block_id)}</p>
+        <p className="text-xs text-slate-500">{tStatic("feature.common.ui_block_theme")} {String(element.props.block_id)}</p>
       )}
       {element?.type === 'plugin/block' && !locked && block && (
-        <div className="space-y-2" aria-label="Thuộc tính block khai báo">
+        <div className="space-y-2" aria-label={t('builder.builder_inspector.declarative')}>
           <p className="break-all text-xs text-slate-600">{block.block_id}</p>
           <BlockSchemaForm key={element.id + ':' + block.block_id} schema={block.schema}
             values={element.props.values as Record<string, unknown>}
@@ -484,7 +485,7 @@ export function BuilderInspector({
         </div>
       )}
       {!element && <p className="text-[11px] text-zinc-500">
-        Các thay đổi responsive chỉ ghi vào document khi bấm Lưu. Thêm hoặc đổi thứ tự node từ Tree.
+        {t('builder.builder_inspector.responsive_notice')}
       </p>}
       {element && !locked && ![
         'core/list',
@@ -495,7 +496,7 @@ export function BuilderInspector({
         'core/content_slot',
         'plugin/block',
       ].includes(element.type) && (
-        <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label="Thuộc tính phần tử">
+        <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label={t('builder.builder_inspector.element_props')}>
           {element.type === 'core/heading' && (() => {
             const rawLevel = Number(element.props.level);
             const activeLevel = Number.isInteger(rawLevel) && rawLevel >= 1 && rawLevel <= 6
@@ -503,14 +504,14 @@ export function BuilderInspector({
             return (
               <>
                 <SegmentedButtonsControl
-                  label="Cấp tiêu đề"
+                  label={t('builder.builder_inspector.heading_level')}
                   value={activeLevel}
                   options={['1', '2', '3', '4', '5', '6'].map(lvl => ({ value: lvl, label: `H${lvl}` }))}
                   testIdPrefix="heading-level"
                   onChange={val => onChange(element.id, 'level', Number(val))}
                 />
                 <label className="block space-y-1">
-                  <span className="block text-xs font-semibold text-zinc-800">Tiêu đề</span>
+                  <span className="block text-xs font-semibold text-zinc-800">{t('builder.builder_inspector.heading')}</span>
                   <input
                     className={INSPECTOR_INPUT_CLASS}
                     type="text"
@@ -526,7 +527,7 @@ export function BuilderInspector({
             binding != null ? (
               <label className="block space-y-1.5">
                 <span className="block text-xs font-semibold text-zinc-800">
-                  Nội dung dự phòng (khi Field Binding trống)
+                  {t('builder.builder_inspector.fallback')}
                 </span>
                 <textarea
                   className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-sky-600"
@@ -536,13 +537,13 @@ export function BuilderInspector({
                   onChange={event => applyPatch(element.id, { text: event.target.value, rich: undefined })}
                 />
                 <span className="block text-[11px] text-zinc-500">
-                  Đang bật Field Binding — fallback dùng văn bản thuần.
+                  {t('builder.builder_inspector.binding_on')}
                 </span>
               </label>
             ) : (
               <LightboxRichTextTrigger
                 id="core-text-editor"
-                label="Nội dung văn bản"
+                label={t('builder.builder_inspector.text')}
                 value={staticValue(element, 'text')}
                 maxBytes={16384}
                 onChange={html => applyPatch(element.id, { text: html, rich: true })}
@@ -553,7 +554,7 @@ export function BuilderInspector({
             <>
               <MediaCardControl
                 id="core-image-media"
-                label="Hình ảnh"
+                label={t('builder.builder_inspector.image')}
                 value={staticValue(element, 'media_id')}
                 acceptKind="image"
                 testId="inspector-image-media"
@@ -561,13 +562,13 @@ export function BuilderInspector({
                 onClear={() => onChange(element.id, 'media_id', undefined)}
               />
               <label className="block space-y-1">
-                <span className="block text-xs font-semibold text-zinc-800">Mô tả ảnh (alt)</span>
+                <span className="block text-xs font-semibold text-zinc-800">{t('builder.builder_inspector.alt')}</span>
                 <input
                   className={INSPECTOR_INPUT_CLASS}
                   type="text"
                   maxLength={512}
                   value={staticValue(element, 'alt')}
-                  placeholder="Mô tả nội dung ảnh cho SEO & trình đọc màn hình…"
+                  placeholder={t('builder.builder_inspector.alt_placeholder')}
                   onChange={event => onChange(element.id, 'alt', event.target.value)}
                 />
               </label>
@@ -576,7 +577,7 @@ export function BuilderInspector({
           {element.type === 'core/button' && (
             <>
               <label className="block space-y-1">
-                <span className="block text-xs font-semibold text-zinc-800">Nhãn nút</span>
+                <span className="block text-xs font-semibold text-zinc-800">{t('builder.builder_inspector.button_label')}</span>
                 <input
                   className={INSPECTOR_INPUT_CLASS}
                   type="text"
@@ -587,7 +588,7 @@ export function BuilderInspector({
               </label>
               <LinkControl
                 id="core-button-link"
-                label="Đường dẫn"
+                label={t('builder.builder_inspector.url')}
                 showFlags
                 value={{
                   url: staticValue(element, 'url'),
@@ -617,16 +618,16 @@ export function BuilderInspector({
                 </label>
               ))}
               {legacyFields.length === 0 && (
-                <p className="text-xs text-slate-500">Block không có field có thể chỉnh.</p>
+                <p className="text-xs text-slate-500">{t('builder.builder_inspector.no_fields')}</p>
               )}
             </>
           )}
         </form>
       )}
       {element?.type === 'core/template_part' && !locked && (
-        <div className="space-y-2" aria-label="Template Part">
+        <div className="space-y-2" aria-label={tStatic("feature.common.ui_template_part")}>
           <label htmlFor="template-part-key" className="block text-sm font-medium text-slate-700">
-            Part Key (ví dụ: header, footer)
+            {t('builder.builder_inspector.part_key')}
           </label>
           <input
             id="template-part-key"
@@ -641,47 +642,46 @@ export function BuilderInspector({
           </datalist>
           {!VALID_TEMPLATE_PART_KEY.test(staticValue(element, 'part_key')) && (
             <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
-              <code>part_key</code> chỉ dùng chữ thường <code>a-z</code>, số <code>0-9</code> và dấu gạch ngang <code>-</code> (bắt đầu bằng chữ cái, tối đa 64 ký tự).
+              {t('builder.builder_inspector.part_validation')}
             </p>
           )}
           <p className="text-xs text-slate-500">
-            Chèn part tái sử dụng từ DB override hoặc thư mục <code>parts/</code> của theme v3. Có thể sửa, thay khóa hoặc xóa bình thường.
+            {t('builder.builder_inspector.part_help')}
           </p>
         </div>
       )}
       {element?.type === 'core/content_slot' && !locked && (
-        <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-xs text-sky-950" aria-label="Content Slot">
-          <p className="font-semibold">Khung nội dung chính (Content Slot)</p>
-          <p>Đây là vị trí chèn nội dung bài viết / trang khi render template. Node này không có thuộc tính cấu hình thêm.</p>
+        <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-xs text-sky-950" aria-label={tStatic("feature.common.ui_content_slot")}>
+          <p className="font-semibold">{t('builder.builder_inspector.slot')}</p>
+          <p>{t('builder.builder_inspector.slot_desc')}</p>
           {requiresContentSlot && !deletable && (
             <p role="status" className="font-medium text-amber-900" data-testid="content-slot-locked-notice">
-              Bắt buộc giữ ít nhất 1 <code>core/content_slot</code> cho loại template này — không thể xóa slot cuối cùng.
+              {t('builder.builder_inspector.slot_required')}
             </p>
           )}
         </div>
       )}
       {element?.type === 'core/pattern_ref' && !locked && (
-        <div className="space-y-2" aria-label="Reusable Pattern">
-          <label htmlFor="pattern-ref-id" className="block text-sm font-medium text-slate-700">Reusable Pattern</label>
+        <div className="space-y-2" aria-label={tStatic("feature.common.ui_reusable_pattern")}>
+          <label htmlFor="pattern-ref-id" className="block text-sm font-medium text-slate-700">{tStatic("feature.common.ui_reusable_pattern")}</label>
           <select id="pattern-ref-id" className={INSPECTOR_INPUT_CLASS} value={Number(element.props.pattern_id) || 0}
             onChange={event => onChange(element.id, 'pattern_id', Number(event.target.value))}>
-            <option value={0}>Chọn Pattern…</option>
+            <option value={0}>{t('builder.builder_inspector.choose_pattern')}</option>
             {patterns.map(pattern => <option key={pattern.id} value={pattern.id}>{pattern.title} (#{pattern.id})</option>)}
             {Number(element.props.pattern_id) > 0 && !patterns.some(pattern => pattern.id === element.props.pattern_id) &&
-              <option value={Number(element.props.pattern_id)}>Pattern #{String(element.props.pattern_id)} · không còn tồn tại</option>}
+              <option value={Number(element.props.pattern_id)}>{tStatic("feature.common.ui_pattern")}{String(element.props.pattern_id)} {t('builder.builder_inspector.pattern_missing')}</option>}
           </select>
-          <button type="button" className="btn-secondary rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50" onClick={onRefreshPatterns}>Tải lại danh sách Pattern</button>
+          <button type="button" className="btn-secondary rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50" onClick={onRefreshPatterns}>{t('builder.builder_inspector.refresh_patterns')}</button>
           {Number(element.props.pattern_id) === 0 && <p role="alert" className="text-sm text-amber-800">
-            Cần chọn Pattern hợp lệ trước khi lưu Builder.
+            {t('builder.builder_inspector.valid_pattern')}
           </p>}
           {patternsLoaded && Number(element.props.pattern_id) > 0
             && !patterns.some(pattern => pattern.id === element.props.pattern_id) && (
               <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
-                Pattern #{String(element.props.pattern_id)} đã bị xóa hoặc không còn tồn tại.
-                Block được giữ trong Builder để bạn chọn Pattern thay thế; nội dung public sẽ bỏ qua block bị thiếu.
+                {t('builder.builder_inspector.pattern_deleted', { id: String(element.props.pattern_id) })}
               </p>
             )}
-          <p className="text-xs text-slate-500">Pattern đồng bộ: mọi trang tham chiếu sẽ nhận bố cục mới khi bản gốc được lưu.</p>
+          <p className="text-xs text-slate-500">{t('builder.builder_inspector.pattern_sync')}</p>
         </div>
       )}
       {element && !locked && ['core/heading', 'core/text', 'core/image', 'core/button'].includes(element.type) && (
@@ -691,7 +691,7 @@ export function BuilderInspector({
         <BuilderListFields key={element.id} element={element} onChange={onListChange} onError={onError} />
       )}
       {element?.type === 'core/video' && !locked && (
-        <div className="space-y-3" aria-label="Thuộc tính video">
+        <div className="space-y-3" aria-label={t('builder.builder_inspector.video_props')}>
           <MediaCardControl
             id="core-video-media"
             label="Video MP4"
@@ -703,7 +703,7 @@ export function BuilderInspector({
           />
           <MediaCardControl
             id="core-video-poster"
-            label="Ảnh poster (tùy chọn)"
+            label={t('builder.builder_inspector.poster')}
             value={staticValue(element, 'poster_image_id')}
             acceptKind="image"
             testId="inspector-video-poster"
@@ -712,13 +712,13 @@ export function BuilderInspector({
           />
           <ToggleSwitchControl
             id="core-video-controls"
-            label="Hiển thị thanh điều khiển (controls)"
+            label={t('builder.builder_inspector.controls')}
             checked={element.props.controls !== false}
             onChange={checked => onChange(element.id, 'controls', checked)}
           />
           <ToggleSwitchControl
             id="core-video-muted"
-            label="Tắt tiếng mặc định (muted)"
+            label={t('builder.builder_inspector.muted')}
             checked={element.props.muted === true}
             onChange={checked => onChange(element.id, 'muted', checked)}
           />
@@ -729,22 +729,22 @@ export function BuilderInspector({
       )}
       {binding != null && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900">
-          <strong>Field Binding hiện có</strong>
-          <p className="mt-1">Thông tin liên kết được giữ nguyên khi chỉnh thuộc tính tĩnh.</p>
+          <strong>{t('builder.builder_inspector.binding')}</strong>
+          <p className="mt-1">{t('builder.builder_inspector.binding_desc')}</p>
           <pre className="mt-2 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(binding, null, 2)}</pre>
         </div>
       )}
       {!locked && onMetaChange && (
-        <div role="group" aria-label="Advanced" className="space-y-3 border-t border-zinc-200 pt-3" data-testid="inspector-meta-advanced">
-          <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">Advanced</h3>
+        <div role="group" aria-label={tStatic("feature.common.ui_advanced")} className="space-y-3 border-t border-zinc-200 pt-3" data-testid="inspector-meta-advanced">
+          <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.common.ui_advanced")}</h3>
           <label className="block space-y-1">
-            <span className="block text-xs font-medium text-zinc-700">Class (CSS Classes)</span>
+            <span className="block text-xs font-medium text-zinc-700">{tStatic("feature.common.ui_class_css_classes")}</span>
             <input
               type="text"
               maxLength={256}
               data-testid="inspector-meta-class"
               value={item.node.meta?.class_name ?? ''}
-              placeholder="vd: py-16 bg-slate-50 rounded-xl"
+              placeholder={tStatic("feature.common.ui_vd_py_16_bg_slate_50_rounded_xl")}
               onChange={event => {
                 const clean = event.target.value.replace(/[^a-zA-Z0-9 _:/.\[\]%#-]/g, '');
                 onMetaChange(item.node.id, { class_name: clean });
@@ -753,8 +753,8 @@ export function BuilderInspector({
             />
           </label>
           <div className="space-y-1.5">
-            <span className="block text-xs font-medium text-zinc-700">Visibility (Hiển thị trên thiết bị)</span>
-            <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Hiển thị theo màn hình">
+            <span className="block text-xs font-medium text-zinc-700">{t('builder.builder_inspector.visibility')}</span>
+            <div className="grid grid-cols-3 gap-1.5" role="group" aria-label={t('builder.builder_inspector.screens')}>
               {([
                 { key: 'hide_desktop', label: 'Desktop' },
                 { key: 'hide_tablet', label: 'Tablet' },
@@ -773,7 +773,7 @@ export function BuilderInspector({
                         ? 'border-zinc-200 bg-zinc-100 text-zinc-400 line-through'
                         : 'border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100')}
                   >
-                    {dev.label} {hidden ? '· Ẩn' : '✓'}
+                    {dev.label} {hidden ? t('builder.builder_inspector.hidden') : '✓'}
                   </button>
                 );
               })}
@@ -790,7 +790,7 @@ export function BuilderInspector({
             data-testid="inspector-delete-node-btn"
             className="w-full rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {deletable ? 'Xóa node này' : 'Không thể xóa Content Slot bắt buộc'}
+            {deletable ? t('builder.builder_inspector.delete') : t('builder.builder_inspector.cannot_delete')}
           </button>
         </div>
       )}

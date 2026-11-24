@@ -1,3 +1,4 @@
+import { useI18n, type TranslationKey } from '../i18n/index.tsx';
 import React, { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ApiClientError } from '../api/client.ts';
 import { listContentEntries, listContentTypes } from '../api/content.ts';
@@ -148,9 +149,9 @@ function buildItemInputs(drafts: DraftItem[]): MenuItemInput[] {
   });
 }
 
-function targetKindLabel(kind: MenuTargetKind): string {
-  if (kind === 'entry') return 'Trang/Bài';
-  if (kind === 'term') return 'Danh mục';
+function targetKindLabel(kind: MenuTargetKind, t: (key: TranslationKey) => string): string {
+  if (kind === 'entry') return t("studio.page_post");
+  if (kind === 'term') return t("studio.taxonomy_term");
   return 'URL';
 }
 
@@ -166,6 +167,7 @@ export const StudioMenuManager: React.FC<Props> = ({
   onApiError,
   onMessage,
 }) => {
+  const { t } = useI18n();
   // Level 1 (list & slots) vs Level 2 (editing specific menu)
   const [editingMenuId, setEditingMenuId] = useState<number | null>(null);
   const [loadedMenu, setLoadedMenu] = useState<MenuWithItems | null>(null);
@@ -238,11 +240,11 @@ export const StudioMenuManager: React.FC<Props> = ({
       if (availableTerms.length > 0 && addTermId === null) setAddTermId(availableTerms[0].id);
       setRefsLoaded(true);
     } catch (reason) {
-      onApiError(reason, 'Không thể tải danh sách Trang/Bài/Danh mục cho menu.');
+      onApiError(reason, t("studio.cannot_load_pages_posts_and_taxonomy_terms_for_the_menu"));
     } finally {
       setRefsLoading(false);
     }
-  }, [refsLoaded, refsLoading, addEntryId, addTermId, onApiError]);
+  }, [refsLoaded, refsLoading, addEntryId, addTermId, onApiError, t]);
 
   const loadMoreEntries = async () => {
     const pending = Object.entries(entryNextOffsets);
@@ -272,7 +274,7 @@ export const StudioMenuManager: React.FC<Props> = ({
         return next;
       });
     } catch (reason) {
-      onApiError(reason, 'Không tải thêm được danh sách bài/trang.');
+      onApiError(reason, t("studio.cannot_load_more_posts_or_pages"));
     } finally {
       setRefsLoading(false);
     }
@@ -294,9 +296,9 @@ export const StudioMenuManager: React.FC<Props> = ({
       setShowAddDrawer(false);
       void loadRefsIfNeeded();
     } catch (reason) {
-      const msg = reason instanceof Error ? reason.message : 'Không thể tải chi tiết menu.';
+      const msg = reason instanceof Error ? reason.message : t("studio.cannot_load_menu_details");
       setLocalError(msg);
-      onApiError(reason, 'Không thể tải chi tiết menu.');
+      onApiError(reason, t("studio.cannot_load_menu_details"));
     } finally {
       setBusy(false);
     }
@@ -322,7 +324,7 @@ export const StudioMenuManager: React.FC<Props> = ({
     const title = newTitle.trim();
     const key = (newKey.trim() || slugifyMenuKey(title)).trim();
     if (!title || !key) {
-      setLocalError('Vui lòng nhập Tên menu và Mã menu.');
+      setLocalError(t("studio.enter_the_menu_name_and_key"));
       return;
     }
     setBusy(true);
@@ -335,7 +337,7 @@ export const StudioMenuManager: React.FC<Props> = ({
       setKeyManuallyEdited(false);
       setShowCreateForm(false);
       await onMenusMutated();
-      onMessage(`Đã tạo menu "${created.menu.title}".`);
+      onMessage(t("studio.created_menu_title", { title: created.menu.title }));
       const drafted = draftFromMenu(created);
       setEditingMenuId(created.menu.id);
       setLoadedMenu(created);
@@ -345,8 +347,8 @@ export const StudioMenuManager: React.FC<Props> = ({
       setShowAddDrawer(true);
       void loadRefsIfNeeded();
     } catch (reason) {
-      setLocalError(reason instanceof Error ? reason.message : 'Không tạo được menu.');
-      onApiError(reason, 'Không tạo được menu.');
+      setLocalError(reason instanceof Error ? reason.message : t("studio.cannot_create_menu"));
+      onApiError(reason, t("studio.cannot_create_menu"));
     } finally {
       setBusy(false);
     }
@@ -355,7 +357,7 @@ export const StudioMenuManager: React.FC<Props> = ({
   const handleSaveMenu = async () => {
     if (!loadedMenu || !csrfToken || busy) return;
     if (!titleDraft.trim()) {
-      setLocalError('Tiêu đề menu không được để trống.');
+      setLocalError(t("studio.menu_title_cannot_be_empty"));
       return;
     }
     setBusy(true);
@@ -375,16 +377,16 @@ export const StudioMenuManager: React.FC<Props> = ({
       setTitleDraft(updated.menu.title);
       setItemsDraft(drafted);
       setSavedItemsSnapshot(JSON.stringify({ title: updated.menu.title, items: drafted }));
-      setLocalNotice('Đã lưu menu & cập nhật xem trước.');
+      setLocalNotice(t("studio.menu_saved_and_preview_updated"));
       await onMenusMutated();
-      onMessage(`Đã lưu menu "${updated.menu.title}".`);
+      onMessage(t("studio.saved_menu_title", { title: updated.menu.title }));
     } catch (reason) {
       if (reason instanceof ApiClientError && reason.status === 412) {
-        setLocalError('Menu đã thay đổi ở phiên khác (412). Nháp hiện tại vẫn được giữ.');
+        setLocalError(t("studio.menu_changed_in_another_session_412_the_current_draft_is_retained"));
       } else {
-        setLocalError(reason instanceof Error ? reason.message : 'Không thể lưu menu.');
+        setLocalError(reason instanceof Error ? reason.message : t("studio.cannot_save_menu"));
       }
-      onApiError(reason, 'Không thể lưu menu.');
+      onApiError(reason, t("studio.cannot_save_menu"));
     } finally {
       setBusy(false);
     }
@@ -392,7 +394,7 @@ export const StudioMenuManager: React.FC<Props> = ({
 
   const handleDeleteMenu = async () => {
     if (!loadedMenu || !csrfToken || busy) return;
-    if (!window.confirm(`Xóa menu "${loadedMenu.menu.title}" (${loadedMenu.menu.menu_key})?`)) return;
+    if (!window.confirm(t("studio.delete_menu_title_key", { title: loadedMenu.menu.title, key: loadedMenu.menu.menu_key }))) return;
     setBusy(true);
     setLocalError('');
     setLocalNotice('');
@@ -402,10 +404,10 @@ export const StudioMenuManager: React.FC<Props> = ({
       setLoadedMenu(null);
       setItemsDraft([]);
       await onMenusMutated();
-      onMessage('Đã xóa menu.');
+      onMessage(t("studio.menu_deleted"));
     } catch (reason) {
-      setLocalError(reason instanceof Error ? reason.message : 'Không thể xóa menu.');
-      onApiError(reason, 'Không thể xóa menu.');
+      setLocalError(reason instanceof Error ? reason.message : t("studio.cannot_delete_menu"));
+      onApiError(reason, t("studio.cannot_delete_menu"));
     } finally {
       setBusy(false);
     }
@@ -418,11 +420,11 @@ export const StudioMenuManager: React.FC<Props> = ({
     if (addTab === 'entry') {
       const targetId = addEntryId ?? entries[0]?.id ?? null;
       if (!targetId) {
-        setLocalError('Chưa có Trang/Bài viết đã xuất bản để thêm.');
+        setLocalError(t("studio.no_published_pages_or_posts_are_available_to_add"));
         return;
       }
       const found = entries.find(item => item.id === targetId);
-      if (!label) label = found?.title ?? `Mục #${targetId}`;
+      if (!label) label = found?.title ?? t("studio.entry_id", { id: targetId });
       setItemsDraft(prev => [...prev, {
         localKey,
         id: null,
@@ -436,11 +438,11 @@ export const StudioMenuManager: React.FC<Props> = ({
     } else if (addTab === 'term') {
       const targetId = addTermId ?? terms[0]?.id ?? null;
       if (!targetId) {
-        setLocalError('Chưa có danh mục công khai để thêm.');
+        setLocalError(t("studio.no_public_taxonomy_terms_are_available_to_add"));
         return;
       }
       const found = terms.find(item => item.id === targetId);
-      if (!label) label = found?.name ?? `Danh mục #${targetId}`;
+      if (!label) label = found?.name ?? t("studio.term_id", { id: targetId });
       setItemsDraft(prev => [...prev, {
         localKey,
         id: null,
@@ -454,7 +456,7 @@ export const StudioMenuManager: React.FC<Props> = ({
     } else {
       const url = addExternalUrl.trim();
       if (!url) {
-        setLocalError('Vui lòng nhập đường dẫn URL.');
+        setLocalError(t("studio.enter_a_url"));
         return;
       }
       if (!label) label = url;
@@ -521,7 +523,7 @@ export const StudioMenuManager: React.FC<Props> = ({
             disabled={busy}
             data-testid="studio-menu-back"
             onClick={() => {
-              if (menuDirty && !window.confirm('Menu có thay đổi chưa lưu. Quay lại danh sách Menu và bỏ nháp?')) {
+              if (menuDirty && !window.confirm(t("studio.the_menu_has_unsaved_changes_return_to_the_menu_list_and_discard_the_draft"))) {
                 return;
               }
               setEditingMenuId(null);
@@ -532,7 +534,7 @@ export const StudioMenuManager: React.FC<Props> = ({
             className="flex items-center gap-1 rounded px-1.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200/70 hover:text-zinc-950"
           >
             <span aria-hidden="true">‹</span>
-            <span>Danh sách Menu</span>
+            <span>{t("studio.menu_list")}</span>
           </button>
           <button
             type="button"
@@ -540,7 +542,7 @@ export const StudioMenuManager: React.FC<Props> = ({
             onClick={() => void handleDeleteMenu()}
             className="rounded px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-45"
           >
-            Xóa menu
+            {t("studio.delete_menu")}
           </button>
         </div>
 
@@ -551,7 +553,7 @@ export const StudioMenuManager: React.FC<Props> = ({
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-2">
               <label htmlFor="studio-menu-title" className="text-xs font-semibold text-zinc-800">
-                Tên menu
+                {t("studio.menu_name")}
               </label>
               <div className="flex items-center gap-1">
                 <span className="font-mono text-[10px] text-zinc-500">{loadedMenu.menu.menu_key}</span>
@@ -571,7 +573,7 @@ export const StudioMenuManager: React.FC<Props> = ({
           <div className="space-y-2 border-t border-zinc-200 pt-2.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-zinc-800">
-                Các mục menu ({itemsDraft.length})
+                {t("studio.menu_items_count", { count: itemsDraft.length })}
               </span>
               <button
                 type="button"
@@ -583,7 +585,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                 }}
                 className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-45"
               >
-                {showAddDrawer ? 'Đóng' : '+ Thêm mục'}
+                {showAddDrawer ? t("studio.close") : t("studio.add_item")}
               </button>
             </div>
 
@@ -595,8 +597,8 @@ export const StudioMenuManager: React.FC<Props> = ({
               >
                 <div className="grid grid-cols-3 gap-1 rounded bg-white p-0.5 border border-zinc-200">
                   {([
-                    ['entry', 'Trang / Bài'],
-                    ['term', 'Danh mục'],
+                    ['entry', t("studio.page_post_203")],
+                    ['term', t("studio.taxonomy_term")],
                     ['external', 'URL'],
                   ] as const).map(([kind, text]) => (
                     <button
@@ -616,13 +618,13 @@ export const StudioMenuManager: React.FC<Props> = ({
                 {addTab === 'entry' && (
                   <div className="space-y-1.5">
                     <select
-                      aria-label="Chọn Trang hoặc Bài viết"
+                      aria-label={t("studio.select_a_page_or_post")}
                       className={INPUT_CLASS}
                       value={addEntryId ?? ''}
                       disabled={refsLoading}
                       onChange={e => setAddEntryId(e.target.value ? Number(e.target.value) : null)}
                     >
-                      {entries.length === 0 && <option value="">{refsLoading ? 'Đang tải…' : '(Chưa có bài xuất bản)'}</option>}
+                      {entries.length === 0 && <option value="">{refsLoading ? t("studio.loading") : t("studio.no_published_entries")}</option>}
                       {entries.map(entry => (
                         <option key={entry.id} value={entry.id}>
                           {entry.title} ({entry.content_type_key})
@@ -636,7 +638,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                         onClick={() => void loadMoreEntries()}
                         className="text-[11px] font-medium text-sky-700 hover:underline"
                       >
-                        {refsLoading ? 'Đang tải thêm…' : 'Tải thêm bài/trang…'}
+                        {refsLoading ? t("studio.loading_more") : t("studio.load_more_posts_pages")}
                       </button>
                     )}
                   </div>
@@ -644,13 +646,13 @@ export const StudioMenuManager: React.FC<Props> = ({
 
                 {addTab === 'term' && (
                   <select
-                    aria-label="Chọn danh mục"
+                    aria-label={t("studio.select_taxonomy_term")}
                     className={INPUT_CLASS}
                     value={addTermId ?? ''}
                     disabled={refsLoading}
                     onChange={e => setAddTermId(e.target.value ? Number(e.target.value) : null)}
                   >
-                    {terms.length === 0 && <option value="">{refsLoading ? 'Đang tải…' : '(Chưa có danh mục)'}</option>}
+                    {terms.length === 0 && <option value="">{refsLoading ? t("studio.loading") : t("studio.no_taxonomy_terms")}</option>}
                     {terms.map(term => (
                       <option key={term.id} value={term.id}>
                         {term.name} ({taxonomyDefs.find(d => d.key === term.kind)?.label ?? term.kind})
@@ -662,8 +664,8 @@ export const StudioMenuManager: React.FC<Props> = ({
                 {addTab === 'external' && (
                   <input
                     type="text"
-                    placeholder="https://... hoặc /lien-he"
-                    aria-label="Đường dẫn URL"
+                    placeholder={t("studio.https_or_contact")}
+                    aria-label={t("studio.url")}
                     className={INPUT_CLASS}
                     value={addExternalUrl}
                     onChange={e => setAddExternalUrl(e.target.value)}
@@ -672,8 +674,8 @@ export const StudioMenuManager: React.FC<Props> = ({
 
                 <input
                   type="text"
-                  placeholder="Nhãn hiển thị (bỏ trống sẽ tự lấy tiêu đề)"
-                  aria-label="Nhãn hiển thị"
+                  placeholder={t("studio.display_label_leave_blank_to_use_the_title")}
+                  aria-label={t("studio.display_label")}
                   className={INPUT_CLASS}
                   value={addLabel}
                   onChange={e => setAddLabel(e.target.value)}
@@ -683,14 +685,14 @@ export const StudioMenuManager: React.FC<Props> = ({
                   type="submit"
                   className="w-full rounded-md bg-sky-600 py-1.5 text-xs font-semibold text-white hover:bg-sky-700"
                 >
-                  Thêm vào Menu
+                  {t("studio.add_to_menu")}
                 </button>
               </form>
             )}
 
             {itemsDraft.length === 0 ? (
               <p className="rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-xs text-zinc-500">
-                Menu này chưa có mục nào. Bấm <strong>+ Thêm mục</strong> để bắt đầu.
+                {t("studio.this_menu_is_empty_select_add_item_to_get_started")}
               </p>
             ) : (
               <div className="space-y-1.5">
@@ -714,24 +716,24 @@ export const StudioMenuManager: React.FC<Props> = ({
                           <span className="shrink-0 text-zinc-400" aria-hidden="true">
                             {expanded ? '▾' : '▸'}
                           </span>
-                          <span className="truncate">{item.label || '(Chưa đặt tên)'}</span>
+                          <span className="truncate">{item.label || t("studio.untitled")}</span>
                           <span className="shrink-0 rounded bg-zinc-100 px-1 py-0.5 text-[10px] font-normal text-zinc-500">
-                            {targetKindLabel(item.target_kind)}
+                            {targetKindLabel(item.target_kind, t)}
                           </span>
                         </button>
                         <div className="flex shrink-0 items-center gap-0.5">
-                          <button type="button" title="Lên" className={MINI_BTN_CLASS} disabled={busy || idx === 0} onClick={() => moveItem(idx, -1)}>↑</button>
-                          <button type="button" title="Xuống" className={MINI_BTN_CLASS} disabled={busy || idx === itemsDraft.length - 1} onClick={() => moveItem(idx, 1)}>↓</button>
-                          <button type="button" title="Giảm thụt lề" className={MINI_BTN_CLASS} disabled={busy || !item.parentLocalKey} onClick={() => outdentItem(idx)}>←</button>
-                          <button type="button" title="Lồng làm mục con" className={MINI_BTN_CLASS} disabled={busy || !canIndent} onClick={() => indentItem(idx)}>→</button>
-                          <button type="button" title="Xóa mục" className={MINI_BTN_CLASS + ' text-rose-700 hover:bg-rose-50'} disabled={busy} onClick={() => removeItem(idx)}>×</button>
+                          <button type="button" title={t("studio.up")} className={MINI_BTN_CLASS} disabled={busy || idx === 0} onClick={() => moveItem(idx, -1)}>↑</button>
+                          <button type="button" title={t("studio.down")} className={MINI_BTN_CLASS} disabled={busy || idx === itemsDraft.length - 1} onClick={() => moveItem(idx, 1)}>↓</button>
+                          <button type="button" title={t("studio.outdent")} className={MINI_BTN_CLASS} disabled={busy || !item.parentLocalKey} onClick={() => outdentItem(idx)}>←</button>
+                          <button type="button" title={t("studio.indent_as_child")} className={MINI_BTN_CLASS} disabled={busy || !canIndent} onClick={() => indentItem(idx)}>→</button>
+                          <button type="button" title={t("studio.delete_item")} className={MINI_BTN_CLASS + ' text-rose-700 hover:bg-rose-50'} disabled={busy} onClick={() => removeItem(idx)}>×</button>
                         </div>
                       </div>
 
                       {expanded && (
                         <div className="space-y-2 border-t border-zinc-100 bg-zinc-50/70 p-2.5">
                           <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                            <span>Nhãn hiển thị</span>
+                            <span>{t("studio.display_label")}</span>
                             <input
                               type="text"
                               className={INPUT_CLASS}
@@ -746,7 +748,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                           </label>
 
                           <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                            <span>Loại đích</span>
+                            <span>{t("studio.target_type")}</span>
                             <select
                               className={INPUT_CLASS}
                               value={item.target_kind}
@@ -757,15 +759,15 @@ export const StudioMenuManager: React.FC<Props> = ({
                                 setItemsDraft(next);
                               }}
                             >
-                              <option value="entry">Trang / Bài viết</option>
-                              <option value="term">Danh mục (Taxonomy)</option>
-                              <option value="external">URL tùy chỉnh</option>
+                              <option value="entry">{t("studio.page_post_223")}</option>
+                              <option value="term">{t("studio.taxonomy_term_224")}</option>
+                              <option value="external">{t("studio.custom_url")}</option>
                             </select>
                           </label>
 
                           {item.target_kind === 'entry' && (
                             <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                              <span>Đích bài/trang</span>
+                              <span>{t("studio.post_page_target")}</span>
                               <select
                                 className={INPUT_CLASS}
                                 value={item.target_entry_id ?? ''}
@@ -779,9 +781,9 @@ export const StudioMenuManager: React.FC<Props> = ({
                                   setItemsDraft(next);
                                 }}
                               >
-                                <option value="">-- Chọn entry --</option>
+                                <option value="">{t("studio.select_entry")}</option>
                                 {item.target_entry_id !== null && !entries.some(en => en.id === item.target_entry_id) && (
-                                  <option value={item.target_entry_id}>#{item.target_entry_id} (đích hiện tại)</option>
+                                  <option value={item.target_entry_id}>{t("studio.id_current_target", { id: item.target_entry_id })}</option>
                                 )}
                                 {entries.map(en => (
                                   <option key={en.id} value={en.id}>
@@ -794,7 +796,7 @@ export const StudioMenuManager: React.FC<Props> = ({
 
                           {item.target_kind === 'term' && (
                             <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                              <span>Đích danh mục</span>
+                              <span>{t("studio.taxonomy_term_target")}</span>
                               <select
                                 className={INPUT_CLASS}
                                 value={item.target_term_id ?? ''}
@@ -808,9 +810,9 @@ export const StudioMenuManager: React.FC<Props> = ({
                                   setItemsDraft(next);
                                 }}
                               >
-                                <option value="">-- Chọn term --</option>
+                                <option value="">{t("studio.select_term")}</option>
                                 {item.target_term_id !== null && !terms.some(t => t.id === item.target_term_id) && (
-                                  <option value={item.target_term_id}>#{item.target_term_id} (đích hiện tại)</option>
+                                  <option value={item.target_term_id}>{t("studio.id_current_target", { id: item.target_term_id })}</option>
                                 )}
                                 {terms.map(t => (
                                   <option key={t.id} value={t.id}>
@@ -823,7 +825,7 @@ export const StudioMenuManager: React.FC<Props> = ({
 
                           {item.target_kind === 'external' && (
                             <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                              <span>Đường dẫn URL</span>
+                              <span>{t("studio.url")}</span>
                               <input
                                 type="text"
                                 placeholder="https://example.com"
@@ -856,7 +858,7 @@ export const StudioMenuManager: React.FC<Props> = ({
             onClick={() => void handleSaveMenu()}
             className="flex w-full items-center justify-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-sky-700 disabled:opacity-45"
           >
-            {busy ? 'Đang lưu menu…' : (menuDirty ? 'Lưu cấu trúc Menu *' : 'Lưu cấu trúc Menu')}
+            {busy ? t("studio.saving_menu") : (menuDirty ? t("studio.save_menu_structure") : t("studio.save_menu_structure_232"))}
           </button>
         </div>
       </div>
@@ -871,17 +873,17 @@ export const StudioMenuManager: React.FC<Props> = ({
 
         <div>
           <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-700">
-            Vị trí hiển thị (Theme Slots)
+            {t("studio.display_locations_theme_slots")}
           </h2>
           {!activeThemeId || !menuSlots ? (
             <div className="mt-2">
               <AdminAlert tone="info">
-                Theme hiện tại chưa kích hoạt hoặc không khai báo vùng menu.
+                {t("studio.no_active_theme_or_the_active_theme_has_no_menu_locations")}
               </AdminAlert>
             </div>
           ) : menuSlots.available_slots.length === 0 ? (
             <p className="mt-1.5 text-xs text-zinc-500">
-              Theme {activeThemeId} không khai báo slot menu nào.
+              {t("studio.theme_theme_has_no_menu_slots", { theme: activeThemeId })}
             </p>
           ) : (
             <div className="mt-2.5 space-y-2.5">
@@ -894,7 +896,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                     htmlFor={`studio-menu-slot-${slot}`}
                   >
                     <span>
-                      Vị trí: <code className="font-mono text-zinc-900">{slot}</code>
+                      {t("studio.location")} <code className="font-mono text-zinc-900">{slot}</code>
                     </span>
                     <select
                       id={`studio-menu-slot-${slot}`}
@@ -903,7 +905,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                       value={assigned ?? ''}
                       onChange={e => onMenuSlotChange(slot, pageChoiceValue(e.target.value))}
                     >
-                      <option value="">(Không gắn menu)</option>
+                      <option value="">{t("studio.no_menu_assigned")}</option>
                       {menusList.map(menu => (
                         <option key={menu.id} value={menu.id}>
                           {menu.title} ({menu.menu_key})
@@ -920,7 +922,7 @@ export const StudioMenuManager: React.FC<Props> = ({
         <div className="space-y-2.5 border-t border-zinc-200 pt-3.5">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-700">
-              Danh sách Menu ({menusList.length})
+              {t("studio.menu_list_count", { count: menusList.length })}
             </h2>
             <button
               type="button"
@@ -929,7 +931,7 @@ export const StudioMenuManager: React.FC<Props> = ({
               onClick={() => setShowCreateForm(v => !v)}
               className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-45"
             >
-              {showCreateForm ? 'Đóng' : '+ Tạo menu'}
+              {showCreateForm ? t("studio.close") : t("studio.create_menu")}
             </button>
           </div>
 
@@ -940,11 +942,11 @@ export const StudioMenuManager: React.FC<Props> = ({
               className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 p-2.5"
             >
               <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                <span>Tên menu</span>
+                <span>{t("studio.menu_name")}</span>
                 <input
                   type="text"
                   required
-                  placeholder="Ví dụ: Menu chính"
+                  placeholder={t("studio.example_main_menu")}
                   className={INPUT_CLASS}
                   value={newTitle}
                   onChange={e => {
@@ -955,7 +957,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                 />
               </label>
               <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                <span>Mã định danh (menu_key)</span>
+                <span>{t("studio.identifier_menu_key")}</span>
                 <input
                   type="text"
                   required
@@ -973,13 +975,13 @@ export const StudioMenuManager: React.FC<Props> = ({
                 disabled={!csrfToken || busy}
                 className="w-full rounded-md bg-sky-600 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-45"
               >
-                {busy ? 'Đang tạo…' : 'Tạo menu mới'}
+                {busy ? t("studio.creating") : t("studio.create_new_menu")}
               </button>
             </form>
           )}
 
           {menusList.length === 0 ? (
-            <p className="text-xs text-zinc-500">Chưa có menu nào. Bấm <strong>+ Tạo menu</strong> để tạo mới.</p>
+            <p className="text-xs text-zinc-500">{t("studio.no_menus_yet_create_menu")}</p>
           ) : (
             <ul className="m-0 list-none space-y-1.5 p-0">
               {menusList.map(menu => (
