@@ -314,7 +314,7 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         .to_str()
         .unwrap()
         .to_owned();
-    assert!(csp.contains("script-src 'none'"));
+    assert!(csp.contains("script-src 'self' 'unsafe-inline'"));
     let en_404_html = en_404.text().await.unwrap();
     assert!(en_404_html.contains("This page does not exist or has been moved."));
     assert!(en_404_html.contains("<details"));

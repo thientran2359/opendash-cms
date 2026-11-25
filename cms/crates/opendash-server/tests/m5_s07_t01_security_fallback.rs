@@ -365,10 +365,12 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
 
     // 3. Adversarial C-SEC corpus: all dangerous templates must be rejected at install
     let bad_templates: &[(&str, &[u8])] = &[
-        ("script_tag", b"<main><script>alert(1)</script>{{ od_content() }}</main>"),
-        ("svg_tag", b"<main><svg onload=alert(1)></svg>{{ od_content() }}</main>"),
-        ("math_tag", b"<main><math><mi>x</mi></math>{{ od_content() }}</main>"),
-        ("event_handler", b"<main><div onclick=\"alert(1)\">x</div>{{ od_content() }}</main>"),
+        // S02 allows static trusted JS/SVG/on*; these negative fixtures must
+        // exercise untrusted interpolation and still-forbidden markup.
+        ("script_tag", b"<main><script>const x = '{{ entry.title }}';</script>{{ od_content() }}</main>"),
+        ("svg_tag", b"<main><svg onload=\"{{ entry.title }}\"></svg>{{ od_content() }}</main>"),
+        ("math_tag", b"<main><math><iframe src='/'></iframe></math>{{ od_content() }}</main>"),
+        ("event_handler", b"<main><div onclick=\"run('{{ entry.title }}')\">x</div>{{ od_content() }}</main>"),
         ("js_url", b"<main><a href=\"javascript:alert(1)\">x</a>{{ od_content() }}</main>"),
         ("forged_filter", b"<main>{{ entry.title | safe }}{{ od_content() }}</main>"),
         ("include_stmt", b"<main>{% include 'other.html' %}{{ od_content() }}</main>"),

@@ -105,7 +105,7 @@ mod s03_package_block_tests {
         let mut files = file_map();
         files.insert(
             "blocks/banner/render.html".into(),
-            b"<script>alert(1)</script>".to_vec(),
+            b"<object>unsafe</object>".to_vec(),
         );
         assert!(validate_theme_v3_files(files).is_err());
 
@@ -1616,7 +1616,7 @@ mod tests {
           "templates":[{"kind":"page", "file":"page.html"}]
         }"#;
         for template in [
-            b"<main><script>alert(1)</script>{{ od_content() }}</main>".as_slice(),
+            b"<main><object>unsafe</object>{{ od_content() }}</main>".as_slice(),
             b"<main>{% include 'evil.html' %}{{ od_content() }}</main>".as_slice(),
             b"<main>{{ od_content() }}{{ od_content() }}</main>".as_slice(),
             b"<div title=\"{{ od_content() }}\"></div>".as_slice(),
@@ -1830,7 +1830,7 @@ mod tests {
             br#"{"manifest_version":3,"theme_id":"bad-csec","name":"Bad","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}]}"#,
         )
         .unwrap();
-        std::fs::write(bad_csec.join("index.html"), b"<script>alert(1)</script>").unwrap();
+        std::fs::write(bad_csec.join("index.html"), b"<iframe>unsafe</iframe>").unwrap();
         assert!(check_theme_path(&bad_csec).is_err());
 
         let _ = std::fs::remove_dir_all(&tmp_root);

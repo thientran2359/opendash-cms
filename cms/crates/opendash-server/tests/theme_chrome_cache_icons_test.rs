@@ -69,7 +69,7 @@ fn cli_accepts_inline_icon_and_rejects_untrusted_icon_forms() {
         "{% set captured %}{{ od_icon('calendar') }}{% endset %}",
         "{{ od_icon('calendar') | upper }}",
         "OD_ICON_0123456789abcdef0123456789abcdef",
-        "<svg><path d='M0 0'/></svg>",
+        "<object><param name='unsafe'/></object>",
     ] {
         write_theme(&path, invalid);
         let (ok, output) = check_theme(&path);
@@ -445,7 +445,10 @@ async fn e2e_page_layout_chrome_and_inline_icons_with_strict_csp() {
         .unwrap()
         .to_owned();
     assert!(csp.contains("img-src 'self'"), "unexpected CSP: {csp}");
-    assert!(csp.contains("script-src 'none'"), "unexpected CSP: {csp}");
+    assert!(
+        csp.contains("script-src 'self' 'unsafe-inline'"),
+        "unexpected CSP: {csp}"
+    );
     let html = public.text().await.unwrap();
     assert!(!html.contains("OD_ICON_"), "raw icon nonce leaked");
     assert!(
