@@ -733,17 +733,37 @@ pub fn resolve_enqueued_assets(
                 (selected_scripts[index] && item.location == ScriptLocation::Head).then_some(index)
             }),
     );
-    for index in scripts.ordered(&selected_scripts) {
+    let script_order = scripts.ordered(&selected_scripts);
+    // Async execution may overtake its dependencies (or its dependents).
+    // Keep async only for isolated handles; connected declarations execute
+    // after parsing, in topological document order, like deferred scripts.
+    let mut linked = vec![false; manifest.scripts.len()];
+    for &index in &script_order {
+        for &dep in &scripts.deps[index] {
+            linked[index] = true;
+            linked[dep] = true;
+        }
+    }
+    let mut delayed = vec![false; manifest.scripts.len()];
+    for index in script_order {
         let script = &manifest.scripts[index];
+        // A parser-blocking dependent would run before a deferred/module
+        // dependency, even if its tag appears later. Promote it to defer.
+        delayed[index] = script.module
+            || script.strategy == ScriptStrategy::Defer
+            || (script.strategy == ScriptStrategy::Async && linked[index])
+            || scripts.deps[index].iter().any(|&dep| delayed[dep]);
         let type_attr = if script.module {
             " type=\"module\""
         } else {
             ""
         };
-        let strategy_attr = match (script.module, script.strategy) {
-            (_, ScriptStrategy::Async) => " async",
-            (false, ScriptStrategy::Defer) => " defer",
-            _ => "",
+        let strategy_attr = if script.strategy == ScriptStrategy::Async && !linked[index] {
+            " async"
+        } else if !script.module && delayed[index] {
+            " defer"
+        } else {
+            ""
         };
         let tag = format!(
             "<script src=\"/theme/{revision_digest}/{}\"{type_attr}{strategy_attr}></script>",
@@ -1153,7 +1173,7 @@ mod tests {
             vec![
                 js("base.js", " defer"),
                 js("middle.mjs", " type=\"module\""),
-                js("head.js", "")
+                js("head.js", " defer")
             ]
         );
         assert_eq!(
@@ -1201,6 +1221,44 @@ mod tests {
                 ResolvedEnqueuedAssets::default()
             );
         }
+    }
+
+    #[test]
+    fn enqueue_preserves_execution_order_across_async_defer_and_blocking_dependencies() {
+        let digest = "a".repeat(64);
+        let mut manifest = enqueue_manifest();
+        manifest.scripts[1].strategy = ScriptStrategy::Blocking;
+        manifest.scripts[5].deps = vec!["async".into()];
+        manifest.validate().unwrap();
+
+        // A blocking footer script cannot execute ahead of its deferred
+        // dependency. Connected async scripts must also execute in order.
+        let archive = resolve_enqueued_assets(&manifest, &digest, EnqueueCondition::Archive);
+        assert_eq!(
+            archive.footer_scripts,
+            vec![
+                format!("<script src=\"/theme/{digest}/assets/base.js\" defer></script>"),
+                format!("<script src=\"/theme/{digest}/assets/footer.js\" defer></script>"),
+                format!(
+                    "<script src=\"/theme/{digest}/assets/async.mjs\" type=\"module\"></script>"
+                ),
+                format!("<script src=\"/theme/{digest}/assets/other.js\" defer></script>"),
+            ]
+        );
+
+        // The archive-only dependent must not alter the independent async
+        // script's strategy on a different route.
+        let home = resolve_enqueued_assets(&manifest, &digest, EnqueueCondition::Home);
+        assert!(
+            home.footer_scripts
+                .iter()
+                .any(|tag| tag.contains("async.mjs\" type=\"module\" async"))
+        );
+        assert!(
+            home.head_scripts
+                .last()
+                .is_some_and(|tag| tag.contains("head.js\" defer"))
+        );
     }
 
     #[test]
