@@ -212,6 +212,9 @@ pub struct ThemeV3Package {
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
+// The approved v3 active asset cap is 512 KiB; retain legacy text caps.
+const V3_MAX_ACTIVE_ASSET_BYTES: usize = 512 * 1024;
+
 fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
     if rel_path == "theme.json" {
         return Ok(V2_MAX_TEXT_BYTES);
@@ -258,7 +261,8 @@ fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
             }
             let ext = name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
             match ext {
-                "css" | "txt" | "js" | "mjs" | "svg" => Ok(V2_MAX_TEXT_BYTES),
+                "css" | "txt" => Ok(V2_MAX_TEXT_BYTES),
+                "js" | "mjs" | "svg" => Ok(V3_MAX_ACTIVE_ASSET_BYTES),
                 "png" | "jpg" | "jpeg" | "webp" | "gif" | "woff2" => Ok(V2_MAX_RASTER_BYTES),
                 _ => Err("Định dạng assets theme v3 không được cho phép."),
             }
@@ -1352,11 +1356,11 @@ mod tests {
                 parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, &invalid_utf8)])),
                 Err(V2ZipError::BadRequest(message)) if message.contains("UTF-8")
             ));
-            let boundary = vec![b'a'; V2_MAX_TEXT_BYTES];
+            let boundary = vec![b'a'; V3_MAX_ACTIVE_ASSET_BYTES];
             assert!(
                 parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, &boundary)])).is_ok()
             );
-            let oversized = vec![b'a'; V2_MAX_TEXT_BYTES + 1];
+            let oversized = vec![b'a'; V3_MAX_ACTIVE_ASSET_BYTES + 1];
             assert!(matches!(
                 parse_theme_zip_v3(&build_v3_zip(manifest, &[(path, &oversized)])),
                 Err(V2ZipError::PayloadTooLarge(_))
