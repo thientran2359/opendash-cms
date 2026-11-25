@@ -189,3 +189,47 @@ class ResumeTests(unittest.TestCase):
             self.assertIn('resume-issue harbor',command);self.assertIn('--ack-id 123',command)
             self.assertIn('--head-sha '+ 'c'*40,command)
             self.assertEqual(run.call_args.kwargs['encoding'],'utf-8')
+
+    def test_pre_pr_resume_succeeds_without_pr_and_follows_chain(self):
+        self.marker.update(pr=None, head_sha=None)
+        self.ack['body'] = self.body()
+        pre_args = ('harbor', self.request, 378, 'M6-S11-T01', 'a'*40, 'b'*40, None, None, 123)
+        def github_no_pr(path):
+            if '/pulls/' in path:
+                raise AssertionError('pre-PR resume must not fetch PR')
+            return self.github(path)
+        with mock.patch.object(a, 'github_json', side_effect=github_no_pr):
+            r = a.resume_issue(*pre_args)
+            self.assertEqual(r['outcome'], 'ACCEPTED')
+            self.assertTrue(a.resume_issue(*pre_args)['duplicate'])
+        self.assertEqual(len(self.posts), 1)
+        self.assertIn('RESUME_CURRENT (pre-PR)', self.posts[0]['text'])
+        self.assertIn('123', self.posts[0]['text'])
+        report = a.status_task('harbor', 378, 'M6-S11-T01', 'a'*40)
+        self.assertEqual(report['request_id'], self.request)
+        self.assertIsNone(report['pr'])
+        self.assertEqual(report['ack_id'], 123)
+
+    def test_pre_pr_resume_rejects_partial_pr_args_or_mismatched_marker(self):
+        with self.assertRaisesRegex(a.Blocked, 'INVALID_RESUME_ARGUMENTS'):
+            a.resume_issue('harbor', self.request, 378, 'M6-S11-T01', 'a'*40, 'b'*40, 406, None, 123)
+        with self.assertRaisesRegex(a.Blocked, 'INVALID_RESUME_ARGUMENTS'):
+            a.resume_issue('harbor', self.request, 378, 'M6-S11-T01', 'a'*40, 'b'*40, None, 'c'*40, 123)
+        # Marker still pins pr=406 while caller omits --pr -> must reject
+        with self.assertRaisesRegex(a.Blocked, 'RESUME_ACK_PINS_OR_SIGNATURE_INVALID'):
+            a.resume_issue('harbor', self.request, 378, 'M6-S11-T01', 'a'*40, 'b'*40, None, None, 123)
+        self.assertFalse(self.posts)
+
+    def test_remote_cli_forwards_pre_pr_resume_without_pr_flags(self):
+        import argparse
+        args = argparse.Namespace(command='resume-issue', target='harbor', ssh_host='user@mac',
+             request_id=self.request, issue=378, task_id='M6-S11-T01', source_sha='a'*40,
+             base_sha='b'*40, pr=None, head_sha=None, ack_id=123)
+        done = mock.Mock(returncode=0, stdout='{"outcome":"ACCEPTED"}')
+        with mock.patch.object(a.subprocess, 'run', return_value=done) as run:
+            a.run_remote(args)
+            command = run.call_args.args[0][-1]
+            self.assertIn('resume-issue harbor', command)
+            self.assertIn('--ack-id 123', command)
+            self.assertNotIn('--pr', command)
+            self.assertNotIn('--head-sha', command)

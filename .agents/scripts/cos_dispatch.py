@@ -751,22 +751,23 @@ def check_resume(target, issue, task_id, source_sha, base_sha, pr, head_sha, ack
     ended_ms = resume_sessions(config, previous_status["input_id"])
     prefix = "repos/" + REPOSITORY
     item = github_json(prefix + "/issues/" + str(issue))
-    pull = github_json(prefix + "/pulls/" + str(pr))
+    pull = github_json(prefix + "/pulls/" + str(pr)) if pr is not None else None
     ack = github_json(prefix + "/issues/comments/" + str(ack_id))
     try:
         if (item["state"] != "open" or not any(x.get("name") == "agent:" + target for x in item["labels"])
                 or task_id not in item.get("body", "") or source_sha not in item.get("body", "")):
             raise Blocked("RESUME_ISSUE_NOT_OWNED_OR_OPEN")
         name = target.title()
-        if (pull["number"] != pr or pull["state"] != "open" or pull.get("merged") is not False
-                or pull["head"]["repo"]["full_name"] != REPOSITORY
-                or pull["base"]["repo"]["full_name"] != REPOSITORY
-                or pull["head"]["ref"] != BRANCHES[target] or pull["base"]["ref"] != "main"
-                or pull["head"]["sha"] != head_sha or pull["base"]["sha"] != base_sha
-                or not re.search(r"Agent:\s*" + name + r"\b", pull.get("body", ""))
-                or task_id not in pull.get("body", "")
-                or not re.search(r"(?<![0-9])#" + str(issue) + r"(?![0-9])", pull.get("body", ""))):
-            raise Blocked("RESUME_PR_PINS_OR_OWNERSHIP_CHANGED")
+        if pull is not None:
+            if (pull["number"] != pr or pull["state"] != "open" or pull.get("merged") is not False
+                    or pull["head"]["repo"]["full_name"] != REPOSITORY
+                    or pull["base"]["repo"]["full_name"] != REPOSITORY
+                    or pull["head"]["ref"] != BRANCHES[target] or pull["base"]["ref"] != "main"
+                    or pull["head"]["sha"] != head_sha or pull["base"]["sha"] != base_sha
+                    or not re.search(r"Agent:\s*" + name + r"\b", pull.get("body", ""))
+                    or task_id not in pull.get("body", "")
+                    or not re.search(r"(?<![0-9])#" + str(issue) + r"(?![0-9])", pull.get("body", ""))):
+                raise Blocked("RESUME_PR_PINS_OR_OWNERSHIP_CHANGED")
         if (ack["id"] != ack_id or ack["user"]["login"] != REPOSITORY.split("/")[0]
                 or ack["issue_url"] != "https://api.github.com/" + prefix + "/issues/" + str(issue)):
             raise Blocked("RESUME_ACK_NOT_AUTHORIZED")
@@ -794,10 +795,14 @@ def check_resume(target, issue, task_id, source_sha, base_sha, pr, head_sha, ack
 
 
 def resume_issue(target, request_id, issue, task_id, source_sha, base_sha, pr, head_sha, ack_id):
+    has_pr = pr is not None or head_sha is not None
+    pr_valid = (not has_pr) or (
+        type(pr) is int and pr >= 1 and bool(SHA_RE.fullmatch(head_sha or ""))
+    )
     if (target not in BRANCHES or str(uuid.UUID(request_id)) != request_id or
-            type(issue) is not int or issue < 1 or type(pr) is not int or pr < 1 or
+            type(issue) is not int or issue < 1 or not pr_valid or
             type(ack_id) is not int or ack_id < 1 or not TASK_RE.fullmatch(task_id or "") or
-            any(not SHA_RE.fullmatch(x or "") for x in (source_sha, base_sha, head_sha))):
+            any(not SHA_RE.fullmatch(x or "") for x in (source_sha, base_sha))):
         raise Blocked("INVALID_RESUME_ARGUMENTS")
     safe, reason = security_check()
     if not safe:
@@ -830,12 +835,22 @@ def resume_issue(target, request_id, issue, task_id, source_sha, base_sha, pr, h
         raise Blocked("CONCURRENT_RESUME_RECONCILE_EXISTING_REQUEST") from exc
     try:
         config = check_resume(target, issue, task_id, source_sha, base_sha, pr, head_sha, ack_id, previous)
-        text = (prompt(target, "issue", issue, task_id, source_sha, base_sha) +
+        if pr is not None:
+            resume_suffix = (
                 " RESUME_CURRENT only, existing PR #" + str(pr) + " head " + head_sha +
                 "; coordinator Issue comment ID " + str(ack_id) +
                 ". Re-fetch that exact comment and PR before edits. Apply only its bounded "
                 "ACK/feedback within task ownership. Do not pick a new task, change Project "
-                "to Ready, or bypass pending security/data/CI/G5 gates. Stop on pin drift.")
+                "to Ready, or bypass pending security/data/CI/G5 gates. Stop on pin drift."
+            )
+        else:
+            resume_suffix = (
+                " RESUME_CURRENT (pre-PR) only; coordinator Issue comment ID " + str(ack_id) +
+                ". Re-fetch that exact comment before edits. Continue the same task within task "
+                "ownership. Do not pick a new task, change Project to Ready, or bypass pending "
+                "security/data/CI/G5 gates. Stop on pin drift."
+            )
+        text = prompt(target, "issue", issue, task_id, source_sha, base_sha) + resume_suffix
         code, _ = call_api("POST", "/v1/inputs", dict(id=input_id, projectId=config["project_id"], text=text))
         record["outcome"] = "ACCEPTED" if code == 202 else "UNKNOWN"
     except Blocked as exc:
@@ -974,7 +989,11 @@ def run_remote(args):
         command.extend(["--issue", str(args.issue), "--task-id", args.task_id,
                         "--source-sha", args.source_sha, "--base-sha", args.base_sha])
     if args.command == "resume-issue":
-        command.extend(["--pr", str(args.pr), "--head-sha", args.head_sha, "--ack-id", str(args.ack_id)])
+        if args.pr is not None:
+            command.extend(["--pr", str(args.pr)])
+        if args.head_sha is not None:
+            command.extend(["--head-sha", args.head_sha])
+        command.extend(["--ack-id", str(args.ack_id)])
     if args.command == "status-task":
         command.extend(["--issue", str(args.issue), "--task-id", args.task_id,
                         "--source-sha", args.source_sha])
@@ -1025,8 +1044,8 @@ def main():
             p.add_argument("--source-sha", required=True)
             p.add_argument("--base-sha", required=True)
         if verb == "resume-issue":
-            p.add_argument("--pr", type=int, required=True)
-            p.add_argument("--head-sha", required=True)
+            p.add_argument("--pr", type=int, default=None)
+            p.add_argument("--head-sha", default=None)
             p.add_argument("--ack-id", type=int, required=True)
         if verb == "status-task":
             p.add_argument("--issue", type=int, required=True)
