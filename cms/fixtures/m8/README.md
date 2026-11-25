@@ -1,38 +1,40 @@
-# M8 Operations & Release E2E Fixtures
+# M8 Operations & Release E2E Fixtures (`m8`)
 
-Tài liệu này mô tả bộ fixture xác định (deterministic) cho harness E2E V1 của M8 (`cms/crates/opendash-server/tests/m8_s08_t01_e2e.rs` và `cms/scripts/m8_browser_e2e.py`).
+## Overview
 
-## 1. Thành phần trong thư mục
+Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 backup, restore, and recovery harnesses ([m8_s08_t01_e2e.rs](../../crates/opendash-server/tests/m8_s08_t01_e2e.rs) and [m8_browser_e2e.py](../../scripts/m8_browser_e2e.py)). Static `.odbackup.age` archives and passphrases are never stored in Git; tests synthesize encrypted backups dynamically in disposable temporary site roots.
 
-- `schema_fingerprints.json`: dấu vân tay schema chuẩn (`schema_version: 33`, `trusted_schema: OFF`, giới hạn đối tượng schema) để đối chiếu an toàn trước khi khôi phục.
-- Fixture runtime được khởi tạo xác định trong test/script: không lưu binary `.odbackup.age` hay secret tĩnh trong Git.
+## Interface
 
-## 2. Phạm vi dữ liệu V1 trong E2E (`M8-S08-T01`)
+- **Schema Fingerprint Fixture ([schema_fingerprints.json](schema_fingerprints.json)):**
+  - Records `schema_version: 33`, `trusted_schema: "OFF"`, `max_schema_objects: 256`, `max_sql_per_object_bytes: 262144`, `max_total_sql_bytes: 2097152`, and `verified_by: "runtime_compiled_migrator_memory_db"`, aligning with `MAX_SCHEMA_OBJECTS`, `MAX_SCHEMA_SQL_PER_OBJECT_BYTES`, and `MAX_SCHEMA_TOTAL_SQL_BYTES` in `[cms/crates/opendash-server/src/storage/restore.rs:validate_restored_db_read_only]`.
+- **V1 Functional Scope (`M8-S08-T01`):**
+  - Covers initial `/auth/setup`, custom content types (`published` vs `draft` visibility isolation), pinned media assets, menus/theme ZIPs, plugins + `plugin_kv`, SEO routes/settings/contact forms, and builder homepage layout.
+- **OPS-01 Intentional Restore Resets:**
+  1. Source `sessions` and login tokens are cleared; admins must re-authenticate on the restored target.
+  2. Restored targets boot in `safe_mode = true` (`X-Robots-Tag: noindex, nofollow` on public routes; anonymous contact submission returns `503`) until password-verified activation via `/api/admin/operations/recovery/activate`.
+  3. `site_smtp_settings.enabled` is reset to `0` (`false`), while `BackupFileKind::SmtpSecret` restores referenced SMTP secret blobs (`secrets/smtp/{sref}.*`) and `validate_restored_db_read_only` fails restore if any referenced secret file is missing.
+  4. Active/queued `operation_jobs` at snapshot time transition to `interrupted` on restart without silent retry.
+  5. External `OPENDASH_DB_PATH` values rebase to `<target_root>/database/opendash.sqlite`, applying private ACLs to `target_parent`, `stage_root`, and restored subdirectories (`database/`, `config/`, `uploads/`, `themes/`, `secrets/`).
+- **Negative Corpus & Recovery Tests (`cms/crates/opendash-server/tests/m8_s08_t01_e2e.rs`):**
+  - `[m8_s08_t01_e2e.rs:negative_corpus_preserves_source_and_never_publishes_target]` verifies fail-closed behavior (source intact, no `READY.json` published) on tampered `.odbackup.age` ciphertext, wrong passphrase, newer `schema_version` (`9999`), and `507 Insufficient Storage` at `MAX_BACKUP_ARTIFACTS = 10` (`[cms/crates/opendash-server/src/backup.rs:MAX_BACKUP_ARTIFACTS]`).
+  - `[m8_s08_t01_e2e.rs:upgrade_0031_to_0033_and_interrupted_job_recovery]` verifies `'running'` `operation_jobs` transition to `'interrupted'` on restart.
 
-- **Auth & Users**: tài khoản Admin ban đầu qua `/auth/setup`.
-- **Content Types & Entries**: custom content type, entry `published`, entry `draft` và trạng thái nội bộ để xác minh không rò rỉ ra public sau restore.
-- **Media & Pinning**: upload media asset và gắn tham chiếu từ builder/entry để xác minh tệp vật lý và tham chiếu ID được bảo toàn.
-- **Menus & Themes**: cấu hình menu public (`/api/admin/menus`) và theme gói ZIP / active theme.
-- **Plugins & `plugin_kv`**: cài plugin ZIP hợp lệ + dữ liệu `plugin_kv` được giữ nguyên sau restore.
-- **SEO Routes, Contact Forms & Settings**: cập nhật `/api/admin/settings/general`, `/api/admin/settings/public`, tạo form liên hệ `/api/admin/contact/forms` và SEO route/slug.
-- **Builder Homepage**: lưu bố cục homepage (`/api/admin/builder/homepage`) với text/image block và xuất bản ra `/`.
+## Invariants
 
-## 3. Danh sách ngoại lệ được reset có chủ đích khi Restore
+- **Fail-Closed Read-Only DB Inspection:** `[cms/crates/opendash-server/src/storage/restore.rs:validate_restored_db_read_only]` enforces `PRAGMA trusted_schema = OFF`, `PRAGMA integrity_check`, `PRAGMA foreign_key_check`, bounded `sqlite_schema` metadata (`256` objects / `256 KiB` per object / `2 MiB` total), and `_sqlx_migrations` verification before any write or migration occurs.
+- **State Equivalence:** Every non-exempt record (content IDs, slugs, `values`, `plugin_kv`, media assets, menus, themes, settings, contact forms, and builder documents) must match 100% after restore.
+- **No Static Secrets:** No `.odbackup.age` payloads or passphrases are committed under `cms/fixtures/m8/`.
 
-Khi khôi phục từ gói `.odbackup.age` sang `site_root` mới, các trạng thái sau **được phép và bắt buộc reset** theo contract `OPS-01`:
+## Side Effects
 
-1. **`sessions` / token đăng nhập cũ**: không giữ phiên từ nguồn; Admin phải đăng nhập lại trên target root.
-2. **Safe Mode & Recovery Gate**: target khởi động ở `safe_mode = true` (`X-Robots-Tag: noindex, nofollow` trên public route, chặn anonymous contact submit với `503`) cho đến khi Admin xác thực mật khẩu và kích hoạt (`/api/admin/operations/recovery/activate`).
-3. **SMTP credentials & `smtp_enabled`**: `smtp_enabled = false`, không mang secret SMTP thực tế sang môi trường khôi phục tự động.
-4. **`operation_jobs` đang chạy/queued tại thời điểm snapshot**: khi target khởi động lại sẽ chuyển sang `interrupted` (không tự động retry ngầm).
-5. **External DB path rebasing**: nếu nguồn dùng `OPENDASH_DB_PATH` ngoài `site_root`, bản khôi phục rebase về `<target_root>/database/opendash.sqlite` và áp quyền ACL riêng tư cho thư mục `database/` & `private/`.
+- None from static files; running `m8_s08_t01_e2e.rs` or `m8_browser_e2e.py` spawns isolated loopback server instances and cleans up temporary `site_root` directories and `.odbackup.age` artifacts upon completion.
 
-Mọi dữ liệu nội dung, ID, slug, `values`, `plugin_kv`, media asset, menu, theme, settings, contact form và bố cục builder khác phải đạt **100% tương đương**.
+## Verification
 
-## 4. Negative Corpus
+Run the M8 Rust integration/E2E suite and Playwright browser E2E runner:
 
-1. **Tampered ciphertext**: sửa 1 byte trong payload `.odbackup.age` → restore thất bại, nguồn nguyên vẹn, target không publish.
-2. **Wrong passphrase**: nhập sai passphrase → restore thất bại, nguồn nguyên vẹn, target không publish.
-3. **Newer schema rejection**: gói backup khai báo `schema_version` cao hơn binary hiện tại → restore worker từ chối fail-closed.
-4. **Interrupted job**: job `running`/`queued` trong DB khi server restart → chuyển `interrupted`, không tự chạy lại.
-5. **Artifact quota (`507`)**: đạt `MAX_BACKUP_ARTIFACTS = 10` → request backup thứ 11 trả `507 Insufficient Storage`, không làm hỏng DB/artifact hiện có.
+```powershell
+cargo test --manifest-path cms/Cargo.toml --locked --test m8_s08_t01_e2e
+python cms/scripts/m8_browser_e2e.py --binary cms/target/release/opendash.exe
+```

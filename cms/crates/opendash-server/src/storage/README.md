@@ -1,14 +1,69 @@
 # SQLite Storage Layer (`opendash-server/src/storage/`)
 
-Sở hữu **100% câu lệnh SQL (`sqlx::query*`, `sqlx::raw_sql`)** của OpenDash. Khởi tạo pool WAL + `foreign_keys = ON` và chạy migrations `0001`–`0044` tại `mod.rs::init_db`.
+## Overview
 
-| Nhóm | Modules | Trách nhiệm chính |
-| --- | --- | --- |
-| **Core & Auth** | `mod.rs`, `auth.rs`, `dashboard.rs` | Khởi tạo SQLite pool, migrations, preflight builtin collisions, users/sessions/bootstrap, thống kê Dashboard. |
-| **Content & Taxonomy** | `content.rs`, `entries.rs`, `entry_table.rs`, `taxonomy.rs`, `patterns.rs` | CPT definitions/settings (`0038`), field groups & editor layouts (`0034`), entry CRUD & composite save, bảng `/entry-table`, custom taxonomies (`0039`), private Pattern CPT và migration từ Section (`0044`). |
-| **Builder & Themes** | `page.rs`, `builder.rs`, `builder_binding.rs`, `overrides.rs`, `theme.rs`, `theme_tests.rs`, `import.rs`, `menu.rs` | Unified entry Builder (`0043`) và `entry_pattern_refs` depth 1 (`0044`), `FixedEntry`/`RouteContext` binding, template overrides (`0018`), theme packages/revisions/options (`0015`/`0017`), selective sample import (`0021`), site menus & slots (`0019`/`0026`). |
-| **Plugins & Extensions** | `plugin.rs`, `plugin_kv.rs`, `admin_extensions.rs` | Plugin metadata/revisions/logs (`0003`/`0022`), isolated KV store (`StagedCommitGuard`), declarative admin columns/actions/term panels (`0036`). |
-| **Public, SEO & Permalinks** | `public_content.rs`, `permalinks.rs`, `seo.rs`, `sitemap.rs`, `settings.rs` | Public content queries & `media_is_referenced`, single route authority (`0040`/`0041` `permalink_route_claims` & redirects), entry/home SEO (`0027`), sitemap XML, site general/public/permalink settings. |
-| **Media & Lifecycle** | `media.rs`, `media_refs.rs`, `media_lifecycle.rs` | Metadata ảnh & video MP4 (`0006`/`0030`), `collect_pins_in_tx` bảo vệ media đang tham chiếu, tombstone/quarantine/reconcile (`0033`). |
-| **Contact & SMTP** | `contact.rs`, `smtp.rs` | Contact forms, submissions, dedup, rate buckets (`0028`), SMTP settings & notification attempts (`0029`). |
-| **Operations & Recovery** | `operations.rs`, `backup.rs`, `restore.rs` | `operation_jobs` ledger (`0032`), `VACUUM INTO` snapshot & inventory, kiểm định schema & phục hồi DB khi restore. |
+Owns **100% of SQLite queries (`sqlx::query*`, `sqlx::raw_sql`)** in OpenDash across 31 domain storage modules (`admin_extensions`–`theme` and `contact`) wired through [`mod.rs`](mod.rs) (plus `s03_media_acl_tests.rs`, `theme_tests.rs`, and `settings_timezones_2026f.txt`). Configures SQLite WAL mode, `foreign_keys = ON`, and `5s` `busy_timeout`, runs `preflight_builtin_key_collisions`, applies migrations `0001_builder_slice.sql` through `0052_taxonomy_term_featured_image.sql` (51 SQL files; `0016` omitted) from `cms/migrations/`, and seeds embedded core blocks in `[mod.rs:init_db]`.
+
+See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 Writer Inventory](../../../../../docs/contracts/M8_WRITER_INVENTORY.md) for persistence and admission rules.
+
+## Interface
+
+- **Pool Bootstrap & Health** ([`mod.rs`](mod.rs)): `[mod.rs:init_db]`, `[mod.rs:check_db_ready]`.
+- **Auth & Dashboard** ([`auth.rs`](auth.rs), [`dashboard.rs`](dashboard.rs)): `[auth.rs:UserSummary]`, `[auth.rs:UsersPage]` (plus `pub(crate)` user/session CRUD), `[dashboard.rs:get_counts]`, `[dashboard.rs:DashboardCounts]`, `[dashboard.rs:PublicationCounts]`.
+- **Content Types, Field Groups, Entries, Patterns & Taxonomy** ([`content.rs`](content.rs), [`entries.rs`](entries.rs), [`entry_table.rs`](entry_table.rs), [`patterns.rs`](patterns.rs), [`taxonomy.rs`](taxonomy.rs)):
+  - `[content.rs:load_effective_content_schema]`, `[content.rs:load_effective_content_schema_in_tx]`, `[content.rs:insert_user_content_type]`, `[content.rs:update_user_content_type]`, `[content.rs:list_content_types_with_meta]`, `[content.rs:load_content_type_catalog]`, `[content.rs:create_user_field_group]`, `[content.rs:update_user_field_group]`, `[content.rs:withdraw_user_field_group]`, `[content.rs:sync_theme_declarations_in_tx]`, `[content.rs:sync_plugin_cnt_declarations_in_tx]`, `[content.rs:get_editor_layout]`, `[content.rs:put_editor_layout]`, `[content.rs:get_effective_editor_config]`.
+  - `[entries.rs:get_entry]`, `[entries.rs:list_entries]`, `[entries.rs:list_published_page]`, `[entries.rs:create_entry_with_fence]`, `[entries.rs:update_entry_with_fence]`, `[entries.rs:prepare_composite_entry_save]`, `[entries.rs:commit_composite_entry_save]`, `[entries.rs:prepare_entry_translation]`, `[entries.rs:commit_entry_translation]`, `[entries.rs:delete_entry]`, `[entries.rs:set_publication_status]`, `[entries.rs:PluginActionFence]`.
+  - `[entry_table.rs:query]`, `[entry_table.rs:EntryTableFilter]`, `[entry_table.rs:EntryTableResult]`.
+  - `[patterns.rs:list]`, `[patterns.rs:get]`, `[patterns.rs:create]`, `[patterns.rs:update]`, `[patterns.rs:delete]`, `[patterns.rs:list_theme_patterns]`, `[patterns.rs:get_theme_pattern]`.
+  - `[taxonomy.rs:list_definitions]`, `[taxonomy.rs:create_definition]`, `[taxonomy.rs:patch_definition]`, `[taxonomy.rs:delete_definition]`, `[taxonomy.rs:list_terms_for_locale]`, `[taxonomy.rs:create_term_with_locale]`, `[taxonomy.rs:patch_term]`, `[taxonomy.rs:delete_term]`.
+- **Builder, Block Catalog, Overrides, Themes, Import & Menus** ([`page.rs`](page.rs), [`builder.rs`](builder.rs), [`builder_binding.rs`](builder_binding.rs), [`overrides.rs`](overrides.rs), [`theme.rs`](theme.rs), [`import.rs`](import.rs), [`menu.rs`](menu.rs)):
+  - `[page.rs:ensure_embedded_core_blocks]`, `[page.rs:load_unified_block_catalog_in_conn]`, `[page.rs:sync_owner_blocks_in_tx]`, `[page.rs:set_owner_block_status_in_tx]`, `[page.rs:resync_plugin_block_acls_in_tx]`.
+  - `[builder.rs:read]`, `[builder.rs:read_public_resolved]`, `[builder.rs:resolve_preview]`, `[builder.rs:resolve_patterns_in_tx_with_budget]`, `[builder.rs:validate_media_refs_in_tx]`, `[builder.rs:save_and_render]` (plus entry-builder storage helpers).
+  - `[builder_binding.rs:resolve]`, `[builder_binding.rs:resolve_in_tx_with_route_and_locale]`.
+  - `[overrides.rs:resolve_template_2axis]`, `[overrides.rs:save_typed_override]`, `[overrides.rs:reset_typed_override]`, `[overrides.rs:preview_typed_override_with_cache_and_locale]`, `[overrides.rs:render_resolved_public_builder_with_cache_for_locale]`, `[overrides.rs:list_studio_targets]`, `[overrides.rs:preview_studio_with_cache_and_locale]`.
+  - `[theme.rs:stage_and_commit_v3_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[theme.rs:activate_revision]`, `[theme.rs:load_active_theme_v3]`, `[theme.rs:list]`, `[theme.rs:verify_revision_durability]`.
+  - `[import.rs:ImportPlan]`, `[import.rs:DryRunImportInput]`, `[import.rs:ThemeSampleManifest]` (dry-run, execution, and orphan import recovery).
+  - `[menu.rs:create_menu_in_tx]`, `[menu.rs:replace_menu_items_in_tx]`, `[menu.rs:get_slot_version_for_locale_in_tx]`, `[menu.rs:MAX_MENU_ITEMS]`, `[menu.rs:MAX_MENU_DEPTH]`.
+- **Plugins, KV, Projections & Admin Extensions** ([`plugin.rs`](plugin.rs), [`plugin_kv.rs`](plugin_kv.rs), [`plugin_projections.rs`](plugin_projections.rs), [`admin_extensions.rs`](admin_extensions.rs)):
+  - `[plugin.rs:install_plugin_revision]`, `[plugin.rs:set_plugin_enabled_cas]`, `[plugin.rs:load_plugin_executable_with_generation]`, `[plugin.rs:is_plugin_generation_active]`, `[plugin.rs:is_actor_role_active]`, `[plugin.rs:delete_entry_with_plugin_fence]`, `[plugin.rs:record_plugin_execution_result]`.
+  - `[plugin_kv.rs:get]`, `[plugin_kv.rs:set]`, `[plugin_kv.rs:delete]`, `[plugin_kv.rs:list]`, `[plugin_kv.rs:begin_immediate]`, `[plugin_kv.rs:commit]`, `[plugin_kv.rs:rollback]`.
+  - `[plugin_projections.rs:recompute_entry_projections]`, `[plugin_projections.rs:spawn_recompute_plugin_projections_batched]`, `[plugin_projections.rs:batch_load_entry_projections]`, `[plugin_projections.rs:delete_entry_projections_in_tx]`.
+  - `[admin_extensions.rs:sync_owner_in_conn]`, `[admin_extensions.rs:effective_list]`, `[admin_extensions.rs:effective_term]`, `[admin_extensions.rs:update_term_values_in_conn]`.
+- **Public Content, Permalinks, SEO, Sitemap & Settings** ([`public_content.rs`](public_content.rs), [`permalinks.rs`](permalinks.rs), [`seo.rs`](seo.rs), [`sitemap.rs`](sitemap.rs), [`settings.rs`](settings.rs)):
+  - `[public_content.rs:get_by_slug_for_locale]`, `[public_content.rs:get_published_by_id]`, `[public_content.rs:load_entry_render_snapshot_with_options]`, `[public_content.rs:list_published_with_total]`, `[public_content.rs:taxonomy_public_page_for_locale]`, `[public_content.rs:media_is_referenced]`.
+  - `[permalinks.rs:resolve_public_path]`, `[permalinks.rs:sync_claims_in_tx]`, `[permalinks.rs:put_settings]`, `[permalinks.rs:sync_provider_rewrite_defaults_in_tx]`, `[permalinks.rs:canonical_entry_path_in_tx]`.
+  - `[seo.rs:get_entry_route]`, `[seo.rs:put_entry_route]`, `[seo.rs:get_entry_seo]`, `[seo.rs:put_entry_seo]`, `[seo.rs:build_entry_seo_view_for_locale]`, `[seo.rs:build_home_seo_view_for_locale]`, `[seo.rs:reading_page_state_for_locale]`.
+  - `[sitemap.rs:count_indexable_routes_in_tx]`, `[sitemap.rs:list_indexable_routes_in_tx]` (`SITEMAP_PART_SIZE = 5_000`, `SITEMAP_MAX_TOTAL_URLS = 1_000_000`).
+  - `[settings.rs:list_locales]`, `[settings.rs:create_locale]`, `[settings.rs:update_locale]`, `[settings.rs:delete_locale]`, `[settings.rs:set_default_locale]`, `[settings.rs:set_multilingual_enabled]`, `[settings.rs:purge_orphan_locale]`, `[settings.rs:get_general_for_locale]`, `[settings.rs:save_general_for_locale]`, `[settings.rs:get_reading_for_locale]`, `[settings.rs:save_reading_for_locale]`, `[settings.rs:get_global_site_options]`, `[settings.rs:put_global_site_options]`, `[settings.rs:get_theme_options_for_locale]`, `[settings.rs:put_theme_options_for_locale]`, `[settings.rs:get_active_public_theme_options_for_locale]`, `[settings.rs:get_admin_i18n_bootstrap]`, `[settings.rs:timezone_catalog]`.
+- **Media, Contact, SMTP, Operations, Backup & Restore** ([`media.rs`](media.rs), [`media_refs.rs`](media_refs.rs), [`media_lifecycle.rs`](media_lifecycle.rs), [`contact.rs`](contact.rs), [`smtp.rs`](smtp.rs), [`operations.rs`](operations.rs), [`backup.rs`](backup.rs), [`restore.rs`](restore.rs)):
+  - `[media.rs:find]`, `[media.rs:list_filtered]`, `[media.rs:save]`, `[media.rs:require_existing_effective_references]`.
+  - `[media_refs.rs:collect_pins_in_tx]`, `[media_refs.rs:ensure_media_active_in_tx]`, `[media_refs.rs:load_media_inventory_bounded]`, `[media_refs.rs:is_media_unreferenced]`.
+  - `[media_lifecycle.rs:tombstone_media_in_tx]`, `[media_lifecycle.rs:finalize_delete_job]`, `[media_lifecycle.rs:list_pending_delete_jobs]`.
+  - `[contact.rs:create_form]`, `[contact.rs:update_form]`, `[contact.rs:delete_form]`, `[contact.rs:list_submissions]`, rate-limit (`RATE_LIMIT_PER_MIN = 5`, `RATE_LIMIT_PER_HOUR = 20`, `RATE_LIMIT_GLOBAL_PER_MIN = 100`) and dedup (`DEDUP_TTL_SECS = 86_400`).
+  - `[smtp.rs:get_smtp_settings]`, `[smtp.rs:put_smtp_settings_cas]`, `[smtp.rs:create_initial_attempt_in_conn]`, `[smtp.rs:claim_pending_attempt]`, `[smtp.rs:finish_attempt]`, `[smtp.rs:recover_inflight_notifications]`.
+  - `[operations.rs:create_job]`, `[operations.rs:transition_job_cas]`, `[operations.rs:mark_interrupted_on_startup]`, `[operations.rs:bump_maintenance_generation]`, `[operations.rs:prune_old_receipts]`.
+  - `[backup.rs:vacuum_into_snapshot]`, `[backup.rs:collect_backup_inventory]`.
+  - `[restore.rs:build_expected_schema_objects]`, `[restore.rs:validate_restored_db_read_only]`, `[restore.rs:validate_and_rebase_copy]`, `[restore.rs:verify_restored_db_references]`.
+
+## Invariants
+
+- **Single SQL Boundary**: 100% of `sqlx::query*` and `sqlx::raw_sql` invocations reside in `src/storage/` (verified by `cms/scripts/check-standards.py`).
+- **Bootstrap & Collision Safety**: `init_db` runs `content::preflight_builtin_key_collisions` before `sqlx::migrate!("../../migrations")` so built-in `post`/`page` descriptors never overwrite existing user/theme/plugin claims, and verifies embedded core blocks afterwards (`[mod.rs:init_db]`).
+- **Transactional Write Integrity & CAS**: Schema transitions, composite saves (`[entries.rs:commit_composite_entry_save]`), plugin revision installs (`[plugin.rs:install_plugin_revision]`), KV commits (`[plugin_kv.rs:begin_immediate]`), permalink claim updates (`[permalinks.rs:sync_claims_in_tx]`), and media tombstoning (`[media_lifecycle.rs:tombstone_media_in_tx]`, `[media_refs.rs:collect_pins_in_tx]`) run inside explicit SQLite transactions with CAS/generation/schema-token fencing.
+- **Single Public Route Authority**: `permalink_route_claims` and `permalinks::resolve_public_path` enforce collision-free canonical paths and 301 redirect chains (`[permalinks.rs:sync_claims_in_tx]`, `[permalinks.rs:resolve_public_path]`).
+- **Schema Fingerprint Verification on Restore**: `validate_restored_db_read_only` compares restored database objects against `build_expected_schema_objects` within bounded object/SQL size limits (`[restore.rs:validate_restored_db_read_only]`).
+
+## Side Effects
+
+- Creates/opens the site SQLite database in WAL mode, executes migrations `0001`–`0052`, and reads/writes all CMS tables (`[mod.rs:init_db]`).
+- Stages and verifies immutable theme and plugin revision directories and `.complete` markers on disk under `themes_root` and `plugins_root` (`[theme.rs:stage_and_commit_v3_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[plugin.rs:stage_and_publish_plugin_revision_with_extensions]`).
+- Creates consistent SQLite snapshot files via `VACUUM INTO` during backup jobs (`[backup.rs:vacuum_into_snapshot]`).
+
+## Verification
+
+Run the storage unit/integration tests and standards checks from the repository root:
+
+```powershell
+python cms/scripts/check-standards.py
+cargo test --manifest-path cms/Cargo.toml -p opendash-server --locked storage::
+```

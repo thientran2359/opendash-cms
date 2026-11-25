@@ -1,29 +1,48 @@
 # Sample Theme v3 (`sample-theme-v3`)
 
-Theme mẫu v3 tối giản minh họa [Đặc tả Theme Format v3](../../../../docs/designs/theme-format-and-template-resolver.md), các C-SEC helpers trong [Theme Ergonomics](../../../../docs/designs/theme-ergonomics-and-csec-helpers.md), và tích hợp write-time projection `entry.ext["rust-seo-plugin"]` từ [rust-seo-plugin](../../plugins/rust-seo-plugin/README.md).
+## Overview
 
-## Cấu trúc gói Theme v3
+Minimal Theme Format v3 reference package (`theme_id: "sample-theme-v3"`, `manifest_version: 3`, `version: "1.0.0"`) illustrating [Theme Format and Template Resolver](../../../../docs/designs/theme-format-and-template-resolver.md), C-SEC helpers from [Theme Ergonomics](../../../../docs/designs/theme-ergonomics-and-csec-helpers.md), and two-step guarded consumption of write-time plugin projections (`entry.ext["rust-seo-plugin"]`) produced by [rust-seo-plugin](../../plugins/rust-seo-plugin/README.md).
 
-- [`theme.json`](theme.json): Khai báo `manifest_version: 3`, template gốc `{ "kind": "single", "file": "single.html" }` và danh sách tài nguyên tường minh `assets: ["assets/app.css"]` (quy tắc D01).
-- [`single.html`](single.html): Template chi tiết đặt tại root gói, tuân thủ `UndefinedBehavior::Strict` và C-SEC:
-  - Chèn CSS an toàn qua `{{ theme_assets['assets/app.css'] }}`.
-  - Hiển thị `breadcrumbs`, `entry.published_at | date_format("%d/%m/%Y")`, `entry.reading_time_minutes | format_number`, `related_entries`, và đúng một `{{ od_content() }}`.
-  - Truy cập mở rộng plugin an toàn hai bước dưới `UndefinedBehavior::Strict`:
+Package layout:
+- [theme.json](theme.json): Theme Format v3 manifest declaring templates and explicit static assets.
+- [single.html](single.html): Single-entry MiniJinja template compliant with `UndefinedBehavior::Strict` and C-SEC rules.
+- `assets/`: Static stylesheet in [assets/app.css](assets/app.css).
+
+## Interface
+
+- **Manifest Contract ([theme.json](theme.json)):**
+  - `manifest_version: 3`, `theme_id: "sample-theme-v3"`, `templates: [{ "kind": "single", "file": "single.html" }]`, `assets: ["assets/app.css"]`.
+- **Template Context & Helpers ([single.html](single.html)):**
+  - Consumes `site.title`, `locale` (defaulted via `locale | default({})`), `theme_assets['assets/app.css']`, `breadcrumbs`, `entry.title`, `entry.published_at | date_format("%d/%m/%Y")`, `entry.reading_time_minutes | format_number`, `related_entries`, and `{{ od_content() }}`.
+  - Reads optional plugin badge data safely under strict undefined checking:
     ```jinja
     {% set seo_ext = entry.ext["rust-seo-plugin"] | default({}) %}
     {% if seo_ext.badge | default("") %}
       <span class="sample-badge">{{ seo_ext.badge | default("") }}</span>
     {% endif %}
     ```
-- [`assets/app.css`](assets/app.css): Stylesheet thuần tĩnh an toàn theo bộ kiểm CSS của C-SEC.
+- **Offline Validator:** `opendash --check-theme` invokes `[cms/crates/opendash-server/src/theme.rs:check_theme_path]` via `[cms/crates/opendash-server/src/main.rs:run_check_cli_flag]`.
 
-## Kiểm tra offline với `opendash --check-theme`
+## Invariants
+
+- **Explicit Asset Declaration (D01):** Only files declared in [theme.json](theme.json) (`theme.json`, `single.html`, `assets/app.css`) may appear in an uploadable theme ZIP; `README.md` must be excluded from runtime ZIP packages because D01 rejects undeclared files.
+- **`UndefinedBehavior::Strict` Safety:** Optional context keys (`locale`, `entry.ext["rust-seo-plugin"]`, `seo_ext.badge`) are guarded with `| default(...)` prior to nested field access.
+- **C-SEC Compliance:** [single.html](single.html) invokes `{{ od_content() }}` exactly once and [assets/app.css](assets/app.css) contains static CSS safe under C-SEC stylesheet sanitization.
+
+## Side Effects
+
+- None; this directory holds static theme package files validated read-only by `opendash --check-theme` or archived into a ZIP for Admin theme upload.
+
+## Verification
+
+Validate the theme directory offline (`[cms/crates/opendash-server/src/theme.rs:check_theme_path]`, also covered by `cms/crates/opendash-server/tests/theme_ergonomics_test.rs`):
 
 ```bash
 ./cms/target/release/opendash --check-theme cms/examples/themes/sample-theme-v3
 ```
 
-Khi đóng gói ZIP để upload trong Admin → Giao diện, chỉ đưa 3 tệp khai báo trong manifest vào gốc archive (`theme.json`, `single.html`, `assets/app.css`; không đóng gói `README.md` vào ZIP runtime vì D01 cấm file chưa khai báo):
+To test an uploadable runtime archive (excluding `README.md`):
 
 ```bash
 zip -r /tmp/sample-theme-v3.zip theme.json single.html assets/app.css

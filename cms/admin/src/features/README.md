@@ -1,22 +1,53 @@
-# Feature modules (`cms/admin/src/features/`)
+# Admin Feature Modules (`cms/admin/src/features/`)
 
-Các phân hệ giao diện của React Admin sử dụng chung HTTP client [`src/api/client.ts`](../api/client.ts), [`AdminPrimitives.tsx`](../components/AdminPrimitives.tsx) và [`FormPrimitives.tsx`](../components/FormPrimitives.tsx):
+## Overview
 
-- `dashboard/`: `DashboardPage.tsx` — Tổng quan và lối tắt quản trị.
-- `content/`: `EntryListPage.tsx`, `ContentTypeForm.tsx`, `ContentTypeSchemaSettings.tsx`, `FieldGroupsManager.tsx`, `EditorLayoutConfigurator.tsx`, `FieldValueInput.tsx` — Bảng danh sách entry, cấu hình CPT, nhóm custom fields và bố cục Single Edit.
-- `editor/`: `SingleEditWorkspace.tsx`, `EditorDraftStore.ts`, `PanelRegionRenderer.tsx` — Màn hình chỉnh sửa đơn nhất theo vùng (`header_bar`, `main_top`, `main_primary`, `main_bottom`, `sidebar`) cho `post`, `page`, CPT và bảo toàn draft khi `401`/`412`.
-- `patterns/`: `PatternsPage.tsx` — Quản lý private Pattern CPT (đồng bộ qua `core/pattern_ref`).
-- `media/`: `MediaLibraryPage.tsx`, `MediaPicker.tsx` — Thư viện media (upload ảnh JPEG/PNG/WebP và video MP4 độc lập, picker single/gallery).
-- `taxonomy/`: `TaxonomyDefinitionsPage.tsx`, `TaxonomyPage.tsx`, `TermEditPage.tsx`, `TermPicker.tsx` — Quản lý custom taxonomy definitions, chuyên mục, thẻ và term picker.
-- `themes/`: `ThemesPanel.tsx`, `ThemeOptionsForm.tsx` — Cài đặt Theme v3 ZIP, kích hoạt revision, Theme Options (hiển thị trong OpenDash Studio) và selective sample import.
-- `library/`: `TemplateLibraryPage.tsx` — Thư viện mẫu cục bộ, Patterns và quản lý site template overrides.
-- `plugins/`: `PluginsPanel.tsx`, `DeclarativePluginUi.tsx` — Cài plugin ZIP, bật/tắt, cài đặt plugin, quyền và UI khai báo.
-- `extensions/`: `AdminContributionRenderer.tsx` — Hiển thị columns, row actions và term panels do theme/plugin đăng ký.
-- `users/`: `UsersPanel.tsx`, `UserProfilePanel.tsx` — Quản lý tài khoản Admin/Editor và hồ sơ cá nhân.
-- `contact/`: `ContactPanel.tsx`, `SmtpSettingsPanel.tsx` — Form liên hệ, submissions và cấu hình SMTP.
-- `seo/`: `SeoPanel.tsx` — Cấu hình SEO website (`robots`, OG, canonical).
-- `settings/`: `PermalinkSettingsPage.tsx`, `ReadingSettingsPanel.tsx`, `MultilingualSettingsPage.tsx` — Cấu hình đường dẫn tĩnh, Reading (Homepage/Posts Page) và Đa ngôn ngữ.
-- `operations/`: `BackupToolsPanel.tsx`, `BackupsPanel.tsx`, `RestorePanel.tsx`, `ReconcilePanel.tsx` — Sao lưu mã hóa, phục hồi sang site root mới và đối soát/xóa media.
-- `system/`: `GeneralSettingsPanel.tsx`, `SystemStatus.tsx` — Cài đặt tổng quát (bao gồm `cms_locale`) và tình trạng hệ thống.
+Domain feature panels and workspaces of the OpenDash React Admin (`cms/admin/`), mounted inside [AdminShell](../shell/README.md) and backed by [the HTTP API client](../api/README.md), [shared UI components](../components/README.md), and [i18n](../i18n/README.md). Designed per [Admin Navigation & Edit Screen](../../../../docs/product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md) and [Core Foundation](../../../../docs/contracts/CORE_FOUNDATION.md).
 
-(OpenDash Studio nằm tại `src/studio/`, các thành phần dựng khối dùng chung nằm tại `src/builder/`, khung điều hướng và định tuyến nằm tại `src/shell/`).
+## Interface
+
+Active `features/*` subdirectories (18 directories on disk; no per-subdirectory `README.md` files):
+
+- `contact/`: `[ContactPanel.tsx:ContactPanel]` (form builder and submissions inbox) and `[SmtpSettingsPanel.tsx:SmtpSettingsPanel]` (SMTP host, TLS, credentials, test email).
+- `content/`: `[EntryListPage.tsx:EntryListPage]` (`parseEntryTableHash`, `entryTableHash`, `safePublicPath`), `[ContentTypeSchemaSettings.tsx:ContentTypeSchemaSettings]`, `[ContentTypeForm.tsx:ContentTypeForm]` (`DraftField`, `ContentTypeCreationDraft`, `blankContentTypeCreationDraft`, `isContentTypeCreationDraftDirty`), `[FieldGroupsManager.tsx:FieldGroupsManager]`, `[EditorLayoutConfigurator.tsx:EditorLayoutConfigurator]`, `[FieldValueInput.tsx:FieldValueInput]`, and wire types in `types.ts` (`[types.ts:ContentEntryRecord]`, `[types.ts:EntryTableResult]`, `[types.ts:EffectiveEditorConfigProjection]`).
+- `dashboard/`: `[DashboardPage.tsx:DashboardPage]` (post and page publication counts).
+- `editor/`: `[SingleEditWorkspace.tsx:SingleEditWorkspace]` (unified list/new/edit workspace for `post`, `page`, and custom content types), `[EditorDraftStore.ts:EditorDraftStore]` / `[EditorDraftStore.ts:editorDraftStore]` (`DraftStatus`, `EditorDraftPayload`, `EditorDraftEntry`, `diffEditorPayload`), and `[PanelRegionRenderer.tsx:PanelRegionRenderer]` (`header_bar`, `main_top`, `main_primary`, `main_bottom`, `sidebar`).
+- `extensions/`: `[AdminContributionRenderer.tsx:AdminColumnCell]`, `[AdminContributionRenderer.tsx:AdminTermPanels]`, and `[AdminContributionRenderer.tsx:safeAdminProviderLink]` for theme/plugin entry columns, row actions, and term extension panels.
+- `library/`: `[TemplateLibraryPage.tsx:TemplateLibraryPage]` (shared patterns, theme template roles, and site template override resets).
+- `media/`: `[MediaLibraryPage.tsx:MediaLibraryPage]`, `[MediaPicker.tsx:MediaPicker]` (single image and gallery modal), `[library/fileValidation.ts:validateImageUpload]`, `[library/fileValidation.ts:validateVideoUpload]`, `[library/fileValidation.ts:MediaUploadValidationError]`, `[library/format.ts:formatMediaBytes]`, `[library/format.ts:formatMediaDate]`, and `media-library.css`.
+- `operations/`: `[BackupToolsPanel.tsx:BackupToolsPanel]`, `[BackupsPanel.tsx:BackupsPanel]`, `[RestorePanel.tsx:RestorePanel]`, and `[ReconcilePanel.tsx:ReconcilePanel]` (encrypted backup creation/download, restore + safe-mode activation, orphan media reconciliation).
+- `patterns/`: `[PatternsPage.tsx:PatternsPage]` (private Pattern CPT CRUD and conflict-aware deletion for `core/pattern_ref`).
+- `plugins/`: `[PluginsPanel.tsx:PluginsPanel]`, `[DeclarativePluginUi.tsx:DeclarativePluginUi]`, and `[declarativeSchema.ts:validateDeclarativeSchemaV1]` (`UI_SCHEMA_VERSION`, `MAX_UI_SCREENS`, `MAX_UI_DEPTH`, `MAX_UI_NODES`, `MAX_UI_PAGE_SIZE`, `buildDraftKey`, `InMemoryDraftStore`) for plugin ZIP install, enable/disable, settings, WASM run, and declarative UI.
+- `posts/`: Empty directory on disk with no active source files (`post`, `page`, and CPT editing are served uniformly by `content/` and `editor/`).
+- `seo/`: `[SeoPanel.tsx:SeoPanel]` and `[SeoPanel.tsx:EntryRouteSeoCard]` (locale-aware homepage and entry route/SEO controls).
+- `settings/`: `[MultilingualSettingsPage.tsx:MultilingualSettingsPage]`, `[PermalinkSettingsPage.tsx:PermalinkSettingsPage]` (`discardPermalinkDraft`, `clearPermalinkDrafts`), and `[ReadingSettingsPanel.tsx:ReadingSettingsPanel]` (`discardReadingDraft`, `clearReadingDrafts`).
+- `shared/`: `[OwnerOptionsForm.tsx:OwnerOptionsForm]`, `[OwnerOptionsForm.tsx:OwnerKind]`, `[OwnerOptionsForm.tsx:OwnerOptionDef]`, `[OwnerOptionsForm.tsx:OwnerOptionsFormProps]`, `[OwnerOptionsForm.tsx:sameOwnerOptionValues]`, `[OwnerOptionsForm.tsx:isSecretConfiguredValue]`, `[OwnerOptionsForm.tsx:isClearSecretMarker]`, `[OwnerOptionsForm.tsx:normalizeOwnerValuesForSchema]`, `[OwnerOptionsForm.tsx:upcastOwnerDefToBlockField]`, and `[OwnerOptionsForm.tsx:buildOwnerOptionsSubmitPayload]` shared between theme and plugin option screens.
+- `system/`: `[GeneralSettingsPanel.tsx:GeneralSettingsPanel]` (`site_title`, `tagline`, `timezone`, `cms_locale`, public origin/indexing) and `[SystemStatus.tsx:SystemStatus]`.
+- `taxonomy/`: `[TaxonomyDefinitionsPage.tsx:TaxonomyDefinitionsPage]`, `[TaxonomyPage.tsx:TaxonomyPage]`, `[TermEditPage.tsx:TermEditPage]`, `[TermPicker.tsx:TermPicker]`, and `[TermPicker.tsx:TermFilters]`.
+- `themes/`: `[ThemesPanel.tsx:ThemesPanel]` (Theme v3 ZIP install, revision activation, selective sample-data dry-run/execute) and `[ThemeOptionsForm.tsx:ThemeOptionsForm]`.
+- `users/`: `[UsersPanel.tsx:UsersPanel]` and `[UserProfilePanel.tsx:UserProfilePanel]`.
+
+## Invariants
+
+- **API & Component Discipline:** Feature modules never issue raw `fetch` calls; every network operation goes through `../api/` and reuses `../components/` and `../i18n/`.
+- **In-Memory Draft Quarantine:** Unsaved drafts live exclusively in JavaScript memory (`Map`) across `[EditorDraftStore.ts:EditorDraftStore]`, `[PermalinkSettingsPage.tsx:PermalinkSettingsPage]`, `[ReadingSettingsPanel.tsx:ReadingSettingsPanel]`, `[TaxonomyDefinitionsPage.tsx:TaxonomyDefinitionsPage]`, `[ContentTypeSchemaSettings.tsx:ContentTypeSchemaSettings]` (`taxonomyDraftMemory`, `settingsDraftMemory`, `createCptDraftMemory`), `[TermEditPage.tsx:TermEditPage]` (`termDrafts`, all scoped by site/actor context), and `[DeclarativePluginUi.tsx:DeclarativePluginUi]` (keyed by `(plugin_id, screen_id, form_id, objectId ?? 'new', schema_version)` via `[declarativeSchema.ts:buildDraftKey]`), surviving transient `401` re-authentication and `412` CAS conflicts without touching `localStorage` or `sessionStorage`.
+- **Safe Extension Rendering:** `[AdminContributionRenderer.tsx:safeAdminProviderLink]` restricts extension links to same-origin root-relative paths; `[declarativeSchema.ts:validateDeclarativeSchemaV1]` enforces `UI_SCHEMA_VERSION = 1`, depth `<= 8`, nodes `<= 200`, screens `<= 20`, and rejects `<`, `>`, or `javascript:` strings.
+- **Publication & Media Preflight:** `[SingleEditWorkspace.tsx:SingleEditWorkspace]` respects `immediate` vs `draft_publish` publication policies via `[../api/content.ts:effectiveContentTypeSettings]`; `[library/fileValidation.ts:validateImageUpload]` (`8 MiB`, `6000 px`, `20M` pixels) and `[library/fileValidation.ts:validateVideoUpload]` (`100 MiB` MP4) pre-validate before upload while Rust remains authoritative.
+
+## Side Effects
+
+- Invokes authenticated Admin HTTP endpoints via `../api/` to mutate entries, schemas, field groups, taxonomies, media, themes, plugins, settings, users, contact forms, and backup/reconcile jobs.
+- Registers `AbortController` cleanup, `URL` hash navigation callbacks (`onNavigateHash`), dirty-leave flags (`onDirtyChange`), and modal UI overlays (`MediaPicker` ARIA dialog, inline native `<dialog>` in `SingleEditWorkspace.tsx`, and local `ConfirmDialog` in `MultilingualSettingsPage.tsx`).
+
+## Verification
+
+- TypeScript check & Vite build (`cms/admin/package.json`):
+  ```powershell
+  npm --prefix cms/admin run typecheck
+  npm --prefix cms/admin run build
+  ```
+- Standards & i18n checks (`cms/scripts/`):
+  ```powershell
+  python cms/scripts/check-standards.py
+  node cms/scripts/check-i18n.mjs
+  ```
