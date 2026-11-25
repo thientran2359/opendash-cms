@@ -11611,7 +11611,6 @@ fn is_localized_admin_path(path: &str) -> bool {
         || path.starts_with("/auth/")
         || path.starts_with("/api/admin/")
         || path.starts_with("/api/themes/")
-        || matches!(path, "/registry" | "/page" | "/preview" | "/save")
 }
 
 async fn effective_locale_for_error(
@@ -11901,10 +11900,6 @@ mod localization_middleware_tests {
             "/auth/me",
             "/api/admin/settings/general",
             "/api/themes/a/options",
-            "/registry",
-            "/page",
-            "/preview",
-            "/save",
         ] {
             assert!(is_localized_admin_path(path), "{path}");
         }

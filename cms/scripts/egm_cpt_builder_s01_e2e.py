@@ -57,7 +57,7 @@ def open_type_settings(page, base: str):
     page.goto(base + "/admin/" + SETTINGS_HASH, wait_until="domcontentloaded")
     page.get_by_role("button", name="Project (project)", exact=True).click()
     form = page.get_by_role("form", name="Cấu hình loại nội dung")
-    expect(form.get_by_label("Visual Builder (builder)")).to_be_visible(timeout=20000)
+    expect(form.get_by_label("Trình dựng trang (builder)")).to_be_visible(timeout=20000)
     return form
 
 
@@ -117,11 +117,10 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         page.goto(base + "/admin/#/cpt/project/new", wait_until="domcontentloaded")
                         expect(page.locator("#content-field-body")).to_be_visible(timeout=20000)
                         page.locator("#entry-title-input").fill(TITLE)
+                        page.locator('div:has(> span:text-is("Đường dẫn:"))').get_by_role("button", name="Sửa").click()
                         page.locator("#entry-slug-input").fill(SLUG)
                         page.locator("#content-field-body").fill(BODY)
-                        page.get_by_role("group", name="Lưu nháp và xuất bản").get_by_role(
-                            "button", name="Lưu nháp"
-                        ).click()
+                        page.get_by_role("button", name="Lưu nháp").first.click()
                         expect(page).to_have_url(re.compile(r"#/cpt/project/[1-9]\d*/edit$"), timeout=20000)
                         match = re.search(r"#/cpt/project/([1-9]\d*)/edit$", page.url)
                         assert match, page.url
@@ -133,80 +132,50 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         assert context.request.get(base + "/content/project/" + SLUG).status == 404
                         checks.append("chrome_create_project_A_private_draft_with_original_body")
 
-                        # Before a document exists, Editor cannot select Builder
-                        # as content source. It can open the exact scoped editor.
-                        mode = page.locator("#entry-content-mode")
-                        expect(mode).to_have_value("editor", timeout=20000)
-                        expect(mode.locator('option[value="builder"]')).to_have_count(1)
-                        expect(mode.locator('option[value="builder"]')).to_be_disabled()
-                        expect(page.get_by_role("button", name="Mở Visual Builder")).to_be_visible()
-                        page.get_by_role("button", name="Mở Visual Builder").click()
-                        scoped_hash = f"#/builder?template=entry&type=project&entry={entry_id}"
+                        # Open the exact scoped Project Studio Mode 2 from the editor toolbar.
+                        expect(page.get_by_test_id("open-ux-builder-toolbar")).to_be_visible(timeout=20000)
+                        page.get_by_test_id("open-ux-builder-toolbar").click()
+                        scoped_hash = f"#/studio/entry/project/{entry_id}"
                         expect(page).to_have_url(base + "/admin/" + scoped_hash, timeout=20000)
-                        workspace = page.get_by_test_id("builder-workspace")
-                        expect(workspace).to_contain_text("Đã mở", timeout=20000)
+                        expect(page.get_by_test_id("studio-workspace")).to_be_visible(timeout=20000)
+                        expect(page.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=20000)
+                        expect(page.get_by_test_id("studio-save-draft-btn")).to_be_visible()
                         builder_initial = api_json(context, "GET", base, builder_path(entry_id))
                         assert builder_initial["entry_id"] == entry_id, builder_initial
                         assert builder_initial["type_key"] == TYPE_KEY, builder_initial
                         assert builder_initial["content_mode"] == "editor", builder_initial
-                        assert builder_initial["document"] is None, builder_initial
-                        checks.append("builder_option_requires_document_and_opens_exact_project_scope")
+                        assert builder_initial["had_freeform_wrap"] is True, builder_initial
+                        assert BODY in json.dumps(builder_initial["document"], ensure_ascii=False), builder_initial
+                        checks.append("builder_option_wraps_existing_body_and_opens_exact_project_scope")
 
-                        # Save AST using the actual Builder controls. Confirmation
-                        # must retain original rich text as a separate field.
+                        # Save AST using Studio Mode 2 controls while retaining draft status.
                         new_heading(page, DESIGN)
-                        expect(workspace).to_contain_text("Chưa lưu", timeout=20000)
-                        prompts: list[str] = []
-
-                        def accept_confirm(dialog):
-                            prompts.append(dialog.message)
-                            dialog.accept()
-
-                        page.on("dialog", accept_confirm)
-                        page.locator("#save").click()
-                        expect(workspace).to_contain_text("Đã lưu", timeout=20000)
+                        expect(page.get_by_test_id("studio-dirty-badge")).to_be_visible(timeout=20000)
+                        page.get_by_test_id("studio-save-draft-btn").click()
+                        expect(page.get_by_test_id("studio-dirty-badge")).to_have_count(0, timeout=20000)
                         built = api_json(context, "GET", base, builder_path(entry_id))
                         assert built["version"] == builder_initial["version"] + 1, built
                         assert built["content_mode"] == "builder", built
                         assert DESIGN in json.dumps(built["document"], ensure_ascii=False), built
                         after_builder = api_json(context, "GET", base, entry_path(entry_id))
-                        assert after_builder["values"]["body"] == BODY, after_builder
+                        assert "<!-- od:" in after_builder["values"]["body"], after_builder
                         assert after_builder["publication_status"] == "draft", after_builder
                         assert after_builder["content_mode"] == "builder", after_builder
                         assert context.request.get(base + "/content/project/" + SLUG).status == 404
-                        checks.append("chrome_builder_save_ast_preserves_body_and_unpublished_status")
+                        checks.append("chrome_builder_save_ast_writes_comment_blocks_and_keeps_unpublished_draft")
                         page.screenshot(path=str(artifacts / "project-a-builder.png"), full_page=True)
 
-                        # Editor↔Builder is a source selection, not a destructive
-                        # migration. Saving Editor mode preserves both values.
+                        # Reloading the Project editor detects unified od comment blocks.
                         page.goto(editor_url(base, entry_id), wait_until="domcontentloaded")
-                        mode = page.locator("#entry-content-mode")
-                        expect(mode).to_have_value("builder", timeout=20000)
-                        expect(page.locator("#content-field-body")).to_have_value(BODY, timeout=20000)
-                        mode.select_option("editor")
-                        page.get_by_role("group", name="Lưu nháp và xuất bản").get_by_role(
-                            "button", name="Lưu nháp"
-                        ).click()
-                        expect(page.get_by_text("Đã lưu thành công", exact=False)).to_be_visible(
-                            timeout=20000
-                        )
-                        editor_saved = api_json(context, "GET", base, entry_path(entry_id))
-                        after_switch = api_json(context, "GET", base, builder_path(entry_id))
-                        assert editor_saved["content_mode"] == "editor", editor_saved
-                        assert editor_saved["publication_status"] == "draft", editor_saved
-                        assert editor_saved["values"]["body"] == BODY, editor_saved
-                        assert after_switch["document"] == built["document"], after_switch
-                        assert after_switch["version"] == built["version"] + 1, after_switch
-                        page.reload(wait_until="domcontentloaded")
-                        expect(page.locator("#entry-content-mode")).to_have_value("editor", timeout=20000)
-                        expect(page.locator("#content-field-body")).to_have_value(BODY, timeout=20000)
+                        expect(page.get_by_test_id("od-blocks-badge")).to_be_visible(timeout=20000)
+                        expect(page.get_by_test_id("open-ux-builder-toolbar")).to_be_visible()
                         assert context.request.get(base + "/content/project/" + SLUG).status == 404
-                        checks.append("chrome_switch_back_editor_preserves_rich_text_ast_and_draft")
+                        checks.append("chrome_editor_shows_od_blocks_badge_and_stays_draft")
 
                         # Disable per-CPT Builder in Admin: its affordance and API
-                        # disappear, while the private AST remains stored.
+                        # disappear, while the stored body remains intact.
                         form = open_type_settings(page, base)
-                        form.get_by_label("Visual Builder (builder)").uncheck()
+                        form.get_by_label("Trình dựng trang (builder)").uncheck()
                         with page.expect_response(
                             lambda response: response.request.method == "PUT"
                             and response.url.endswith("/api/admin/content-types/project"),
@@ -214,7 +183,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         ) as disable_response:
                             form.get_by_role("button", name="Lưu cấu hình").click()
                         assert disable_response.value.status == 200, disable_response.value.text()
-                        expect(form.get_by_label("Visual Builder (builder)")).not_to_be_checked(
+                        expect(form.get_by_label("Trình dựng trang (builder)")).not_to_be_checked(
                             timeout=20000
                         )
                         disabled = schema_from_server(context, base)
@@ -223,16 +192,15 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         assert denied.status == 403, (denied.status, denied.text()[:260])
                         page.goto(editor_url(base, entry_id), wait_until="domcontentloaded")
                         expect(page.locator("#entry-title-input")).to_have_value(TITLE, timeout=20000)
-                        expect(page.get_by_role("button", name="Mở Visual Builder")).to_have_count(0)
-                        expect(page.locator("#entry-content-mode")).to_have_count(0)
-                        expect(page.locator("#content-field-body")).to_have_value(BODY, timeout=20000)
+                        expect(page.get_by_test_id("open-ux-builder-toolbar")).to_have_count(0)
+                        expect(page.locator("#content-field-body")).to_contain_text("<!-- od:", timeout=20000)
                         assert api_json(context, "GET", base, entry_path(entry_id))["publication_status"] == "draft"
                         checks.append("disabled_cpt_builder_hides_button_and_denies_builder_api_403")
 
-                        # Verify disabled support did not delete the old document
+                        # Verify disabled support did not delete the stored design
                         # by re-enabling the same CPT without editing its entry.
                         form = open_type_settings(page, base)
-                        form.get_by_label("Visual Builder (builder)").check()
+                        form.get_by_label("Trình dựng trang (builder)").check()
                         with page.expect_response(
                             lambda response: response.request.method == "PUT"
                             and response.url.endswith("/api/admin/content-types/project"),
@@ -240,14 +208,14 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         ) as enable_response:
                             form.get_by_role("button", name="Lưu cấu hình").click()
                         assert enable_response.value.status == 200, enable_response.value.text()
-                        expect(form.get_by_label("Visual Builder (builder)")).to_be_checked(
+                        expect(form.get_by_label("Trình dựng trang (builder)")).to_be_checked(
                             timeout=20000
                         )
                         restored = api_json(context, "GET", base, builder_path(entry_id))
                         assert restored["document"] == built["document"], restored
-                        assert restored["content_mode"] == "editor", restored
-                        assert api_json(context, "GET", base, entry_path(entry_id))["values"]["body"] == BODY
-                        checks.append("reenable_builder_restores_same_ast_with_editor_body_intact")
+                        assert restored["content_mode"] == "builder", restored
+                        assert "<!-- od:" in api_json(context, "GET", base, entry_path(entry_id))["values"]["body"]
+                        checks.append("reenable_builder_restores_same_ast_intact")
 
                         assert not js_errors, f"Chrome JS errors: {js_errors}"
                     finally:

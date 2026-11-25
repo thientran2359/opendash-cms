@@ -16,7 +16,7 @@ Directory index:
 - **Baseline DB Generator & Verifier:** `[cms/scripts/make_baseline_fixture.py:create_baseline_fixture]` validates `baseline_0001.sqlite` schema/content (`theme_blocks`, `home_page` row `id = 1`) or regenerates it from a pre-M1.1 binary.
 - **Admin Extension Fixture Manifests (`admin-review/`):**
   - `admin-review/plugin/plugin.json`: `review-provider` (`manifest_schema: 2`, `actions: ["inspect"]`, `admin_extensions` `columns` + `term_panels`).
-  - `admin-review/theme/theme.json`: `review-theme` (`manifest_version: 2`, `admin_extensions` `columns` + `term_panels`).
+  - `admin-review/theme/theme.json`: `review-theme` (`manifest_version: 3`, `templates: [{"kind": "single", "file": "single.html"}]`, `admin_extensions` `columns` + `term_panels`).
 - **Subtree Packages:**
   - [demo-website/README.md](./demo-website/README.md): `seed`, `smoke`, `capture`, `all`, `serve`, and `reset` workflows under `runtime/demo-website/<run-name>/`.
   - [m7/README.md](./m7/README.md): SHA256-pinned synthetic `video-avc-aac.mp4` and loopback SMTP TLS certs.

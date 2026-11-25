@@ -244,7 +244,6 @@ interface AdminShellProps {
   cptTaxonomies?: Record<string, Array<{ key: string; label: string }>>;
   onNavigateHash: (hash: string) => void;
   hasUnsavedChanges: boolean;
-  sidebarContent: React.ReactNode;
   contentContent: React.ReactNode;
   schemaSettingsContent: React.ReactNode;
   postsContent: React.ReactNode;
@@ -267,7 +266,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   route, routeForbidden, cptTypes, cptTaxonomies, onNavigateHash, hasUnsavedChanges,
-  sidebarContent, contentContent, schemaSettingsContent,
+  contentContent, schemaSettingsContent,
   postsContent, pagesContent, patternsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
   libraryContent, studioContent,
@@ -287,7 +286,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
             ? 'schema' : 'posts')
         : route.view === 'profile'
           ? 'users'
-          : route.view === 'builder' || route.view === 'studio' || route.view === 'studio-entry'
+          : route.view === 'studio' || route.view === 'studio-entry'
             ? 'studio'
             : route.view === 'themes'
               ? 'themes'
@@ -344,7 +343,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
         : route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
           ? '#/taxonomy/definitions' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
     route.view === 'profile' ? '#/users/profile' :
-    route.view === 'builder' || route.view === 'studio' ? '#/studio' :
+    route.view === 'studio' ? '#/studio' :
     route.view === 'tools' ? `#/tools/${route.sub}` :
     route.view === 'settings'
       ? (route.sub === 'content-types' ? '#/appearance/content-types' : `#/settings/${route.sub}`) :
@@ -599,12 +598,6 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'themes' && <div className="od-admin-card min-w-0">{themesContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' && <div className="od-legacy-scope">{libraryContent}</div>}
                 {user?.role === 'admin' && route.view === 'patterns' && <div className="od-legacy-scope">{patternsContent}</div>}
-
-                <section className={user && route.view === 'builder' ? 'od-editor-panel od-legacy-scope' : 'hidden'} aria-label={t('shell.builder')} aria-hidden={!user || route.view !== 'builder'}>
-                  <div id="builder-main">
-                    <section className="editor-sidebar">{sidebarContent}</section>
-                  </div>
-                </section>
 
                 <section className={user && route.view === 'cpt' ? `od-editor-panel${cptLegacy}` : 'hidden'} aria-label={t('shell.custom_content')} aria-hidden={!user || route.view !== 'cpt'}>
                   <div id="content-main">{contentContent}</div>

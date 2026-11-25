@@ -2,11 +2,6 @@ import { tStatic } from '../i18n/index.tsx';
 import type { BlockFieldSpec } from '../types.ts';
 import { requestJson } from './client.ts';
 
-export interface ThemeItem {
-  id: string;
-  compatible_block_id: string | null;
-}
-
 export interface ThemeRevisionSummary {
   revision_id: string;
   theme_id: string;
@@ -19,15 +14,11 @@ export interface ThemeSelection {
   revision_id: string | null;
   theme_id: string | null;
   version: number;
-  legacy_block_id: string | null;
   source_format: 'v3' | null;
 }
 
 export interface ThemesSummary {
-  items: ThemeItem[];
-  active_id: string | null;
   version: number;
-  homepage_compatible: boolean | null;
   revisions: ThemeRevisionSummary[];
   selection: ThemeSelection;
 }

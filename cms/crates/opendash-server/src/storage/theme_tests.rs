@@ -23,6 +23,7 @@ use crate::storage::{
         reset_typed_override, resolve_template_2axis, save_typed_override,
     },
     public_content,
+    theme::{ThemeSourceFormat, list},
 };
 
 struct TempDirGuard(PathBuf);
@@ -230,6 +231,62 @@ async fn migration_0042_upgrades_legacy_schema_and_preserves_deleted_reading_ref
             .await
             .unwrap();
     assert_eq!(version, 2);
+}
+
+#[tokio::test]
+async fn pre_0042_legacy_theme_rows_list_cleanly_without_http_500() {
+    let tmp = TempDirGuard::new("legacy_theme_list");
+    let path = tmp.path().join("site.sqlite");
+    {
+        let db = connect_file_pool(&path).await;
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        let mut migrator = sqlx::migrate::Migrator::new(migrations).await.unwrap();
+        migrator.migrations.to_mut().retain(|m| m.version <= 41);
+        migrator.run(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO theme_packages (theme_id,display_name,source_format,is_legacy)
+             VALUES ('legacy-v1-a','Legacy V1','v1_legacy',1),('old-v2-theme','Legacy V2','v2',0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO theme_revisions (
+                revision_id,theme_id,version,revision_digest,source_format,
+                manifest_json,file_digests_json,provenance_json
+             ) VALUES
+                ('legacy-v1-rev','legacy-v1-a','1.0.0','digest-v1','v1_legacy','{}','{}','{}'),
+                ('old-v2-rev','old-v2-theme','2.0.0','digest-v2','v2','{}','{}','{}')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO theme_active_selection (id,revision_id,version)
+             VALUES (1,'old-v2-rev',9)
+             ON CONFLICT(id) DO UPDATE SET revision_id=excluded.revision_id,version=9",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        db.close().await;
+    }
+    let db = init_db(&path).await.unwrap();
+    let listed = list(&db)
+        .await
+        .expect("pre-0042 theme rows must list without 500");
+    assert_eq!(listed.version, 9);
+    assert_eq!(listed.selection.revision_id.as_deref(), Some("old-v2-rev"));
+    assert_eq!(listed.selection.source_format, Some(ThemeSourceFormat::V2));
+    assert!(listed.revisions.iter().any(
+        |r| r.revision_id == "legacy-v1-rev" && r.source_format == ThemeSourceFormat::V1Legacy
+    ));
+    assert!(
+        listed
+            .revisions
+            .iter()
+            .any(|r| r.revision_id == "old-v2-rev" && r.source_format == ThemeSourceFormat::V2)
+    );
 }
 
 #[tokio::test]

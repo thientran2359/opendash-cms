@@ -1272,3 +1272,175 @@ async fn negative_corpus_preserves_source_and_never_publishes_target() {
         .unwrap();
     assert_eq!(still_ok.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn missing_v3_theme_complete_marker_fails_restore_closed() {
+    use std::io::{Cursor, Read};
+
+    let tmp = TempDirGuard::new("missing-v3-complete");
+    let source_root = tmp.path().join("source-site");
+    let source_db = source_root.join("database").join("opendash.sqlite");
+    fs::create_dir_all(source_root.join("database")).unwrap();
+
+    let srv = spawn_server(&source_root, &source_db).await;
+    let client = Client::builder().redirect(Policy::none()).build().unwrap();
+    let (cookie, csrf) =
+        setup_and_login(&client, &srv.base_url, "admin", "admin-password-123").await;
+
+    let theme_zip = build_theme_zip("m8-missing-complete-theme");
+    let theme_inst = client
+        .post(format!("{}/api/admin/themes", srv.base_url))
+        .header(header::COOKIE, &cookie)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::CONTENT_TYPE, "application/zip")
+        .body(theme_zip)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(theme_inst.status(), StatusCode::CREATED);
+
+    let passphrase = "restore-complete-marker-passphrase";
+    let b_resp = client
+        .post(format!("{}/api/admin/operations/backups", srv.base_url))
+        .header(header::COOKIE, &cookie)
+        .header("X-CSRF-Token", &csrf)
+        .json(&json!({
+            "passphrase": passphrase,
+            "confirm_passphrase": passphrase,
+            "reason": "missing complete marker"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(b_resp.status(), StatusCode::ACCEPTED);
+    let b_job_id = b_resp.json::<Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b_job = poll_job(&client, &srv.base_url, &cookie, &b_job_id).await;
+    assert_eq!(b_job["state"], "succeeded", "backup job failed: {b_job}");
+
+    let dl_bytes = client
+        .get(format!(
+            "{}/api/admin/operations/backups/{b_job_id}/file",
+            srv.base_url
+        ))
+        .header(header::COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap()
+        .to_vec();
+
+    // Decrypt the backup archive, strip the theme revision `.complete` marker
+    // from both manifest.json and the ZIP archive, then re-encrypt.
+    let decryptor = age::Decryptor::new_buffered(Cursor::new(&dl_bytes)).expect("age decryptor");
+    let mut identity = age::scrypt::Identity::new(SecretString::from(passphrase.to_string()));
+    identity.set_max_work_factor(16);
+    let mut reader = decryptor
+        .decrypt(std::iter::once(&identity as &dyn age::Identity))
+        .expect("decrypt valid backup");
+    let mut decrypted_zip = Vec::new();
+    reader.read_to_end(&mut decrypted_zip).unwrap();
+
+    let mut archive = zip::ZipArchive::new(Cursor::new(&decrypted_zip)).expect("open backup zip");
+    let mut manifest: BackupManifestV1 = {
+        let mut mf = archive.by_name("manifest.json").expect("manifest.json");
+        let mut raw = Vec::new();
+        mf.read_to_end(&mut raw).unwrap();
+        serde_json::from_slice(&raw).expect("parse BackupManifestV1")
+    };
+
+    let removed_entries: std::collections::HashSet<String> = manifest
+        .files
+        .iter()
+        .filter(|rec| {
+            rec.logical_key.starts_with("themes/revisions/")
+                && rec.logical_key.ends_with("/.complete")
+        })
+        .map(|rec| rec.entry_name.clone())
+        .collect();
+    assert!(
+        !removed_entries.is_empty(),
+        "backup manifest must include theme revision .complete marker"
+    );
+    manifest
+        .files
+        .retain(|rec| !removed_entries.contains(&rec.entry_name));
+
+    let mut stripped_zip = Vec::new();
+    {
+        let mut out = ZipWriter::new(Cursor::new(&mut stripped_zip));
+        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        for idx in 0..archive.len() {
+            let mut file = archive.by_index(idx).unwrap();
+            let name = file.name().unwrap().into_owned();
+            if name == "manifest.json" || removed_entries.contains(&name) {
+                continue;
+            }
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf).unwrap();
+            out.start_file(&name, opts).unwrap();
+            out.write_all(&buf).unwrap();
+        }
+        out.start_file("manifest.json", opts).unwrap();
+        out.write_all(&serde_json::to_vec(&manifest).unwrap())
+            .unwrap();
+        out.finish().unwrap();
+    }
+
+    let stripped_age = encrypt_age_bytes(&stripped_zip, passphrase);
+    let up_stripped = client
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .body(stripped_age)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(up_stripped.status(), StatusCode::CREATED);
+    let upload_id = up_stripped.json::<Value>().await.unwrap()["upload_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let r_resp = client
+        .post(format!("{}/api/admin/operations/restores", srv.base_url))
+        .header(header::COOKIE, &cookie)
+        .header("X-CSRF-Token", &csrf)
+        .json(&json!({
+            "upload_id": upload_id,
+            "passphrase": passphrase,
+            "reason": "missing-v3-complete"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r_resp.status(), StatusCode::ACCEPTED);
+    let r_job_id = r_resp.json::<Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let r_job = poll_job(&client, &srv.base_url, &cookie, &r_job_id).await;
+    assert_eq!(
+        r_job["state"], "failed",
+        "restore without v3 .complete marker must fail closed: {r_job}"
+    );
+
+    let restores_dir = source_root.join("backups").join("restored");
+    if restores_dir.exists() {
+        for entry in fs::read_dir(&restores_dir).unwrap() {
+            let entry = entry.unwrap();
+            assert!(
+                !entry.path().join("READY.json").exists(),
+                "failed v3 restore must not write READY.json"
+            );
+        }
+    }
+}

@@ -93,10 +93,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
     // template_overrides_preview, menus_preview)
     let required_handlers: &[(&str, &[&str])] = &[
         ("auth.rs", &["auth_setup", "auth_login", "auth_logout"]),
-        (
-            "builder.rs",
-            &["save", "entry_builder_put", "entry_builder_reset"],
-        ),
+        ("builder.rs", &["entry_builder_put", "entry_builder_reset"]),
         (
             "contact.rs",
             &[

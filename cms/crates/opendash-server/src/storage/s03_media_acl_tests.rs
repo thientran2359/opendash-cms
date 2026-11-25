@@ -319,27 +319,53 @@ async fn plugin_media_projects_to_home_entry_and_template_acl_with_privacy_guard
         "private body may not emit media ACL"
     );
 
-    let version: i64 = sqlx::query_scalar("SELECT version FROM builder_homepage WHERE id = 1")
-        .fetch_one(&db)
+    // Legacy builder_homepage rows and projection tables remain schema-present
+    // on upgraded databases, but neither public media ACL nor delete pins
+    // consult them once legacy homepage Builder is retired.
+    let doc_json = String::from_utf8(document.to_json().unwrap()).unwrap();
+    sqlx::query("UPDATE builder_homepage SET document_json = ? WHERE id = 1")
+        .bind(&doc_json)
+        .execute(&db)
         .await
         .unwrap();
-    save_and_render(&db, &document, version, |_, _, _, _| Ok(()))
+    sqlx::query("INSERT INTO builder_homepage_video_refs (media_id, ref_role) VALUES (?, 'video')")
+        .bind(&video_id)
+        .execute(&db)
         .await
         .unwrap();
-    let home_video: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM builder_homepage_video_refs WHERE media_id = ? AND ref_role = 'video'",
-    )
-    .bind(&video_id)
-    .fetch_one(&db)
-    .await
-    .unwrap();
-    let home_image: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM builder_homepage_media WHERE media_id = ?")
-            .bind(&image_id)
-            .fetch_one(&db)
+    sqlx::query("INSERT INTO builder_homepage_media (media_id) VALUES (?)")
+        .bind(&image_id)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(
+        !crate::storage::public_content::media_is_referenced(&db, &video_id)
             .await
-            .unwrap();
-    assert_eq!((home_video, home_image), (1, 1));
+            .unwrap(),
+        "inert builder_homepage video ref must not expose media publicly"
+    );
+    assert!(
+        !crate::storage::public_content::media_is_referenced(&db, &image_id)
+            .await
+            .unwrap(),
+        "inert builder_homepage image ref must not expose media publicly"
+    );
+    let mut pin_tx = db.begin().await.unwrap();
+    let img_pins = crate::storage::media_refs::collect_pins_in_tx(&mut pin_tx, &image_id)
+        .await
+        .unwrap();
+    let vid_pins = crate::storage::media_refs::collect_pins_in_tx(&mut pin_tx, &video_id)
+        .await
+        .unwrap();
+    pin_tx.commit().await.unwrap();
+    assert_eq!(
+        img_pins.total_pins, 0,
+        "inert builder_homepage must not pin media"
+    );
+    assert_eq!(
+        vid_pins.total_pins, 0,
+        "inert builder_homepage must not pin video"
+    );
 
     let target = TemplateCandidate::new(TemplateCandidateKind::Index);
     let saved = crate::storage::overrides::save_typed_override(&db, &target, &document, None)

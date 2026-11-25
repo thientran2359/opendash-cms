@@ -9,7 +9,6 @@ export type AdminView =
   | 'media'
   | 'taxonomy'
   | 'themes'
-  | 'builder'
   | 'studio'
   | 'studio-entry'
   | 'plugins'
@@ -224,7 +223,6 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
       const valid =
         segs.length === 4 &&
         Boolean(rawTypeKey) &&
-        rawTypeKey !== 'pattern' &&
         rawTypeKey !== 'section' &&
         /^[a-z][a-z0-9_]{0,63}$/.test(rawTypeKey ?? '') &&
         entryId !== undefined;
@@ -260,15 +258,15 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     const typeKey = params.get('type') ?? undefined;
     const validType = Boolean(typeKey && /^[a-z][a-z0-9_]{0,63}$/.test(typeKey));
 
-    // Keep Pattern Builder on legacy BuilderWorkspace until patterns move to Studio.
+    // Redirect legacy Pattern builder URLs cleanly into Studio Mode 2 (Admin-only via isRouteAllowed).
     if (templateRole === 'entry' && typeKey === 'pattern' && entryId !== undefined) {
       return {
-        view: 'builder',
-        sub: 'builder',
-        templateRole,
-        typeKey,
+        view: 'studio-entry',
+        sub: 'entry',
+        typeKey: 'pattern',
         entryId,
         rawHash: hash,
+        redirectHash: `#/studio/entry/pattern/${entryId}`,
       };
     }
     if (templateRole === 'page' && typeKey === 'page' && entryId !== undefined) {
@@ -335,8 +333,9 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
       };
     }
     return {
-      view: 'builder',
+      view: 'studio',
       sub: 'invalid',
+      studioPanel: 'root',
       templateRole,
       typeKey,
       entryId,
@@ -378,13 +377,12 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
 export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
   if (route.view === 'patterns' && route.sub === 'invalid') return false;
   if (route.view === 'taxonomy' && route.taxonomyMode === 'invalid') return false;
-  if (route.view === 'builder' && route.sub !== 'builder') return false;
   if (route.view === 'studio' && (route.sub === 'invalid' || role !== 'admin')) return false;
   if (route.view === 'studio-entry') {
+    if (route.typeKey === 'pattern' && role !== 'admin') return false;
     return route.sub === 'entry'
       && !!route.typeKey
       && route.typeKey !== 'section'
-      && route.typeKey !== 'pattern'
       && /^[a-z][a-z0-9_]{0,63}$/.test(route.typeKey)
       && Number.isSafeInteger(route.entryId)
       && (route.entryId ?? 0) > 0;
@@ -396,12 +394,6 @@ export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
   if (route.view === 'taxonomy' && !['list', 'edit'].includes(route.taxonomyMode ?? '')) return false;
   if (route.view === 'themes' || route.view === 'plugins' || route.view === 'users' || route.view === 'tools' || route.view === 'settings') {
     return false;
-  }
-  if (route.view === 'builder') {
-    return ((route.templateRole === 'entry' && !!route.typeKey && route.typeKey !== 'section' && route.typeKey !== 'pattern'
-      && /^[a-z][a-z0-9_]{0,63}$/.test(route.typeKey))
-      || (route.templateRole === 'page' && route.typeKey === 'page'))
-      && Number.isSafeInteger(route.entryId) && (route.entryId ?? 0) > 0;
   }
   return true;
 }

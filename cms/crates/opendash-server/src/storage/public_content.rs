@@ -324,7 +324,7 @@ pub async fn load_entry_render_snapshot_with_options(
         let doc =
             opendash_core::builder_blocks::parse_blocks_lenient_or_recover(raw_body.unwrap_or(""))
                 .document;
-        let state = builder::read_home_tx(&mut tx).await?;
+        let state = builder::read_render_context_tx(&mut tx).await?;
         let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
             &mut tx,
             &doc,
@@ -1279,10 +1279,6 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              )
            LIMIT 1
          ) OR EXISTS (
-           SELECT 1 FROM builder_homepage_media AS bm
-           JOIN builder_homepage AS b ON b.id = 1
-           WHERE bm.media_id = ? AND b.document_json IS NOT NULL
-         ) OR EXISTS (
            SELECT 1
            FROM theme_option_media_refs AS tom
            JOIN theme_revisions AS r ON r.theme_id = tom.owner_id
@@ -1317,10 +1313,6 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            FROM site_home_seo AS h
            JOIN site_locales AS sl ON sl.code = h.locale
            WHERE h.og_image_id = ? AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-         ) OR EXISTS (
-           SELECT 1 FROM builder_homepage_video_refs AS bv
-           JOIN builder_homepage AS b ON b.id = 1
-           WHERE bv.media_id = ? AND b.document_json IS NOT NULL
          ) OR EXISTS (
            SELECT 1
            FROM template_override_media_refs AS tom
@@ -1403,8 +1395,6 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              AND d.declaration_state = 'declared'
          )"#,
     )
-    .bind(id)
-    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)

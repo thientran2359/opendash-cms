@@ -79,7 +79,7 @@ async fn active_in_conn(conn: &mut SqliteConnection) -> ApiResult<Vec<Registered
          LEFT JOIN theme_revisions r ON r.revision_id=s.revision_id
          WHERE a.provider_status='active'
            AND ((a.owner_kind='plugin' AND p.enabled=1 AND p.last_error IS NULL)
-             OR (a.owner_kind='theme' AND r.theme_id=a.owner_id AND r.source_format='v2'))
+             OR (a.owner_kind='theme' AND r.theme_id=a.owner_id AND r.source_format='v3'))
          ORDER BY a.owner_kind,a.owner_id,a.local_key",
     )
     .fetch_all(&mut *conn)

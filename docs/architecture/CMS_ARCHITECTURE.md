@@ -14,8 +14,8 @@ Mã nguồn CMS được tổ chức thành **Workspace Rust 2 crate** kết h�
 ```mermaid
 flowchart LR
     subgraph Admin["cms/admin/ (React + TS + Vite + Tailwind CSS)"]
-        Shell["Admin Shell & 18 Feature Modules\n(Posts/Pages/CPT, Media, Builder, Themes, Plugins, Operations)"]
-        Builder["Visual Builder Workspace\n(Section -> Row -> Column -> Element, Iframe Preview)"]
+        Shell["Admin Shell & Feature Modules\n(Posts/Pages/CPT, Media, Themes, Patterns, Plugins, Operations)"]
+        Builder["OpenDash Studio & Builder Core\n(StudioWorkspace Mode 1/2 + BuilderEditorCore, Iframe Preview)"]
         ApiClient["API Client (cms/admin/src/api/client.ts)\n(CSRF, giữ draft khi 401/412 qua EditorDraftStore)"]
         Shell --> ApiClient
         Builder --> ApiClient
@@ -53,7 +53,7 @@ flowchart LR
 3. **`cms/admin/` (Giao diện quản trị và Builder trên trình duyệt):**
    - **`api/` (21 modules):** Mọi lời gọi HTTP đi qua [`client.ts`](../../cms/admin/src/api/client.ts).
    - **`shell/`:** `AdminShell.tsx` (điều hướng 3 nhóm `Nội dung`, `Giao diện`, `Tùy chỉnh`), `router.ts`, `AuthPanel.tsx`.
-   - **`builder/`:** `BuilderWorkspace.tsx`, `BuilderTree.tsx`, `BuilderCanvas.tsx`, `BuilderInspector.tsx` (hỗ trợ Homepage, Template Overrides, Page-scoped Builder và private Section CPT).
+   - **`builder/` & `studio/`:** `StudioWorkspace.tsx` (Mode 1 Customizer + Mode 2 Entry/Pattern UX Builder), `BuilderEditorCore.tsx`, `BuilderTree.tsx`, `BuilderCanvas.tsx`, `BuilderInspector.tsx`, `BuilderPreviewFrame.tsx` (`BuilderWorkspace.tsx` cũ đã được thay thế hoàn toàn).
    - **`features/` (18 thư mục):** `contact/`, `content/`, `dashboard/`, `editor/` (`SingleEditWorkspace.tsx`, `EditorDraftStore.ts`), `extensions/`, `library/`, `media/`, `operations/`, `patterns/`, `plugins/`, `posts/`, `seo/`, `settings/`, `shared/`, `system/`, `taxonomy/`, `themes/`, `users/`.
 
 ### 1.2. Luồng Xem trước (Preview), Lưu (Save), Xuất bản (Publish) và Quyền sở hữu Dữ liệu
@@ -61,7 +61,7 @@ flowchart LR
 - **Xem trước (Preview):** Gửi dữ liệu chưa lưu lên route preview có xác thực và `sequence ID` cục bộ; server dùng cùng bộ render MiniJinja (`C-SEC`) trả HTML vào `iframe sandbox=""`. Thay đổi chưa lưu **không ghi đè trang công khai**.
 - **Lưu vs Xuất bản:**
   - Với `post`, `page` và các CPT cấu hình `publication: "draft_publish"` (`0038_content_type_settings.sql`), thao tác **Lưu** trên bản `draft` chỉ ghi DB (không công khai URL, archive, sitemap hoặc media ACL); chỉ thao tác **Xuất bản** mới công khai.
-  - Với **Visual Builder** (homepage, template overrides, exact Page Builder) và các CPT để chế độ `immediate`, thao tác **Lưu** cập nhật công khai ngay.
+  - Với **OpenDash Studio** (template overrides, Global Options, Menus, Reading Settings, Pattern riêng tư và entry CPT cấu hình `immediate`) cùng các CPT `immediate`, thao tác **Lưu** cập nhật trực tiếp ngay; riêng `post`, `page` và CPT `draft_publish` chỉnh sửa trong Studio Mode 2 vẫn giữ ranh giới `draft` / `published`.
 - **Tách biệt Dữ liệu Website & Mã nguồn (`SitePaths`):**
   - Toàn bộ dữ liệu runtime của website tách khỏi mã nguồn trong `cms/` thông qua `SitePaths` (`OPENDASH_SITE_ROOT`, `OPENDASH_DB_PATH`): `database/opendash.sqlite`, `database/secrets/smtp/`, `themes/revisions/`, `plugins/revisions/`, `uploads/media/`, `uploads/.quarantine/`, `backups/artifacts/`, `config/site.json`, `runtime/site.lock`.
   - Staging cùng ổ đĩa (`runtime/staging/`, `.staging/<run_uuid>/`) đảm bảo `std::fs::rename` nguyên tử trên cả Windows và POSIX.

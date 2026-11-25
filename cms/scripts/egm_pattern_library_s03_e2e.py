@@ -13,6 +13,7 @@ import io
 import json
 import pathlib
 import platform
+import re
 import subprocess
 import tempfile
 import zipfile
@@ -55,14 +56,65 @@ def section_text(section: dict) -> str:
                     for element in column["children"])
 
 
-def preview_draft(page, entry_url: str) -> dict:
-    """Capture the exact unsaved AST sent by the browser, not the server snapshot."""
-    with page.expect_response(lambda response: response.url.endswith(entry_url + "/preview")
-                              and response.request.method == "POST") as pending:
-        page.get_by_role("button", name="Xem trước").click()
+def expect_preview_after(page, entry_url: str, action) -> dict:
+    """Capture the exact unsaved AST sent by Studio's debounced preview POST."""
+    with page.expect_response(
+        lambda response: response.url.endswith(entry_url + "/preview")
+        and response.request.method == "POST",
+        timeout=20000,
+    ) as pending:
+        action()
     response = pending.value
     assert response.status == 200, response.text()[:450]
     return response.request.post_data_json
+
+
+def ensure_tree_view(page) -> None:
+    for _ in range(4):
+        back = page.get_by_test_id("studio-inline-back-btn")
+        if back.count() == 0:
+            break
+        back.click()
+
+
+def node_locator(page, doc: dict, target_id: str):
+    """Expand any collapsed container ancestors along the path to `target_id`."""
+    ensure_tree_view(page)
+    ancestors: list[str] = []
+    found = False
+    for sec in doc.get("sections", []):
+        if sec["id"] == target_id:
+            found = True
+            break
+        for row in sec.get("children", []):
+            if row["id"] == target_id:
+                ancestors = [sec["id"]]
+                found = True
+                break
+            for col in row.get("children", []):
+                if col["id"] == target_id:
+                    ancestors = [sec["id"], row["id"]]
+                    found = True
+                    break
+                for el in col.get("children", []):
+                    if el["id"] == target_id:
+                        ancestors = [sec["id"], row["id"], col["id"]]
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                break
+        if found:
+            break
+    for anc in ancestors:
+        loc = page.locator(f'[role="treeitem"][data-node-id="{anc}"]')
+        if loc.count() > 0 and loc.get_attribute("aria-expanded") == "false":
+            loc.focus()
+            loc.press("ArrowRight")
+    item = page.locator(f'[role="treeitem"][data-node-id="{target_id}"]')
+    expect(item).to_be_visible(timeout=10000)
+    return item
 
 
 def zip_v3() -> bytes:
@@ -113,9 +165,9 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                              {"username": "s03_admin", "password": "AdminPassword123!"}, expected=201)
                     csrf = admin_login(ctx, base, "s03_admin", "AdminPassword123!", cms_locale="vi")
                     library = "/api/admin/patterns/library"
-                    no_theme = api_json(ctx, "GET", base, library)
-                    assert no_theme["items"] == [], no_theme
-                    checks.append("auth_guard_and_no_active_theme_empty_catalog")
+                    starter = api_json(ctx, "GET", base, library)
+                    assert all(x["id"].startswith("theme:opendash-starter:") for x in starter["items"]), starter
+                    checks.append("auth_guard_and_starter_default_pattern_catalog")
 
                     upload = ctx.request.post(base + "/api/admin/themes", data=zip_v3(), headers={
                         "Origin": base, "X-CSRF-Token": csrf, "Content-Type": "application/zip",
@@ -150,22 +202,16 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     entry_url = f"/api/admin/entries/page/{page_id}/builder"
                     before = api_json(ctx, "GET", base, entry_url)
                     assert before["document"] is None
-                    page.goto(base + f"/admin/#/builder?template=page&type=page&entry={page_id}",
+                    page.goto(base + f"/admin/#/studio/entry/page/{page_id}",
                               wait_until="domcontentloaded")
-                    workspace = page.get_by_test_id("builder-workspace")
-                    expect(workspace).to_contain_text("Đã mở", timeout=20000)
-                    sidebar = page.get_by_role("tablist", name="Builder sidebar")
-                    expect(sidebar.get_by_role("tab")).to_have_count(3)
-                    for name in ("Blocks", "Patterns", "Media"):
-                        expect(sidebar.get_by_role("tab", name=name, exact=True)).to_be_visible()
-                    expect(sidebar.get_by_role("tab", name="Blocks")).to_have_attribute("aria-selected", "true")
-                    sidebar.get_by_role("tab", name="Media").click()
-                    expect(sidebar.get_by_role("tab", name="Media")).to_have_attribute("aria-selected", "true")
-                    sidebar.get_by_role("tab", name="Patterns").click()
-                    expect(sidebar.get_by_role("tab", name="Patterns")).to_have_attribute("aria-selected", "true")
-                    checks.append("builder_sidebar_blocks_patterns_media_tabs")
+                    workspace = page.get_by_test_id("studio-workspace")
+                    expect(workspace).to_be_visible(timeout=20000)
+                    expect(page.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=20000)
+                    expect(page.get_by_test_id("studio-save-draft-btn")).to_be_visible()
+                    footer = page.get_by_test_id("studio-sidebar-footer")
+                    footer.get_by_test_id("studio-open-pattern-library").click()
+                    checks.append("studio_mode2_sidebar_and_pattern_library_entry")
 
-                    page.get_by_test_id("open-pattern-library").click()
                     modal = page.get_by_test_id("pattern-library-modal")
                     expect(modal).to_be_visible(timeout=15000)
                     expect(page.get_by_test_id("pattern-library-grid").locator("article")).to_have_count(2)
@@ -176,61 +222,58 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     expect(page.get_by_test_id("pattern-library-grid").locator("article")).to_have_count(1)
                     modal.get_by_placeholder("Tìm theo tên, mô tả hoặc danh mục…").fill("")
                     expect(page.get_by_test_id("pattern-library-grid").locator("article")).to_have_count(2)
-                    page.get_by_test_id("insert-theme-pattern-hero").click()
+                    first = expect_preview_after(
+                        page, entry_url, lambda: page.get_by_test_id("insert-theme-pattern-hero").click()
+                    )
                     expect(modal).to_have_count(0)
-                    expect(workspace).to_contain_text("Đã chèn bản sao", timeout=10000)
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_be_visible(timeout=10000)
                     assert api_json(ctx, "GET", base, entry_url) == before
-                    # No node is selected in the initially empty Builder. The first
+                    # No node is selected in the initially empty Studio tree. The first
                     # insert exercises the fallback append path.
-                    first = preview_draft(page, entry_url)
                     assert [section_text(section) for section in first["sections"]] == [
                         "THEME HERO COPY SOURCE"
                     ], first
                     assert len(node_ids(first)) == 4
                     assert not (node_ids(first) & node_ids(source["document"]))
                     assert api_json(ctx, "GET", base, entry_url) == before
-                    page.get_by_role("button", name="Canvas cấu trúc").click()
                     checks.append("browser_modal_filter_and_empty_selection_fallback_append")
 
-                    page.get_by_test_id("open-pattern-library").click()
+                    footer.get_by_test_id("studio-open-pattern-library").click()
                     expect(page.get_by_test_id("pattern-library-grid").locator("article")).to_have_count(2)
-                    page.get_by_test_id("insert-theme-pattern-contact").click()
+                    second = expect_preview_after(
+                        page, entry_url, lambda: page.get_by_test_id("insert-theme-pattern-contact").click()
+                    )
                     expect(page.get_by_test_id("pattern-library-modal")).to_have_count(0)
-                    second = preview_draft(page, entry_url)
                     assert [section_text(section) for section in second["sections"]] == [
                         "THEME HERO COPY SOURCE", "THEME CONTACT COPY SOURCE"
                     ], second
-                    page.get_by_role("button", name="Canvas cấu trúc").click()
 
                     # Inserting after a selected Section must preserve the next
                     # sibling's position, rather than always appending.
-                    sidebar.get_by_role("tab", name="Blocks").click()
                     first_section_id = second["sections"][0]["id"]
-                    page.locator(f'[role="treeitem"][data-node-id="{first_section_id}"]').click()
-                    sidebar.get_by_role("tab", name="Patterns").click()
-                    page.get_by_test_id("open-pattern-library").click()
-                    page.get_by_test_id("insert-theme-pattern-hero").click()
+                    node_locator(page, second, first_section_id).click()
+                    footer.get_by_test_id("studio-open-pattern-library").click()
+                    inserted_after_section = expect_preview_after(
+                        page, entry_url, lambda: page.get_by_test_id("insert-theme-pattern-hero").click()
+                    )
                     expect(page.get_by_test_id("pattern-library-modal")).to_have_count(0)
-                    inserted_after_section = preview_draft(page, entry_url)
                     assert [section_text(section) for section in inserted_after_section["sections"]] == [
                         "THEME HERO COPY SOURCE", "THEME HERO COPY SOURCE",
                         "THEME CONTACT COPY SOURCE"
                     ], inserted_after_section
                     assert inserted_after_section["sections"][0]["id"] == first_section_id
                     assert inserted_after_section["sections"][2]["id"] == second["sections"][1]["id"]
-                    page.get_by_role("button", name="Canvas cấu trúc").click()
                     checks.append("pattern_insert_after_selected_section_preserves_siblings")
 
                     # Selection within a Row/Column/Element resolves to its
                     # ancestor Section. A repeated insert gets new IDs again.
-                    sidebar.get_by_role("tab", name="Blocks").click()
                     heading_id = inserted_after_section["sections"][0]["children"][0]["children"][0]["children"][0]["id"]
-                    page.locator(f'[role="treeitem"][data-node-id="{heading_id}"]').click()
-                    sidebar.get_by_role("tab", name="Patterns").click()
-                    page.get_by_test_id("open-pattern-library").click()
-                    page.get_by_test_id("insert-theme-pattern-contact").click()
+                    node_locator(page, inserted_after_section, heading_id).click()
+                    footer.get_by_test_id("studio-open-pattern-library").click()
+                    unsaved = expect_preview_after(
+                        page, entry_url, lambda: page.get_by_test_id("insert-theme-pattern-contact").click()
+                    )
                     expect(page.get_by_test_id("pattern-library-modal")).to_have_count(0)
-                    unsaved = preview_draft(page, entry_url)
                     assert [section_text(section) for section in unsaved["sections"]] == [
                         "THEME HERO COPY SOURCE", "THEME CONTACT COPY SOURCE",
                         "THEME HERO COPY SOURCE", "THEME CONTACT COPY SOURCE"
@@ -245,13 +288,12 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     assert api_json(ctx, "GET", base, entry_url) == before
                     assert api_json(ctx, "GET", base, library + "/theme/hero") == source
                     assert api_json(ctx, "GET", base, library + "/theme/contact") == contact_source
-                    page.get_by_role("button", name="Canvas cấu trúc").click()
                     page.screenshot(path=str(artifacts / "pattern-copies-before-save.png"), full_page=True)
                     checks.append("descendant_selection_order_repeated_copy_unique_ids_and_no_unsaved_write")
 
                     page.on("dialog", lambda dialog: dialog.accept())
-                    page.get_by_role("button", name="Lưu Page").click()
-                    expect(workspace).to_contain_text("Đã lưu", timeout=20000)
+                    page.get_by_test_id("studio-save-draft-btn").click()
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_have_count(0, timeout=20000)
                     saved = api_json(ctx, "GET", base, entry_url)
                     assert saved["document"] == unsaved
                     assert saved["version"] == before["version"] + 1
@@ -259,23 +301,22 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     assert api_json(ctx, "GET", base, library + "/theme/contact") == contact_source
                     checks.append("save_cas_persists_copy_not_theme_source")
 
-                    # Edit the page copy through Inspector and Save; immutable ZIP content survives.
-                    sidebar.get_by_role("tab", name="Blocks").click()
-                    page.locator('[role="treeitem"][data-node-id="' + heading_id + '"]').click()
+                    # Edit the page copy through Studio Inspector and Save; immutable ZIP content survives.
+                    node_locator(page, saved["document"], heading_id).dblclick()
                     page.get_by_label("Tiêu đề", exact=True).fill("EDITED PAGE COPY")
-                    page.get_by_role("button", name="Lưu Page").click()
-                    expect(workspace).to_contain_text("Đã lưu", timeout=20000)
+                    page.get_by_test_id("studio-save-draft-btn").click()
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_have_count(0, timeout=20000)
                     after_edit = api_json(ctx, "GET", base, entry_url)
                     assert "EDITED PAGE COPY" in json.dumps(after_edit["document"])
                     assert api_json(ctx, "GET", base, library + "/theme/hero") == source
                     assert api_json(ctx, "GET", base, library + "/theme/contact") == contact_source
                     assert api_json(ctx, "GET", base, library + "?q=Welcome")["items"]
+                    ensure_tree_view(page)
                     page.screenshot(path=str(artifacts / "pattern-copy-after-edit.png"), full_page=True)
                     checks.append("page_copy_edit_does_not_write_immutable_theme_or_raise_js_errors")
 
-                    # The Media sidebar uses the existing authenticated image
-                    # picker. Selecting an image inserts into the local draft,
-                    # without saving the Page or making its media publicly readable.
+                    # Media insertion inside Studio Add catalog uses the authenticated
+                    # picker without saving the Page or exposing private media.
                     uploaded = ctx.request.post(base + "/api/admin/media", data=make_png(seed=53),
                                                 headers={"Origin": base, "X-CSRF-Token": csrf,
                                                          "Content-Type": "image/png",
@@ -285,15 +326,16 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     assert ctx.request.get(base + f"/api/admin/media/{media_id}/file").status == 200
                     assert anon.request.get(base + f"/api/admin/media/{media_id}/file").status == 401
                     assert anon.request.get(base + f"/media/{media_id}/file").status == 404
-                    sidebar.get_by_role("tab", name="Media").click()
-                    expect(sidebar.get_by_role("tab", name="Media")).to_have_attribute("aria-selected", "true")
-                    page.get_by_test_id("builder-open-media-picker").click()
-                    picker = page.get_by_role("dialog", name="Chọn ảnh từ Media Library")
+                    node_locator(page, after_edit["document"], heading_id).click()
+                    page.get_by_role("button", name="Thêm Block").first.click()
+                    page.get_by_test_id("studio-open-media-picker").click()
+                    picker = page.get_by_role("dialog", name="Chọn media từ Media Library")
                     expect(picker).to_be_visible(timeout=10000)
                     picker.locator('.media-tile[title="s03-private.png"]').click()
-                    picker.get_by_role("button", name="Dùng ảnh đã chọn").click()
+                    with_image = expect_preview_after(
+                        page, entry_url, lambda: picker.get_by_role("button", name="Dùng media đã chọn").click()
+                    )
                     expect(picker).to_have_count(0)
-                    with_image = preview_draft(page, entry_url)
                     new_images = [
                         element for section in with_image["sections"]
                         for row in section["children"]
@@ -302,17 +344,58 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         if element["type"] == "core/image" and element["props"].get("media_id") == media_id
                     ]
                     assert len(new_images) == 1, with_image
-                    # With an existing selected descendant, insertion may reuse
-                    # its Column. The new image must still have a fresh node ID.
                     assert len(node_ids(with_image)) > len(node_ids(after_edit["document"])), with_image
                     assert not (node_ids(with_image) & source_ids)
                     assert api_json(ctx, "GET", base, entry_url) == after_edit
                     assert anon.request.get(base + f"/media/{media_id}/file").status == 404
                     assert api_json(ctx, "GET", base, library + "/theme/hero") == source
                     assert api_json(ctx, "GET", base, library + "/theme/contact") == contact_source
-                    page.get_by_role("button", name="Canvas cấu trúc").click()
+                    ensure_tree_view(page)
                     page.screenshot(path=str(artifacts / "media-picker-unsaved-copy.png"), full_page=True)
                     checks.append("authenticated_media_picker_unsaved_insert_private_acl_and_source_immutable")
+
+                    # Mode 2 Pattern editing (#/studio/entry/pattern/:id), Exit -> #/patterns/:id/edit,
+                    # legacy #/builder Pattern redirect, and Editor RBAC rejection.
+                    page.goto(base + "/admin/#/patterns/new", wait_until="domcontentloaded")
+                    expect(page.get_by_test_id("pattern-workspace")).to_be_visible(timeout=15000)
+                    page.get_by_label("Tiêu đề Pattern").fill("S03 Studio Pattern")
+                    page.get_by_label("Slug Pattern").fill("s03-studio-pattern")
+                    page.get_by_role("button", name="Lưu Pattern").click()
+                    expect(page).to_have_url(re.compile(r"#/patterns/[1-9]\d*/edit$"), timeout=15000)
+                    pat_id = int(re.search(r"#/patterns/(\d+)/edit", page.url).group(1))
+                    page.get_by_role("button", name="Mở Pattern Builder").click()
+                    expect(page).to_have_url(base + f"/admin/#/studio/entry/pattern/{pat_id}", timeout=15000)
+                    expect(page.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=15000)
+                    expect(page.get_by_test_id("studio-save-btn")).to_have_text("Lưu Pattern")
+                    page.get_by_role("button", name="Thêm Block").first.click()
+                    expect(page.get_by_role("button", name="Heading H1–H6")).to_be_visible()
+                    expect(page.get_by_role("button", name="Pattern tái sử dụng")).to_have_count(0)
+                    page.get_by_role("button", name="Heading H1–H6").click()
+                    page.get_by_label("Tiêu đề", exact=True).fill("PATTERN MODE 2 HEADING")
+                    page.get_by_test_id("studio-save-btn").click()
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_have_count(0, timeout=15000)
+                    pat_doc = api_json(ctx, "GET", base, f"/api/admin/entries/pattern/{pat_id}/builder")
+                    assert "PATTERN MODE 2 HEADING" in json.dumps(pat_doc["document"]), pat_doc
+                    assert anon.request.get(base + "/content/pattern/s03-studio-pattern").status == 404
+                    page.get_by_test_id("studio-exit-btn").click()
+                    expect(page).to_have_url(base + f"/admin/#/patterns/{pat_id}/edit", timeout=15000)
+                    page.goto(base + f"/admin/#/builder?template=entry&type=pattern&entry={pat_id}", wait_until="domcontentloaded")
+                    expect(page).to_have_url(base + f"/admin/#/studio/entry/pattern/{pat_id}", timeout=15000)
+                    expect(page.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=15000)
+                    checks.append("studio_mode2_pattern_save_exit_and_legacy_builder_redirect")
+
+                    api_json(ctx, "POST", base, "/api/admin/users",
+                             {"username": "s03_editor", "password": "EditorPassword123!", "role": "editor"},
+                             csrf, expected=201)
+                    editor_ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+                    admin_login(editor_ctx, base, "s03_editor", "EditorPassword123!")
+                    epage = editor_ctx.new_page()
+                    epage.goto(base + f"/admin/#/studio/entry/pattern/{pat_id}", wait_until="domcontentloaded")
+                    expect(epage.get_by_test_id("studio-workspace")).to_have_count(0, timeout=10000)
+                    expect(epage.get_by_test_id("rbac-forbidden")).to_be_visible(timeout=10000)
+                    assert editor_ctx.request.get(base + f"/api/admin/entries/pattern/{pat_id}/builder").status == 403
+                    editor_ctx.close()
+                    checks.append("editor_denied_studio_pattern_mode2_ui_and_api_403")
                     assert not errors, errors
                 finally:
                     browser.close()

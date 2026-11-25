@@ -10,7 +10,6 @@ interface Props {
   document: BuilderDocument;
   selectedId: string | null;
   elementType: InsertableElementType;
-  registry?: Record<string, Record<string, string>>;
   blockSchemas?: BlockCatalogItemDto[];
   onSelect: (id: string) => void;
   onAdd: (parentId: string | null, kind: 'section' | 'row' | 'column' | 'element') => void;
@@ -19,7 +18,7 @@ interface Props {
 }
 
 export function BuilderTree({
-  document, selectedId, elementType, registry = {}, blockSchemas = [],
+  document, selectedId, elementType, blockSchemas = [],
   onSelect, onAdd, onMove, onDelete,
 }: Props) {
   const { t } = useI18n();
@@ -43,7 +42,7 @@ export function BuilderTree({
     let target: string | undefined;
     if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
       event.preventDefault();
-      if (!isProtectedNode(document, item.node.id, registry, blockSchemas)) {
+      if (!isProtectedNode(document, item.node.id, blockSchemas)) {
         onMove(item.node.id, event.key === 'ArrowUp' ? -1 : 1);
       }
       return;
@@ -70,9 +69,9 @@ export function BuilderTree({
       {nodes.filter(entry => entry.parentId === parentId).map(item => {
         const nextKind = ({ section: 'row', row: 'column', column: 'element' } as const)[item.kind as 'section' | 'row' | 'column'];
         const label = nodeTitle(item, blockSchemas);
-        const protectedNode = isProtectedNode(document, item.node.id, registry, blockSchemas);
+        const protectedNode = isProtectedNode(document, item.node.id, blockSchemas);
         const locked = item.kind === 'element'
-          && isLockedElement(item.node as import('./document.ts').BuilderElement, registry, blockSchemas);
+          && isLockedElement(item.node as import('./document.ts').BuilderElement, blockSchemas);
         return (
           <li role="none" key={item.node.id}>
             <div className={'min-w-0 overflow-hidden rounded-lg p-1 ' +

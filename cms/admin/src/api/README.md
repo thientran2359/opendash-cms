@@ -2,7 +2,7 @@
 
 ## Overview
 
-Single HTTP transport and typed endpoint layer for the OpenDash React Admin (`cms/admin/`). All requests to `/auth/*`, `/registry`, `/api/health`, `/api/i18n/admin`, `/api/themes/*`, and `/api/admin/*` flow through [`client.ts`](client.ts) across 21 TypeScript modules (`index.ts` barrel plus 20 domain modules). See [Core Foundation](../../../../docs/contracts/CORE_FOUNDATION.md) and [CMS Architecture](../../../../docs/architecture/CMS_ARCHITECTURE.md).
+Single HTTP transport and typed endpoint layer for the OpenDash React Admin (`cms/admin/`). All requests to `/auth/*`, `/api/health`, `/api/i18n/admin`, `/api/themes/*`, and `/api/admin/*` flow through [`client.ts`](client.ts) across 21 TypeScript modules (`index.ts` barrel plus 20 domain modules). See [Core Foundation](../../../../docs/contracts/CORE_FOUNDATION.md) and [CMS Architecture](../../../../docs/architecture/CMS_ARCHITECTURE.md).
 
 ## Interface
 
@@ -20,7 +20,7 @@ Single HTTP transport and typed endpoint layer for the OpenDash React Admin (`cm
   - `[media.ts:listMedia]`, `[media.ts:uploadMedia]`, `[media.ts:uploadVideo]`, `[media.ts:deleteMedia]`, `[media.ts:mediaThumbnailUrl]`, `[media.ts:mediaOriginalUrl]`, `[media.ts:MediaDeleteConflictError]`.
 - **Studio, Builder, Themes & Menus (`studio.ts`, `builder.ts`, `themes.ts`, `menus.ts`):**
   - `[studio.ts:getStudioTargets]`, `[studio.ts:postStudioPreview]`.
-  - `[builder.ts:getTemplateOverrides]`, `[builder.ts:putTemplateOverride]`, `[builder.ts:previewTemplateOverride]`, `[builder.ts:resetTemplateOverride]`, `[builder.ts:getEntryBuilder]`, `[builder.ts:previewEntryBuilder]`, `[builder.ts:saveEntryBuilder]`, `[builder.ts:resetEntryBuilder]`, `[builder.ts:getRegistry]`, `[builder.ts:getBlockSchemas]`, `[builder.ts:getPrivatePreviewMedia]`.
+  - `[builder.ts:getTemplateOverrides]`, `[builder.ts:putTemplateOverride]`, `[builder.ts:previewTemplateOverride]`, `[builder.ts:resetTemplateOverride]`, `[builder.ts:getEntryBuilder]`, `[builder.ts:previewEntryBuilder]`, `[builder.ts:saveEntryBuilder]`, `[builder.ts:resetEntryBuilder]`, `[builder.ts:getBlockSchemas]`, `[builder.ts:getPrivatePreviewMedia]`.
   - `[themes.ts:getThemes]`, `[themes.ts:installTheme]`, `[themes.ts:activateTheme]`, `[themes.ts:activateThemeRevision]`, `[themes.ts:getActiveThemeLayouts]`, `[themes.ts:getThemeOptions]`, `[themes.ts:saveThemeOptions]`, `[themes.ts:dryRunSampleImport]`, `[themes.ts:executeSampleImport]`, `[themes.ts:isV3ThemeInstall]`.
   - `[menus.ts:listMenus]`, `[menus.ts:createMenu]`, `[menus.ts:getMenu]`, `[menus.ts:updateMenu]`, `[menus.ts:deleteMenu]`, `[menus.ts:previewMenu]`, `[menus.ts:getMenuSlots]`, `[menus.ts:putMenuSlots]`.
 - **Settings, Locales, SEO, Plugins, Contact & Operations (`settings.ts`, `locales.ts`, `seo.ts`, `plugins.ts`, `contact.ts`, `smtp.ts`, `operations.ts`):**

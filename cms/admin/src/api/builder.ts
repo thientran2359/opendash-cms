@@ -1,5 +1,5 @@
 import { tStatic } from '../i18n/index.tsx';
-import type { BlockRegistry, BlockCatalogItemDto } from '../types.ts';
+import type { BlockCatalogItemDto } from '../types.ts';
 import type { ContentMode } from '../features/content/types.ts';
 import type { BuilderDocument } from '../builder/document.ts';
 import { requestBlob, requestJson } from './client.ts';
@@ -164,13 +164,6 @@ export function resetEntryBuilder(
     method: 'POST', csrfToken, contentType: 'application/json', ifMatchVersion: version,
     body: JSON.stringify({ confirm: true }),
     defaultErrorMessage: tStatic('api.builder.reset_the_entry_builder'),
-  });
-}
-
-export async function getRegistry(): Promise<BlockRegistry> {
-  return requestJson<BlockRegistry>('/registry', {
-    method: 'GET',
-    defaultErrorMessage: tStatic('api.builder.load_blocks'),
   });
 }
 

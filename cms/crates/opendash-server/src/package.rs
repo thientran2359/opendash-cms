@@ -103,9 +103,9 @@ pub fn is_valid_zip_content_type(
     }
 }
 
-/// Validates a relative ASCII path for v2 theme packages:
+/// Validates a relative ASCII path inside theme/plugin packages:
 /// no empty/dot/dot-dot segments, backslashes, drive letters/colons, control chars, or leading/trailing slashes.
-pub fn validate_v2_relative_path(raw: &str) -> Result<String, &'static str> {
+pub fn validate_theme_relative_path(raw: &str) -> Result<String, &'static str> {
     if raw.is_empty()
         || !raw.is_ascii()
         || raw.starts_with('/')
@@ -170,7 +170,7 @@ where
         if entry.is_dir() {
             let trimmed = name.trim_end_matches('/');
             if !trimmed.is_empty() {
-                validate_v2_relative_path(trimmed).map_err(V2ZipError::BadRequest)?;
+                validate_theme_relative_path(trimmed).map_err(V2ZipError::BadRequest)?;
             }
             if entry.size() > 0 {
                 return Err(V2ZipError::BadRequest(
@@ -180,7 +180,7 @@ where
             continue;
         }
 
-        let rel_path = validate_v2_relative_path(&name).map_err(V2ZipError::BadRequest)?;
+        let rel_path = validate_theme_relative_path(&name).map_err(V2ZipError::BadRequest)?;
         if files.len() >= V2_MAX_FILES {
             return Err(V2ZipError::PayloadTooLarge(
                 "Gói theme ZIP v2 vượt quá giới hạn 256 file.",

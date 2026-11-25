@@ -1,4 +1,4 @@
-"""Run the Windows CMS slice over HTTP, or write a sample theme for the builder."""
+"""Run the Windows CMS slice over HTTP, or write a sample v3 theme ZIP."""
 
 import argparse
 from contextlib import contextmanager
@@ -16,19 +16,22 @@ from urllib.request import Request, urlopen
 from zipfile import ZIP_DEFLATED, ZipFile
 
 
-def sample_theme(descriptor="block.json"):
+def sample_theme(manifest_path="theme.json"):
     archive = io.BytesIO()
     with ZipFile(archive, "w", ZIP_DEFLATED) as theme:
         theme.writestr(
-            descriptor,
+            manifest_path,
             json.dumps({
-                "id": "sample/banner",
-                "fields": {"title": "Tiêu đề", "note": "Mô tả"},
+                "manifest_version": 3,
+                "theme_id": "sample-v3",
+                "name": "Sample v3 Theme",
+                "version": "1.0.0",
+                "templates": [{"kind": "single", "file": "single.html"}],
             }),
         )
         theme.writestr(
-            "block.html",
-            "<article><h2>{{ values.title }}</h2><p>{{ values.note }}</p></article>",
+            "single.html",
+            "<article><h1>{{ entry.title }}</h1>{{ od_content() }}</article>",
         )
     return archive.getvalue()
 
@@ -59,13 +62,13 @@ def running(binary, database, site_root=None):
                 process.wait(timeout=10)
 
 
-def request(base, path, data=None, content_type=None, headers=None):
+def request(base, path, data=None, content_type=None, headers=None, method=None):
     req_headers = {}
     if content_type:
         req_headers["Content-Type"] = content_type
     if headers:
         req_headers.update(headers)
-    req = Request(base + path, data=data, headers=req_headers)
+    req = Request(base + path, data=data, headers=req_headers, method=method)
     try:
         with urlopen(req, timeout=5) as response:
             set_cookie = response.headers.get("Set-Cookie")
@@ -77,8 +80,24 @@ def request(base, path, data=None, content_type=None, headers=None):
 
 
 def verify(binary):
-    block = {"type": "sample/banner", "values": {"title": "Dự án A < B", "note": "{{ 7 * 7 }}"}}
-    body = json.dumps(block, ensure_ascii=False).encode()
+    doc = {
+        "schema_version": 1,
+        "sections": [{
+            "id": "smoke-sec",
+            "children": [{
+                "id": "smoke-row",
+                "children": [{
+                    "id": "smoke-col",
+                    "children": [{
+                        "id": "smoke-hd",
+                        "type": "core/heading",
+                        "props": {"level": 2, "text": "Dự án A < B {{ 7 * 7 }}"},
+                    }],
+                }],
+            }],
+        }],
+    }
+    body = json.dumps(doc, ensure_ascii=False).encode()
     admin_setup = json.dumps({"username": "admin", "password": "password123"}).encode()
 
     with TemporaryDirectory(prefix="opendash-smoke-") as folder:
@@ -88,9 +107,11 @@ def verify(binary):
             assert request(base, "/builder")[0] == 200
             assert request(base, "/")[0] == 200
 
-            # Admin endpoints protected
-            assert request(base, "/registry")[0] == 401
-            assert request(base, "/page")[0] == 401
+            # Retired M3-M5 endpoints stay 404; active Admin endpoints require auth
+            assert request(base, "/registry")[0] == 404
+            assert request(base, "/page")[0] == 404
+            assert request(base, "/api/admin/builder/blocks")[0] == 401
+            assert request(base, "/api/admin/themes")[0] == 401
 
             # Setup first admin
             assert request(base, "/auth/setup", admin_setup, "application/json")[0] == 201
@@ -113,85 +134,110 @@ def verify(binary):
             }
             read_headers = {"Cookie": session_cookie}
 
-            # Check /auth/me
+            # Check /auth/me & retired routes remain 404 when authenticated
             me_status, me_body, _ = request(base, "/auth/me", headers=read_headers)
             assert me_status == 200
             assert json.loads(me_body)["user"]["username"] == "admin"
+            assert request(base, "/registry", headers=read_headers)[0] == 404
+            assert request(base, "/page", headers=read_headers)[0] == 404
+            assert request(base, "/preview", body, "application/json", headers=auth_headers)[0] == 404
+            assert request(base, "/save", body, "application/json", headers=auth_headers)[0] == 404
 
-            # Check registry with auth
-            assert json.loads(request(base, "/registry", headers=read_headers)[1]) == {}
+            # Active declared blocks & ThemeList shape
+            blk_status, blk_body, _ = request(base, "/api/admin/builder/blocks", headers=read_headers)
+            assert blk_status == 200, blk_body
+            th_status, th_body, _ = request(base, "/api/admin/themes", headers=read_headers)
+            assert th_status == 200, th_body
+            th_json = json.loads(th_body)
+            assert "revisions" in th_json and "selection" in th_json
+            assert "items" not in th_json and "active_id" not in th_json
 
-            # Theme installation
+            # Theme v3 installation & activation
             assert (
                 request(
                     base,
-                    "/theme",
-                    sample_theme("../block.json"),
+                    "/api/admin/themes",
+                    sample_theme("../theme.json"),
                     "application/zip",
                     headers=auth_headers,
                 )[0]
                 == 400
             )
+            inst_status, inst_body, _ = request(
+                base,
+                "/api/admin/themes",
+                sample_theme(),
+                "application/zip",
+                headers=auth_headers,
+            )
+            assert inst_status == 201, inst_body
+            rev_id = json.loads(inst_body)["revision_id"]
+            th_json = json.loads(request(base, "/api/admin/themes", headers=read_headers)[1])
+            act_status, act_body, _ = request(
+                base,
+                "/api/admin/themes/active",
+                json.dumps({"revision_id": rev_id}).encode(),
+                "application/json",
+                headers={**auth_headers, "If-Match": f'"v{th_json["version"]}"'},
+                method="PUT",
+            )
+            assert act_status == 200, act_body
+
+            # Page entry builder preview isolation & CAS save
+            page_st, page_body, _ = request(
+                base,
+                "/api/admin/content-types/page/entries",
+                json.dumps({"title": "Smoke Page", "slug": "smoke-page", "values": {}}).encode(),
+                "application/json",
+                headers=auth_headers,
+            )
+            assert page_st == 201, page_body
+            page_entry = json.loads(page_body)
+            entry_builder_path = f"/api/admin/entries/page/{page_entry['id']}/builder"
+            init_st, init_body, _ = request(base, entry_builder_path, headers=read_headers)
+            assert init_st == 200 and json.loads(init_body)["document"] is None
+
+            prev_st, prev_body, _ = request(
+                base, entry_builder_path + "/preview", body, "application/json", headers=auth_headers
+            )
+            assert prev_st == 200, prev_body
+            prev_html = json.loads(prev_body)["html"]
+            assert "Dự án A &lt; B" in prev_html and "{{ 7 * 7 }}" in prev_html
+
+            # Draft page stays private before save & before publication
+            assert request(base, "/smoke-page")[0] == 404
+
+            save_st, save_body, _ = request(
+                base,
+                entry_builder_path,
+                body,
+                "application/json",
+                headers={**auth_headers, "If-Match": f'"v{page_entry["version"]}"'},
+                method="PUT",
+            )
+            assert save_st == 200, save_body
+            assert request(base, "/smoke-page")[0] == 404
+
+            # Invalid AST rejected without overwriting saved doc
             assert (
                 request(
                     base,
-                    "/theme",
-                    sample_theme(),
-                    "application/zip",
-                    headers=auth_headers,
-                )[0]
-                == 201
-            )
-            assert json.loads(request(base, "/registry", headers=read_headers)[1]) == {
-                "sample/banner": {"note": "Mô tả", "title": "Tiêu đề"}
-            }
-
-            # Preview
-            status, preview, _ = request(
-                base, "/preview", body, "application/json", headers=auth_headers
-            )
-            assert status == 200 and "Dự án A &lt; B" in preview and "{{ 7 * 7 }}" in preview
-
-            # Public page still unchanged before save
-            assert request(base, "/")[1] == "<p>Chưa lưu block.</p>"
-
-            # Save
-            save_status, save_res, _ = request(
-                base, "/save", body, "application/json", headers=auth_headers
-            )
-            assert save_status == 200 and save_res == preview
-            assert request(base, "/")[1] == preview
-
-            # Rejected save input
-            assert (
-                request(
-                    base,
-                    "/save",
-                    b'{"type":"sample/banner","values":{}}',
+                    entry_builder_path,
+                    b'{"schema_version":999,"sections":[]}',
                     "application/json",
-                    headers=auth_headers,
+                    headers={**auth_headers, "If-Match": f'"v{json.loads(save_body)["version"]}"'},
+                    method="PUT",
                 )[0]
                 == 400
             )
-            # Duplicate theme
-            assert (
-                request(
-                    base,
-                    "/theme",
-                    sample_theme(),
-                    "application/zip",
-                    headers=auth_headers,
-                )[0]
-                == 409
-            )
-            assert request(base, "/")[1] == preview
+            assert request(base, "/")[0] == 200
 
         # Restart and verify persistence
         with running(binary, database) as base:
-            assert json.loads(request(base, "/page", headers=read_headers)[1]) == block
-            assert request(base, "/")[1] == preview
+            after_st, after_body, _ = request(base, entry_builder_path, headers=read_headers)
+            assert after_st == 200 and json.loads(after_body)["document"] == doc
 
-    print("PASS: ZIP install, preview isolation, save, rejected inputs, and SQLite persistence after restart")
+    print("PASS: Theme v3 ZIP install, entry preview isolation, CAS save, rejected inputs, retired M3-M5 404s, and SQLite persistence after restart")
 
 
 if __name__ == "__main__":

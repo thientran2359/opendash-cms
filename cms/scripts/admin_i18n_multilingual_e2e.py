@@ -64,7 +64,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> None:
 
                 def auth_errors():
                     messages = []
-                    for path in ("/auth/me", GENERAL, "/api/themes/starter/options", "/registry", "/page"):
+                    for path in ("/auth/me", GENERAL, "/api/themes/starter/options", "/api/admin/builder/blocks", "/api/admin/themes"):
                         response = anon.request.get(base + path)
                         assert response.status == 401, (path, response.status)
                         assert response.headers["x-opendash-error-code"] == "auth.unauthorized"

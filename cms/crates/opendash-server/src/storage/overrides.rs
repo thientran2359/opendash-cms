@@ -25,8 +25,8 @@ use crate::{
     page::{self, RenderAnnotationScope, RenderedLayout},
     storage::{
         builder::{
-            self, HomeState, ListResults, check_preview_images, resolve_contact_forms_in_tx,
-            resolve_lists_in_tx,
+            self, BuilderRenderContext, ListResults, check_preview_images,
+            resolve_contact_forms_in_tx, resolve_lists_in_tx,
         },
         builder_binding::{self, BindingResults},
         content, entries, menu, permalinks, public_content, settings, theme,
@@ -708,41 +708,6 @@ async fn get_override_in_tx(
     row.map(row_to_record).transpose()
 }
 
-/// Compatibility reader for callers being retired with the v2 public routes.
-pub async fn resolve_effective_override(
-    db: &SqlitePool,
-    role: OverrideRole,
-    type_key: Option<&str>,
-    entry_id: Option<i64>,
-) -> ApiResult<Option<TemplateOverrideRecord>> {
-    let scope = OverrideScope::new(
-        role,
-        type_key
-            .filter(|_| role.allows_type_scope())
-            .map(str::to_string),
-        entry_id.filter(|_| role.allows_entry_scope()),
-    )?;
-    let mut candidates = vec![candidate_for_legacy_scope(&scope)?];
-    if scope.scope_entry_id.is_some() {
-        candidates.push(candidate_for_legacy_scope(&OverrideScope::new(
-            role,
-            scope.scope_type_key.clone(),
-            None,
-        )?)?);
-    }
-    if scope.scope_type_key.is_some() {
-        candidates.push(candidate_for_legacy_scope(&OverrideScope::new(
-            role, None, None,
-        )?)?);
-    }
-    for candidate in candidates {
-        if let Some(record) = get_typed_override(db, &candidate).await? {
-            return Ok(Some(record));
-        }
-    }
-    Ok(None)
-}
-
 async fn validate_scope_and_load_cpt_fields(
     tx: &mut Transaction<'_, Sqlite>,
     scope: &OverrideScope,
@@ -933,9 +898,9 @@ async fn validate_typed_document_in_tx(
     target: &TemplateCandidate,
     document: &BuilderDocument,
     prior: Option<&BuilderDocument>,
-) -> ApiResult<HomeState> {
+) -> ApiResult<BuilderRenderContext> {
     let scoped_fields = validate_typed_target_in_tx(tx, target).await?;
-    let state = builder::read_home_tx(tx).await?;
+    let state = builder::read_render_context_tx(tx).await?;
     document
         .validate_for_save_with_schemas(&state.unified_block_schemas()?, prior)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -1280,7 +1245,7 @@ fn part_scope_prefix(key: &str, expansion_idx: usize) -> String {
 }
 
 struct PreviewRenderContext<'a> {
-    state: &'a HomeState,
+    state: &'a BuilderRenderContext,
     graph: &'a BTreeMap<String, PreviewPartSource>,
     theme_context: &'a serde_json::Value,
     route: Option<(&'a str, &'a str)>,
@@ -2105,7 +2070,7 @@ pub async fn render_override_for_public_with_context(
     parts: Option<&BTreeMap<String, String>>,
 ) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
-    let state: HomeState = builder::read_home_tx(&mut tx).await?;
+    let state: BuilderRenderContext = builder::read_render_context_tx(&mut tx).await?;
     let bindings: BindingResults =
         builder_binding::resolve_in_tx_with_route(&mut tx, &record.document, false, route_entry)
             .await?;
@@ -2229,7 +2194,7 @@ impl PublicCompositionBudget {
 }
 
 struct PublicBuilderContext<'a> {
-    state: &'a HomeState,
+    state: &'a BuilderRenderContext,
     active: Option<&'a ActiveThemeV3>,
     theme_context: &'a serde_json::Value,
     route_entry: Option<(&'a str, &'a str)>,
@@ -2455,7 +2420,7 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
 ) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
     let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
-    let state = builder::read_home_tx(&mut tx).await?;
+    let state = builder::read_render_context_tx(&mut tx).await?;
     let url_policy = active_theme_url_policy(active)?;
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
@@ -2737,7 +2702,7 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
 ) -> ApiResult<(Option<String>, Option<String>, bool)> {
     let mut tx = db.begin().await?;
     let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
-    let state = builder::read_home_tx(&mut tx).await?;
+    let state = builder::read_render_context_tx(&mut tx).await?;
     let url_policy = active_theme_url_policy(active_v3)?;
     let context = PublicBuilderContext {
         state: &state,
@@ -3264,7 +3229,7 @@ async fn build_preview_context_in_tx(
 async fn render_preview_named_part_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     key: &str,
-    state: &HomeState,
+    state: &BuilderRenderContext,
     active: Option<&ActiveThemeV3>,
     theme_context: &serde_json::Value,
     route: Option<(&str, &str)>,
@@ -3452,7 +3417,7 @@ pub async fn preview_studio_with_cache_and_locale(
     validate_typed_target_in_tx(&mut tx, target).await?;
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
-    let mut state = builder::read_home_tx(&mut tx).await?;
+    let mut state = builder::read_render_context_tx(&mut tx).await?;
     let (general, pub_settings, options, menus) =
         build_preview_context_in_tx(&mut tx, active.as_ref(), transient, &effective_locale).await?;
     state.site_options = options.clone();
@@ -3818,7 +3783,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     entries::filter_entry_values_for_role(&mut record, schema, actor_role);
     let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
-    let mut state = builder::read_home_tx(tx).await?;
+    let mut state = builder::read_render_context_tx(tx).await?;
     let (general, pub_settings, options, menus) =
         build_preview_context_in_tx(tx, active.as_ref(), None, &record.locale).await?;
     state.site_options = options.clone();

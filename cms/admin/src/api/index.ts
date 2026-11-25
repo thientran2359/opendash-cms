@@ -4,7 +4,7 @@ export { getAuthMe, setupAdmin, login, logout, createEditor } from './auth.ts';
 export { listUsers, createUser, updateUser, resetUserPassword, removeUser } from './auth.ts';
 export { getProfile, updateProfile } from './users.ts';
 export type { UserProfile, UpdateProfileInput } from './users.ts';
-export { getRegistry, getPrivatePreviewMedia } from './builder.ts';
+export { getPrivatePreviewMedia } from './builder.ts';
 export type { HomepageOpen, HomepagePreview, BuilderDiagnostic, OverrideRole } from './builder.ts';
 export { getThemes, installTheme, activateTheme } from './themes.ts';
 export { getPlugins, installPlugin, runPlugin, disablePlugin, enablePlugin } from './plugins.ts';

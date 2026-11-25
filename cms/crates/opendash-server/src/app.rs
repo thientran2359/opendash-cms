@@ -22,7 +22,7 @@ use crate::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
         builder::{
             block_schemas, builder, entry_builder_get, entry_builder_preview, entry_builder_put,
-            entry_builder_reset, page, preview, registry, save, serve_asset,
+            entry_builder_reset, serve_asset,
         },
         content::{
             MAX_CONTENT_TYPE_JSON_BYTES, content_entry_preview, content_entry_publication,
@@ -673,10 +673,6 @@ pub fn build_router_with_themes_root(
             post(crate::routes::smtp::notify_submission)
                 .layer(DefaultBodyLimit::max(crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES)),
         )
-        .route("/registry", get(registry))
-        .route("/page", get(page))
-        .route("/preview", post(preview))
-        .route("/save", post(save))
         .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES))
         .layer(axum::Extension(secret_store))
         .layer(axum::Extension(smtp_service))

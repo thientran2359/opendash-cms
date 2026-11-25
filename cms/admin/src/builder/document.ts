@@ -457,7 +457,6 @@ function validListTaxonomyFilter(props: {
  * The server's is_preserved validator is the final authority. */
 export function isLockedElement(
   element: BuilderElement,
-  registry: Record<string, Record<string, string>>,
   blockCatalog: BlockCatalogItemDto[] = [],
 ): boolean {
   const props = element.props;
@@ -486,8 +485,8 @@ export function isLockedElement(
     case 'core/content_slot': return Object.keys(props).length > 0;
     case 'core/template_part': return typeof props.part_key !== 'string';
     case 'legacy/block':
-      return typeof props.block_id !== 'string' || !object(props.values)
-        || !Object.hasOwn(registry, props.block_id);
+      // Retired M1–M4 theme block nodes remain immutable read-only anchors (D3).
+      return true;
     case 'plugin/block': {
       // Rust PluginBlockProps has deny_unknown_fields. An extra top-level
       // property (including a seemingly valid binding) makes the entire node
@@ -502,7 +501,7 @@ export function isLockedElement(
 }
 
 export function isProtectedNode(
-  document: BuilderDocument, id: string, registry: Record<string, Record<string, string>>,
+  document: BuilderDocument, id: string,
   blockCatalog: BlockCatalogItemDto[] = [],
 ): boolean {
   const entries = allNodes(document);
@@ -510,7 +509,7 @@ export function isProtectedNode(
   if (!location) return false;
   return entries.some(entry =>
     entry.kind === 'element'
-    && isLockedElement(entry.node as BuilderElement, registry, blockCatalog)
+    && isLockedElement(entry.node as BuilderElement, blockCatalog)
     && entry.path.slice(0, location.path.length).every((step, index) => step === location.path[index])
   );
 }
@@ -519,7 +518,6 @@ export function isProtectedNode(
  * even when other nodes are added/moved. Mirrors server's is_preserved guard. */
 export function preservesAnchors(
   before: BuilderDocument, after: BuilderDocument,
-  registry: Record<string, Record<string, string>>,
   deletedId?: string,
   blockCatalog: BlockCatalogItemDto[] = [],
 ): boolean {
@@ -527,7 +525,7 @@ export function preservesAnchors(
   const afterEntries = allNodes(after);
   const beforeEntries = allNodes(before);
   return beforeEntries.every(entry => {
-    if (entry.kind !== 'element' || !isLockedElement(entry.node as BuilderElement, registry, blockCatalog)) return true;
+    if (entry.kind !== 'element' || !isLockedElement(entry.node as BuilderElement, blockCatalog)) return true;
     if (deleted && deleted.path.every((step, index) => entry.path[index] === step)) return true;
     const current = afterEntries.find(item => item.node.id === entry.node.id);
     return !!current && JSON.stringify(current.node) === JSON.stringify(entry.node)
@@ -637,12 +635,11 @@ function withinBuilderLimits(document: BuilderDocument): boolean {
 /** Duplicate an editable subtree without moving any immutable anchor. */
 export function duplicateNode(
   document: BuilderDocument, id: string,
-  registry: Record<string, Record<string, string>>,
   blockCatalog: BlockCatalogItemDto[] = [],
 ): { document: BuilderDocument; id: string } | null {
   const leafLoc = locate(document, id);
   const source = carrierLocation(document, id);
-  if (!leafLoc || !source || isProtectedNode(document, source.node.id, registry, blockCatalog)
+  if (!leafLoc || !source || isProtectedNode(document, source.node.id, blockCatalog)
       || countDescendantElementsByType(document, source.node.id, 'core/content_slot') > 0
       || countElementsByType(document, 'core/list')
         + countDescendantElementsByType(document, source.node.id, 'core/list') > 8) return null;
@@ -670,7 +667,7 @@ export function duplicateNode(
   for (const entry of inserted) entry.node.id = newNodeId(entry.kind, next);
 
   if (distinctPatternIdCount(next) > 16 || !withinBuilderLimits(next)
-      || !preservesAnchors(document, next, registry, undefined, blockCatalog)) return null;
+      || !preservesAnchors(document, next, undefined, blockCatalog)) return null;
   const targetRelPath = [...duplicatePath, ...leafLoc.path.slice(source.path.length)];
   const returnEntry = inserted.find(entry =>
     entry.path.length === targetRelPath.length
@@ -843,7 +840,6 @@ function distinctPatternIdCount(document: BuilderDocument): number {
 
 export function copyNodeOptions(
   document: BuilderDocument, id: string,
-  registry: Record<string, Record<string, string>>,
   blockCatalog: BlockCatalogItemDto[] = [],
 ): StudioBuilderClipboard | null {
   const item = locate(document, id);
@@ -873,7 +869,7 @@ export function copyNodeOptions(
   }
 
   const element = item.node;
-  if (element.type === 'core/content_slot' || isLockedElement(element, registry, blockCatalog)) return null;
+  if (element.type === 'core/content_slot' || isLockedElement(element, blockCatalog)) return null;
   const clipboard: StudioBuilderClipboard = attachSharedStyle({
     kind: 'element',
     elementType: element.type,
@@ -965,7 +961,7 @@ export function pasteNodeOptions(
  * index, ancestor IDs, and serialized element content. Supports transparent carriers across freeform blocks. */
 export function reorderSiblingNode(
   document: BuilderDocument, sourceId: string, targetId: string,
-  position: 'before' | 'after', registry: Record<string, Record<string, string>>,
+  position: 'before' | 'after',
   blockCatalog: BlockCatalogItemDto[] = [],
 ): BuilderDocument | null {
   if (sourceId === targetId || (position !== 'before' && position !== 'after')) return null;
@@ -973,7 +969,7 @@ export function reorderSiblingNode(
   const target = carrierLocation(document, targetId);
   if (!source || !target || source.node.id === target.node.id
       || source.kind !== target.kind || source.parentId !== target.parentId
-      || isProtectedNode(document, source.node.id, registry, blockCatalog)) return null;
+      || isProtectedNode(document, source.node.id, blockCatalog)) return null;
   const next = clone(document);
   const siblings = childrenAt(next, source.parentId ? locate(next, source.parentId) : undefined);
   if (!siblings) return null;
@@ -984,7 +980,7 @@ export function reorderSiblingNode(
   const insertIndex = targetIndex + (position === 'after' ? 1 : 0);
   if (insertIndex === sourceIndex) return null;
   siblings.splice(insertIndex, 0, moving);
-  return preservesAnchors(document, next, registry, undefined, blockCatalog) ? next : null;
+  return preservesAnchors(document, next, undefined, blockCatalog) ? next : null;
 }
 
 export function countElementsByType(document: BuilderDocument, elementType: string): number {

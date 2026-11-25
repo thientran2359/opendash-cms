@@ -12,8 +12,6 @@ export interface AuthResponse {
   site_instance_id?: string;
 }
 
-export type BlockRegistry = Record<string, Record<string, string>>;
-
 /** Declarative block.json v1 DTOs, mirrored from opendash-core/block_schema.rs.
  * Unknown persisted values are retained by Builder and sent back unchanged. */
 export type BlockPropValue =

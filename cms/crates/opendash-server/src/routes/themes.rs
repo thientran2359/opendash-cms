@@ -25,7 +25,7 @@ use sqlx::SqlitePool;
 use crate::{
     auth::{Role, require_admin, require_admin_with_csrf, require_session},
     error::{ApiError, ApiResult},
-    package::{V2ZipError, is_valid_zip_content_type, validate_v2_relative_path},
+    package::{V2ZipError, is_valid_zip_content_type, validate_theme_relative_path},
     storage::{
         overrides, patterns,
         theme::{
@@ -585,7 +585,7 @@ pub async fn theme_asset(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Ok(safe_rel) = validate_v2_relative_path(&rel_path) else {
+    let Ok(safe_rel) = validate_theme_relative_path(&rel_path) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let Some(mime) = theme_asset_mime(&safe_rel) else {

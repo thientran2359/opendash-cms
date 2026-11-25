@@ -132,7 +132,6 @@ def test_auth_and_rbac(binary, baseline_db):
     print("Testing auth, validations, RBAC, CSRF, expiry, and logout...")
     with TemporaryDirectory(prefix="opendash-auth-") as folder:
         database = Path(folder) / "cms.sqlite"
-        # Legacy preview/save remain supported for migrated legacy blocks.
         # Seed from the immutable pre-M1.1 fixture, never from a live site.
         with closing(sqlite3.connect(baseline_db.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)) as src, closing(sqlite3.connect(database)) as dst:
             src.backup(dst)
@@ -209,22 +208,55 @@ def test_auth_and_rbac(binary, baseline_db):
             editor_auth = {"Cookie": editor_cookie, "X-CSRF-Token": editor_csrf}
             editor_read = {"Cookie": editor_cookie}
 
-            # Editor can read registry & page
-            assert request(base, "/registry", headers=editor_read)[0] == 200
-            assert request(base, "/page", headers=editor_read)[0] == 200
+            # Retired M3-M5 endpoints stay unmounted -> 404
+            assert request(base, "/registry", headers=editor_read)[0] == 404
+            assert request(base, "/page", headers=editor_read)[0] == 404
+            assert request(base, "/preview", b"{}", "application/json", headers=editor_auth)[0] == 404
+            assert request(base, "/save", b"{}", "application/json", headers=editor_auth)[0] == 404
 
-            # Editor can preview & save
-            block_data = json.dumps({"type": "sample/banner", "values": {"title": "Tác phẩm Editor", "note": "Ghi chú"}}).encode()
-            assert request(base, "/preview", block_data, "application/json", headers=editor_auth)[0] == 200
-            assert request(base, "/save", block_data, "application/json", headers=editor_auth)[0] == 200
-            assert json.loads(request(base, "/page", headers=editor_read)[1]) == json.loads(block_data)
+            # Editor can read declared blocks catalog, publish posts, and preview post builder;
+            # Editor is denied on Admin-only Studio targets and Pattern write/builder routes.
+            assert request(base, "/api/admin/builder/blocks", headers=editor_read)[0] == 200
+            assert request(base, "/api/admin/studio/targets", headers=editor_read)[0] == 403
+            assert request(base, "/api/admin/patterns", json.dumps({"title": "Denied", "slug": "denied"}).encode(), "application/json", headers=editor_auth)[0] == 403
+            assert request(base, "/api/admin/entries/pattern/1/builder", headers=editor_read)[0] == 403
             # The v3 public home is independent of legacy Builder data. Exercise
             # Editor publication on the actual public content route as well.
-            assert "Tác phẩm Editor" not in request(base, "/")[1]
+            assert "Baseline Title" not in request(base, "/")[1]
             status, body, _ = request(base, "/api/admin/content-types/post/entries", json.dumps({"title": "Editor public post", "slug": "editor-public-post", "locale": "vi", "values": {}}).encode(), "application/json", headers=editor_auth)
             assert status == 201, body
             entry = json.loads(body)
             assert request(base, "/editor-public-post")[0] == 404
+            # Default `post` does not enable Builder (403); `page` allows Editor Builder preview (200).
+            assert request(base, f"/api/admin/entries/post/{entry['id']}/builder", headers=editor_read)[0] == 403
+            pg_st, pg_body, _ = request(
+                base,
+                "/api/admin/content-types/page/entries",
+                json.dumps({"title": "Editor draft page", "slug": "editor-draft-page", "locale": "vi", "values": {}}).encode(),
+                "application/json",
+                headers=editor_auth,
+            )
+            assert pg_st == 201, pg_body
+            page_builder_path = f"/api/admin/entries/page/{json.loads(pg_body)['id']}/builder"
+            page_doc = {
+                "schema_version": 1,
+                "sections": [{
+                    "id": "ed-sec",
+                    "children": [{
+                        "id": "ed-row",
+                        "children": [{
+                            "id": "ed-col",
+                            "children": [{
+                                "id": "ed-hd",
+                                "type": "core/heading",
+                                "props": {"level": 2, "text": "Tác phẩm Editor"},
+                            }],
+                        }],
+                    }],
+                }],
+            }
+            assert request(base, page_builder_path + "/preview", json.dumps(page_doc).encode(), "application/json", headers=editor_auth)[0] == 200
+            assert "Tác phẩm Editor" not in request(base, "/")[1]
             status, body, _ = request(base, f"/api/admin/content-types/post/entries/{entry['id']}/publication", b'{"status":"published"}', "application/json", headers={**editor_auth, "If-Match": f'"v{entry["version"]}"'})
             assert status == 200, body
             status, body, _ = request(base, "/editor-public-post")
@@ -244,8 +276,8 @@ def test_auth_and_rbac(binary, baseline_db):
 
             # Now editor_cookie should be expired -> 401
             assert request(base, "/auth/me", headers=editor_read)[0] == 401
-            assert request(base, "/registry", headers=editor_read)[0] == 401
-            assert request(base, "/save", block_data, "application/json", headers=editor_auth)[0] == 401
+            assert request(base, "/api/admin/builder/blocks", headers=editor_read)[0] == 401
+            assert request(base, "/api/admin/content-types/post/entries", json.dumps({"title": "Expired", "slug": "expired", "values": {}}).encode(), "application/json", headers=editor_auth)[0] == 401
 
             # 10. Logout and cookie reuse check
             st, ed_login_res2, ed_cookie_hdr2 = request(base, "/auth/login", editor_login_input, "application/json")
@@ -263,7 +295,7 @@ def test_auth_and_rbac(binary, baseline_db):
 
             # Reusing logged out cookie -> 401
             assert request(base, "/auth/me", headers={"Cookie": ed_cookie2})[0] == 401
-            assert request(base, "/save", block_data, "application/json", headers=ed_auth2)[0] == 401
+            assert request(base, "/api/admin/content-types/post/entries", json.dumps({"title": "Reuse", "slug": "reuse", "values": {}}).encode(), "application/json", headers=ed_auth2)[0] == 401
 
 
 def test_database_upgrade(binary, baseline_db_path: Path):
@@ -294,9 +326,11 @@ def test_database_upgrade(binary, baseline_db_path: Path):
             assert pub_status == 200
             assert "Baseline Title" not in pub_html and "noindex,nofollow" in pub_html, pub_html
 
-            # 2. Admin endpoints protected on upgraded DB
-            assert request(base, "/registry")[0] == 401
-            assert request(base, "/page")[0] == 401
+            # 2. Retired M3-M5 endpoints stay 404; active Admin endpoints protected on upgraded DB
+            assert request(base, "/registry")[0] == 404
+            assert request(base, "/page")[0] == 404
+            assert request(base, "/api/admin/builder/blocks")[0] == 401
+            assert request(base, "/api/admin/themes")[0] == 401
 
             # 3. Setup first admin on upgraded DB
             admin_creds = json.dumps({"username": "admin", "password": "password123"}).encode()
@@ -310,25 +344,59 @@ def test_database_upgrade(binary, baseline_db_path: Path):
             auth_headers = {"Cookie": session_cookie, "X-CSRF-Token": csrf_token}
             read_headers = {"Cookie": session_cookie}
 
-            # 5. Read saved page from pre-M1.1 baseline
-            page_status, page_json, _ = request(base, "/page", headers=read_headers)
-            assert page_status == 200
-            page_data = json.loads(page_json)
-            assert page_data["values"]["title"] == "Baseline Title"
+            # 5. Pre-0042 rows list cleanly via ThemeList without HTTP 500
+            th_st, th_json, _ = request(base, "/api/admin/themes", headers=read_headers)
+            assert th_st == 200, (th_st, th_json)
+            th_data = json.loads(th_json)
+            assert "revisions" in th_data and "selection" in th_data
+            assert "items" not in th_data and "active_id" not in th_data
+            assert request(base, "/api/admin/builder/blocks", headers=read_headers)[0] == 200
 
-            # 6. Save update
-            new_block = json.dumps({
-                "type": "sample/banner",
-                "values": {"title": "Upgraded Title", "note": "Upgraded Note"},
-            }).encode()
-            assert request(base, "/save", new_block, "application/json", headers=auth_headers)[0] == 200
-            assert json.loads(request(base, "/page", headers=read_headers)[1])["values"]["title"] == "Upgraded Title"
+            # 6. Historical baseline home_page row stays inert in SQLite; save new Page Builder AST
+            with closing(sqlite3.connect(test_db)) as conn:
+                row = conn.execute("SELECT values_json FROM home_page WHERE id = 1").fetchone()
+                assert row is not None and "Baseline Title" in row[0]
+
+            page_st, page_body, _ = json_request(base, "/api/admin/content-types/page/entries", {
+                "title": "Upgraded Studio Page",
+                "slug": "upgraded-studio-page",
+                "values": {"body": "Upgraded Note"},
+            }, auth_headers)
+            assert page_st == 201, (page_st, page_body)
+            page_entry = json.loads(page_body)
+            page_builder_path = f"/api/admin/entries/page/{page_entry['id']}/builder"
+            upgraded_doc = {
+                "schema_version": 1,
+                "sections": [{
+                    "id": "upg-sec",
+                    "children": [{
+                        "id": "upg-row",
+                        "children": [{
+                            "id": "upg-col",
+                            "children": [{
+                                "id": "upg-hd",
+                                "type": "core/heading",
+                                "props": {"level": 2, "text": "Upgraded Title"},
+                            }],
+                        }],
+                    }],
+                }],
+            }
+            put_st, put_body, _ = json_request(
+                base,
+                page_builder_path,
+                upgraded_doc,
+                {**auth_headers, "If-Match": f'"v{page_entry["version"]}"'},
+                "PUT",
+            )
+            assert put_st == 200, (put_st, put_body)
             assert "Upgraded Title" not in request(base, "/")[1]
 
         # 7. Restart and verify persistence on upgraded DB
         with running(binary, test_db) as base:
-            assert request(base, "/page", headers=read_headers)[0] == 200
-            assert json.loads(request(base, "/page", headers=read_headers)[1])["values"]["title"] == "Upgraded Title"
+            persisted_st, persisted_body, _ = request(base, page_builder_path, headers=read_headers)
+            assert persisted_st == 200, persisted_body
+            assert json.loads(persisted_body)["document"] == upgraded_doc
             assert "Upgraded Title" not in request(base, "/")[1]
 
 

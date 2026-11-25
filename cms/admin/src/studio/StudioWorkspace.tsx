@@ -22,7 +22,7 @@ import {
 } from '../api/settings.ts';
 import { getStudioTargets, postStudioPreview, type StudioTargetItem, type TransientStudioOverrides } from '../api/studio.ts';
 import { saveThemeOptions } from '../api/themes.ts';
-import { BuilderWorkspace, BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderWorkspace.tsx';
+import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
 import { BuilderPreviewFrame } from '../builder/BuilderPreviewFrame.tsx';
 import {
   EMPTY_DOCUMENT,
@@ -41,7 +41,7 @@ import {
 } from '../builder/document.ts';
 import { editorDraftStore } from '../features/editor/EditorDraftStore.ts';
 import type { ParsedRoute, StudioPanelId } from '../shell/router.ts';
-import type { AuthUser, BlockRegistry } from '../types.ts';
+import type { AuthUser } from '../types.ts';
 import { StudioCustomizerNav } from './StudioCustomizerNav.tsx';
 import { StudioSidebarHeader } from './StudioSidebarHeader.tsx';
 import { StudioSidebarFooter } from './StudioSidebarFooter.tsx';
@@ -104,6 +104,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   const isMode2 = route.view === 'studio-entry';
   const entryTypeKey = isMode2 ? (route.typeKey ?? '') : '';
   const entryId = isMode2 ? (route.entryId ?? null) : null;
+  const isPatternEntry = isMode2 && entryTypeKey === 'pattern';
 
   // Shared UI & preview state
   const [viewport, setViewport] = useState<BuilderViewport>('desktop');
@@ -114,7 +115,6 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [notice, setNotice] = useState('');
   const [error, setError] = useState(false);
   const [conflict, setConflict] = useState(false);
-  const [registry, setRegistry] = useState<BlockRegistry>({});
   const [patterns, setPatterns] = useState<PatternRecord[]>([]);
   const [patternsLoaded, setPatternsLoaded] = useState(false);
   const [builderView, setBuilderView] = useState<StudioBuilderView>('tree');
@@ -407,7 +407,6 @@ export const StudioWorkspace: React.FC<Props> = ({
         }),
         builderApi.getTemplateOverrides(),
         listMenus(100, 0),
-        api.getRegistry(),
         listPatterns().catch(() => ({ items: [] as PatternRecord[], total: 0, limit: 50, offset: 0 })),
         getGlobalSiteOptions(),
       ])
@@ -419,7 +418,6 @@ export const StudioWorkspace: React.FC<Props> = ({
           pagesRes,
           overridesRes,
           menusRes,
-          regRes,
           patRes,
           globalOptsRes,
         ]) => {
@@ -473,7 +471,6 @@ export const StudioWorkspace: React.FC<Props> = ({
             setThemeOptionsReloadToken(v => v + 1);
           }
 
-          setRegistry(regRes);
           setPatterns(patRes.items);
           setPatternsLoaded(true);
 
@@ -508,12 +505,10 @@ export const StudioWorkspace: React.FC<Props> = ({
     Promise.all([
       builderApi.getEntryBuilder(entryTypeKey, entryId),
       getContentEntry(entryTypeKey, entryId),
-      api.getRegistry(),
       listPatterns(),
     ])
-      .then(([opened, entryRec, regRes, patRes]) => {
+      .then(([opened, entryRec, patRes]) => {
         if (!alive || seq !== loadSeqRef.current || authorityRef.current !== reqAuthority) return;
-        setRegistry(regRes);
         setPatterns(patRes.items);
         setPatternsLoaded(true);
         setEntryTitle(entryRec.title);
@@ -938,9 +933,11 @@ export const StudioWorkspace: React.FC<Props> = ({
 
       setEntryPublicationStatus(currentStatus);
       setStatus(
-        entryPublicationPolicy === 'draft_publish' && currentStatus === 'draft'
-          ? t("studio.saved_page_builder_draft_v_version_content_remains_a_draft", { version: currentVersion })
-          : t("studio.saved_and_published_changes_v_version", { version: currentVersion }),
+        isPatternEntry
+          ? t("studio.saved_pattern_v_version", { version: currentVersion })
+          : entryPublicationPolicy === 'draft_publish' && currentStatus === 'draft'
+            ? t("studio.saved_page_builder_draft_v_version_content_remains_a_draft", { version: currentVersion })
+            : t("studio.saved_and_published_changes_v_version", { version: currentVersion }),
       );
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) {
@@ -991,7 +988,9 @@ export const StudioWorkspace: React.FC<Props> = ({
         ? `#/pages/${entryId}/edit`
         : entryTypeKey === 'post'
           ? `#/posts/${entryId}/edit`
-          : `#/cpt/${encodeURIComponent(entryTypeKey)}/${entryId}/edit`;
+          : entryTypeKey === 'pattern'
+            ? `#/patterns/${entryId}/edit`
+            : `#/cpt/${encodeURIComponent(entryTypeKey)}/${entryId}/edit`;
       onNavigateHash(target);
       return;
     }
@@ -1019,8 +1018,6 @@ export const StudioWorkspace: React.FC<Props> = ({
     .filter(t => t.target.kind === 'part' && t.target.part_key)
     .map(t => t.target.part_key as string);
 
-  // Reference BuilderWorkspace helper check keeps legacy Pattern Builder export tree alive cleanly.
-  void BuilderWorkspace;
   void canDeleteElement;
 
   const canSaveMode2 =
@@ -1062,7 +1059,13 @@ export const StudioWorkspace: React.FC<Props> = ({
           identity: t("studio.site_identity"), 'theme-options': t("studio.appearance_options"),
           menus: t("studio.menus_and_locations"), reading: t("studio.homepage_and_reading"), templates: t("studio.build_templates") } as Record<string, string>)[panel];
   const contextBadge = isMode2
-    ? (entryTypeKey === 'page' ? t("studio.page") : entryTypeKey === 'post' ? t("studio.post") : entryTypeKey)
+    ? (entryTypeKey === 'page'
+        ? t("studio.page")
+        : entryTypeKey === 'post'
+          ? t("studio.post")
+          : entryTypeKey === 'pattern'
+            ? t("builder.document.pattern")
+            : entryTypeKey)
     : selectedTarget && panel === 'templates' ? t("studio.template") : panel === 'root' ? t("studio.theme") : undefined;
   const contextBack = isMode2
     ? undefined
@@ -1199,16 +1202,15 @@ export const StudioWorkspace: React.FC<Props> = ({
                 selectedId={entrySelectedNodeId}
                 onSelect={setEntrySelectedNodeId}
                 onChangeDocument={handleBuilderChange}
-                registry={registry}
                 csrfToken={csrfToken}
                 viewport={viewport}
                 themeRevision={themeRevision}
                 patterns={patterns}
                 patternsLoaded={patternsLoaded}
                 onRefreshPatterns={refreshPatterns}
-                allowRouteContext={true}
-                allowPatternRef={true}
-                allowList={true}
+                allowRouteContext={!isPatternEntry}
+                allowPatternRef={!isPatternEntry}
+                allowList={!isPatternEntry}
                 allowContentSlot={false}
                 allowTemplatePart={false}
                 requiresContentSlot={false}
@@ -1281,7 +1283,6 @@ export const StudioWorkspace: React.FC<Props> = ({
               onSelectTemplateNode={setTemplateSelectedNodeId}
               onChangeTemplateDoc={handleBuilderChange}
               templateDirty={templateDirty}
-              registry={registry}
               viewport={viewport}
               themeRevision={themeRevision}
               patterns={patterns}
@@ -1305,7 +1306,12 @@ export const StudioWorkspace: React.FC<Props> = ({
             onUndo={handleUndo}
             onRedo={handleRedo}
             savePolicy={isMode2
-              ? { mode: 'entry', publicationPolicy: entryPublicationPolicy, publicationStatus: entryPublicationStatus }
+              ? {
+                  mode: 'entry',
+                  isPrivatePattern: isPatternEntry,
+                  publicationPolicy: entryPublicationPolicy,
+                  publicationStatus: entryPublicationStatus,
+                }
               : { mode: 'customizer' }}
             canSave={isMode2 ? canSaveMode2 : mode1Dirty && !localeDraftBlocked}
             onSaveCustomizer={() => void handleSaveMode1()}
