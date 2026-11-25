@@ -1463,11 +1463,20 @@ pub async fn preview_saved_entry_body(
     actor: &SessionContext,
     type_key: &str,
     id: i64,
-) -> ApiResult<Option<RenderedLayout>> {
+) -> ApiResult<Option<(RenderedLayout, crate::template_sec::IconNonceTable)>> {
     let mut tx = db.begin().await?;
-    let rendered = preview_saved_page_body_in_tx(&mut tx, actor, type_key, id).await?;
+    let mut budget = page::RenderBudget::new();
+    let rendered = preview_saved_page_body_in_tx_with_budget(
+        &mut tx,
+        actor,
+        type_key,
+        id,
+        &mut budget,
+        page::BlockTemplateCache::global(),
+    )
+    .await?;
     tx.rollback().await?;
-    Ok(rendered)
+    Ok(rendered.map(|html| (html, budget.icon_nonces)))
 }
 
 pub async fn preview_entry_builder(
@@ -1524,6 +1533,11 @@ pub async fn preview_entry_builder_with_cache(
     )
     .await?;
     let out = if type_key == "pattern" {
+        let mut rendered = rendered;
+        rendered.html = crate::content_render::finalize_document_icons(
+            rendered.html,
+            &render_budget.icon_nonces,
+        )?;
         rendered
     } else {
         crate::storage::overrides::wrap_entry_body_in_preview_shell_in_tx_with_budget(

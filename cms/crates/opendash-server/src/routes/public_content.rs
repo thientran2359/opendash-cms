@@ -13,6 +13,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use opendash_core::content::{ContentTypeDefinition, FieldRole};
+use opendash_core::theme::{EnqueueCondition, ResolvedEnqueuedAssets, resolve_enqueued_assets};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -39,6 +40,15 @@ fn normalized_origin(public_origin: Option<&str>) -> &str {
     public_origin
         .map(|s| s.trim().trim_end_matches('/'))
         .unwrap_or("")
+}
+
+fn enqueued_for_route(
+    active: Option<&theme_storage::ActiveThemeV3>,
+    condition: EnqueueCondition,
+) -> ResolvedEnqueuedAssets {
+    active.map_or_else(ResolvedEnqueuedAssets::default, |active| {
+        resolve_enqueued_assets(&active.manifest, &active.revision_digest, condition)
+    })
 }
 
 struct PublicRouteContext<'a> {
@@ -184,7 +194,7 @@ async fn render_resolved_public_template_html(
     let slot_html = if matches!(&resolution, TemplateResolution::CoreFallback) {
         String::new()
     } else {
-        match crate::document::normalize_public_document(fallback_html) {
+        match crate::document::normalize_public_document_with_options(fallback_html, true) {
             Ok(parts) => {
                 let mut fragment = parts.authorized_styles.concat();
                 fragment.push_str(&parts.body_fragment);
@@ -394,13 +404,17 @@ pub(crate) async fn render_not_found_response_for_locale(
         };
     let view =
         crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, l10n.not_found_title);
-    let html = content_render::compose_document_with_seo_with_body_classes(
+    let enqueued = enqueued_for_route(active.as_ref(), EnqueueCondition::NotFound);
+    let html = content_render::compose_document_with_seo_with_assets(
         header_html.as_deref(),
         &body.html,
         footer_html.as_deref(),
         &view,
         &["od-route-not-found"],
+        &enqueued,
+        active.is_some(),
     )?;
+    let html = content_render::finalize_document_icons(html, &budget.render_budget.icon_nonces)?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
         html,
         body.has_active_contact_form || shell_has_form,
@@ -645,13 +659,19 @@ pub(crate) async fn render_canonical_archive(
     )
     .await?;
     let type_class = format!("od-type-{type_key}");
+    let enqueued = enqueued_for_route(active_v3.as_ref(), EnqueueCondition::Archive);
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::compose_document_with_seo_with_body_classes(
-            header.as_deref(),
-            &body.html,
-            footer.as_deref(),
-            &seo_view,
-            &["od-route-archive", &type_class],
+        content_render::finalize_document_icons(
+            content_render::compose_document_with_seo_with_assets(
+                header.as_deref(),
+                &body.html,
+                footer.as_deref(),
+                &seo_view,
+                &["od-route-archive", &type_class],
+                &enqueued,
+                active_v3.is_some(),
+            )?,
+            &budget.render_budget.icon_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,
     ))
@@ -939,13 +959,26 @@ async fn render_entry_response_with_cache(
     } else {
         &["od-route-single", &type_class]
     };
+    let route_condition = if is_home {
+        EnqueueCondition::Home
+    } else if type_key == "page" {
+        EnqueueCondition::Page
+    } else {
+        EnqueueCondition::Single
+    };
+    let enqueued = enqueued_for_route(active_v3.as_ref(), route_condition);
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::compose_document_with_seo_with_body_classes(
-            header.as_deref(),
-            &body.html,
-            footer.as_deref(),
-            &seo_view,
-            body_classes,
+        content_render::finalize_document_icons(
+            content_render::compose_document_with_seo_with_assets(
+                header.as_deref(),
+                &body.html,
+                footer.as_deref(),
+                &seo_view,
+                body_classes,
+                &enqueued,
+                active_v3.is_some(),
+            )?,
+            &budget.render_budget.icon_nonces,
         )?,
         body.has_active_contact_form || entry_has_form || shell_has_form,
     ))
@@ -1264,13 +1297,19 @@ pub(crate) async fn render_canonical_taxonomy(
     )
     .await?;
     let tax_class = format!("od-tax-{}", schema.key);
+    let enqueued = enqueued_for_route(active_v3.as_ref(), EnqueueCondition::Taxonomy);
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::compose_document_with_seo_with_body_classes(
-            header.as_deref(),
-            &body.html,
-            footer.as_deref(),
-            &seo_view,
-            &["od-route-taxonomy", &tax_class],
+        content_render::finalize_document_icons(
+            content_render::compose_document_with_seo_with_assets(
+                header.as_deref(),
+                &body.html,
+                footer.as_deref(),
+                &seo_view,
+                &["od-route-taxonomy", &tax_class],
+                &enqueued,
+                active_v3.is_some(),
+            )?,
+            &budget.render_budget.icon_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,
     ))

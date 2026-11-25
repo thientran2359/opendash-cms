@@ -37,10 +37,14 @@ async fn spawn_server() -> TestServer {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let site_root = std::env::temp_dir().join(format!(
-        "opendash-m5-s03-t01-{}-{nanos}",
-        std::process::id()
-    ));
+    // SitePaths rejects symlinked ancestors. On macOS /tmp redirects to
+    // /private/tmp, so canonicalize the temporary parent before spawning.
+    let site_root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!(
+            "opendash-m5-s03-t01-{}-{nanos}",
+            std::process::id()
+        ));
     fs::create_dir_all(&site_root).unwrap();
 
     let bin = env!("CARGO_BIN_EXE_opendash");
@@ -251,7 +255,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         ("theme.json", bad_manifest, CompressionMethod::Deflated),
         (
             "single.html",
-            b"<article>{{ entry.title }}<script>alert(1)</script>{{ od_content() }}</article>",
+            b"<article>{{ entry.title }}<iframe src='/'></iframe>{{ od_content() }}</article>",
             CompressionMethod::Deflated,
         ),
     ]);

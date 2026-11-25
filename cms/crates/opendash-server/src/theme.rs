@@ -101,7 +101,7 @@ mod s03_package_block_tests {
         let mut files = file_map();
         files.insert(
             "blocks/banner/render.html".into(),
-            b"<script>alert(1)</script>".to_vec(),
+            b"<object>unsafe</object>".to_vec(),
         );
         assert!(validate_theme_v3_files(files).is_err());
 
@@ -165,6 +165,9 @@ pub struct ThemeV3Package {
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
+// The approved v3 active asset cap is 512 KiB; retain legacy text caps.
+const V3_MAX_ACTIVE_ASSET_BYTES: usize = 512 * 1024;
+
 fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
     if rel_path == "theme.json" {
         return Ok(V2_MAX_TEXT_BYTES);
@@ -212,6 +215,7 @@ fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
             let ext = name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
             match ext {
                 "css" | "txt" => Ok(V2_MAX_TEXT_BYTES),
+                "js" | "mjs" | "svg" => Ok(V3_MAX_ACTIVE_ASSET_BYTES),
                 "png" | "jpg" | "jpeg" | "webp" | "gif" | "woff2" => Ok(V2_MAX_RASTER_BYTES),
                 _ => Err("Định dạng assets theme v3 không được cho phép."),
             }
@@ -574,6 +578,9 @@ pub(crate) fn validate_theme_v3_files(
                 let css = std::str::from_utf8(raw)
                     .map_err(|_| V2ZipError::BadRequest("Theme v3 CSS phải là UTF-8 hợp lệ."))?;
                 crate::template_sec::validate_safe_css(css).map_err(V2ZipError::BadRequest)?;
+            } else if path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".svg") {
+                std::str::from_utf8(raw)
+                    .map_err(|_| V2ZipError::BadRequest("Theme v3 JS/SVG phải là UTF-8 hợp lệ."))?;
             }
         } else if !declared.contains(path) {
             return Err(V2ZipError::BadRequest(
@@ -964,6 +971,8 @@ pub fn theme_asset_mime(rel_path: &str) -> Option<&'static str> {
         .map(|(_, e)| e.to_ascii_lowercase())?;
     match ext.as_str() {
         "css" => Some("text/css; charset=utf-8"),
+        "js" | "mjs" => Some("text/javascript; charset=utf-8"),
+        "svg" => Some("image/svg+xml"),
         "png" => Some("image/png"),
         "jpg" | "jpeg" => Some("image/jpeg"),
         "webp" => Some("image/webp"),
@@ -1109,6 +1118,83 @@ mod tests {
     }
 
     #[test]
+    fn v3_s01_accepts_declared_utf8_js_modules_and_svg_only_within_text_cap() {
+        for (path, source, mime) in [
+            (
+                "assets/main.js",
+                "const title = 'Tiếng Việt';".as_bytes(),
+                "text/javascript; charset=utf-8",
+            ),
+            (
+                "assets/module.mjs",
+                b"export const enabled = true;".as_slice(),
+                "text/javascript; charset=utf-8",
+            ),
+            (
+                "assets/icon.svg",
+                br#"<svg xmlns="http://www.w3.org/2000/svg"><title>Icon</title></svg>"#.as_slice(),
+                "image/svg+xml",
+            ),
+        ] {
+            let mut manifest = minimal_v3_manifest();
+            manifest["assets"] = serde_json::json!([path]);
+            let pkg =
+                parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, source)])).unwrap();
+            assert_eq!(pkg.files[path], source);
+            assert_eq!(theme_asset_mime(path), Some(mime));
+
+            let invalid_utf8 = [0xff, 0xfe];
+            assert!(matches!(
+                parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, &invalid_utf8)])),
+                Err(V2ZipError::BadRequest(message)) if message.contains("UTF-8")
+            ));
+            let boundary = vec![b'a'; V3_MAX_ACTIVE_ASSET_BYTES];
+            assert!(
+                parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, &boundary)])).is_ok()
+            );
+            let oversized = vec![b'a'; V3_MAX_ACTIVE_ASSET_BYTES + 1];
+            assert!(matches!(
+                parse_theme_zip_v3(&build_v3_zip(manifest, &[(path, &oversized)])),
+                Err(V2ZipError::PayloadTooLarge(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn v3_s01_rejects_svg_pattern_preview_and_undeclared_active_assets() {
+        let mut manifest = minimal_v3_manifest();
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg"/>"#;
+        for (path, source) in [
+            ("assets/icon.svg", svg.as_slice()),
+            ("assets/main.js", b"let x = 1;".as_slice()),
+            ("assets/module.mjs", b"export {};".as_slice()),
+        ] {
+            assert!(matches!(
+                parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, source)])),
+                Err(V2ZipError::BadRequest(_))
+            ));
+        }
+        manifest["assets"] = serde_json::json!(["assets/icon.svg"]);
+        manifest["patterns"] = serde_json::json!([{
+            "key": "hero", "title": "Hero", "category": "banner",
+            "file": "patterns/hero.json", "preview_asset": "assets/icon.svg"
+        }]);
+        assert!(matches!(
+            parse_theme_zip_v3(&build_v3_zip(
+                manifest,
+                &[
+                    (
+                        "patterns/hero.json",
+                        br#"{"schema_version":1,"sections":[]}"#
+                    ),
+                    ("assets/icon.svg", svg),
+                ],
+            )),
+            Err(V2ZipError::BadRequest(_))
+        ));
+    }
+
+    #[test]
     fn v3_d01_rejects_missing_undeclared_and_duplicate_assets() {
         let manifest = minimal_v3_manifest();
         let assets = &[("assets/extra.png", b"image".as_slice())];
@@ -1194,8 +1280,8 @@ mod tests {
             "assets/../escape.png",
             "../escape.png",
             "assets\\escape.png",
-            "assets/evil.svg",
-            "assets/evil.js",
+            "assets/evil.wasm",
+            "assets/evil.zip",
             "assets/evil.html",
             "assets/images/.secret.png",
             too_long.as_str(),
@@ -1322,7 +1408,7 @@ mod tests {
           "templates":[{"kind":"page", "file":"page.html"}]
         }"#;
         for template in [
-            b"<main><script>alert(1)</script>{{ od_content() }}</main>".as_slice(),
+            b"<main><object>unsafe</object>{{ od_content() }}</main>".as_slice(),
             b"<main>{% include 'evil.html' %}{{ od_content() }}</main>".as_slice(),
             b"<main>{{ od_content() }}{{ od_content() }}</main>".as_slice(),
             b"<div title=\"{{ od_content() }}\"></div>".as_slice(),
@@ -1469,7 +1555,7 @@ mod tests {
             br#"{"manifest_version":3,"theme_id":"bad-csec","name":"Bad","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}]}"#,
         )
         .unwrap();
-        std::fs::write(bad_csec.join("index.html"), b"<script>alert(1)</script>").unwrap();
+        std::fs::write(bad_csec.join("index.html"), b"<iframe>unsafe</iframe>").unwrap();
         assert!(check_theme_path(&bad_csec).is_err());
 
         let _ = std::fs::remove_dir_all(&tmp_root);

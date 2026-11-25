@@ -432,7 +432,7 @@ async fn studio_s04_unified_body_roundtrip_and_cpt_builder() {
             format!("{title} Body Classic Edited")
         );
 
-        // Verify public page renders edited text cleanly with script-src 'none' & zero data-od-* attributes.
+        // Verify public page renders edited text cleanly with trusted-theme CSP & zero data-od-* attributes.
         let route_info: Value = http
             .get(format!(
                 "{}/api/admin/content-types/{type_key}/entries/{id}/route",
@@ -459,7 +459,7 @@ async fn studio_s04_unified_body_roundtrip_and_cpt_builder() {
             .to_str()
             .unwrap()
             .to_owned();
-        assert!(csp.contains("script-src 'none'"));
+        assert!(csp.contains("script-src 'self' 'unsafe-inline'"));
         let pub_html = pub_res.text().await.unwrap();
         assert!(pub_html.contains(&format!("{title} Body Classic Edited")));
         assert!(!pub_html.contains("data-od-editable"));
@@ -949,7 +949,7 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
         .to_str()
         .unwrap()
         .to_owned();
-    assert!(m2_csp.contains("script-src 'none'"));
+    assert!(m2_csp.contains("script-src 'self' 'unsafe-inline'"));
     let m2_html = m2_prev.json::<Value>().await.unwrap()["html"]
         .as_str()
         .unwrap()
@@ -1000,7 +1000,7 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
         .to_str()
         .unwrap()
         .to_owned();
-    assert!(m1_csp.contains("script-src 'none'"));
+    assert!(m1_csp.contains("script-src 'self' 'unsafe-inline'"));
     let m1_html = m1_prev.json::<Value>().await.unwrap()["html"]
         .as_str()
         .unwrap()
@@ -1009,7 +1009,7 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
     assert!(!m1_html.contains(xss_img));
     assert!(!m1_html.contains(xss_svg));
 
-    // Public route stays clean (zero data-od-editable, escaped XSS, script-src 'none').
+    // Public route stays clean (zero data-od-editable, escaped XSS, trusted-theme CSP).
     let page_route: Value = http
         .get(format!(
             "{}/api/admin/content-types/page/entries/{pid}/route",

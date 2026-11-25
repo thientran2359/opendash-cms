@@ -609,7 +609,9 @@ mod block_package_tests {
         assert!(PluginPackage::from_zip(&make_zip(&wrong_owner, false), engine.engine()).is_err());
 
         let mut unsafe_html = pair("notice");
-        unsafe_html[1].1 = b"<script>alert(1)</script>".to_vec();
+        // S02 permits static trusted scripts in Declarative Blocks; iframe
+        // remains an unsafe element and must still be rejected at install.
+        unsafe_html[1].1 = b"<iframe src='/'></iframe>".to_vec();
         assert!(PluginPackage::from_zip(&make_zip(&unsafe_html, false), engine.engine()).is_err());
 
         let mut traversal = pair("notice");
@@ -784,7 +786,7 @@ mod block_package_tests {
         .unwrap();
         std::fs::write(
             unsafe_block_dir.join("blocks/notice/render.html"),
-            b"<script>alert(1)</script>",
+            b"<iframe src='/'></iframe>",
         )
         .unwrap();
         assert!(check_plugin_path(&unsafe_block_dir).is_err());

@@ -290,7 +290,7 @@ async fn builder_contact_form_preview_live_csp_and_nojs_submit() {
         .unwrap()
         .to_owned();
     assert!(csp_live.contains("form-action 'self'"));
-    assert!(csp_live.contains("script-src 'none'"));
+    assert!(csp_live.contains("script-src 'self' 'unsafe-inline'"));
 
     let live_html = home_live.text().await.unwrap();
     assert!(live_html.contains(&format!("action=\"/api/public/contact/{form_id}\"")));

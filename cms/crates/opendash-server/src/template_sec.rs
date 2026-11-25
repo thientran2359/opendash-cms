@@ -15,6 +15,11 @@ use minijinja::{
 };
 
 pub const MAX_RENDERED_HTML_BYTES: usize = 512 * 1024;
+/// Mirrors `document::MAX_PUBLIC_DOCUMENT_BYTES` without coupling `template_sec.rs`
+/// to `crate::document` (some integration tests include `template_sec.rs` standalone).
+pub const MAX_ICON_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
+pub const ICON_NONCE_PREFIX: &str = "OD_ICON_";
+pub const MAX_ICONS_PER_REQUEST: usize = 128;
 pub const TEMPLATE_FUEL_LIMIT: u64 = 10_000;
 pub const TEMPLATE_RECURSION_LIMIT: usize = 16;
 const MAX_COMPOSITION_PART_DEPTH: usize = 3;
@@ -24,6 +29,142 @@ const MAX_COMPOSITION_EXPANSIONS: usize = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderFormattingConfig {
     pub timezone: String,
+}
+
+#[cfg(test)]
+mod trusted_theme_markup_tests {
+    use super::*;
+
+    fn theme(source: &str) -> Result<CompiledCsecComposition, &'static str> {
+        validate_and_compile_csec_composition(
+            "trusted_markup",
+            source,
+            &BTreeMap::new(),
+            CsecContentKind::NonEntry,
+        )
+    }
+
+    fn block_schema() -> opendash_core::block_schema::BlockSchemaV1 {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "id": "trusted/markup",
+            "title": "Trusted markup",
+            "category": "content",
+            "render": "render.html",
+            "fields": [{ "type": "text", "key": "label", "label": "Label" }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn trusted_theme_svg_scripts_events_and_raw_text_survive_compile_and_render() {
+        let source = r##"<main onclick="this.dataset.clicked='1'"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 20 20"><title>Icon</title><use xlink:href="#symbol"/></svg><script>if (window.innerWidth < 768 && 3 > 1) { document.body.dataset.mobile = '1'; }</script></main>"##;
+        let compiled = theme(source).unwrap();
+        let output = compiled.render(Value::UNDEFINED, None).unwrap();
+        assert_eq!(output, source);
+
+        let nested =
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><svg><title>Nested</title></svg></svg>"#;
+        assert_eq!(
+            theme(nested)
+                .unwrap()
+                .render(Value::UNDEFINED, None)
+                .unwrap(),
+            nested
+        );
+    }
+
+    #[test]
+    fn legacy_render_and_validation_stay_strict() {
+        for source in [
+            "<svg><title>Icon</title></svg>",
+            "<script>const a = 1 < 2;</script>",
+            "<button onclick=\"go()\">Click</button>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>",
+        ] {
+            assert!(
+                validate_template_csec("legacy", source).is_err(),
+                "{source}"
+            );
+            assert!(
+                render_csec("legacy", source, Value::UNDEFINED).is_err(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn trusted_theme_rejects_dynamic_js_and_malformed_rawtext() {
+        for source in [
+            r#"<button onclick="{{ entry.title }}">Click</button>"#,
+            r#"<button onclick="{% if active %}go(){% endif %}">Click</button>"#,
+            r#"<button onclick="{% raw %}{{ entry.title }}{% endraw %}">Click</button>"#,
+            r#"<svg onload="{{ title }}"></svg>"#,
+            r#"<script>const value = "{{ entry.title }}";</script>"#,
+            r#"<script>{% if cond %}go(){% endif %}</script>"#,
+            r#"<script>{% for item in items %}go(){% endfor %}</script>"#,
+            r#"<script>{% set a = 'x' %}go()</script>"#,
+            r#"<script>{{ od_icon('check') }}</script>"#,
+            r#"<script>{{ od_part('header') }}</script>"#,
+            "<script>\n<!--\n/*<script>*/\n// </script>\n{{ entry.title }}\n<!-- </script> -->",
+            "<svg><script><![CDATA[// </script>\n{{ entry.title }}\n//<!-- ]]> </script> --> </svg>",
+            r#"<script src="/theme/app.js"/>"#,
+            r#"<script>const n = 2 < 3;"#,
+            r#"</script><p>orphan</p>"#,
+            r#"<svg><title>Unclosed</title>"#,
+            r#"</svg>"#,
+            r#"<title>Not an SVG title</title>"#,
+            r#"<svg><use xlink:href="javascript:alert(1)"/></svg>"#,
+        ] {
+            assert!(theme(source).is_err(), "accepted unsafe template: {source}");
+        }
+    }
+
+    #[test]
+    fn block_template_allows_static_js_svg_but_rejects_dynamic_handlers_and_scripts() {
+        let schema = block_schema();
+        let source = r#"<button onclick="this.dataset.ok='1'">{{ label }}</button><svg xmlns="http://www.w3.org/2000/svg"><title>OK</title></svg><script>if (1 < 2 && 3 > 2) { document.body.dataset.ok = '1'; }</script>"#;
+        validate_block_template_csec("trusted/markup", source, &schema).unwrap();
+        let mut budget = RenderBudget::new();
+        let rendered = render_block_csec_with_budget(
+            "trusted/markup",
+            source,
+            &schema,
+            &BTreeMap::from([("label".to_owned(), serde_json::json!("<safe>"))]),
+            false,
+            &mut budget,
+        )
+        .unwrap();
+        assert!(rendered.contains("onclick=\"this.dataset.ok='1'\""));
+        assert!(rendered.contains("&lt;safe&gt;"));
+        assert!(rendered.contains("if (1 < 2 && 3 > 2)"));
+
+        for source in [
+            r#"<button onclick="{{ label }}">Click</button>"#,
+            r#"<button onclick="{% if label %}go(){% endif %}">Click</button>"#,
+            r#"<script>const value = "{{ label }}";</script>"#,
+            r#"<script>{% if label %}go(){% endif %}</script>"#,
+            "<script>\n<!--\n/*<script>*/\n// </script>\n{{ label }}\n<!-- </script> -->",
+            "<svg><script><![CDATA[// </script>\n{{ label }}\n//<!-- ]]> </script> --> </svg>",
+            r#"<script/>"#,
+            r#"</script>"#,
+        ] {
+            assert!(
+                validate_block_template_csec("trusted/markup", source, &schema).is_err(),
+                "accepted unsafe block: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn icon_nonce_replacement_never_inserts_svg_in_script_rawtext() {
+        let nonce = "OD_ICON_0123456789abcdef0123456789abcdef";
+        let table = IconNonceTable {
+            entries: vec![(nonce.to_owned(), "<svg/>".to_owned())],
+        };
+        let source = format!("<script>if (1 < 2 && 3 > 1) {{ console.log('{nonce}'); }}</script>");
+        assert!(table.substitute_into_document(source).is_err());
+    }
 }
 
 impl Default for RenderFormattingConfig {
@@ -222,7 +363,26 @@ impl CompiledCsecComposition {
         fuel_remaining: &mut u64,
         fmt_cfg: &RenderFormattingConfig,
     ) -> Result<String, &'static str> {
-        if *fuel_remaining == 0 || *fuel_remaining > TEMPLATE_FUEL_LIMIT {
+        let mut budget = RenderBudget::new();
+        budget.fuel_remaining = *fuel_remaining;
+        let result = self.render_with_config_and_budget(
+            context,
+            sanitized_content_html,
+            &mut budget,
+            fmt_cfg,
+        );
+        *fuel_remaining = budget.fuel_remaining;
+        result
+    }
+
+    pub(crate) fn render_with_config_and_budget(
+        &self,
+        context: Value,
+        sanitized_content_html: Option<&str>,
+        budget: &mut RenderBudget,
+        fmt_cfg: &RenderFormattingConfig,
+    ) -> Result<String, &'static str> {
+        if budget.fuel_remaining == 0 || budget.fuel_remaining > TEMPLATE_FUEL_LIMIT {
             return Err("Fuel composition không hợp lệ hoặc đã hết.");
         }
         let nonce = if self.content_count == 1 {
@@ -244,39 +404,62 @@ impl CompiledCsecComposition {
             self.source.clone()
         };
         let mut env = restricted_environment_with_config(fmt_cfg);
-        env.set_fuel(Some(*fuel_remaining));
+        let local = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        install_icon_function(
+            &mut env,
+            &budget.icon_nonces,
+            &local,
+            budget.html_bytes_used,
+            &overflowed,
+        );
+        env.set_fuel(Some(budget.fuel_remaining));
         env.add_template(&self.name, &source)
             .map_err(|_| "Không thể biên dịch theme composition.")?;
         let captured = env
             .get_template(&self.name)
             .map_err(|_| "Không tìm thấy theme composition.")?
             .render_captured(context)
-            .map_err(|_| "Lỗi thực thi theme composition (fuel/recursion/undefined).")?;
+            .map_err(|_| {
+                if overflowed.load(std::sync::atomic::Ordering::Relaxed) {
+                    budget.html_bytes_used = MAX_RENDERED_HTML_BYTES + 1;
+                }
+                "Lỗi thực thi theme composition (fuel/recursion/undefined)."
+            })?;
         let (consumed, remaining) = captured
             .state()
             .fuel_levels()
             .ok_or("Thiếu bộ theo dõi fuel composition.")?;
-        if fuel_remaining.checked_sub(consumed) != Some(remaining) {
+        if budget.fuel_remaining.checked_sub(consumed) != Some(remaining) {
             return Err("Fuel composition không hợp lệ.");
         }
-        *fuel_remaining = remaining;
+        budget.fuel_remaining = remaining;
         let shell = captured.output();
         if shell.len() > MAX_RENDERED_HTML_BYTES {
             return Err("HTML render vượt quá giới hạn 512 KiB.");
         }
-        validate_html_and_css_context(&shell, true)?;
-        let Some(nonce) = nonce else {
-            return Ok(shell.to_owned());
+        validate_html_and_css_context(&shell, true, true)?;
+        let out = if let Some(nonce) = nonce {
+            if shell.matches(&nonce).count() != 1 {
+                return Err("Nonce nội dung của theme không xuất hiện đúng một lần.");
+            }
+            let content = sanitized_content_html.unwrap_or("");
+            let final_len = shell.len() - nonce.len() + content.len();
+            if final_len > MAX_RENDERED_HTML_BYTES {
+                return Err("HTML sau khi chèn nội dung vượt quá giới hạn 512 KiB.");
+            }
+            shell.replacen(&nonce, content, 1)
+        } else {
+            shell.to_owned()
         };
-        if shell.matches(&nonce).count() != 1 {
-            return Err("Nonce nội dung của theme không xuất hiện đúng một lần.");
-        }
-        let content = sanitized_content_html.unwrap_or("");
-        let final_len = shell.len() - nonce.len() + content.len();
-        if final_len > MAX_RENDERED_HTML_BYTES {
-            return Err("HTML sau khi chèn nội dung vượt quá giới hạn 512 KiB.");
-        }
-        Ok(shell.replacen(&nonce, content, 1))
+        let additions = local.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let icon_growth: usize = additions
+            .iter()
+            .map(|(n, s)| s.len().saturating_sub(n.len()))
+            .sum();
+        budget.charge_html_bytes(icon_growth)?;
+        budget.icon_nonces.extend(additions);
+        Ok(out)
     }
 }
 
@@ -290,6 +473,135 @@ const PREVIEW_PART_NONCE_PREFIX: &str = "OD_PREVIEW_PART_";
 // Reserved only by the block RichText post-render nonce replacer.
 pub const BLOCK_RICHTEXT_NONCE_PREFIX: &str = "OD_RICHTEXT_";
 
+#[derive(Debug, Clone, Default)]
+pub struct IconNonceTable {
+    entries: Vec<(String, String)>,
+}
+
+impl IconNonceTable {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn extend(&mut self, entries: Vec<(String, String)>) {
+        self.entries.extend(entries);
+    }
+
+    /// Substitute server-generated SVG only after document normalization. Any
+    /// nonce that disappeared during slot fallback is intentionally ignored.
+    pub fn substitute_into_document(&self, html: String) -> Result<String, &'static str> {
+        if self.entries.is_empty() {
+            return Ok(html);
+        }
+        let mut replacements = Vec::new();
+        for (nonce, svg) in &self.entries {
+            let mut matches = html.match_indices(nonce);
+            if let Some((offset, _)) = matches.next() {
+                if matches.next().is_some() {
+                    return Err("Nonce icon xuất hiện nhiều hơn một lần.");
+                }
+                replacements.push((offset, nonce.as_str(), svg.as_str()));
+            }
+        }
+        replacements.sort_unstable_by_key(|(offset, _, _)| *offset);
+        let mut out = String::with_capacity(html.len());
+        let mut state = HtmlScanState::Body;
+        let mut cursor = 0;
+        let mut in_diagnostic = false;
+        let mut diagnostic_pre = false;
+        for (offset, nonce, svg) in replacements {
+            let before = html
+                .get(cursor..offset)
+                .ok_or("Vị trí nonce icon không hợp lệ.")?;
+            for (index, byte) in before.bytes().enumerate() {
+                // The normalizer's diagnostic markup is server-owned. A nonce
+                // printed as escaped diagnostic text must never become SVG.
+                let suffix = &before.as_bytes()[index..];
+                if state == HtmlScanState::Body && suffix.starts_with(b"<main data-doc-diagnostic=")
+                {
+                    in_diagnostic = true;
+                } else if state == HtmlScanState::Body && suffix.starts_with(b"</main>") {
+                    in_diagnostic = false;
+                    diagnostic_pre = false;
+                } else if state == HtmlScanState::Body
+                    && in_diagnostic
+                    && suffix.starts_with(b"<pre")
+                {
+                    diagnostic_pre = true;
+                } else if state == HtmlScanState::Body && suffix.starts_with(b"</pre>") {
+                    diagnostic_pre = false;
+                }
+                state = state.consume(byte);
+            }
+            if state != HtmlScanState::Body || diagnostic_pre || in_diagnostic {
+                return Err("Nonce icon không nằm trong thân HTML an toàn.");
+            }
+            out.push_str(before);
+            out.push_str(svg);
+            cursor = offset + nonce.len();
+            if out.len() > MAX_ICON_DOCUMENT_BYTES {
+                return Err("Document chứa icon vượt giới hạn HTML.");
+            }
+        }
+        out.push_str(&html[cursor..]);
+        if out.len() > MAX_ICON_DOCUMENT_BYTES {
+            return Err("Document chứa icon vượt giới hạn HTML.");
+        }
+        Ok(out)
+    }
+}
+
+fn new_icon_nonce() -> Result<String, &'static str> {
+    let mut bytes = [0_u8; 16];
+    OsRng
+        .try_fill_bytes(&mut bytes)
+        .map_err(|_| "Không tạo được nonce icon.")?;
+    let mut nonce = ICON_NONCE_PREFIX.to_owned();
+    for byte in bytes {
+        use std::fmt::Write;
+        write!(&mut nonce, "{byte:02x}").map_err(|_| "Không tạo được nonce icon.")?;
+    }
+    Ok(nonce)
+}
+
+fn install_icon_function(
+    env: &mut Environment<'_>,
+    existing: &IconNonceTable,
+    local: &std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>,
+    html_bytes_used: usize,
+    overflowed: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let existing_count = existing.entries.len();
+    let local = local.clone();
+    let overflowed = overflowed.clone();
+    env.add_function(
+        "od_icon",
+        move |name: &str, class: Option<&str>| -> Result<String, minijinja::Error> {
+            let svg = opendash_core::icons::render_core_icon_svg(name, class)
+                .ok_or_else(|| filter_invalid_op("od_icon: tên icon hoặc class không hợp lệ"))?;
+            let mut table = local.lock().unwrap_or_else(|e| e.into_inner());
+            if existing_count.saturating_add(table.len()) >= MAX_ICONS_PER_REQUEST {
+                return Err(filter_invalid_op("od_icon vượt quá 128 icon/request"));
+            }
+            let nonce = new_icon_nonce().map_err(filter_invalid_op)?;
+            let local_growth: usize = table
+                .iter()
+                .map(|(n, s)| s.len().saturating_sub(n.len()))
+                .sum();
+            if html_bytes_used
+                .saturating_add(local_growth)
+                .saturating_add(svg.len().saturating_sub(nonce.len()))
+                > MAX_RENDERED_HTML_BYTES
+            {
+                overflowed.store(true, std::sync::atomic::Ordering::Relaxed);
+                return Err(filter_invalid_op("od_icon vượt giới hạn HTML 512 KiB"));
+            }
+            table.push((nonce.clone(), svg));
+            Ok(nonce)
+        },
+    );
+}
+
 // Per-node fuel cap within the shared 10,000 request RenderBudget.
 pub const MAX_BLOCK_FUEL_PER_NODE: u64 = 2_000;
 
@@ -298,6 +610,7 @@ pub struct RenderBudget {
     pub fuel_remaining: u64,
     pub html_bytes_used: usize,
     pub locale: String,
+    pub icon_nonces: IconNonceTable,
 }
 
 impl Default for RenderBudget {
@@ -306,6 +619,7 @@ impl Default for RenderBudget {
             fuel_remaining: TEMPLATE_FUEL_LIMIT,
             html_bytes_used: 0,
             locale: "vi".to_owned(),
+            icon_nonces: IconNonceTable::default(),
         }
     }
 }
@@ -333,6 +647,7 @@ pub(crate) struct PreviewCompositionBudget {
     pub html_bytes_used: usize,
     pub expansions: usize,
     pub stack: Vec<String>,
+    pub icon_nonces: IconNonceTable,
 }
 
 impl Default for PreviewCompositionBudget {
@@ -342,6 +657,7 @@ impl Default for PreviewCompositionBudget {
             html_bytes_used: 0,
             expansions: 0,
             stack: Vec::new(),
+            icon_nonces: IconNonceTable::default(),
         }
     }
 }
@@ -357,6 +673,7 @@ impl PreviewCompositionBudget {
             html_bytes_used: rb.html_bytes_used,
             expansions: 0,
             stack: Vec::new(),
+            icon_nonces: rb.icon_nonces,
         }
     }
 
@@ -365,12 +682,14 @@ impl PreviewCompositionBudget {
             fuel_remaining: self.fuel_remaining,
             html_bytes_used: self.html_bytes_used,
             locale: "vi".to_owned(),
+            icon_nonces: self.icon_nonces.clone(),
         }
     }
 
     pub(crate) fn sync_from_render_budget(&mut self, rb: &RenderBudget) {
         self.fuel_remaining = rb.fuel_remaining;
         self.html_bytes_used = rb.html_bytes_used;
+        self.icon_nonces = rb.icon_nonces.clone();
     }
 }
 
@@ -425,7 +744,7 @@ fn preview_composition_sites(
     if source.len() > MAX_RENDERED_HTML_BYTES {
         return Err("Template hoặc part vượt giới hạn 512 KiB.");
     }
-    if source.contains(PREVIEW_PART_NONCE_PREFIX) {
+    if source.contains(PREVIEW_PART_NONCE_PREFIX) || source.contains(ICON_NONCE_PREFIX) {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
     composition_sites(name, source, true, policy)
@@ -501,8 +820,17 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
     compiler.flatten(name, source, 0, &mut program)?;
     // Revalidate across source boundaries; the original source checks alone
     // cannot detect markup or syntax introduced by concatenation.
-    validate_template_csec_with_theme_urls(name, &program, policy)?;
+    validate_template_csec_with_usage_flags(name, &program, policy, true, true)?;
     let mut env = restricted_environment_with_config(fmt_cfg);
+    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    install_icon_function(
+        &mut env,
+        &budget.icon_nonces,
+        &local_icons,
+        budget.html_bytes_used,
+        &overflowed,
+    );
     env.set_fuel(Some(budget.fuel_remaining));
     env.add_template(name, &program)
         .map_err(|_| "Không thể biên dịch theme preview.")?;
@@ -510,7 +838,12 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
         .get_template(name)
         .map_err(|_| "Không tìm thấy theme preview.")?
         .render_captured(context)
-        .map_err(|_| "Lỗi thực thi theme preview (fuel/recursion/undefined).")?;
+        .map_err(|_| {
+            if overflowed.load(std::sync::atomic::Ordering::Relaxed) {
+                budget.html_bytes_used = MAX_RENDERED_HTML_BYTES + 1;
+            }
+            "Lỗi thực thi theme preview (fuel/recursion/undefined)."
+        })?;
     let (consumed, remaining) = captured
         .state()
         .fuel_levels()
@@ -527,8 +860,22 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
     if shell.len() > MAX_RENDERED_HTML_BYTES {
         return Err("HTML render vượt quá giới hạn 512 KiB.");
     }
-    validate_html_and_css_context(shell, true)?;
-    insert_preview_fragments(shell, &compiler.nonces)
+    validate_html_and_css_context(shell, true, true)?;
+    let out = insert_preview_fragments(shell, &compiler.nonces)?;
+    let additions = local_icons
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let icon_growth: usize = additions
+        .iter()
+        .map(|(n, s)| s.len().saturating_sub(n.len()))
+        .sum();
+    budget.html_bytes_used = budget.html_bytes_used.saturating_add(icon_growth);
+    if budget.html_bytes_used > MAX_RENDERED_HTML_BYTES {
+        return Err("HTML preview chứa icon vượt giới hạn 512 KiB.");
+    }
+    budget.icon_nonces.extend(additions);
+    Ok(out)
 }
 
 struct PreviewFragmentCompiler<'a> {
@@ -1399,27 +1746,38 @@ pub fn validate_template_csec_with_theme_urls(
     source: &str,
     policy: &ThemeUrlPolicy,
 ) -> Result<(), &'static str> {
-    validate_template_csec_with_usage_flags(name, source, policy).map(|_| ())
+    validate_template_csec_with_usage_flags(name, source, policy, false, false).map(|_| ())
 }
 
 fn validate_template_csec_with_usage_flags(
     name: &str,
     source: &str,
     policy: &ThemeUrlPolicy,
+    allow_od_icon: bool,
+    allow_trusted_theme_markup: bool,
 ) -> Result<ThemeTemplateUsageFlags, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
+    if source.contains(ICON_NONCE_PREFIX) {
+        return Err("Theme HTML chứa marker icon nội bộ bị cấm.");
+    }
     let ast = parse(source, name, SyntaxConfig::default())
         .map_err(|_| "Cú pháp template MiniJinja không hợp lệ.")?;
 
-    validate_stmt(&ast)?;
+    validate_stmt_with_icons(&ast, allow_od_icon, false)?;
     reject_reserved_context_rebinding(&ast)?;
     let is_full_doctype_doc = source
         .trim_start()
         .to_ascii_lowercase()
         .starts_with("<!doctype");
-    let usage = walk_theme_ast_with_url_scopes(&ast, false, is_full_doctype_doc, policy)?;
+    let usage = walk_theme_ast_with_url_scopes(
+        &ast,
+        false,
+        is_full_doctype_doc,
+        policy,
+        allow_trusted_theme_markup,
+    )?;
 
     let mut env = restricted_environment();
     env.add_template(name, source)
@@ -1452,7 +1810,7 @@ pub fn render_csec_with_config(
     if rendered.len() > MAX_RENDERED_HTML_BYTES {
         return Err("HTML render vượt quá giới hạn 512 KiB.");
     }
-    validate_html_and_css_context(&rendered, true)?;
+    validate_html_and_css_context(&rendered, true, false)?;
     Ok(rendered)
 }
 
@@ -1542,7 +1900,8 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
     }
     // This last check catches dangerous markup introduced across part boundaries,
     // in addition to the independent source checks before expansion.
-    let usage = validate_template_csec_with_usage_flags(root_name, &compiled_source, policy)?;
+    let usage =
+        validate_template_csec_with_usage_flags(root_name, &compiled_source, policy, true, true)?;
     Ok(CompiledCsecComposition {
         source: compiled_source,
         name: root_name.to_owned(),
@@ -1665,7 +2024,7 @@ fn composition_sites(
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
-    if source.contains(CONTENT_SLOT_TOKEN) {
+    if source.contains(CONTENT_SLOT_TOKEN) || source.contains(ICON_NONCE_PREFIX) {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
     let ast = parse(source, name, SyntaxConfig::default())
@@ -1676,7 +2035,7 @@ fn composition_sites(
             .trim_start()
             .to_ascii_lowercase()
             .starts_with("<!doctype");
-    let _ = walk_theme_ast_with_url_scopes(&ast, is_part, is_full_doctype_doc, policy)?;
+    let _ = walk_theme_ast_with_url_scopes(&ast, is_part, is_full_doctype_doc, policy, true)?;
     let mut sites = Vec::new();
     collect_composition_sites(&ast, source, false, &mut sites)?;
     sites.sort_by_key(|site| site.start);
@@ -1706,6 +2065,9 @@ fn collect_composition_sites(
             }
         }
         Stmt::EmitExpr(e) => {
+            if parse_od_icon_call(&e.expr)?.is_some() {
+                return Ok(());
+            }
             let Some(call) = parse_composition_call(&e.expr)? else {
                 return Ok(());
             };
@@ -1811,6 +2173,68 @@ fn parse_composition_call(expr: &Expr<'_>) -> Result<Option<CompositionCall>, &'
     }
 }
 
+fn parse_od_icon_call<'a>(
+    expr: &'a Expr<'_>,
+) -> Result<Option<(&'a str, Option<&'a str>)>, &'static str> {
+    let Expr::Call(call) = expr else {
+        return Ok(None);
+    };
+    let Expr::Var(var) = &call.expr else {
+        return Ok(None);
+    };
+    if var.id != "od_icon" {
+        return Ok(None);
+    }
+    let [
+        minijinja::machinery::ast::CallArg::Pos(Expr::Const(name)),
+        rest @ ..,
+    ] = call.args.as_slice()
+    else {
+        return Err("od_icon() yêu cầu string literal name và class tùy chọn.");
+    };
+    let name = name
+        .value
+        .as_str()
+        .ok_or("od_icon() name phải là string literal.")?;
+    if opendash_core::icons::lookup_core_icon_paths(name).is_none() {
+        return Err("od_icon() tên icon không tồn tại trong core registry.");
+    }
+    let class = match rest {
+        [] => None,
+        [minijinja::machinery::ast::CallArg::Pos(Expr::Const(class))] => {
+            let class = class
+                .value
+                .as_str()
+                .ok_or("od_icon() class phải là string literal.")?;
+            if !opendash_core::icons::valid_icon_class_attr(class) {
+                return Err("od_icon() class không hợp lệ.");
+            }
+            Some(class)
+        }
+        _ => return Err("od_icon() chỉ nhận name và class string literal tùy chọn."),
+    };
+    Ok(Some((name, class)))
+}
+
+fn reject_icons_in_set_block(children: &[Stmt<'_>]) -> Result<(), &'static str> {
+    fn contains_icon(stmt: &Stmt<'_>) -> bool {
+        match stmt {
+            Stmt::EmitExpr(e) => parse_od_icon_call(&e.expr).is_ok_and(|v| v.is_some()),
+            Stmt::IfCond(c) => c.true_body.iter().chain(&c.false_body).any(contains_icon),
+            Stmt::ForLoop(c) => c.body.iter().chain(&c.else_body).any(contains_icon),
+            Stmt::WithBlock(c) => c.body.iter().any(contains_icon),
+            Stmt::SetBlock(c) => c.body.iter().any(contains_icon),
+            Stmt::Template(c) => c.children.iter().any(contains_icon),
+            _ => false,
+        }
+    }
+    if children.iter().any(contains_icon) {
+        Err("C-SEC cấm od_icon() trong set block.")
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CommentScanSubState {
     /// Immediately after `<!--`: `>` closes (`<!-->`), `-` enters `StartDash`.
@@ -1868,6 +2292,7 @@ enum HtmlScanState {
     Tag { quote: Option<u8>, prefix: String },
     Comment(CommentScanSubState),
     Style { closing_prefix: usize },
+    Script { closing_prefix: usize },
     Title { closing_prefix: usize },
 }
 
@@ -1901,6 +2326,24 @@ impl HtmlScanState {
                     }
                 }
             }
+            Self::Script { closing_prefix } => {
+                const CLOSE: &[u8] = b"</script>";
+                let lowered = byte.to_ascii_lowercase();
+                let next = if lowered == CLOSE[closing_prefix] {
+                    closing_prefix + 1
+                } else if lowered == b'<' {
+                    1
+                } else {
+                    0
+                };
+                if next == CLOSE.len() {
+                    Self::Body
+                } else {
+                    Self::Script {
+                        closing_prefix: next,
+                    }
+                }
+            }
             Self::Title { closing_prefix } => {
                 const CLOSE: &[u8] = b"</title>";
                 let lowered = byte.to_ascii_lowercase();
@@ -1923,7 +2366,7 @@ impl HtmlScanState {
                 mut quote,
                 mut prefix,
             } => {
-                if prefix.len() < 7 {
+                if prefix.len() < 8 {
                     prefix.push(char::from(byte));
                 }
                 if prefix == "<!--" {
@@ -1944,6 +2387,14 @@ impl HtmlScanState {
                             .is_some_and(|b| b.is_ascii_whitespace() || *b == b'>')
                     {
                         return Self::Style { closing_prefix: 0 };
+                    }
+                    if lower.starts_with("<script")
+                        && lower
+                            .as_bytes()
+                            .get(7)
+                            .is_some_and(|b| b.is_ascii_whitespace() || *b == b'>')
+                    {
+                        return Self::Script { closing_prefix: 0 };
                     }
                     if lower.starts_with("<title")
                         && lower
@@ -2188,15 +2639,29 @@ pub fn json_context_with_shared_locale(
 }
 
 fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
+    validate_stmt_with_icons(stmt, false, false)
+}
+
+fn validate_stmt_with_icons(
+    stmt: &Stmt<'_>,
+    allow_od_icon: bool,
+    in_set_block: bool,
+) -> Result<(), &'static str> {
     match stmt {
         Stmt::Template(t) => {
             for child in &t.children {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             Ok(())
         }
         Stmt::EmitRaw(_) => Ok(()),
-        Stmt::EmitExpr(e) => validate_expr(&e.expr),
+        Stmt::EmitExpr(e) => {
+            if allow_od_icon && !in_set_block && parse_od_icon_call(&e.expr)?.is_some() {
+                Ok(())
+            } else {
+                validate_expr(&e.expr)
+            }
+        }
         Stmt::ForLoop(f) => {
             validate_expr(&f.target)?;
             validate_expr(&f.iter)?;
@@ -2204,20 +2669,20 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
                 validate_expr(cond)?;
             }
             for child in &f.body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             for child in &f.else_body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             Ok(())
         }
         Stmt::IfCond(i) => {
             validate_expr(&i.expr)?;
             for child in &i.true_body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             for child in &i.false_body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             Ok(())
         }
@@ -2227,7 +2692,7 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
                 validate_expr(v)?;
             }
             for child in &w.body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             Ok(())
         }
@@ -2241,7 +2706,7 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
             }
             validate_expr(&sb.target)?;
             for child in &sb.body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, true)?;
             }
             Ok(())
         }
@@ -2259,6 +2724,7 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
 }
 
 const RESERVED_CONTEXT_VARS: &[&str] = &[
+    "od_icon",
     "options",
     "theme_options",
     "theme_assets",
@@ -2814,6 +3280,11 @@ enum ThemeHtmlState {
         closing_prefix: usize,
         css_buf: String,
     },
+    Script {
+        closing_prefix: usize,
+        comment_prefix: usize,
+        cdata_prefix: usize,
+    },
     Title {
         closing_prefix: usize,
     },
@@ -2831,6 +3302,56 @@ enum ThemeHtmlState {
         meta_ok: bool,
         attr_static_buf: String,
     },
+    // Only trusted Theme/Block templates track foreign-content nesting. The
+    // wrapper preserves SVG depth across tags, comments, and Jinja branches.
+    Trusted {
+        inner: Box<ThemeHtmlState>,
+        svg_depth: usize,
+    },
+}
+
+impl ThemeHtmlState {
+    fn inner(&self) -> &Self {
+        match self {
+            Self::Trusted { inner, .. } => inner,
+            other => other,
+        }
+    }
+
+    fn trusted_depth(&self) -> usize {
+        match self {
+            Self::Trusted { svg_depth, .. } => *svg_depth,
+            _ => 0,
+        }
+    }
+
+    fn into_inner(self) -> Self {
+        match self {
+            Self::Trusted { inner, .. } => *inner,
+            other => other,
+        }
+    }
+
+    fn with_trust(inner: Self, trusted: bool, svg_depth: usize) -> Self {
+        if trusted {
+            Self::Trusted {
+                inner: Box::new(inner),
+                svg_depth,
+            }
+        } else {
+            inner
+        }
+    }
+}
+
+/// Match one forbidden script prefix incrementally across adjacent raw AST
+/// nodes. Each pattern has only one possible proper suffix-prefix: "<".
+fn next_script_escaped_prefix(pattern: &[u8], matched: usize, ascii: Option<u8>) -> usize {
+    match ascii {
+        Some(byte) if byte == pattern[matched] => matched + 1,
+        Some(b'<') => 1,
+        _ => 0,
+    }
 }
 
 const MAX_THEME_WALKER_STATES: usize = 64;
@@ -2880,29 +3401,40 @@ pub(crate) fn is_valid_theme_stylesheet_href(raw_val: &str) -> bool {
         && rel_path.ends_with(".css")
 }
 
-fn is_dangerous_attr_name(attr_name: &str) -> bool {
+fn is_dangerous_attr_name(attr_name: &str, allow_trusted_theme_markup: bool) -> bool {
+    matches!(attr_name, "srcdoc" | "formaction" | "action")
+        || (!allow_trusted_theme_markup
+            && (attr_name.starts_with("on")
+                || matches!(attr_name, "xmlns" | "xmlns:xlink" | "xlink:href")))
+}
+
+fn forbids_dynamic_interpolation(attr_name: &str) -> bool {
     attr_name.starts_with("on")
         || matches!(
             attr_name,
-            "srcdoc" | "formaction" | "action" | "xmlns" | "xlink:href"
+            "srcdoc" | "formaction" | "action" | "xmlns" | "xmlns:xlink" | "xlink:href"
         )
 }
 
 fn is_security_checked_attr(attr_name: &str) -> bool {
-    matches!(
-        attr_name,
-        "href"
-            | "src"
-            | "poster"
-            | "cite"
-            | "style"
-            | "srcset"
-            | "ping"
-            | "rel"
-            | "http-equiv"
-            | "content"
-            | "name"
-    )
+    attr_name.starts_with("on")
+        || matches!(
+            attr_name,
+            "href"
+                | "src"
+                | "poster"
+                | "cite"
+                | "style"
+                | "srcset"
+                | "ping"
+                | "rel"
+                | "http-equiv"
+                | "content"
+                | "name"
+                | "xmlns"
+                | "xmlns:xlink"
+                | "xlink:href"
+        )
 }
 
 fn new_theme_tag_state(first_char: char, is_close: bool) -> ThemeHtmlState {
@@ -2931,15 +3463,21 @@ fn check_theme_tag_name(
     is_close: bool,
     is_part: bool,
     is_full_doctype_doc: bool,
+    allow_trusted_theme_markup: bool,
+    svg_depth: usize,
 ) -> Result<(), &'static str> {
     if tag_name.is_empty() {
         return Err("Thẻ HTML không có tên hợp lệ.");
     }
-    if is_close && matches!(tag_name, "link" | "meta" | "title" | "style") {
+    if is_close && matches!(tag_name, "link" | "meta" | "title" | "style" | "script") {
         return Err("Thẻ đóng HTML không hợp lệ ở vị trí này.");
     }
     if FORBIDDEN_TAGS.contains(&tag_name)
-        && !(tag_name == "title" && !is_close && !is_part && is_full_doctype_doc)
+        && !(allow_trusted_theme_markup
+            && matches!(tag_name, "script" | "svg" | "foreignobject" | "math"))
+        && !(tag_name == "title"
+            && !is_close
+            && ((!is_part && is_full_doctype_doc) || (allow_trusted_theme_markup && svg_depth > 0)))
     {
         return Err("Template chứa thẻ HTML bị C-SEC cấm.");
     }
@@ -2958,6 +3496,7 @@ fn finalize_theme_attr(
     link_has_valid_href: &mut bool,
     meta_ok: &mut bool,
     attr_static_buf: &mut String,
+    allow_trusted_theme_markup: bool,
 ) -> Result<(), &'static str> {
     if attr_name.is_empty() {
         return Ok(());
@@ -2965,8 +3504,15 @@ fn finalize_theme_attr(
     if !seen_attrs.insert(attr_name.clone()) {
         return Err("Thẻ HTML chứa thuộc tính bị trùng lặp.");
     }
-    if is_dangerous_attr_name(attr_name) {
+    if is_dangerous_attr_name(attr_name, allow_trusted_theme_markup) {
         return Err("Template chứa thuộc tính HTML bị C-SEC cấm.");
+    }
+    if forbids_dynamic_interpolation(attr_name)
+        && (*attr_expr_count != 0
+            || attr_static_buf.contains("{{")
+            || attr_static_buf.contains("{%"))
+    {
+        return Err("C-SEC cấm nội suy trong thuộc tính sự kiện/namespace HTML.");
     }
     if tag_name == "meta" {
         if !matches!(attr_name.as_str(), "charset" | "name" | "content") {
@@ -3016,13 +3562,16 @@ fn finalize_theme_attr(
             }
         }
     }
-    if matches!(attr_name.as_str(), "href" | "src" | "poster" | "cite") {
+    if matches!(
+        attr_name.as_str(),
+        "href" | "src" | "poster" | "cite" | "xlink:href"
+    ) {
         if *attr_expr_count > 1 || (*attr_expr_count > 0 && *attr_has_static_bytes) {
             return Err("URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.");
         }
         if *attr_expr_count == 0 && !(tag_name == "link" && attr_name == "href") {
             let decoded = decode_html_entities_for_url(attr_static_buf);
-            if tag_name == "a" && attr_name == "href" {
+            if (tag_name == "a" && attr_name == "href") || attr_name == "xlink:href" {
                 validate_safe_href_url(&decoded)?;
             } else {
                 validate_safe_url(&decoded)?;
@@ -3045,8 +3594,17 @@ fn finalize_theme_tag(
     meta_ok: bool,
     is_part: bool,
     is_full_doctype_doc: bool,
+    allow_trusted_theme_markup: bool,
+    svg_depth: usize,
 ) -> Result<ThemeHtmlState, &'static str> {
-    check_theme_tag_name(tag_name, is_close, is_part, is_full_doctype_doc)?;
+    check_theme_tag_name(
+        tag_name,
+        is_close,
+        is_part,
+        is_full_doctype_doc,
+        allow_trusted_theme_markup,
+        svg_depth,
+    )?;
     if is_close {
         return Ok(ThemeHtmlState::Body);
     }
@@ -3061,6 +3619,11 @@ fn finalize_theme_tag(
             closing_prefix: 0,
             css_buf: String::new(),
         }),
+        "script" => Ok(ThemeHtmlState::Script {
+            closing_prefix: 0,
+            comment_prefix: 0,
+            cdata_prefix: 0,
+        }),
         "title" => Ok(ThemeHtmlState::Title { closing_prefix: 0 }),
         _ => Ok(ThemeHtmlState::Body),
     }
@@ -3071,7 +3634,43 @@ fn step_theme_raw_char(
     ch: char,
     is_part: bool,
     is_full_doctype_doc: bool,
+    allow_trusted_theme_markup: bool,
+    svg_depth: usize,
 ) -> Result<ThemeHtmlState, &'static str> {
+    if let ThemeHtmlState::Trusted {
+        inner,
+        svg_depth: depth,
+    } = state
+    {
+        let completed_svg_tag = match inner.as_ref() {
+            ThemeHtmlState::Tag {
+                tag_name,
+                is_close,
+                phase,
+                quote,
+                ..
+            } if tag_name == "svg" && ch == '>' && quote.is_none() => {
+                Some((*is_close, *phase == TagPhase::SelfClosingSlash))
+            }
+            _ => None,
+        };
+        let next = step_theme_raw_char(*inner, ch, is_part, is_full_doctype_doc, true, depth)?;
+        let depth = if let Some((is_close, self_closing)) = completed_svg_tag {
+            if is_close {
+                depth.checked_sub(1).ok_or("Thẻ </svg> không có thẻ mở.")?
+            } else if self_closing {
+                depth
+            } else {
+                depth
+                    .checked_add(1)
+                    .filter(|d| *d <= 64)
+                    .ok_or("SVG lồng nhau quá sâu.")?
+            }
+        } else {
+            depth
+        };
+        return Ok(ThemeHtmlState::with_trust(next, true, depth));
+    }
     let ascii = if ch.is_ascii() { Some(ch as u8) } else { None };
     match state {
         ThemeHtmlState::Body => {
@@ -3189,6 +3788,43 @@ fn step_theme_raw_char(
                 css_buf,
             })
         }
+        ThemeHtmlState::Script {
+            mut closing_prefix,
+            mut comment_prefix,
+            mut cdata_prefix,
+        } => {
+            // Keep the HTML5 escaped and SVG CDATA scanners in the Theme AST
+            // walker too. A fake closing tag inside either state may cause
+            // untrusted Jinja output after it to execute as JavaScript.
+            comment_prefix = next_script_escaped_prefix(b"<!--", comment_prefix, ascii);
+            cdata_prefix = next_script_escaped_prefix(b"<![CDATA[", cdata_prefix, ascii);
+            if comment_prefix == 4 || cdata_prefix == 9 {
+                return Err("C-SEC cam HTML escaped state va SVG CDATA trong <script>.");
+            }
+            const EXPECTED: &[u8; 8] = b"</script";
+            if closing_prefix == EXPECTED.len() {
+                if ascii == Some(b'>') {
+                    return Ok(ThemeHtmlState::Body);
+                }
+                if ascii.is_some_and(|b| is_ascii_html_whitespace(b) || b == b'/') {
+                    return Err("Thẻ đóng </script> không được chứa khoảng trắng hoặc /.");
+                }
+                closing_prefix = if ascii == Some(b'<') { 1 } else { 0 };
+            } else {
+                closing_prefix = match ascii {
+                    Some(b) if b.to_ascii_lowercase() == EXPECTED[closing_prefix] => {
+                        closing_prefix + 1
+                    }
+                    Some(b'<') => 1,
+                    _ => 0,
+                };
+            }
+            Ok(ThemeHtmlState::Script {
+                closing_prefix,
+                comment_prefix,
+                cdata_prefix,
+            })
+        }
         ThemeHtmlState::Title { mut closing_prefix } => {
             const EXPECTED: &[u8; 7] = b"</title";
             if closing_prefix == 7 {
@@ -3234,17 +3870,31 @@ fn step_theme_raw_char(
                         tag_name.push(ch.to_ascii_lowercase());
                     }
                     Some(b) if is_ascii_html_whitespace(b) => {
-                        check_theme_tag_name(&tag_name, is_close, is_part, is_full_doctype_doc)?;
+                        check_theme_tag_name(
+                            &tag_name,
+                            is_close,
+                            is_part,
+                            is_full_doctype_doc,
+                            allow_trusted_theme_markup,
+                            svg_depth,
+                        )?;
                         phase = TagPhase::BeforeAttr;
                     }
                     Some(b'/') => {
                         if is_close
                             || tag_name.is_empty()
-                            || matches!(tag_name.as_str(), "style" | "title")
+                            || matches!(tag_name.as_str(), "style" | "title" | "script")
                         {
                             return Err("Dấu tự đóng `/` trên thẻ HTML không hợp lệ.");
                         }
-                        check_theme_tag_name(&tag_name, is_close, is_part, is_full_doctype_doc)?;
+                        check_theme_tag_name(
+                            &tag_name,
+                            is_close,
+                            is_part,
+                            is_full_doctype_doc,
+                            allow_trusted_theme_markup,
+                            svg_depth,
+                        )?;
                         phase = TagPhase::SelfClosingSlash;
                     }
                     Some(b'>') => {
@@ -3256,6 +3906,8 @@ fn step_theme_raw_char(
                             meta_ok,
                             is_part,
                             is_full_doctype_doc,
+                            allow_trusted_theme_markup,
+                            svg_depth,
                         );
                     }
                     _ => return Err("Tên thẻ HTML chứa ký tự không hợp lệ."),
@@ -3273,6 +3925,8 @@ fn step_theme_raw_char(
                                     meta_ok,
                                     is_part,
                                     is_full_doctype_doc,
+                                    allow_trusted_theme_markup,
+                                    svg_depth,
                                 );
                             }
                             _ => return Err("Thẻ đóng HTML không được chứa thuộc tính hoặc /."),
@@ -3290,7 +3944,7 @@ fn step_theme_raw_char(
                                 phase = TagPhase::AttrName;
                             }
                             Some(b'/') => {
-                                if matches!(tag_name.as_str(), "style" | "title") {
+                                if matches!(tag_name.as_str(), "style" | "title" | "script") {
                                     return Err("Thẻ <style>/<title> không được tự đóng.");
                                 }
                                 phase = TagPhase::SelfClosingSlash;
@@ -3304,6 +3958,8 @@ fn step_theme_raw_char(
                                     meta_ok,
                                     is_part,
                                     is_full_doctype_doc,
+                                    allow_trusted_theme_markup,
+                                    svg_depth,
                                 );
                             }
                             _ => return Err("Thuộc tính HTML phải bắt đầu bằng chữ cái ASCII."),
@@ -3335,8 +3991,9 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
+                            allow_trusted_theme_markup,
                         )?;
-                        if matches!(tag_name.as_str(), "style" | "title") {
+                        if matches!(tag_name.as_str(), "style" | "title" | "script") {
                             return Err("Thẻ <style>/<title> không được tự đóng.");
                         }
                         phase = TagPhase::SelfClosingSlash;
@@ -3353,6 +4010,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
+                            allow_trusted_theme_markup,
                         )?;
                         return finalize_theme_tag(
                             &tag_name,
@@ -3362,6 +4020,8 @@ fn step_theme_raw_char(
                             meta_ok,
                             is_part,
                             is_full_doctype_doc,
+                            allow_trusted_theme_markup,
+                            svg_depth,
                         );
                     }
                     _ => return Err("Tên thuộc tính HTML chứa ký tự không hợp lệ."),
@@ -3383,8 +4043,9 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
+                            allow_trusted_theme_markup,
                         )?;
-                        if matches!(tag_name.as_str(), "style" | "title") {
+                        if matches!(tag_name.as_str(), "style" | "title" | "script") {
                             return Err("Thẻ <style>/<title> không được tự đóng.");
                         }
                         phase = TagPhase::SelfClosingSlash;
@@ -3401,6 +4062,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
+                            allow_trusted_theme_markup,
                         )?;
                         return finalize_theme_tag(
                             &tag_name,
@@ -3410,6 +4072,8 @@ fn step_theme_raw_char(
                             meta_ok,
                             is_part,
                             is_full_doctype_doc,
+                            allow_trusted_theme_markup,
+                            svg_depth,
                         );
                     }
                     Some(b'a'..=b'z' | b'A'..=b'Z') => {
@@ -3424,6 +4088,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
+                            allow_trusted_theme_markup,
                         )?;
                         attr_name.push(ch.to_ascii_lowercase());
                         phase = TagPhase::AttrName;
@@ -3465,6 +4130,7 @@ fn step_theme_raw_char(
                                 &mut link_has_valid_href,
                                 &mut meta_ok,
                                 &mut attr_static_buf,
+                                allow_trusted_theme_markup,
                             )?;
                             phase = TagPhase::BeforeAttr;
                         } else {
@@ -3495,6 +4161,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
+                            allow_trusted_theme_markup,
                         )?;
                         phase = TagPhase::BeforeAttr;
                     } else if ascii == Some(b'>') {
@@ -3509,6 +4176,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
+                            allow_trusted_theme_markup,
                         )?;
                         return finalize_theme_tag(
                             &tag_name,
@@ -3518,6 +4186,8 @@ fn step_theme_raw_char(
                             meta_ok,
                             is_part,
                             is_full_doctype_doc,
+                            allow_trusted_theme_markup,
+                            svg_depth,
                         );
                     } else if matches!(
                         ascii,
@@ -3546,6 +4216,8 @@ fn step_theme_raw_char(
                             meta_ok,
                             is_part,
                             is_full_doctype_doc,
+                            allow_trusted_theme_markup,
+                            svg_depth,
                         );
                     }
                     return Err("Sau `/` ở cuối thẻ mở phải là `>`.");
@@ -3566,6 +4238,7 @@ fn step_theme_raw_char(
                 attr_static_buf,
             })
         }
+        ThemeHtmlState::Trusted { .. } => unreachable!("trusted state unwrapped above"),
     }
 }
 
@@ -3805,11 +4478,17 @@ fn classify_theme_url_slot(tag_name: &str, attr_name: &str) -> Option<UrlAttrSlo
 }
 
 fn reject_style_control_flow(states: &BTreeSet<ThemeHtmlState>) -> Result<(), &'static str> {
-    if states
-        .iter()
-        .any(|s| matches!(s, ThemeHtmlState::Style { .. }))
-    {
-        return Err("C-SEC cấm nội suy và khối điều khiển Jinja bên trong <style>.");
+    if states.iter().any(|s| {
+        matches!(
+            s.inner(),
+            ThemeHtmlState::Style { .. } | ThemeHtmlState::Script { .. }
+        ) || matches!(
+            s.inner(),
+            ThemeHtmlState::Tag { attr_name, .. }
+                if forbids_dynamic_interpolation(attr_name)
+        )
+    }) {
+        return Err("C-SEC cấm Jinja trong <style>/<script> và thuộc tính sự kiện/namespace HTML.");
     }
     Ok(())
 }
@@ -3819,20 +4498,26 @@ fn walk_theme_ast_with_url_scopes(
     is_part: bool,
     is_full_doctype_doc: bool,
     policy: &ThemeUrlPolicy,
+    allow_trusted_theme_markup: bool,
 ) -> Result<ThemeTemplateUsageFlags, &'static str> {
     let mut usage = ThemeTemplateUsageFlags::default();
     let (final_states, _) = walk_theme_stmt_with_url_scopes(
         stmt,
-        BTreeSet::from([ThemeHtmlState::Body]),
+        BTreeSet::from([ThemeHtmlState::with_trust(
+            ThemeHtmlState::Body,
+            allow_trusted_theme_markup,
+            0,
+        )]),
         UrlScopeStack::root(),
         is_part,
         is_full_doctype_doc,
         policy,
+        allow_trusted_theme_markup,
         &mut usage,
     )?;
     if final_states
         .iter()
-        .any(|state| *state != ThemeHtmlState::Body)
+        .any(|state| state.inner() != &ThemeHtmlState::Body || state.trusted_depth() != 0)
     {
         return Err(
             "Template phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment/style/title).",
@@ -3848,6 +4533,7 @@ fn walk_theme_stmts_with_url_scopes(
     is_part: bool,
     is_full_doctype_doc: bool,
     policy: &ThemeUrlPolicy,
+    allow_trusted_theme_markup: bool,
     usage: &mut ThemeTemplateUsageFlags,
 ) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
     for child in stmts {
@@ -3858,6 +4544,7 @@ fn walk_theme_stmts_with_url_scopes(
             is_part,
             is_full_doctype_doc,
             policy,
+            allow_trusted_theme_markup,
             usage,
         )?;
         states = next_states;
@@ -3876,6 +4563,7 @@ fn walk_theme_stmt_with_url_scopes(
     is_part: bool,
     is_full_doctype_doc: bool,
     policy: &ThemeUrlPolicy,
+    allow_trusted_theme_markup: bool,
     usage: &mut ThemeTemplateUsageFlags,
 ) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
     match stmt {
@@ -3886,6 +4574,7 @@ fn walk_theme_stmt_with_url_scopes(
             is_part,
             is_full_doctype_doc,
             policy,
+            allow_trusted_theme_markup,
             usage,
         ),
         Stmt::EmitRaw(raw) => {
@@ -3893,7 +4582,15 @@ fn walk_theme_stmt_with_url_scopes(
             for initial in states {
                 let mut cur = initial;
                 for ch in raw.raw.chars() {
-                    cur = step_theme_raw_char(cur, ch, is_part, is_full_doctype_doc)?;
+                    let depth = cur.trusted_depth();
+                    cur = step_theme_raw_char(
+                        cur,
+                        ch,
+                        is_part,
+                        is_full_doctype_doc,
+                        allow_trusted_theme_markup,
+                        depth,
+                    )?;
                 }
                 next_states.insert(cur);
             }
@@ -3904,8 +4601,14 @@ fn walk_theme_stmt_with_url_scopes(
         }
         Stmt::EmitExpr(expr) => {
             reject_style_control_flow(&states)?;
+            if parse_od_icon_call(&expr.expr)?.is_some() {
+                if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
+                    return Err("od_icon() chỉ được xuất trong thân HTML.");
+                }
+                return Ok((states, scopes));
+            }
             if parse_composition_call(&expr.expr)?.is_some() {
-                if states.iter().any(|s| *s != ThemeHtmlState::Body) {
+                if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_part/od_content chỉ được xuất hiện trong thân HTML.");
                 }
                 return Ok((states, scopes));
@@ -3913,8 +4616,9 @@ fn walk_theme_stmt_with_url_scopes(
             record_usage_flags_in_expr(&expr.expr, usage);
             if states.iter().any(|s| {
                 matches!(
-                    s,
+                    s.inner(),
                     ThemeHtmlState::Style { .. }
+                        | ThemeHtmlState::Script { .. }
                         | ThemeHtmlState::Comment(_)
                         | ThemeHtmlState::BodyLt
                         | ThemeHtmlState::BodyLtSlash
@@ -3931,10 +4635,10 @@ fn walk_theme_stmt_with_url_scopes(
             }
             let has_non_tag = states
                 .iter()
-                .any(|s| !matches!(s, ThemeHtmlState::Tag { .. }));
+                .any(|s| !matches!(s.inner(), ThemeHtmlState::Tag { .. }));
             let has_tag = states
                 .iter()
-                .any(|s| matches!(s, ThemeHtmlState::Tag { .. }));
+                .any(|s| matches!(s.inner(), ThemeHtmlState::Tag { .. }));
             if has_non_tag && has_tag {
                 return Err("C-SEC cấm trộn lẫn ngữ cảnh thẻ HTML và thân HTML tại điểm nội suy.");
             }
@@ -3945,6 +4649,8 @@ fn walk_theme_stmt_with_url_scopes(
             let mut expected_url_slot: Option<Option<UrlAttrSlot>> = None;
             let mut updated_states = BTreeSet::new();
             for state in states {
+                let trusted = allow_trusted_theme_markup;
+                let svg_depth = state.trusted_depth();
                 let ThemeHtmlState::Tag {
                     tag_name,
                     is_close,
@@ -3958,7 +4664,7 @@ fn walk_theme_stmt_with_url_scopes(
                     mut link_has_valid_href,
                     meta_ok,
                     attr_static_buf,
-                } = state
+                } = state.into_inner()
                 else {
                     unreachable!("non-tag state already filtered");
                 };
@@ -3967,7 +4673,7 @@ fn walk_theme_stmt_with_url_scopes(
                         "C-SEC chỉ cho phép nội suy bên trong giá trị thuộc tính có dấu ngoặc kép.",
                     );
                 }
-                if is_dangerous_attr_name(&attr_name)
+                if forbids_dynamic_interpolation(&attr_name)
                     || matches!(attr_name.as_str(), "style" | "srcset" | "ping")
                     || (tag_name == "link" && attr_name == "rel")
                     || tag_name == "meta"
@@ -4013,20 +4719,24 @@ fn walk_theme_stmt_with_url_scopes(
                     }
                     attr_expr_count = attr_expr_count.saturating_add(1);
                 }
-                updated_states.insert(ThemeHtmlState::Tag {
-                    tag_name,
-                    is_close,
-                    phase,
-                    attr_name,
-                    quote,
-                    attr_has_static_bytes,
-                    attr_expr_count,
-                    seen_attrs,
-                    link_rel_stylesheet,
-                    link_has_valid_href,
-                    meta_ok,
-                    attr_static_buf,
-                });
+                updated_states.insert(ThemeHtmlState::with_trust(
+                    ThemeHtmlState::Tag {
+                        tag_name,
+                        is_close,
+                        phase,
+                        attr_name,
+                        quote,
+                        attr_has_static_bytes,
+                        attr_expr_count,
+                        seen_attrs,
+                        link_rel_stylesheet,
+                        link_has_valid_href,
+                        meta_ok,
+                        attr_static_buf,
+                    },
+                    trusted,
+                    svg_depth,
+                ));
             }
             Ok((updated_states, scopes))
         }
@@ -4041,6 +4751,7 @@ fn walk_theme_stmt_with_url_scopes(
                 is_part,
                 is_full_doctype_doc,
                 policy,
+                allow_trusted_theme_markup,
                 usage,
             )?;
             let (false_states, false_scopes) = walk_theme_stmts_with_url_scopes(
@@ -4050,6 +4761,7 @@ fn walk_theme_stmt_with_url_scopes(
                 is_part,
                 is_full_doctype_doc,
                 policy,
+                allow_trusted_theme_markup,
                 usage,
             )?;
             true_states.extend(false_states);
@@ -4083,6 +4795,7 @@ fn walk_theme_stmt_with_url_scopes(
                 is_part,
                 is_full_doctype_doc,
                 policy,
+                allow_trusted_theme_markup,
                 usage,
             )?;
             out_scopes.pop_frame();
@@ -4103,6 +4816,7 @@ fn walk_theme_stmt_with_url_scopes(
         }
         Stmt::SetBlock(sb) => {
             reject_style_control_flow(&states)?;
+            reject_icons_in_set_block(&sb.body)?;
             if sb.filter.is_some() {
                 return Err("C-SEC cấm modifier filter trong khối set.");
             }
@@ -4113,14 +4827,22 @@ fn walk_theme_stmt_with_url_scopes(
             }
             let (sb_states, sb_scopes) = walk_theme_stmts_with_url_scopes(
                 &sb.body,
-                BTreeSet::from([ThemeHtmlState::Body]),
+                BTreeSet::from([ThemeHtmlState::with_trust(
+                    ThemeHtmlState::Body,
+                    allow_trusted_theme_markup,
+                    0,
+                )]),
                 scopes.clone(),
                 is_part,
                 is_full_doctype_doc,
                 policy,
+                allow_trusted_theme_markup,
                 usage,
             )?;
-            if sb_states.iter().any(|s| *s != ThemeHtmlState::Body) {
+            if sb_states
+                .iter()
+                .any(|s| s.inner() != &ThemeHtmlState::Body || s.trusted_depth() != 0)
+            {
                 return Err("Khối set block phải đóng đủ thẻ/comment HTML bên trong.");
             }
             scopes = UrlScopeStack::intersect(&scopes, &sb_scopes);
@@ -4146,6 +4868,7 @@ fn walk_theme_stmt_with_url_scopes(
                 is_part,
                 is_full_doctype_doc,
                 policy,
+                allow_trusted_theme_markup,
                 usage,
             )?;
 
@@ -4182,6 +4905,7 @@ fn walk_theme_stmt_with_url_scopes(
                     is_part,
                     is_full_doctype_doc,
                     policy,
+                    allow_trusted_theme_markup,
                     usage,
                 )?;
                 let mut next_states = loop_states.clone();
@@ -4220,8 +4944,12 @@ fn walk_theme_stmt_with_url_scopes(
     }
 }
 
-fn validate_html_and_css_context(src: &str, post_render: bool) -> Result<(), &'static str> {
-    validate_html_and_css_context_with_url_vars(src, post_render, None)
+fn validate_html_and_css_context(
+    src: &str,
+    post_render: bool,
+    allow_trusted_theme_markup: bool,
+) -> Result<(), &'static str> {
+    validate_html_and_css_context_with_url_vars(src, post_render, None, allow_trusted_theme_markup)
 }
 
 fn find_rawtext_or_rcdata_end(
@@ -4230,10 +4958,11 @@ fn find_rawtext_or_rcdata_end(
     tag_name: &str,
 ) -> Result<(usize, usize), &'static str> {
     let bytes = src.as_bytes();
-    let needle = if tag_name == "style" {
-        b"</style"
-    } else {
-        b"</title"
+    let needle: &[u8] = match tag_name {
+        "style" => b"</style",
+        "script" => b"</script",
+        "title" => b"</title",
+        _ => return Err("Thẻ raw-text không hợp lệ."),
     };
     let mut pos = body_start;
     while pos + needle.len() <= bytes.len() {
@@ -4241,17 +4970,15 @@ fn find_rawtext_or_rcdata_end(
             match bytes.get(pos + needle.len()) {
                 Some(&b'>') => return Ok((pos, pos + needle.len() + 1)),
                 Some(&b) if is_ascii_html_whitespace(b) || b == b'/' => {
-                    return Err(
-                        "Thẻ đóng </style> hoặc </title> không được chứa khoảng trắng hoặc /.",
-                    );
+                    return Err("Thẻ đóng raw-text không được chứa khoảng trắng hoặc /.");
                 }
-                None => return Err("Thẻ đóng </style> hoặc </title> không hoàn chỉnh."),
+                None => return Err("Thẻ đóng raw-text không hoàn chỉnh."),
                 Some(_) => {}
             }
         }
         pos += 1;
     }
-    Err("Thẻ <style> hoặc <title> thiếu thẻ đóng hợp lệ.")
+    Err("Thẻ raw-text thiếu thẻ đóng hợp lệ.")
 }
 
 fn is_sensitive_global_option_key(key: &str) -> bool {
@@ -4308,14 +5035,17 @@ fn validate_html_and_css_context_with_url_vars(
     src: &str,
     post_render: bool,
     block_url_vars: Option<&BlockUrlVarAllowlist>,
+    allow_trusted_theme_markup: bool,
 ) -> Result<(), &'static str> {
     let lower = src.to_ascii_lowercase();
     let is_full_doctype_doc =
         block_url_vars.is_none() && lower.trim_start().starts_with("<!doctype");
 
-    // Single-pass scan over HTML, RAWTEXT `<style>`, and RCDATA `<title>`.
+    // Scan HTML plus RAWTEXT style/script and RCDATA title. SVG depth limits
+    // the exceptional <title> permission to actual SVG foreign content.
     let bytes = src.as_bytes();
     let mut i = 0;
+    let mut svg_depth = 0_usize;
     while i < bytes.len() {
         if bytes[i] != b'<' {
             i += 1;
@@ -4378,11 +5108,23 @@ fn validate_html_and_css_context_with_url_vars(
         if tag_name.is_empty() {
             return Err("Tên thẻ HTML không hợp lệ.");
         }
-        if is_close && matches!(tag_name.as_str(), "style" | "title" | "link" | "meta") {
+        if is_close
+            && matches!(
+                tag_name.as_str(),
+                "style" | "title" | "script" | "link" | "meta"
+            )
+        {
             return Err("Thẻ đóng HTML không hợp lệ ở vị trí này.");
         }
         if FORBIDDEN_TAGS.contains(&tag_name.as_str())
-            && !(tag_name == "title" && !is_close && is_full_doctype_doc)
+            && !(allow_trusted_theme_markup
+                && matches!(
+                    tag_name.as_str(),
+                    "script" | "svg" | "foreignobject" | "math"
+                ))
+            && !(tag_name == "title"
+                && !is_close
+                && (is_full_doctype_doc || (allow_trusted_theme_markup && svg_depth > 0)))
         {
             return Err("Template chứa thẻ HTML bị C-SEC cấm.");
         }
@@ -4411,13 +5153,31 @@ fn validate_html_and_css_context_with_url_vars(
             if !attr_slice.trim().is_empty() {
                 return Err("Thẻ đóng HTML không được chứa thuộc tính hoặc /.");
             }
+            if tag_name == "svg" {
+                svg_depth = svg_depth
+                    .checked_sub(1)
+                    .ok_or("Thẻ </svg> không có thẻ mở.")?;
+            }
             i = k + 1;
             continue;
         }
 
-        validate_tag_attributes(&tag_name, attr_slice, post_render, block_url_vars)?;
-        if matches!(tag_name.as_str(), "style" | "title") && attr_slice.trim_end().ends_with('/') {
-            return Err("Thẻ <style>/<title> không được tự đóng.");
+        validate_tag_attributes(
+            &tag_name,
+            attr_slice,
+            post_render,
+            block_url_vars,
+            allow_trusted_theme_markup,
+        )?;
+        let self_closing = attr_slice.trim_end().ends_with('/');
+        if matches!(tag_name.as_str(), "style" | "title" | "script") && self_closing {
+            return Err("Thẻ <style>/<title>/<script> không được tự đóng.");
+        }
+        if tag_name == "svg" && !self_closing {
+            svg_depth = svg_depth
+                .checked_add(1)
+                .filter(|depth| *depth <= 64)
+                .ok_or("SVG lồng nhau quá sâu.")?;
         }
 
         if tag_name == "style" {
@@ -4438,9 +5198,26 @@ fn validate_html_and_css_context_with_url_vars(
             i = next_i;
             continue;
         }
+        if tag_name == "script" {
+            let (close_start, next_i) = find_rawtext_or_rcdata_end(src, k + 1, "script")?;
+            let js_body = &src[k + 1..close_start];
+            // HTML5 escaped script states after a comment opener can keep a
+            // literal closing tag inside JavaScript instead of closing it.
+            // Reject that opener so template data cannot become executable JS.
+            if js_body.contains("<!--") || js_body.contains("<![CDATA[") {
+                return Err("C-SEC cam HTML escaped state va SVG CDATA trong <script>.");
+            }
+            if !post_render && (js_body.contains("{{") || js_body.contains("{%")) {
+                return Err("C-SEC cấm nội suy Jinja bên trong <script>.");
+            }
+            i = next_i;
+            continue;
+        }
         i = k + 1;
     }
-
+    if svg_depth != 0 {
+        return Err("SVG thiếu thẻ đóng.");
+    }
     Ok(())
 }
 
@@ -4449,6 +5226,7 @@ fn validate_tag_attributes(
     attr_slice: &str,
     post_render: bool,
     block_url_vars: Option<&BlockUrlVarAllowlist>,
+    allow_trusted_theme_markup: bool,
 ) -> Result<(), &'static str> {
     let attrs = parse_attributes(attr_slice)?;
 
@@ -4480,13 +5258,14 @@ fn validate_tag_attributes(
     }
 
     for (name, val) in attrs {
-        if name.starts_with("on")
-            || matches!(
-                name.as_str(),
-                "srcdoc" | "formaction" | "action" | "xmlns" | "xlink:href"
-            )
-        {
+        if is_dangerous_attr_name(&name, allow_trusted_theme_markup) {
             return Err("Template chứa thuộc tính HTML bị C-SEC cấm.");
+        }
+        if !post_render
+            && forbids_dynamic_interpolation(&name)
+            && (val.contains("{{") || val.contains("{%"))
+        {
+            return Err("C-SEC cấm nội suy bên trong thuộc tính sự kiện/namespace HTML.");
         }
 
         if name == "style" {
@@ -4498,7 +5277,7 @@ fn validate_tag_attributes(
 
         if matches!(
             name.as_str(),
-            "href" | "src" | "poster" | "cite" | "srcset" | "ping"
+            "href" | "src" | "poster" | "cite" | "srcset" | "ping" | "xlink:href"
         ) {
             if !post_render && (val.contains("{{") || val.contains("{%")) {
                 if matches!(name.as_str(), "srcset" | "ping") {
@@ -4553,7 +5332,7 @@ fn validate_tag_attributes(
                     for target in decoded.split_whitespace() {
                         validate_safe_url(target)?;
                     }
-                } else if tag_name == "a" && name == "href" {
+                } else if (tag_name == "a" && name == "href") || name == "xlink:href" {
                     validate_safe_href_url(&decoded)?;
                 } else {
                     validate_safe_url(&decoded)?;
@@ -4721,8 +5500,10 @@ impl BlockSchemaTemplateContext {
     }
 
     fn is_sensitive_name(&self, id: &str, active_loops: &BTreeMap<String, String>) -> bool {
-        matches!(id, "options" | "theme_options" | "od_is_preview")
-            || self.richtext_vars.contains(id)
+        matches!(
+            id,
+            "options" | "theme_options" | "od_is_preview" | "od_icon"
+        ) || self.richtext_vars.contains(id)
             || self.href_vars.contains(id)
             || self.src_vars.contains(id)
             || self.media_raw_vars.contains(id)
@@ -5035,6 +5816,13 @@ fn walk_block_ast_stmt(
     ctx: &BlockSchemaTemplateContext,
     active_loops: &BTreeMap<String, String>,
 ) -> Result<BTreeSet<HtmlScanState>, &'static str> {
+    if !matches!(stmt, Stmt::Template(_) | Stmt::EmitRaw(_))
+        && states
+            .iter()
+            .any(|state| matches!(state, HtmlScanState::Script { .. }))
+    {
+        return Err("C-SEC cấm nội suy và điều khiển Jinja trong <script> của block.");
+    }
     match stmt {
         Stmt::Template(t) => walk_block_ast_sequence(&t.children, states, ctx, active_loops),
         Stmt::EmitRaw(raw) => {
@@ -5049,6 +5837,12 @@ fn walk_block_ast_stmt(
             Ok(result)
         }
         Stmt::EmitExpr(e) => {
+            if parse_od_icon_call(&e.expr)?.is_some() {
+                if states.iter().any(|s| *s != HtmlScanState::Body) {
+                    return Err("od_icon() chỉ được xuất trong thân HTML của block.");
+                }
+                return Ok(states.clone());
+            }
             check_block_expr_restrictions(&e.expr, ctx, active_loops)?;
             if let Some(kind) = classify_bare_sensitive_expr(&e.expr, ctx, active_loops) {
                 match kind {
@@ -5161,6 +5955,7 @@ fn walk_block_ast_stmt(
             Ok(states.clone())
         }
         Stmt::SetBlock(sb) => {
+            reject_icons_in_set_block(&sb.body)?;
             if sb.filter.is_some() {
                 return Err("C-SEC cấm modifier filter trong khối set.");
             }
@@ -5264,17 +6059,18 @@ pub fn validate_block_template_csec(
     if source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
         || source.contains(CONTENT_SLOT_TOKEN)
         || source.contains(PREVIEW_PART_NONCE_PREFIX)
+        || source.contains(ICON_NONCE_PREFIX)
     {
         return Err("Template block chứa chuỗi nonce nội bộ bị cấm.");
     }
 
     let ctx = BlockSchemaTemplateContext::from_schema(schema);
     let url_allowlist = ctx.url_allowlist();
-    validate_html_and_css_context_with_url_vars(source, false, Some(&url_allowlist))?;
+    validate_html_and_css_context_with_url_vars(source, false, Some(&url_allowlist), true)?;
 
     let ast = parse(source, block_id, SyntaxConfig::default())
         .map_err(|_| "Cú pháp MiniJinja của template block không hợp lệ.")?;
-    validate_stmt(&ast)?;
+    validate_stmt_with_icons(&ast, true, false)?;
 
     let final_states = walk_block_ast_stmt(
         &ast,
@@ -5721,6 +6517,15 @@ pub fn render_block_csec_with_options_and_budget_and_config(
         .or_insert_with(|| Value::from(is_preview));
 
     let mut env = restricted_environment_with_config(fmt_cfg);
+    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    install_icon_function(
+        &mut env,
+        &budget.icon_nonces,
+        &local_icons,
+        budget.html_bytes_used,
+        &overflowed,
+    );
     env.set_fuel(Some(node_fuel));
     env.add_template(block_id, template_source)
         .map_err(|_| "Không thể biên dịch template block.")?;
@@ -5728,7 +6533,12 @@ pub fn render_block_csec_with_options_and_budget_and_config(
         .get_template(block_id)
         .map_err(|_| "Không tìm thấy template block.")?
         .render_captured(Value::from_pairs(ctx_map))
-        .map_err(|_| "Lỗi thực thi template block (fuel/recursion/undefined).")?;
+        .map_err(|_| {
+            if overflowed.load(std::sync::atomic::Ordering::Relaxed) {
+                budget.html_bytes_used = MAX_RENDERED_HTML_BYTES + 1;
+            }
+            "Lỗi thực thi template block (fuel/recursion/undefined)."
+        })?;
 
     let (consumed, _remaining) = captured
         .state()
@@ -5740,7 +6550,7 @@ pub fn render_block_csec_with_options_and_budget_and_config(
     if shell.len() > MAX_RENDERED_HTML_BYTES {
         return Err("HTML render của block vượt quá giới hạn 512 KiB.");
     }
-    validate_html_and_css_context(shell, true)?;
+    validate_html_and_css_context(shell, true, true)?;
 
     let out = if nonces.is_empty() {
         shell.to_owned()
@@ -5753,6 +6563,16 @@ pub fn render_block_csec_with_options_and_budget_and_config(
     };
 
     budget.charge_html_bytes(out.len())?;
+    let additions = local_icons
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let icon_growth: usize = additions
+        .iter()
+        .map(|(n, s)| s.len().saturating_sub(n.len()))
+        .sum();
+    budget.charge_html_bytes(icon_growth)?;
+    budget.icon_nonces.extend(additions);
     Ok(out)
 }
 
@@ -5862,6 +6682,205 @@ mod composition_tests {
             )
             .unwrap();
         assert!(!Arc::ptr_eq(&invalid_digest, &uncached));
+    }
+
+    #[test]
+    fn curated_icon_is_replaced_only_after_document_normalization() {
+        let compiled = validate_and_compile_csec_composition(
+            "page",
+            "<main>{{ od_icon('calendar', 'w-3.5 h-3.5') }}{{ od_content() }}</main>",
+            &BTreeMap::new(),
+            CsecContentKind::Entry,
+        )
+        .unwrap();
+        let mut budget = RenderBudget::new();
+        let shell = compiled
+            .render_with_config_and_budget(
+                json_to_safe_value(&serde_json::json!({})),
+                Some("<p>OK</p>"),
+                &mut budget,
+                &RenderFormattingConfig::default(),
+            )
+            .unwrap();
+        assert!(shell.contains(ICON_NONCE_PREFIX));
+        assert!(!shell.contains("<svg"));
+        // Exercise the same document-normalization boundary without coupling
+        // this module's unit tests to the server's SEO/content-render modules.
+        let composed = format!("<!doctype html><html><body>{shell}</body></html>");
+        let final_html = budget
+            .icon_nonces
+            .substitute_into_document(composed)
+            .unwrap();
+        assert!(final_html.contains("class=\"w-3.5 h-3.5\""));
+        assert!(final_html.contains("<svg xmlns="));
+        assert!(!final_html.contains(ICON_NONCE_PREFIX));
+    }
+
+    #[test]
+    fn icon_security_validation_rejects_unsafe_contexts() {
+        let invalid = [
+            "<main>OD_ICON_0123456789abcdef0123456789abcdef</main>",
+            "<main><iframe src='/x'></iframe></main>",
+            "<main>{{ od_icon('not-in-registry') }}</main>",
+            "<main>{{ od_icon('calendar', 'w-3 onclick=alert(1)') }}</main>",
+            "<main>{{ od_icon('calendar') | upper }}</main>",
+            "<main>{{ od_icon(name) }}</main>",
+            "<div title=\"{{ od_icon('calendar') }}\">x</div>",
+            "<style>{{ od_icon('calendar') }}</style>",
+            "{% set foo %}{{ od_icon('calendar') }}{% endset %}<main>x</main>",
+            "{% set od_icon = 'fake' %}<main>test</main>",
+        ];
+        for source in invalid {
+            assert!(
+                validate_and_compile_csec_composition(
+                    "t",
+                    source,
+                    &BTreeMap::new(),
+                    CsecContentKind::NonEntry
+                )
+                .is_err(),
+                "should reject: {source}"
+            );
+        }
+        assert!(
+            render_csec(
+                "legacy",
+                "<main>{{ od_icon('calendar') }}</main>",
+                Value::from(())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn icon_nonce_rejects_attribute_and_style_and_duplicate_substitution() {
+        let nonce = "OD_ICON_0123456789abcdef0123456789abcdef".to_owned();
+        let table = IconNonceTable {
+            entries: vec![(nonce.clone(), "<svg/>".to_owned())],
+        };
+        assert!(
+            table
+                .substitute_into_document(format!("<p>{nonce}</p>"))
+                .unwrap()
+                .contains("<svg/>")
+        );
+        assert!(
+            table
+                .substitute_into_document(format!("<div title=\"{nonce}\"></div>"))
+                .is_err()
+        );
+        assert!(
+            table
+                .substitute_into_document(format!("<!-- {nonce} -->"))
+                .is_err()
+        );
+        assert!(
+            table
+                .substitute_into_document(format!("<style>{nonce}</style>"))
+                .is_err()
+        );
+        assert!(
+            table
+                .substitute_into_document(format!("<p>{nonce}{nonce}</p>"))
+                .is_err()
+        );
+        assert!(
+            table
+                .substitute_into_document("<p>nonce missing</p>".to_owned())
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn icon_budget_caps_128_total_across_segments_and_charges_growth() {
+        let compiled = validate_and_compile_csec_composition(
+            "p",
+            "<p>{{ od_icon('check') }}</p>",
+            &BTreeMap::new(),
+            CsecContentKind::NonEntry,
+        )
+        .unwrap();
+        let mut budget = RenderBudget::new();
+        for _ in 0..MAX_ICONS_PER_REQUEST {
+            compiled
+                .render_with_config_and_budget(
+                    Value::from(()),
+                    None,
+                    &mut budget,
+                    &RenderFormattingConfig::default(),
+                )
+                .unwrap();
+        }
+        assert_eq!(budget.icon_nonces.entries.len(), MAX_ICONS_PER_REQUEST);
+        assert!(budget.html_bytes_used > 0);
+        assert!(
+            compiled
+                .render_with_config_and_budget(
+                    Value::from(()),
+                    None,
+                    &mut budget,
+                    &RenderFormattingConfig::default()
+                )
+                .is_err()
+        );
+
+        let mut budget = RenderBudget::new();
+        budget.html_bytes_used = MAX_RENDERED_HTML_BYTES - 1;
+        assert!(
+            compiled
+                .render_with_config_and_budget(
+                    Value::from(()),
+                    None,
+                    &mut budget,
+                    &RenderFormattingConfig::default()
+                )
+                .is_err()
+        );
+        assert!(budget.html_bytes_used > MAX_RENDERED_HTML_BYTES);
+        assert!(budget.icon_nonces.is_empty());
+    }
+
+    #[test]
+    fn declarative_block_icon_renders_once_and_rejects_attribute_spoofing() {
+        let source = "<div>{{ od_icon('arrow-right', 'w-3.5') }}</div>";
+        let schema: opendash_core::block_schema::BlockSchemaV1 =
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 1,
+                "id": "test-icon",
+                "title": "Test",
+                "category": "content",
+                "render": "render.html",
+                "fields": []
+            }))
+            .unwrap();
+        validate_block_template_csec("test-icon", source, &schema).unwrap();
+        let mut budget = RenderBudget::new();
+        let shell = render_block_csec_with_budget(
+            "test-icon",
+            source,
+            &schema,
+            &BTreeMap::new(),
+            false,
+            &mut budget,
+        )
+        .unwrap();
+        assert!(shell.contains(ICON_NONCE_PREFIX));
+        assert!(!shell.contains("<svg"));
+        let final_html = budget.icon_nonces.substitute_into_document(shell).unwrap();
+        assert!(final_html.contains("<svg "));
+        assert!(final_html.contains("class=\"w-3.5\""));
+        for invalid in [
+            "<div title=\"{{ od_icon('check') }}\">hi</div>",
+            "<div>{{ od_icon('missing') }}</div>",
+            "{% set captured %}{{ od_icon('check') }}{% endset %}<div>ok</div>",
+            "<div>OD_ICON_0123456789abcdef0123456789abcdef</div>",
+            "<div><object data='/x'></object></div>",
+        ] {
+            assert!(
+                validate_block_template_csec("test-icon", invalid, &schema).is_err(),
+                "{invalid}"
+            );
+        }
     }
 
     #[test]
@@ -6297,7 +7316,7 @@ mod composition_tests {
             tpl.render(Value::UNDEFINED, None).unwrap(),
             "<main><h1>OK</h1></main>"
         );
-        let malicious = parts(&[("header", "<script>alert(1)</script>")]);
+        let malicious = parts(&[("header", "<script>{{ entry.title }}</script>")]);
         assert!(
             compile(
                 "<main>{{ od_part('header') }}</main>",
@@ -6594,9 +7613,9 @@ mod composition_tests {
         .unwrap();
 
         let bad_templates = [
-            "<!-- --!><script>alert(1)</script><!-- -->",
-            "<!--><script>alert(1)</script><!-- -->",
-            "<!---><script>alert(1)</script><!-- -->",
+            "<!-- --!><iframe src='/x'></iframe><!-- -->",
+            "<!--><iframe src='/x'></iframe><!-- -->",
+            "<!---><iframe src='/x'></iframe><!-- -->",
             "<a href=\"javascript:alert(1)\" href=\"https://ok.example\">x</a>",
             "<a href=\"/&sol;evil.com\">x</a>",
             "<a href=\"java&#x09;script:alert(1)\">x</a>",
@@ -6976,7 +7995,7 @@ mod spec1_s01_tests {
             r#"{% for i, entry in entries %}<a href="{{ entry.url }}">x</a>{% endfor %}"#,
             r#"{% for outer in menus.primary.items %}{% for n in [1,2] %}<a href="{{ outer.url }}">x</a>{% set outer = "x" %}{% endfor %}{% endfor %}"#,
             r#"{% for outer in menus.primary.items %}{% for n in [1,2] %}<a href="{{ outer.url }}">x</a>{% set x %}{% set outer = "bad" %}{% endset %}{% endfor %}{% endfor %}"#,
-            r#"{% set unused %}<script>alert(1)</script>{% endset %}"#,
+            r#"{% set unused %}<script>{{ entry.title }}</script>{% endset %}"#,
             r#"{% for x in entries %}{% else %}<div id="open"{% endfor %}"#,
             r#"{% with x = 1 %}{% set y = menus.primary.items %}{% endwith %}{% for a in menus.primary.items %}{% set a = 1 %}<a href="{{ a.url }}">x</a>{% endfor %}"#,
             // HTML/RCDATA/RAWTEXT/Tag phase anti-bypass

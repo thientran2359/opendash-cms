@@ -356,6 +356,66 @@ pub struct ThemePatternDecl {
     pub file: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnqueueCondition {
+    #[default]
+    All,
+    Home,
+    Page,
+    Single,
+    Archive,
+    Taxonomy,
+    NotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptLocation {
+    Head,
+    #[default]
+    Footer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptStrategy {
+    Blocking,
+    #[default]
+    Defer,
+    Async,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeStyleEnqueueDecl {
+    pub handle: String,
+    pub src: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<EnqueueCondition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeScriptEnqueueDecl {
+    pub handle: String,
+    pub src: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deps: Vec<String>,
+    #[serde(default)]
+    pub location: ScriptLocation,
+    #[serde(default)]
+    pub strategy: ScriptStrategy,
+    #[serde(default)]
+    pub module: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<EnqueueCondition>,
+}
+
 /// v3 is additive in S01: v2 manifests are still readable by existing callers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -377,6 +437,10 @@ pub struct ThemeV3Manifest {
     /// Explicit allowlist of static files within assets/. Omission means none.
     #[serde(default)]
     pub assets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub styles: Vec<ThemeStyleEnqueueDecl>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<ThemeScriptEnqueueDecl>,
     #[serde(default)]
     pub options: Option<serde_json::Value>,
     #[serde(default)]
@@ -444,10 +508,13 @@ impl ThemeV3Manifest {
                     .as_deref()
                     .is_some_and(|desc| desc.len() > 4096 || desc.chars().any(char::is_control))
                 || !valid_subdir_file(&pattern.file, "patterns/", ".json")
-                || pattern
-                    .preview_asset
-                    .as_deref()
-                    .is_some_and(|path| !valid_v3_asset_path(path))
+                || pattern.preview_asset.as_deref().is_some_and(|path| {
+                    !valid_v3_asset_path(path)
+                        || !matches!(
+                            path.rsplit_once('.').map(|(_, ext)| ext),
+                            Some("png" | "jpg" | "jpeg" | "webp" | "gif")
+                        )
+                })
             {
                 return Err("Invalid or duplicate theme pattern");
             }
@@ -458,8 +525,257 @@ impl ThemeV3Manifest {
                 return Err("Invalid or duplicate theme asset path");
             }
         }
+        self.enqueue_graphs(&asset_paths)?;
         Ok(())
     }
+
+    fn enqueue_graphs(
+        &self,
+        asset_paths: &BTreeSet<&str>,
+    ) -> Result<(EnqueueGraph, EnqueueGraph), &'static str> {
+        if self.styles.len() > 64 || self.scripts.len() > 64 {
+            return Err("Too many theme enqueue declarations");
+        }
+        for style in &self.styles {
+            if !valid_v3_asset_path(&style.src)
+                || !style.src.ends_with(".css")
+                || !asset_paths.contains(style.src.as_str())
+                || style.media.as_deref().is_some_and(|media| {
+                    media.trim().is_empty()
+                        || media.len() > 64
+                        || !media
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || b" (),:./-".contains(&c))
+                })
+            {
+                return Err("Invalid theme style source or media");
+            }
+        }
+        for script in &self.scripts {
+            if !valid_v3_asset_path(&script.src)
+                || !(script.src.ends_with(".js") || script.src.ends_with(".mjs"))
+                || !asset_paths.contains(script.src.as_str())
+            {
+                return Err("Invalid theme script source");
+            }
+        }
+        Ok((
+            EnqueueGraph::new(
+                self.styles
+                    .iter()
+                    .map(|item| (item.handle.as_str(), item.deps.as_slice())),
+                true,
+            )?,
+            EnqueueGraph::new(
+                self.scripts
+                    .iter()
+                    .map(|item| (item.handle.as_str(), item.deps.as_slice())),
+                false,
+            )?,
+        ))
+    }
+}
+
+const TAILWIND_HANDLE: &str = "opendash-tailwind";
+
+/// Edges point from each declaration to its dependencies. Indices preserve
+/// the manifest's declaration order, independently of handle spelling.
+struct EnqueueGraph {
+    deps: Vec<Vec<usize>>,
+}
+
+impl EnqueueGraph {
+    fn new<'a>(
+        items: impl Iterator<Item = (&'a str, &'a [String])>,
+        allow_tailwind: bool,
+    ) -> Result<Self, &'static str> {
+        let items: Vec<_> = items.collect();
+        let mut handles = BTreeMap::new();
+        for (index, (handle, _)) in items.iter().enumerate() {
+            if !valid_kebab_segment_with_limit(handle, 64)
+                || *handle == TAILWIND_HANDLE
+                || handles.insert(*handle, index).is_some()
+            {
+                return Err("Invalid or duplicate theme enqueue handle");
+            }
+        }
+        let mut deps = vec![Vec::new(); items.len()];
+        for (index, (_, names)) in items.iter().enumerate() {
+            let mut seen = BTreeSet::new();
+            for name in *names {
+                if !seen.insert(name.as_str()) {
+                    return Err("Duplicate theme enqueue dependency");
+                }
+                if allow_tailwind && name == TAILWIND_HANDLE {
+                    continue;
+                }
+                let dep = handles
+                    .get(name.as_str())
+                    .ok_or("Unknown theme enqueue dependency")?;
+                deps[index].push(*dep);
+            }
+        }
+        // Three-color DFS checks every declaration, including routes which
+        // would not select it. Depth is bounded by the manifest item cap.
+        fn visit(index: usize, deps: &[Vec<usize>], colors: &mut [u8]) -> bool {
+            match colors[index] {
+                1 => return false,
+                2 => return true,
+                _ => {}
+            }
+            colors[index] = 1;
+            if !deps[index].iter().all(|&dep| visit(dep, deps, colors)) {
+                return false;
+            }
+            colors[index] = 2;
+            true
+        }
+        let mut colors = vec![0; deps.len()];
+        for index in 0..deps.len() {
+            if !visit(index, &deps, &mut colors) {
+                return Err("Cyclic theme enqueue dependencies");
+            }
+        }
+        Ok(Self { deps })
+    }
+
+    fn closure(&self, roots: impl Iterator<Item = usize>) -> Vec<bool> {
+        let mut selected = vec![false; self.deps.len()];
+        let mut pending: Vec<_> = roots.collect();
+        while let Some(index) = pending.pop() {
+            if !selected[index] {
+                selected[index] = true;
+                pending.extend(self.deps[index].iter().copied());
+            }
+        }
+        selected
+    }
+
+    fn ordered(&self, selected: &[bool]) -> Vec<usize> {
+        let mut emitted = vec![false; self.deps.len()];
+        let mut ordered = Vec::new();
+        // Among eligible nodes choose the earliest declaration. All selected
+        // dependencies are in the closure and the graph is already acyclic.
+        while let Some(index) = (0..self.deps.len()).find(|&index| {
+            selected[index] && !emitted[index] && self.deps[index].iter().all(|&dep| emitted[dep])
+        }) {
+            emitted[index] = true;
+            ordered.push(index);
+        }
+        ordered
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResolvedEnqueuedAssets {
+    pub head_styles: Vec<String>,
+    pub head_style_urls: Vec<String>,
+    pub head_scripts: Vec<String>,
+    pub footer_scripts: Vec<String>,
+}
+
+/// Resolve only declared, validated local assets into safe HTML tags.
+pub fn resolve_enqueued_assets(
+    manifest: &ThemeV3Manifest,
+    revision_digest: &str,
+    route_condition: EnqueueCondition,
+) -> ResolvedEnqueuedAssets {
+    let mut result = ResolvedEnqueuedAssets::default();
+    if revision_digest.len() != 64
+        || !revision_digest
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        || manifest.validate().is_err()
+    {
+        return result;
+    }
+    let asset_paths = manifest.assets.iter().map(String::as_str).collect();
+    let Ok((styles, scripts)) = manifest.enqueue_graphs(&asset_paths) else {
+        return result;
+    };
+    let matches_route = |conditions: &[EnqueueCondition]| {
+        conditions.is_empty()
+            || conditions.contains(&EnqueueCondition::All)
+            || conditions.contains(&route_condition)
+    };
+    let selected_styles = styles.closure(
+        manifest
+            .styles
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| matches_route(&item.conditions).then_some(index)),
+    );
+    for index in styles.ordered(&selected_styles) {
+        let style = &manifest.styles[index];
+        let url = format!("/theme/{revision_digest}/{}", style.src);
+        let media = style
+            .media
+            .as_ref()
+            .map_or_else(String::new, |value| format!(" media=\"{value}\""));
+        result
+            .head_styles
+            .push(format!("<link rel=\"stylesheet\" href=\"{url}\"{media}>"));
+        result.head_style_urls.push(url);
+    }
+    let selected_scripts = scripts.closure(
+        manifest
+            .scripts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| matches_route(&item.conditions).then_some(index)),
+    );
+    let head = scripts.closure(
+        manifest
+            .scripts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                (selected_scripts[index] && item.location == ScriptLocation::Head).then_some(index)
+            }),
+    );
+    let script_order = scripts.ordered(&selected_scripts);
+    // Async execution may overtake its dependencies (or its dependents).
+    // Keep async only for isolated handles; connected declarations execute
+    // after parsing, in topological document order, like deferred scripts.
+    let mut linked = vec![false; manifest.scripts.len()];
+    for &index in &script_order {
+        for &dep in &scripts.deps[index] {
+            linked[index] = true;
+            linked[dep] = true;
+        }
+    }
+    let mut delayed = vec![false; manifest.scripts.len()];
+    for index in script_order {
+        let script = &manifest.scripts[index];
+        // A parser-blocking dependent would run before a deferred/module
+        // dependency, even if its tag appears later. Promote it to defer.
+        delayed[index] = script.module
+            || script.strategy == ScriptStrategy::Defer
+            || (script.strategy == ScriptStrategy::Async && linked[index])
+            || scripts.deps[index].iter().any(|&dep| delayed[dep]);
+        let type_attr = if script.module {
+            " type=\"module\""
+        } else {
+            ""
+        };
+        let strategy_attr = if script.strategy == ScriptStrategy::Async && !linked[index] {
+            " async"
+        } else if !script.module && delayed[index] {
+            " defer"
+        } else {
+            ""
+        };
+        let tag = format!(
+            "<script src=\"/theme/{revision_digest}/{}\"{type_attr}{strategy_attr}></script>",
+            script.src
+        );
+        if head[index] {
+            result.head_scripts.push(tag);
+        } else {
+            result.footer_scripts.push(tag);
+        }
+    }
+    result
 }
 
 fn valid_label(value: &str, max_chars: usize) -> bool {
@@ -491,7 +807,7 @@ fn valid_subdir_file(value: &str, prefix: &str, suffix: &str) -> bool {
 ///
 /// The byte limit applies after "assets/"; directories use [a-z0-9_-]+,
 /// filenames use [a-z0-9_.-] with a non-dot first byte, no ".." and only
-/// the inert file extensions supported by the v3 archive reader.
+/// the file extensions supported by the v3 archive reader.
 pub fn valid_v3_asset_path(value: &str) -> bool {
     let Some(path) = value.strip_prefix("assets/") else {
         return false;
@@ -525,7 +841,17 @@ pub fn valid_v3_asset_path(value: &str) -> bool {
             return !stem.is_empty()
                 && matches!(
                     extension,
-                    "css" | "txt" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "woff2"
+                    "css"
+                        | "txt"
+                        | "js"
+                        | "mjs"
+                        | "svg"
+                        | "png"
+                        | "jpg"
+                        | "jpeg"
+                        | "webp"
+                        | "gif"
+                        | "woff2"
                 );
         }
     }
@@ -589,6 +915,8 @@ mod tests {
                 file: "patterns/hero.json".into(),
             }],
             assets: vec!["assets/images/hero.webp".into(), "assets/styles.css".into()],
+            styles: Vec::new(),
+            scripts: Vec::new(),
             options: None,
             menus: None,
             sample: None,
@@ -671,6 +999,9 @@ mod tests {
         for path in [
             "assets/x.css",
             "assets/note.txt",
+            "assets/other.svg",
+            "assets/other.js",
+            "assets/other.mjs",
             "assets/photo.png",
             "assets/photo.jpg",
             "assets/photo.jpeg",
@@ -712,8 +1043,6 @@ mod tests {
             "assets/logos\\logo.png",
             "assets/logo.PnG",
             "assets/Logo.png",
-            "assets/other.svg",
-            "assets/other.js",
             "assets/other.wasm",
             "assets/page.html",
             "assets/archive.zip",
@@ -737,7 +1066,7 @@ mod tests {
             "assets/.hidden/logo.png",
             "assets/icons.v2/logo.png",
             "assets/a..b.png",
-            "assets/payload.js",
+            "assets/payload.wasm",
             "assets/icons/../../logo.png",
             "assets/icons//logo.png",
             "assets/img.PNG",
@@ -753,6 +1082,315 @@ mod tests {
         let mut invalid_preview = baseline.clone();
         invalid_preview.patterns[0].preview_asset = Some("assets/icons.v2/logo.png".into());
         assert!(invalid_preview.validate().is_err());
+    }
+
+    fn enqueue_manifest() -> ThemeV3Manifest {
+        let mut value = serde_json::to_value(v3_manifest()).unwrap();
+        value["assets"] = json!([
+            "assets/base.css",
+            "assets/layout.css",
+            "assets/home.css",
+            "assets/print.css",
+            "assets/base.js",
+            "assets/middle.mjs",
+            "assets/head.js",
+            "assets/footer.js",
+            "assets/async.mjs",
+            "assets/other.js",
+            "assets/icon.svg"
+        ]);
+        value["styles"] = json!([
+            {"handle":"home", "src":"assets/home.css", "deps":["layout"], "conditions":["home"]},
+            {"handle":"print", "src":"assets/print.css", "media":"(min-aspect-ratio: 16/9)", "conditions":["all"]},
+            {"handle":"layout", "src":"assets/layout.css", "deps":["base"], "conditions":["page"]},
+            {"handle":"base", "src":"assets/base.css", "deps":["opendash-tailwind"], "conditions":["single"]}
+        ]);
+        value["scripts"] = json!([
+            {"handle":"head", "src":"assets/head.js", "deps":["middle","base"], "location":"head", "strategy":"blocking", "conditions":["home"]},
+            {"handle":"footer", "src":"assets/footer.js", "deps":["base"]},
+            {"handle":"middle", "src":"assets/middle.mjs", "deps":["base"], "module":true, "conditions":["page"]},
+            {"handle":"base", "src":"assets/base.js", "conditions":["single"]},
+            {"handle":"async", "src":"assets/async.mjs", "module":true, "strategy":"async"},
+            {"handle":"other", "src":"assets/other.js", "strategy":"async", "conditions":["archive"]}
+        ]);
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn enqueue_defaults_and_strict_fields_are_backward_compatible() {
+        let mut value = serde_json::to_value(v3_manifest()).unwrap();
+        assert!(value.get("styles").is_none());
+        assert!(value.get("scripts").is_none());
+        let legacy: ThemeV3Manifest = serde_json::from_value(value.clone()).unwrap();
+        assert!(legacy.styles.is_empty() && legacy.scripts.is_empty());
+        legacy.validate().unwrap();
+        value["styles"] = json!([{"handle":"main", "src":"assets/styles.css"}]);
+        value["scripts"] = json!([{"handle":"main", "src":"assets/main.js"}]);
+        let parsed: ThemeV3Manifest = serde_json::from_value(value.clone()).unwrap();
+        assert!(parsed.styles[0].conditions.is_empty());
+        assert!(parsed.styles[0].media.is_none());
+        assert_eq!(parsed.scripts[0].location, ScriptLocation::Footer);
+        assert_eq!(parsed.scripts[0].strategy, ScriptStrategy::Defer);
+        assert!(!parsed.scripts[0].module);
+        value["scripts"][0]["strategy"] = json!("unknown");
+        assert!(serde_json::from_value::<ThemeV3Manifest>(value.clone()).is_err());
+        value["scripts"][0]["strategy"] = json!("defer");
+        value["styles"][0]["unknown"] = json!(true);
+        assert!(serde_json::from_value::<ThemeV3Manifest>(value).is_err());
+    }
+
+    #[test]
+    fn enqueue_resolves_route_transitive_dependencies_and_promotes_head_scripts() {
+        let manifest = enqueue_manifest();
+        manifest.validate().unwrap();
+        let digest = "a".repeat(64);
+        let url = |src: &str| format!("/theme/{digest}/assets/{src}");
+        let css = |src: &str, attrs: &str| {
+            format!("<link rel=\"stylesheet\" href=\"{}\"{attrs}>", url(src))
+        };
+        let js = |src: &str, attrs: &str| format!("<script src=\"{}\"{attrs}></script>", url(src));
+        let home = resolve_enqueued_assets(&manifest, &digest, EnqueueCondition::Home);
+        assert_eq!(
+            home.head_style_urls,
+            vec![
+                url("print.css"),
+                url("base.css"),
+                url("layout.css"),
+                url("home.css")
+            ]
+        );
+        assert_eq!(
+            home.head_styles,
+            vec![
+                css("print.css", " media=\"(min-aspect-ratio: 16/9)\""),
+                css("base.css", ""),
+                css("layout.css", ""),
+                css("home.css", "")
+            ]
+        );
+        assert_eq!(
+            home.head_scripts,
+            vec![
+                js("base.js", " defer"),
+                js("middle.mjs", " type=\"module\""),
+                js("head.js", " defer")
+            ]
+        );
+        assert_eq!(
+            home.footer_scripts,
+            vec![
+                js("footer.js", " defer"),
+                js("async.mjs", " type=\"module\" async")
+            ]
+        );
+        let archive = resolve_enqueued_assets(&manifest, &digest, EnqueueCondition::Archive);
+        assert_eq!(archive.head_style_urls, vec![url("print.css")]);
+        assert!(archive.head_scripts.is_empty());
+        assert_eq!(
+            archive.footer_scripts,
+            vec![
+                js("base.js", " defer"),
+                js("footer.js", " defer"),
+                js("async.mjs", " type=\"module\" async"),
+                js("other.js", " async")
+            ]
+        );
+        let page = resolve_enqueued_assets(&manifest, &digest, EnqueueCondition::Page);
+        assert_eq!(
+            page.head_style_urls,
+            vec![url("print.css"), url("base.css"), url("layout.css")]
+        );
+        assert!(page.head_scripts.is_empty());
+        assert_eq!(
+            page.footer_scripts,
+            vec![
+                js("base.js", " defer"),
+                js("footer.js", " defer"),
+                js("middle.mjs", " type=\"module\""),
+                js("async.mjs", " type=\"module\" async")
+            ]
+        );
+        for invalid in [
+            "a".repeat(63),
+            "A".repeat(64),
+            "g".repeat(64),
+            format!("{}\"", "a".repeat(63)),
+        ] {
+            assert_eq!(
+                resolve_enqueued_assets(&manifest, &invalid, EnqueueCondition::Home),
+                ResolvedEnqueuedAssets::default()
+            );
+        }
+    }
+
+    #[test]
+    fn enqueue_preserves_execution_order_across_async_defer_and_blocking_dependencies() {
+        let digest = "a".repeat(64);
+        let mut manifest = enqueue_manifest();
+        manifest.scripts[1].strategy = ScriptStrategy::Blocking;
+        manifest.scripts[5].deps = vec!["async".into()];
+        manifest.validate().unwrap();
+
+        // A blocking footer script cannot execute ahead of its deferred
+        // dependency. Connected async scripts must also execute in order.
+        let archive = resolve_enqueued_assets(&manifest, &digest, EnqueueCondition::Archive);
+        assert_eq!(
+            archive.footer_scripts,
+            vec![
+                format!("<script src=\"/theme/{digest}/assets/base.js\" defer></script>"),
+                format!("<script src=\"/theme/{digest}/assets/footer.js\" defer></script>"),
+                format!(
+                    "<script src=\"/theme/{digest}/assets/async.mjs\" type=\"module\"></script>"
+                ),
+                format!("<script src=\"/theme/{digest}/assets/other.js\" defer></script>"),
+            ]
+        );
+
+        // The archive-only dependent must not alter the independent async
+        // script's strategy on a different route.
+        let home = resolve_enqueued_assets(&manifest, &digest, EnqueueCondition::Home);
+        assert!(
+            home.footer_scripts
+                .iter()
+                .any(|tag| tag.contains("async.mjs\" type=\"module\" async"))
+        );
+        assert!(
+            home.head_scripts
+                .last()
+                .is_some_and(|tag| tag.contains("head.js\" defer"))
+        );
+    }
+
+    #[test]
+    fn enqueue_validates_sources_handles_media_and_entire_dependency_graph() {
+        let baseline = enqueue_manifest();
+        baseline.validate().unwrap();
+        let mut cases = Vec::new();
+        let mut m = baseline.clone();
+        m.styles[0].handle = "opendash-tailwind".into();
+        cases.push(m);
+        let mut m = baseline.clone();
+        m.scripts[0].handle = "opendash-tailwind".into();
+        cases.push(m);
+        let mut m = baseline.clone();
+        m.styles[0].handle = "Invalid_handle".into();
+        cases.push(m);
+        let mut m = baseline.clone();
+        m.scripts[0].handle = "a".repeat(65);
+        cases.push(m);
+        let mut m = baseline.clone();
+        m.styles[0].handle = m.styles[1].handle.clone();
+        cases.push(m);
+        let mut m = baseline.clone();
+        m.scripts[0].handle = m.scripts[1].handle.clone();
+        cases.push(m);
+        for src in [
+            "assets/missing.css",
+            "assets/base.js",
+            "assets/../base.css",
+            "https://example.com/base.css",
+        ] {
+            let mut m = baseline.clone();
+            m.styles[0].src = src.into();
+            cases.push(m);
+        }
+        for src in ["assets/missing.js", "assets/base.css", "assets/icon.svg"] {
+            let mut m = baseline.clone();
+            m.scripts[0].src = src.into();
+            cases.push(m);
+        }
+        for media in [
+            " ".into(),
+            "a".repeat(65),
+            "screen\"".into(),
+            "screen\n".into(),
+            "é".into(),
+            "a&b".into(),
+        ] {
+            let mut m = baseline.clone();
+            m.styles[0].media = Some(media);
+            cases.push(m);
+        }
+        for deps in [
+            vec!["missing"],
+            vec!["layout", "layout"],
+            vec!["home"],
+            vec!["opendash-tailwind", "opendash-tailwind"],
+            vec!["footer"],
+        ] {
+            let mut m = baseline.clone();
+            m.styles[0].deps = deps.into_iter().map(String::from).collect();
+            cases.push(m);
+        }
+        for deps in [
+            vec!["missing"],
+            vec!["base", "base"],
+            vec!["head"],
+            vec!["opendash-tailwind"],
+            vec!["layout"],
+        ] {
+            let mut m = baseline.clone();
+            m.scripts[0].deps = deps.into_iter().map(String::from).collect();
+            cases.push(m);
+        }
+        let mut m = baseline.clone();
+        m.styles[3].deps.push("home".into());
+        cases.push(m);
+        let mut m = baseline.clone();
+        m.scripts[3].deps.push("head".into());
+        cases.push(m);
+        let mut m = baseline.clone();
+        m.styles = (0..65)
+            .map(|i| ThemeStyleEnqueueDecl {
+                handle: format!("style-{i}"),
+                src: "assets/base.css".into(),
+                deps: vec![],
+                media: None,
+                conditions: vec![],
+            })
+            .collect();
+        cases.push(m);
+        let mut m = baseline.clone();
+        m.scripts = (0..65)
+            .map(|i| ThemeScriptEnqueueDecl {
+                handle: format!("script-{i}"),
+                src: "assets/base.js".into(),
+                deps: vec![],
+                location: ScriptLocation::Footer,
+                strategy: ScriptStrategy::Defer,
+                module: false,
+                conditions: vec![],
+            })
+            .collect();
+        cases.push(m);
+        for (i, invalid) in cases.iter().enumerate() {
+            assert!(invalid.validate().is_err(), "invalid case {i}");
+            assert_eq!(
+                resolve_enqueued_assets(invalid, &"0".repeat(64), EnqueueCondition::NotFound),
+                ResolvedEnqueuedAssets::default(),
+                "invalid case {i}"
+            );
+        }
+        let mut valid = baseline;
+        valid.styles[0].media = Some("(min-resolution: 1.5dppx)".into());
+        valid.validate().unwrap();
+    }
+
+    #[test]
+    fn pattern_preview_remains_raster_only() {
+        for ext in [
+            "png", "jpg", "jpeg", "webp", "gif", "js", "mjs", "svg", "css", "txt", "woff2",
+        ] {
+            let mut manifest = v3_manifest();
+            let path = format!("assets/preview.{ext}");
+            manifest.assets.push(path.clone());
+            manifest.patterns[0].preview_asset = Some(path);
+            assert_eq!(
+                manifest.validate().is_ok(),
+                matches!(ext, "png" | "jpg" | "jpeg" | "webp" | "gif"),
+                "{ext}"
+            );
+        }
     }
 
     #[test]

@@ -13,7 +13,10 @@ use opendash_core::{
         valid_content_type_key,
     },
     registry::{DeclarationState, ProviderStatus},
-    theme::{PageLayoutChrome, TemplateCandidate, TemplateCandidateKind},
+    theme::{
+        EnqueueCondition, PageLayoutChrome, ResolvedEnqueuedAssets, TemplateCandidate,
+        TemplateCandidateKind, resolve_enqueued_assets,
+    },
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
@@ -1431,6 +1434,35 @@ fn route_kind_for_candidate(kind: TemplateCandidateKind) -> &'static str {
     }
 }
 
+/// Previews need the theme's styles, while scripts are reserved for the public
+/// page. The source manifest and digest are already verified by theme storage.
+fn preview_enqueued_styles(
+    active: Option<&ActiveThemeV3>,
+    route: EnqueueCondition,
+) -> ResolvedEnqueuedAssets {
+    let Some(active) = active else {
+        return ResolvedEnqueuedAssets::default();
+    };
+    let mut resolved = resolve_enqueued_assets(&active.manifest, &active.revision_digest, route);
+    resolved.head_scripts.clear();
+    resolved.footer_scripts.clear();
+    resolved
+}
+
+fn preview_condition(kind: TemplateCandidateKind) -> EnqueueCondition {
+    match kind {
+        TemplateCandidateKind::Home => EnqueueCondition::Home,
+        TemplateCandidateKind::Page | TemplateCandidateKind::PageLayout => EnqueueCondition::Page,
+        TemplateCandidateKind::Single
+        | TemplateCandidateKind::SingleCustom
+        | TemplateCandidateKind::Singular => EnqueueCondition::Single,
+        TemplateCandidateKind::Archive => EnqueueCondition::Archive,
+        TemplateCandidateKind::Taxonomy => EnqueueCondition::Taxonomy,
+        TemplateCandidateKind::NotFound => EnqueueCondition::NotFound,
+        TemplateCandidateKind::Index | TemplateCandidateKind::Part => EnqueueCondition::All,
+    }
+}
+
 fn build_placeholder_preview_entry(type_key: &str) -> EntryView {
     let mut terms = BTreeMap::new();
     terms.insert("category".to_owned(), Vec::new());
@@ -2010,6 +2042,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
     )
     .await?;
     rendered.diagnostics.append(&mut body_diagnostics);
+    rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
     tx.rollback().await?;
     Ok(rendered)
 }
@@ -2174,14 +2207,14 @@ impl PublicCompositionBudget {
     ) -> ApiResult<String> {
         self.charge(compiled.part_expansions())?;
         let html = compiled
-            .render_with_config_and_remaining_fuel(
+            .render_with_config_and_budget(
                 template_sec::json_context_with_shared_locale(
                     context,
                     self.shared_t.as_ref(),
                     self.shared_locale.as_ref(),
                 ),
                 slot,
-                &mut self.render_budget.fuel_remaining,
+                &mut self.render_budget,
                 fmt_cfg,
             )
             .map_err(ApiError::internal)?;
@@ -3552,7 +3585,7 @@ pub async fn preview_studio_with_cache_and_locale(
         return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
     }
 
-    let slot_fragment = crate::document::normalize_public_document(&body)
+    let slot_fragment = crate::document::normalize_public_document_with_options(&body, true)
         .map(|parts| {
             let mut f = parts.authorized_styles.concat();
             f.push_str(&parts.body_fragment);
@@ -3750,12 +3783,18 @@ pub async fn preview_studio_with_cache_and_locale(
     let (_, bcp47_tag, dir) =
         settings::get_locale_bcp47_and_dir_in_conn(&mut *tx, Some(&effective_locale)).await?;
     let seo = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &general.site_title);
-    let full_html = content_render::compose_document_with_seo(
+    let enqueued = preview_enqueued_styles(active.as_ref(), preview_condition(target.kind));
+    let full_html = content_render::compose_document_with_seo_with_assets(
         header_html.as_deref(),
         &main_html,
         footer_html.as_deref(),
         &seo,
+        &[],
+        &enqueued,
+        true,
     )?;
+    let full_html =
+        content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
     tx.rollback().await?;
     Ok(RenderedLayout {
         has_active_contact_form,
@@ -3837,13 +3876,14 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
         active.as_ref().map(|a| &a.page_layouts),
     )
     .await?;
-    let slot_fragment = crate::document::normalize_public_document(&entry_rendered.html)
-        .map(|parts| {
-            let mut f = parts.authorized_styles.concat();
-            f.push_str(&parts.body_fragment);
-            f
-        })
-        .unwrap_or_else(|_| entry_rendered.html.clone());
+    let slot_fragment =
+        crate::document::normalize_public_document_with_options(&entry_rendered.html, true)
+            .map(|parts| {
+                let mut f = parts.authorized_styles.concat();
+                f.push_str(&parts.body_fragment);
+                f
+            })
+            .unwrap_or_else(|_| entry_rendered.html.clone());
 
     let mut preview_budget =
         PreviewCompositionBudget::with_render_budget(entry_render_budget.clone());
@@ -3958,12 +3998,23 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     let (_, bcp47_tag, dir) =
         settings::get_locale_bcp47_and_dir_in_conn(&mut **tx, Some(&record.locale)).await?;
     let seo = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &record.title);
-    let full_html = content_render::compose_document_with_seo(
+    let condition = if record.content_type_key == "page" {
+        EnqueueCondition::Page
+    } else {
+        EnqueueCondition::Single
+    };
+    let enqueued = preview_enqueued_styles(active.as_ref(), condition);
+    let full_html = content_render::compose_document_with_seo_with_assets(
         header_html.as_deref(),
         &template_html,
         footer_html.as_deref(),
         &seo,
+        &[],
+        &enqueued,
+        true,
     )?;
+    let full_html =
+        content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
     Ok(RenderedLayout {
         has_active_contact_form,
         html: full_html,

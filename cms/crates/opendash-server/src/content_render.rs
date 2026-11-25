@@ -7,6 +7,7 @@ use opendash_core::content::{
     ContentFieldDefinition, ContentFieldType, ContentTypeDefinition, EffectiveContentSchema,
     EffectiveFieldStatus, FieldRole, PublicExposure,
 };
+use opendash_core::theme::ResolvedEnqueuedAssets;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -1040,6 +1041,19 @@ pub fn compose_document_with_seo(
     compose_document_with_seo_with_body_classes(header_html, rendered_layout, footer_html, seo, &[])
 }
 
+/// Server-owned SVG substitution happens only after document normalization.
+pub fn finalize_document_icons(
+    html: String,
+    icon_nonces: &crate::template_sec::IconNonceTable,
+) -> ApiResult<String> {
+    if icon_nonces.is_empty() {
+        return Ok(html);
+    }
+    icon_nonces
+        .substitute_into_document(html)
+        .map_err(ApiError::internal)
+}
+
 pub fn compose_document_with_seo_with_body_classes(
     header_html: Option<&str>,
     rendered_layout: &str,
@@ -1047,11 +1061,38 @@ pub fn compose_document_with_seo_with_body_classes(
     seo: &crate::seo::SeoView,
     body_classes: &[&str],
 ) -> ApiResult<String> {
+    compose_document_with_seo_with_assets(
+        header_html,
+        rendered_layout,
+        footer_html,
+        seo,
+        body_classes,
+        &ResolvedEnqueuedAssets::default(),
+        false,
+    )
+}
+
+/// Compose a public document with trusted theme assets, preserving the strict
+/// normalizer for callers which do not explicitly opt into theme markup.
+pub fn compose_document_with_seo_with_assets(
+    header_html: Option<&str>,
+    rendered_layout: &str,
+    footer_html: Option<&str>,
+    seo: &crate::seo::SeoView,
+    body_classes: &[&str],
+    enqueued: &ResolvedEnqueuedAssets,
+    allow_trusted_theme_markup: bool,
+) -> ApiResult<String> {
     let mut styles = Vec::new();
+    let mut authorized_head_scripts = Vec::new();
     let (mut body_attributes, body_fragment) =
-        match crate::document::normalize_public_document(rendered_layout) {
+        match crate::document::normalize_public_document_with_options(
+            rendered_layout,
+            allow_trusted_theme_markup,
+        ) {
             Ok(parts) => {
                 styles.extend(parts.authorized_styles);
+                authorized_head_scripts.extend(parts.authorized_head_scripts);
                 (parts.body_attributes, parts.body_fragment)
             }
             Err(diag) => {
@@ -1111,20 +1152,25 @@ pub fn compose_document_with_seo_with_body_classes(
         body_attrs_str.push_str(&escape_html_attr(&v));
         body_attrs_str.push('"');
     }
-    let normalize_slot = |slot: Option<&str>, styles: &mut Vec<String>| -> String {
-        let Some(raw) = slot.filter(|s| !s.is_empty()) else {
-            return String::new();
-        };
-        match crate::document::normalize_public_document(raw) {
-            Ok(parts) => {
-                styles.extend(parts.authorized_styles);
-                parts.body_fragment
+    let normalize_slot =
+        |slot: Option<&str>, styles: &mut Vec<String>, scripts: &mut Vec<String>| -> String {
+            let Some(raw) = slot.filter(|s| !s.is_empty()) else {
+                return String::new();
+            };
+            match crate::document::normalize_public_document_with_options(
+                raw,
+                allow_trusted_theme_markup,
+            ) {
+                Ok(parts) => {
+                    styles.extend(parts.authorized_styles);
+                    scripts.extend(parts.authorized_head_scripts);
+                    parts.body_fragment
+                }
+                Err(_) => String::new(),
             }
-            Err(_) => String::new(),
-        }
-    };
-    let header = normalize_slot(header_html, &mut styles);
-    let footer = normalize_slot(footer_html, &mut styles);
+        };
+    let header = normalize_slot(header_html, &mut styles, &mut authorized_head_scripts);
+    let footer = normalize_slot(footer_html, &mut styles, &mut authorized_head_scripts);
 
     let mut head = String::from(
         "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
@@ -1180,21 +1226,103 @@ pub fn compose_document_with_seo_with_body_classes(
         head.push_str(&serialize_json_ld_safe(block));
         head.push_str("</script>");
     }
-    if !styles
-        .iter()
-        .any(|style| style.contains("/assets/opendash-tailwind.css"))
-    {
-        head.push_str("<link rel=\"stylesheet\" href=\"/assets/opendash-tailwind.css\">");
+    head.push_str("<link rel=\"stylesheet\" href=\"/assets/opendash-tailwind.css\">");
+    for style in &enqueued.head_styles {
+        head.push_str(style);
     }
+    let mut seen_urls: BTreeSet<String> = enqueued.head_style_urls.iter().cloned().collect();
+    seen_urls.insert("/assets/opendash-tailwind.css".to_owned());
     for style in styles {
+        if let Some(href) = stylesheet_url_from_tag(&style) {
+            if !seen_urls.insert(href) {
+                continue;
+            }
+        }
         head.push_str(&style);
+    }
+    for script in &enqueued.head_scripts {
+        head.push_str(script);
+    }
+    for script in authorized_head_scripts {
+        head.push_str(&script);
     }
     let dir = if seo.dir == "rtl" { "rtl" } else { "ltr" };
     Ok(format!(
-        "<!doctype html><html lang=\"{}\" dir=\"{}\"><head>{head}</head><body{body_attrs_str}>{header}{body_fragment}{footer}</body></html>",
+        "<!doctype html><html lang=\"{}\" dir=\"{}\"><head>{head}</head><body{body_attrs_str}>{header}{body_fragment}{footer}{}</body></html>",
         escape_html_attr(&seo.lang),
-        dir
+        dir,
+        enqueued.footer_scripts.concat(),
     ))
+}
+
+/// Stylesheet links are authorized by the normalizer. Extract their local URL
+/// only for deduplication, including entity-encoded path characters.
+fn stylesheet_url_from_tag(tag: &str) -> Option<String> {
+    let tag = tag.trim_start();
+    if !tag.get(..5)?.eq_ignore_ascii_case("<link") {
+        return None;
+    }
+    let bytes = tag.as_bytes();
+    let mut cursor = 5;
+    while cursor < bytes.len() {
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() || matches!(bytes[cursor], b'>' | b'/') {
+            break;
+        }
+        let start = cursor;
+        while cursor < bytes.len()
+            && !bytes[cursor].is_ascii_whitespace()
+            && !matches!(bytes[cursor], b'=' | b'>' | b'/')
+        {
+            cursor += 1;
+        }
+        if start == cursor {
+            cursor += 1;
+            continue;
+        }
+        let name = &tag[start..cursor];
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() || bytes[cursor] != b'=' {
+            continue;
+        }
+        cursor += 1;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() {
+            break;
+        }
+        let quote = bytes[cursor];
+        let (from, to) = if quote == b'\'' || quote == b'"' {
+            cursor += 1;
+            let from = cursor;
+            while cursor < bytes.len() && bytes[cursor] != quote {
+                cursor += 1;
+            }
+            let to = cursor;
+            cursor = (cursor + 1).min(bytes.len());
+            (from, to)
+        } else {
+            let from = cursor;
+            while cursor < bytes.len()
+                && !bytes[cursor].is_ascii_whitespace()
+                && bytes[cursor] != b'>'
+            {
+                cursor += 1;
+            }
+            (from, cursor)
+        };
+        if name.eq_ignore_ascii_case("href") {
+            return Some(opendash_core::richtext::decode_html5_entities(
+                &tag[from..to],
+            ));
+        }
+    }
+    None
 }
 
 pub fn serialize_json_ld_safe(val: &Value) -> String {
@@ -1445,6 +1573,69 @@ mod tests {
         assert!(!DEFAULT_SINGLE.contains("max-width:850px"));
         assert!(!DEFAULT_ARCHIVE.contains("max-width:850px"));
         assert!(!html.contains("max-width:850px"));
+    }
+
+    #[test]
+    fn trusted_document_deduplicates_enqueued_styles_and_preserves_head_scripts() {
+        let seo = crate::seo::SeoView::for_noindex_page("vi", "Trusted markup");
+        let assets = ResolvedEnqueuedAssets {
+            head_styles: vec![
+                "<link rel=\"stylesheet\" href=\"/theme/digest/assets/base.css\">".to_owned(),
+            ],
+            head_style_urls: vec!["/theme/digest/assets/base.css".to_owned()],
+            head_scripts: vec![
+                "<script type=\"module\" src=\"/theme/digest/assets/init.mjs\"></script>"
+                    .to_owned(),
+            ],
+            footer_scripts: vec![
+                "<script src=\"/theme/digest/assets/app.js\" defer></script>".to_owned(),
+            ],
+        };
+        let html = compose_document_with_seo_with_assets(
+            Some("<header>Header</header>"),
+            concat!(
+                "<!doctype html><html><head>",
+                "<link rel=\"stylesheet\" href=\"/assets/opendash-tailwind.css\">",
+                "<link href=\"/theme/digest/assets/base.css\" rel=\"stylesheet\">",
+                "<link rel=\"stylesheet\" href=\"/theme/digest/assets/&#x62;ase.css\">",
+                "<style>.trusted{display:block}</style>",
+                "<script>if (2 < 3) { window.headReady = true; }</script>",
+                "</head><body><main>Body</main></body></html>"
+            ),
+            Some("<footer>Footer</footer>"),
+            &seo,
+            &["od-route-home"],
+            &assets,
+            true,
+        )
+        .unwrap();
+        assert_eq!(html.matches("/assets/opendash-tailwind.css").count(), 1);
+        assert_eq!(html.matches("/theme/digest/assets/base.css").count(), 1);
+        assert!(!html.contains("&#x62;ase.css"));
+        assert!(html.contains("<style>.trusted{display:block}</style>"));
+        assert_ordered_markup(
+            &html,
+            &[
+                "/assets/opendash-tailwind.css",
+                "/theme/digest/assets/base.css",
+                "/theme/digest/assets/init.mjs",
+                "window.headReady = true",
+                "</head>",
+                "<main>Body</main>",
+                "<footer>Footer</footer>",
+                "/theme/digest/assets/app.js",
+            ],
+        );
+    }
+
+    fn assert_ordered_markup(html: &str, fragments: &[&str]) {
+        let mut at = 0;
+        for fragment in fragments {
+            let pos = html[at..]
+                .find(fragment)
+                .unwrap_or_else(|| panic!("missing {fragment}: {html}"));
+            at += pos + fragment.len();
+        }
     }
 
     #[test]
