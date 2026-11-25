@@ -13,6 +13,7 @@ import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimi
 
 interface TaxonomyPageProps {
   kind: TaxonomyKind;
+  cptTypeKey?: string;
   user: AuthUser | null;
   csrfToken: string | null;
   localeState?: AdminLocaleState;
@@ -53,6 +54,7 @@ function orderedTerms(hierarchical: boolean, terms: TaxonomyTerm[]): Array<{ ter
 /** Route chooses the fixed taxonomy kind. Lists never mount an editor form. */
 export function TaxonomyPage({
   kind,
+  cptTypeKey,
   user,
   csrfToken,
   localeState = EMPTY_ADMIN_LOCALE_STATE,
@@ -70,8 +72,10 @@ export function TaxonomyPage({
   const [filterLocale, setFilterLocale] = useState('all');
   const [page, setPage] = useState(0);
   const admin = user?.role === 'admin';
-  const listHash = kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
-    : `#/taxonomy/${encodeURIComponent(kind)}/terms`;
+  const listHash = cptTypeKey
+    ? `#/cpt/${encodeURIComponent(cptTypeKey)}/taxonomy/${encodeURIComponent(kind)}`
+    : kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
+      : `#/taxonomy/${encodeURIComponent(kind)}/terms`;
   const newHash = `${listHash}/new`;
   const editHash = (id: number) => `${listHash}/${id}/edit`;
 

@@ -87,12 +87,7 @@ function buildMenuTree(
         { label: t('shell.new'), hash: `#/cpt/${ct.descriptor.key}/new` },
         ...(cptTaxonomies[ct.descriptor.key] ?? []).map(tax => ({
           label: tax.label,
-          hash:
-            tax.key === 'category'
-              ? '#/posts/categories'
-              : tax.key === 'tag'
-                ? '#/posts/tags'
-                : `#/taxonomy/${encodeURIComponent(tax.key)}/terms`,
+          hash: `#/cpt/${encodeURIComponent(ct.descriptor.key)}/taxonomy/${encodeURIComponent(tax.key)}`,
         })),
       ],
     })),
@@ -289,8 +284,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     route.view === 'cpt' && route.typeKey
       ? `cpt:${route.typeKey}`
       : route.view === 'taxonomy'
-        ? (route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
-          ? 'schema' : 'posts')
+        ? (route.typeKey
+          ? `cpt:${route.typeKey}`
+          : route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
+            ? 'schema' : 'posts')
         : route.view === 'profile'
           ? 'users'
           : route.view === 'builder' || route.view === 'studio' || route.view === 'studio-entry'
@@ -345,8 +342,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const selectedNavHash =
     route.view === 'themes' ? `#/appearance/${route.sub}` :
     route.view === 'taxonomy'
-      ? (route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
-        ? '#/taxonomy/definitions' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
+      ? (route.typeKey && route.taxonomyKind
+        ? `#/cpt/${encodeURIComponent(route.typeKey)}/taxonomy/${encodeURIComponent(route.taxonomyKind)}`
+        : route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
+          ? '#/taxonomy/definitions' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
     route.view === 'profile' ? '#/users/profile' :
     route.view === 'builder' || route.view === 'studio' ? '#/studio' :
     route.view === 'tools' ? `#/tools/${route.sub}` :

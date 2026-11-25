@@ -853,13 +853,13 @@ const AppContent: React.FC = () => {
             user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={scopedTaxonomyApiError}
             onNavigateHash={navigateHash} onDirtyChange={markTermDirty} />
         : route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
-          ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
-              kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
+          ? <TermEditPage key={`term-${route.typeKey ?? 'taxonomy'}-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
+              kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode} cptTypeKey={route.typeKey}
               termId={route.entryId ?? null} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
               localeState={localeState}
               onApiError={scopedTaxonomyApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
-          : <TaxonomyPage key={`terms-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
-              kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
+          : <TaxonomyPage key={`terms-${route.typeKey ?? 'taxonomy'}-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
+              kind={route.taxonomyKind ?? 'category'} cptTypeKey={route.typeKey} user={user} csrfToken={csrfToken}
               localeState={localeState}
               onApiError={scopedTaxonomyApiError} onNavigateHash={navigateHash} />}
     />

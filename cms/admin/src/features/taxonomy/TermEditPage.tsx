@@ -15,6 +15,7 @@ import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 interface TermEditProps {
   kind: TaxonomyKind;
   mode: 'new' | 'edit';
+  cptTypeKey?: string;
   termId: number | null;
   user: AuthUser | null;
   /** Site instance from App, required to safely recover a draft after a 401. */
@@ -84,7 +85,7 @@ function allowedParents(terms: TaxonomyTerm[], targetId: number | null): Taxonom
 }
 
 /** A full-route editor; extension mount slots intentionally contain no fake fields. */
-export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToken,
+export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstanceId, csrfToken,
   localeState = EMPTY_ADMIN_LOCALE_STATE, onApiError, onDirtyChange, onNavigateHash}: TermEditProps) {
   useI18n();
   const scope = termScope(siteInstanceId, user, kind, mode, termId);
@@ -117,8 +118,10 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
   onErrorRef.current = onApiError;
   const reportDirtyRef = useRef(onDirtyChange);
   reportDirtyRef.current = onDirtyChange;
-  const listHash = kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
-    : `#/taxonomy/${encodeURIComponent(kind)}/terms`;
+  const listHash = cptTypeKey
+    ? `#/cpt/${encodeURIComponent(cptTypeKey)}/taxonomy/${encodeURIComponent(kind)}`
+    : kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
+      : `#/taxonomy/${encodeURIComponent(kind)}/terms`;
   const routeHash = mode === 'new' ? `${listHash}/new` : `${listHash}/${termId}/edit`;
   const hierarchical = Boolean(definition?.hierarchical);
   const providerUnavailable = Boolean(definition &&
