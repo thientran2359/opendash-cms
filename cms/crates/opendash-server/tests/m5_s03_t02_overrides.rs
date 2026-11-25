@@ -721,7 +721,7 @@ async fn v3_page_canvas_and_custom_single_selections_survive_theme_switch() {
                 {"kind":"single_custom","custom_key":"feature","label":"Feature",
                     "allowed_types":["post"],"file":"feature.html"}
             ],
-            "page_layouts":[{"key":"canvas","label":"Canvas","file":"page-layouts/canvas.html"}],
+            "page_layouts":[{"key":"canvas","label":"Canvas","file":"page-layouts/canvas.html","chrome":"none"}],
             "parts":{"header":"header.html"}
         });
         for (path, contents) in [

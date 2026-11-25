@@ -1,6 +1,7 @@
 //! C-SEC MiniJinja 3.0.5 safe subset, AST allowlist, and contextual HTML/URL/CSS validator.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 
@@ -88,6 +89,83 @@ pub enum CsecContentKind {
     NonEntry,
 }
 
+const MAX_THEME_CACHE_ENTRIES: usize = 256;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ThemeCompositionCacheKey {
+    pub revision_digest: String,
+    pub target_key: String,
+    pub content_kind: u8,
+}
+
+#[derive(Debug, Default)]
+pub struct ThemeCompositionCache {
+    inner: RwLock<BTreeMap<ThemeCompositionCacheKey, Arc<CompiledCsecComposition>>>,
+}
+
+impl ThemeCompositionCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn global() -> &'static Arc<Self> {
+        static GLOBAL: OnceLock<Arc<ThemeCompositionCache>> = OnceLock::new();
+        GLOBAL.get_or_init(|| Arc::new(Self::new()))
+    }
+
+    pub fn get_or_compile(
+        &self,
+        revision_digest: &str,
+        target_key: &str,
+        source: &str,
+        parts: &BTreeMap<String, String>,
+        content_kind: CsecContentKind,
+        policy: &ThemeUrlPolicy,
+    ) -> Result<Arc<CompiledCsecComposition>, &'static str> {
+        let compile = || {
+            validate_and_compile_csec_composition_with_theme_urls(
+                target_key,
+                source,
+                parts,
+                content_kind,
+                policy,
+            )
+            .map(Arc::new)
+        };
+        if revision_digest.len() != 64 || !revision_digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return compile();
+        }
+        let key = ThemeCompositionCacheKey {
+            revision_digest: revision_digest.to_owned(),
+            target_key: target_key.to_owned(),
+            content_kind: match content_kind {
+                CsecContentKind::Entry => 0,
+                CsecContentKind::Index => 1,
+                CsecContentKind::NonEntry => 2,
+            },
+        };
+        if let Some(found) = self
+            .inner
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+            .cloned()
+        {
+            return Ok(found);
+        }
+        let compiled = compile()?;
+        let mut guard = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(found) = guard.get(&key).cloned() {
+            return Ok(found);
+        }
+        if guard.len() >= MAX_THEME_CACHE_ENTRIES {
+            guard.clear();
+        }
+        guard.insert(key, compiled.clone());
+        Ok(compiled)
+    }
+}
+
 /// Validated theme v3 template, flattened into a single MiniJinja program.
 /// This ensures every part shares the same context, fuel and output budget.
 #[derive(Debug, Clone)]
@@ -96,6 +174,7 @@ pub struct CompiledCsecComposition {
     name: String,
     content_count: usize,
     part_expansions: usize,
+    pub max_part_depth: usize,
     pub uses_related_entries: bool,
     pub uses_recent_posts: bool,
 }
@@ -1433,6 +1512,7 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
     let mut expansions = 0_usize;
     let mut visiting = BTreeSet::new();
     let mut content_count = 0_usize;
+    let mut max_part_depth = 0_usize;
     let compiled_source = flatten_composition(
         root_source,
         &root_sites,
@@ -1442,6 +1522,7 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
         0,
         &mut expansions,
         &mut content_count,
+        &mut max_part_depth,
     )?;
 
     match kind {
@@ -1467,6 +1548,7 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
         name: root_name.to_owned(),
         content_count,
         part_expansions: expansions,
+        max_part_depth,
         uses_related_entries: usage.uses_related_entries,
         uses_recent_posts: usage.uses_recent_posts,
     })
@@ -1520,6 +1602,7 @@ fn flatten_composition(
     depth: usize,
     expansions: &mut usize,
     content_count: &mut usize,
+    max_part_depth: &mut usize,
 ) -> Result<String, &'static str> {
     let mut out = String::new();
     let mut cursor = 0_usize;
@@ -1531,6 +1614,7 @@ fn flatten_composition(
                 out.push_str(CONTENT_SLOT_TOKEN);
             }
             CompositionCall::Part(key) => {
+                *max_part_depth = (*max_part_depth).max(depth + 1);
                 *expansions += 1;
                 if *expansions > MAX_COMPOSITION_EXPANSIONS {
                     return Err("od_part vượt quá 32 lần mở rộng.");
@@ -1554,6 +1638,7 @@ fn flatten_composition(
                     depth + 1,
                     expansions,
                     content_count,
+                    max_part_depth,
                 )?;
                 visiting.remove(key);
                 out.push_str(&child);
@@ -5674,6 +5759,110 @@ pub fn render_block_csec_with_options_and_budget_and_config(
 #[cfg(test)]
 mod composition_tests {
     use super::*;
+
+    #[test]
+    fn theme_cache_reuses_immutable_compilation_and_regenerates_content_nonce() {
+        let cache = ThemeCompositionCache::new();
+        let first_digest = "a".repeat(64);
+        let second_digest = "b".repeat(64);
+        let parts = BTreeMap::from([
+            (
+                "header".to_owned(),
+                "<header>{{ od_part('leaf') }}</header>".to_owned(),
+            ),
+            ("leaf".to_owned(), "<span>leaf</span>".to_owned()),
+        ]);
+        let policy = ThemeUrlPolicy::default();
+        let body_source = "<main>{{ od_content() }}{{ od_part('header') }}</main>";
+        let body = cache
+            .get_or_compile(
+                &first_digest,
+                "page",
+                body_source,
+                &parts,
+                CsecContentKind::Entry,
+                &policy,
+            )
+            .unwrap();
+        assert_eq!(body.max_part_depth, 2);
+        let cached = cache
+            .get_or_compile(
+                &first_digest,
+                "page",
+                body_source,
+                &parts,
+                CsecContentKind::Entry,
+                &policy,
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&body, &cached));
+        let other_revision = cache
+            .get_or_compile(
+                &second_digest,
+                "page",
+                body_source,
+                &parts,
+                CsecContentKind::Entry,
+                &policy,
+            )
+            .unwrap();
+        assert!(!Arc::ptr_eq(&body, &other_revision));
+
+        let header_source = parts.get("header").unwrap();
+        let header = cache
+            .get_or_compile(
+                &first_digest,
+                "part:header",
+                header_source,
+                &parts,
+                CsecContentKind::NonEntry,
+                &policy,
+            )
+            .unwrap();
+        assert_eq!(header.max_part_depth, 1);
+        let cached_header = cache
+            .get_or_compile(
+                &first_digest,
+                "part:header",
+                header_source,
+                &parts,
+                CsecContentKind::NonEntry,
+                &policy,
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&header, &cached_header));
+
+        // The immutable compiled program retains the internal slot token.
+        // Rendering creates a new random 128-bit nonce for every request.
+        let render = || {
+            body.render(
+                json_to_safe_value(&serde_json::json!({})),
+                Some("<p>ok</p>"),
+            )
+        };
+        assert_eq!(render().unwrap(), render().unwrap());
+        let invalid_digest = cache
+            .get_or_compile(
+                "invalid",
+                "page",
+                body_source,
+                &parts,
+                CsecContentKind::Entry,
+                &policy,
+            )
+            .unwrap();
+        let uncached = cache
+            .get_or_compile(
+                "invalid",
+                "page",
+                body_source,
+                &parts,
+                CsecContentKind::Entry,
+                &policy,
+            )
+            .unwrap();
+        assert!(!Arc::ptr_eq(&invalid_digest, &uncached));
+    }
 
     #[test]
     fn theme_url_option_validation_covers_scalar_boundaries_and_entity_bypasses() {
