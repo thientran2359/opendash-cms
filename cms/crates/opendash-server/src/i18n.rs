@@ -2859,6 +2859,21 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "name, slug, parent_id or extensions is required for an update.",
     ),
     (
+        "taxonomy.name_slug_parent_id_featured_image_or_extensions_is_required_for_an_update",
+        "Cần name, slug, parent_id, featured_image_media_id hoặc extensions để cập nhật.",
+        "name, slug, parent_id, featured_image_media_id or extensions is required for an update.",
+    ),
+    (
+        "taxonomy.invalid_featured_image_id",
+        "ID ảnh đại diện không hợp lệ.",
+        "Invalid featured image ID.",
+    ),
+    (
+        "taxonomy.featured_image_not_found_or_inactive",
+        "Ảnh đại diện không tồn tại hoặc không phải ảnh đang hoạt động.",
+        "Featured image not found or is not an active image.",
+    ),
+    (
         "request.invalid_if_match",
         "expected_version không khớp If-Match.",
         "expected_version does not match If-Match.",

@@ -79,7 +79,7 @@ async fn migration_0051_fresh_and_upgrade_preserve_schema_budget_and_content() {
     .await
     .unwrap();
 
-    migrator.run(&fresh).await.unwrap();
+    migrator.run_to(51, &fresh).await.unwrap();
     check_migration(&fresh, false, before).await;
     let default_locale: String =
         sqlx::query_scalar("SELECT code FROM site_locales WHERE is_default = 1")
@@ -88,7 +88,7 @@ async fn migration_0051_fresh_and_upgrade_preserve_schema_budget_and_content() {
             .unwrap();
     assert_eq!(default_locale, "vi");
 
-    migrator.run(&upgrade).await.unwrap();
+    migrator.run_to(51, &upgrade).await.unwrap();
     check_migration(&upgrade, true, before).await;
     let preserved: (String, String, i64) = sqlx::query_as(
         "SELECT site_title,tagline,version FROM site_general_settings_locales WHERE locale='en'",
