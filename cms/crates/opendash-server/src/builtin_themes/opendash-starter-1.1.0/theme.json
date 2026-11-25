@@ -64,7 +64,8 @@
     {
       "key": "canvas",
       "label": "Landing Page (Ẩn Header & Footer)",
-      "file": "page-layouts/canvas.html"
+      "file": "page-layouts/canvas.html",
+      "chrome": "none"
     }
   ],
   "patterns": [

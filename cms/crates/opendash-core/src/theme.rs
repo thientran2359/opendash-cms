@@ -325,12 +325,22 @@ impl ThemeTemplateDecl {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PageLayoutChrome {
+    #[default]
+    Default,
+    None,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PageLayoutDecl {
     pub key: String,
     pub label: String,
     pub file: String,
+    #[serde(default)]
+    pub chrome: PageLayoutChrome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -568,6 +578,7 @@ mod tests {
                 key: "canvas".into(),
                 label: "Canvas".into(),
                 file: "page-layouts/canvas.html".into(),
+                chrome: PageLayoutChrome::Default,
             }],
             patterns: vec![ThemePatternDecl {
                 key: "hero".into(),
@@ -607,6 +618,24 @@ mod tests {
         let mut unknown = serde_json::to_value(manifest).unwrap();
         unknown["unexpected"] = json!("value");
         assert!(serde_json::from_value::<ThemeV3Manifest>(unknown).is_err());
+    }
+
+    #[test]
+    fn page_layout_chrome_is_backward_compatible_and_explicit() {
+        let mut old = serde_json::to_value(v3_manifest()).unwrap();
+        old["page_layouts"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("chrome");
+        let parsed: ThemeV3Manifest = serde_json::from_value(old).unwrap();
+        assert_eq!(parsed.page_layouts[0].chrome, PageLayoutChrome::Default);
+        let mut declared = serde_json::to_value(parsed).unwrap();
+        declared["page_layouts"][0]["chrome"] = json!("none");
+        let parsed: ThemeV3Manifest = serde_json::from_value(declared.clone()).unwrap();
+        assert_eq!(parsed.page_layouts[0].chrome, PageLayoutChrome::None);
+        parsed.validate().unwrap();
+        declared["page_layouts"][0]["chrome"] = json!("unknown");
+        assert!(serde_json::from_value::<ThemeV3Manifest>(declared).is_err());
     }
 
     #[test]
