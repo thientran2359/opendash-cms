@@ -2,7 +2,7 @@
 
 **Decision owner:** Atlas (Coordinator) · **Author:** Nova · **Date:** 2026-11-16
 **Status:** `ACCEPTED / G2 AGREED` (`CONCLUDED_BY_AGENTS` theo Final Decision của Atlas tại [PR #270 receipt (`#issuecomment-6903576673`)](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) trên head `6c0150690a8148ceb2e668546a7d5e6a8edc4824`, có hiệu lực contract kỹ thuật đầy đủ khi PR được merge theo [ADR-0010](ADR-0010-agent-project-and-merge-authority.md); lịch sử thảo luận tại [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268) và `270-R1`–`270-R9`).
-**Implementation / Verification:** `NOT_STARTED / NOT_RUN`. Bộ đặc tả G3 (`M7-S09-T01`–`M7-S13-T02`) được quy định tại [G3 Admin Navigation & Single Edit](../archive/plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md); chưa phát hành GitHub Issue hay cấp `Project Ready` từ tài liệu này.
+**Implementation / Verification:** `NOT_STARTED / NOT_RUN`. Bộ đặc tả G3 (`M7-S09-T01`–`M7-S13-T02`) được quy định tại `G3 Admin Navigation & Single Edit` (Git history); chưa phát hành GitHub Issue hay cấp `Project Ready` từ tài liệu này.
 
 > [!NOTE]
 > Số thứ tự `ADR-0016` và mã migration dự kiến `0034_field_groups_and_editor_layout.sql` được đối chiếu tại baseline `main@a52607c` (nơi [ADR-0015](ADR-0015-m8-operations-release.md) và `0033_media_lifecycle.sql` là số cao nhất hiện tại). Tài liệu này **không cấp số cứng cho runtime trước G3**; khi phát hành G3 và mở PR runtime phải kiểm tra lại số thứ tự kế tiếp trên `main`.
@@ -48,4 +48,4 @@ Qua rà soát kiến trúc tại [Issue #268](https://github.com/thientran2359/o
 
 - Đặc tả kỹ thuật chi tiết được quy định tại **[Contract Admin Navigation & Single Edit](../contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md)**.
 - Yêu cầu sản phẩm cập nhật tại **[Admin Navigation và bố cục màn hình chỉnh sửa](../product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md)**.
-- Ảnh hưởng tới các module trong [Module Catalog](../archive/plans/MODULE_CATALOG_V1.md): `FND-05`, `CNT-01`, `CNT-02`, `CNT-04`, `SITE-02`, `PLG-03`. Đặc tả G3 nằm tại [G3 Admin Navigation & Single Edit](../archive/plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md); chưa phát hành Issue hay cấp `Project Ready` trong PR tài liệu này.
+- Ảnh hưởng tới các module trong `Module Catalog` (Git history): `FND-05`, `CNT-01`, `CNT-02`, `CNT-04`, `SITE-02`, `PLG-03`. Đặc tả G3 nằm tại `G3 Admin Navigation & Single Edit` (Git history); chưa phát hành Issue hay cấp `Project Ready` trong PR tài liệu này.

@@ -9,12 +9,11 @@ Thư mục `cms/` tập trung mã nguồn, migrations (`0001`–`0041`), SDK, sc
 | Axum HTTP + SQLite + MiniJinja + Wasmi + Backup | [`crates/opendash-server`](crates/opendash-server/README.md) |
 | React Admin / Visual Builder | [`admin`](admin/package.json) ([features](admin/src/features/README.md)) |
 | Plugin SDK (AssemblyScript) | [`sdk`](sdk/README.md) |
-| Theme và plugin mẫu | [`examples/plugins/sample-plugin`](examples/plugins/sample-plugin/README.md), [`examples/themes/sample-theme`](examples/themes/sample-theme/README.md) |
+| Theme và plugin mẫu | [`examples/plugins/sample-plugin`](examples/plugins/sample-plugin/README.md), [`examples/themes/sample-theme-v3`](examples/themes/sample-theme-v3/README.md) |
 | SQLite migrations và fixture nguồn | [`migrations`](migrations/README.md), [`fixtures`](fixtures/README.md) |
 | Linux deploy configs (systemd/nginx) | [`deploy/`](deploy/install-linux.sh), [`opendash.service`](deploy/opendash.service) |
 | Build/health/check/E2E scripts | [`scripts`](scripts/README.md) |
 | Tài liệu, kiến trúc, hợp đồng, thiết kế EGM | [`docs`](../docs/README.md) |
-| Thử nghiệm lịch sử | [`spikes`](spikes/README.md) |
 
 Từ thư mục gốc repository:
 

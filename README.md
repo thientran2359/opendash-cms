@@ -10,7 +10,7 @@ Quá trình thiết kế và kiểm chứng tuân theo quy trình **EGM (Elephan
 
 | Thư mục | Nội dung |
 |---|---|
-| [`cms/`](cms/README.md) | Mã nguồn và công cụ phát triển: `crates/` (`opendash-core`, `opendash-server`), `admin/`, `sdk/`, `examples/`, `migrations/` (`0001`–`0041`), `fixtures/`, `deploy/`, `scripts/`, `spikes/`; chứa `Cargo.toml` và `Cargo.lock` |
+| [`cms/`](cms/README.md) | Mã nguồn và công cụ phát triển: `crates/` (`opendash-core`, `opendash-server`), `admin/`, `sdk/`, `examples/`, `migrations/` (`0001`–`0041`), `fixtures/`, `deploy/`, `scripts/`; chứa `Cargo.toml` và `Cargo.lock` |
 | [`docs/`](docs/README.md) | Tài liệu sản phẩm, kiến trúc, contracts, thiết kế EGM (`designs/`), quyết định (`decisions/`), bằng chứng (`verification/`) và lưu trữ lịch sử (`archive/`) |
 | [`themes/`](themes/README.md) | Theme đã cài của website |
 | [`plugins/`](plugins/README.md) | Plugin đã cài của website |

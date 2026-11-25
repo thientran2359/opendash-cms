@@ -24,7 +24,7 @@ OpenDash là CMS Rust + SQLite, đóng gói một executable cho mỗi website, 
 - Preview chưa lưu và trang công khai dùng cùng nguyên tắc render; bấm Lưu cập nhật nội dung công khai. CPT/fields và bố cục do website sở hữu, không bị mất khi đổi theme hoặc tắt plugin.
 - Giữ nguyên tên binary `opendash`, chuỗi migrations và plugin ABI v1 khi chuyển source; kiểm tra lại các đường dẫn `build.rs`, `rust-embed`, `sqlx::migrate!`, fixtures và smoke scripts.
 - Các lệnh Cargo từ root dùng `--manifest-path cms/Cargo.toml`; `.vscode/settings.json` khai báo `rust-analyzer.linkedProjects` trỏ vào `cms/Cargo.toml` để IDE nhận diện workspace ngay từ gốc; scripts build tại `cms/scripts/`. Mặc định server ghi `database/opendash.sqlite` trong thư mục website cả khi chạy từ `cms/`. Khi nhập M1/M2 và triển khai V1, toàn bộ đường dẫn runtime và thư mục staging giải nén cùng ổ đĩa (`runtime/staging/`) được quản lý tập trung qua `SitePaths` theo [CMS_ARCHITECTURE.md](../architecture/CMS_ARCHITECTURE.md).
-- Scaffold chỉ minh họa kết nối Rust/React/SQLite/MiniJinja, không chứng minh đã nhập hoặc kiểm chứng hệ CMS M1/M2. Xem [kiểm kê trước scaffold](../verification/2026-11-06-repository-inventory.md), [báo cáo kiểm chứng](../verification/README.md) và [kế hoạch nhập mã](../archive/plans/README.md).
+- Scaffold chỉ minh họa kết nối Rust/React/SQLite/MiniJinja, không chứng minh đã nhập hoặc kiểm chứng hệ CMS M1/M2. Xem `2026-11-06-repository-inventory.md` (Git history), [báo cáo kiểm chứng](../verification/README.md) và [`docs/archive/`](../archive/README.md).
 
 ## Tham chiếu
 

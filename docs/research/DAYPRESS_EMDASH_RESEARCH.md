@@ -27,7 +27,7 @@ V1 yêu cầu CPT, custom fields, taxonomy cha–con, form nhập liệu, builde
 
 **Bảo toàn dữ liệu là điều kiện cứng:** đổi/cập nhật theme giữ content và bố cục đã chỉnh; tắt plugin giữ CPT/fields/content; thiếu block/template cần có cảnh báo/đường khôi phục. Người quản trị **được thông báo quyền plugin nhưng không phải duyệt quyền riêng ở V1**. Repeater, revision history, đồng bộ block, đa ngữ, publish workflow độc lập và thương mại điện tử thuộc các mốc sau.
 
-**Tình trạng code OpenDash tại thời điểm viết:** M1/M2 đã được nhập và có [báo cáo kiểm chứng tại workspace đích](../verification/2026-11-07-m1-m2-import.md): Auth/RBAC/CSRF, theme ZIP một block, Preview/Lưu, Wasmi worker và ABI v1 đã qua bộ kiểm tra trên Windows. M3 content/media, M4 builder nhiều tầng và backup/restore toàn website còn tiếp theo. Không đề xuất viết lại các module M1/M2 đã có chỉ vì hệ thống tham khảo sử dụng cách khác.
+**Tình trạng code OpenDash tại thời điểm viết:** M1/M2 đã được nhập và có báo cáo kiểm chứng tại workspace đích (`2026-11-07-m1-m2-import.md`, Git history): Auth/RBAC/CSRF, theme ZIP một block, Preview/Lưu, Wasmi worker và ABI v1 đã qua bộ kiểm tra trên Windows. M3 content/media, M4 builder nhiều tầng và backup/restore toàn website còn tiếp theo. Không đề xuất viết lại các module M1/M2 đã có chỉ vì hệ thống tham khảo sử dụng cách khác.
 
 ## 2. Ma trận so sánh
 

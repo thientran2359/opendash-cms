@@ -30,7 +30,6 @@ import { editorDraftStore } from './features/editor/EditorDraftStore.ts';
 import { MediaRoute } from './shell/MediaRoute.tsx';
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 import { ThemesPanel } from './features/themes/ThemesPanel.tsx';
-import { MenusPanel } from './features/menus/MenusPanel.tsx';
 import { SeoPanel } from './features/seo/SeoPanel.tsx';
 import { ContactPanel } from './features/contact/ContactPanel.tsx';
 import { SmtpSettingsPanel } from './features/contact/SmtpSettingsPanel.tsx';
@@ -681,13 +680,7 @@ const AppContent: React.FC = () => {
         onApiError={handleApiError}
         onSavedSettingsOrTheme={() => setThemeRevision(v => v + 1)}
       /> : null}
-      previewContent={null}
-      themesContent={<ThemesPanel mode="themes" csrfToken={csrfToken} localeState={localeState} onApiError={handleApiError}
-        onInstalled={() => setThemeRevision(value => value + 1)}
-        onActivated={() => setThemeRevision(value => value + 1)}
-      />}
-      menusContent={<MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} localeState={localeState} onApiError={(error) => handleApiError(error, tStatic("app.menus_error"))} />}
-      themeOptionsContent={<ThemesPanel mode="options" csrfToken={csrfToken} localeState={localeState} onApiError={handleApiError}
+      themesContent={<ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
         onInstalled={() => setThemeRevision(value => value + 1)}
         onActivated={() => setThemeRevision(value => value + 1)}
       />}

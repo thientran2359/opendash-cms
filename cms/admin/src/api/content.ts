@@ -2,7 +2,6 @@ import { tStatic } from '../i18n/index.tsx';
 import {
   CompositeEntrySaveInput,
   CompositeEntrySaveResult,
-  ContentEntryInput,
   ContentEntryRecord,
   EntryTableQuery,
   EntryTableResult,
@@ -261,62 +260,11 @@ export function runEntryProviderAction(
   );
 }
 
-export interface ContentTypeTaxonomyEligibility {
-  content_type_key: string;
-  taxonomy_kind: string;
-  owner_kind: string;
-  owner_id: string | null;
-  provider_status: string;
-  declaration_state: string;
-}
-
-export function listContentTypeTaxonomyEligibility(typeKey: string, signal?: AbortSignal): Promise<ContentTypeTaxonomyEligibility[]> {
-  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
-    signal,
-    defaultErrorMessage: tStatic('api.content.check_effective_taxonomies'),
-  });
-}
-
 /** Effective, active taxonomies include the site's explicit CPT override. */
 export function getEffectiveContentTypeTaxonomies(typeKey: string, signal?: AbortSignal): Promise<string[]> {
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/effective`, {
     signal,
     defaultErrorMessage: tStatic('api.content.load_taxonomies_for_the_content_type'),
-  });
-}
-
-export interface ConfiguredContentTypeTaxonomies {
-  taxonomies: string[];
-  effective: string[];
-  has_override: boolean;
-  /** CAS version captured in the same SQLite snapshot as configured keys. */
-  type_version: number;
-}
-
-/** Full saved choice, including inactive provider keys hidden from public use. */
-export function getConfiguredContentTypeTaxonomies(
-  typeKey: string, signal?: AbortSignal,
-): Promise<ConfiguredContentTypeTaxonomies> {
-  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
-    signal,
-    defaultErrorMessage: tStatic('api.content.load_all_saved_taxonomy_settings'),
-  });
-}
-
-/** Shares the canonical CPT schema version; stale edits fail with 412. */
-export function updateContentTypeTaxonomyEligibility(
-  typeKey: string,
-  expectedVersion: number,
-  taxonomies: string[],
-  csrfToken: string,
-): Promise<OwnedContentTypeWithSettings> {
-  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
-    method: 'PUT',
-    contentType: 'application/json',
-    csrfToken,
-    ifMatchVersion: expectedVersion,
-    body: JSON.stringify({ taxonomies, expected_version: expectedVersion }),
-    defaultErrorMessage: tStatic('api.content.update_assigned_taxonomies'),
   });
 }
 
@@ -333,39 +281,6 @@ export function changeContentEntryPublication(
 export function getContentEntry(typeKey: string, id: number): Promise<ContentEntryRecord> {
   return requestJson(entryPath(typeKey, id), {
     defaultErrorMessage: tStatic('api.content.load_the_entry'),
-  });
-}
-
-export function createContentEntry(
-  typeKey: string,
-  input: ContentEntryInput,
-  csrfToken: string,
-): Promise<ContentEntryRecord> {
-  return requestJson(entriesPath(typeKey), {
-    method: 'POST',
-    csrfToken,
-    contentType: 'application/json',
-    body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.content.create_the_entry'),
-    oversizeErrorMessage: tStatic('api.content.the_entry_exceeds_the_512_kib_limit'),
-  });
-}
-
-export function updateContentEntry(
-  typeKey: string,
-  id: number,
-  version: number,
-  input: ContentEntryInput,
-  csrfToken: string,
-): Promise<ContentEntryRecord> {
-  return requestJson(entryPath(typeKey, id), {
-    method: 'PUT',
-    csrfToken,
-    ifMatchVersion: version,
-    contentType: 'application/json',
-    body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.content.save_the_entry'),
-    oversizeErrorMessage: tStatic('api.content.the_entry_exceeds_the_512_kib_limit'),
   });
 }
 

@@ -49,7 +49,7 @@ After the blind review, Aster checked the actual references: C-SEC is the
 [M5 theme contract's safe subset and contextual validator](../../../docs/contracts/M5_THEME_TEMPLATES.md#c-sec--g2-agreed-minijinja-305-safe-subset--contextual-validator);
 C1 is [Content type settings](../../../docs/contracts/CONTENT_FOUNDATION_2026_11.md#2-content-type-settings-c1).
 F08/F09 are the restore-before-activation security blocker and full-suite SSRF
-flake recorded in the [Windows audit](../../../docs/verification/2026-11-16-usable-beta-windows-audit.md).
+flake recorded in the Windows audit (`2026-11-16-usable-beta-windows-audit.md`, Git history).
 These checks support the proposed reference clarification; they do not retroactively
 add context to the independent reviewer or erase its findings.
 

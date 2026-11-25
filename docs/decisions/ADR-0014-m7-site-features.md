@@ -4,7 +4,7 @@
 
 ## Context
 
-Owner requested full M7 G1→G2→G3 while Nova completes M6. Baseline `main@4b60388683a01df8d6332c88449b4fa6821ef5fc` includes M6 Windows E2E, not complete multi-OS/browser closure. [PRD](../product/PRODUCT_REQUIREMENTS.md), [candidates](../archive/plans/milestones/M7/TASK_PLAN.md) and [source inventory](../../.agents/research/2026-11-14-m7-site-features-g1.md) define scope and actual reuse. CodeGraph was unindexed; source read directly.
+Owner requested full M7 G1→G2→G3 while Nova completes M6. Baseline `main@4b60388683a01df8d6332c88449b4fa6821ef5fc` includes M6 Windows E2E, not complete multi-OS/browser closure. [PRD](../product/PRODUCT_REQUIREMENTS.md), `M7 TASK_PLAN` (Git history) and `2026-11-14-m7-site-features-g1.md` (Git history) define scope and actual reuse. CodeGraph was unindexed; source read directly.
 
 ## Final Decision
 
@@ -41,6 +41,6 @@ M5#157/M6#188 may stay open for macOS while development proceeds; do not claim m
 
 Normative entry checklist is [contract §9](../contracts/M7_SITE_FEATURES.md#9-release-and-operations-boundary). This amendment authorizes no test-result fabrication, Project transition without evidence, dispatch or product implementation in the documentation change itself.
 
-Normative [M7 contract](../contracts/M7_SITE_FEATURES.md), exhaustive [G3](../archive/plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Atlas coordinates/chốt technical decisions under [ADR-0010](ADR-0010-agent-project-and-merge-authority.md). Proposed implementation owners become active only through Issue/Project claim. Nova retains M6 ownership. No product implementation, dispatch, predecessor closure or deployment in this docs delivery.
+Normative [M7 contract](../contracts/M7_SITE_FEATURES.md), exhaustive `M7 G3` (Git history). Atlas coordinates/chốt technical decisions under [ADR-0010](ADR-0010-agent-project-and-merge-authority.md). Proposed implementation owners become active only through Issue/Project claim. Nova retains M6 ownership. No product implementation, dispatch, predecessor closure or deployment in this docs delivery.
 
 **Evidence:** source/standards inspection; exact validation, review head and CI recorded on PR. M7 build/migration/native/browser tests NOT_RUN. Security/data findings must be resolved before merge; PRD expansion uses Stop-and-Propose.

@@ -13,26 +13,17 @@ import {
   type SampleGroup,
   type ThemesSummary,
 } from '../../api/themes.ts';
-import {
-  EMPTY_ADMIN_LOCALE_STATE,
-  type AdminLocaleState,
-} from '../../api/locales.ts';
-import { ThemeOptionsForm } from './ThemeOptionsForm.tsx';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface Props {
-  mode?: 'themes' | 'options';
   csrfToken: string | null;
-  localeState?: AdminLocaleState;
   onApiError: (error: unknown, fallback: string) => void;
   onInstalled: () => void;
   onActivated: () => void;
 }
 
 export const ThemesPanel: React.FC<Props> = ({
-  mode = 'themes',
   csrfToken,
-  localeState = EMPTY_ADMIN_LOCALE_STATE,
   onApiError,
   onInstalled,
   onActivated,
@@ -135,27 +126,6 @@ export const ThemesPanel: React.FC<Props> = ({
   const activeThemeKey = data?.selection.source_format === 'v3'
     ? data.selection.theme_id
     : data?.active_id;
-
-  if (mode === 'options') {
-    return (
-      <section className="min-w-0 space-y-5" aria-label={translate('shell.studio')} data-testid="theme-options-screen">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{translate('feature.themes.themespanel.appearance_customize')}</p>
-          <h2 className="mt-1.5 text-xl font-bold tracking-tight text-zinc-950">{translate('feature.themes.themespanel.appearance_options')}</h2>
-          <p className="mt-1 text-sm text-zinc-600">{translate('feature.themes.themespanel.configure_the_active_theme_install_and_activate_themes_on_the_separate_appearanc')}</p>
-        </div>
-        {loading && <p role="status" className="text-sm text-zinc-600">{translate('feature.themes.themespanel.loading_theme_options')}</p>}
-        {error && <AdminAlert tone="error">{error}</AdminAlert>}
-        {!loading && data && !activeThemeKey && (
-          <AdminAlert tone="warning">{translate('feature.themes.themespanel.no_active_theme_to_customize_open_appearance_to_install_and_activate_a_theme_fir')}</AdminAlert>
-        )}
-        {!loading && data && activeThemeKey && (
-          <ThemeOptionsForm key={`${activeThemeKey}@${data.selection.revision_id ?? data.selection.version}`}
-            themeId={activeThemeKey} csrfToken={csrfToken} localeState={localeState} onApiError={onApiError} />
-        )}
-      </section>
-    );
-  }
 
   return (
     <section className="min-w-0 space-y-5" aria-label={translate('feature.themes.themespanel.manage_themes')} data-testid="themes-panel">

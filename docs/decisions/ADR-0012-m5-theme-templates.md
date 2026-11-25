@@ -12,7 +12,7 @@ This record requires independent Nova review and merge. It does not claim M5 IMP
 - Reviewed G3: PR #135 head `11d3fa326b1b23ddd63814b8811e425b58728bc4`, 13 task drafts for P01–P10.
 - Current reviewed main: `067ebacd884bcd630e3de68fc22cd90dfae1bac6`.
 - Forge research baseline: `2e6b5c53db10fd23a069ff795cc845cc1fd40f6b`. Product diff to current main is empty for `cms/admin cms/crates cms/migrations cms/Cargo.toml cms/Cargo.lock themes plugins`; only M4 runner/evidence additions intervened.
-- **M4 release handoff:** `a176414bba5b7b85f408137ef0e0b964c2329843`, [Atlas final pin / #110](https://github.com/thientran2359/opendash-cms/issues/110#issuecomment-6838596973). Source equality and two native binary hashes are recorded in the [Mac G5](../verification/2026-11-12-m4-s10-t01-g5-macos.md) and [Windows G5](../verification/2026-11-12-m4-s10-t02-g5-windows.md). Later evidence commits are not replacement release source.
+- **M4 release handoff:** `a176414bba5b7b85f408137ef0e0b964c2329843`, [Atlas final pin / #110](https://github.com/thientran2359/opendash-cms/issues/110#issuecomment-6838596973). Source equality and two native binary hashes are recorded in the `Mac G5` (`2026-11-12-m4-s10-t01-g5-macos.md`, Git history) and `Windows G5` (`2026-11-12-m4-s10-t02-g5-windows.md`, Git history). Later evidence commits are not replacement release source.
 - Supporting existing contracts: [ADR-0007](ADR-0007-m4-builder-taxonomy-foundation.md), [ADR-0009](ADR-0009-m4-core-element-field-binding.md), [ADR-0011](ADR-0011-m4-builder-editor-responsive-list.md), [Core Foundation](../contracts/CORE_FOUNDATION.md).
 - The exact selected behavior, limitations, acceptance and stop conditions are in [M5 Theme contract](../contracts/M5_THEME_TEMPLATES.md).
 

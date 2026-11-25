@@ -37,10 +37,10 @@ Project transition, parent Issue closure, Beta PASS or deployment.
 
 ## Implementation specifications
 
-- [M7 navigation/editor/taxonomy/table](../archive/plans/milestones/M7/slices/2026-11-17-owner-admin-review-g3.md)
-- [M6 declarative contributions](../archive/plans/milestones/M6/slices/2026-11-17-owner-admin-review-g3.md)
-- [M4 Page and Section Builder](../archive/plans/milestones/M4/slices/2026-11-17-owner-admin-review-g3.md)
-- [M5 local library](../archive/plans/milestones/M5/slices/2026-11-17-owner-admin-review-g3.md)
+- `M7 navigation/editor/taxonomy/table` (Git history)
+- `M6 declarative contributions` (Git history)
+- `M4 Page and Section Builder` (Git history)
+- `M5 local library` (Git history)
 
 ## Validation
 

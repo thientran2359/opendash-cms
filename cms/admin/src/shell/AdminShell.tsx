@@ -245,7 +245,6 @@ interface AdminShellProps {
   onNavigateHash: (hash: string) => void;
   hasUnsavedChanges: boolean;
   sidebarContent: React.ReactNode;
-  previewContent: React.ReactNode;
   contentContent: React.ReactNode;
   schemaSettingsContent: React.ReactNode;
   postsContent: React.ReactNode;
@@ -260,8 +259,6 @@ interface AdminShellProps {
   toolsContent: React.ReactNode;
   settingsContent: React.ReactNode;
   themesContent: React.ReactNode;
-  menusContent: React.ReactNode;
-  themeOptionsContent: React.ReactNode;
   libraryContent: React.ReactNode;
   studioContent?: React.ReactNode;
 }
@@ -270,10 +267,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   route, routeForbidden, cptTypes, cptTaxonomies, onNavigateHash, hasUnsavedChanges,
-  sidebarContent, previewContent, contentContent, schemaSettingsContent,
+  sidebarContent, contentContent, schemaSettingsContent,
   postsContent, pagesContent, patternsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
-  menusContent, themeOptionsContent, libraryContent, studioContent,
+  libraryContent, studioContent,
 }) => {
   const { t, setSection } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -600,15 +597,12 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 {user && route.view === 'media' && mediaContent}
                 {user && route.view === 'taxonomy' && <div className="od-admin-card min-w-0 max-w-full">{taxonomyContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'themes' && <div className="od-admin-card min-w-0">{themesContent}</div>}
-                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'menus' && <div className="od-admin-card min-w-0">{menusContent}</div>}
-                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'options' && <div className="od-admin-card min-w-0">{themeOptionsContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' && <div className="od-legacy-scope">{libraryContent}</div>}
                 {user?.role === 'admin' && route.view === 'patterns' && <div className="od-legacy-scope">{patternsContent}</div>}
 
                 <section className={user && route.view === 'builder' ? 'od-editor-panel od-legacy-scope' : 'hidden'} aria-label={t('shell.builder')} aria-hidden={!user || route.view !== 'builder'}>
                   <div id="builder-main">
                     <section className="editor-sidebar">{sidebarContent}</section>
-                    {previewContent}
                   </div>
                 </section>
 
