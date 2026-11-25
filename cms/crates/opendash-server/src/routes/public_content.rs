@@ -30,7 +30,6 @@ use crate::{
         entries::EntryFilters,
         media,
         overrides::{self, PublicTemplateContext, TemplateResolution},
-        page::active_content_templates,
         permalinks, public_content,
         seo::{self, ReadingPageState},
         settings, theme as theme_storage,
@@ -562,7 +561,6 @@ pub(crate) async fn render_canonical_archive(
         Some(Extension(root)) => theme_storage::load_active_theme_v3(&db, &root.0).await?,
         None => None,
     };
-    let (list_template, _) = active_content_templates(&db).await?;
     let site = settings::get_general_for_locale(&db, Some(&locale)).await?;
     let pub_settings = settings::get_public(&db).await?;
     let theme_opts =
@@ -585,7 +583,7 @@ pub(crate) async fn render_canonical_archive(
         &pagination,
         &breadcrumbs,
         None,
-        list_template.as_deref(),
+        None,
         &site_ctx,
         &fmt_cfg,
         &locale,
@@ -812,7 +810,6 @@ async fn render_entry_response_with_cache(
             canonical_path: canonical_path.clone(),
         }
     };
-    let (_, single_template) = active_content_templates(&db).await?;
     let site = settings::get_general_for_locale(&db, Some(&entry_locale)).await?;
     let pub_settings = settings::get_public(&db).await?;
     let theme_opts =
@@ -876,7 +873,7 @@ async fn render_entry_response_with_cache(
         None => content_render::render_single_with_context_for_locale(
             schema,
             &view,
-            single_template.as_deref(),
+            None,
             &site_ctx,
             archive_path.as_deref(),
             &breadcrumbs,

@@ -125,7 +125,7 @@ export const ThemesPanel: React.FC<Props> = ({
   const v3Revisions = data?.revisions.filter(revision => revision.source_format === 'v3') ?? [];
   const activeThemeKey = data?.selection.source_format === 'v3'
     ? data.selection.theme_id
-    : data?.active_id;
+    : null;
 
   return (
     <section className="min-w-0 space-y-5" aria-label={translate('feature.themes.themespanel.manage_themes')} data-testid="themes-panel">
@@ -154,12 +154,6 @@ export const ThemesPanel: React.FC<Props> = ({
       {loading && <p role="status" className="text-sm text-zinc-600">{translate('feature.themes.themespanel.loading_themes')}</p>}
       {!loading && data && (
         <>
-          {data.homepage_compatible === false && (
-            <AdminAlert tone="warning" role="alert" data-testid="theme-compat-warning">{translate('feature.themes.themespanel.the_current_theme_does_not_support_homepage_blocks_public_pages_hide_the_blocks_')}</AdminAlert>
-          )}
-          {data.homepage_compatible === true && (
-            <AdminAlert tone="success" data-testid="theme-compat-ok">{translate('feature.themes.themespanel.the_theme_supports_saved_homepage_blocks')}</AdminAlert>
-          )}
           {v3Revisions.length === 0 && <p className="text-sm text-zinc-500">{translate('feature.themes.themespanel.no_themes_yet_install_a_zip_to_get_started')}</p>}
           {v3Revisions.length > 0 && (
             <section className="space-y-3" aria-label={translate('feature.themes.themespanel.theme_v3_revisions')} data-testid="theme-v3-revisions">
@@ -202,7 +196,7 @@ export const ThemesPanel: React.FC<Props> = ({
           {data.selection.source_format === 'v3' && (
             <nav aria-label={translate('feature.themes.themespanel.edit_theme_templates')} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-4 text-sm">
               <p className="text-zinc-700">{translate('feature.themes.themespanel.to_edit_header_footer_single_or_archive_open_the_visual_builder_and_select_the_a')}</p>
-              <a href="#/builder" className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50">{translate('feature.themes.themespanel.open_visual_builder')}</a>
+              <a href="#/studio" className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50">{translate('feature.themes.themespanel.open_visual_builder')}</a>
             </nav>
           )}
           {activeThemeKey && (

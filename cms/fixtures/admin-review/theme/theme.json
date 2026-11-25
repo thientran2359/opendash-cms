@@ -1,11 +1,14 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "theme_id": "review-theme",
   "name": "Admin Review Theme",
   "version": "1.0.0",
-  "templates": {
-    "home": "templates/home.html"
-  },
+  "templates": [
+    {
+      "kind": "single",
+      "file": "single.html"
+    }
+  ],
   "admin_extensions": {
     "schema_version": 1,
     "columns": [

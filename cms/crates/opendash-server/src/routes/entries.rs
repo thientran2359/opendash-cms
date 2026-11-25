@@ -21,8 +21,7 @@ use crate::{
     hooks::HookDispatcher,
     storage::{
         content::load_content_type_definition, entries as entry_storage, entry_table,
-        media as media_storage, page::active_content_templates, permalinks, public_content,
-        settings,
+        media as media_storage, permalinks, public_content, settings,
     },
 };
 
@@ -911,26 +910,10 @@ pub async fn entry_preview(
             icon_nonces = nonces;
             rendered.html
         } else {
-            let (_, selected_template) = active_content_templates(&db).await?;
-            render_admin_single_fallback_html(
-                &db,
-                &entry,
-                &effective,
-                actor_role,
-                selected_template.as_deref(),
-            )
-            .await?
+            render_admin_single_fallback_html(&db, &entry, &effective, actor_role, None).await?
         }
     } else {
-        let (_, selected_template) = active_content_templates(&db).await?;
-        render_admin_single_fallback_html(
-            &db,
-            &entry,
-            &effective,
-            actor_role,
-            selected_template.as_deref(),
-        )
-        .await?
+        render_admin_single_fallback_html(&db, &entry, &effective, actor_role, None).await?
     };
     let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
     let html = content_render::finalize_document_icons(html, &icon_nonces)?;

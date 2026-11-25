@@ -73,7 +73,7 @@ def package_zip(manifest: dict, kind: str) -> bytes:
             arc.writestr('plugin.wasm', deterministic_wasm())
         else:
             arc.writestr('theme.json', json.dumps(manifest, ensure_ascii=False))
-            arc.writestr('templates/home.html', '<h1>Theme review</h1>')
+            arc.writestr('single.html', '<article><h1>{{ entry.title }}</h1>{{ od_content() }}</article>')
     return output.getvalue()
 
 
@@ -191,7 +191,7 @@ def verify_old_new_old(predecessor: pathlib.Path, candidate: pathlib.Path,
 
 def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dict:
     js_errors: list[str] = []
-    with tempfile.TemporaryDirectory(prefix='m6-s10-t01-', dir=str(artifacts.parent)) as directory:
+    with tempfile.TemporaryDirectory(prefix='m6-s10-t01-', dir=str(artifacts.parent), ignore_cleanup_errors=True) as directory:
         root = pathlib.Path(directory) / 'site'
         root.mkdir(mode=0o700)
         server, base = launch_server(binary, root)

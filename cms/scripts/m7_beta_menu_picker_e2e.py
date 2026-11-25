@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -20,6 +21,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -67,6 +69,45 @@ def stop_server(proc: subprocess.Popen) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait(timeout=8)
+
+
+def add_zip_file(archive: ZipFile, name: str, data: bytes | str) -> None:
+    # Fixed metadata makes fixture ZIP digests and revision IDs reproducible.
+    entry = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+    entry.compress_type = ZIP_DEFLATED
+    entry.external_attr = 0o644 << 16
+    archive.writestr(entry, data)
+
+
+def theme_zip(theme_id: str, version: str, *, sample: bool = False) -> bytes:
+    demo = pathlib.Path(__file__).resolve().parents[1] / "fixtures/demo-website/theme-moc-studio"
+    manifest = json.loads((demo / "theme.json").read_text(encoding="utf-8"))
+    manifest.update({"theme_id": theme_id, "version": version, "name": f"F02 {theme_id}"})
+    if sample:
+        manifest["sample"] = {
+            "sample_key": "starter",
+            "pages": [{
+                "object_key": "starter_page", "slug": "f02-starter", "title": "F02 Starter",
+                "content_type": "page", "values": {},
+            }],
+            "menus": [{
+                "object_key": "starter_nav", "menu_key": "f02_starter_nav", "title": "F02 Starter Nav",
+                "slot_key": "primary", "items": [
+                    {"label": "Starter", "target_kind": "entry", "target_object_key": "starter_page"},
+                ],
+            }],
+            "settings": [{
+                "object_key": "starter_brand", "option_key": "studio_eyebrow",
+                "value": "F02 Sample Brand",
+            }],
+        }
+    memory = io.BytesIO()
+    with ZipFile(memory, "w", ZIP_DEFLATED) as archive:
+        add_zip_file(archive, "theme.json", json.dumps(manifest, ensure_ascii=False, sort_keys=True))
+        for file in sorted(demo.glob("*.html")):
+            add_zip_file(archive, file.name, file.read_bytes())
+        add_zip_file(archive, "assets/style.css", (demo / "assets/style.css").read_bytes())
+    return memory.getvalue()
 
 
 def api_json(ctx, method: str, base: str, path: str, data=None, csrf=None, extra=None, expected=200):

@@ -9,7 +9,7 @@ Fullscreen visual customization and page-building workspace (`#/studio` and `#/s
 - **Workspace Orchestrator (`StudioWorkspace.tsx`):**
   - `[StudioWorkspace.tsx:StudioWorkspace]`: Coordinates Mode 1 (`route.view === 'studio'`, Admin-only customizer & typed template overrides) and Mode 2 (`route.view === 'studio-entry'`, entry builder), `50`-step Undo/Redo history, `250 ms` debounced live preview (`[../api/studio.ts:postStudioPreview]` / `[../api/builder.ts:previewEntryBuilder]`), preview locale switching, `412` conflict handling, and `401` draft quarantine.
 - **Customizer Navigation (`StudioCustomizerNav.tsx`):**
-  - `[StudioCustomizerNav.tsx:StudioCustomizerNav]`: Renders Mode 1 sub-panels (`'root'`, `'identity'`, `'theme-options'`, `'menus'`, `'reading'`, `'templates'`), grouped template target list (`parts`, `core`, `content_types`, `page_layouts`, `custom_templates`, `overrides`), and `[../builder/BuilderWorkspace.tsx:BuilderEditorCore]` once a template override is initialized.
+  - `[StudioCustomizerNav.tsx:StudioCustomizerNav]`: Renders Mode 1 sub-panels (`'root'`, `'identity'`, `'theme-options'`, `'menus'`, `'reading'`, `'templates'`), grouped template target list (`parts`, `core`, `content_types`, `page_layouts`, `custom_templates`, `overrides`), and `[../builder/BuilderEditorCore.tsx:BuilderEditorCore]` once a template override is initialized.
 - **Menu Manager (`StudioMenuManager.tsx`):**
   - `[StudioMenuManager.tsx:StudioMenuManager]`: Two-level sidebar editor for theme menu slot assignments (`getMenuSlots` / `putMenuSlots`) and menu/item CRUD (`createMenu`, `getMenu`, `updateMenu`, `deleteMenu`) with hierarchical indentation (up to depth 7) targeting published entries, public taxonomy terms, or external URLs.
 - **Sidebar Builder Controls (`StudioBlockTree.tsx`, `StudioBlockCatalog.tsx`, `StudioSidebarHeader.tsx`, `StudioSidebarFooter.tsx`):**
@@ -28,7 +28,7 @@ Fullscreen visual customization and page-building workspace (`#/studio` and `#/s
 
 ## Side Effects
 
-- Loads and mutates Studio targets, typed template overrides, entry builders, general/reading settings, global site options, theme options, menus/menu slots, patterns, and block registry via `../api/`.
+- Loads and mutates Studio targets, typed template overrides, entry builders, general/reading settings, global site options, theme options, menus/menu slots, patterns, and declarative block schemas via `../api/`.
 - Clears matching entries in `[../features/editor/EditorDraftStore.ts:editorDraftStore]` after saving or publishing in Mode 2.
 - Registers `window` `keydown` shortcuts and `document` `pointerdown`/`keydown` listeners for contextual menus and overflow popovers.
 

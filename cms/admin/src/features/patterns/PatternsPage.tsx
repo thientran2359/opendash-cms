@@ -162,7 +162,7 @@ export function PatternsPage({ route, user, csrfToken, onApiError, onNavigateHas
       <div className="flex flex-wrap gap-2">
         {canWrite && <button type="submit" disabled={saving || (isEdit && !dirty)}>{saving ? translate('general.saving') : translate('feature.patterns.patternspage.save_pattern')}</button>}
         {current && canWrite && <button type="button" className="btn-secondary"
-          onClick={() => onNavigateHash(`#/builder?template=entry&type=pattern&entry=${current.id}`)}>{translate('feature.patterns.patternspage.open_pattern_builder')}</button>}
+          onClick={() => onNavigateHash(`#/studio/entry/pattern/${current.id}`)}>{translate('feature.patterns.patternspage.open_pattern_builder')}</button>}
         {current && canWrite && <button type="button" className="btn-secondary" disabled={saving || dirty}
           onClick={() => void remove()}>{translate('feature.patterns.patternspage.delete_pattern')}</button>}
       </div>

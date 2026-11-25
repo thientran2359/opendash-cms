@@ -7,7 +7,7 @@ use std::{
 use wasmi::{Engine, ExternType, Module, ValType};
 
 use crate::package::{
-    V2_MAX_EXPANSION_RATIO, open_bounded_zip, read_bounded_entry, validate_v2_relative_path,
+    V2_MAX_EXPANSION_RATIO, open_bounded_zip, read_bounded_entry, validate_theme_relative_path,
 };
 
 use super::manifest::PluginManifest;
@@ -89,14 +89,14 @@ impl PluginPackage {
             if file.is_dir() {
                 let trimmed = name.trim_end_matches('/');
                 if !trimmed.is_empty() {
-                    validate_v2_relative_path(trimmed)?;
+                    validate_theme_relative_path(trimmed)?;
                 }
                 if file.size() != 0 {
                     return Err("Thư mục trong ZIP phải rỗng.");
                 }
                 continue;
             }
-            let name = validate_v2_relative_path(&name)?;
+            let name = validate_theme_relative_path(&name)?;
             regular_files += 1;
             if regular_files > MAX_PLUGIN_FILES {
                 return Err("ZIP chứa quá nhiều file (tối đa 72 file).");
@@ -398,7 +398,7 @@ fn walk_plugin_dir(
                     "Thư mục plugin vượt quá giới hạn độ sâu tối đa ({MAX_PLUGIN_DIR_DEPTH}): {rel_path}"
                 ));
             }
-            validate_v2_relative_path(&rel_path).map_err(str::to_owned)?;
+            validate_theme_relative_path(&rel_path).map_err(str::to_owned)?;
             if !seen_lower.insert(rel_path.to_ascii_lowercase()) {
                 return Err(format!(
                     "Đường dẫn plugin bị trùng lặp không phân biệt hoa thường: {rel_path}"
@@ -416,7 +416,7 @@ fn walk_plugin_dir(
                 block_files,
             )?;
         } else if ft.is_file() {
-            let rel_path = validate_v2_relative_path(&rel_path).map_err(str::to_owned)?;
+            let rel_path = validate_theme_relative_path(&rel_path).map_err(str::to_owned)?;
             *regular_files += 1;
             if *regular_files > MAX_PLUGIN_FILES {
                 return Err(format!(

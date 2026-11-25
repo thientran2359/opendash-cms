@@ -15,13 +15,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
-use crate::{
-    error::{ApiError, ApiResult},
-    theme::{Block, Fields},
-};
+use crate::error::{ApiError, ApiResult};
 
-#[cfg(test)]
-const RESERVED_LEGACY_PREFIX: &str = "legacy-v1-";
 const COMPLETE_MARKER: &str = ".complete";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,7 +64,6 @@ pub struct ThemeRevisionRecord {
     pub source_format: ThemeSourceFormat,
     pub manifest_json: String,
     pub file_digests: BTreeMap<String, String>,
-    pub legacy_block_id: Option<String>,
     pub provenance_json: String,
     pub created_at: String,
 }
@@ -79,7 +73,6 @@ pub struct ActiveThemeSelection {
     pub revision_id: Option<String>,
     pub theme_id: Option<String>,
     pub version: i64,
-    pub legacy_block_id: Option<String>,
     pub source_format: Option<ThemeSourceFormat>,
 }
 
@@ -108,12 +101,6 @@ pub enum RevisionActivationOutcome {
     CorruptRevision(RevisionDurabilityStatus),
 }
 
-#[derive(Debug, Serialize)]
-pub struct ThemeItem {
-    pub id: String,
-    pub compatible_block_id: Option<String>,
-}
-
 /// Admin-only projection: never serialize manifest, path, provenance or file-map metadata.
 #[derive(Debug, Serialize)]
 pub struct ThemeRevisionSummary {
@@ -126,59 +113,9 @@ pub struct ThemeRevisionSummary {
 
 #[derive(Debug, Serialize)]
 pub struct ThemeList {
-    pub items: Vec<ThemeItem>,
-    pub active_id: Option<String>,
     pub version: i64,
-    /// Null means no saved homepage or no explicit activation.
-    pub homepage_compatible: Option<bool>,
     pub revisions: Vec<ThemeRevisionSummary>,
     pub selection: ActiveThemeSelection,
-}
-
-pub enum ActivationOutcome {
-    Activated(ThemeList),
-    NotFound,
-    Stale,
-}
-
-#[derive(Debug)]
-pub struct SelectedTemplate {
-    pub template: Option<String>,
-    pub visibility: &'static str,
-}
-
-#[derive(Debug)]
-pub struct HomeSnapshot {
-    pub block: Block,
-    pub original_fields: Fields,
-    pub selected: SelectedTemplate,
-}
-
-/// Validate a v2 `theme_id`: lowercase ASCII kebab-case (1..=64 chars),
-/// never claiming the reserved `legacy-v1-` identity domain.
-#[cfg(test)]
-pub fn valid_v2_theme_id(id: &str) -> bool {
-    if id.is_empty() || id.len() > 64 || id.starts_with(RESERVED_LEGACY_PREFIX) {
-        return false;
-    }
-    let bytes = id.as_bytes();
-    if bytes.first() == Some(&b'-') || bytes.last() == Some(&b'-') {
-        return false;
-    }
-    let mut prev_dash = false;
-    for &b in bytes {
-        match b {
-            b'a'..=b'z' | b'0'..=b'9' => prev_dash = false,
-            b'-' => {
-                if prev_dash {
-                    return false;
-                }
-                prev_dash = true;
-            }
-            _ => return false,
-        }
-    }
-    true
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -366,7 +303,6 @@ type RevisionRow = (
     String,
     String,
     String,
-    Option<String>,
     String,
     String,
 );
@@ -380,7 +316,6 @@ fn row_to_revision(row: RevisionRow) -> ApiResult<ThemeRevisionRecord> {
         source_format,
         manifest_json,
         file_digests_json,
-        legacy_block_id,
         provenance_json,
         created_at,
     ) = row;
@@ -393,7 +328,6 @@ fn row_to_revision(row: RevisionRow) -> ApiResult<ThemeRevisionRecord> {
         source_format: ThemeSourceFormat::from_db(&source_format)?,
         manifest_json,
         file_digests,
-        legacy_block_id,
         provenance_json,
         created_at,
     })
@@ -405,7 +339,7 @@ pub async fn find_revision_by_id(
 ) -> ApiResult<Option<ThemeRevisionRecord>> {
     let row: Option<RevisionRow> = sqlx::query_as(
         "SELECT revision_id, theme_id, version, revision_digest, source_format,
-                manifest_json, file_digests_json, legacy_block_id, provenance_json, created_at
+                manifest_json, file_digests_json, provenance_json, created_at
          FROM theme_revisions
          WHERE revision_id = ?",
     )
@@ -421,7 +355,7 @@ async fn find_revision_by_digest(
 ) -> ApiResult<Option<ThemeRevisionRecord>> {
     let row: Option<RevisionRow> = sqlx::query_as(
         "SELECT revision_id, theme_id, version, revision_digest, source_format,
-                manifest_json, file_digests_json, legacy_block_id, provenance_json, created_at
+                manifest_json, file_digests_json, provenance_json, created_at
          FROM theme_revisions
          WHERE revision_digest = ?",
     )
@@ -808,14 +742,8 @@ pub async fn ensure_default_starter_theme(
 }
 
 pub async fn get_active_selection(db: &SqlitePool) -> ApiResult<ActiveThemeSelection> {
-    let row: (
-        Option<String>,
-        Option<String>,
-        i64,
-        Option<String>,
-        Option<String>,
-    ) = sqlx::query_as(
-        "SELECT a.revision_id, r.theme_id, a.version, r.legacy_block_id, r.source_format
+    let row: (Option<String>, Option<String>, i64, Option<String>) = sqlx::query_as(
+        "SELECT a.revision_id, r.theme_id, a.version, r.source_format
              FROM theme_active_selection a
              LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
              WHERE a.id = 1",
@@ -823,7 +751,7 @@ pub async fn get_active_selection(db: &SqlitePool) -> ApiResult<ActiveThemeSelec
     .fetch_one(db)
     .await?;
     let source_format = row
-        .4
+        .3
         .as_deref()
         .map(ThemeSourceFormat::from_db)
         .transpose()?;
@@ -831,7 +759,6 @@ pub async fn get_active_selection(db: &SqlitePool) -> ApiResult<ActiveThemeSelec
         revision_id: row.0,
         theme_id: row.1,
         version: row.2,
-        legacy_block_id: row.3,
         source_format,
     })
 }
@@ -865,7 +792,7 @@ pub async fn list_revisions(
 ) -> ApiResult<Vec<ThemeRevisionRecord>> {
     let rows: Vec<RevisionRow> = sqlx::query_as(
         "SELECT revision_id, theme_id, version, revision_digest, source_format,
-                manifest_json, file_digests_json, legacy_block_id, provenance_json, created_at
+                manifest_json, file_digests_json, provenance_json, created_at
          FROM theme_revisions
          WHERE theme_id = ?
          ORDER BY created_at ASC, revision_id ASC",
@@ -889,7 +816,7 @@ pub async fn activate_revision(
     };
     let row: Option<RevisionRow> = sqlx::query_as(
         "SELECT revision_id, theme_id, version, revision_digest, source_format,
-                manifest_json, file_digests_json, legacy_block_id, provenance_json, created_at
+                manifest_json, file_digests_json, provenance_json, created_at
          FROM theme_revisions
          WHERE revision_id = ?",
     )
@@ -1326,7 +1253,7 @@ pub(super) async fn capture_active_theme_v3_in_conn(
     // afterwards because immutable digest/complete marker checks hold.
     let row: Option<RevisionRow> = sqlx::query_as(
         "SELECT r.revision_id, r.theme_id, r.version, r.revision_digest, r.source_format,
-                r.manifest_json, r.file_digests_json, r.legacy_block_id, r.provenance_json, r.created_at
+                r.manifest_json, r.file_digests_json, r.provenance_json, r.created_at
            FROM theme_active_selection a
            JOIN theme_revisions r ON r.revision_id = a.revision_id
           WHERE a.id = 1",
@@ -1432,159 +1359,17 @@ pub(super) async fn load_active_theme_v3_in_conn(
 }
 
 /// Source block ID is never overwritten or silently translated. NULL active
-/// means the original legacy template. Explicit unsupported means blank page.
-pub fn select_template(
-    source_id: &str,
-    source_template: String,
-    active_id: Option<&str>,
-    active_alias: Option<&str>,
-    active_template: Option<String>,
-) -> SelectedTemplate {
-    match active_id {
-        None => SelectedTemplate {
-            template: Some(source_template),
-            visibility: "rendered",
-        },
-        Some(id) if source_id == id || Some(source_id) == active_alias => SelectedTemplate {
-            template: active_template,
-            visibility: "rendered",
-        },
-        Some(_) => SelectedTemplate {
-            template: None,
-            visibility: "unsupported",
-        },
-    }
-}
-
-/// Save and render using one SQLite write snapshot. The renderer executes
-/// before commit, so a template error cannot leave a successful write behind.
-/// No hook is invoked here; callers dispatch only after this transaction commits.
-pub async fn save_home_page_and_render<T, F>(
-    db: &SqlitePool,
-    block: &Block,
-    source_template: String,
-    render: F,
-) -> ApiResult<T>
-where
-    F: FnOnce(SelectedTemplate) -> ApiResult<T>,
-{
-    let mut tx = db.begin().await?;
-    // Builder conversion is one-way. Reserve the same singleton writer used
-    // by layout Save *before* touching M3 home_page; a legacy request racing
-    // with conversion can never revive the old public source.
-    let changed = sqlx::query(
-        "UPDATE builder_homepage SET version = version + 1
-         WHERE id = 1 AND document_json IS NULL AND version < 9223372036854775807",
-    )
-    .execute(&mut *tx)
-    .await?;
-    if changed.rows_affected() != 1 {
-        return Err(ApiError::conflict(
-            "Homepage đã chuyển sang Builder dạng cây. Hãy mở /api/admin/builder/homepage.",
-        ));
-    }
-    sqlx::query(
-        "INSERT INTO home_page (id, block_id, values_json) VALUES (1, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET block_id = excluded.block_id, values_json = excluded.values_json",
-    )
-    .bind(&block.kind)
-    .bind(serde_json::to_string(&block.values)?)
-    .execute(&mut *tx)
-    .await?;
-    let (active_id, alias, active_template): (Option<String>, Option<String>, Option<String>) =
-        sqlx::query_as(
-            "SELECT r.legacy_block_id, t.compatible_block_id, t.template
-             FROM theme_active_selection a
-             LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
-             LEFT JOIN theme_blocks t ON t.id = r.legacy_block_id
-             WHERE a.id = 1",
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-    let selected = select_template(
-        &block.kind,
-        source_template,
-        active_id.as_deref(),
-        alias.as_deref(),
-        active_template,
-    );
-    let output = render(selected)?;
-    tx.commit().await?;
-    Ok(output)
-}
-
-pub async fn active_selection(
-    db: &SqlitePool,
-) -> ApiResult<(Option<String>, Option<String>, Option<String>)> {
-    let selection: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT r.legacy_block_id, t.compatible_block_id, t.template
-         FROM theme_active_selection a
-         LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
-         LEFT JOIN theme_blocks t ON t.id = r.legacy_block_id
-         WHERE a.id = 1",
-    )
-    .fetch_one(db)
-    .await?;
-    Ok(selection)
-}
-
-/// Atomic, single-query view of the saved homepage and current active theme.
-/// Values and fields are never projected through a different theme's schema.
-pub async fn public_home(db: &SqlitePool) -> ApiResult<Option<HomeSnapshot>> {
-    let row: Option<(
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    )> = sqlx::query_as(
-        "SELECT p.block_id, p.values_json, src.fields_json, src.template,
-                r.legacy_block_id, active.compatible_block_id, active.template
-         FROM home_page p
-         JOIN theme_blocks src ON src.id = p.block_id
-         JOIN theme_active_selection a ON a.id = 1
-         LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
-         LEFT JOIN theme_blocks active ON active.id = r.legacy_block_id
-         WHERE p.id = 1",
-    )
-    .fetch_optional(db)
-    .await?;
-    row.map(
-        |(kind, values, fields, original_template, active_id, alias, active_template)| {
-            let selected = select_template(
-                &kind,
-                original_template,
-                active_id.as_deref(),
-                alias.as_deref(),
-                active_template,
-            );
-            Ok(HomeSnapshot {
-                block: Block {
-                    kind,
-                    values: serde_json::from_str(&values)?,
-                },
-                original_fields: serde_json::from_str(&fields)?,
-                selected,
-            })
-        },
-    )
-    .transpose()
-}
-
 pub async fn list(db: &SqlitePool) -> ApiResult<ThemeList> {
     // All fields (including revision visibility and CAS selection) are one read
     // snapshot. A concurrent activate/install cannot interleave two GET fields.
     let mut tx = db.begin().await?;
-    let (revision_id, theme_id, version, active_id, source_format): (
+    let (revision_id, theme_id, version, source_format): (
         Option<String>,
         Option<String>,
         i64,
         Option<String>,
-        Option<String>,
     ) = sqlx::query_as(
-        "SELECT a.revision_id, r.theme_id, a.version, r.legacy_block_id, r.source_format
+        "SELECT a.revision_id, r.theme_id, a.version, r.source_format
          FROM theme_active_selection a
          LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
          WHERE a.id = 1",
@@ -1595,26 +1380,11 @@ pub async fn list(db: &SqlitePool) -> ApiResult<ThemeList> {
         revision_id,
         theme_id,
         version,
-        legacy_block_id: active_id.clone(),
         source_format: source_format
             .as_deref()
             .map(ThemeSourceFormat::from_db)
             .transpose()?,
     };
-    let rows: Vec<(String, Option<String>)> =
-        sqlx::query_as("SELECT id, compatible_block_id FROM theme_blocks ORDER BY id")
-            .fetch_all(&mut *tx)
-            .await?;
-    // Once the Builder layout is saved, the old M3 home_page is retained
-    // solely for backup/restore. Its single-block compatibility must not be
-    // reported as compatibility of the new (possibly mixed) Builder tree.
-    let saved: Option<String> = sqlx::query_scalar(
-        "SELECT p.block_id FROM home_page p
-         JOIN builder_homepage b ON b.id = 1 AND b.document_json IS NULL
-         WHERE p.id = 1",
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
     let raw_revisions: Vec<(String, String, String, String, String)> = sqlx::query_as(
         "SELECT revision_id, theme_id, version, revision_digest, source_format
          FROM theme_revisions ORDER BY theme_id ASC, version ASC, revision_id ASC",
@@ -1635,55 +1405,11 @@ pub async fn list(db: &SqlitePool) -> ApiResult<ThemeList> {
             },
         )
         .collect::<ApiResult<Vec<_>>>()?;
-    let homepage_compatible = match (saved.as_deref(), active_id.as_deref()) {
-        (Some(source), Some(id)) => Some(
-            rows.iter()
-                .find(|(key, _)| key == id)
-                .is_some_and(|(_, alias)| source == id || alias.as_deref() == Some(source)),
-        ),
-        _ => None,
-    };
     Ok(ThemeList {
-        items: rows
-            .into_iter()
-            .map(|(id, compatible_block_id)| ThemeItem {
-                id,
-                compatible_block_id,
-            })
-            .collect(),
-        active_id,
         version,
-        homepage_compatible,
         revisions,
         selection,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn compatibility_selection_never_uses_old_html_for_unsupported_blocks() {
-        let legacy = select_template("a/banner", "A".into(), None, None, None);
-        assert_eq!(legacy.template.as_deref(), Some("A"));
-        let alias = select_template(
-            "a/banner",
-            "A".into(),
-            Some("b/banner"),
-            Some("a/banner"),
-            Some("B".into()),
-        );
-        assert_eq!(alias.template.as_deref(), Some("B"));
-        let absent = select_template(
-            "a/banner",
-            "A".into(),
-            Some("c/banner"),
-            None,
-            Some("C".into()),
-        );
-        assert_eq!(absent.visibility, "unsupported");
-        assert!(absent.template.is_none());
-    }
 }
 
 #[cfg(test)]

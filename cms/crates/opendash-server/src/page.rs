@@ -1,15 +1,11 @@
-//! Page use cases shared by preview, save and public rendering.
+//! Page use cases shared by preview and public rendering.
 use crate::{
     error::{ApiError, ApiResult},
-    hooks::HookDispatcher,
     public_context::CanonicalUrlBuilder,
     storage::{
-        builder::{HomeState, ListResults, ResolvedList},
+        builder::{BuilderRenderContext, ListResults, ResolvedList},
         builder_binding::{BindingResult, BindingResults},
-        page::load_theme_block,
-        theme::{self as theme_storage, HomeSnapshot, SelectedTemplate},
     },
-    theme::{self, Block},
 };
 use opendash_core::{
     builder::{
@@ -17,12 +13,11 @@ use opendash_core::{
         Responsive, ResponsiveStyle, SectionWidth, TextAlign, compile_box_spacing_tailwind,
         gap_px_to_tw_step,
     },
-    hooks::HookEvent,
     id::valid_package_id,
 };
 use serde::Serialize;
+#[cfg(test)]
 use serde_json::json;
-use sqlx::SqlitePool;
 
 pub use crate::template_sec::RenderBudget;
 
@@ -85,11 +80,6 @@ impl BlockTemplateCache {
         guard.insert(key, validated.clone());
         Ok(validated)
     }
-}
-
-pub struct RenderedBlock {
-    pub html: String,
-    pub visibility: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -510,7 +500,7 @@ fn format_css_number(n: f64, unit: Option<opendash_core::block_schema::CssUnit>)
 /// Emits scoped CSS custom properties (`--od-*`) for all active, declared `block.json` v1
 /// `PluginBlock` instances in `document` under `[data-od-node-scope="{scope}-{node_id}"]`.
 pub fn serialize_scoped_block_css(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     scope: &str,
     is_preview: bool,
@@ -837,7 +827,7 @@ pub fn serialize_scoped_block_css(
 /// Only renderer-known core elements can add public media references.
 #[cfg(test)]
 pub fn render_builder(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
 ) -> ApiResult<RenderedLayout> {
@@ -847,7 +837,7 @@ pub fn render_builder(
 /// All bound values are obtained by the storage layer under Preview/public ACL.
 /// The renderer never reads SQL or treats rich text as raw markup.
 pub fn render_builder_resolved(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
     bindings: &BindingResults,
@@ -858,7 +848,7 @@ pub fn render_builder_resolved(
 /// Query-free renderer: storage has already resolved every list against the
 /// same SQLite snapshot as the document/Field Binding sources.
 pub fn render_builder_with_lists(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
     bindings: &BindingResults,
@@ -875,7 +865,7 @@ pub fn render_builder_with_lists(
 }
 
 pub fn render_builder_with_lists_and_forms(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
     bindings: &BindingResults,
@@ -893,7 +883,7 @@ pub struct BuilderTemplateContext<'a> {
 }
 
 pub fn render_builder_with_template_context(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
     bindings: &BindingResults,
@@ -937,7 +927,7 @@ fn editable_attrs(
 /// Render an entry or a trusted, one-hop Pattern body. Only the storage layer
 /// can populate `patterns`, so incoming AST never carries referenced markup.
 pub fn render_builder_with_patterns(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
     bindings: &BindingResults,
@@ -963,7 +953,7 @@ pub fn render_builder_with_patterns(
 
 #[allow(clippy::too_many_arguments)]
 pub fn render_builder_with_annotations(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
     bindings: &BindingResults,
@@ -995,7 +985,7 @@ pub fn render_builder_with_annotations(
 
 #[allow(clippy::too_many_arguments)]
 pub fn render_builder_with_budget(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
     bindings: &BindingResults,
@@ -1029,7 +1019,7 @@ pub fn render_builder_with_budget(
 
 #[allow(clippy::too_many_arguments)]
 pub fn render_builder_with_budget_and_base_path(
-    state: &HomeState,
+    state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
     bindings: &BindingResults,
@@ -1424,49 +1414,6 @@ pub fn render_builder_with_budget_and_base_path(
                                         }
                                     }
                                 }
-                            } else if let Some(template_src) = state
-                                .themes
-                                .get(&props.block_id)
-                                .map(|d| d.template.as_str())
-                            {
-                                let fmt_cfg = crate::template_sec::RenderFormattingConfig {
-                                    timezone: state.timezone.clone(),
-                                };
-                                match render_plugin_block_csec_with_budget_and_config(
-                                    &props.block_id,
-                                    template_src,
-                                    &props.values,
-                                    budget,
-                                    &fmt_cfg,
-                                ) {
-                                    Ok(rendered_inner) => {
-                                        already_charged_bytes = already_charged_bytes
-                                            .saturating_add(rendered_inner.len());
-                                        Some(format!(
-                                            "<div class=\"builder-plugin-block\" data-block-id=\"{}\" data-od-node-scope=\"{}\">{}</div>",
-                                            escape_html(&props.block_id),
-                                            escape_html(&node_scope),
-                                            rendered_inner
-                                        ))
-                                    }
-                                    Err(_) => {
-                                        if budget.html_bytes_used
-                                            > crate::template_sec::MAX_RENDERED_HTML_BYTES
-                                        {
-                                            return Err(ApiError::bad_request(
-                                                "Builder template composition exceeds 512 KiB.",
-                                            ));
-                                        }
-                                        diagnostics.push(BuilderDiagnostic {
-                                            node_id: element.id.clone(),
-                                            code: "plugin_block_render_error",
-                                        });
-                                        Some(format!(
-                                            "<div class=\"builder-block-unavailable\" data-block-id=\"{}\"></div>",
-                                            escape_html(&props.block_id)
-                                        ))
-                                    }
-                                }
                             } else {
                                 diagnostics.push(BuilderDiagnostic {
                                     node_id: element.id.clone(),
@@ -1538,58 +1485,8 @@ pub fn render_builder_with_budget_and_base_path(
                                 }
                             }
                         }
-                        ElementContent::Known(KnownElement::Legacy(props)) => {
-                            match state.themes.get(&props.block_id) {
-                                None => {
-                                    diagnostics.push(BuilderDiagnostic {
-                                        node_id: element.id.clone(),
-                                        code: "descriptor_missing",
-                                    });
-                                    None
-                                }
-                                Some(definition) => {
-                                    let selected = theme_storage::select_template(
-                                        &props.block_id,
-                                        definition.template.clone(),
-                                        state.active_id.as_deref(),
-                                        state.active_alias.as_deref(),
-                                        state.active_template.clone(),
-                                    );
-                                    if let Some(template) = selected.template {
-                                        let block = Block {
-                                            kind: props.block_id.clone(),
-                                            values: props.values.clone(),
-                                        };
-                                        if block
-                                            .validate_against_fields(&definition.fields)
-                                            .is_err()
-                                        {
-                                            diagnostics.push(BuilderDiagnostic {
-                                                node_id: element.id.clone(),
-                                                code: "legacy_fields_invalid",
-                                            });
-                                            None
-                                        } else {
-                                            Some(
-                                                theme::render(
-                                                    &template,
-                                                    &definition.fields,
-                                                    &block,
-                                                )
-                                                .map_err(ApiError::bad_request)?,
-                                            )
-                                        }
-                                    } else {
-                                        diagnostics.push(BuilderDiagnostic {
-                                            node_id: element.id.clone(),
-                                            code: "unsupported_by_theme",
-                                        });
-                                        None
-                                    }
-                                }
-                            }
-                        }
-                        ElementContent::Unresolved(_) => {
+                        ElementContent::Known(KnownElement::Legacy(_))
+                        | ElementContent::Unresolved(_) => {
                             diagnostics.push(BuilderDiagnostic {
                                 node_id: element.id.clone(),
                                 code: "descriptor_missing",
@@ -1766,289 +1663,7 @@ fn list_page_href(base_path: &str, lists: &ListResults, node_id: &str, target: i
     CanonicalUrlBuilder::list_pages(base_path, &pages)
 }
 
-pub fn render_legacy_state(state: &HomeState) -> ApiResult<Option<RenderedBlock>> {
-    let Some(block) = &state.legacy else {
-        return Ok(None);
-    };
-    let definition = state
-        .themes
-        .get(&block.kind)
-        .ok_or_else(|| ApiError::internal("Missing legacy theme descriptor"))?;
-    let selected = theme_storage::select_template(
-        &block.kind,
-        definition.template.clone(),
-        state.active_id.as_deref(),
-        state.active_alias.as_deref(),
-        state.active_template.clone(),
-    );
-    render_selected(block, &definition.fields, selected).map(Some)
-}
-
-pub fn layout_hook_payload(document: &BuilderDocument, version: i64) -> serde_json::Value {
-    let elements: Vec<_> = document
-        .sections
-        .iter()
-        .flat_map(|s| &s.children)
-        .flat_map(|r| &r.children)
-        .flat_map(|c| &c.children)
-        .collect();
-    if let [only] = elements.as_slice() {
-        if let ElementContent::Known(KnownElement::Legacy(props)) = &only.content {
-            return json!({"block_type": props.block_id});
-        }
-    }
-    json!({"block_type": "core/layout", "layout_version": version})
-}
-
-pub async fn dispatch_saved_hook(hooks: &HookDispatcher, payload: serde_json::Value) {
-    let report = hooks.dispatch(HookEvent::PageAfterSave, payload).await;
-    for outcome in &report.outcomes {
-        if let Some(error) = &outcome.error {
-            eprintln!(
-                "Saved page; hook {} failed ({}): {error}",
-                outcome.handler_id, report.envelope.correlation_id
-            );
-        }
-    }
-}
-
-fn render_selected(
-    block: &Block,
-    fields: &theme::Fields,
-    selected: SelectedTemplate,
-) -> ApiResult<RenderedBlock> {
-    // Always validate against the author's original block schema, including when
-    // the active theme does not support it. Incompatible does not mean invalid.
-    block
-        .validate_against_fields(fields)
-        .map_err(ApiError::bad_request)?;
-    let html = match selected.template {
-        Some(template) => theme::render(&template, fields, block).map_err(ApiError::bad_request)?,
-        None => "<main></main>".to_string(), // Safe empty content; never borrow a stale template.
-    };
-    Ok(RenderedBlock {
-        html,
-        visibility: selected.visibility,
-    })
-}
-
-pub fn render_saved(snapshot: HomeSnapshot) -> ApiResult<RenderedBlock> {
-    render_selected(
-        &snapshot.block,
-        &snapshot.original_fields,
-        snapshot.selected,
-    )
-}
-
-pub async fn render_block(db: &SqlitePool, block: &Block) -> ApiResult<RenderedBlock> {
-    let (original_template, fields) = load_theme_block(db, &block.kind).await?;
-    let (active_id, active_alias, active_template) = theme_storage::active_selection(db).await?;
-    let selected = theme_storage::select_template(
-        &block.kind,
-        original_template,
-        active_id.as_deref(),
-        active_alias.as_deref(),
-        active_template,
-    );
-    render_selected(block, &fields, selected)
-}
-
-pub async fn save_page(
-    db: &SqlitePool,
-    hooks: &HookDispatcher,
-    block: &Block,
-) -> ApiResult<RenderedBlock> {
-    // A converted homepage must reject *every* legacy write with 409,
-    // including requests whose legacy descriptor no longer resolves.
-    // The transaction in save_home_page_and_render repeats the guard under
-    // the writer lock to close the race with a concurrent Builder Save.
-    crate::storage::builder::legacy_page(db).await?;
-    // The source schema is immutable once a package is installed. Validate
-    // before acquiring a SQLite write lock; render + homepage write observe
-    // one active-theme version inside the same write transaction.
-    let (original_template, fields) = load_theme_block(db, &block.kind).await?;
-    block
-        .validate_against_fields(&fields)
-        .map_err(ApiError::bad_request)?;
-    let rendered =
-        theme_storage::save_home_page_and_render(db, block, original_template, |selected| {
-            render_selected(block, &fields, selected)
-        })
-        .await?;
-    // The SQLite autocommit has completed. Notifications cannot invalidate this save.
-    dispatch_saved_hook(hooks, json!({ "block_type": block.kind })).await;
-    Ok(rendered)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        plugin::PluginManager,
-        storage::{
-            builder::{read as builder_read, save_and_render as builder_save_and_render},
-            page::{insert_theme_block, load_home_page},
-        },
-        theme::{BlockDescriptor, Fields, Theme},
-    };
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
-
-    #[tokio::test]
-    async fn save_commits_before_hooks_and_keeps_data_after_handler_failure() {
-        let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
-        let fields = Fields::from([("title".into(), "Title".into())]);
-        insert_theme_block(
-            &db,
-            &Theme {
-                descriptor: BlockDescriptor {
-                    id: "sample/banner".into(),
-                    fields,
-                },
-                template: "<h1>{{ values.title }}</h1>".into(),
-                content_list_template: None,
-                content_single_template: None,
-                compatible_block_id: None,
-            },
-        )
-        .await
-        .unwrap();
-        let block = Block {
-            kind: "sample/banner".into(),
-            values: Fields::from([("title".into(), "Saved title".into())]),
-        };
-        let observed = Arc::new(AtomicBool::new(false));
-        let mut hooks = HookDispatcher::new(Arc::new(PluginManager::new(db.clone(), false)));
-        let observed_by_handler = observed.clone();
-        let handler_db = db.clone();
-        hooks
-            .register_handler(
-                "core/check_commit",
-                HookEvent::PageAfterSave,
-                1,
-                move |event| {
-                    let db = handler_db.clone();
-                    let observed = observed_by_handler.clone();
-                    Box::pin(async move {
-                        assert_eq!(
-                            load_home_page(&db).await.unwrap().unwrap().values["title"],
-                            "Saved title"
-                        );
-                        assert_eq!(event.payload["block_type"], "sample/banner");
-                        observed.store(true, Ordering::SeqCst);
-                        Err("expected handler failure".into())
-                    })
-                },
-            )
-            .unwrap();
-        hooks
-            .register_handler("core/panic", HookEvent::PageAfterSave, 2, |_| {
-                Box::pin(async { panic!("expected handler panic") })
-            })
-            .unwrap();
-        // Preview does not write or dispatch.
-        assert!(
-            render_block(&db, &block)
-                .await
-                .unwrap()
-                .html
-                .contains("Saved title")
-        );
-        assert!(load_home_page(&db).await.unwrap().is_none());
-        assert!(!observed.load(Ordering::SeqCst));
-        assert!(
-            save_page(&db, &hooks, &block)
-                .await
-                .unwrap()
-                .html
-                .contains("Saved title")
-        );
-        assert!(observed.load(Ordering::SeqCst));
-        assert_eq!(load_home_page(&db).await.unwrap().unwrap(), block);
-        let invalid = Block {
-            kind: "missing/block".into(),
-            values: block.values.clone(),
-        };
-        assert!(save_page(&db, &hooks, &invalid).await.is_err());
-        assert_eq!(load_home_page(&db).await.unwrap().unwrap(), block);
-    }
-
-    #[tokio::test]
-    async fn builder_save_commits_before_hook_failure_and_never_exposes_draft() {
-        let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
-        let draft = BuilderDocument::from_json(
-            br#"{"schema_version":1,"sections":[{"id":"section-root","children":[{"id":"row-root","children":[{"id":"column-root","children":[{"id":"heading-root","type":"core/text","props":{"text":"Committed"}}]}]}]}]}"#,
-        ).unwrap();
-        let observed = Arc::new(AtomicBool::new(false));
-        let mut hooks = HookDispatcher::new(Arc::new(PluginManager::new(db.clone(), false)));
-        let observed_copy = observed.clone();
-        let observer_db = db.clone();
-        hooks
-            .register_handler(
-                "core/builder_commit_check",
-                HookEvent::PageAfterSave,
-                1,
-                move |event| {
-                    let observed = observed_copy.clone();
-                    let db = observer_db.clone();
-                    Box::pin(async move {
-                        let committed = builder_read(&db).await.unwrap();
-                        assert_eq!(committed.version, 2);
-                        assert!(committed.saved.is_some());
-                        assert_eq!(
-                            event.payload,
-                            json!({"block_type": "core/layout", "layout_version": 2})
-                        );
-                        observed.store(true, Ordering::SeqCst);
-                        Err("expected hook failure after commit".to_string())
-                    })
-                },
-            )
-            .unwrap();
-
-        let (version, rendered) =
-            builder_save_and_render(&db, &draft, 1, |current, document, bindings, _lists| {
-                render_builder_resolved(current, document, false, bindings)
-            })
-            .await
-            .unwrap();
-        assert_eq!(version, 2);
-        assert!(rendered.html.contains("Committed"));
-        assert!(!observed.load(Ordering::SeqCst));
-        dispatch_saved_hook(&hooks, layout_hook_payload(&draft, version)).await;
-        assert!(observed.load(Ordering::SeqCst));
-        assert_eq!(builder_read(&db).await.unwrap().saved, Some(draft.clone()));
-        let failure =
-            builder_save_and_render(&db, &draft, 1, |current, document, bindings, _lists| {
-                render_builder_resolved(current, document, false, bindings)
-            })
-            .await
-            .unwrap_err();
-        assert_eq!(failure.0, axum::http::StatusCode::PRECONDITION_FAILED);
-        assert_eq!(builder_read(&db).await.unwrap().version, 2);
-    }
-
-    #[test]
-    fn single_legacy_node_uses_original_m3_hook_block_type() {
-        let doc = BuilderDocument::from_json(
-            br#"{"schema_version":1,"sections":[{"id":"section-root","children":[{"id":"row-root","children":[{"id":"column-root","children":[{"id":"block-root","type":"legacy/block","props":{"block_id":"sample/banner","values":{"title":"Secret draft"}}}]}]}]}]}"#,
-        ).unwrap();
-        assert_eq!(
-            layout_hook_payload(&doc, 42),
-            json!({"block_type": "sample/banner"})
-        );
-        let empty = BuilderDocument::empty();
-        assert_eq!(
-            layout_hook_payload(&empty, 3),
-            json!({"block_type": "core/layout", "layout_version": 3})
-        );
-    }
-}
-
 pub fn render_plugin_block_csec(
     block_id: &str,
     template_source: &str,
@@ -2058,6 +1673,7 @@ pub fn render_plugin_block_csec(
     render_plugin_block_csec_with_budget(block_id, template_source, values, &mut budget)
 }
 
+#[cfg(test)]
 pub fn render_plugin_block_csec_with_budget(
     block_id: &str,
     template_source: &str,
@@ -2073,6 +1689,7 @@ pub fn render_plugin_block_csec_with_budget(
     )
 }
 
+#[cfg(test)]
 pub fn render_plugin_block_csec_with_budget_and_config(
     block_id: &str,
     template_source: &str,
@@ -2189,22 +1806,38 @@ mod m6_s05_tests {
             }],
         };
 
-        let mut active_state = HomeState {
-            active_id: None,
-            active_alias: None,
-            active_template: None,
-            themes: BTreeMap::new(),
-            saved: Some(doc.clone()),
-            legacy: None,
-            version: 1,
+        let mut declared = BTreeMap::new();
+        let schema: opendash_core::block_schema::BlockSchemaV1 =
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 1,
+                "id": "acme-plugin/hero",
+                "title": "Hero",
+                "category": "content",
+                "render": "render.html",
+                "fields": [
+                    { "type": "text", "key": "title", "label": "Title" }
+                ]
+            }))
+            .unwrap();
+        declared.insert(
+            "acme-plugin/hero".to_owned(),
+            crate::storage::page::RegisteredBlockDef {
+                block_id: "acme-plugin/hero".to_owned(),
+                owner: opendash_core::registry::ResourceOwner::Plugin("acme-plugin".into()),
+                status: opendash_core::registry::ProviderStatus::Active,
+                declaration_state: opendash_core::registry::DeclarationState::Declared,
+                schema: opendash_core::block_schema::RegisteredBlockSchema {
+                    schema,
+                    legacy_mode: false,
+                },
+                template: "<section class=\"hero\">{{ title }}</section>".to_owned(),
+                revision_digest: "rev-test-1".to_owned(),
+            },
+        );
+        let active_state = BuilderRenderContext {
+            declared_blocks: declared,
             ..Default::default()
         };
-        crate::storage::builder::register_plugin_block_template(
-            &mut active_state,
-            "acme-plugin/hero",
-            "<section class=\"hero\">{{ title }}</section>",
-        )
-        .expect("register plugin block template");
 
         let rendered_active = render_builder_with_lists(
             &active_state,
@@ -2223,17 +1856,8 @@ mod m6_s05_tests {
         assert!(rendered_active.html.contains("Hello"));
         assert!(rendered_active.diagnostics.is_empty());
 
-        // Disabled plugin: block absent from state.themes -> safe fallback without error
-        let disabled_state = HomeState {
-            active_id: None,
-            active_alias: None,
-            active_template: None,
-            themes: BTreeMap::new(),
-            saved: Some(doc.clone()),
-            legacy: None,
-            version: 1,
-            ..Default::default()
-        };
+        // Disabled plugin: block absent from declared_blocks -> safe fallback without error
+        let disabled_state = BuilderRenderContext::default();
         let rendered_disabled = render_builder_with_lists(
             &disabled_state,
             &doc,
@@ -2277,16 +1901,7 @@ mod m6_s05_tests {
                 }],
             }],
         };
-        let state = HomeState {
-            version: 1,
-            saved: Some(doc.clone()),
-            legacy: None,
-            themes: BTreeMap::new(),
-            active_id: None,
-            active_alias: None,
-            active_template: None,
-            ..Default::default()
-        };
+        let state = BuilderRenderContext::default();
         let mut lists = ListResults::new();
         lists.insert(
             "list-1".into(),
@@ -2326,16 +1941,7 @@ mod m6_s05_tests {
             ColumnNode, ContentSlotProps, ElementNode, HeadingProps, PatternRefProps, RowNode,
             SectionNode, TemplatePartProps,
         };
-        let state = HomeState {
-            version: 1,
-            saved: None,
-            legacy: None,
-            themes: BTreeMap::new(),
-            active_id: None,
-            active_alias: None,
-            active_template: None,
-            ..Default::default()
-        };
+        let state = BuilderRenderContext::default();
         let pattern_doc = BuilderDocument {
             schema_version: 1,
             sections: vec![SectionNode {
@@ -2503,8 +2109,7 @@ mod m6_s05_tests {
 
     #[test]
     fn renders_all_five_core_blocks_with_scoped_css_responsive_breakpoints_and_budget_isolation() {
-        let state = HomeState {
-            version: 1,
+        let state = BuilderRenderContext {
             declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
             ..Default::default()
         };
@@ -2771,7 +2376,7 @@ mod m6_s05_tests {
             NodeVisibility, RowNode, SectionNode,
         };
 
-        let state = HomeState::default();
+        let state = BuilderRenderContext::default();
         let cache = BlockTemplateCache::new();
         let doc = BuilderDocument {
             schema_version: 1,
@@ -2920,8 +2525,7 @@ mod m6_s05_tests {
                 revision_digest: "rev-demo-1".into(),
             },
         );
-        let state = HomeState {
-            version: 1,
+        let state = BuilderRenderContext {
             declared_blocks: declared,
             ..Default::default()
         };
@@ -3166,8 +2770,7 @@ mod m6_s05_tests {
         };
 
         let cache = BlockTemplateCache::new();
-        let state_with_links = HomeState {
-            version: 1,
+        let state_with_links = BuilderRenderContext {
             declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
             site_options: BTreeMap::from([
                 (
@@ -3212,8 +2815,7 @@ mod m6_s05_tests {
         assert!(decoded_html.contains("target=\"_blank\" rel=\"noopener noreferrer\""));
 
         // Empty global links: public omits output, preview shows configuration hint.
-        let state_empty = HomeState {
-            version: 1,
+        let state_empty = BuilderRenderContext {
             declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
             ..Default::default()
         };

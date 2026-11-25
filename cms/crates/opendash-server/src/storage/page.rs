@@ -4,7 +4,7 @@ use std::{
 };
 
 use opendash_core::{
-    block_schema::{BlockSchemaV1, RegisteredBlockSchema, upcast_legacy_descriptor},
+    block_schema::{BlockSchemaV1, RegisteredBlockSchema},
     builder::BuilderDocument,
     builder_blocks::{
         ExtractedBlockRefs, extract_block_refs_lenient_with_schemas,
@@ -14,15 +14,11 @@ use opendash_core::{
         ContentFieldType, ContentSupport, EffectiveContentSchema, FieldRole, PublicExposure,
     },
     registry::{DeclarationState, OwnedDescriptor, ProviderStatus, RegistryCatalog, ResourceOwner},
-    theme::BlockDescriptor,
 };
 use sha2::{Digest, Sha256};
 use sqlx::{SqliteConnection, SqlitePool};
 
-use crate::{
-    error::{ApiError, ApiResult},
-    theme::{Block, Fields, Theme},
-};
+use crate::error::{ApiError, ApiResult};
 
 #[derive(Debug, Clone)]
 pub struct RegisteredBlockDef {
@@ -247,33 +243,6 @@ pub async fn load_unified_block_catalog_in_conn(
             },
         );
     }
-    let legacy_rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT id, fields_json FROM theme_blocks ORDER BY id")
-            .fetch_all(&mut *conn)
-            .await?;
-    for (id, fields_json) in legacy_rows {
-        if catalog.get(&id).is_some() {
-            continue;
-        }
-        let Some((namespace, _)) = id.split_once('/') else {
-            continue;
-        };
-        let owner = ResourceOwner::Theme(namespace.to_owned());
-        let fields: Fields = serde_json::from_str(&fields_json)?;
-        let desc = BlockDescriptor {
-            id: id.clone(),
-            fields,
-        };
-        catalog.insert_loaded(
-            id,
-            OwnedDescriptor {
-                owner,
-                status: ProviderStatus::Active,
-                declaration_state: DeclarationState::Declared,
-                descriptor: upcast_legacy_descriptor(&desc),
-            },
-        );
-    }
     Ok(catalog)
 }
 
@@ -304,19 +273,6 @@ pub async fn sync_owner_blocks_in_tx(
         {
             return Err(ApiError::conflict(
                 "ID block đã thuộc quyền sở hữu của gói khác.",
-            ));
-        }
-
-        let legacy_exists: Option<String> =
-            sqlx::query_scalar("SELECT id FROM theme_blocks WHERE id = ?")
-                .bind(&schema.id)
-                .fetch_optional(&mut *conn)
-                .await?;
-        if legacy_exists.is_some()
-            && (owner_kind != "theme" || !schema.id.starts_with(&format!("{owner_id}/")))
-        {
-            return Err(ApiError::conflict(
-                "ID block xung đột với theme_blocks của gói khác.",
             ));
         }
     }
@@ -549,42 +505,6 @@ pub async fn resync_plugin_block_acls_in_tx(conn: &mut SqliteConnection) -> ApiR
         }
     }
 
-    // Homepage ACL projections are independent of the Entry's publication
-    // policy. They take effect immediately when the Builder document is saved.
-    let homepage_json: Option<String> =
-        sqlx::query_scalar("SELECT document_json FROM builder_homepage WHERE id = 1")
-            .fetch_optional(&mut *conn)
-            .await?
-            .flatten();
-    let homepage_refs = homepage_json
-        .as_deref()
-        .and_then(|raw| BuilderDocument::from_json(raw.as_bytes()).ok())
-        .map(|doc| active_document_refs(&doc, &catalog))
-        .unwrap_or_default();
-    let homepage_roles = active_media_roles_in_conn(&mut *conn, &homepage_refs).await?;
-    sqlx::query("DELETE FROM builder_homepage_media")
-        .execute(&mut *conn)
-        .await?;
-    sqlx::query("DELETE FROM builder_homepage_video_refs")
-        .execute(&mut *conn)
-        .await?;
-    for (media_id, role) in homepage_roles {
-        if role == "image" {
-            sqlx::query("INSERT INTO builder_homepage_media(media_id) VALUES (?)")
-                .bind(media_id)
-                .execute(&mut *conn)
-                .await?;
-        } else {
-            sqlx::query(
-                "INSERT INTO builder_homepage_video_refs(media_id, ref_role) VALUES (?, ?)",
-            )
-            .bind(media_id)
-            .bind(role)
-            .execute(&mut *conn)
-            .await?;
-        }
-    }
-
     let overrides: Vec<(i64, String)> =
         sqlx::query_as("SELECT id, ast_json FROM template_overrides ORDER BY id")
             .fetch_all(&mut *conn)
@@ -609,161 +529,6 @@ pub async fn resync_plugin_block_acls_in_tx(conn: &mut SqliteConnection) -> ApiR
         }
     }
     Ok(())
-}
-
-#[derive(Debug, Clone)]
-pub struct BlockDefinition {
-    pub fields: Fields,
-    pub template: String,
-}
-
-/// SQLite is authoritative. A fresh snapshot avoids stale state across restart/install.
-pub async fn load_block_catalog(db: &SqlitePool) -> ApiResult<RegistryCatalog<BlockDefinition>> {
-    let rows: Vec<(String, String, String)> =
-        sqlx::query_as("SELECT id, fields_json, template FROM theme_blocks ORDER BY id")
-            .fetch_all(db)
-            .await?;
-    let mut catalog = RegistryCatalog::new();
-    for (id, fields, template) in rows {
-        if !opendash_core::id::valid_namespaced_block_id(&id) {
-            return Err(ApiError::internal("Invalid stored block ID"));
-        }
-        let owner = ResourceOwner::Theme(id.split_once('/').unwrap().0.to_owned());
-        catalog
-            .register(
-                id,
-                owner,
-                BlockDefinition {
-                    fields: serde_json::from_str(&fields)?,
-                    template,
-                },
-            )
-            .map_err(|e| ApiError::conflict(e.to_string()))?;
-    }
-    Ok(catalog)
-}
-
-pub async fn list_theme_blocks(db: &SqlitePool) -> ApiResult<BTreeMap<String, Fields>> {
-    Ok(load_block_catalog(db)
-        .await?
-        .iter()
-        .map(|(id, entry)| (id.clone(), entry.descriptor.fields.clone()))
-        .collect())
-}
-
-pub async fn insert_theme_block(db: &SqlitePool, theme: &Theme) -> ApiResult<()> {
-    let mut catalog = load_block_catalog(db).await?;
-    let owner = ResourceOwner::Theme(
-        theme
-            .descriptor
-            .id
-            .split_once('/')
-            .ok_or_else(|| ApiError::bad_request("Invalid block namespace"))?
-            .0
-            .into(),
-    );
-    catalog
-        .register(
-            theme.descriptor.id.clone(),
-            owner,
-            BlockDefinition {
-                fields: theme.descriptor.fields.clone(),
-                template: theme.template.clone(),
-            },
-        )
-        .map_err(|e| ApiError::conflict(e.to_string()))?;
-    // Explicit aliases must resolve to an already-installed block with the
-    // EXACT field keys. Labels may differ; missing/extra fields cannot be
-    // silently dropped. Validate before creating any persistent state.
-    if let Some(alias) = &theme.compatible_block_id {
-        let source = catalog
-            .get(alias)
-            .ok_or_else(|| ApiError::bad_request("Alias trỏ đến block chưa được cài đặt."))?;
-        if source
-            .descriptor
-            .fields
-            .keys()
-            .ne(theme.descriptor.fields.keys())
-        {
-            return Err(ApiError::bad_request(
-                "Field keys của alias không khớp block nguồn.",
-            ));
-        }
-    }
-    // The UNIQUE constraint still arbitrates concurrent installs after this snapshot check.
-    let result = sqlx::query(
-        "INSERT INTO theme_blocks
-                     (id, fields_json, template, content_list_template, content_single_template, compatible_block_id)
-                     VALUES (?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&theme.descriptor.id)
-    .bind(serde_json::to_string(&theme.descriptor.fields)?)
-    .bind(&theme.template)
-    .bind(&theme.content_list_template)
-    .bind(&theme.content_single_template)
-    .bind(&theme.compatible_block_id)
-    .execute(db)
-    .await;
-    match result {
-        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
-            Err(ApiError::conflict("ID block đã có trong dữ liệu."))
-        }
-        result => {
-            result?;
-            Ok(())
-        }
-    }
-}
-
-/// Explicit active theme controls CPT templates. Without an explicit activation
-/// preserve the pre-0011 home_page-selected template for migrated websites.
-pub async fn active_content_templates(
-    db: &SqlitePool,
-) -> ApiResult<(Option<String>, Option<String>)> {
-    let templates: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT
-            CASE WHEN r.legacy_block_id IS NULL THEN legacy.content_list_template
-                 ELSE active.content_list_template END,
-            CASE WHEN r.legacy_block_id IS NULL THEN legacy.content_single_template
-                 ELSE active.content_single_template END
-         FROM theme_active_selection AS a
-         LEFT JOIN theme_revisions AS r ON r.revision_id = a.revision_id
-         LEFT JOIN theme_blocks AS active ON active.id = r.legacy_block_id
-         LEFT JOIN home_page AS p ON p.id = 1
-         LEFT JOIN theme_blocks AS legacy ON legacy.id = p.block_id
-         WHERE a.id = 1",
-    )
-    .fetch_optional(db)
-    .await?;
-    Ok(templates.unwrap_or((None, None)))
-}
-
-pub async fn load_theme_block(db: &SqlitePool, block_id: &str) -> ApiResult<(String, Fields)> {
-    let catalog = load_block_catalog(db).await?;
-    let entry = catalog
-        .get(block_id)
-        .ok_or_else(|| ApiError::bad_request("Block not found"))?;
-    if entry.status != opendash_core::registry::ProviderStatus::Active {
-        return Err(ApiError::bad_request("Block provider is inactive"));
-    }
-    Ok((
-        entry.descriptor.template.clone(),
-        entry.descriptor.fields.clone(),
-    ))
-}
-
-pub async fn load_home_page(db: &SqlitePool) -> ApiResult<Option<Block>> {
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT block_id, values_json FROM home_page WHERE id = 1")
-            .fetch_optional(db)
-            .await?;
-    row.map(|(kind, values)| {
-        Ok(Block {
-            kind,
-            values: serde_json::from_str(&values)?,
-        })
-    })
-    .transpose()
 }
 
 #[cfg(test)]
@@ -947,15 +712,33 @@ mod s02_block_registry_tests {
         .await
         .unwrap();
         resync_plugin_block_acls_in_tx(&mut conn).await.unwrap();
-        let first: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM builder_homepage_media")
+        let inert_media: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM builder_homepage_media")
             .fetch_one(&mut *conn)
             .await
             .unwrap();
-        assert_eq!(first, 1);
+        assert_eq!(
+            inert_media, 0,
+            "resync must leave builder_homepage_media inert"
+        );
 
-        // A published Page can project its public Builder body, but changing
-        // the effective body field to private must revoke that grant even
-        // while the plugin itself remains active.
+        // A published Page can project its public Builder body, and template
+        // overrides track active vs inactive plugin blocks independently of the
+        // inert builder_homepage row.
+        sqlx::query(
+            "INSERT INTO template_overrides(target_kind, canonical_target_key, target_json, ast_json, version)
+             VALUES ('index', 'index', '{\"kind\":\"index\"}', ?, 1)",
+        )
+        .bind(&original_json)
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+        resync_plugin_block_acls_in_tx(&mut conn).await.unwrap();
+        let ov_initial: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM template_override_media_refs")
+                .fetch_one(&mut *conn)
+                .await
+                .unwrap();
+        assert_eq!(ov_initial, 1);
         let body = serialize_builder_document_to_blocks(&document).unwrap();
         sqlx::query(
             "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
@@ -1014,7 +797,7 @@ mod s02_block_registry_tests {
         .await
         .unwrap();
         resync_plugin_block_acls_in_tx(&mut conn).await.unwrap();
-        let revoked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM builder_homepage_media")
+        let revoked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM template_override_media_refs")
             .fetch_one(&mut *conn)
             .await
             .unwrap();
@@ -1024,7 +807,7 @@ mod s02_block_registry_tests {
             .await
             .unwrap();
         resync_plugin_block_acls_in_tx(&mut conn).await.unwrap();
-        let restored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM builder_homepage_media")
+        let restored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM template_override_media_refs")
             .fetch_one(&mut *conn)
             .await
             .unwrap();

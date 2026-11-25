@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     Extension, Json,
@@ -21,13 +21,7 @@ use crate::{
     auth::{require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
-    page::{render_block, save_page},
-    routes::public::rendered,
-    storage::{
-        builder as builder_storage,
-        page::{list_theme_blocks, load_unified_block_catalog_in_conn},
-    },
-    theme::{Block, Fields},
+    storage::{builder as builder_storage, page::load_unified_block_catalog_in_conn},
 };
 
 pub async fn builder() -> Response {
@@ -119,14 +113,6 @@ mod public_tailwind_asset_tests {
     }
 }
 
-pub async fn registry(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-) -> ApiResult<Json<BTreeMap<String, Fields>>> {
-    require_session(&headers, &db).await?;
-    Ok(Json(list_theme_blocks(&db).await?))
-}
-
 #[derive(Debug, Serialize)]
 pub struct BlockCatalogItemDto {
     pub block_id: String,
@@ -212,47 +198,6 @@ mod block_schema_api_tests {
                 .is_some()
         );
     }
-}
-
-pub async fn page(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-) -> ApiResult<Json<Option<Block>>> {
-    require_session(&headers, &db).await?;
-    Ok(Json(builder_storage::legacy_page(&db).await?))
-}
-
-pub async fn preview(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-    Json(block): Json<Block>,
-) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
-    Ok(builder_rendered(render_block(&db, &block).await?))
-}
-
-pub async fn save(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
-    State(db): State<SqlitePool>,
-    State(hooks): State<Arc<HookDispatcher>>,
-    headers: HeaderMap,
-    Json(block): Json<Block>,
-) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
-    Ok(builder_rendered(save_page(&db, &hooks, &block).await?))
-}
-
-fn builder_rendered(result: crate::page::RenderedBlock) -> Response {
-    let mut response = rendered(result.html);
-    response.headers_mut().insert(
-        header::CACHE_CONTROL,
-        axum::http::HeaderValue::from_static("no-store"),
-    );
-    response.headers_mut().insert(
-        "X-OpenDash-Block-Visibility",
-        axum::http::HeaderValue::from_static(result.visibility),
-    );
-    response
 }
 
 fn builder_headers(version: Option<i64>) -> HeaderMap {

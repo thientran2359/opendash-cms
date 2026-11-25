@@ -20,7 +20,6 @@ import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
 import { clearPermalinkDrafts, discardPermalinkDraft, PermalinkSettingsPage } from './features/settings/PermalinkSettingsPage.tsx';
 import { clearReadingDrafts, discardReadingDraft, ReadingSettingsPanel } from './features/settings/ReadingSettingsPanel.tsx';
-import { BuilderWorkspace } from './builder/BuilderWorkspace.tsx';
 import { StudioWorkspace } from './studio/StudioWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
@@ -65,11 +64,6 @@ function editorIdentity(route: ParsedRoute, hash: string): string | null {
   if (route.sub === 'edit' && route.entryId != null) return `${typeKey}:${route.entryId}`;
   const uuid = draftUuidFromHash(hash);
   return uuid ? `${typeKey}:new:${uuid}` : null;
-}
-
-function builderIdentity(route: ParsedRoute): string | null {
-  if (route.view !== 'builder') return null;
-  return `${route.sub}:${route.templateRole ?? 'header'}:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
 }
 
 function studioIdentity(route: ParsedRoute): string | null {
@@ -118,7 +112,6 @@ const AppContent: React.FC = () => {
     readingDirtyRef.current = value;
     setReadingDirty(value);
   }, []);
-  const [builderDirty, setBuilderDirty] = useState(false);
   const [studioDirty, setStudioDirty] = useState(false);
   const studioDirtyRef = useRef(false);
   const markStudioDirty = useCallback((value: boolean) => {
@@ -148,16 +141,13 @@ const AppContent: React.FC = () => {
   // account has logged in. Only the session that issued the request may react
   // to its 401; otherwise it could log out the *new* account and lose drafts.
   const authSessionEpochRef = useRef(0);
-  const builderDirtyRef = useRef(builderDirty);
-  builderDirtyRef.current = builderDirty;
-  const lastBuilderRouteRef = useRef<ParsedRoute | null>(
-    route.view === 'builder' && route.sub === 'builder' ? route : null,
-  );
-  if (route.view === 'builder' && route.sub === 'builder') lastBuilderRouteRef.current = route;
-  const lastStudioRouteRef = useRef<ParsedRoute | null>(
-    route.view === 'studio' || route.view === 'studio-entry' ? route : null,
-  );
-  if (route.view === 'studio' || route.view === 'studio-entry') lastStudioRouteRef.current = route;
+  const isStudioRoute = route.view === 'studio' || route.view === 'studio-entry';
+  const lastStudioRouteRef = useRef<ParsedRoute | null>(null);
+  if (user && isStudioRoute) {
+    lastStudioRouteRef.current = isRouteAllowed(route, user.role) ? route : null;
+  } else if (user && lastStudioRouteRef.current && !isRouteAllowed(lastStudioRouteRef.current, user.role)) {
+    lastStudioRouteRef.current = null;
+  }
 
   // Auth inputs
   const [authUsername, setAuthUsername] = useState<string>('');
@@ -243,9 +233,6 @@ const AppContent: React.FC = () => {
     const nextEditor = editorIdentity(next, destination);
     const leavingDirtyEditor = currentEditor !== null && currentEditor !== nextEditor &&
       editorDraftStore.hasDirtyKey(currentEditor);
-    const switchingBuilderTarget = current.view === 'builder'
-      && builderIdentity(current) !== builderIdentity(next);
-    const leavingBuilder = switchingBuilderTarget && builderDirtyRef.current;
     const switchingStudioTarget = (current.view === 'studio' || current.view === 'studio-entry')
       && studioIdentity(current) !== studioIdentity(next);
     const leavingStudio = switchingStudioTarget && studioDirtyRef.current;
@@ -258,11 +245,9 @@ const AppContent: React.FC = () => {
       && acceptedHashRef.current !== destination && readingDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    const hasDirty = leavingDirtyEditor || leavingBuilder || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading;
+    const hasDirty = leavingDirtyEditor || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading;
     if (!hasDirty) return true;
-    const approved = window.confirm(switchingBuilderTarget
-        ? tStatic("app.discard_builder")
-        : leavingStudio
+    const approved = window.confirm(leavingStudio
           ? tStatic("app.discard_studio")
         : leavingTerm
           ? tStatic("app.discard_taxonomy")
@@ -341,7 +326,7 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || studioDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(studioDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
@@ -449,19 +434,15 @@ const AppContent: React.FC = () => {
         setSiteInstanceId(nextSiteId);
         setLocaleState(EMPTY_ADMIN_LOCALE_STATE);
         setBuilderReset(value => value + 1);
-        setBuilderDirty(false);
         markStudioDirty(false);
         lastStudioRouteRef.current = null;
-        lastBuilderRouteRef.current = null;
         markPatternsDirty(false);
       } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
         editorDraftStore.clear();
         setBuilderReset(value => value + 1);
-        setBuilderDirty(false);
         markStudioDirty(false);
         lastStudioRouteRef.current = null;
-        lastBuilderRouteRef.current = null;
         markPatternsDirty(false);
       } else {
         setAuthGeneration(g => g + 1);
@@ -485,7 +466,7 @@ const AppContent: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || builderDirty || studioDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm(tStatic("app.discard_logout"))) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || studioDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm(tStatic("app.discard_logout"))) {
       return;
     }
     setIsProcessing(true);
@@ -510,10 +491,8 @@ const AppContent: React.FC = () => {
       setContentDirty(false);
       markPermalinkDirty(false);
       markReadingDirty(false);
-      setBuilderDirty(false);
       markStudioDirty(false);
       lastStudioRouteRef.current = null;
-      lastBuilderRouteRef.current = null;
       setPostsDirty(false);
       setPagesDirty(false);
       markPatternsDirty(false);
@@ -657,16 +636,8 @@ const AppContent: React.FC = () => {
       ]))}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || builderDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
-      sidebarContent={lastBuilderRouteRef.current ? <BuilderWorkspace
-        key={builderIdentity(lastBuilderRouteRef.current) ?? 'header'}
-        route={lastBuilderRouteRef.current}
-        active={route.view === 'builder' && isRouteAllowed(route, user?.role ?? 'editor')}
-        onNavigateHash={navigateHash}
-        user={user} csrfToken={csrfToken} resetToken={builderReset} themeRevision={themeRevision}
-        onDirtyChange={setBuilderDirty} onApiError={handleApiError}
-      /> : null}
-      studioContent={lastStudioRouteRef.current ? <StudioWorkspace
+      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
+      studioContent={lastStudioRouteRef.current && (!user || isRouteAllowed(lastStudioRouteRef.current, user.role)) ? <StudioWorkspace
         key={studioIdentity(lastStudioRouteRef.current) ?? 'studio-mode1'}
         route={route.view === 'studio' || route.view === 'studio-entry' ? route : lastStudioRouteRef.current}
         active={(route.view === 'studio' || route.view === 'studio-entry') && isRouteAllowed(route, user?.role ?? 'editor')}
@@ -694,8 +665,13 @@ const AppContent: React.FC = () => {
           siteInstanceId={siteInstanceId}
           selectedTypeKey={selectedSchemaTypeKey}
           onSelectTypeKey={key => {
-            if (key) navigateHash(`#/appearance/content-types/${key}`);
-            else setSelectedSchemaTypeKey(null);
+            if (key) {
+              if (routeRef.current.view === 'settings' && routeRef.current.sub === 'content-types') {
+                navigateHash(`#/appearance/content-types/${key}`);
+              }
+            } else {
+              setSelectedSchemaTypeKey(null);
+            }
           }}
           csrfToken={csrfToken}
           onApiError={scopedTaxonomyApiError}

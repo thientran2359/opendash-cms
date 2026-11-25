@@ -12,7 +12,7 @@ use sqlx::SqlitePool;
 
 use crate::{
     error::{ApiError, ApiResult},
-    package::validate_v2_relative_path,
+    package::validate_theme_relative_path,
     storage::{
         settings::{self, ThemeOptionDef, ThemeOptionType},
         theme::{ThemeSourceFormat, find_revision_by_id, get_active_selection},
@@ -297,7 +297,7 @@ fn validate_sample_manifest(
                 "object_key của sample media không hợp lệ hoặc trùng lặp.".into(),
             ));
         }
-        let safe_rel = validate_v2_relative_path(&m.path).map_err(|_| {
+        let safe_rel = validate_theme_relative_path(&m.path).map_err(|_| {
             ApiError(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Đường dẫn media trong sample không hợp lệ.".into(),
@@ -1108,7 +1108,7 @@ pub async fn execute_sample_import_with_cutpoint(
                 .iter()
                 .find(|x| x.object_key == item.object_key)
                 .ok_or_else(|| ApiError::internal("Không tìm thấy media item trong sample."))?;
-            let safe_rel = validate_v2_relative_path(&m.path).map_err(ApiError::bad_request)?;
+            let safe_rel = validate_theme_relative_path(&m.path).map_err(ApiError::bad_request)?;
             let mut full_path = rev_dir.clone();
             for seg in safe_rel.split('/') {
                 full_path.push(seg);

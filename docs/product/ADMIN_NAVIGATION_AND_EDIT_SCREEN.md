@@ -52,4 +52,4 @@ Thanh màn hình (header_bar): breadcrumb / tiêu đề / Xem trước / Đăng 
 
 - Mobile (`< 1024px`) xếp thành 1 cột theo thứ tự `header_bar → main_top → main_primary → main_bottom → sidebar`.
 - Các field thuộc nội dung dùng chung trạng thái chưa lưu (dirty state), validation và nút Lưu nguyên tử (`CompositeEntrySaveInput`); các panel hành động độc lập (`PanelKind::Action`) dùng nút và phản hồi riêng.
-- Mở Visual Builder từ màn hình Page đi vào route `#/builder?template=page&type=page&entry=<id>` để chỉnh đúng trang đó.
+- Mở Visual Builder cho entry (`page`, CPT có bật Builder) đi vào OpenDash Studio Mode 2 tại `#/studio/entry/:typeKey/:id`, và chỉnh Pattern đi vào `#/studio/entry/pattern/:id` (chỉ Admin; `BuilderWorkspace` tại `#/builder` đã ngừng sử dụng, chỉ giữ HTTP redirect `GET /builder` → `/admin/#/studio` và chuyển hướng hash tương thích cho Pattern sang `#/studio/entry/pattern/:id`).

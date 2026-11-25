@@ -93,10 +93,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
     // template_overrides_preview, menus_preview)
     let required_handlers: &[(&str, &[&str])] = &[
         ("auth.rs", &["auth_setup", "auth_login", "auth_logout"]),
-        (
-            "builder.rs",
-            &["save", "entry_builder_put", "entry_builder_reset"],
-        ),
+        ("builder.rs", &["entry_builder_put", "entry_builder_reset"]),
         (
             "contact.rs",
             &[
@@ -115,6 +112,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "field_group_update",
                 "field_group_delete",
                 "editor_layout_put",
+                "content_entry_publication",
             ],
         ),
         (
@@ -126,6 +124,8 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "entry_publication",
                 "entry_composite_create",
                 "entry_composite_update",
+                "entry_translation_create",
+                "entry_table_provider_action",
             ],
         ),
         ("import.rs", &["import_dry_run", "import_execute"]),
@@ -138,6 +138,10 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "menus_delete",
                 "menu_slots_put",
             ],
+        ),
+        (
+            "patterns.rs",
+            &["pattern_create", "pattern_update", "pattern_delete"],
         ),
         (
             "plugin.rs",
@@ -180,7 +184,15 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
         ),
         (
             "taxonomy.rs",
-            &["taxonomy_create", "taxonomy_patch", "taxonomy_delete"],
+            &[
+                "taxonomy_definitions_create",
+                "taxonomy_definitions_patch",
+                "taxonomy_definitions_delete",
+                "taxonomy_create",
+                "taxonomy_patch",
+                "taxonomy_delete",
+                "taxonomy_eligibility_put",
+            ],
         ),
         (
             "themes.rs",

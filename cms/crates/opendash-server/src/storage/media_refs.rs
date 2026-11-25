@@ -110,63 +110,7 @@ pub async fn collect_pins_in_tx(
         }
     }
 
-    // 2. Legacy home_page & theme_blocks
-    let home_rows = sqlx::query("SELECT id, values_json FROM home_page")
-        .fetch_all(&mut *conn)
-        .await?;
-    for row in home_rows {
-        let id: i64 = row.try_get("id")?;
-        let values_json: String = row.try_get("values_json")?;
-        if parse_json_and_check_pin(&values_json, media_id, "home_page")? {
-            push_pin(&mut summary, "legacy_home_page", id.to_string());
-        }
-    }
-
-    let block_rows = sqlx::query("SELECT id, fields_json, template FROM theme_blocks")
-        .fetch_all(&mut *conn)
-        .await?;
-    for row in block_rows {
-        let id: String = row.try_get("id")?;
-        let fields_json: String = row.try_get("fields_json")?;
-        let template: String = row.try_get("template")?;
-        if parse_json_and_check_pin(&fields_json, media_id, "theme_blocks")?
-            || text_contains_media_pin(&template, media_id)
-        {
-            push_pin(&mut summary, "legacy_theme_block", id);
-        }
-    }
-
-    // 3. Builder homepage (document_json + projection ref tables)
-    let builder_rows = sqlx::query("SELECT id, document_json FROM builder_homepage")
-        .fetch_all(&mut *conn)
-        .await?;
-    let mut builder_pinned = false;
-    for row in builder_rows {
-        let id: i64 = row.try_get("id")?;
-        let doc_json: Option<String> = row.try_get("document_json")?;
-        if let Some(raw) = doc_json {
-            if parse_json_and_check_pin(&raw, media_id, "builder_homepage")? {
-                push_pin(&mut summary, "builder_homepage", id.to_string());
-                builder_pinned = true;
-            }
-        }
-    }
-    if !builder_pinned {
-        let proj_count: i64 = sqlx::query_scalar(
-            "SELECT
-                (SELECT COUNT(*) FROM builder_homepage_media WHERE media_id = ?) +
-                (SELECT COUNT(*) FROM builder_homepage_video_refs WHERE media_id = ?)",
-        )
-        .bind(media_id)
-        .bind(media_id)
-        .fetch_one(&mut *conn)
-        .await?;
-        if proj_count > 0 {
-            push_pin(&mut summary, "builder_homepage", "1".to_string());
-        }
-    }
-
-    // 4. Site-owned typed template ASTs (all candidates, including inactive
+    // 2. Site-owned typed template ASTs (all candidates, including inactive
     // themes and unpublished entry selectors). Preserve pins for every saved
     // override independently of public media delivery eligibility.
     let override_rows = sqlx::query("SELECT id, ast_json FROM template_overrides ORDER BY id ASC")

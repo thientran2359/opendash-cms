@@ -145,11 +145,14 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
     );
     let (admin, csrf) = login(&client, &srv.base, "admin", "AdminPassword123!").await;
     let initial = list(&client, &srv.base, &admin).await;
-    assert_eq!(initial["items"].as_array().unwrap().len(), 0);
+    assert!(initial.get("items").is_none());
+    assert!(initial.get("active_id").is_none());
+    assert!(initial.get("homepage_compatible").is_none());
     assert_eq!(initial["revisions"].as_array().unwrap().len(), 1);
     assert_eq!(initial["selection"]["theme_id"], "opendash-starter");
     assert!(initial["selection"]["revision_id"].as_str().is_some());
     assert_eq!(initial["selection"]["version"], 1);
+    assert!(initial["selection"].get("legacy_block_id").is_none());
 
     // Editor has no Admin revision list/activate rights.
     assert_eq!(
@@ -254,8 +257,14 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
     assert_eq!(ids[0], ids[1], "idempotent re-upload retains revision ID");
     assert_ne!(ids[0], ids[2]);
     let starter_selected = list(&client, &srv.base, &admin).await;
-    assert_eq!(starter_selected["items"].as_array().unwrap().len(), 0);
-    assert_eq!(starter_selected["active_id"], Value::Null);
+    assert!(starter_selected.get("items").is_none());
+    assert!(starter_selected.get("active_id").is_none());
+    assert!(starter_selected.get("homepage_compatible").is_none());
+    assert!(
+        starter_selected["selection"]
+            .get("legacy_block_id")
+            .is_none()
+    );
     let rows = starter_selected["revisions"].as_array().unwrap();
     assert_eq!(
         rows.len(),
@@ -362,7 +371,10 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
     assert_eq!(current["selection"]["revision_id"], ids[0]);
     assert_eq!(current["selection"]["theme_id"], "f02-editorial");
     assert_eq!(current["selection"]["version"], 2);
-    assert_eq!(current["active_id"], Value::Null);
+    assert!(current.get("active_id").is_none());
+    assert!(current.get("items").is_none());
+    assert!(current.get("homepage_compatible").is_none());
+    assert!(current["selection"].get("legacy_block_id").is_none());
     assert_eq!(
         client
             .put(format!("{}/api/admin/themes/active", srv.base))

@@ -5,7 +5,12 @@ import { type BuilderViewport } from '../builder/document.ts';
 
 export type StudioSavePolicy =
   | { mode: 'customizer' }
-  | { mode: 'entry'; publicationPolicy: 'immediate' | 'draft_publish'; publicationStatus: 'draft' | 'published' | string };
+  | {
+      mode: 'entry';
+      isPrivatePattern?: boolean;
+      publicationPolicy: 'immediate' | 'draft_publish';
+      publicationStatus: 'draft' | 'published' | string;
+    };
 
 interface Props {
   saving: boolean;
@@ -69,6 +74,9 @@ export const StudioSidebarFooter: React.FC<Props> = ({
         {savePolicy.mode === 'customizer' ? (
           <AdminButton variant="primary" size="sm" disabled={disabled || !canSave}
             onClick={onSaveCustomizer} data-testid="studio-save-btn">{saving ? t("studio.saving") : t("studio.save_changes")}</AdminButton>
+        ) : savePolicy.isPrivatePattern ? (
+          <AdminButton variant="primary" size="sm" disabled={disabled || !canSave}
+            onClick={() => onSaveEntry?.()} data-testid="studio-save-btn">{saving ? t("studio.saving") : t("studio.save_pattern")}</AdminButton>
         ) : savePolicy.publicationPolicy === 'immediate' ? (
           <AdminButton variant="primary" size="sm" disabled={disabled || !canSave}
             onClick={() => onSaveEntry?.()} data-testid="studio-save-btn">{saving ? t("studio.saving") : t("studio.save_and_update")}</AdminButton>

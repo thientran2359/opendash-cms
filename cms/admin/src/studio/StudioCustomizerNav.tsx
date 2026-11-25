@@ -12,13 +12,13 @@ import type {
 import type { StudioTargetGroup, StudioTargetItem } from '../api/studio.ts';
 import type { ThemeOptionDef } from '../api/themes.ts';
 import { BlockSchemaForm } from '../builder/BlockSchemaForm.tsx';
-import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderWorkspace.tsx';
+import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
 import type { StudioMenuRequest } from './StudioBlockTree.tsx';
 import type { BuilderDocument, BuilderViewport, StudioBuilderClipboard } from '../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../components/AdminPrimitives.tsx';
 import { ThemeOptionsForm } from '../features/themes/ThemeOptionsForm.tsx';
 import type { StudioPanelId } from '../shell/router.ts';
-import type { BlockRegistry, BlockSchemaV1 } from '../types.ts';
+import type { BlockSchemaV1 } from '../types.ts';
 import { StudioMenuManager } from './StudioMenuManager.tsx';
 
 interface Props {
@@ -64,7 +64,6 @@ interface Props {
   onSelectTemplateNode: (id: string | null) => void;
   onChangeTemplateDoc: (next: BuilderDocument, nextSelected?: string | null, removedId?: string) => boolean;
   templateDirty: boolean;
-  registry: BlockRegistry;
   viewport: BuilderViewport;
   themeRevision: number;
   patterns: PatternRecord[];
@@ -155,7 +154,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   onSelectTemplateNode,
   onChangeTemplateDoc,
   templateDirty,
-  registry,
   viewport,
   themeRevision,
   patterns,
@@ -531,7 +529,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               selectedId={templateSelectedNodeId}
               onSelect={onSelectTemplateNode}
               onChangeDocument={onChangeTemplateDoc}
-              registry={registry}
               csrfToken={csrfToken}
               viewport={viewport}
               themeRevision={themeRevision}

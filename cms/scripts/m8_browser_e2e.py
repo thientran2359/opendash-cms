@@ -281,19 +281,26 @@ def run_e2e(
             page.wait_for_selector("#user-panel", timeout=15000)
 
             phase("source_visual_builder_navigation")
-            page.locator('#admin-navigation button[data-menu-id="themes"]').click()
-            page.get_by_role("link", name="Visual Builder", exact=True).click()
-            page.locator('[data-testid="builder-workspace"]').wait_for(state="visible")
-            assert page.url.endswith("#/builder"), "Visual Builder did not navigate to #/builder"
-            page.click('button:has-text("+ Section")')
-            page.click('button[title="Thêm row"]')
-            page.click('button[title="Thêm column"]')
-            page.click('button[title="Thêm element"]')
+            page.locator('#admin-navigation button[data-menu-id="studio"]').click()
+            page.locator('[data-testid="studio-workspace"]').wait_for(state="visible")
+            page.locator('[data-testid="studio-nav-root"]').wait_for(state="visible")
+            assert page.url.endswith("#/studio"), "Studio navigation did not navigate to #/studio"
+            page.locator('[data-testid="studio-nav-templates"]').click()
+            page.locator('[data-testid="studio-panel-templates"]').wait_for(state="visible")
+            page.locator('[data-testid="studio-target-part:header"]').click()
+            init_btn = page.locator('[data-testid="studio-init-template-override"]')
+            if init_btn.count() > 0:
+                init_btn.click()
+            page.get_by_role("button", name="Thêm Block").first.click()
+            page.get_by_role("button", name="Heading H1–H6").click()
+            page.get_by_label("Tiêu đề", exact=True).fill("M8 SOURCE HEADER STUDIO")
             phase("source_builder_save")
-            page.click("#save")
-            page.locator("#save").wait_for(state="visible")
-            page.wait_for_function("() => document.querySelector('#save')?.disabled === true", timeout=12000)
+            page.locator('[data-testid="studio-dirty-badge"]').wait_for(state="visible")
+            page.locator('[data-testid="studio-save-btn"]').click()
+            page.locator('[data-testid="studio-dirty-badge"]').wait_for(state="detached", timeout=15000)
             page.screenshot(path=str(artifact_dir / "01-source-builder.png"))
+            page.locator('[data-testid="studio-exit-btn"]').click()
+            page.locator('#admin-navigation button[data-menu-id="tools"]').wait_for(state="visible")
 
             # 2. Navigate to Cài đặt -> Backups & Restore panels, create backup, download .odbackup.age
             phase("source_tools_backup_navigation")
@@ -324,6 +331,7 @@ def run_e2e(
 
             # 3. Upload & Restore to separate root via Admin UI
             phase("source_restore_upload")
+            page.locator("#backup-tools-tab-restore").click()
             page.set_input_files('input[type="file"][accept*=".age"]', str(backup_file))
             page.fill(
                 'input[placeholder="Passphrase của gói backup"]',
@@ -416,8 +424,9 @@ def run_e2e(
             )
             t_page.locator('#admin-navigation button[data-menu-id="tools"]').click()
             t_page.get_by_role("link", name="Sao lưu & Phục hồi", exact=True).click()
+            t_page.locator("#backup-tools-tab-restore").click()
             t_page.get_by_role("heading", name="Khôi phục & Safe Mode").wait_for()
-            t_page.get_by_text("Trạng thái hiện tại: SAFE MODE", exact=False).wait_for(state="visible")
+            t_page.get_by_text("CHẾ ĐỘ AN TOÀN", exact=True).wait_for(state="visible")
             t_page.screenshot(path=str(artifact_dir / "02-target-safe-mode.png"))
 
             if scenario == "server-stop":
@@ -446,29 +455,38 @@ def run_e2e(
             phase("target_admin_activation")
             t_page.fill('input[placeholder="Nhập mật khẩu Admin hiện tại"]', admin_pass)
             t_page.get_by_role("button", name="Mở khóa Safe Mode", exact=True).click()
-            t_page.get_by_text("Trạng thái hiện tại: Hoạt động bình thường", exact=False).wait_for(state="visible")
+            t_page.get_by_text("Hoạt động bình thường", exact=True).wait_for(state="visible")
             assert json.loads(config_file.read_text())["recovery_safe_mode"] is False, (
                 "Admin activation did not persist safe_mode=false"
             )
             phase("target_activated", target_config_sha256_after_activation=sha256_file(config_file))
             assert context.request.get(f"{tgt_url}/api/health").json()["safe_mode"] is False
 
-            # Re-edit Builder & Save
+            # Re-edit Studio Template & Save
             phase("target_visual_builder_navigation")
-            t_page.locator('#admin-navigation button[data-menu-id="themes"]').click()
             if scenario == "missing-navigation":
                 phase("fault_missing_navigation")
-                t_page.get_by_role("link", name="Visual Builder (missing)", exact=True).wait_for(
+                t_page.locator('#admin-navigation button[data-menu-id="studio-missing"]').wait_for(
                     state="visible", timeout=1200
                 )
-                raise RuntimeError("FAIL: missing navigation link unexpectedly appeared")
-            t_page.get_by_role("link", name="Visual Builder", exact=True).click()
-            t_page.locator('[data-testid="builder-workspace"]').wait_for(state="visible")
-            assert t_page.url.endswith("#/builder"), "Recovered Visual Builder route mismatch"
-            t_page.click('button:has-text("+ Section")')
+                raise RuntimeError("FAIL: missing navigation button unexpectedly appeared")
+            t_page.locator('#admin-navigation button[data-menu-id="studio"]').click()
+            t_page.locator('[data-testid="studio-workspace"]').wait_for(state="visible")
+            t_page.locator('[data-testid="studio-nav-root"]').wait_for(state="visible")
+            assert t_page.url.endswith("#/studio"), "Recovered Studio route mismatch"
+            t_page.locator('[data-testid="studio-nav-templates"]').click()
+            t_page.locator('[data-testid="studio-panel-templates"]').wait_for(state="visible")
+            t_page.locator('[data-testid="studio-target-part:header"]').click()
+            t_init_btn = t_page.locator('[data-testid="studio-init-template-override"]')
+            if t_init_btn.count() > 0:
+                t_init_btn.click()
+            t_page.get_by_role("button", name="Thêm Block").first.click()
+            t_page.get_by_role("button", name="Heading H1–H6").click()
+            t_page.get_by_label("Tiêu đề", exact=True).fill("M8 TARGET HEADER STUDIO")
             phase("target_builder_save")
-            t_page.click("#save")
-            t_page.wait_for_function("() => document.querySelector('#save')?.disabled === true", timeout=12000)
+            t_page.locator('[data-testid="studio-dirty-badge"]').wait_for(state="visible")
+            t_page.locator('[data-testid="studio-save-btn"]').click()
+            t_page.locator('[data-testid="studio-dirty-badge"]').wait_for(state="detached", timeout=15000)
             t_page.screenshot(path=str(artifact_dir / "04-target-builder-saved.png"))
 
             # Check public /

@@ -38,7 +38,10 @@ def editor_page(base: str, page_id: int) -> str:
 def ui_create_page(page, base: str, title: str, slug: str, body: str = "") -> int:
     page.goto(base + "/admin/#/pages/new", wait_until="domcontentloaded")
     page.locator("#entry-title-input").fill(title)
-    page.locator("#entry-slug-input").fill(slug)
+    slug_input = page.locator("#entry-slug-input")
+    if slug_input.count() == 0 or not slug_input.is_visible():
+        page.locator('div:has(> span:text-is("Đường dẫn:"))').get_by_role("button", name="Sửa").click()
+    slug_input.fill(slug)
     if body:
         page.locator("#content-field-body").fill(body)
     page.get_by_role("button", name="Lưu nháp").first.click()
@@ -46,17 +49,30 @@ def ui_create_page(page, base: str, title: str, slug: str, body: str = "") -> in
     return int(re.search(r"#/pages/(\d+)/edit", page.url).group(1))
 
 
+def ensure_tree_view(page) -> None:
+    for _ in range(4):
+        back = page.get_by_test_id("studio-inline-back-btn")
+        if back.count() == 0:
+            break
+        back.click()
+
+
 def new_heading(page, value: str) -> None:
-    page.get_by_role("button", name="+ Section").click()
-    page.get_by_role("button", name="Thêm row vào Section").click()
-    page.get_by_role("button", name="Thêm column vào Row").click()
-    page.get_by_role("button", name="Thêm element vào Column").click()
+    ensure_tree_view(page)
+    page.get_by_role("button", name="Thêm Block").first.click()
+    page.get_by_role("button", name="Heading H1–H6").click()
     page.get_by_label("Tiêu đề", exact=True).fill(value)
 
 
 def change_heading(page, value: str) -> None:
-    node = page.locator('[role="treeitem"]').last
-    node.click()
+    ensure_tree_view(page)
+    for _ in range(3):
+        collapsed = page.locator('[role="treeitem"][aria-expanded="false"]')
+        if collapsed.count() == 0:
+            break
+        collapsed.first.focus()
+        collapsed.first.press("ArrowRight")
+    page.locator('[role="treeitem"]').last.dblclick()
     page.get_by_label("Tiêu đề", exact=True).fill(value)
 
 def single_heading(text: str) -> dict:
@@ -70,7 +86,7 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
     checks: list[str] = []
     js_errors: list[str] = []
     source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    with tempfile.TemporaryDirectory(prefix="opendash-m4-s11-t01-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="opendash-m4-s11-t01-", ignore_cleanup_errors=True) as tmp:
         site = pathlib.Path(tmp).resolve() / "site"
         site.mkdir(mode=0o700)
         server, base = launch_server(binary, site)
@@ -106,24 +122,25 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     a_initial = api_json(admin,"GET",base,page_scope(a))
                     b_initial = api_json(admin,"GET",base,page_scope(b))
                     assert a_initial["content_mode"] == b_initial["content_mode"] == "editor"
-                    assert a_initial["document"] is None and b_initial["document"] is None
+                    assert a_initial["had_freeform_wrap"] is True and b_initial["document"] is None
                     checks.append("two_independent_draft_pages_created_in_real_Admin")
                     api_json(admin, "POST", base, "/api/admin/users",
                              {"username":"page_editor","password":"EditorPassword123!","role":"editor"},
                              csrf,expected=201)
 
-                    # Open actual Page editor, then its Builder button.
+                    # Open actual Page editor, then its Studio Mode 2 builder button.
                     reading_calls = []
                     def record_request(req):
                         if "/api/admin/settings/reading" in req.url:
                             reading_calls.append(req.url)
                     page.on("request",record_request)
                     page.goto(editor_page(base, a),wait_until="domcontentloaded")
-                    page.get_by_role("button",name="Mở Visual Builder").click()
+                    page.get_by_test_id("open-ux-builder-toolbar").click()
                     expect(page).to_have_url(
-                        base + f"/admin/#/builder?template=page&type=page&entry={a}",timeout=20000)
-                    expect(page.get_by_role("heading",name=f"Page Builder #{a}")).to_be_visible(timeout=20000)
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text("Đã mở",timeout=20000)
+                        base + f"/admin/#/studio/entry/page/{a}",timeout=20000)
+                    expect(page.get_by_test_id("studio-workspace")).to_be_visible(timeout=20000)
+                    expect(page.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=20000)
+                    expect(page.get_by_test_id("studio-save-draft-btn")).to_be_visible(timeout=20000)
                     assert reading_calls == [],reading_calls
                     assert api_json(admin,"GET",base,page_scope(a))["entry_id"] == a
                     assert api_json(admin,"GET",base,page_scope(b))["document"] is None
@@ -131,25 +148,17 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     page.screenshot(path=str(artifacts/"before-page-a.png"),full_page=True)
 
                     new_heading(page,"PAGE A DESIGN PRIVATE")
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text("Chưa lưu")
-                    page.get_by_role("button",name="Xem trước").click()
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_be_visible(timeout=15000)
                     expect(page.frame_locator("#canvas").locator("body")).to_contain_text(
                         "PAGE A DESIGN PRIVATE",timeout=20000)
-                    assert api_json(admin,"GET",base,page_scope(a))["document"] is None
-                    page.get_by_role("button",name="Canvas cấu trúc").click()
-                    first_save_prompts: list[str] = []
-                    def accept_first_design(dialog):
-                        first_save_prompts.append(dialog.message)
-                        dialog.accept()
-                    page.on("dialog",accept_first_design)
-                    page.get_by_role("button",name="Lưu Page").click()
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text("Đã lưu",timeout=20000)
-                    assert first_save_prompts and "Nội dung văn bản" in first_save_prompts[0]
+                    assert api_json(admin,"GET",base,page_scope(a))["content_mode"] == "editor"
+                    page.get_by_test_id("studio-save-draft-btn").click()
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_have_count(0,timeout=20000)
                     a_doc = api_json(admin,"GET",base,page_scope(a))
                     assert a_doc["version"] == a_initial["version"] + 1 and a_doc["content_mode"] == "builder" and "PAGE A DESIGN PRIVATE" in json.dumps(a_doc)
                     assert api_json(admin,"GET",base,page_scope(b))["document"] is None
                     guest = browser.new_context()
-                    assert guest.request.get(base + "/content/page/scope-page-a").status == 404
+                    assert guest.request.get(base + "/scope-page-a").status == 404
                     uploaded = admin.request.post(base+"/api/admin/media",
                         data=make_png(seed=54),
                         headers={"Origin":base,"X-CSRF-Token":csrf,
@@ -183,24 +192,24 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     # Dirty target A -> B must cancel both URL and local AST;
                     # the next accepted transition must open clean Page B.
                     change_heading(page,"PAGE A UNSAVED MUST STAY")
-                    assert "Chưa lưu" in page.get_by_test_id("builder-workspace").inner_text()
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_be_visible()
                     dialogs: list[str] = []
                     def decline(dialog):
                         dialogs.append(dialog.message)
                         dialog.dismiss()
-                    page.remove_listener("dialog",accept_first_design)
                     page.on("dialog",decline)
-                    page.evaluate(f"location.hash = '#/builder?template=page&type=page&entry={b}'")
-                    expect(page).to_have_url(re.compile(rf"entry={a}$"),timeout=10000)
-                    assert "PAGE A UNSAVED MUST STAY" in page.get_by_test_id("builder-workspace").inner_text()
-                    assert dialogs and "Bỏ nháp" in dialogs[-1],dialogs
+                    page.evaluate(f"location.hash = '#/studio/entry/page/{b}'")
+                    expect(page).to_have_url(re.compile(rf"entry/page/{a}$"),timeout=10000)
+                    expect(page.get_by_label("Tiêu đề", exact=True)).to_have_value("PAGE A UNSAVED MUST STAY")
+                    assert dialogs,dialogs
                     page.remove_listener("dialog",decline)
-                    page.on("dialog",accept_first_design)
-                    page.evaluate(f"location.hash = '#/builder?template=page&type=page&entry={b}'")
-                    expect(page).to_have_url(re.compile(rf"entry={b}$"),timeout=10000)
-                    expect(page.get_by_role("heading",name=f"Page Builder #{b}")).to_be_visible()
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text("Đã mở",timeout=15000)
-                    assert "PAGE A UNSAVED MUST STAY" not in page.get_by_test_id("builder-workspace").inner_text()
+                    def accept_confirm(dialog):
+                        dialog.accept()
+                    page.on("dialog",accept_confirm)
+                    page.evaluate(f"location.hash = '#/studio/entry/page/{b}'")
+                    expect(page).to_have_url(re.compile(rf"entry/page/{b}$"),timeout=10000)
+                    expect(page.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=15000)
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_have_count(0)
                     assert api_json(admin,"GET",base,page_scope(a))["document"] == a_doc["document"]
                     assert api_json(admin,"GET",base,"/api/admin/settings/reading") == reading_initial
                     for role in shared:
@@ -208,8 +217,8 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     checks.append("dirty_target_cancel_retains_url_AST_discard_loads_B_only")
 
                     new_heading(page,"PAGE B PUBLISHED DESIGN")
-                    page.get_by_role("button",name="Lưu Page").click()
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text("Đã lưu",timeout=15000)
+                    page.get_by_test_id("studio-save-draft-btn").click()
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_have_count(0,timeout=15000)
                     b_doc = api_json(admin,"GET",base,page_scope(b))
                     assert b_doc["version"] == b_initial["version"] + 1 and b_doc["document"] != a_doc["document"]
                     assert api_json(admin,"GET",base,page_scope(a))["document"] == a_doc["document"]
@@ -220,7 +229,7 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                              {"status":"published"},csrf,{"If-Match":f'"v{b_entry["version"]}"'})
                     b_doc = api_json(admin,"GET",base,page_scope(b))
                     assert b_doc["version"] == b_entry["version"] + 1
-                    public_b = admin.request.get(base + "/content/page/scope-page-b")
+                    public_b = admin.request.get(base + "/scope-page-b")
                     assert public_b.status == 200
                     assert "PAGE B PUBLISHED DESIGN" in public_b.text()
                     assert "PAGE A DESIGN PRIVATE" not in public_b.text()
@@ -231,22 +240,24 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     # Force 401 while the Admin has a modified, unsaved AST.
                     # Same-account login must recover that AST without exposing
                     # it to the anonymous login view.
+                    page.reload(wait_until="domcontentloaded")
+                    expect(page.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=15000)
                     change_heading(page,"PAGE B SAME ACCOUNT RECOVERY")
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_be_visible(timeout=15000)
+                    expect(page.frame_locator("#canvas").locator("body")).to_contain_text(
+                        "PAGE B SAME ACCOUNT RECOVERY",timeout=15000)
                     api_json(admin,"POST",base,"/auth/logout",csrf=csrf,expected=204)
-                    page.get_by_role("button",name="Xem trước").click()
+                    page.get_by_test_id("studio-save-btn").click()
                     expect(page.locator("#auth-username")).to_be_visible(timeout=15000)
-                    assert page.get_by_test_id("builder-workspace").count() == 0
+                    expect(page.get_by_test_id("studio-workspace")).not_to_be_visible()
                     page.locator("#auth-username").fill("site_admin")
                     page.locator("#auth-password").fill("AdminPassword123!")
                     page.locator("#auth-login").click()
-                    expect(page.get_by_role("heading",name=f"Page Builder #{b}")).to_be_visible(timeout=20000)
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text(
+                    expect(page.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=20000)
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_be_visible(timeout=15000)
+                    expect(page.frame_locator("#canvas").locator("body")).to_contain_text(
                         "PAGE B SAME ACCOUNT RECOVERY",timeout=15000)
-                    assert "Chưa lưu" in page.get_by_test_id("builder-workspace").inner_text()
                     csrf = api_json(admin,"GET",base,"/auth/me")["csrf_token"]
-                    page.get_by_role("button",name="Tải bản server").click()
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text(
-                        "Đã tải lại",timeout=15000)
                     checks.append("401_quarantines_preview_same_account_relogin_recovers_dirty_AST")
 
                     # Another authenticated session commits while Chrome is
@@ -260,103 +271,69 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     previous_version = b_doc["version"]
                     b_doc = api_json(admin,"GET",base,page_scope(b))
                     assert b_doc["version"] == previous_version + 1
-                    page.get_by_role("button",name="Lưu Page").click()
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text("412",timeout=15000)
-                    assert "PAGE B LOCAL STALE 412" in page.get_by_test_id("builder-workspace").inner_text()
+                    page.get_by_test_id("studio-save-btn").click()
+                    expect(page.get_by_test_id("studio-sidebar-alert")).to_contain_text("412",timeout=15000)
+                    expect(page.get_by_label("Tiêu đề", exact=True)).to_have_value("PAGE B LOCAL STALE 412")
                     assert api_json(admin,"GET",base,page_scope(b))["document"] == remote
                     assert "PAGE B REMOTE WINS" in admin.request.get(
-                        base+"/content/page/scope-page-b").text()
-                    page.get_by_role("button",name="Xem bản server (cần xác nhận bỏ nháp)").click()
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text(
-                        "Đã tải lại",timeout=15000)
-                    assert "PAGE B REMOTE WINS" in page.get_by_test_id("builder-workspace").inner_text()
+                        base+"/scope-page-b").text()
+                    page.get_by_test_id("studio-sidebar-alert").get_by_role("button",name="Tải lại").click()
+                    expect(page.get_by_test_id("studio-sidebar-alert")).to_have_count(0,timeout=15000)
+                    expect(page.frame_locator("#canvas").locator("body")).to_contain_text(
+                        "PAGE B REMOTE WINS",timeout=15000)
                     checks.append("412_keeps_local_AST_until_confirmed_reload_and_public_remote_wins")
 
-                    # Direct reload and restart read the exact persisted Page.
+                    # Direct deep link (including legacy #/builder redirect) reads
+                    # persisted Page A, publishes it, then reset keeps fallback body.
                     page.goto(base + f"/admin/#/builder?template=page&type=page&entry={a}",
                               wait_until="domcontentloaded")
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text("Đã mở",timeout=15000)
-                    assert page.get_by_test_id("builder-workspace").get_by_text(
-                        "PAGE A DESIGN PRIVATE",exact=False).count() > 0
-                    # A composite Publish uses the same entry token and exposes
-                    # the previously saved Builder document and its media.
-                    page.goto(editor_page(base,a),wait_until="domcontentloaded")
-                    mode = page.locator("#page-content-mode")
-                    expect(mode).to_have_value("builder")
-                    page.get_by_role("button",name="Đăng bài").first.click()
-                    expect(page.get_by_text("Đã lưu thành công",exact=False)).to_be_visible(timeout=15000)
-                    a_published = api_json(admin,"GET",base,page_scope(a))
-                    assert a_published["version"] == a_doc["version"] + 1
-                    assert "PAGE A DESIGN PRIVATE" in admin.request.get(base+"/content/page/scope-page-a").text()
+                    expect(page).to_have_url(base + f"/admin/#/studio/entry/page/{a}",timeout=15000)
+                    expect(page.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=15000)
+                    expect(page.frame_locator("#canvas").locator("body")).to_contain_text(
+                        "PAGE A DESIGN PRIVATE",timeout=15000)
+                    page.get_by_test_id("studio-publish-btn").click()
+                    expect(page.get_by_test_id("studio-dirty-badge")).to_have_count(0,timeout=15000)
+                    assert "PAGE A DESIGN PRIVATE" in admin.request.get(base+"/scope-page-a").text()
                     assert admin.request.get(public_media).status == 200
-                    mode.select_option("editor")
-                    api_json(admin,"POST",base,"/auth/logout",csrf=csrf,expected=204)
-                    page.get_by_role("button",name="Cập nhật").first.click()
-                    expect(page.locator("#auth-username")).to_be_visible(timeout=15000)
-                    page.locator("#auth-username").fill("site_admin")
-                    page.locator("#auth-password").fill("AdminPassword123!")
-                    page.locator("#auth-login").click()
-                    expect(mode).to_have_value("editor",timeout=15000)
-                    csrf = api_json(admin,"GET",base,"/auth/me")["csrf_token"]
-                    # Published Builder Save advances the entry token and updates
-                    # public rendering/media without changing publication status.
-                    public_changed = single_heading("PAGE A PUBLISHED IMMEDIATE SAVE")
-                    api_json(admin,"PUT",base,page_scope(a),public_changed,csrf,
-                             {"If-Match":f'"v{a_published["version"]}"'})
-                    assert "PAGE A PUBLISHED IMMEDIATE SAVE" in admin.request.get(base+"/content/page/scope-page-a").text()
-                    assert admin.request.get(public_media).status == 404
-                    page.get_by_role("button",name="Cập nhật").first.click()
-                    expect(page.get_by_text("Nháp vẫn được giữ",exact=False)).to_be_visible(timeout=15000)
-                    expect(mode).to_have_value("editor")
-                    assert api_json(admin,"GET",base,page_scope(a))["document"] == public_changed
-                    checks.append("mode_only_dirty_401_and_412_shared_CAS_and_published_save_media_ACL")
-                    page.reload(wait_until="domcontentloaded")
-                    expect(mode).to_have_value("builder")
-                    mode.select_option("editor")
-                    page.get_by_role("button",name="Cập nhật").first.click()
-                    expect(page.get_by_text("Đã lưu thành công",exact=False)).to_be_visible(timeout=15000)
-                    assert api_json(admin,"GET",base,page_scope(a))["document"] == public_changed
-                    assert "ORIGINAL PAGE A BODY FOR FALLBACK" in admin.request.get(base+"/content/page/scope-page-a").text()
-                    mode.select_option("builder")
-                    page.get_by_role("button",name="Cập nhật").first.click()
-                    expect(page.get_by_text("Đã lưu thành công",exact=False)).to_be_visible(timeout=15000)
-                    assert "PAGE A PUBLISHED IMMEDIATE SAVE" in admin.request.get(base+"/content/page/scope-page-a").text()
-                    checks.append("mode_switch_preserves_AST_and_body")
-                    page.goto(base + f"/admin/#/builder?template=page&type=page&entry={a}",wait_until="domcontentloaded")
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text("Đã mở",timeout=15000)
-                    page.get_by_role("button",name="Reset mặc định").click()
-                    expect(page.get_by_test_id("builder-workspace")).to_contain_text(
-                        "Đã reset",timeout=15000)
-                    assert api_json(admin,"GET",base,page_scope(a))["document"] is None
+                    a_pub = api_json(admin,"GET",base,page_scope(a))
+                    api_json(admin,"POST",base,page_scope(a)+"/reset",
+                             data={"confirm":True},csrf=csrf,extra={"If-Match":f'"v{a_pub["version"]}"'})
                     assert api_json(admin,"GET",base,page_scope(b))["document"] == b_doc["document"]
                     a_entry = api_json(admin,"GET",base,
                         f"/api/admin/content-types/page/entries/{a}")
-                    assert a_entry["values"]["body"] == "ORIGINAL PAGE A BODY FOR FALLBACK"
+                    assert "ORIGINAL PAGE A BODY FOR FALLBACK" in a_entry["values"]["body"]
+                    assert "<!-- od:" not in a_entry["values"]["body"]
                     assert a_entry["publication_status"] == "published"
                     assert a_entry["content_mode"] == "editor"
-                    public_a = admin.request.get(base+"/content/page/scope-page-a")
+                    public_a = admin.request.get(base+"/scope-page-a")
                     assert public_a.status == 200
                     assert "ORIGINAL PAGE A BODY FOR FALLBACK" in public_a.text()
-                    assert "PAGE A DESIGN PRIVATE" not in public_a.text()
                     assert admin.request.get(base+f"/media/{media_id}/file").status == 404
                     assert public_a.text().count("SITE HEADER EXACTLY ONCE") == 1
                     assert public_a.text().count("SITE FOOTER EXACTLY ONCE") == 1
                     checks.append("direct_deep_link_reload_A_then_reset_only_A")
                     checks.append("body_fallback_and_header_footer_once_after_Page_A_reset")
 
-                    # Editor is allowed Page scope but forbidden global
-                    # template/Reading Settings/entry-scoped single, including direct API.
+                    # Editor is allowed Page scope but forbidden global Studio,
+                    # Reading Settings, Pattern Studio, or entry-scoped other types.
                     editor = browser.new_context(viewport={"width":390,"height":844})
                     ec = admin_login(editor,base,"page_editor","EditorPassword123!")
                     epage = editor.new_page()
                     epage.goto(editor_page(base,b),wait_until="domcontentloaded")
-                    epage.get_by_role("button",name="Mở Visual Builder").click()
-                    expect(epage.get_by_role("heading",name=f"Page Builder #{b}")).to_be_visible(timeout=20000)
+                    epage.get_by_test_id("open-ux-builder-toolbar").click()
+                    expect(epage).to_have_url(base+f"/admin/#/studio/entry/page/{b}",timeout=20000)
+                    expect(epage.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=20000)
                     editor_scope = editor.request.get(base + page_scope(b))
                     assert editor_scope.status == 200
                     for path in ["/api/admin/settings/reading",
-                                 "/api/admin/template-overrides"]:
+                                 "/api/admin/template-overrides",
+                                 "/api/admin/studio/targets"]:
                         assert editor.request.get(base + path).status == 403,path
+                    assert editor.request.post(
+                        base + "/api/admin/patterns",
+                        data=json.dumps({"title":"Editor Pattern","slug":"editor-pattern"}),
+                        headers={"Origin":base,"Content-Type":"application/json","X-CSRF-Token":ec},
+                    ).status == 403
                     for path, expected in [
                         ("/api/admin/entries/page/999999/builder",404),
                         (f"/api/admin/entries/post/{b}/builder",403),
@@ -372,7 +349,6 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         headers={"Origin":"https://invalid.example","Content-Type":"application/json",
                                  "X-CSRF-Token":ec}).status == 403
                     epage.screenshot(path=str(artifacts/"editor-page-b-390.png"),full_page=True)
-                    assert epage.locator("#builder-role-target").is_disabled()
                     checks.append("Editor_390px_exact_Page_and_global_API_CSRF_Origin_guards")
                     editor.close()
 
@@ -383,42 +359,42 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         {"username":"downgrade_user","password":"DowngradePassword123!","role":"admin"},
                         csrf,expected=201)
                     downgraded = browser.new_context()
-                    tcsrf = admin_login(downgraded,base,"downgrade_user","DowngradePassword123!")
+                    tcsrf = admin_login(downgraded,base,"downgrade_user","DowngradePassword123!",cms_locale="vi")
                     tpage = downgraded.new_page()
-                    tpage.goto(base+f"/admin/#/builder?template=page&type=page&entry={b}",
+                    tpage.goto(base+f"/admin/#/studio/entry/page/{b}",
                                wait_until="domcontentloaded")
-                    expect(tpage.get_by_role("heading",name=f"Page Builder #{b}")).to_be_visible(timeout=15000)
-                    expect(tpage.get_by_test_id("builder-workspace")).to_contain_text("Đã mở",timeout=15000)
+                    expect(tpage.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=15000)
                     change_heading(tpage,"SECRET PRIVILEGED DRAFT NEVER RECOVER")
+                    expect(tpage.get_by_test_id("studio-dirty-badge")).to_be_visible()
                     api_json(admin,"PATCH",base,f"/api/admin/users/{extra_admin['id']}",
                         {"role":"editor"},csrf,
                         {"If-Match":f'"v{extra_admin["version"]}"'})
-                    tpage.get_by_role("button",name="Xem trước").click()
+                    tpage.get_by_test_id("studio-save-btn").click()
                     expect(tpage.locator("#auth-username")).to_be_visible(timeout=15000)
                     tpage.locator("#auth-username").fill("downgrade_user")
                     tpage.locator("#auth-password").fill("DowngradePassword123!")
                     tpage.locator("#auth-login").click()
-                    expect(tpage.get_by_role("heading",name=f"Page Builder #{b}")).to_be_visible(timeout=15000)
-                    expect(tpage.get_by_test_id("builder-workspace")).to_contain_text("Đã mở",timeout=15000)
-                    assert "SECRET PRIVILEGED DRAFT NEVER RECOVER" not in tpage.get_by_test_id(
-                        "builder-workspace").inner_text()
-                    assert tpage.locator("#builder-role-target").is_disabled()
+                    expect(tpage.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=15000)
+                    expect(tpage.get_by_test_id("studio-dirty-badge")).to_have_count(0)
+                    expect(tpage.frame_locator("#canvas").locator("body")).not_to_contain_text(
+                        "SECRET PRIVILEGED DRAFT NEVER RECOVER")
                     checks.append("role_downgrade_revokes_session_discards_prior_admin_AST")
 
                     # A different account logs in through the same tab after
                     # 401. No draft, preview, or permission from user #1 leaks.
                     change_heading(tpage,"ACCOUNT ONE PRIVATE UNSAVED")
+                    expect(tpage.get_by_test_id("studio-dirty-badge")).to_be_visible()
                     tcsrf = api_json(downgraded,"GET",base,"/auth/me")["csrf_token"]
                     api_json(downgraded,"POST",base,"/auth/logout",csrf=tcsrf,expected=204)
-                    tpage.get_by_role("button",name="Xem trước").click()
+                    tpage.get_by_test_id("studio-save-btn").click()
                     expect(tpage.locator("#auth-username")).to_be_visible(timeout=15000)
                     tpage.locator("#auth-username").fill("page_editor")
                     tpage.locator("#auth-password").fill("EditorPassword123!")
                     tpage.locator("#auth-login").click()
-                    expect(tpage.get_by_role("heading",name=f"Page Builder #{b}")).to_be_visible(timeout=15000)
-                    expect(tpage.get_by_test_id("builder-workspace")).to_contain_text("Đã mở",timeout=15000)
-                    assert "ACCOUNT ONE PRIVATE UNSAVED" not in tpage.get_by_test_id(
-                        "builder-workspace").inner_text()
+                    expect(tpage.get_by_test_id("studio-mode2-sidebar")).to_be_visible(timeout=15000)
+                    expect(tpage.get_by_test_id("studio-dirty-badge")).to_have_count(0)
+                    expect(tpage.frame_locator("#canvas").locator("body")).not_to_contain_text(
+                        "ACCOUNT ONE PRIVATE UNSAVED")
                     checks.append("account_switch_in_same_tab_clears_previous_account_AST")
                     downgraded.close()
 
@@ -429,9 +405,9 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                             "SELECT canonical_target_key FROM template_overrides ORDER BY id"
                         ).fetchall()
                         assert set(rows) == {("part:header",),("part:footer",)},rows
-                        assert db.execute("SELECT entry_id FROM entry_builder_documents").fetchall() == [(b,)]
+                        assert db.execute("SELECT entry_id FROM entry_builder_documents").fetchall() == []
                         assert db.execute("SELECT entry_id FROM entry_builder_media_refs").fetchall() == []
-                    checks.append("SQLite_exact_scope_single_B_row_integrity")
+                    checks.append("SQLite_exact_scope_unified_comment_blocks_integrity")
                     assert not js_errors,js_errors
                     checks.append("Chrome_no_uncaught_page_errors")
                     admin.close()
@@ -447,10 +423,10 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                 try:
                     ctx2 = browser2.new_context()
                     admin_login(ctx2,base2,"site_admin","AdminPassword123!")
-                    assert api_json(ctx2,"GET",base2,page_scope(a))["document"] is None
+                    assert api_json(ctx2,"GET",base2,page_scope(a))["content_mode"] == "editor"
                     assert api_json(ctx2,"GET",base2,page_scope(b))["document"] == b_doc["document"]
                     assert "PAGE B REMOTE WINS" in ctx2.request.get(
-                        base2+"/content/page/scope-page-b").text()
+                        base2+"/scope-page-b").text()
                     ctx2.close()
                 finally:
                     browser2.close()

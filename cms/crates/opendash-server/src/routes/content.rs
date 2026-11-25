@@ -27,7 +27,6 @@ use crate::{
     storage::{
         content::{self as content_storage, ContentTypeApiItem},
         entries as entry_storage,
-        page::active_content_templates,
     },
 };
 
@@ -154,13 +153,8 @@ pub async fn content_entry_preview(
     entry_storage::filter_entry_values_for_role(&mut record, &effective, role);
     let entry_locale = record.locale.clone();
     let entry_title = record.title.clone();
-    let (_, selected_template) = active_content_templates(&db).await?;
     let raw = crate::routes::entries::render_admin_single_fallback_html(
-        &db,
-        &record,
-        &effective,
-        role,
-        selected_template.as_deref(),
+        &db, &record, &effective, role, None,
     )
     .await?;
     let (_, bcp47_tag, dir) =

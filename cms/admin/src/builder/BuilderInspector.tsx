@@ -50,7 +50,6 @@ import type { PatternRecord } from '../api/patterns.ts';
 interface Props {
   document: BuilderDocument;
   selectedId: string | null;
-  registry: Record<string, Record<string, string>>;
   blockSchemas?: BlockCatalogItemDto[];
   csrfToken: string | null;
   viewport: BuilderViewport;
@@ -135,7 +134,6 @@ const ALIGN_CLASS_MAP: Record<ResponsiveAlign, string> = {
 export function BuilderInspector({
   document,
   selectedId,
-  registry,
   blockSchemas = [],
   csrfToken,
   viewport,
@@ -173,7 +171,7 @@ export function BuilderInspector({
   const sectionNode = item.kind === 'section' ? item.node as BuilderSection : null;
   const block = element?.type === 'plugin/block'
     ? blockSchemas.find(candidate => candidate.block_id === element.props?.block_id) : undefined;
-  const locked = element ? isLockedElement(element, registry, blockSchemas) : false;
+  const locked = element ? isLockedElement(element, blockSchemas) : false;
   const deletable = canDeleteElement(document, item.node.id, { requiresContentSlot });
   const suggestedPartKeys = [...new Set([...(availablePartKeys ?? []), 'header', 'footer'])];
 
@@ -244,9 +242,6 @@ export function BuilderInspector({
       onResponsiveChange(item.node.id, viewport, property, null);
     }
   };
-  const legacyFields = element?.type === 'legacy/block'
-    ? Object.entries(registry[String(element.props.block_id ?? '')] || {}).map(([key, title]) => ({ key, title }))
-    : [];
   const vis = item.node.meta?.visibility ?? {};
   const toggleVisibility = (key: 'hide_desktop' | 'hide_tablet' | 'hide_mobile') => {
     onMetaChange?.(item.node.id, {
@@ -601,25 +596,6 @@ export function BuilderInspector({
                   nofollow: next.nofollow ? true : undefined,
                 })}
               />
-            </>
-          )}
-          {element.type === 'legacy/block' && (
-            <>
-              {legacyFields.map(field => (
-                <label key={field.key} className="block space-y-1">
-                  <span className="block text-xs font-semibold text-zinc-800">{field.title}</span>
-                  <input
-                    className={INSPECTOR_INPUT_CLASS}
-                    type="text"
-                    maxLength={512}
-                    value={staticValue(element, field.key)}
-                    onChange={event => onChange(element.id, field.key, event.target.value)}
-                  />
-                </label>
-              ))}
-              {legacyFields.length === 0 && (
-                <p className="text-xs text-slate-500">{t('builder.builder_inspector.no_fields')}</p>
-              )}
             </>
           )}
         </form>

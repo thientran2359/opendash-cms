@@ -18,7 +18,6 @@ export type StudioMenuRequest = {
 export interface StudioBlockTreeProps {
   document: BuilderDocument;
   selectedId: string | null;
-  registry?: Record<string, Record<string, string>>;
   blockSchemas?: BlockCatalogItemDto[];
   disabled?: boolean;
   expandedIds: Set<string>;
@@ -69,7 +68,7 @@ function TreeIcon({ name }: { name: IconName }) {
 }
 
 export function StudioBlockTree({
-  document, selectedId, registry = {}, blockSchemas = [], disabled = false,
+  document, selectedId, blockSchemas = [], disabled = false,
   expandedIds, onExpandedIdsChange, menuRequest, onMenuRequestHandled,
   canvasPickSeq = 0,
   onSelect, onEdit, onAdd, onMove, onReorder, canReorder,
@@ -224,7 +223,7 @@ export function StudioBlockTree({
     });
   };
   const moveAvailable = (item: VisibleNodeLocation, direction: -1 | 1): boolean => {
-    if (disabled || isProtectedNode(document, item.node.id, registry, blockSchemas)) return false;
+    if (disabled || isProtectedNode(document, item.node.id, blockSchemas)) return false;
     const siblings = nodes.filter(entry => entry.visualParentId === item.visualParentId);
     const index = siblings.findIndex(entry => entry.node.id === item.node.id);
     const neighbor = siblings[index + direction];
@@ -290,7 +289,7 @@ export function StudioBlockTree({
   };
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>, id: string) => {
-    if (disabled || isProtectedNode(document, id, registry, blockSchemas)) {
+    if (disabled || isProtectedNode(document, id, blockSchemas)) {
       event.preventDefault();
       return;
     }
@@ -343,9 +342,9 @@ export function StudioBlockTree({
         const id = item.node.id;
         const isContainer = item.kind !== 'element';
         const expanded = isContainer && expandedIds.has(id);
-        const protectedNode = isProtectedNode(document, id, registry, blockSchemas);
+        const protectedNode = isProtectedNode(document, id, blockSchemas);
         const locked = item.kind === 'element'
-          && isLockedElement(item.node as BuilderElement, registry, blockSchemas);
+          && isLockedElement(item.node as BuilderElement, blockSchemas);
         const label = nodeTitle(item, blockSchemas);
         const htmlId = item.node.meta?.html_id?.trim() || '';
         const canOperate = !disabled && !protectedNode;

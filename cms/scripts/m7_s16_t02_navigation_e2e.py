@@ -17,8 +17,7 @@ import tempfile
 import traceback
 
 from playwright.sync_api import expect, sync_playwright
-from m7_beta_menu_picker_e2e import admin_login, api_json, launch_server, stop_server
-from m5_beta_theme_v2_e2e import theme_zip
+from m7_beta_menu_picker_e2e import admin_login, api_json, launch_server, stop_server, theme_zip
 
 
 def digest(path: pathlib.Path) -> str:
@@ -133,6 +132,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     expect(page.get_by_test_id("content-type-schema-settings")).to_be_visible()
                     expect(page).to_have_url(re.compile(r"#/appearance/content-types(?:/[^/]+)?$"))
                     page.goto(base + "/admin/#/tools/restore", wait_until="domcontentloaded")
+                    page.locator("#backup-tools-tab-restore").click()
                     expect(page.get_by_role("heading", name="Restore & safe mode")).to_be_visible()
                     checks.append("legacy_content_and_restore_aliases")
 

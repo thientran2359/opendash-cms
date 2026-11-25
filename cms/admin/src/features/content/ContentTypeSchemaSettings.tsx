@@ -201,20 +201,26 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     setCreateOpenState({ scope: createScope, open: false });
   };
 
-  const load = async () => {
+  const load = async (isCancelled?: () => boolean) => {
     try {
       const list = await listContentTypes();
+      if (isCancelled?.()) return;
       setContentTypes(list);
       if (!selectedTypeKey && list.length > 0) {
         onSelectTypeKey(list[0].descriptor.key);
       }
     } catch (err) {
+      if (isCancelled?.()) return;
       onApiError(err, tStatic("feature.content.contenttypeschemasettings.could_not_load_the_content_type_list"));
     }
   };
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    void load(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
   }, [revision]);
 
   const activeType = contentTypes.find(ct => ct.descriptor.key === selectedTypeKey) ?? null;

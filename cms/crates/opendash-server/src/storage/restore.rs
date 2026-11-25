@@ -334,10 +334,9 @@ pub async fn verify_restored_db_references(db_path: &Path, site_root: &Path) -> 
     }
 
     for tr in &inventory.theme_revisions {
-        if tr.source_format == "package_zip_v2" {
+        if tr.source_format == "v3" {
             let rev_dir = site_root
                 .join("themes")
-                .join(&tr.theme_id)
                 .join("revisions")
                 .join(&tr.revision_digest);
             if !rev_dir.join(".complete").is_file() {

@@ -406,17 +406,6 @@ pub async fn install_plugin_revision(
                 "ID block đã thuộc quyền sở hữu của gói khác.".into(),
             ));
         }
-        let legacy_exists: Option<String> =
-            sqlx::query_scalar("SELECT id FROM theme_blocks WHERE id = ?")
-                .bind(&schema.id)
-                .fetch_optional(db_pool)
-                .await
-                .map_err(|e| PluginStorageError::Internal(e.to_string()))?;
-        if legacy_exists.is_some() {
-            return Err(PluginStorageError::Conflict(
-                "ID block xung đột với theme_blocks.".into(),
-            ));
-        }
     }
 
     stage_and_publish_plugin_revision_with_blocks(

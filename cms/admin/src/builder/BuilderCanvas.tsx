@@ -9,19 +9,18 @@ interface Props {
   document: BuilderDocument;
   selectedId: string | null;
   viewport: BuilderViewport;
-  registry: Record<string, Record<string, string>>;
   blockSchemas?: BlockCatalogItemDto[];
   patterns: PatternRecord[];
   patternsLoaded: boolean;
   onSelect: (id: string) => void;
 }
 
-function ElementContent({ element, registry, blockSchemas, patterns, patternsLoaded }: {
-  element: BuilderElement; registry: Props['registry']; blockSchemas: BlockCatalogItemDto[];
+function ElementContent({ element, blockSchemas, patterns, patternsLoaded }: {
+  element: BuilderElement; blockSchemas: BlockCatalogItemDto[];
   patterns: PatternRecord[]; patternsLoaded: boolean;
 }) {
   const { t } = useI18n();
-  if (isLockedElement(element, registry, blockSchemas)) {
+  if (isLockedElement(element, blockSchemas)) {
     return <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
       {t('builder.builder_canvas.locked', { block: element.type === 'plugin/block' ? String(element.props?.block_id ?? '') : (element.type || t('builder.builder_canvas.unknown')) })}
     </div>;
@@ -86,7 +85,7 @@ function ElementContent({ element, registry, blockSchemas, patterns, patternsLoa
 }
 
 export function BuilderCanvas({
-  document, selectedId, registry, blockSchemas = [], patterns, patternsLoaded, viewport, onSelect,
+  document, selectedId, blockSchemas = [], patterns, patternsLoaded, viewport, onSelect,
 }: Props) {
   const { t } = useI18n();
   const selectProps = (id: string) => ({
@@ -105,7 +104,7 @@ export function BuilderCanvas({
     <button key={element.id} {...selectProps(element.id)}
       aria-label={t('builder.builder_canvas.select_element', { type: element.type, id: element.id })}>
       <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{element.type}</span>
-      <ElementContent element={element} registry={registry} blockSchemas={blockSchemas}
+      <ElementContent element={element} blockSchemas={blockSchemas}
         patterns={patterns} patternsLoaded={patternsLoaded} />
     </button>
   );

@@ -304,8 +304,8 @@ async fn auth_scope(client: &Client, server: &Server, expected_vi: bool) -> Stri
         "/auth/me",
         GENERAL,
         "/api/themes/starter/options",
-        "/registry",
-        "/page",
+        "/api/admin/builder/blocks",
+        "/api/admin/themes",
     ] {
         let body = localized_error(
             client.get(server.url(path)).send().await.unwrap(),

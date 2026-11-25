@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/scripts/` contains **34** operational scripts covering workspace builds, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
+`cms/scripts/` contains **31** operational scripts covering workspace builds, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
 
 ## Interface
 
@@ -27,34 +27,31 @@
 | [`codegraph-index-docs.mjs`](codegraph-index-docs.mjs) | Indexes canonical contracts, ADRs, and `docs/designs/*.md` into local CodeGraph (`[--list-sources]` works without the engine binary). |
 | [`codegraph-query.mjs`](codegraph-query.mjs) | CLI wrapper for CodeGraph queries: `symbol <query>`, `callgraph\|callers\|callees <file> <line>`, `docs <query>`, `entrypoints`. |
 
-### API, Auth, Media & Migration Smoke Tests (8)
+### API, Auth, Media & Migration Smoke Tests (7)
 
 All smoke scripts launch isolated server instances (ephemeral loopback ports and `TemporaryDirectory` DB/site roots) via `running(...)` or apply SQLite migrations in memory, accepting `--binary <path>` where a server executable is required:
 
-- [`windows_smoke.py`](windows_smoke.py) — Core HTTP builder/theme smoke helper (`running`, `sample_theme`).
+- [`windows_smoke.py`](windows_smoke.py) — Core HTTP v3 theme, entry builder, retired M3–M5 `404` checks, and launcher helper (`running`, `sample_theme`).
 - [`windows_auth_smoke.py`](windows_auth_smoke.py) — Auth, RBAC, session expiry, CSRF, concurrent setup, and DB upgrade tests.
 - [`make_baseline_fixture.py`](make_baseline_fixture.py) — Generates or verifies `cms/fixtures/baseline_0001.sqlite` (`create_baseline_fixture`).
 - [`content_types_smoke.py`](content_types_smoke.py) — CPT API CRUD & SQLite smoke (`running`, `login`, `request`).
 - [`content_entries_smoke.py`](content_entries_smoke.py) — Content entry CRUD, concurrency, and media wiring smoke (`api`).
 - [`media_smoke.py`](media_smoke.py) — Media library upload/PNG helper and lifecycle smoke (`make_png`, `upload_image`).
-- [`public_content_smoke.py`](public_content_smoke.py) — Public CPT, themed HTML, and media delivery smoke.
 - [`egm_pattern_s02_migration.py`](egm_pattern_s02_migration.py) — In-memory SQLite migration test applying `0001`–`0043` then `0044` (`apply_through`) to verify Section-to-Pattern upgrade integrity.
 
-### Live Browser E2E Suites (15)
+### Live Browser E2E Suites (13)
 
 Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-specific `--artifact-dir` / `--browser` flags):
 
 - [`admin_i18n_multilingual_e2e.py`](admin_i18n_multilingual_e2e.py) — Admin i18n and multilingual settings (`0051`) browser journeys.
 - [`admin_nav_single_edit_e2e.py`](admin_nav_single_edit_e2e.py) — Bounded Chrome Admin navigation, RBAC, and single-edit acceptance.
 - [`egm_cpt_builder_s01_e2e.py`](egm_cpt_builder_s01_e2e.py) — CPT builder browser smoke on an isolated site.
-- [`egm_pattern_library_s03_e2e.py`](egm_pattern_library_s03_e2e.py) — Pattern library Chrome + API E2E suite.
+- [`egm_pattern_library_s03_e2e.py`](egm_pattern_library_s03_e2e.py) — Pattern library, Studio Mode 2 Pattern (`#/studio/entry/pattern/:id`), and RBAC Chrome + API E2E suite.
 - [`general_settings_browser.py`](general_settings_browser.py) — General Settings (`SITE-01`) embedded Admin browser test.
-- [`m4_s11_t01_page_builder_e2e.py`](m4_s11_t01_page_builder_e2e.py) — Page builder E2E acceptance (`ui_create_page`, `new_heading`).
-- [`m4_s11_t02_sections_e2e.py`](m4_s11_t02_sections_e2e.py) — Reusable Sections Chrome + SQLite contract (`create_ui_section`).
-- [`m5_beta_theme_v2_e2e.py`](m5_beta_theme_v2_e2e.py) — Theme v2 revision selection, sample import, and preservation (`theme_zip`).
-- [`m5_s12_t01_library_e2e.py`](m5_s12_t01_library_e2e.py) — Local template library + Section copy E2E test.
+- [`m4_s11_t01_page_builder_e2e.py`](m4_s11_t01_page_builder_e2e.py) — Page builder Studio Mode 2 E2E acceptance (`ui_create_page`, `new_heading`, `change_heading`).
+- [`m5_s12_t01_library_e2e.py`](m5_s12_t01_library_e2e.py) — Local template library, Pattern CRUD (`create_ui_pattern`), and Studio override E2E test.
 - [`m6_s10_t01_admin_extensions_e2e.py`](m6_s10_t01_admin_extensions_e2e.py) — Plugin provider Admin columns, actions, and term panels E2E.
-- [`m7_beta_menu_picker_e2e.py`](m7_beta_menu_picker_e2e.py) — Admin menu picker E2E and shared launcher helpers (`launch_server`, `stop_server`, `admin_login`, `api_json`, `set_cms_locale`).
+- [`m7_beta_menu_picker_e2e.py`](m7_beta_menu_picker_e2e.py) — Admin menu picker E2E and shared launcher/theme helpers (`launch_server`, `stop_server`, `admin_login`, `api_json`, `set_cms_locale`, `theme_zip`).
 - [`m7_s16_t02_navigation_e2e.py`](m7_s16_t02_navigation_e2e.py) — Grouped Admin routes and one-screen-per-destination E2E.
 - [`m7_s16_t06_entry_table_e2e.py`](m7_s16_t06_entry_table_e2e.py) — Entry tables, bulk CAS, URL redirect history, and mobile viewport E2E.
 - [`m8_browser_e2e.py`](m8_browser_e2e.py) — Backup → restore → re-auth → activate → re-edit → Save → public E2E.
