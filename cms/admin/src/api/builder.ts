@@ -10,17 +10,10 @@ export interface BlockDiagnostic {
   code: string;
   message: string;
 }
-export interface HomepageOpen {
-  document: BuilderDocument;
-  source: 'empty' | 'legacy' | 'layout';
-  version: number;
-}
 export interface HomepagePreview {
   html: string;
   diagnostics: BuilderDiagnostic[];
 }
-
-export type OverrideRole = 'page' | 'header' | 'footer' | 'archive' | 'single' | 'taxonomy_archive';
 
 export interface EntryBuilderOpen {
   entry_id: number;

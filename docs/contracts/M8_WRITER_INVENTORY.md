@@ -1,6 +1,6 @@
 # M8 Writer & Recovery Inventory
 
-Tài liệu này liệt kê toàn bộ top-level mutators, async/background writers và startup recovery paths trong `opendash-server`, gắn với cơ chế khóa bảo trì của [`SiteCoordinator`](../../cms/crates/opendash-server/src/operations.rs) (đồng bộ với các route registrations trong [`app.rs`](../../cms/crates/opendash-server/src/app.rs) và migrations `0001`–`0051`).
+Tài liệu này liệt kê toàn bộ top-level mutators, async/background writers và startup recovery paths trong `opendash-server`, gắn với cơ chế khóa bảo trì của [`SiteCoordinator`](../../cms/crates/opendash-server/src/operations.rs) (đồng bộ với các route registrations trong [`app.rs`](../../cms/crates/opendash-server/src/app.rs) và migrations `0001`–`0052`).
 
 ## 1. Quy tắc chung
 

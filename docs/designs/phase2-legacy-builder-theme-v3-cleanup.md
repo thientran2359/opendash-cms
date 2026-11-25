@@ -1,11 +1,11 @@
 # Phase 2 Legacy Retirement: Studio Pattern Cutover, M3–M5 Route Removal, Theme v3 Enforcement & PRD Sync
 
 * **Author:** Nova
-* **Status:** Approved
+* **Status:** Verified
 * **Date:** 2026-11-25
 * **Approved By:** Owner
 * **Approval Evidence:** Owner direct instruction in Antigravity chat 2026-11-25
-* **Goldfish Review:** Brainstorm 7-lens Goldfish synthesizer (dae24751) · 2026-11-25; post-implementation /egm-drift-report required before Verified
+* **Goldfish Review:** Brainstorm 7-lens Goldfish synthesizer (dae24751) · 2026-11-25; egm-codebase-details post-implementation drift audit (5b88c4d4) · 2026-11-26 (0 Blocker / 0 Major after F-01–F-06 hardening)
 * **Approval Gate Note:** Updates `docs/product/PRODUCT_REQUIREMENTS.md` and removes legacy HTTP/Admin endpoints, therefore final approval requires `Approved By: Owner` per [ADR-0010](../decisions/ADR-0010-agent-project-and-merge-authority.md).
 
 --------------------------------------------------------------------------------

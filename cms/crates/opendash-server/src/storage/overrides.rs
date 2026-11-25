@@ -38,107 +38,6 @@ use crate::{
     template_sec::{self, PreviewCompositionBudget},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OverrideRole {
-    Page,
-    Header,
-    Footer,
-    Archive,
-    Single,
-    TaxonomyArchive,
-}
-
-impl OverrideRole {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Page => "page",
-            Self::Header => "header",
-            Self::Footer => "footer",
-            Self::Archive => "archive",
-            Self::Single => "single",
-            Self::TaxonomyArchive => "taxonomy_archive",
-        }
-    }
-
-    pub fn parse(raw: &str) -> ApiResult<Self> {
-        match raw {
-            "page" => Ok(Self::Page),
-            "header" => Ok(Self::Header),
-            "footer" => Ok(Self::Footer),
-            "archive" => Ok(Self::Archive),
-            "single" => Ok(Self::Single),
-            "taxonomy_archive" => Ok(Self::TaxonomyArchive),
-            "home" => Err(ApiError::bad_request(
-                "Trang chủ dùng /api/admin/builder/homepage, không tạo override riêng.",
-            )),
-            _ => Err(ApiError::bad_request(
-                "Role template override không hợp lệ.",
-            )),
-        }
-    }
-
-    pub fn allows_entry_scope(self) -> bool {
-        matches!(self, Self::Page | Self::Single)
-    }
-
-    pub fn allows_type_scope(self) -> bool {
-        matches!(self, Self::Page | Self::Archive | Self::Single)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OverrideScope {
-    pub role: OverrideRole,
-    pub scope_type_key: Option<String>,
-    pub scope_entry_id: Option<i64>,
-}
-
-impl OverrideScope {
-    pub fn new(
-        role: OverrideRole,
-        scope_type_key: Option<String>,
-        scope_entry_id: Option<i64>,
-    ) -> ApiResult<Self> {
-        let scope_type_key = scope_type_key.filter(|s| !s.trim().is_empty());
-        if let Some(ref tk) = scope_type_key {
-            if !role.allows_type_scope() {
-                return Err(ApiError::bad_request(
-                    "Role này không hỗ trợ scope theo loại nội dung.",
-                ));
-            }
-            if !valid_content_type_key(tk) {
-                return Err(ApiError::bad_request("scope_type_key không hợp lệ."));
-            }
-        }
-        if let Some(eid) = scope_entry_id {
-            if !role.allows_entry_scope() {
-                return Err(ApiError::bad_request(
-                    "Chỉ role page hoặc single mới hỗ trợ scope theo entry.",
-                ));
-            }
-            if scope_type_key.is_none() {
-                return Err(ApiError::bad_request(
-                    "Cần scope_type_key khi chỉ định scope_entry_id.",
-                ));
-            }
-            if eid <= 0 {
-                return Err(ApiError::bad_request("scope_entry_id không hợp lệ."));
-            }
-            // Site-owned Page body overrides have exactly one identity. A
-            // post/CPT must never be addressable through the Page role.
-            if role == OverrideRole::Page && scope_type_key.as_deref() != Some("page") {
-                return Err(ApiError::bad_request("Page Builder cần type_key=page."));
-            }
-        }
-        Ok(Self {
-            role,
-            scope_type_key,
-            scope_entry_id,
-        })
-    }
-}
-
 /// The route must authenticate publication, provider visibility, archive
 /// eligibility and assigned template eligibility before constructing context.
 #[derive(Debug, Clone)]
@@ -425,32 +324,6 @@ pub(super) async fn build_reset_candidate_chain_for_locale_in_conn(
     Ok(candidates)
 }
 
-fn candidate_for_legacy_scope(scope: &OverrideScope) -> ApiResult<TemplateCandidate> {
-    use TemplateCandidateKind as K;
-    let mut result = match scope.role {
-        OverrideRole::Page => candidate(K::Page),
-        OverrideRole::Header | OverrideRole::Footer => {
-            let mut part = candidate(K::Part);
-            part.part_key = Some(scope.role.as_str().to_string());
-            part
-        }
-        OverrideRole::Archive => candidate(K::Archive),
-        OverrideRole::Single => candidate(K::Single),
-        OverrideRole::TaxonomyArchive => candidate(K::Taxonomy),
-    };
-    if scope.role == OverrideRole::Page
-        && (scope.scope_entry_id.is_some() || scope.scope_type_key.is_some())
-    {
-        return Err(ApiError::bad_request(
-            "Legacy Page scope has no typed template identity.",
-        ));
-    }
-    result.content_type = scope.scope_type_key.clone();
-    result.entry_id = scope.scope_entry_id;
-    result.canonical_key().map_err(ApiError::bad_request)?;
-    Ok(result)
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct TemplateOverrideRecord {
     pub id: i64,
@@ -683,41 +556,23 @@ pub async fn list_overrides(db: &SqlitePool) -> ApiResult<Vec<TemplateOverrideRe
     rows.into_iter().map(row_to_record).collect()
 }
 
-pub async fn get_override(
-    db: &SqlitePool,
-    scope: &OverrideScope,
-) -> ApiResult<Option<TemplateOverrideRecord>> {
-    let mut tx = db.begin().await?;
-    validate_scope_and_load_cpt_fields(&mut tx, scope).await?;
-    let record = get_override_in_tx(&mut tx, scope).await?;
-    tx.commit().await?;
-    Ok(record)
-}
-
-async fn get_override_in_tx(
+async fn validate_cpt_target_fields_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
-    scope: &OverrideScope,
-) -> ApiResult<Option<TemplateOverrideRecord>> {
-    let candidate = candidate_for_legacy_scope(scope)?;
-    let key = candidate.canonical_key().map_err(ApiError::bad_request)?;
-    let row: Option<OverrideRow> = sqlx::query_as(
-        "SELECT id, target_kind, canonical_target_key, target_json, ast_json, version,
-                base_theme_id, base_revision_digest, updated_at
-           FROM template_overrides WHERE canonical_target_key = ?",
-    )
-    .bind(key)
-    .fetch_optional(&mut **tx)
-    .await?;
-    row.map(row_to_record).transpose()
-}
-
-async fn validate_scope_and_load_cpt_fields(
-    tx: &mut Transaction<'_, Sqlite>,
-    scope: &OverrideScope,
+    type_key: &str,
+    entry_id: Option<i64>,
 ) -> ApiResult<Option<Vec<String>>> {
-    let Some(ref type_key) = scope.scope_type_key else {
+    let type_key = type_key.trim();
+    if type_key.is_empty() {
         return Ok(None);
-    };
+    }
+    if !valid_content_type_key(type_key) {
+        return Err(ApiError::bad_request("scope_type_key không hợp lệ."));
+    }
+    if let Some(eid) = entry_id
+        && eid <= 0
+    {
+        return Err(ApiError::bad_request("scope_entry_id không hợp lệ."));
+    }
     let def_json: Option<String> =
         sqlx::query_scalar("SELECT definition_json FROM content_types WHERE key = ?")
             .bind(type_key)
@@ -732,11 +587,11 @@ async fn validate_scope_and_load_cpt_fields(
         .map_err(|_| ApiError::internal("Định nghĩa loại nội dung không hợp lệ."))?;
     let field_keys: Vec<String> = def.fields.into_iter().map(|f| f.key).collect();
 
-    if let Some(entry_id) = scope.scope_entry_id {
+    if let Some(eid) = entry_id {
         let exists: Option<i64> = sqlx::query_scalar(
             "SELECT id FROM content_entries WHERE id = ? AND content_type_key = ?",
         )
-        .bind(entry_id)
+        .bind(eid)
         .bind(type_key)
         .fetch_optional(&mut **tx)
         .await?;
@@ -870,13 +725,7 @@ async fn validate_typed_target_in_tx(
 ) -> ApiResult<Option<Vec<String>>> {
     target.canonical_key().map_err(ApiError::bad_request)?;
     if let Some(kind) = target.content_type.as_deref() {
-        let role = if target.kind == TemplateCandidateKind::Archive {
-            OverrideRole::Archive
-        } else {
-            OverrideRole::Single
-        };
-        let scope = OverrideScope::new(role, Some(kind.to_owned()), target.entry_id)?;
-        return validate_scope_and_load_cpt_fields(tx, &scope).await;
+        return validate_cpt_target_fields_in_tx(tx, kind, target.entry_id).await;
     }
     if let Some(term_id) = target.term_id {
         let exists: i64 = sqlx::query_scalar(
@@ -2045,46 +1894,6 @@ pub async fn preview_typed_override_with_cache_and_locale(
     rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
     tx.rollback().await?;
     Ok(rendered)
-}
-
-/// Kept temporarily for the old Builder endpoint callers until routes migrate.
-pub async fn save_override_and_render(
-    db: &SqlitePool,
-    scope: &OverrideScope,
-    document: &BuilderDocument,
-    expected_version: Option<i64>,
-) -> ApiResult<(TemplateOverrideRecord, RenderedLayout)> {
-    let target = candidate_for_legacy_scope(scope)?;
-    let saved = save_typed_override(db, &target, document, expected_version).await?;
-    let rendered = render_override_for_public(db, &saved, None).await?;
-    Ok((saved, rendered))
-}
-
-/// Kept temporarily for old Builder endpoints; v3 reset API uses the typed ID.
-pub async fn reset_override(
-    db: &SqlitePool,
-    scope: &OverrideScope,
-    expected_version: i64,
-    confirmed: bool,
-) -> ApiResult<()> {
-    if !confirmed {
-        return Err(ApiError::bad_request("Reset requires confirmation."));
-    }
-    let target = candidate_for_legacy_scope(scope)?;
-    let existing = get_typed_override(db, &target)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Template override not found."))?;
-    reset_typed_override(
-        db,
-        existing.id,
-        Some(expected_version),
-        &[target],
-        None,
-        None,
-        None,
-    )
-    .await?;
-    Ok(())
 }
 
 pub async fn render_override_for_public(

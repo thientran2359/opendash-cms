@@ -22,7 +22,7 @@ LOCALES = "/api/admin/locales"
 def run(binary: pathlib.Path, artifacts: pathlib.Path) -> None:
     artifacts.mkdir(parents=True, exist_ok=True)
     checks = []
-    with tempfile.TemporaryDirectory(prefix="opendash-admin-i18n-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="opendash-admin-i18n-", ignore_cleanup_errors=True) as temporary:
         root = pathlib.Path(temporary).resolve()
         db = root / "database/opendash.sqlite"
         proc, base = launch_server(binary, root)
@@ -150,6 +150,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> None:
                     return page.get_by_test_id("multilingual-enabled-checkbox")
 
                 def add_locale(code, label):
+                    page.get_by_test_id("multilingual-tabs-languages").click()
                     page.get_by_test_id("add-locale-btn").click()
                     page.get_by_test_id("new-locale-code").fill(code)
                     page.get_by_test_id("new-locale-label").fill(label)
@@ -157,6 +158,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> None:
                     expect(page.get_by_test_id("locale-row-" + code)).to_be_visible()
 
                 def remove_locale(code):
+                    page.get_by_test_id("multilingual-tabs-languages").click()
                     page.get_by_test_id("delete-locale-" + code).click()
                     expect(page.get_by_test_id("delete-locale-modal")).to_be_visible()
                     with page.expect_response(lambda r: r.url.endswith(LOCALES + "/" + code)
@@ -317,6 +319,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> None:
                 assert rows("SELECT deleted_at FROM site_locales WHERE code='fr'")[0][0]
                 assert retained == content_snapshot("fr")
                 assert anon.request.get(base + "/fr/s05-french").status == 404
+                page.get_by_test_id("multilingual-tabs-orphans").click()
                 orphan_row = page.get_by_test_id("orphan-locale-row-fr")
                 expect(orphan_row).to_be_visible()
                 orphan = next(i for i in api("GET", LOCALES + "/orphans").json()["items"] if i["code"] == "fr")
@@ -333,6 +336,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> None:
                 assert retained == content_snapshot("fr")
                 assert anon.request.get(base + "/fr/s05-french").status == 200
                 remove_locale("fr")
+                page.get_by_test_id("multilingual-tabs-orphans").click()
                 page.get_by_test_id("purge-orphan-fr").click()
                 expect(page.get_by_test_id("purge-orphan-modal")).to_be_visible()
                 confirm = page.get_by_test_id("purge-confirm-input")

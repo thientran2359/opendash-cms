@@ -21,15 +21,6 @@ use crate::package::{
 
 pub const MAX_ZIP_BYTES: usize = 64 * 1024;
 
-pub struct Theme {
-    pub descriptor: BlockDescriptor,
-    pub template: String,
-    pub content_list_template: Option<String>,
-    pub content_single_template: Option<String>,
-    /// Explicitly supported block from another installed theme; never rewrites home_page.
-    pub compatible_block_id: Option<String>,
-}
-
 #[cfg(test)]
 mod s03_package_block_tests {
     use super::*;
@@ -127,13 +118,6 @@ mod s03_package_block_tests {
         files.insert("theme.json".into(), br#"{"manifest_version":3,"theme_id":"abcdefghijklmnopqrstuvwxyz-abcde","name":"Sample","version":"1.0.0"}"#.to_vec());
         assert!(validate_theme_v3_files(files).is_err());
     }
-}
-
-pub fn render(template: &str, fields: &Fields, block: &Block) -> Result<String, &'static str> {
-    block.validate_against_fields(fields)?;
-    let context = minijinja::context!(values => &block.values);
-    crate::template_sec::render_csec("block", template, context)
-        .map_err(|_| "Không render được template block.")
 }
 
 /// Shared MiniJinja C-SEC HTML auto-escaping and fuel budget for theme CPT
@@ -878,12 +862,12 @@ pub struct ThemeTaxonomyEligibilityDeclaration {
     pub taxonomies: Vec<String>,
 }
 
-/// Parses and validates `declarations` (and optional top-level `field_groups`) from a v2 theme manifest.
+/// Parses and validates `declarations` (and optional top-level `field_groups`) from a v3 theme manifest.
 /// Rejects unknown fields, invalid CPT/field schemas, duplicate keys, and any
 /// undeclared taxonomy associations and duplicate keys.
 pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations, &'static str> {
     let val: serde_json::Value =
-        serde_json::from_str(manifest_json).map_err(|_| "Manifest theme v2 không hợp lệ.")?;
+        serde_json::from_str(manifest_json).map_err(|_| "Manifest theme v3 không hợp lệ.")?;
     let mut raw_decl = match val.get("declarations").cloned() {
         Some(v) if !v.is_null() => v,
         _ => serde_json::json!({}),

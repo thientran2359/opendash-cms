@@ -7,14 +7,14 @@ export interface ThemeRevisionSummary {
   theme_id: string;
   version: string;
   revision_digest: string;
-  source_format: 'v3';
+  source_format: 'v1_legacy' | 'v2' | 'v3';
 }
 
 export interface ThemeSelection {
   revision_id: string | null;
   theme_id: string | null;
   version: number;
-  source_format: 'v3' | null;
+  source_format: 'v1_legacy' | 'v2' | 'v3' | null;
 }
 
 export interface ThemesSummary {

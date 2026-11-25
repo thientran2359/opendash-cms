@@ -24,7 +24,7 @@ flowchart LR
     subgraph Server["cms/crates/opendash-server (Binary duy nhất)"]
         Routes["HTTP Routes & Guards (src/routes/)\n(Axum, Auth/RBAC, CSRF, AdmittedMutation)"]
         UseCases["Domain Services & Renderers\n(MiniJinja C-SEC, Document Normalizer, Media/Backup/SMTP)"]
-        Storage["Storage & Migrations (src/storage/, 0001-0041)\n(100% SQLx + SQLite WAL)"]
+        Storage["Storage & Migrations (src/storage/, 0001-0052)\n(100% SQLx + SQLite WAL)"]
         PluginHost["Plugin Host & Worker (src/plugin/)\n(Wasmi process-isolated, DNS-pinned Egress)"]
         Routes --> UseCases
         UseCases --> Storage
@@ -32,7 +32,7 @@ flowchart LR
     end
 
     subgraph Core["cms/crates/opendash-core (Thư viện thuần Rust)"]
-        Domain["Domain Models & Validators\n(id, registry, hooks, content, builder, theme, plugin, contact, backup, admin_extensions)"]
+        Domain["Domain Models & Validators\n(id, registry, hooks, content, block_schema, builder, builder_blocks,\nrichtext, icons, theme, plugin, contact, backup, admin_extensions, i18n)"]
     end
 
     ApiClient -->|HTTP / JSON| Routes
@@ -44,17 +44,17 @@ flowchart LR
 
 1. **`cms/crates/opendash-core` (Thư viện Rust thuần domain & kiểm tra hợp lệ):**
    - Chỉ phụ thuộc `serde`, `serde_json`, `url`. Tuyệt đối không dùng `axum`, `sqlx`, `wasmi`, `tokio`, `reqwest` hoặc `std::{fs, io, net, process, thread}`.
-   - Gồm 10 modules ([`src/lib.rs`](../../cms/crates/opendash-core/src/lib.rs)): `id`, `registry`, `hooks`, `content`, `builder`, `theme`, `plugin`, `contact`, `backup`, `admin_extensions`.
+   - Gồm 15 modules ([`src/lib.rs`](../../cms/crates/opendash-core/src/lib.rs)): `admin_extensions`, `backup`, `block_schema`, `builder`, `builder_blocks`, `contact`, `content`, `hooks`, `i18n`, `icons`, `id`, `plugin`, `registry`, `richtext`, `theme`.
 2. **`cms/crates/opendash-server` (Ứng dụng thực thi phụ thuộc `opendash-core`):**
-   - **`routes/` (22 modules):** Xác thực phiên/CSRF (`require_*`), admission lease (`AdmittedMutation`), kiểm tra body/headers và ánh xạ HTTP response (`ApiError`). Không chứa câu lệnh SQL.
-   - **`storage/` (31 files):** Sở hữu **100% truy vấn `sqlx::query*` / `sqlx::raw_sql`**, transactions `BEGIN IMMEDIATE` và migrations `0001`–`0041`.
+   - **`routes/` (23 files: `mod.rs` + 22 modules):** Xác thực phiên/CSRF (`require_*`), admission lease (`AdmittedMutation`), kiểm tra body/headers và ánh xạ HTTP response (`ApiError`). Không chứa câu lệnh SQL.
+   - **`storage/` (32 module files + 2 test files):** Sở hữu **100% truy vấn `sqlx::query*` / `sqlx::raw_sql`**, transactions `BEGIN IMMEDIATE` và migrations `0001`–`0052`.
    - **`plugin/`:** Vòng đời plugin revisions, worker cô lập tiến trình (`--plugin-worker`), `host_ops` (`kv_get`, `kv_set`, `http_request`, `content_save`) và HTTP egress chống SSRF (`egress.rs`).
    - **Hạ tầng server:** `SiteCoordinator` (`operations.rs`), `SitePaths` (`paths.rs`), `template_sec.rs` (`C-SEC`), `document.rs` (`normalize_public_document`), `backup*.rs` & `restore.rs` (`age` encrypted), `media*.rs`, `smtp.rs`, `secrets.rs`, `config.rs`, và `rust-embed` (`app.rs`).
 3. **`cms/admin/` (Giao diện quản trị và Builder trên trình duyệt):**
-   - **`api/` (21 modules):** Mọi lời gọi HTTP đi qua [`client.ts`](../../cms/admin/src/api/client.ts).
+   - **`api/` (21 files):** Mọi lời gọi HTTP đi qua [`client.ts`](../../cms/admin/src/api/client.ts).
    - **`shell/`:** `AdminShell.tsx` (điều hướng 3 nhóm `Nội dung`, `Giao diện`, `Tùy chỉnh`), `router.ts`, `AuthPanel.tsx`.
    - **`builder/` & `studio/`:** `StudioWorkspace.tsx` (Mode 1 Customizer + Mode 2 Entry/Pattern UX Builder), `BuilderEditorCore.tsx`, `BuilderTree.tsx`, `BuilderCanvas.tsx`, `BuilderInspector.tsx`, `BuilderPreviewFrame.tsx` (`BuilderWorkspace.tsx` cũ đã được thay thế hoàn toàn).
-   - **`features/` (18 thư mục):** `contact/`, `content/`, `dashboard/`, `editor/` (`SingleEditWorkspace.tsx`, `EditorDraftStore.ts`), `extensions/`, `library/`, `media/`, `operations/`, `patterns/`, `plugins/`, `posts/`, `seo/`, `settings/`, `shared/`, `system/`, `taxonomy/`, `themes/`, `users/`.
+   - **`features/` (17 thư mục):** `contact/`, `content/`, `dashboard/`, `editor/` (`SingleEditWorkspace.tsx`, `EditorDraftStore.ts`), `extensions/`, `library/`, `media/`, `operations/`, `patterns/`, `plugins/`, `seo/`, `settings/`, `shared/`, `system/`, `taxonomy/`, `themes/`, `users/`.
 
 ### 1.2. Luồng Xem trước (Preview), Lưu (Save), Xuất bản (Publish) và Quyền sở hữu Dữ liệu
 
@@ -78,10 +78,10 @@ opendash-cms/
 │   ├── Cargo.toml                          # [workspace] members = ["crates/opendash-core", "crates/opendash-server"]
 │   ├── Cargo.lock
 │   ├── crates/
-│   │   ├── opendash-core/src/              # 10 domain modules thuần Rust (lib.rs)
-│   │   └── opendash-server/src/            # Server binary: routes/ (22), storage/ (31), plugin/, tests/
-│   ├── admin/src/                          # React + TS + Vite + Tailwind CSS (api/, shell/, builder/, features/)
-│   ├── migrations/                         # 40 migrations SQLite (0001–0041, bỏ qua số 0016)
+│   │   ├── opendash-core/src/              # 15 domain modules thuần Rust (lib.rs)
+│   │   └── opendash-server/src/            # Server binary: routes/ (23 files), storage/ (32 module files + 2 test files), plugin/, tests/
+│   ├── admin/src/                          # React + TS + Vite + Tailwind CSS (api/, shell/, studio/, builder/, i18n/, features/)
+│   ├── migrations/                         # 51 migrations SQLite (0001–0052, bỏ qua số 0016)
 │   ├── fixtures/                           # Database mẫu kiểm tra nâng cấp (baseline_0001.sqlite)
 │   ├── sdk/                                # AssemblyScript Plugin SDK (sdk/as/opendash.ts)
 │   ├── examples/                           # Plugin/Theme mẫu (sample-plugin, rust-seo-plugin, sample-theme-v3)

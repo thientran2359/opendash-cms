@@ -9951,9 +9951,9 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "Locale dictionary values must be plain strings.",
     ),
     (
-        "theme.invalid_v2_theme_manifest",
-        "Manifest theme v2 không hợp lệ.",
-        "Invalid v2 theme manifest.",
+        "theme.invalid_v3_theme_manifest",
+        "Manifest theme v3 không hợp lệ.",
+        "Invalid v3 theme manifest.",
     ),
     (
         "backup.the_original_media_key_must_start_with_media",
