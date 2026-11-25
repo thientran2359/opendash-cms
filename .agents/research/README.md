@@ -20,6 +20,7 @@ Lưu các ghi chú nghiên cứu đang mở, tài liệu vận hành CoS còn d�
 - [Starter Specs Drift Report (2026-11-24)](2026-11-24_STARTER_SPECS_DRIFT_REPORT.md)
 - [Theme Ergonomics & C-SEC Helpers Drift Report (2026-11-24)](2026-11-24_THEME_ERGONOMICS_DRIFT_REPORT.md)
 - [Admin i18n & Multilingual Settings Drift Report (2026-11-25)](2026-11-25-admin-i18n-drift-report.md)
+- [CMS README Bootstrap Drift Report (2026-11-25)](2026-11-25_CMS_README_BOOTSTRAP_DRIFT_REPORT.md)
 
 ## Ghi chú CoS Dispatch & EGM Pilot
 
