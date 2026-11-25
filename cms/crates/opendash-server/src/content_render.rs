@@ -1040,6 +1040,19 @@ pub fn compose_document_with_seo(
     compose_document_with_seo_with_body_classes(header_html, rendered_layout, footer_html, seo, &[])
 }
 
+/// Server-owned SVG substitution happens only after document normalization.
+pub fn finalize_document_icons(
+    html: String,
+    icon_nonces: &crate::template_sec::IconNonceTable,
+) -> ApiResult<String> {
+    if icon_nonces.is_empty() {
+        return Ok(html);
+    }
+    icon_nonces
+        .substitute_into_document(html)
+        .map_err(ApiError::internal)
+}
+
 pub fn compose_document_with_seo_with_body_classes(
     header_html: Option<&str>,
     rendered_layout: &str,

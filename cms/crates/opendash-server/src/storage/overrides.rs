@@ -2045,6 +2045,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
     )
     .await?;
     rendered.diagnostics.append(&mut body_diagnostics);
+    rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
     tx.rollback().await?;
     Ok(rendered)
 }
@@ -2209,14 +2210,14 @@ impl PublicCompositionBudget {
     ) -> ApiResult<String> {
         self.charge(compiled.part_expansions())?;
         let html = compiled
-            .render_with_config_and_remaining_fuel(
+            .render_with_config_and_budget(
                 template_sec::json_context_with_shared_locale(
                     context,
                     self.shared_t.as_ref(),
                     self.shared_locale.as_ref(),
                 ),
                 slot,
-                &mut self.render_budget.fuel_remaining,
+                &mut self.render_budget,
                 fmt_cfg,
             )
             .map_err(ApiError::internal)?;
@@ -3791,6 +3792,8 @@ pub async fn preview_studio_with_cache_and_locale(
         footer_html.as_deref(),
         &seo,
     )?;
+    let full_html =
+        content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
     tx.rollback().await?;
     Ok(RenderedLayout {
         has_active_contact_form,
@@ -3999,6 +4002,8 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
         footer_html.as_deref(),
         &seo,
     )?;
+    let full_html =
+        content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
     Ok(RenderedLayout {
         has_active_contact_form,
         html: full_html,

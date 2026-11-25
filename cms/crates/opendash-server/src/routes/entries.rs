@@ -903,10 +903,12 @@ pub async fn entry_preview(
     let (_, bcp47_tag, dir) =
         crate::storage::settings::get_locale_bcp47_and_dir(&db, Some(&entry.locale)).await?;
     let seo_view = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &entry.title);
+    let mut icon_nonces = crate::template_sec::IconNonceTable::default();
     let raw_html = if supports_builder && body_view_allowed && has_blocks {
-        if let Some(rendered) =
+        if let Some((rendered, nonces)) =
             crate::storage::builder::preview_saved_entry_body(&db, &actor, &type_key, id).await?
         {
+            icon_nonces = nonces;
             rendered.html
         } else {
             let (_, selected_template) = active_content_templates(&db).await?;
@@ -931,6 +933,7 @@ pub async fn entry_preview(
         .await?
     };
     let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
+    let html = content_render::finalize_document_icons(html, &icon_nonces)?;
     Ok((
         [
             (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
