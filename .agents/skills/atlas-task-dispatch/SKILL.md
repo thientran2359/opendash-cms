@@ -49,13 +49,22 @@ Báo mỗi agent: **Issue/Task | Project gate | CoS receipt (`NOT_SENT`/`ACCEPTE
 
 ## `RESUME Issue` — Tiếp tục task đã có `send-issue` khi có ACK mới
 
-Chỉ dùng sau khi lượt trước đã kết thúc (`ACCEPTED`, `outbox_delivery=sent`, `latest turn ended`), có comment ACK có cấu trúc (ký `Agent: Atlas` hoặc `Agent: Aster`) pin đúng repo/target/Issue/Task/source/PR/head/base và slot project rảnh:
+Chỉ dùng sau khi lượt trước đã kết thúc (`ACCEPTED`, `outbox_delivery=sent`, `latest turn ended`), có comment ACK có cấu trúc (ký `Agent: Atlas` hoặc `Agent: Aster` kèm marker `<!-- opendash-resume-v1 ... -->`) pin đúng repo/target/Issue/Task/source/base và slot project rảnh. Hỗ trợ cả 2 trường hợp:
 
+1. **Đã có PR mở** (pin thêm `--pr` và `--head-sha`):
 ```bash
 python3.13 .agents/scripts/cos_dispatch.py --local resume-issue harbor \
   --request-id <uuid> --issue <N> --task-id <Task-ID> \
   --source-sha <approved-spec-source-sha> --base-sha <current-PR-base-SHA> \
   --pr <PR> --head-sha <current-PR-head-SHA> --ack-id <new-Issue-comment-ID>
+```
+
+2. **Chưa có PR (pre-PR resume — lượt trước dừng sớm do lỗi worktree/môi trường):** bỏ `--pr` và `--head-sha` (trong marker `<!-- opendash-resume-v1 ... -->` đặt `"pr": null, "head_sha": null` hoặc bỏ trống 2 trường này):
+```bash
+python3.13 .agents/scripts/cos_dispatch.py --local resume-issue harbor \
+  --request-id <uuid> --issue <N> --task-id <Task-ID> \
+  --source-sha <approved-spec-source-sha> --base-sha <approved-base-SHA> \
+  --ack-id <new-Issue-comment-ID>
 ```
 
 ## `RUN PR` — Tác giả sửa PR tài liệu theo review

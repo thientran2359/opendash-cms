@@ -213,8 +213,9 @@ async fn render_resolved_public_template_html(
             precompiled_shell: inspection.precompiled_shell,
         }),
         TemplateResolution::DbOverride(record) => {
-            let canvas_layout =
-                record.target.kind == opendash_core::theme::TemplateCandidateKind::PageLayout;
+            let canvas_layout = record.target.kind
+                == opendash_core::theme::TemplateCandidateKind::PageLayout
+                && overrides::is_canvas_page_layout(active, record.target.layout_key.as_deref());
             let rendered = overrides::render_resolved_public_builder_with_cache_for_locale(
                 db,
                 &record,
@@ -239,9 +240,7 @@ async fn render_resolved_public_template_html(
             let compiled = match inspection.precompiled_body {
                 Some(compiled) => compiled,
                 None => {
-                    use crate::template_sec::{
-                        CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
-                    };
+                    use crate::template_sec::CsecContentKind;
                     let kind = if target_key == "index" {
                         CsecContentKind::Index
                     } else if matches!(target_key.as_str(), "home" | "page" | "singular" | "single")
@@ -255,13 +254,25 @@ async fn render_resolved_public_template_html(
                     };
                     let empty_parts = BTreeMap::new();
                     let parts = active.map(|v| &v.parts).unwrap_or(&empty_parts);
-                    validate_and_compile_csec_composition_with_theme_urls(
-                        &target_key,
-                        &html,
-                        parts,
-                        kind,
-                        &url_policy,
-                    )
+                    if let Some(active) = active {
+                        crate::template_sec::ThemeCompositionCache::global().get_or_compile(
+                            &active.revision_digest,
+                            &target_key,
+                            &html,
+                            parts,
+                            kind,
+                            &url_policy,
+                        )
+                    } else {
+                        crate::template_sec::validate_and_compile_csec_composition_with_theme_urls(
+                            &target_key,
+                            &html,
+                            parts,
+                            kind,
+                            &url_policy,
+                        )
+                        .map(Arc::new)
+                    }
                     .map_err(ApiError::internal)?
                 }
             };
@@ -270,7 +281,10 @@ async fn render_resolved_public_template_html(
             Ok(ResolvedPublicHtml {
                 html,
                 has_active_contact_form: false,
-                canvas_layout: target_key.starts_with("page_layout:"),
+                canvas_layout: overrides::is_canvas_page_layout(
+                    active,
+                    target_key.strip_prefix("page_layout:"),
+                ),
                 theme_context: context,
                 precompiled_shell: inspection.precompiled_shell,
             })

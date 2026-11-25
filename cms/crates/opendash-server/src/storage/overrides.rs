@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
+    sync::Arc,
 };
 
 use opendash_core::{
@@ -12,7 +13,7 @@ use opendash_core::{
         valid_content_type_key,
     },
     registry::{DeclarationState, ProviderStatus},
-    theme::{TemplateCandidate, TemplateCandidateKind},
+    theme::{PageLayoutChrome, TemplateCandidate, TemplateCandidateKind},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
@@ -167,6 +168,35 @@ pub enum PublicTemplateContext {
 
 fn candidate(kind: TemplateCandidateKind) -> TemplateCandidate {
     TemplateCandidate::new(kind)
+}
+
+pub(crate) fn is_canvas_page_layout(
+    active: Option<&ActiveThemeV3>,
+    layout_key: Option<&str>,
+) -> bool {
+    let Some(layout_key) = layout_key else {
+        return false;
+    };
+    active
+        .and_then(|theme| {
+            theme
+                .manifest
+                .page_layouts
+                .iter()
+                .find(|decl| decl.key == layout_key)
+        })
+        .map_or(layout_key == "canvas", |decl| {
+            decl.chrome == PageLayoutChrome::None
+        })
+}
+
+fn is_canvas_target(active: Option<&ActiveThemeV3>, target: &TemplateCandidate) -> bool {
+    target.kind == TemplateCandidateKind::PageLayout
+        && is_canvas_page_layout(active, target.layout_key.as_deref())
+}
+
+fn is_canvas_resolved_key(active: Option<&ActiveThemeV3>, target_key: &str) -> bool {
+    is_canvas_page_layout(active, target_key.strip_prefix("page_layout:"))
 }
 
 pub fn build_candidates(context: &PublicTemplateContext) -> ApiResult<Vec<TemplateCandidate>> {
@@ -2209,28 +2239,6 @@ struct PublicBuilderContext<'a> {
     fmt_cfg: &'a template_sec::RenderFormattingConfig,
 }
 
-/// Check the full depth of a contiguous theme graph at its actual Builder
-/// boundary; the compiler checks the same graph from its own lexical root.
-fn check_theme_part_depth(
-    key: &str,
-    sources: &BTreeMap<String, String>,
-    depth: usize,
-    url_policy: &template_sec::ThemeUrlPolicy,
-) -> ApiResult<()> {
-    if depth > 3 {
-        return Err(ApiError::internal("Template part depth exceeds 3."));
-    }
-    let source = sources
-        .get(key)
-        .ok_or_else(|| ApiError::internal("Theme part missing."))?;
-    for child in template_sec::csec_part_keys_with_theme_urls(key, source, url_policy)
-        .map_err(ApiError::internal)?
-    {
-        check_theme_part_depth(&child, sources, depth + 1, url_policy)?;
-    }
-    Ok(())
-}
-
 async fn render_public_part(
     tx: &mut Transaction<'_, Sqlite>,
     key: &str,
@@ -2273,15 +2281,19 @@ async fn render_public_part(
     let Some(source) = active.parts.get(key) else {
         return Ok(None);
     };
-    let compiled = template_sec::validate_and_compile_csec_composition_with_theme_urls(
-        &canonical,
-        source,
-        &active.parts,
-        template_sec::CsecContentKind::NonEntry,
-        ctx.url_policy,
-    )
-    .map_err(ApiError::internal)?;
-    check_theme_part_depth(key, &active.parts, depth, ctx.url_policy)?;
+    let compiled = template_sec::ThemeCompositionCache::global()
+        .get_or_compile(
+            &active.revision_digest,
+            &canonical,
+            source,
+            &active.parts,
+            template_sec::CsecContentKind::NonEntry,
+            ctx.url_policy,
+        )
+        .map_err(ApiError::internal)?;
+    if depth + compiled.max_part_depth > 3 {
+        return Err(ApiError::internal("Template part depth exceeds 3."));
+    }
     let html = budget.render_theme_with_config(&compiled, ctx.theme_context, None, ctx.fmt_cfg)?;
     Ok(Some(RenderedLayout {
         html,
@@ -2476,12 +2488,12 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
 
 #[derive(Debug, Default)]
 pub struct PrecompiledPublicShell {
-    pub header: Option<template_sec::CompiledCsecComposition>,
-    pub footer: Option<template_sec::CompiledCsecComposition>,
+    pub header: Option<Arc<template_sec::CompiledCsecComposition>>,
+    pub footer: Option<Arc<template_sec::CompiledCsecComposition>>,
 }
 
 pub struct PublicSurfaceInspection {
-    pub precompiled_body: Option<template_sec::CompiledCsecComposition>,
+    pub precompiled_body: Option<Arc<template_sec::CompiledCsecComposition>>,
     pub precompiled_shell: PrecompiledPublicShell,
     pub uses_related_entries: bool,
     pub uses_recent_posts: bool,
@@ -2512,7 +2524,7 @@ async fn inspect_part_slot_in_tx(
     url_policy: &template_sec::ThemeUrlPolicy,
     uses_related_entries: &mut bool,
     uses_recent_posts: &mut bool,
-) -> ApiResult<(bool, Option<template_sec::CompiledCsecComposition>)> {
+) -> ApiResult<(bool, Option<Arc<template_sec::CompiledCsecComposition>>)> {
     let target = TemplateCandidate {
         part_key: Some(key.to_owned()),
         ..candidate(TemplateCandidateKind::Part)
@@ -2545,15 +2557,19 @@ async fn inspect_part_slot_in_tx(
     let Some(source) = active.parts.get(key) else {
         return Ok((false, None));
     };
-    check_theme_part_depth(key, &active.parts, depth, url_policy)?;
-    let compiled = template_sec::validate_and_compile_csec_composition_with_theme_urls(
-        &canonical,
-        source,
-        &active.parts,
-        template_sec::CsecContentKind::NonEntry,
-        url_policy,
-    )
-    .map_err(ApiError::internal)?;
+    let compiled = template_sec::ThemeCompositionCache::global()
+        .get_or_compile(
+            &active.revision_digest,
+            &canonical,
+            source,
+            &active.parts,
+            template_sec::CsecContentKind::NonEntry,
+            url_policy,
+        )
+        .map_err(ApiError::internal)?;
+    if depth + compiled.max_part_depth > 3 {
+        return Err(ApiError::internal("Template part depth exceeds 3."));
+    }
     *uses_related_entries |= compiled.uses_related_entries;
     *uses_recent_posts |= compiled.uses_recent_posts;
     Ok((true, Some(compiled)))
@@ -2612,23 +2628,35 @@ pub async fn inspect_public_surfaces_and_precompile(
                 &mut uses_recent_posts,
             )
             .await?;
-            record.target.kind == TemplateCandidateKind::PageLayout
+            is_canvas_target(active, &record.target)
         }
         TemplateResolution::ActiveTheme { target_key, html } => {
             let empty_parts = BTreeMap::new();
             let parts = active.map(|a| &a.parts).unwrap_or(&empty_parts);
-            let compiled = template_sec::validate_and_compile_csec_composition_with_theme_urls(
-                target_key,
-                html,
-                parts,
-                csec_content_kind_for_target_key(target_key),
-                url_policy,
-            )
+            let compiled = if let Some(active) = active {
+                template_sec::ThemeCompositionCache::global().get_or_compile(
+                    &active.revision_digest,
+                    target_key,
+                    html,
+                    parts,
+                    csec_content_kind_for_target_key(target_key),
+                    url_policy,
+                )
+            } else {
+                template_sec::validate_and_compile_csec_composition_with_theme_urls(
+                    target_key,
+                    html,
+                    parts,
+                    csec_content_kind_for_target_key(target_key),
+                    url_policy,
+                )
+                .map(Arc::new)
+            }
             .map_err(ApiError::internal)?;
             uses_related_entries |= compiled.uses_related_entries;
             uses_recent_posts |= compiled.uses_recent_posts;
             precompiled_body = Some(compiled);
-            target_key.starts_with("page_layout:")
+            is_canvas_resolved_key(active, target_key)
         }
         TemplateResolution::CoreFallback => false,
     };
@@ -2771,7 +2799,7 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
     let header = render_shell_slot(
         &mut tx,
         "header",
-        precompiled_shell.header.as_ref(),
+        precompiled_shell.header.as_deref(),
         &context,
         budget,
     )
@@ -2779,7 +2807,7 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
     let footer = render_shell_slot(
         &mut tx,
         "footer",
-        precompiled_shell.footer.as_ref(),
+        precompiled_shell.footer.as_deref(),
         &context,
         budget,
     )
@@ -3309,30 +3337,29 @@ fn render_csec_template_for_preview(
     budget: &mut PublicCompositionBudget,
     fmt_cfg: &template_sec::RenderFormattingConfig,
 ) -> ApiResult<String> {
-    use crate::template_sec::{
-        CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
-    };
-    let kind = if target_key == "index" {
-        CsecContentKind::Index
-    } else if matches!(target_key, "home" | "page" | "singular" | "single")
-        || target_key.starts_with("single:")
-        || target_key.starts_with("single_custom:")
-        || target_key.starts_with("page_layout:")
-    {
-        CsecContentKind::Entry
-    } else {
-        CsecContentKind::NonEntry
-    };
+    let kind = csec_content_kind_for_target_key(target_key);
     let empty_parts = BTreeMap::new();
     let parts = active.map(|v| &v.parts).unwrap_or(&empty_parts);
     let url_policy = active_theme_url_policy(active)?;
-    let composition = validate_and_compile_csec_composition_with_theme_urls(
-        target_key,
-        html,
-        parts,
-        kind,
-        &url_policy,
-    )
+    let composition = if let Some(active) = active {
+        template_sec::ThemeCompositionCache::global().get_or_compile(
+            &active.revision_digest,
+            target_key,
+            html,
+            parts,
+            kind,
+            &url_policy,
+        )
+    } else {
+        template_sec::validate_and_compile_csec_composition_with_theme_urls(
+            target_key,
+            html,
+            parts,
+            kind,
+            &url_policy,
+        )
+        .map(Arc::new)
+    }
     .map_err(ApiError::bad_request)?;
     budget.render_theme_with_config(&composition, theme_context, slot_html, fmt_cfg)
 }
@@ -3593,7 +3620,7 @@ pub async fn preview_studio_with_cache_and_locale(
         obj.insert("locale".to_owned(), preview_locale_ctx.clone());
     }
     public_budget.set_locale_context(active.as_ref(), &effective_locale, preview_locale_ctx);
-    let mut canvas_layout = target.kind == K::PageLayout;
+    let mut canvas_layout = is_canvas_target(active.as_ref(), target);
     let main_scope = if target.kind == K::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
     } else {
@@ -3646,7 +3673,7 @@ pub async fn preview_studio_with_cache_and_locale(
         .await?;
         match resolved {
             TemplateResolution::DbOverride(record) => {
-                canvas_layout = record.target.kind == K::PageLayout;
+                canvas_layout = is_canvas_target(active.as_ref(), &record.target);
                 let graph = preview_part_graph(
                     &mut tx,
                     &record.target,
@@ -3685,9 +3712,7 @@ pub async fn preview_studio_with_cache_and_locale(
                 rendered.html
             }
             TemplateResolution::ActiveTheme { target_key, html } => {
-                if target_key.starts_with("page_layout:") {
-                    canvas_layout = true;
-                }
+                canvas_layout = is_canvas_resolved_key(active.as_ref(), &target_key);
                 let slot = if target.kind == K::Part {
                     None
                 } else {
@@ -3706,6 +3731,7 @@ pub async fn preview_studio_with_cache_and_locale(
                 out
             }
             TemplateResolution::CoreFallback => {
+                canvas_layout = false;
                 if target.kind == K::Part {
                     String::new()
                 } else {
@@ -3884,7 +3910,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
 
     let template_html = match resolution {
         TemplateResolution::DbOverride(override_rec) => {
-            canvas_layout = override_rec.target.kind == TemplateCandidateKind::PageLayout;
+            canvas_layout = is_canvas_target(active.as_ref(), &override_rec.target);
             let graph = preview_part_graph(
                 tx,
                 &override_rec.target,
@@ -3918,9 +3944,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
             tpl_rendered.html
         }
         TemplateResolution::ActiveTheme { target_key, html } => {
-            if target_key.starts_with("page_layout:") {
-                canvas_layout = true;
-            }
+            canvas_layout = is_canvas_resolved_key(active.as_ref(), &target_key);
             let out = render_csec_template_for_preview(
                 &target_key,
                 &html,
