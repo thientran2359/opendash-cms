@@ -255,7 +255,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         ("theme.json", bad_manifest, CompressionMethod::Deflated),
         (
             "single.html",
-            b"<article>{{ entry.title }}<script>alert(1)</script>{{ od_content() }}</article>",
+            b"<article>{{ entry.title }}<iframe src='/'></iframe>{{ od_content() }}</article>",
             CompressionMethod::Deflated,
         ),
     ]);

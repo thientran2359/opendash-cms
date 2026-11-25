@@ -3282,6 +3282,8 @@ enum ThemeHtmlState {
     },
     Script {
         closing_prefix: usize,
+        comment_prefix: usize,
+        cdata_prefix: usize,
     },
     Title {
         closing_prefix: usize,
@@ -3339,6 +3341,16 @@ impl ThemeHtmlState {
         } else {
             inner
         }
+    }
+}
+
+/// Match one forbidden script prefix incrementally across adjacent raw AST
+/// nodes. Each pattern has only one possible proper suffix-prefix: "<".
+fn next_script_escaped_prefix(pattern: &[u8], matched: usize, ascii: Option<u8>) -> usize {
+    match ascii {
+        Some(byte) if byte == pattern[matched] => matched + 1,
+        Some(b'<') => 1,
+        _ => 0,
     }
 }
 
@@ -3607,7 +3619,11 @@ fn finalize_theme_tag(
             closing_prefix: 0,
             css_buf: String::new(),
         }),
-        "script" => Ok(ThemeHtmlState::Script { closing_prefix: 0 }),
+        "script" => Ok(ThemeHtmlState::Script {
+            closing_prefix: 0,
+            comment_prefix: 0,
+            cdata_prefix: 0,
+        }),
         "title" => Ok(ThemeHtmlState::Title { closing_prefix: 0 }),
         _ => Ok(ThemeHtmlState::Body),
     }
@@ -3772,7 +3788,19 @@ fn step_theme_raw_char(
                 css_buf,
             })
         }
-        ThemeHtmlState::Script { mut closing_prefix } => {
+        ThemeHtmlState::Script {
+            mut closing_prefix,
+            mut comment_prefix,
+            mut cdata_prefix,
+        } => {
+            // Keep the HTML5 escaped and SVG CDATA scanners in the Theme AST
+            // walker too. A fake closing tag inside either state may cause
+            // untrusted Jinja output after it to execute as JavaScript.
+            comment_prefix = next_script_escaped_prefix(b"<!--", comment_prefix, ascii);
+            cdata_prefix = next_script_escaped_prefix(b"<![CDATA[", cdata_prefix, ascii);
+            if comment_prefix == 4 || cdata_prefix == 9 {
+                return Err("C-SEC cam HTML escaped state va SVG CDATA trong <script>.");
+            }
             const EXPECTED: &[u8; 8] = b"</script";
             if closing_prefix == EXPECTED.len() {
                 if ascii == Some(b'>') {
@@ -3791,7 +3819,11 @@ fn step_theme_raw_char(
                     _ => 0,
                 };
             }
-            Ok(ThemeHtmlState::Script { closing_prefix })
+            Ok(ThemeHtmlState::Script {
+                closing_prefix,
+                comment_prefix,
+                cdata_prefix,
+            })
         }
         ThemeHtmlState::Title { mut closing_prefix } => {
             const EXPECTED: &[u8; 7] = b"</title";
