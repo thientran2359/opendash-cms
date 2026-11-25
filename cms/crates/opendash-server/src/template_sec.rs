@@ -106,6 +106,8 @@ mod trusted_theme_markup_tests {
             r#"<script>{% set a = 'x' %}go()</script>"#,
             r#"<script>{{ od_icon('check') }}</script>"#,
             r#"<script>{{ od_part('header') }}</script>"#,
+            "<script>\n<!--\n/*<script>*/\n// </script>\n{{ entry.title }}\n<!-- </script> -->",
+            "<svg><script><![CDATA[// </script>\n{{ entry.title }}\n//<!-- ]]> </script> --> </svg>",
             r#"<script src="/theme/app.js"/>"#,
             r#"<script>const n = 2 < 3;"#,
             r#"</script><p>orphan</p>"#,
@@ -142,6 +144,8 @@ mod trusted_theme_markup_tests {
             r#"<button onclick="{% if label %}go(){% endif %}">Click</button>"#,
             r#"<script>const value = "{{ label }}";</script>"#,
             r#"<script>{% if label %}go(){% endif %}</script>"#,
+            "<script>\n<!--\n/*<script>*/\n// </script>\n{{ label }}\n<!-- </script> -->",
+            "<svg><script><![CDATA[// </script>\n{{ label }}\n//<!-- ]]> </script> --> </svg>",
             r#"<script/>"#,
             r#"</script>"#,
         ] {
@@ -5165,6 +5169,12 @@ fn validate_html_and_css_context_with_url_vars(
         if tag_name == "script" {
             let (close_start, next_i) = find_rawtext_or_rcdata_end(src, k + 1, "script")?;
             let js_body = &src[k + 1..close_start];
+            // HTML5 escaped script states after a comment opener can keep a
+            // literal closing tag inside JavaScript instead of closing it.
+            // Reject that opener so template data cannot become executable JS.
+            if js_body.contains("<!--") || js_body.contains("<![CDATA[") {
+                return Err("C-SEC cam HTML escaped state va SVG CDATA trong <script>.");
+            }
             if !post_render && (js_body.contains("{{") || js_body.contains("{%")) {
                 return Err("C-SEC cấm nội suy Jinja bên trong <script>.");
             }

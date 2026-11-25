@@ -479,6 +479,14 @@ fn tokenize(
                             "Thẻ <script> chưa được đóng.",
                         ));
                     };
+                    if raw[end + 1..after_close].contains("<!--")
+                        || raw[end + 1..after_close].contains("<![CDATA[")
+                    {
+                        return Err(DocumentNormalizationDiagnostic::new(
+                            "script_escaped_state",
+                            "HTML escaped state hoặc SVG CDATA trong <script> không an toàn.",
+                        ));
+                    }
                     let _ = attrs;
                     out.push((
                         TokenKind::ScriptBlock(&raw[i..after_close]),
@@ -535,13 +543,27 @@ pub fn normalize_public_document_with_options(
 ) -> Result<SafeDocumentParts, DocumentNormalizationDiagnostic> {
     let tokens = tokenize(raw_html, allow_trusted_theme_markup)?;
 
-    let has_envelope = tokens.iter().any(|(tok, name)| {
-        matches!(tok, TokenKind::Doctype(_))
-            || matches!(
-                (tok, name.as_str()),
-                (TokenKind::OpenTag { .. }, "html" | "head" | "body")
-                    | (TokenKind::CloseTag { .. }, "html" | "head" | "body")
-            )
+    // SVG foreignObject may embed HTML <body>/<html> as foreign content. It
+    // must not turn a normal Theme fragment into a document envelope.
+    let mut envelope_svg_depth = 0usize;
+    let has_envelope = tokens.iter().any(|(tok, name)| match tok {
+        TokenKind::OpenTag { self_closing, .. } if name == "svg" => {
+            if !self_closing {
+                envelope_svg_depth += 1;
+            }
+            false
+        }
+        TokenKind::CloseTag { .. } if name == "svg" => {
+            envelope_svg_depth = envelope_svg_depth.saturating_sub(1);
+            false
+        }
+        TokenKind::Doctype(_) => true,
+        TokenKind::OpenTag { .. } | TokenKind::CloseTag { .. }
+            if matches!(name.as_str(), "html" | "head" | "body") =>
+        {
+            envelope_svg_depth == 0
+        }
+        _ => false,
     });
 
     if !has_envelope {
@@ -673,7 +695,7 @@ pub fn normalize_public_document_with_options(
                 self_closing,
                 ..
             } => match name.as_str() {
-                "html" => {
+                "html" if svg_depth == 0 => {
                     if phase != Phase::BeforeHtml || self_closing {
                         return Err(DocumentNormalizationDiagnostic::new(
                             "invalid_html_envelope",
@@ -697,7 +719,7 @@ pub fn normalize_public_document_with_options(
                     }
                     phase = Phase::InHtmlBeforeHead;
                 }
-                "head" => {
+                "head" if svg_depth == 0 => {
                     if !matches!(phase, Phase::InHtmlBeforeHead) || seen_head || self_closing {
                         return Err(DocumentNormalizationDiagnostic::new(
                             "invalid_head_envelope",
@@ -707,7 +729,7 @@ pub fn normalize_public_document_with_options(
                     seen_head = true;
                     phase = Phase::InHead;
                 }
-                "body" => {
+                "body" if svg_depth == 0 => {
                     if !matches!(
                         phase,
                         Phase::InHtmlBeforeHead | Phase::InHtmlBetweenHeadAndBody
@@ -760,7 +782,7 @@ pub fn normalize_public_document_with_options(
                 },
             },
             TokenKind::CloseTag { .. } => match name.as_str() {
-                "head" => {
+                "head" if svg_depth == 0 => {
                     if phase != Phase::InHead {
                         return Err(DocumentNormalizationDiagnostic::new(
                             "unexpected_close_head",
@@ -769,7 +791,7 @@ pub fn normalize_public_document_with_options(
                     }
                     phase = Phase::InHtmlBetweenHeadAndBody;
                 }
-                "body" => {
+                "body" if svg_depth == 0 => {
                     if phase != Phase::InBody {
                         return Err(DocumentNormalizationDiagnostic::new(
                             "unexpected_close_body",
@@ -778,7 +800,7 @@ pub fn normalize_public_document_with_options(
                     }
                     phase = Phase::AfterBody;
                 }
-                "html" => {
+                "html" if svg_depth == 0 => {
                     if phase != Phase::AfterBody {
                         return Err(DocumentNormalizationDiagnostic::new(
                             "unexpected_close_html",
@@ -869,6 +891,41 @@ mod tests {
     }
 
     #[test]
+    fn trusted_foreignobject_html_body_does_not_create_or_close_document_envelope() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><body class="nested"><p>Nested HTML</p></body></foreignObject></svg>"#;
+        let fragment = normalize_public_document_with_options(svg, true).unwrap();
+        assert!(fragment.body_fragment.contains(r#"<body class="nested">"#));
+        assert!(fragment.body_fragment.contains("<p>Nested HTML</p>"));
+        assert!(
+            fragment
+                .body_fragment
+                .contains("</body></foreignobject></svg>")
+        );
+        assert!(fragment.body_attributes.is_empty());
+
+        let document = format!(
+            "<!doctype html><html><head></head><body class=\"outer\"><main>{svg}</main></body></html>"
+        );
+        let normalized = normalize_public_document_with_options(&document, true).unwrap();
+        assert_eq!(
+            normalized.body_attributes,
+            vec![("class".to_owned(), "outer".to_owned())]
+        );
+        assert!(
+            normalized
+                .body_fragment
+                .contains(r#"<body class="nested">"#)
+        );
+        assert!(normalized.body_fragment.contains("<p>Nested HTML</p>"));
+        assert!(
+            normalized
+                .body_fragment
+                .contains("</body></foreignobject></svg>")
+        );
+        assert!(normalize_public_document(svg).is_err());
+    }
+
+    #[test]
     fn trusted_envelope_keeps_svg_title_but_filters_body_attrs() {
         let html = r#"<html lang="en" onload="bad()"><head></head><body class="ok" onload="bad()" data-live="1">
             <svg onpointerdown="onStatic()"><title>Accessible SVG</title></svg>
@@ -929,6 +986,23 @@ mod tests {
         assert!(
             normalize_public_document_with_options("<iframe src='/a'></iframe>", true).is_err()
         );
+    }
+
+    #[test]
+    fn trusted_script_rejects_html5_double_escaped_data_smuggling() {
+        for script in [
+            "<script>\n<!--\n/*<script>*/\n// </script>\nalert(1)\n<!-- </script> -->",
+            "<svg><script><![CDATA[// </script>\nalert(1)\n//<!-- ]]> </script> --> </svg>",
+        ] {
+            let error = normalize_public_document_with_options(script, true).unwrap_err();
+            assert_eq!(error.code, "script_escaped_state");
+            let document = format!(
+                "<!doctype html><html><head></head><body><main>{script}</main></body></html>"
+            );
+            let error = normalize_public_document_with_options(&document, true).unwrap_err();
+            assert_eq!(error.code, "script_escaped_state");
+            assert!(normalize_public_document(script).is_err());
+        }
     }
 
     #[test]
