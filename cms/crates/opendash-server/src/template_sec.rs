@@ -15,6 +15,9 @@ use minijinja::{
 };
 
 pub const MAX_RENDERED_HTML_BYTES: usize = 512 * 1024;
+/// Mirrors `document::MAX_PUBLIC_DOCUMENT_BYTES` without coupling `template_sec.rs`
+/// to `crate::document` (some integration tests include `template_sec.rs` standalone).
+pub const MAX_ICON_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 pub const ICON_NONCE_PREFIX: &str = "OD_ICON_";
 pub const MAX_ICONS_PER_REQUEST: usize = 128;
 pub const TEMPLATE_FUEL_LIMIT: u64 = 10_000;
@@ -400,12 +403,12 @@ impl IconNonceTable {
             out.push_str(before);
             out.push_str(svg);
             cursor = offset + nonce.len();
-            if out.len() > crate::document::MAX_PUBLIC_DOCUMENT_BYTES {
+            if out.len() > MAX_ICON_DOCUMENT_BYTES {
                 return Err("Document chứa icon vượt giới hạn HTML.");
             }
         }
         out.push_str(&html[cursor..]);
-        if out.len() > crate::document::MAX_PUBLIC_DOCUMENT_BYTES {
+        if out.len() > MAX_ICON_DOCUMENT_BYTES {
             return Err("Document chứa icon vượt giới hạn HTML.");
         }
         Ok(out)
