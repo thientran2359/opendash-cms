@@ -1,7 +1,14 @@
 import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  AdminAlert,
+  AdminButton,
+  AdminTabPanel,
+  AdminTabs,
+} from '../../components/AdminPrimitives.tsx';
 import { LocaleTabs } from '../../components/LocaleTabs.tsx';
+
+type MenusTabId = 'menus' | 'slots';
 import { ApiClientError } from '../../api/client.ts';
 import {
   EMPTY_ADMIN_LOCALE_STATE,
@@ -148,6 +155,7 @@ export function MenusPanel({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState<MenusTabId>('menus');
 
   const loadMenusAndRefs = useCallback(async () => {
     try {
@@ -433,7 +441,25 @@ export function MenusPanel({
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
 
-      <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => void handleCreateMenu(e)}>
+      <AdminTabs
+        tabs={[
+          { id: 'menus', label: translate('menus.tab_menus'), badge: menus.length },
+          { id: 'slots', label: translate('menus.tab_slots'), badge: slots ? slots.available_slots.length : undefined },
+        ]}
+        activeId={activeTab}
+        onChange={setActiveTab}
+        ariaLabel={translate('menus.tabs_label')}
+        testId="menus-tabs"
+        idPrefix="menus"
+      />
+
+      <AdminTabPanel
+        active={activeTab === 'menus'}
+        id="menus-panel-menus"
+        labelledBy="menus-tab-menus"
+        className="space-y-5"
+      >
+        <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => void handleCreateMenu(e)}>
         <label htmlFor="od-menu-new-key" className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
           <span>{translate('feature.menus.menuspanel.menu_key')}</span>
           <input
@@ -625,7 +651,13 @@ export function MenusPanel({
           )}
         </div>
       )}
+      </AdminTabPanel>
 
+      <AdminTabPanel
+        active={activeTab === 'slots'}
+        id="menus-panel-slots"
+        labelledBy="menus-tab-slots"
+      >
       {slots && (
         <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3" data-testid="menu-slots">
           <h3 className="text-base font-semibold text-slate-900">{translate('feature.menus.menuspanel.active_theme_menu_slots')}{slots.theme_id} · v{slots.version})
@@ -663,6 +695,7 @@ export function MenusPanel({
           )}
         </div>
       )}
+      </AdminTabPanel>
     </section>
   );
 }

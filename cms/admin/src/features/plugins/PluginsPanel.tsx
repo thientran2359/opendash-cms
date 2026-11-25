@@ -4,7 +4,15 @@ import type { PluginSettingsSnapshot, PluginSummary } from '../../types.ts';
 import { ApiClientError } from '../../api/client.ts';
 import { getPluginSettings, getPlugins, savePluginSettings } from '../../api/plugins.ts';
 import { ZipUploadField } from '../../components/FormPrimitives.tsx';
-import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  AdminAlert,
+  AdminBadge,
+  AdminButton,
+  AdminTabPanel,
+  AdminTabs,
+} from '../../components/AdminPrimitives.tsx';
+
+type PluginsTabId = 'installed' | 'settings' | 'run';
 import {
   buildOwnerOptionsSubmitPayload,
   OwnerOptionsForm,
@@ -75,6 +83,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   const [settingsNotice, setSettingsNotice] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [settingsReloadTick, setSettingsReloadTick] = useState(0);
+  const [activeTab, setActiveTab] = useState<PluginsTabId>('installed');
   const latestRequest = useRef(0);
   const pendingRef = useRef(false);
   const mounted = useRef(true);
@@ -296,6 +305,24 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       {notice && <AdminAlert tone="error">{notice}</AdminAlert>}
 
       {mode === 'list' && <>
+        <AdminTabs
+          tabs={[
+            { id: 'installed', label: translate('plugins.tab_installed'), badge: visiblePlugins.length },
+            { id: 'settings', label: translate('plugins.tab_settings') },
+            { id: 'run', label: translate('plugins.tab_run') },
+          ]}
+          activeId={activeTab}
+          onChange={setActiveTab}
+          ariaLabel={translate('plugins.tabs_label')}
+          testId="plugins-tabs"
+          idPrefix="plugins"
+        />
+
+        <AdminTabPanel
+          active={activeTab === 'installed'}
+          id="plugins-panel-installed"
+          labelledBy="plugins-tab-installed"
+        >
       <section className="space-y-3" aria-labelledby="plugin-list-heading">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 id="plugin-list-heading" className="text-sm font-semibold text-zinc-900">{translate('feature.plugins.pluginspanel.installed_plugins')}{visiblePlugins.length})
@@ -349,7 +376,10 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
                     variant={isSettingsOpen ? 'primary' : 'secondary'}
                     size="sm"
                     disabled={busy}
-                    onClick={() => setSettingsPluginId(plugin.id)}
+                    onClick={() => {
+                      setSettingsPluginId(plugin.id);
+                      setActiveTab('settings');
+                    }}
                     aria-pressed={isSettingsOpen}
                     aria-label={translate('feature.plugins.pluginspanel.plugin_settings_2', { name: plugin.name })}
                   >
@@ -369,9 +399,15 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           })}
         </div>
       </section>
+        </AdminTabPanel>
 
-      {settingsTargetPlugin && (
-        <section className="min-w-0 max-w-2xl space-y-3 border-t border-zinc-200 pt-5" aria-labelledby="plugin-settings-heading">
+        <AdminTabPanel
+          active={activeTab === 'settings'}
+          id="plugins-panel-settings"
+          labelledBy="plugins-tab-settings"
+        >
+      {settingsTargetPlugin ? (
+        <section className="min-w-0 max-w-2xl space-y-3" aria-labelledby="plugin-settings-heading">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 id="plugin-settings-heading" className="text-sm font-semibold text-zinc-950">{translate('feature.plugins.pluginspanel.plugin_settings_3')}{' '}{settingsTargetPlugin.name} ({settingsTargetPlugin.id})
             </h3>
@@ -416,9 +452,20 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
             />
           )}
         </section>
+      ) : (
+        <AdminAlert tone="info" className="max-w-2xl">
+          {translate('plugins.select_plugin_for_settings')}
+        </AdminAlert>
       )}
+        </AdminTabPanel>
 
-      <section className="min-w-0 max-w-2xl space-y-3 border-t border-zinc-200 pt-5" aria-labelledby="plugin-run-heading">
+        <AdminTabPanel
+          active={activeTab === 'run'}
+          id="plugins-panel-run"
+          labelledBy="plugins-tab-run"
+          className="space-y-4"
+        >
+      <section className="min-w-0 max-w-2xl space-y-3" aria-labelledby="plugin-run-heading">
         <h3 id="plugin-run-heading" className="text-sm font-semibold text-zinc-950">{translate('feature.plugins.pluginspanel.test_plugin_execution')}</h3>
         {selected
           ? <p className="break-all text-xs text-zinc-600">{translate('feature.plugins.pluginspanel.selected_plugin')}{' '}<strong className="text-zinc-900">{selected.name}</strong> ({selected.id})</p>
@@ -448,6 +495,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           onUnauthorized={onUnauthorized ?? (() => {})}
         />
       )}
+        </AdminTabPanel>
       </>}
     </div>
   );

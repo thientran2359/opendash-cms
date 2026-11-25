@@ -35,8 +35,7 @@ import { SeoPanel } from './features/seo/SeoPanel.tsx';
 import { ContactPanel } from './features/contact/ContactPanel.tsx';
 import { SmtpSettingsPanel } from './features/contact/SmtpSettingsPanel.tsx';
 import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
-import { BackupsPanel } from './features/operations/BackupsPanel.tsx';
-import { RestorePanel } from './features/operations/RestorePanel.tsx';
+import { BackupToolsPanel } from './features/operations/BackupToolsPanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
 import { TaxonomyDefinitionsPage } from './features/taxonomy/TaxonomyDefinitionsPage.tsx';
@@ -724,10 +723,13 @@ const AppContent: React.FC = () => {
         />
       }
       toolsContent={route.sub === 'backup'
-        ? <>
-            <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.backup_error"))} />
-            <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.restore_error"))} />
-          </>
+        ? (
+          <BackupToolsPanel
+            csrfToken={csrfToken}
+            onBackupError={(error) => handleApiError(error, tStatic("app.backup_error"))}
+            onRestoreError={(error) => handleApiError(error, tStatic("app.restore_error"))}
+          />
+        )
         : route.sub === 'media-reconcile'
           ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.reconcile_error"))} />
           : route.sub === 'health' ? <SystemStatus /> : null}

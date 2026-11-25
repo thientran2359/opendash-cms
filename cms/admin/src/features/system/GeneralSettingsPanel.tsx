@@ -16,8 +16,15 @@ import {
   type GeneralSettingsDraft,
   type TimezoneCatalog,
 } from '../../api/settings.ts';
-import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  AdminAlert,
+  AdminButton,
+  AdminTabPanel,
+  AdminTabs,
+} from '../../components/AdminPrimitives.tsx';
 import { LocaleTabs } from '../../components/LocaleTabs.tsx';
+
+type GeneralTabId = 'general' | 'public';
 
 const FIELD_CLASS =
   'h-9 w-full max-w-xl rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 ' +
@@ -98,6 +105,8 @@ export function GeneralSettingsPanel({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
+  const [activeTab, setActiveTab] = useState<GeneralTabId>('general');
+  const [publicDirty, setPublicDirty] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -188,116 +197,144 @@ export function GeneralSettingsPanel({
           {t('general.description')}
         </p>
       </div>
-      <LocaleTabs
-        localeState={localeState}
-        activeLocale={effectiveLocale ?? defaultLocaleCode}
-        onSelectLocale={(code) => { if (!saving) setActiveLocale(code); }}
-        testId="general-locale-tabs"
+      <AdminTabs
+        tabs={[
+          { id: 'general', label: t('general.tab_general'), dirty: dirty || stale },
+          { id: 'public', label: t('general.tab_public'), dirty: publicDirty },
+        ]}
+        activeId={activeTab}
+        onChange={setActiveTab}
+        ariaLabel={t('general.tabs_label')}
+        testId="general-settings-tabs"
+        idPrefix="general-settings"
       />
-      {loading && <p role="status" className="text-sm text-zinc-500">{t('general.loading')}</p>}
-      {error && <AdminAlert tone="error">{error}</AdminAlert>}
-      {notice && <AdminAlert tone="success">{t('general.saved')}</AdminAlert>}
-      {stale && <p className="text-sm text-zinc-700">{t('general.reload_hint')}</p>}
-      {!loading && (!draft || !saved || !catalog) && (
-        <AdminButton variant="primary" onClick={() => void load()}>
-          {t('general.retry')}
-        </AdminButton>
-      )}
-      {!loading && draft && saved && catalog && (
-        <form className="space-y-4" onSubmit={(event) => void handleSave(event)}>
-          <div>
-            <label htmlFor="od-site-title" className="mb-1 block text-sm font-medium text-zinc-800">{t('general.site_title')}</label>
-            <input
-              id="od-site-title" name="site_title" autoComplete="organization" required disabled={saving}
-              className={FIELD_CLASS}
-              value={draft.site_title}
-              onChange={(event) => setDraft({ ...draft, site_title: event.target.value })}
-              aria-describedby="od-site-title-help"
-            />
-            <p id="od-site-title-help" className="mt-1 text-xs text-zinc-500">{t('general.site_title_help')}</p>
-          </div>
-          <div>
-            <label htmlFor="od-tagline" className="mb-1 block text-sm font-medium text-zinc-800">{t('general.tagline')}</label>
-            <textarea
-              id="od-tagline" name="tagline" rows={3} disabled={saving}
-              className={TEXTAREA_CLASS}
-              value={draft.tagline}
-              onChange={(event) => setDraft({ ...draft, tagline: event.target.value })}
-              aria-describedby="od-tagline-help"
-            />
-            <p id="od-tagline-help" className="mt-1 text-xs text-zinc-500">{t('general.tagline_help')}</p>
-          </div>
-          <div>
-            <label htmlFor="od-timezone" className="mb-1 block text-sm font-medium text-zinc-800">{t('general.timezone')}</label>
-            <select
-              id="od-timezone" name="timezone"
-              className={FIELD_CLASS}
-              value={draft.timezone}
-              disabled={isSecondaryLocale || saving}
-              onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}
-              aria-describedby="od-timezone-help"
-            >
-              {hasLegacyTimezone && <option value={draft.timezone}>{t('general.timezone_legacy', { timezone: draft.timezone })}</option>}
-              {catalog.items.map((timezone) => <option key={timezone} value={timezone}>{timezone}</option>)}
-            </select>
-            <p id="od-timezone-help" className="mt-1 text-xs text-zinc-500">
-              {isSecondaryLocale
-                ? t('general.timezone_secondary')
-                : t('general.timezone_catalog', { version: catalog.version })}
-            </p>
-          </div>
-          <div>
-            <label htmlFor="od-cms-locale" className="mb-1 block text-sm font-medium text-zinc-800">{t('general.cms_locale')}</label>
-            <select id="od-cms-locale" data-testid="cms-locale-select" className={FIELD_CLASS}
-              value={draft.cms_locale} disabled={isSecondaryLocale || saving}
-              onChange={(event) => setDraft({ ...draft, cms_locale: event.target.value })}
-              aria-describedby="od-cms-locale-help">
-              {draft.cms_locale && !bootstrap.available_locales.some((option) => option.code === draft.cms_locale) && (
-                <option value={draft.cms_locale}>{draft.cms_locale}</option>
-              )}
-              {bootstrap.available_locales.map((option) => (
-                <option key={option.code} value={option.code}>{option.native_name} — {option.english_name} ({option.code})</option>
-              ))}
-            </select>
-            <p id="od-cms-locale-help" className="mt-1 text-xs text-zinc-500">{isSecondaryLocale ? t('general.cms_secondary') : t('general.cms_help')}</p>
-            {bootstrap.available_locales.some((option) => option.code === draft.cms_locale && !option.installed) && (
-              <AdminAlert tone="warning" className="mt-2 max-w-xl" data-testid="cms-locale-fallback">{t('general.cms_fallback')}</AdminAlert>
-            )}
-          </div>
-          {preview && (
-            <div className="max-w-xl rounded-lg border border-zinc-200 bg-zinc-50 p-3.5 text-sm text-zinc-700" data-testid="timezone-preview">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('general.timezone_preview')}</h3>
-              <p className="mt-1.5">{t('general.winter', { time: preview.winter.text })}</p>
-              <p className="mt-1">{t('general.summer', { time: preview.summer.text })}</p>
-              {(preview.winter.fallback || preview.summer.fallback) && (
-                <p role="status" className="mt-2 text-amber-800">
-                  {t('general.timezone_fallback')}
-                </p>
+      <AdminTabPanel
+        active={activeTab === 'general'}
+        id="general-settings-panel-general"
+        labelledBy="general-settings-tab-general"
+        className="space-y-6"
+      >
+        <LocaleTabs
+          localeState={localeState}
+          activeLocale={effectiveLocale ?? defaultLocaleCode}
+          onSelectLocale={(code) => { if (!saving) setActiveLocale(code); }}
+          testId="general-locale-tabs"
+        />
+        {loading && <p role="status" className="text-sm text-zinc-500">{t('general.loading')}</p>}
+        {error && <AdminAlert tone="error">{error}</AdminAlert>}
+        {notice && <AdminAlert tone="success">{t('general.saved')}</AdminAlert>}
+        {stale && <p className="text-sm text-zinc-700">{t('general.reload_hint')}</p>}
+        {!loading && (!draft || !saved || !catalog) && (
+          <AdminButton variant="primary" onClick={() => void load()}>
+            {t('general.retry')}
+          </AdminButton>
+        )}
+        {!loading && draft && saved && catalog && (
+          <form className="space-y-4" onSubmit={(event) => void handleSave(event)}>
+            <div>
+              <label htmlFor="od-site-title" className="mb-1 block text-sm font-medium text-zinc-800">{t('general.site_title')}</label>
+              <input
+                id="od-site-title" name="site_title" autoComplete="organization" required disabled={saving}
+                className={FIELD_CLASS}
+                value={draft.site_title}
+                onChange={(event) => setDraft({ ...draft, site_title: event.target.value })}
+                aria-describedby="od-site-title-help"
+              />
+              <p id="od-site-title-help" className="mt-1 text-xs text-zinc-500">{t('general.site_title_help')}</p>
+            </div>
+            <div>
+              <label htmlFor="od-tagline" className="mb-1 block text-sm font-medium text-zinc-800">{t('general.tagline')}</label>
+              <textarea
+                id="od-tagline" name="tagline" rows={3} disabled={saving}
+                className={TEXTAREA_CLASS}
+                value={draft.tagline}
+                onChange={(event) => setDraft({ ...draft, tagline: event.target.value })}
+                aria-describedby="od-tagline-help"
+              />
+              <p id="od-tagline-help" className="mt-1 text-xs text-zinc-500">{t('general.tagline_help')}</p>
+            </div>
+            <div>
+              <label htmlFor="od-timezone" className="mb-1 block text-sm font-medium text-zinc-800">{t('general.timezone')}</label>
+              <select
+                id="od-timezone" name="timezone"
+                className={FIELD_CLASS}
+                value={draft.timezone}
+                disabled={isSecondaryLocale || saving}
+                onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}
+                aria-describedby="od-timezone-help"
+              >
+                {hasLegacyTimezone && <option value={draft.timezone}>{t('general.timezone_legacy', { timezone: draft.timezone })}</option>}
+                {catalog.items.map((timezone) => <option key={timezone} value={timezone}>{timezone}</option>)}
+              </select>
+              <p id="od-timezone-help" className="mt-1 text-xs text-zinc-500">
+                {isSecondaryLocale
+                  ? t('general.timezone_secondary')
+                  : t('general.timezone_catalog', { version: catalog.version })}
+              </p>
+            </div>
+            <div>
+              <label htmlFor="od-cms-locale" className="mb-1 block text-sm font-medium text-zinc-800">{t('general.cms_locale')}</label>
+              <select id="od-cms-locale" data-testid="cms-locale-select" className={FIELD_CLASS}
+                value={draft.cms_locale} disabled={isSecondaryLocale || saving}
+                onChange={(event) => setDraft({ ...draft, cms_locale: event.target.value })}
+                aria-describedby="od-cms-locale-help">
+                {draft.cms_locale && !bootstrap.available_locales.some((option) => option.code === draft.cms_locale) && (
+                  <option value={draft.cms_locale}>{draft.cms_locale}</option>
+                )}
+                {bootstrap.available_locales.map((option) => (
+                  <option key={option.code} value={option.code}>{option.native_name} — {option.english_name} ({option.code})</option>
+                ))}
+              </select>
+              <p id="od-cms-locale-help" className="mt-1 text-xs text-zinc-500">{isSecondaryLocale ? t('general.cms_secondary') : t('general.cms_help')}</p>
+              {bootstrap.available_locales.some((option) => option.code === draft.cms_locale && !option.installed) && (
+                <AdminAlert tone="warning" className="mt-2 max-w-xl" data-testid="cms-locale-fallback">{t('general.cms_fallback')}</AdminAlert>
               )}
             </div>
-          )}
-          <div className="flex flex-wrap items-center gap-2.5 pt-1">
-            <AdminButton
-              variant="primary"
-              type="submit"
-              disabled={!dirty || !csrfToken || saving || stale}
-            >
-              {saving ? t('general.saving') : t('general.save')}
-            </AdminButton>
-            <AdminButton variant="secondary" disabled={saving} onClick={() => void load()}>
-              {t('general.reload')}
-            </AdminButton>
-            {dirty && <span className="text-xs font-medium text-amber-800" role="status">{t('general.dirty')}</span>}
-          </div>
-        </form>
-      )}
-      <PublicSiteSettingsSection
-        csrfToken={csrfToken}
-        onApiError={onApiError}
-        localeState={localeState}
-        onLocalesChanged={onLocalesChanged}
-      />
-      <a href="#/settings/multilingual" className="text-sm text-od-accent underline">{t('general.multilingual_link')}</a>
+            {preview && (
+              <div className="max-w-xl rounded-lg border border-zinc-200 bg-zinc-50 p-3.5 text-sm text-zinc-700" data-testid="timezone-preview">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('general.timezone_preview')}</h3>
+                <p className="mt-1.5">{t('general.winter', { time: preview.winter.text })}</p>
+                <p className="mt-1">{t('general.summer', { time: preview.summer.text })}</p>
+                {(preview.winter.fallback || preview.summer.fallback) && (
+                  <p role="status" className="mt-2 text-amber-800">
+                    {t('general.timezone_fallback')}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              <AdminButton
+                variant="primary"
+                type="submit"
+                disabled={!dirty || !csrfToken || saving || stale}
+              >
+                {saving ? t('general.saving') : t('general.save')}
+              </AdminButton>
+              <AdminButton variant="secondary" disabled={saving} onClick={() => void load()}>
+                {t('general.reload')}
+              </AdminButton>
+              {dirty && <span className="text-xs font-medium text-amber-800" role="status">{t('general.dirty')}</span>}
+            </div>
+          </form>
+        )}
+      </AdminTabPanel>
+      <AdminTabPanel
+        active={activeTab === 'public'}
+        id="general-settings-panel-public"
+        labelledBy="general-settings-tab-public"
+        className="space-y-4"
+      >
+        <PublicSiteSettingsSection
+          csrfToken={csrfToken}
+          onApiError={onApiError}
+          localeState={localeState}
+          onLocalesChanged={onLocalesChanged}
+          onDirtyChange={setPublicDirty}
+        />
+        <div>
+          <a href="#/settings/multilingual" className="text-sm text-od-accent underline">{t('general.multilingual_link')}</a>
+        </div>
+      </AdminTabPanel>
     </section>
   );
 }
@@ -307,11 +344,14 @@ function PublicSiteSettingsSection({
   onApiError,
   localeState = EMPTY_ADMIN_LOCALE_STATE,
   onLocalesChanged,
-}: Props) {
+  onDirtyChange,
+}: Props & { onDirtyChange?: (dirty: boolean) => void }) {
   const { t } = useI18n();
   const contentLanguageLocked = localeState.multilingualEnabled || localeState.hasStoredSecondaryLocales;
   const onApiErrorRef = useRef(onApiError);
   onApiErrorRef.current = onApiError;
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
   const [saved, setSaved] = useState<PublicSiteSettings | null>(null);
   const [draft, setDraft] = useState<PublicSiteSettingsDraft | null>(null);
   const [loading, setLoading] = useState(true);
@@ -357,6 +397,10 @@ function PublicSiteSettingsSection({
     draft.indexing_enabled !== saved.indexing_enabled
   ));
 
+  useEffect(() => {
+    onDirtyChangeRef.current?.(dirty || stale);
+  }, [dirty, stale]);
+
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!saved || !draft || !csrfToken || saving) return;
@@ -395,7 +439,7 @@ function PublicSiteSettingsSection({
   }
 
   return (
-    <div className="border-t border-slate-200 pt-6 space-y-5" data-testid="public-settings">
+    <div className="space-y-5" data-testid="public-settings">
       <div>
         <h3 className="text-lg font-semibold text-slate-900">{t('general.public_heading')}</h3>
         <p className="mt-1 text-sm text-slate-600">

@@ -128,7 +128,7 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
   };
 
   return (
-    <section className="mt-8 space-y-4 border-t border-zinc-200 pt-6">
+    <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-zinc-950">{translate('feature.operations.restorepanel.restore_safe_mode')}</h3>

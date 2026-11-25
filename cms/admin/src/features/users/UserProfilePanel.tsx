@@ -1,7 +1,15 @@
 import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useState } from 'react';
 import { getProfile, updateProfile, type UserProfile } from '../../api/users.ts';
-import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  AdminAlert,
+  AdminBadge,
+  AdminButton,
+  AdminTabPanel,
+  AdminTabs,
+} from '../../components/AdminPrimitives.tsx';
+
+type ProfileTabId = 'account' | 'password';
 
 interface UserProfilePanelProps {
   csrfToken: string | null;
@@ -26,6 +34,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ProfileTabId>('account');
 
   useEffect(() => {
     let active = true;
@@ -99,17 +108,48 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
       {message && <AdminAlert tone="success">{message}</AdminAlert>}
       {errorMsg && <AdminAlert tone="error">{errorMsg}</AdminAlert>}
       <form onSubmit={handleSubmit} className="space-y-4">
-        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>{translate('feature.users.userprofilepanel.username_display_name')}</span>
-          <input
-            type="text"
-            className={INPUT_CLASS}
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            required
-          />
-        </label>
-        <div className="space-y-3 border-t border-zinc-200 pt-4">
+        <AdminTabs
+          tabs={[
+            {
+              id: 'account',
+              label: translate('profile.tab_account'),
+              dirty: Boolean(username.trim() && username.trim() !== profile.username),
+            },
+            {
+              id: 'password',
+              label: translate('profile.tab_password'),
+              dirty: Boolean(currentPassword || newPassword),
+            },
+          ]}
+          activeId={activeTab}
+          onChange={setActiveTab}
+          ariaLabel={translate('profile.tabs_label')}
+          testId="profile-tabs"
+          idPrefix="profile"
+        />
+        <AdminTabPanel
+          active={activeTab === 'account'}
+          id="profile-panel-account"
+          labelledBy="profile-tab-account"
+          className="space-y-3"
+        >
+          <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+            <span>{translate('feature.users.userprofilepanel.username_display_name')}</span>
+            <input
+              type="text"
+              className={INPUT_CLASS}
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              required
+            />
+          </label>
+        </AdminTabPanel>
+        <AdminTabPanel
+          active={activeTab === 'password'}
+          id="profile-panel-password"
+          labelledBy="profile-tab-password"
+          className="space-y-3"
+        >
           <div>
             <h3 className="text-sm font-semibold text-zinc-900">{translate('feature.users.userprofilepanel.change_password_optional')}</h3>
             <p className="mt-0.5 text-xs text-zinc-500">{translate('feature.users.userprofilepanel.your_current_password_is_required_when_changing_your_password')}</p>
@@ -134,7 +174,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
               autoComplete="new-password"
             />
           </label>
-        </div>
+        </AdminTabPanel>
         <AdminButton type="submit" variant="primary" disabled={saving || !csrfToken}>
           {saving ? translate('feature.users.userprofilepanel.saving') : translate('feature.users.userprofilepanel.save_profile')}
         </AdminButton>

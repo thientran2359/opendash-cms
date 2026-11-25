@@ -8,7 +8,14 @@ import {
 import { effectiveContentTypeSettings, listContentTypes, queryContentEntryTable, type OwnedContentTypeWithSettings } from '../../api/content.ts';
 import { listTaxonomyDefinitions, type TaxonomyDefinition } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
-import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  AdminAlert,
+  AdminButton,
+  AdminTabPanel,
+  AdminTabs,
+} from '../../components/AdminPrimitives.tsx';
+
+type PermalinkTabId = 'posts' | 'cpts' | 'taxonomies';
 
 interface Props {
   user: AuthUser | null;
@@ -105,6 +112,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
   const [notice, setNotice] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [customMode, setCustomMode] = useState(false);
+  const [activeTab, setActiveTab] = useState<PermalinkTabId>('posts');
   const draftRef = useRef<PermalinkSettingsDraft | null>(null);
   draftRef.current = draft;
   const loadSerialRef = useRef(0);
@@ -318,6 +326,9 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     updateDraft({ ...draft, [kind]: bases });
   }
   const preset = customMode ? CUSTOM : (draft?.post_structure ?? CUSTOM);
+  const postsDirty = Boolean(saved && draft && draft.post_structure !== saved.post_structure);
+  const cptsDirty = Boolean(saved && draft && !sameBases(draft.content_type_bases, saved.content_type_bases));
+  const taxonomiesDirty = Boolean(saved && draft && !sameBases(draft.taxonomy_bases, saved.taxonomy_bases));
 
   return (
     <section className="min-w-0 space-y-5" data-testid="permalink-settings" aria-labelledby="permalink-heading">
@@ -360,7 +371,25 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
       )}
       {saved && draft && (
         <form onSubmit={event => void save(event)} className="space-y-6">
-          <div className="space-y-2">
+          <AdminTabs
+            tabs={[
+              { id: 'posts', label: t('permalink.tab_posts'), dirty: postsDirty },
+              { id: 'cpts', label: t('permalink.tab_cpts'), badge: typeKeys.length, dirty: cptsDirty },
+              { id: 'taxonomies', label: t('permalink.tab_taxonomies'), badge: taxonomyKeys.length, dirty: taxonomiesDirty },
+            ]}
+            activeId={activeTab}
+            onChange={setActiveTab}
+            ariaLabel={t('permalink.tabs_label')}
+            testId="permalink-tabs"
+            idPrefix="permalink"
+          />
+
+          <AdminTabPanel
+            active={activeTab === 'posts'}
+            id="permalink-panel-posts"
+            labelledBy="permalink-tab-posts"
+            className="space-y-2"
+          >
             <label htmlFor="permalink-post-preset" className="block text-sm font-medium text-zinc-800">{t('permalink.post_structure')}</label>
             <select id="permalink-post-preset" className="h-9 w-full max-w-2xl rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
               value={preset} disabled={loading} onChange={event => {
@@ -398,8 +427,13 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
               ))}
             </div>
             <p className="text-xs text-zinc-500">{t('permalink.token_help')}</p>
-          </div>
-          <div>
+          </AdminTabPanel>
+
+          <AdminTabPanel
+            active={activeTab === 'cpts'}
+            id="permalink-panel-cpts"
+            labelledBy="permalink-tab-cpts"
+          >
             <h3 className="text-sm font-semibold text-zinc-900">{t('permalink.cpt_heading')}</h3>
             <p className="mb-3 mt-0.5 text-xs text-zinc-500">{t('permalink.cpt_help')}</p>
             {typeKeys.length === 0 && <p className="text-sm text-zinc-500">{t('permalink.no_cpt')}</p>}
@@ -439,8 +473,13 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                 </div>;
               })}
             </div>
-          </div>
-          <div>
+          </AdminTabPanel>
+
+          <AdminTabPanel
+            active={activeTab === 'taxonomies'}
+            id="permalink-panel-taxonomies"
+            labelledBy="permalink-tab-taxonomies"
+          >
             <h3 className="text-sm font-semibold text-zinc-900">{t('permalink.taxonomy_heading')}</h3>
             <p className="mb-3 mt-0.5 text-xs text-zinc-500">{t('permalink.taxonomy_help')}</p>
             {taxonomyKeys.length === 0 && <p className="text-sm text-zinc-500">{t('permalink.no_taxonomy')}</p>}
@@ -480,7 +519,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                 </div>;
               })}
             </div>
-          </div>
+          </AdminTabPanel>
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4" data-testid="permalink-server-preview">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('permalink.preview_heading')}</h3>
             <p className="mt-1 text-xs text-zinc-600">
