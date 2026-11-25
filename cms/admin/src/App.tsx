@@ -37,7 +37,6 @@ import { SmtpSettingsPanel } from './features/contact/SmtpSettingsPanel.tsx';
 import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
 import { BackupToolsPanel } from './features/operations/BackupToolsPanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
-import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
 import { TaxonomyDefinitionsPage } from './features/taxonomy/TaxonomyDefinitionsPage.tsx';
 import { PatternsPage } from './features/patterns/PatternsPage.tsx';
 import { TemplateLibraryPage } from './features/library/TemplateLibraryPage.tsx';
@@ -852,16 +851,13 @@ const AppContent: React.FC = () => {
         ? <TaxonomyDefinitionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}`}
             user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={scopedTaxonomyApiError}
             onNavigateHash={navigateHash} onDirtyChange={markTermDirty} />
-        : route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
-          ? <TermEditPage key={`term-${route.typeKey ?? 'taxonomy'}-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
-              kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode} cptTypeKey={route.typeKey}
-              termId={route.entryId ?? null} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
-              localeState={localeState}
-              onApiError={scopedTaxonomyApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
-          : <TaxonomyPage key={`terms-${route.typeKey ?? 'taxonomy'}-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
-              kind={route.taxonomyKind ?? 'category'} cptTypeKey={route.typeKey} user={user} csrfToken={csrfToken}
-              localeState={localeState}
-              onApiError={scopedTaxonomyApiError} onNavigateHash={navigateHash} />}
+        : <TaxonomyPage key={`terms-${route.typeKey ?? 'taxonomy'}-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
+            kind={route.taxonomyKind ?? 'category'} cptTypeKey={route.typeKey}
+            routeMode={route.taxonomyMode === 'edit' ? 'edit' : 'new'}
+            selectedTermId={route.taxonomyMode === 'edit' ? (route.entryId ?? null) : null}
+            user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+            localeState={localeState}
+            onApiError={scopedTaxonomyApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />}
     />
   );
 };

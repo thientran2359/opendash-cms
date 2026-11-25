@@ -2470,6 +2470,13 @@ export const en = {
   "profile.tabs_label": "Profile sections",
   "profile.tab_account": "Account info",
   "profile.tab_password": "Password",
+  "taxonomy.featured_image": "Featured image",
+  "taxonomy.featured_image_help": "Optional thumbnail image for this term.",
+  "taxonomy.choose_featured_image": "Choose or upload image",
+  "taxonomy.change_featured_image": "Change image",
+  "taxonomy.remove_featured_image": "Remove image",
+  "taxonomy.editor_select_term_hint": "Select a term from the list on the left to edit its extension fields.",
+  "taxonomy.back_to_create": "Back to create new",
 } as const;
 
 export type TranslationKey = keyof typeof en;

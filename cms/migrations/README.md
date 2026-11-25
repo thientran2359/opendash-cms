@@ -1,6 +1,6 @@
-# SQLite migrations (`0001`–`0051`)
+# SQLite migrations (`0001`–`0052`)
 
-Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (50 file, đánh số từ `0001` đến `0051`, bỏ qua số `0016`). **Không chỉnh sửa nội dung hoặc đổi LF của các migration đã áp dụng để bảo toàn checksum**; mọi thay đổi schema mới phải tạo file migration tăng tiến tiếp theo.
+Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (51 file, đánh số từ `0001` đến `0052`, bỏ qua số `0016`). **Không chỉnh sửa nội dung hoặc đổi LF của các migration đã áp dụng để bảo toàn checksum**; mọi thay đổi schema mới phải tạo file migration tăng tiến tiếp theo.
 
 | Nhóm / Mốc | Migrations | Nội dung chính |
 | --- | --- | --- |
@@ -21,3 +21,4 @@ Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (50 file,
 | **Theme Ergonomics (`published_at`)** | `0049_entry_published_at.sql` | Thêm cột `content_entries.published_at` (+0 schema objects) và backfill theo `updated_at` cho các bản ghi đã xuất bản. |
 | **Plugin Extensibility & Projections (Spec 2)** | `0050_plugin_extensibility_and_projections.sql` | Rebuild PK 3 bảng `theme_option_values` / `theme_option_versions` / `theme_option_media_refs` theo `(owner_kind, owner_id, ...)` (+0 net objects) và tạo bảng `plugin_entry_projections` + `idx_plugin_entry_projections_plugin` (+2 net objects). |
 | **Admin I18n & Multilingual Settings (Lớp 3)** | `0051_admin_i18n_and_multilingual_settings.sql` | Thêm `site_general_settings.cms_locale` (mặc định `en`), `site_locales_state.multilingual_enabled` (backfill bật nếu có > 1 locale) và `site_locales.deleted_at` (+0 schema objects). |
+| **Taxonomy Term Featured Image** | `0052_taxonomy_term_featured_image.sql` | Thêm cột `taxonomy_terms.featured_image_media_id` (`REFERENCES media_assets(id) ON DELETE RESTRICT`) và index phụ cho ảnh đại diện của term. |

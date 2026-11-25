@@ -2472,4 +2472,11 @@ export const vi: Record<TranslationKey, string> = {
   "profile.tabs_label": "Các mục hồ sơ cá nhân",
   "profile.tab_account": "Thông tin tài khoản",
   "profile.tab_password": "Mật khẩu",
+  "taxonomy.featured_image": "Ảnh đại diện",
+  "taxonomy.featured_image_help": "Ảnh đại diện tùy chọn hiển thị cho mục phân loại này.",
+  "taxonomy.choose_featured_image": "Chọn hoặc tải ảnh lên",
+  "taxonomy.change_featured_image": "Đổi ảnh",
+  "taxonomy.remove_featured_image": "Gỡ ảnh",
+  "taxonomy.editor_select_term_hint": "Chọn một mục ở danh sách bên trái để sửa các trường mở rộng.",
+  "taxonomy.back_to_create": "Quay lại tạo mới",
 } as const;

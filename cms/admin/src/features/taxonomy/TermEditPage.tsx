@@ -1,6 +1,7 @@
 import { getEffectiveBcp47, tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiClientError } from '../../api/client.ts';
+import { mediaThumbnailUrl } from '../../api/media.ts';
 import { createTaxonomyTerm, getTaxonomyTerm, getEffectiveTermConfig, getTaxonomyDefinition,
   listAllTaxonomyTerms, updateTaxonomyTerm,
   type TaxonomyDefinition, type TaxonomyKind, type TaxonomyTerm, type TaxonomyTermChanges } from '../../api/taxonomy.ts';
@@ -9,6 +10,7 @@ import {
   EMPTY_ADMIN_LOCALE_STATE,
   type AdminLocaleState,
 } from '../../api/locales.ts';
+import { MediaPicker } from '../media/MediaPicker.tsx';
 import { AdminTermPanels, type EffectiveTermConfig, type TermExtensionValues } from '../extensions/AdminContributionRenderer.tsx';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
@@ -22,12 +24,15 @@ interface TermEditProps {
   siteInstanceId?: string;
   csrfToken: string | null;
   localeState?: AdminLocaleState;
+  embedded?: boolean;
   onApiError: (error: unknown, fallback: string) => void;
   onDirtyChange: (dirty: boolean) => void;
   onNavigateHash: (hash: string) => void;
+  onSaved?: (saved: TaxonomyTerm) => void;
+  onCancelEdit?: () => void;
 }
 
-interface FormValues { name: string; slug: string; parentId: string }
+interface FormValues { name: string; slug: string; parentId: string; featuredImageId: string }
 interface TermDraft {
   form: FormValues;
   baseline: FormValues;
@@ -49,9 +54,12 @@ const termScope = (siteId: string | undefined, actor: AuthUser | null,
 const cloneExtensions = (source: TermExtensionValues): TermExtensionValues =>
   Object.fromEntries(Object.entries(source).map(([panel, values]) => [panel, { ...values }]));
 
-const blank = (): FormValues => ({ name: '', slug: '', parentId: '' });
+const blank = (): FormValues => ({ name: '', slug: '', parentId: '', featuredImageId: '' });
 const fromTerm = (term: TaxonomyTerm): FormValues => ({
-  name: term.name, slug: term.slug, parentId: term.parent_id === null ? '' : String(term.parent_id),
+  name: term.name,
+  slug: term.slug,
+  parentId: term.parent_id === null ? '' : String(term.parent_id),
+  featuredImageId: term.featured_image_media_id ?? '',
 });
 const fieldClass = 'h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50';
 const selectClass = 'h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50';
@@ -86,7 +94,8 @@ function allowedParents(terms: TaxonomyTerm[], targetId: number | null): Taxonom
 
 /** A full-route editor; extension mount slots intentionally contain no fake fields. */
 export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstanceId, csrfToken,
-  localeState = EMPTY_ADMIN_LOCALE_STATE, onApiError, onDirtyChange, onNavigateHash}: TermEditProps) {
+  localeState = EMPTY_ADMIN_LOCALE_STATE, embedded = false, onApiError, onDirtyChange, onNavigateHash,
+  onSaved, onCancelEdit}: TermEditProps) {
   useI18n();
   const scope = termScope(siteInstanceId, user, kind, mode, termId);
   const mountedRef = useRef(true);
@@ -113,9 +122,12 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
   const [extensionBaseline, setExtensionBaseline] = useState<TermExtensionValues>(recovered?.extensionBaseline ?? {});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
   const savingRef = useRef(false);
   const onErrorRef = useRef(onApiError);
   onErrorRef.current = onApiError;
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
   const reportDirtyRef = useRef(onDirtyChange);
   reportDirtyRef.current = onDirtyChange;
   const listHash = cptTypeKey
@@ -135,7 +147,8 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
   }, [selectedLocale, defaultLocaleCode]);
   const activeTermLocale = mode === 'edit' ? (current?.locale ?? defaultLocaleCode) : selectedLocale;
   const dirty = form.name !== baseline.name || form.slug !== baseline.slug ||
-    form.parentId !== baseline.parentId || JSON.stringify(extensions) !== JSON.stringify(extensionBaseline);
+    form.parentId !== baseline.parentId || form.featuredImageId !== baseline.featuredImageId ||
+    JSON.stringify(extensions) !== JSON.stringify(extensionBaseline);
   const parentOptions = useMemo(() => {
     const scoped = activeTermLocale
       ? allTerms.filter((t) => !t.locale || t.locale === activeTermLocale)
@@ -161,8 +174,10 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
     extensionBaseline, extensionConfig?.schema_token]);
 
   useEffect(() => () => {
-    if (scope && window.location.hash.split('?')[0] !== routeHash) termDrafts.delete(scope);
-  }, [scope, routeHash]);
+    const currentHash = window.location.hash.split('?')[0];
+    const matchesEmbeddedCreate = embedded && mode === 'new' && (currentHash === listHash || currentHash === `${listHash}/new`);
+    if (scope && !matchesEmbeddedCreate && currentHash !== routeHash) termDrafts.delete(scope);
+  }, [scope, routeHash, embedded, mode, listHash]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -282,7 +297,16 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
     if (scope) termDrafts.delete(scope);
     recoveredRef.current = null;
     setForm(baseline); setExtensions(extensionBaseline);
+    setError(''); setNotice('');
+    setManualSlug(mode === 'edit');
     reportDirtyRef.current(false);
+    if (embedded) {
+      if (mode === 'edit') {
+        if (onCancelEdit) onCancelEdit();
+        else onNavigateHash(listHash);
+      }
+      return;
+    }
     onNavigateHash(listHash);
   };
 
@@ -316,6 +340,7 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
             slug,
             ...(hierarchical ? { parent_id: parentId } : {}),
             ...(localeState.hasMultipleLocales && selectedLocale ? { locale: selectedLocale } : {}),
+            ...(form.featuredImageId ? { featured_image_media_id: form.featuredImageId } : {}),
           }, csrfToken);
         } else {
           if (!current || version === null) return;
@@ -324,6 +349,9 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
           if (canEditCore && slug !== baseline.slug) changes.slug = slug;
           const oldParent = baseline.parentId ? Number(baseline.parentId) : null;
           if (canEditCore && hierarchical && parentId !== oldParent) changes.parent_id = parentId;
+          if (canEditCore && form.featuredImageId !== baseline.featuredImageId) {
+            changes.featured_image_media_id = form.featuredImageId || null;
+          }
           if (extensionConfig) {
             const altered: TermExtensionValues = {};
             for (const panel of extensionConfig.panels) {
@@ -344,17 +372,36 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
           saved = await updateTaxonomyTerm(current.id, version, changes, csrfToken);
         }
         if (!mountedRef.current) return;
-        const next = fromTerm(saved);
-        setCurrent(saved); setVersion(saved.version); setBaseline(next); setForm(next);
-        setExtensionBaseline(extensions);
-        if (saved.schema_token && extensionConfig)
-          setExtensionConfig({...extensionConfig, schema_token: saved.schema_token});
-        setConflict(false); setLatest(null);
-        if (scope) termDrafts.delete(scope);
-        recoveredRef.current = null;
-        reportDirtyRef.current(false);
-        setNotice(tStatic("feature.taxonomy.termeditpage.saved_term_value_value_vvalue", { value1: definition?.label ?? kind, value2: saved.id, value3: saved.version }));
-        if (mode === 'new') onNavigateHash(`${listHash}/${saved.id}/edit`);
+        if (embedded && mode === 'new') {
+          const reset = blank();
+          setCurrent(null); setVersion(null); setBaseline(reset); setForm(reset);
+          setManualSlug(false);
+          setExtensionBaseline({}); setExtensions({});
+          if (definition?.hierarchical) {
+            void listAllTaxonomyTerms(kind).then(terms => {
+              if (mountedRef.current) setAllTerms(terms);
+            }).catch(() => {});
+          }
+          setConflict(false); setLatest(null);
+          if (scope) termDrafts.delete(scope);
+          recoveredRef.current = null;
+          reportDirtyRef.current(false);
+          setNotice(tStatic("feature.taxonomy.termeditpage.saved_term_value_value_vvalue", { value1: definition?.label ?? kind, value2: saved.id, value3: saved.version }));
+          onSavedRef.current?.(saved);
+        } else {
+          const next = fromTerm(saved);
+          setCurrent(saved); setVersion(saved.version); setBaseline(next); setForm(next);
+          setExtensionBaseline(extensions);
+          if (saved.schema_token && extensionConfig)
+            setExtensionConfig({...extensionConfig, schema_token: saved.schema_token});
+          setConflict(false); setLatest(null);
+          if (scope) termDrafts.delete(scope);
+          recoveredRef.current = null;
+          reportDirtyRef.current(false);
+          setNotice(tStatic("feature.taxonomy.termeditpage.saved_term_value_value_vvalue", { value1: definition?.label ?? kind, value2: saved.id, value3: saved.version }));
+          onSavedRef.current?.(saved);
+          if (!embedded && mode === 'new') onNavigateHash(`${listHash}/${saved.id}/edit`);
+        }
       } catch (cause) {
         if (!mountedRef.current) return;
         if (cause instanceof ApiClientError && (cause.status === 412 || cause.status === 409)) {
@@ -383,19 +430,25 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
   if (loading) return <p role="status" className="text-sm text-zinc-600">{tStatic("feature.taxonomy.termeditpage.loading_taxonomy_editor")}</p>;
 
   return (
-    <section className="mx-auto w-full min-w-0 max-w-4xl space-y-5" data-testid="term-edit-page"
-      data-term-kind={kind} data-term-id={current?.id ?? ''}>
+    <section
+      className={embedded ? 'w-full min-w-0 space-y-4' : 'mx-auto w-full min-w-0 max-w-4xl space-y-5'}
+      data-testid="term-edit-page"
+      data-term-kind={kind}
+      data-term-id={current?.id ?? ''}
+    >
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{tStatic("feature.posts.postpageworkspace.content")}{' '}{definition?.label ?? kind}</p>
-          <h2 className="mt-1 text-xl font-bold tracking-tight text-zinc-950">
+          <h2 className="mt-1 text-lg font-bold tracking-tight text-zinc-950">
             {mode === 'new' ? tStatic("feature.taxonomy.termeditpage.add_value_term", { value1: definition?.label ?? kind }) : tStatic("feature.taxonomy.termeditpage.edit_value_term_value", { value1: definition?.label ?? kind, value2: String(current?.id) })}
           </h2>
           {current && <p className="mt-0.5 text-xs text-zinc-500">ID #{current.id} {tStatic("feature.taxonomy.termeditpage.version_v")}{version} · {dirty ? tStatic("feature.taxonomy.termeditpage.unsaved") : tStatic("feature.taxonomy.termeditpage.synced")}</p>}
         </div>
-        <AdminButton variant="secondary" size="sm" disabled={busy} onClick={discardAndBack}>
-          {tStatic("feature.taxonomy.termeditpage.cancel_return_to_list")}
-        </AdminButton>
+        {(!embedded || mode === 'edit') && (
+          <AdminButton variant="secondary" size="sm" disabled={busy} onClick={discardAndBack}>
+            {embedded ? tStatic("taxonomy.back_to_create") : tStatic("feature.taxonomy.termeditpage.cancel_return_to_list")}
+          </AdminButton>
+        )}
       </header>
 
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
@@ -461,6 +514,50 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
           <span className="text-xs font-normal text-zinc-500">{tStatic("feature.taxonomy.termeditpage.cannot_select_a_descendant_or_move_a_branch_beyond")}</span>
         </label>}
 
+        <div className="space-y-2" data-testid="term-featured-image-field">
+          <div className="text-sm font-medium text-zinc-800">{tStatic("taxonomy.featured_image")}</div>
+          {form.featuredImageId ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50/50 p-3">
+              <img
+                src={mediaThumbnailUrl(form.featuredImageId)}
+                alt={tStatic("taxonomy.featured_image")}
+                className="h-20 w-20 rounded-md border border-zinc-200 bg-white object-cover"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <AdminButton
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy || user.role !== 'admin'}
+                  data-testid="term-change-featured-image"
+                  onClick={() => setPickerOpen(true)}
+                >
+                  {tStatic("taxonomy.change_featured_image")}
+                </AdminButton>
+                <AdminButton
+                  variant="danger"
+                  size="sm"
+                  disabled={busy || user.role !== 'admin'}
+                  data-testid="term-remove-featured-image"
+                  onClick={() => setForm(previous => ({ ...previous, featuredImageId: '' }))}
+                >
+                  {tStatic("taxonomy.remove_featured_image")}
+                </AdminButton>
+              </div>
+            </div>
+          ) : (
+            <AdminButton
+              variant="secondary"
+              size="sm"
+              disabled={busy || user.role !== 'admin'}
+              data-testid="term-choose-featured-image"
+              onClick={() => setPickerOpen(true)}
+            >
+              {tStatic("taxonomy.choose_featured_image")}
+            </AdminButton>
+          )}
+          <p className="text-xs font-normal text-zinc-500">{tStatic("taxonomy.featured_image_help")}</p>
+        </div>
+
         {mode === 'edit' && extensionConfig && <AdminTermPanels config={extensionConfig}
           values={extensions} disabled={busy}
           onChange={(panelKey, key, value) => setExtensions(previous => ({
@@ -483,11 +580,27 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
             disabled={busy || conflict || !csrfToken || (mode === 'new' && (user.role !== 'admin' || providerUnavailable))}>
             {busy ? tStatic("feature.users.userprofilepanel.saving") : mode === 'new' ? tStatic("feature.editor.panelregionrenderer.create_new") : tStatic("feature.users.userspanel.save_changes")}
           </AdminButton>
-          <AdminButton variant="secondary" size="md" disabled={busy} onClick={discardAndBack}>
-            {tStatic("feature.taxonomy.termeditpage.cancel_edits")}
-          </AdminButton>
+          {(!embedded || mode === 'edit' || dirty) && (
+            <AdminButton variant="secondary" size="md" disabled={busy} onClick={discardAndBack}>
+              {tStatic("feature.taxonomy.termeditpage.cancel_edits")}
+            </AdminButton>
+          )}
         </div>
       </form>
+      {pickerOpen && (
+        <MediaPicker
+          mode="image"
+          acceptKind="image"
+          selectedIds={form.featuredImageId ? [form.featuredImageId] : []}
+          csrfToken={csrfToken}
+          onApply={(ids) => {
+            setForm(previous => ({ ...previous, featuredImageId: ids[0] ?? '' }));
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+          onError={(err, fallback) => onErrorRef.current(err, fallback)}
+        />
+      )}
       <div data-extension-slot="term-after-core" aria-hidden="true" />
     </section>
   );
