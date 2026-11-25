@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WATCHDOG = 180
@@ -276,7 +277,7 @@ def run_e2e(
             page.goto(f"{src_url}/admin", wait_until="domcontentloaded")
             page.fill("#auth-username", admin_user)
             page.fill("#auth-password", admin_pass)
-            page.click("#auth-login")
+            login_legacy_vi(page, src_url)
             page.wait_for_selector("#user-panel", timeout=15000)
 
             phase("source_visual_builder_navigation")

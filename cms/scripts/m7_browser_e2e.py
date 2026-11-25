@@ -6,6 +6,7 @@ import json
 import pathlib
 import sys
 from playwright.sync_api import sync_playwright
+from m7_beta_menu_picker_e2e import set_cms_locale
 
 
 def launch_browser(p):
@@ -71,6 +72,7 @@ def main() -> int:
         )
         assert login_resp.status == 200, f"Login failed: {login_resp.status}"
         csrf = login_resp.json()["csrf_token"]
+        set_cms_locale(page, base_url, csrf, "vi")
 
         # 3. Verify Settings, Menus, and Contact Forms views load cleanly in Admin UI
         for route in ("settings", "taxonomy", "themes", "media", "builder"):

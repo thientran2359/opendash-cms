@@ -60,7 +60,7 @@ def run(binary: pathlib.Path, artifact_dir: pathlib.Path) -> dict:
                     password = 'M7-S16-T03-Temporary-Admin-123!'
                     api_json(ctx, 'POST', base, '/auth/setup',
                              {'username': 'editor_owner', 'password': password}, expected=201)
-                    csrf = admin_login(ctx, base, 'editor_owner', password)
+                    csrf = admin_login(ctx, base, 'editor_owner', password, cms_locale="vi")
                     category = api_json(ctx, 'POST', base, '/api/admin/taxonomy/terms',
                                         {'kind': 'category', 'name': 'Parent Cat', 'slug': 'parent-cat'}, csrf, expected=201)
                     child = api_json(ctx, 'POST', base, '/api/admin/taxonomy/terms',

@@ -203,7 +203,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     password = 'Review-Provider-Fixture-Local-123456!'
                     api_json(ctx, 'POST', base, '/auth/setup',
                              {'username': 'review_admin', 'password': password}, expected=201)
-                    csrf = admin_login(ctx, base, 'review_admin', password)
+                    csrf = admin_login(ctx, base, 'review_admin', password, cms_locale="vi")
                     term = api_json(ctx, 'POST', base, '/api/admin/taxonomy/terms',
                         {'kind': 'category', 'name': 'Provider Category', 'slug': 'provider-category'},
                         csrf, expected=201)

@@ -46,7 +46,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     password = 'Local-Taxonomy-Admin-Fixture-123456!'
                     api_json(admin, 'POST', base, '/auth/setup',
                              {'username': 'tax_owner', 'password': password}, expected=201)
-                    csrf = admin_login(admin, base, 'tax_owner', password)
+                    csrf = admin_login(admin, base, 'tax_owner', password, cms_locale="vi")
                     root_term = api_json(admin, 'POST', base, '/api/admin/taxonomy/terms',
                         {'kind': 'category', 'name': 'News Root', 'slug': 'news-root'}, csrf, expected=201)
                     child_term = api_json(admin, 'POST', base, '/api/admin/taxonomy/terms',

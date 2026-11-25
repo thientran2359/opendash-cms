@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 from queue import Queue
+import socket
 import subprocess
 from tempfile import TemporaryDirectory
 from threading import Thread
@@ -33,8 +34,15 @@ def sample_theme(descriptor="block.json"):
 
 
 @contextmanager
-def running(binary, database):
-    env = dict(os.environ, OPENDASH_PORT="0", OPENDASH_SITE_ROOT=str(database.parent), OPENDASH_DB_PATH=str(database))
+def running(binary, database, site_root=None):
+    database = database.resolve()
+    root = (site_root or (database.parent.parent if database.parent.name == "database" else database.parent)).resolve()
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    assert port != 18964, "Reserved review port"
+    env = dict(os.environ, OPENDASH_PORT=str(port), OPENDASH_SITE_ROOT=str(root), OPENDASH_DB_PATH=str(database))
+    env.pop("OPENDASH_PUBLIC_ORIGIN", None)
     with subprocess.Popen(
         [str(binary)], env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8"
     ) as process:
@@ -42,10 +50,13 @@ def running(binary, database):
         Thread(target=lambda: output.put(process.stdout.readline()), daemon=True).start()
         try:
             line = output.get(timeout=20).strip()
-            assert line.startswith("OpenDash: http://127.0.0.1:") and line.endswith("/builder"), line
-            yield line.removeprefix("OpenDash: ").removesuffix("/builder")
+            base = f"http://127.0.0.1:{port}"
+            assert line == f"OpenDash: {base}/builder", line
+            yield base
         finally:
-            process.terminate()
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=10)
 
 
 def request(base, path, data=None, content_type=None, headers=None):

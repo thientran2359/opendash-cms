@@ -122,7 +122,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> int:
                 context = browser.new_context(viewport={"width": 1440, "height": 900})
                 api_json(context, "POST", base, "/auth/setup",
                          {"username": "admin", "password": "F03-Safe-Draft-Admin123!"}, expected=201)
-                csrf = admin_login(context, base, "admin", "F03-Safe-Draft-Admin123!")
+                csrf = admin_login(context, base, "admin", "F03-Safe-Draft-Admin123!", cms_locale="vi")
                 api_json(context, "POST", base, "/api/admin/users",
                          {"username": "editor1", "password": "F03-Safe-Draft-Editor123!", "role": "editor"},
                          csrf, expected=201)

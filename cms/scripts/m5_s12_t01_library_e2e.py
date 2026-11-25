@@ -252,7 +252,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     api_json(admin, 'POST', base, '/auth/setup', {
                         'username': 'library_admin', 'password': 'AdminPassword123!',
                     }, expected=201)
-                    csrf = admin_login(admin, base, 'library_admin', 'AdminPassword123!')
+                    csrf = admin_login(admin, base, 'library_admin', 'AdminPassword123!', cms_locale="vi")
                     assert admin.request.get(base + '/api/admin/library').headers.get('cache-control') == 'no-store'
                     catalog = api_json(admin, 'GET', base, '/api/admin/library')
                     assert catalog['sections'] == [] and catalog['theme_templates'] == []

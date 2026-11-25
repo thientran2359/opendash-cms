@@ -31,6 +31,7 @@ from importlib.metadata import version as package_version
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 from builder_editor_browser import state as browser_state
 from builder_homepage_smoke import checked, element, get, preview, save
@@ -261,7 +262,7 @@ def verify_upgrade(m4: Path, m3: Path, chrome: Path) -> None:
                 page.goto(base + "/admin/#/builder")
                 page.locator("#auth-username").fill("themeadmin")
                 page.locator("#auth-password").fill("qa-password-123")
-                page.locator("#auth-login").click()
+                login_legacy_vi(page, base, historical=True)
                 expect(page.locator('[data-testid="builder-workspace"]')).to_contain_text("Đã mở")
                 expect(page.locator('[role="treeitem"][data-node-id="release-heading"]')).to_be_visible()
                 page.locator('[role="treeitem"][data-node-id="release-heading"]').click()
@@ -322,7 +323,7 @@ def verify_upgrade(m4: Path, m3: Path, chrome: Path) -> None:
                 page.goto(base + "/admin/#/themes")
                 page.locator("#auth-username").fill("themeadmin")
                 page.locator("#auth-password").fill("qa-password-123")
-                page.locator("#auth-login").click()
+                login_legacy_vi(page, base, historical=True)
                 panel = page.locator('[data-testid="themes-panel"]')
                 expect(panel).to_be_visible()
                 expect(panel.locator('[data-testid="active-theme"]')).to_contain_text(

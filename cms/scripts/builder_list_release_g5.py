@@ -19,6 +19,7 @@ from tempfile import TemporaryDirectory
 from urllib.parse import urlencode
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 TABLES = [
     "content_types", "content_entries", "taxonomy_terms", "entry_terms",
@@ -70,7 +71,7 @@ def start_chrome(browser, base: str):
     page.goto(base + "/admin/#/builder")
     page.locator("#auth-username").fill("g5admin")
     page.locator("#auth-password").fill("password123")
-    page.locator("#auth-login").click()
+    login_legacy_vi(page, base, historical=True)
     expect(page.locator('[data-testid="builder-workspace"]')).to_contain_text("Đã mở")
     return page
 

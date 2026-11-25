@@ -104,7 +104,7 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                     checks.append("embedded_admin_bundle_exact_bytes")
                     api(ctx, base, "POST", "/auth/setup", 201,
                         {"username": "c4_browser", "password": "C4-Browser-Isolated-Password!2026"})
-                    csrf = admin_login(ctx, base, "c4_browser", "C4-Browser-Isolated-Password!2026")
+                    csrf = admin_login(ctx, base, "c4_browser", "C4-Browser-Isolated-Password!2026", cms_locale="vi")
                     original = api(ctx, base, "GET", "/api/admin/settings/permalinks")
                     assert original["content_type_bases"] == {}
                     assert original["taxonomy_bases"] == {}

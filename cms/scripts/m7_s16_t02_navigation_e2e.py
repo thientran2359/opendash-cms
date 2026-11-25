@@ -27,23 +27,25 @@ def digest(path: pathlib.Path) -> str:
 
 # hash, expected feature, unrelated feature that must not be rendered.
 ADMIN_ROUTES = [
-    ("#/appearance/menus", '[data-testid="menus-panel"]', '[data-testid="themes-panel"]'),
-    ("#/appearance/themes", '[data-testid="themes-panel"]', '[data-testid="menus-panel"]'),
-    ("#/appearance/options", '[data-testid="theme-options-screen"]', '[data-testid="themes-panel"]'),
+    ("#/appearance/menus", '[data-testid="studio-panel-menus"]', '[data-testid="themes-panel"]'),
+    ("#/appearance/themes", '[data-testid="themes-panel"]', '[data-testid="studio-panel-menus"]'),
+    ("#/appearance/options", '[data-testid="studio-panel-theme-options"]', '[data-testid="themes-panel"]'),
     ("#/appearance/content-types", '[data-testid="content-type-schema-settings"]', '[data-testid="themes-panel"]'),
     ("#/settings/content-types", '[data-testid="content-type-schema-settings"]', '[data-testid="themes-panel"]'),
-    ("#/appearance/library", '[data-testid="pending-library"]', '[data-testid="themes-panel"]'),
-    ("#/sections", '[data-testid="pending-sections"]', '[data-testid="entry-list-post"]'),
-    ("#/sections/new", '[data-testid="pending-sections"]', '#entry-title-input'),
+    ("#/appearance/library", '[data-testid="local-template-library"]', '[data-testid="themes-panel"]'),
+    ("#/sections", '[data-testid="pattern-workspace"]', '[data-testid="entry-list-post"]'),
+    ("#/sections/new", '[data-testid="pattern-workspace"]', '#entry-title-input'),
     ("#/plugins", "#plugin-list-heading", "#plugin-upload-heading"),
     ("#/plugins/install", "#plugin-upload-heading", "#plugin-list-heading"),
-    ("#/users", ".od-users-table", 'button:has-text("Tạo tài khoản")'),
-    ("#/users/new", 'button:has-text("Tạo tài khoản")', ".od-users-table"),
-    ("#/tools/backup", '[aria-label="Sao lưu mã hóa"]', "h3:has-text('Đối soát lưu trữ')"),
-    ("#/tools/media-reconcile", "h3:has-text('Đối soát lưu trữ')", '[aria-label="Sao lưu mã hóa"]'),
-    ("#/tools/health", "h2:has-text('Trạng thái hệ thống')", '[aria-label="Sao lưu mã hóa"]'),
-    ("#/settings/general", '[data-testid="general-settings"]', '[aria-label="SEO trang chủ"]'),
-    ("#/settings/seo", '[aria-label="SEO trang chủ"]', '[data-testid="general-settings"]'),
+    ("#/users", ".od-users-table", 'button:has-text("Create account")'),
+    ("#/users/new", 'button:has-text("Create account")', ".od-users-table"),
+    ("#/tools/backup", '[aria-label="Encrypted backup"]', "h2:has-text('Storage reconciliation & quarantine')"),
+    ("#/tools/media-reconcile", "h2:has-text('Storage reconciliation & quarantine')", '[aria-label="Encrypted backup"]'),
+    ("#/tools/health", "h2:has-text('System status')", '[aria-label="Encrypted backup"]'),
+    ("#/settings/general", '[data-testid="general-settings"]', '[aria-label="Homepage SEO"]'),
+    ("#/settings/reading", '[data-testid="reading-settings"]', '[data-testid="general-settings"]'),
+    ("#/settings/multilingual", '[data-testid="multilingual-enabled-checkbox"]', '[data-testid="general-settings"]'),
+    ("#/settings/seo", '[aria-label="Homepage SEO"]', '[data-testid="general-settings"]'),
     ("#/settings/contact", "#contact-forms-panel", "#smtp-settings-panel"),
     ("#/settings/smtp", "#smtp-settings-panel", "#contact-forms-panel"),
     ("#/contact/submissions", "#contact-forms-panel", "#smtp-settings-panel"),
@@ -72,19 +74,22 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         "username": "nav_editor", "password": "Navigation-Editor-Test-12345!", "role": "editor",
                     }, csrf, expected=201)
                     page.goto(base + "/admin/#/appearance/menus", wait_until="domcontentloaded")
-                    expect(page.get_by_test_id("menus-panel")).to_be_visible(timeout=20000)
+                    expect(page.get_by_test_id("studio-panel-menus")).to_be_visible(timeout=20000)
                     page.screenshot(path=str(artifacts / "baseline-menus.png"), full_page=True)
                     expect(page.get_by_test_id("themes-panel")).to_have_count(0)
                     checks.append("menus_without_theme_install_or_options")
-                    nav = page.get_by_role("navigation", name="Các mục quản trị")
+                    expect(page).to_have_url(base + "/admin/#/studio?panel=menus")
+                    expect(page.get_by_test_id("admin-layout")).not_to_be_visible()
+                    page.goto(base + "/admin/#/dashboard", wait_until="domcontentloaded")
+                    nav = page.get_by_role("navigation", name="Admin sections")
+                    expect(nav).to_be_visible()
                     groups = [node.inner_text().casefold() for node in nav.locator(".od-nav-group-title").all()]
-                    assert groups == ["nội dung", "giao diện", "tùy chỉnh"], groups
-                    assert nav.locator('[data-menu-id="sections"]').is_disabled()
-                    assert nav.locator('[data-menu-id="library"]').is_disabled()
-                    assert nav.locator('[data-menu-id="sections"]').get_attribute("title")
-                    assert nav.locator('[href="#/sections"]').count() == 0
-                    assert nav.locator('[href="#/appearance/library"]').count() == 0
-                    checks.append("three_groups_pending_sections_and_library_disabled")
+                    assert groups == ["content", "appearance", "system"], groups
+                    expect(nav.locator('[data-menu-id="patterns"]')).to_be_enabled()
+                    expect(nav.locator('[data-menu-id="studio"]')).to_be_enabled()
+                    expect(nav.locator('[data-menu-id="themes"]')).to_be_enabled()
+                    assert nav.locator('[data-menu-id="sections"]').count() == 0
+                    checks.append("three_groups_current_patterns_studio_and_themes_enabled")
 
                     for index, (hashroute, visible, absent) in enumerate(ADMIN_ROUTES, start=1):
                         page.goto(base + "/admin/" + hashroute, wait_until="domcontentloaded")
@@ -92,7 +97,12 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         unrelated = page.locator(absent)
                         if unrelated.count() > 0:
                             expect(unrelated.first).not_to_be_visible()
-                        expect(page.get_by_test_id("breadcrumb")).to_contain_text("Quản trị")
+                        if hashroute in ("#/appearance/menus", "#/appearance/options"):
+                            panel = "menus" if hashroute.endswith("menus") else "theme-options"
+                            expect(page).to_have_url(base + "/admin/#/studio?panel=" + panel)
+                            expect(page.get_by_test_id("admin-layout")).not_to_be_visible()
+                        else:
+                            expect(page.get_by_test_id("breadcrumb")).to_contain_text("Administration")
                         page.reload(wait_until="domcontentloaded")
                         expect(page.locator(visible).first).to_be_visible(timeout=20000)
                         checks.append("route:" + hashroute)
@@ -105,42 +115,41 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     page.goto(base + "/admin/#/dashboard", wait_until="domcontentloaded")
                     nav.locator('[data-menu-id="themes"]').click()
                     expect(page).to_have_url(base + "/admin/#/appearance/themes")
-                    child = nav.locator('a[href="#/appearance/menus"]')
+                    child = nav.locator('a[href="#/appearance/library"]')
                     expect(child).to_be_visible()
                     child.click()
-                    expect(page).to_have_url(base + "/admin/#/appearance/menus")
-                    expect(page.get_by_test_id("menus-panel")).to_be_visible()
+                    expect(page).to_have_url(base + "/admin/#/appearance/library")
+                    expect(page.get_by_test_id("local-template-library")).to_be_visible()
                     expect(child).to_have_attribute("aria-current", "page")
-                    expect(page.get_by_test_id("breadcrumb")).to_contain_text("Menus")
+                    expect(page.get_by_test_id("breadcrumb")).to_contain_text("Install theme")
                     page.go_back(wait_until="domcontentloaded")
                     expect(page.get_by_test_id("themes-panel")).to_be_visible()
                     expect(nav.locator('a[href="#/appearance/themes"]')).to_have_attribute("aria-current", "page")
                     page.go_forward(wait_until="domcontentloaded")
-                    expect(page.get_by_test_id("menus-panel")).to_be_visible()
+                    expect(page.get_by_test_id("local-template-library")).to_be_visible()
                     checks.append("sidebar_click_back_forward_breadcrumb_active_leaf")
 
                     page.goto(base + "/admin/#/content", wait_until="domcontentloaded")
                     expect(page.get_by_test_id("content-type-schema-settings")).to_be_visible()
                     expect(page).to_have_url(re.compile(r"#/appearance/content-types(?:/[^/]+)?$"))
                     page.goto(base + "/admin/#/tools/restore", wait_until="domcontentloaded")
-                    expect(page.get_by_role("heading", name="Khôi phục & Safe Mode")).to_be_visible()
+                    expect(page.get_by_role("heading", name="Restore & safe mode")).to_be_visible()
                     checks.append("legacy_content_and_restore_aliases")
 
-                    for target, locator in (("#/sections/new", '[data-testid="pending-sections"]'),
-                                            ("#/appearance/library", '[data-testid="pending-library"]')):
+                    for target, heading in (("#/sections/new", "Create pattern"), ("#/sections", "Patterns")):
                         page.goto(base + "/admin/" + target, wait_until="domcontentloaded")
-                        expect(page.locator(locator)).to_contain_text("chưa khả dụng")
+                        expect(page.get_by_test_id("pattern-workspace").get_by_role("heading", name=heading, exact=True)).to_be_visible()
                         expect(page.locator("#builder-main")).not_to_be_visible()
-                    checks.append("pending_routes_truthful_no_fake_section_or_library")
+                    checks.append("legacy_section_routes_show_real_pattern_workspace")
 
                     page.set_viewport_size({"width": 390, "height": 844})
                     page.goto(base + "/admin/#/dashboard", wait_until="domcontentloaded")
-                    page.get_by_role("button", name="Mở menu").click()
-                    for group in ("Nội dung", "Giao diện", "Tùy chỉnh"):
+                    page.get_by_role("button", name="Open menu").click()
+                    for group in ("Content", "Appearance", "System"):
                         expect(nav.locator(".od-nav-group-title").filter(has_text=group)).to_be_visible()
                     page.screenshot(path=str(artifacts / "mobile-three-groups.png"), full_page=True)
                     page.keyboard.press("Escape")
-                    expect(page.get_by_role("button", name="Mở menu")).to_have_attribute("aria-expanded", "false")
+                    expect(page.get_by_role("button", name="Open menu")).to_have_attribute("aria-expanded", "false")
                     checks.append("390px_grouped_drawer_and_escape")
                     page.set_viewport_size({"width": 1440, "height": 900})
                     page.goto(base + "/admin/#/appearance/themes", wait_until="domcontentloaded")
@@ -150,13 +159,13 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         "name": "nav-test-theme.zip", "mimeType": "application/zip",
                         "buffer": theme_zip("nav-test-theme", "1.0.0"),
                     })
-                    expect(theme_panel.get_by_role("status").filter(has_text="Đã cài")).to_be_visible(timeout=25000)
+                    expect(theme_panel.get_by_role("status").filter(has_text="Installed")).to_be_visible(timeout=25000)
                     theme_panel.locator('[data-theme-revision-id] input[name="selected-theme-revision"]').check()
-                    theme_panel.get_by_role("button", name="Kích hoạt revision đã chọn").click()
+                    theme_panel.get_by_role("button", name="Activate selected revision").click()
                     expect(theme_panel.get_by_test_id("active-theme")).to_contain_text("nav-test-theme", timeout=20000)
-                    assert theme_panel.get_by_test_id("theme-options-form").count() == 0
+                    assert theme_panel.get_by_test_id("theme-specific-options-section").count() == 0
                     page.goto(base + "/admin/#/appearance/options", wait_until="domcontentloaded")
-                    expect(page.get_by_test_id("theme-options-form")).to_be_visible(timeout=20000)
+                    expect(page.get_by_test_id("theme-specific-options-section")).to_be_visible(timeout=20000)
                     expect(page.get_by_test_id("themes-panel")).to_have_count(0)
                     checks.append("installed_theme_options_only_on_separate_options_screen")
                     editor = browser.new_context(viewport={"width": 390, "height": 844})
@@ -164,14 +173,14 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     editor_page = editor.new_page()
                     editor_page.goto(base + "/admin/#/users/profile", wait_until="domcontentloaded")
                     expect(editor_page.get_by_test_id("user-profile-panel")).to_be_visible(timeout=20000)
-                    editor_nav = editor_page.get_by_role("navigation", name="Các mục quản trị")
-                    for menu_name in ("themes", "plugins", "settings", "tools"):
+                    editor_nav = editor_page.get_by_role("navigation", name="Admin sections")
+                    for menu_name in ("studio", "themes", "patterns", "schema", "plugins", "settings", "tools"):
                         assert editor_nav.locator(f'[data-menu-id="{menu_name}"]').count() == 0
                     checks.append("editor_profile_and_admin_menu_visibility")
                     for restricted_hash in (
                         "#/appearance/menus", "#/appearance/options", "#/appearance/content-types",
                         "#/settings/content-types", "#/plugins/install", "#/tools/health",
-                        "#/users/new", "#/settings/smtp",
+                        "#/users/new", "#/settings/smtp", "#/settings/reading", "#/settings/multilingual",
                     ):
                         editor_page.goto(base + "/admin/" + restricted_hash, wait_until="domcontentloaded")
                         expect(editor_page.get_by_test_id("rbac-forbidden")).to_be_visible(timeout=18000)
@@ -186,7 +195,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         assert reloaded["selection"]["theme_id"] == "nav-test-theme", reloaded["selection"]
                         fresh_page = fresh.new_page()
                         fresh_page.goto(restarted_base + "/admin/#/appearance/options", wait_until="domcontentloaded")
-                        expect(fresh_page.get_by_test_id("theme-options-form")).to_be_visible(timeout=20000)
+                        expect(fresh_page.get_by_test_id("theme-specific-options-section")).to_be_visible(timeout=20000)
                         checks.append("restart_persists_active_theme_and_separate_options_route")
                         fresh.close()
                     finally:

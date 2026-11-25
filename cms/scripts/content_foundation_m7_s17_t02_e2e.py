@@ -205,7 +205,7 @@ def run_admin_ui(binary: pathlib.Path, artifacts: pathlib.Path,
 
                     api(ctx, base, "POST", "/auth/setup", 201,
                         {"username": "t02_ui", "password": "Chrome-T02-Isolated-Password!2026"})
-                    csrf = admin_login(ctx, base, "t02_ui", "Chrome-T02-Isolated-Password!2026")
+                    csrf = admin_login(ctx, base, "t02_ui", "Chrome-T02-Isolated-Password!2026", cms_locale="vi")
                     post = api(ctx, base, "POST", "/api/admin/content-types/post/entries", 201,
                                {"title": "UI T02 Public", "slug": "ui-live", "values": {}}, csrf)
                     draft = api(ctx, base, "POST", "/api/admin/content-types/post/entries", 201,

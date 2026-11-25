@@ -279,7 +279,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     page = admin.new_page()
                     page.on("pageerror", lambda exc: errors.append(str(exc)))
                     api_json(admin, "POST", base, "/auth/setup", {"username": "site_admin", "password": "AdminPassword123!"}, expected=201)
-                    csrf = admin_login(admin, base, "site_admin", "AdminPassword123!")
+                    csrf = admin_login(admin, base, "site_admin", "AdminPassword123!", cms_locale="vi")
                     reading_before = api_json(admin, "GET", base, "/api/admin/settings/reading")
                     a = create_ui_section(page, base, "Section A UI", "section-a")
                     b = create_ui_section(page, base, "Section B UI", "section-b")

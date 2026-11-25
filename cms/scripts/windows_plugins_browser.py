@@ -6,6 +6,7 @@ import secrets
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 from windows_plugin_smoke import request, running
 
 
@@ -28,8 +29,8 @@ def verify(binary: Path, browser_path: str | None) -> None:
             page.locator("#auth-username").fill("qaadmin")
             page.locator("#auth-password").fill(password)
             page.locator("#auth-setup").click()
-            expect(page.locator("#status")).to_contain_text("Đã tạo")
-            page.locator("#auth-login").click()
+            expect(page.locator("#status")).to_contain_text("Administrator created")
+            login_legacy_vi(page, base)
             expect(page.locator("#user-info")).to_contain_text("qaadmin")
             expect(page.locator("#plugin-management-section")).to_be_visible()
             expect(page.locator("#plugin-list-heading")).to_contain_text("(0)")

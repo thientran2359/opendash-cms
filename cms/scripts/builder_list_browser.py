@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 from urllib.parse import urlencode
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 from builder_editor_browser import new_tree, running, save, state
 from builder_list_smoke import create, fragment, set_publication
@@ -61,7 +62,7 @@ def verify(binary: Path, chrome: str):
                 page.goto(base + '/admin/#/builder')
                 page.locator('#auth-username').fill('listadmin')
                 page.locator('#auth-password').fill('password123')
-                page.locator('#auth-login').click()
+                login_legacy_vi(page, base)
                 expect(page.locator('[data-testid="builder-workspace"]')).to_contain_text('Đã mở')
                 new_tree(page)
                 first_id = new_list(page)

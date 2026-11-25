@@ -13,6 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 from builder_editor_browser import element_at, new_tree, running, save, state
 from content_entries_smoke import api
@@ -100,7 +101,7 @@ def check(browser_path: str, binary: Path):
                 ui.goto(base + "/admin/#/builder")
                 ui.locator("#auth-username").fill("bindingadmin")
                 ui.locator("#auth-password").fill("password123")
-                ui.locator("#auth-login").click()
+                login_legacy_vi(ui, base)
                 expect(ui.locator('[data-testid="builder-workspace"]')).to_contain_text("Đã mở")
                 new_tree(ui)
 

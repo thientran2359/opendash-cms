@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 from windows_smoke import running
 from themes_smoke import theme_zip
 
@@ -24,8 +25,8 @@ def verify(binary, chrome):
             page.locator("#auth-username").fill("themebrowser")
             page.locator("#auth-password").fill("password-browser-1")
             page.locator("#auth-setup").click()
-            expect(page.locator("#status")).to_contain_text("Đã tạo")
-            page.locator("#auth-login").click()
+            expect(page.locator("#status")).to_contain_text("Administrator created")
+            login_legacy_vi(page, base)
             panel = page.locator("[data-testid='themes-panel']")
             expect(panel).to_be_visible()
             expect(panel.locator("[data-testid='active-theme']")).to_contain_text("legacy")

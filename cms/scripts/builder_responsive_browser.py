@@ -17,6 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 from builder_editor_browser import running, save, state
 
@@ -72,8 +73,8 @@ def verify(binary: Path, browser_path: str | None) -> None:
             page.locator("#auth-username").fill("responsiveadmin")
             page.locator("#auth-password").fill("responsive-pass-123")
             page.locator("#auth-setup").click()
-            expect(page.locator("#status")).to_contain_text("Đã tạo")
-            page.locator("#auth-login").click()
+            expect(page.locator("#status")).to_contain_text("Administrator created")
+            login_legacy_vi(page, base)
             expect(page.locator('[data-testid="builder-workspace"]')).to_contain_text("Đã mở")
             csrf = page.request.get(base + "/auth/me").json()["csrf_token"]
             seeded = page.request.put(

@@ -22,6 +22,7 @@ import tempfile
 import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+from m7_beta_menu_picker_e2e import set_cms_locale
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BINARY = REPO_ROOT / "cms" / "target" / "release" / ("opendash.exe" if os.name == "nt" else "opendash")
@@ -295,6 +296,7 @@ def main() -> int:
             )
             assert r_login.status == 200
             admin_csrf = r_login.json()["csrf_token"]
+            set_cms_locale(page, base_url, admin_csrf, "vi")
 
             r_ed = page.request.post(
                 f"{base_url}/api/admin/users",

@@ -21,6 +21,7 @@ from tempfile import TemporaryDirectory
 from threading import Thread
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 URL = "/api/admin/builder/homepage"
 
@@ -129,8 +130,8 @@ def verify_editor(binary: Path, browser_path: str | None):
             page.locator("#auth-username").fill("editoradmin")
             page.locator("#auth-password").fill("editor-password-123")
             page.locator("#auth-setup").click()
-            expect(page.locator("#status")).to_contain_text("Đã tạo")
-            page.locator("#auth-login").click()
+            expect(page.locator("#status")).to_contain_text("Administrator created")
+            login_legacy_vi(page, base)
             workspace = page.locator('[data-testid="builder-workspace"]')
             expect(workspace).to_contain_text("Đã mở homepage")
             assert state(page, base)["source"] == "empty"
@@ -341,7 +342,7 @@ def verify_unresolved(binary: Path, browser_path: str | None):
             page.goto(base + "/admin/#/builder")
             page.locator("#auth-username").fill("themeadmin")
             page.locator("#auth-password").fill("qa-password-123")
-            page.locator("#auth-login").click()
+            login_legacy_vi(page, base)
             expect(page.locator('[data-canvas-id="missing-provider"]')).to_contain_text("Không thể hiển thị")
             page.locator('[data-canvas-id="missing-provider"]').click()
             expect(page.get_by_text("Node không resolve được")).to_be_visible()
@@ -390,7 +391,7 @@ def verify_legacy_preview(binary: Path, browser_path: str | None):
                 page.goto(base + "/admin/#/builder")
                 page.locator("#auth-username").fill("themeadmin")
                 page.locator("#auth-password").fill("qa-password-123")
-                page.locator("#auth-login").click()
+                login_legacy_vi(page, base)
                 expect(page.locator('[data-testid="builder-workspace"]')).to_contain_text("Nguồn: legacy")
                 page.get_by_role("button", name="Xem trước").click()
                 expect(page.frame_locator("#canvas").locator('article[data-theme="A"]')).to_contain_text("Legacy preview original")

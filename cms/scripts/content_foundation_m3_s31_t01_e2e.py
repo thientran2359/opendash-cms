@@ -103,7 +103,7 @@ def run(binary: pathlib.Path, artifact_dir: pathlib.Path) -> list[str]:
                     password = 'C1-Local-Only-Admin-Password-2026!'
                     api_json(ctx, 'POST', base, '/auth/setup',
                              {'username': 'c1_admin', 'password': password}, expected=201)
-                    csrf = admin_login(ctx, base, 'c1_admin', password)
+                    csrf = admin_login(ctx, base, 'c1_admin', password, cms_locale="vi")
                     types = api_json(ctx, 'GET', base, '/api/admin/content-types')
                     schema = {entry['descriptor']['key']: entry for entry in types}
                     assert schema['post']['descriptor']['settings']['publication'] == 'draft_publish'
