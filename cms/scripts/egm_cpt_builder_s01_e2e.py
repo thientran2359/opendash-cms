@@ -86,7 +86,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         api_json(context, "POST", base, "/auth/setup", {
                             "username": "s01_admin", "password": "S01-Only-Test-Password-123!"
                         }, expected=201)
-                        admin_login(context, base, "s01_admin", "S01-Only-Test-Password-123!")
+                        admin_login(context, base, "s01_admin", "S01-Only-Test-Password-123!", cms_locale="vi")
 
                         # Create project through Admin, including a user-owned
                         # rich_text body and explicitly enabled Builder support.

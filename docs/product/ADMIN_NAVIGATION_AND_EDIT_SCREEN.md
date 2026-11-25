@@ -8,28 +8,27 @@ Người quen WordPress có thể tìm đúng công cụ trong Admin, quản lý
 
 ## 2. Nhóm Menu Chính, Submenu và Hash Routes
 
-Thanh điều hướng Admin (desktop sidebar thu gọn được + mobile drawer) tổ chức thành `Tổng quan` và 3 nhóm có nhãn rõ ràng:
+Thanh điều hướng Admin (desktop sidebar thu gọn được + mobile drawer) tổ chức thành `Tổng quan` và 3 nhóm có nhãn rõ ràng. Bảng dùng nhãn Tiếng Việt; giao diện mặc định là English (`en`), và nhãn thay đổi theo CMS Language.
 
 | Nhóm | Menu chính | Submenu & Hash Route chính | Quyền |
 | --- | --- | --- | --- |
 | — | **Tổng quan** | Dashboard (`#/dashboard`) | Admin, Editor |
 | **Nội dung** | **Bài viết** | Tất cả bài viết (`#/posts`) · Thêm mới (`#/posts/new`) · Chuyên mục (`#/posts/categories`) · Thẻ (`#/posts/tags`) | Admin, Editor |
 | **Nội dung** | **Trang** | Tất cả trang (`#/pages`) · Thêm mới (`#/pages/new`) | Admin, Editor |
-| **Nội dung** | **Thư viện** | Tất cả media (`#/media`) · Tải lên (`#/media/upload`) | Admin, Editor |
-| **Nội dung** | **Section** | Tất cả Section (`#/sections`) · Thêm mới (`#/sections/new`) | Admin, Editor |
 | **Nội dung** | **CPT tùy chỉnh** | Danh sách (`#/cpt/:typeKey`) · Thêm mới (`#/cpt/:typeKey/new`) · Taxonomy gắn với CPT | Admin, Editor |
-| **Giao diện** | **Giao diện** | Themes (`#/appearance/themes`) · Menus (`#/appearance/menus`) | Admin |
-| **Giao diện** | **Tùy chỉnh giao diện** | Tùy chọn theme (`#/appearance/options`) · Visual Builder (`#/builder`) | Admin |
-| **Giao diện** | **Loại nội dung & Trường** | Cấu hình CPT, field groups và vị trí panel (`#/appearance/content-types`; alias `#/settings/content-types`) | Admin |
-| **Giao diện** | **Taxonomy tùy chỉnh** | Định nghĩa taxonomy và danh sách term (`#/taxonomy/definitions`, `#/taxonomy/:kind/terms`) | Admin |
-| **Giao diện** | **Thư viện mẫu** | Mẫu Section / Template cục bộ (`#/appearance/library`) | Admin |
-| **Tùy chỉnh** | **Plugins** | Plugins đã cài (`#/plugins`) · Cài từ ZIP (`#/plugins/install`) | Admin |
-| **Tùy chỉnh** | **Người dùng** | Tất cả người dùng (`#/users`) · Thêm mới (`#/users/new`) | Admin |
-| **Tùy chỉnh** | **Hồ sơ của tôi** | Thông tin cá nhân & đổi mật khẩu (`#/profile`) | Admin, Editor |
-| **Tùy chỉnh** | **Công cụ** | Sao lưu & Phục hồi (`#/tools/backup`) · Đối soát media (`#/tools/reconcile`) · Tình trạng hệ thống (`#/tools/health`) | Admin |
-| **Tùy chỉnh** | **Cài đặt** | Tổng quát (`#/settings/general`) · Đường dẫn tĩnh (`#/settings/permalinks`) · SEO website (`#/settings/seo`) · Liên hệ (`#/settings/contact`) · Thông báo Email SMTP (`#/settings/smtp`) | Admin |
+| **Nội dung** | **Thư viện media** | Media (`#/media`) | Admin, Editor |
+| **Nội dung** | **Liên hệ** | Cấu hình và quản lý liên hệ (`#/settings/contact`) | Admin |
+| **Giao diện** | **Tùy chỉnh giao diện** | OpenDash Studio (`#/studio`) | Admin |
+| **Giao diện** | **Theme** | Themes đã cài (`#/appearance/themes`) · Cài theme (`#/appearance/library`) | Admin |
+| **Giao diện** | **Patterns** | Tất cả Pattern (`#/patterns`) · Thêm Pattern (`#/patterns/new`) | Admin |
+| **Hệ thống** | **Cấu trúc nội dung** | Loại nội dung & Trường (`#/appearance/content-types`) · Taxonomy tùy chỉnh (`#/taxonomy/definitions`) | Admin |
+| **Hệ thống** | **Plugins** | Plugins đã cài (`#/plugins`) · Cài plugin (`#/plugins/install`) | Admin |
+| **Hệ thống** | **Người dùng** | Tất cả người dùng (`#/users`) · Thêm người dùng (`#/users/new`) · Hồ sơ của tôi (`#/users/profile`) | Admin; Editor chỉ thấy Hồ sơ của tôi |
+| **Hệ thống** | **Công cụ** | Sao lưu & Phục hồi (`#/tools/backup`) · Đối soát Media (`#/tools/media-reconcile`) · Tình trạng hệ thống (`#/tools/health`) | Admin |
+| **Hệ thống** | **Cài đặt** | Tổng quát (`#/settings/general`) · Đa ngôn ngữ (`#/settings/multilingual`) · Trang chủ & Bài viết (`#/settings/reading`) · Đường dẫn tĩnh (`#/settings/permalinks`) · SEO (`#/settings/seo`) · Thông báo Email (SMTP) (`#/settings/smtp`) | Admin |
 
 - Mỗi màn hình có URL riêng hỗ trợ reload, back/forward; ẩn menu không thay thế kiểm quyền server.
+- Tổng quát lưu CMS Language (`cms_locale`) toàn site; màn hình Đa ngôn ngữ riêng quản lý ngôn ngữ nội dung, công tắc `multilingual_enabled`, xóa và dọn dữ liệu mồ côi. Tắt đa ngôn ngữ ẩn các công cụ ngôn ngữ phụ nhưng giữ dữ liệu và vẫn cho phép mở màn hình cấu hình này.
 - Khu vực `Loại nội dung & Trường` chỉ dùng để cấu hình schema/field groups/editor layout, tuyệt đối không chứa danh sách hay form nhập liệu entry.
 - Khi phiên hết hạn (`401`), `EditorDraftStore` quarantine bản nháp và kiểm tra lại quyền hiệu lực (`effective-editor-config`) sau khi đăng nhập lại; logout hoặc đổi tài khoản sẽ xóa sạch bản nháp.
 

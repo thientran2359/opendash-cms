@@ -17,7 +17,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from content_types_smoke import login, request, running
+from content_types_smoke import login, request
+from windows_smoke import running
 from content_entries_smoke import api
 from media_smoke import raw_request
 
@@ -75,7 +76,7 @@ def smoke(binary: Path):
             status, data, headers = check(get(base, SETTINGS, admin), 200, "defaults")
             assert json.loads(data) == {
                 "site_title": "OpenDash", "tagline": "", "timezone": "UTC",
-                "version": 1,
+                "version": 1, "cms_locale": "en", "has_override": True,
             }
             assert headers["ETag"] == '"v1"'
             assert "no-store" in headers["Cache-Control"]
@@ -126,11 +127,12 @@ def smoke(binary: Path):
             assert json.loads(get(base, SETTINGS, admin)[1]) == saved
             html_schema = {
                 "key": "settings_test", "label": "Tin tức",
+                "settings": {"public": True, "has_archive": True, "publication": "immediate", "supports": ["editor"]},
                 "fields": [{"key": "body", "label": "Body", "type": "rich_text"}],
             }
             check(request(base, "/api/admin/content-types", html_schema, admin),
                   201, "create archive fixture")
-            listing = "/content/settings_test"
+            listing = "/settings_test"
             html = check(get(base, listing), 200, "public archive")[1].decode()
             assert "&lt;script&gt;" in html and "&lt;img src=x onerror=alert(2)&gt;" in html
             assert "<script>" not in html and "<img src=x" not in html
@@ -149,30 +151,44 @@ def smoke(binary: Path):
 
             archive = io.BytesIO()
             with ZipFile(archive, "w", ZIP_DEFLATED) as theme:
-                theme.writestr("block.json", json.dumps({
-                    "id": "settings/banner",
-                    "fields": {"title": "Tiêu đề", "note": "Mô tả"},
+                theme.writestr("theme.json", json.dumps({
+                    "manifest_version": 3, "theme_id": "settings-smoke",
+                    "name": "Settings smoke", "version": "1.0.0",
+                    "templates": [{"kind": kind, "file": f"{kind}.html"}
+                                  for kind in ("home", "page", "archive", "single", "taxonomy")],
                 }))
-                theme.writestr("block.html", "<div>{{ values.title }}</div>")
-                theme.writestr("content-list.html",
-                               "<html><h1>CUSTOM {{ site.title }}</h1>"
-                               "<p>{{ site.tagline }}</p></html>")
-                theme.writestr("content-single.html",
-                               "<html><h1>CUSTOM {{ site.title }}</h1>"
-                               "<p>{{ site.tagline }}</p><p>{{ entry.title }}</p></html>")
-            check(raw_request(base, "POST", "/theme", archive.getvalue(), {
+                for kind in ("home", "page", "archive", "single", "taxonomy"):
+                    theme.writestr(f"{kind}.html", "<main><h1>CUSTOM {{ site.title }}</h1>"
+                                   "<p>{{ site.tagline }}</p>" + ("{{ od_content() }}" if kind in ("home", "page", "single") else "") + "</main>")
+            _, installed, _ = check(raw_request(base, "POST", "/api/admin/themes", archive.getvalue(), {
                 **admin, "Content-Type": "application/zip",
             }), 201, "install custom site template")
-            check(api(base, "POST", "/save", {
-                "type": "settings/banner",
-                "values": {"title": "Homepage giữ nguyên", "note": "Đã lưu"},
-            }, admin), 200, "activate custom template via Builder Save")
+            _, _, theme_headers = check(get(base, "/api/admin/themes", admin), 200, "theme selection")
+            check(raw_request(base, "PUT", "/api/admin/themes/active", json.dumps({
+                "revision_id": json.loads(installed)["revision_id"],
+            }).encode(), {**admin, "Content-Type": "application/json", "If-Match": theme_headers["ETag"]}),
+                  200, "activate custom template")
             for path in (listing, listing + "/public-one"):
                 custom = check(get(base, path), 200, "custom site context")[1].decode()
                 assert "CUSTOM" in custom and "&lt;script&gt;" in custom
                 assert "&lt;img src=x onerror=alert(2)&gt;" in custom
                 assert "<script>" not in custom and "<img src=x" not in custom
-            assert "Homepage giữ nguyên" in get(base, "/")[1].decode()
+            # Assign an actual published Page to the v3 homepage; legacy
+            # Builder blocks must not be published implicitly.
+            _, page_body, _ = check(request(base, "/api/admin/content-types/page/entries", {
+                "title": "Homepage giữ nguyên", "slug": "settings-home", "values": {},
+            }, admin), 201, "create homepage fixture")
+            page = json.loads(page_body)
+            check(api(base, "POST", f"/api/admin/content-types/page/entries/{page['id']}/publication",
+                      {"status": "published"}, {**admin, "If-Match": f'"v{page["version"]}"'}),
+                  200, "publish homepage fixture")
+            reading = "/api/admin/settings/reading"
+            _, _, reading_headers = check(get(base, reading, admin), 200, "reading settings")
+            check(api(base, "PUT", reading, {"homepage_page_id": page["id"], "posts_page_id": None},
+                      {**admin, "If-Match": reading_headers["ETag"]}), 200, "assign homepage")
+            home = check(get(base, "/"), 200, "custom homepage")[1].decode()
+            assert "CUSTOM" in home and "&lt;script&gt;" in home
+            assert "<script>" not in home and "<img src=x" not in home
 
             # Two racing writers must yield one win and one stale version.
             with ThreadPoolExecutor(max_workers=2) as executor:
@@ -190,7 +206,9 @@ def smoke(binary: Path):
 
         with closing(sqlite3.connect(db)) as conn:
             row = conn.execute(
-                "SELECT site_title, tagline, timezone, version FROM site_general_settings WHERE id=1"
+                "SELECT g.site_title, g.tagline, s.timezone, g.version "
+                "FROM site_general_settings_locales g JOIN site_locales l ON l.code=g.locale "
+                "CROSS JOIN site_general_settings s WHERE l.is_default=1 AND s.id=1"
             ).fetchone()
             assert row[2] == "America/New_York" and row[3] == 4
             assert conn.execute(
@@ -200,13 +218,13 @@ def smoke(binary: Path):
                 "SELECT success FROM _sqlx_migrations WHERE version=9"
             ).fetchone() == (1,)
             assert conn.execute("SELECT COUNT(*) FROM users").fetchone() == (2,)
-            assert conn.execute("SELECT COUNT(*) FROM content_entries").fetchone() == (1,)
+            assert conn.execute("SELECT COUNT(*) FROM content_entries").fetchone() == (2,)
 
         with running(binary, db) as base:
             admin = login(base, "qaadmin", "password123")
             saved = json.loads(check(get(base, SETTINGS, admin), 200, "restart")[1])
             assert saved["timezone"] == "America/New_York" and saved["version"] == 4
-            assert check(get(base, "/content/settings_test/public-one"),
+            assert check(get(base, "/settings_test/public-one"),
                          200, "published entry restart")[0] == 200
             assert check(get(base, "/"), 200, "Builder public homepage")[0] == 200
         print("PASS: SITE-01 defaults, ACL, CSRF, CAS/race, Unicode, escaping, persistence, restart")
@@ -241,6 +259,7 @@ def upgrade(binary: Path, baseline: Path):
                                         "upgrade defaults")[1])
             assert defaults == {
                 "site_title": "OpenDash", "tagline": "", "timezone": "UTC", "version": 1,
+                "cms_locale": "en", "has_override": True,
             }
 
         with closing(sqlite3.connect(db)) as conn:

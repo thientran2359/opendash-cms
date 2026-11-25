@@ -227,7 +227,7 @@ def test_plugin_package_validation(binary):
                 headers={"Cookie": admin_cookie, "X-CSRF-Token": admin_csrf},
             )
             assert status == 400, f"Expected 400 for path traversal ZIP, got {status}"
-            assert "path traversal" in resp or "không an toàn" in resp
+            assert any(message in resp for message in ("path traversal", "unsafe segment", "không an toàn"))
 
             # 3. Missing manifest.json
             missing_manifest_zip = make_bad_zip("plugin.wasm", b"\x00asm\x01\x00\x00\x00")

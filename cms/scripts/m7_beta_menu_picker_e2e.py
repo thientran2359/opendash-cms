@@ -44,7 +44,9 @@ def wait_for_health(base: str, process: subprocess.Popen) -> None:
 
 
 def launch_server(binary: pathlib.Path, root: pathlib.Path) -> tuple[subprocess.Popen, str]:
+    root = root.resolve()
     port = free_port()
+    assert port != 18964, "Reserved review port"
     base = f"http://127.0.0.1:{port}"
     env = os.environ.copy()
     env["OPENDASH_SITE_ROOT"] = str(root)
@@ -86,9 +88,51 @@ def api_json(ctx, method: str, base: str, path: str, data=None, csrf=None, extra
     return response.json()
 
 
-def admin_login(ctx, base: str, username: str, password: str) -> str:
+def set_cms_locale(ctx, base: str, csrf: str, locale: str) -> bool:
+    """Explicit locale fixture for a disposable site; preserves content locale."""
+    assert re.fullmatch(r"http://127\.0\.0\.1:\d+", base) and not base.endswith(":18964"), base
+    bootstrap = api_json(ctx, "GET", base, "/api/i18n/admin")
+    if bootstrap["configured_locale"] == locale:
+        assert bootstrap["effective_locale"] == locale
+        return False
+    endpoint = "/api/admin/settings/general"
+    current = ctx.request.get(base + endpoint)
+    assert current.status == 200, current.text()
+    data = {k: current.json()[k] for k in ("site_title", "tagline", "timezone")}
+    data["cms_locale"] = locale
+    saved = api_json(ctx, "PUT", base, endpoint, data, csrf,
+                     {"If-Match": current.headers["etag"]})
+    assert saved["cms_locale"] == locale
+    actual = api_json(ctx, "GET", base, "/api/i18n/admin")
+    assert actual["configured_locale"] == actual["effective_locale"] == locale
+    return True
+
+
+def admin_login(ctx, base: str, username: str, password: str, *, cms_locale: str | None = None) -> str:
     body = api_json(ctx, "POST", base, "/auth/login", {"username": username, "password": password})
+    if cms_locale is not None:
+        assert body["user"]["role"] == "admin"
+        set_cms_locale(ctx, base, body["csrf_token"], cms_locale)
     return body["csrf_token"]
+
+
+def login_legacy_vi(page, base: str, *, historical: bool = False) -> None:
+    """Initial UI login, then explicitly select the legacy Vietnamese labels.
+
+    Do not call during same-account draft recovery. A historical binary in a
+    cross-version test may predate the bootstrap endpoint entirely.
+    """
+    with page.expect_response(lambda r: r.url == base + "/auth/login" and r.request.method == "POST") as login:
+        page.locator("#auth-login").click()
+    response = login.value
+    assert response.status == 200, response.text()
+    body = response.json()
+    assert body["user"]["role"] == "admin"
+    expect(page.locator("#auth-login")).not_to_be_visible()
+    if historical and page.request.get(base + "/api/i18n/admin").status == 404:
+        return
+    if set_cms_locale(page, base, body["csrf_token"], "vi"):
+        page.reload(wait_until="domcontentloaded")
 
 
 def create_ui_entry(page, ctx, base: str, kind: str, title: str, slug: str) -> int:
@@ -149,7 +193,7 @@ def run(binary: pathlib.Path, artifact_dir: pathlib.Path) -> int:
 
                 api_json(context, "POST", base, "/auth/setup",
                          {"username": "admin", "password": "G5-Test-Admin-123456"}, expected=201)
-                csrf = admin_login(context, base, "admin", "G5-Test-Admin-123456")
+                csrf = admin_login(context, base, "admin", "G5-Test-Admin-123456", cms_locale="vi")
                 # Empty picker uses no phantom options, even though Menu editor exists.
                 create_ui_menu(page, base)
                 page.get_by_role("button", name="+ Thêm mục").click()

@@ -111,7 +111,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     assert anon.request.get(base + "/api/admin/patterns/library").status == 401
                     api_json(ctx, "POST", base, "/auth/setup",
                              {"username": "s03_admin", "password": "AdminPassword123!"}, expected=201)
-                    csrf = admin_login(ctx, base, "s03_admin", "AdminPassword123!")
+                    csrf = admin_login(ctx, base, "s03_admin", "AdminPassword123!", cms_locale="vi")
                     library = "/api/admin/patterns/library"
                     no_theme = api_json(ctx, "GET", base, library)
                     assert no_theme["items"] == [], no_theme

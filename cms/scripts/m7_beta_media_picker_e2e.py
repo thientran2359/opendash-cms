@@ -125,7 +125,7 @@ def run(binary: pathlib.Path, artifact_dir: pathlib.Path):
                 api_json(ctx, "POST", base, "/auth/setup", {
                     "username": "admin", "password": "F05-Local-Only-Admin-123456",
                 }, expected=201)
-                csrf = admin_login(ctx, base, "admin", "F05-Local-Only-Admin-123456")
+                csrf = admin_login(ctx, base, "admin", "F05-Local-Only-Admin-123456", cms_locale="vi")
                 img_a = upload(ctx, base, csrf, "f05-a.png", (255, 0, 0))
                 img_b = upload(ctx, base, csrf, "f05-b.png", (0, 50, 255))
                 checks.append("admin_uploaded_two_authorized_images")

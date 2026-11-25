@@ -349,6 +349,7 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
                 "site_title": "Mộc Studio — Thiết kế không gian sống",
                 "tagline": "Kiến trúc bản địa, vật liệu tự nhiên và ánh sáng bền vững.",
                 "timezone": "Asia/Ho_Chi_Minh",
+                "cms_locale": "vi",
             },
             {**admin, "If-Match": gen_hdrs["etag"]},
         ),

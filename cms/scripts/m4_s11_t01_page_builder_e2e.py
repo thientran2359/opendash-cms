@@ -83,7 +83,7 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     page.on("pageerror", lambda e: js_errors.append(str(e)))
                     api_json(admin, "POST", base, "/auth/setup",
                              {"username":"site_admin","password":"AdminPassword123!"},expected=201)
-                    csrf = admin_login(admin, base, "site_admin", "AdminPassword123!")
+                    csrf = admin_login(admin, base, "site_admin", "AdminPassword123!", cms_locale="vi")
                     # Existing site header and footer must be composed once;
                     # Page-specific Save cannot mutate shared ASTs or site
                     # Reading Settings (the supported homepage configuration).

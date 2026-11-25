@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 from windows_smoke import running
 
 
@@ -47,8 +48,8 @@ def verify(binary: Path, browser_path: str | None):
             page.locator("#auth-username").fill("dashboardadmin")
             page.locator("#auth-password").fill("dashboard-password-1")
             page.locator("#auth-setup").click()
-            expect(page.locator("#status")).to_contain_text("Đã tạo")
-            page.locator("#auth-login").click()
+            expect(page.locator("#status")).to_contain_text("Administrator created")
+            login_legacy_vi(page, base)
             expect(page.get_by_role("heading", name="Thống kê nội dung")).to_be_visible()
             expect(page.locator('[data-dashboard-metric="post-draft"]')).to_contain_text("Đang tải")
             for key in ("post-draft", "post-published", "page-draft", "page-published"):

@@ -24,6 +24,7 @@ from tempfile import TemporaryDirectory
 from urllib.parse import urlencode
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 from builder_editor_browser import save as ui_save, state as browser_state
 from builder_homepage_smoke import (
@@ -86,7 +87,7 @@ def browser_login(page, base: str) -> None:
     page.goto(base + "/admin/#/builder")
     page.locator("#auth-username").fill("integrationadmin")
     page.locator("#auth-password").fill("password123")
-    page.locator("#auth-login").click()
+    login_legacy_vi(page, base)
     expect(page.locator('[data-testid="builder-workspace"]')).to_contain_text("Đã mở", timeout=10000)
 
 

@@ -16,6 +16,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 TABLES = [
     "content_types", "content_entries", "taxonomy_terms", "entry_terms",
@@ -107,7 +108,7 @@ def verify(pre_binary: Path, new_binary: Path, chrome: str, scripts: Path) -> No
             page.goto(base + "/admin/#/builder")
             page.locator("#auth-username").fill("g5admin")
             page.locator("#auth-password").fill("password123")
-            page.locator("#auth-login").click()
+            login_legacy_vi(page, base, historical=True)
             expect(page.locator('[data-testid="builder-workspace"]')).to_contain_text("Đã mở")
             page.locator('[role="treeitem"][data-node-id="element-bound"]').click()
             expect(page.get_by_label("Binding content type").locator('option[value="projects"]')).to_have_count(1)
@@ -152,7 +153,7 @@ def verify(pre_binary: Path, new_binary: Path, chrome: str, scripts: Path) -> No
             page.goto(base + "/admin/#/builder")
             page.locator("#auth-username").fill("g5admin")
             page.locator("#auth-password").fill("password123")
-            page.locator("#auth-login").click()
+            login_legacy_vi(page, base, historical=True)
             expect(page.locator('[data-testid="builder-workspace"]')).to_contain_text("Đã mở")
             page.locator('[role="treeitem"][data-node-id="element-bound"]').click()
             expect(page.get_by_text("Field Binding hiện có")).to_be_visible()

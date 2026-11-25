@@ -49,8 +49,9 @@ def sha256(path: pathlib.Path) -> str:
 
 
 def assert_disjoint(first: dict[str, float], second: dict[str, float], width: int) -> None:
-    for rect in (first, second):
-        assert rect["width"] >= 40 and rect["height"] >= 36, rect
+    for rect, min_height in ((first, 36), (second, 32)):
+        # Unified upload and secondary reload retain their respective CSS sizes.
+        assert rect["width"] >= 40 and rect["height"] >= min_height, rect
         assert rect["x"] >= -1 and rect["x"] + rect["width"] <= width + 1, (width, rect)
     overlap_x = min(first["x"] + first["width"], second["x"] + second["width"]) - max(first["x"], second["x"])
     overlap_y = min(first["y"] + first["height"], second["y"] + second["height"]) - max(first["y"], second["y"])
@@ -75,30 +76,26 @@ def file_chooser_upload(page: Any, button: Any, file: pathlib.Path, key: str | N
 def verify_layout(page: Any, artifacts: pathlib.Path, widths: tuple[int, ...], checks: list[str]) -> None:
     for width in widths:
         page.set_viewport_size({"width": width, "height": 900})
-        page.locator(".od-media-upload-actions").first.wait_for(timeout=15000)
-        buttons = page.locator(".od-media-upload")
-        assert buttons.count() == 2, "Image and video controls not independent"
-        first, second = (buttons.nth(i) for i in range(2))
-        expect(first).to_be_visible()
-        expect(second).to_be_visible()
-        first.scroll_into_view_if_needed()
+        upload = page.get_by_role("button", name="+ Tải tệp lên", exact=True)
+        reload = page.get_by_role("button", name="Tải lại", exact=True)
+        expect(upload).to_be_visible()
+        expect(reload).to_be_visible()
+        upload.scroll_into_view_if_needed()
         page.screenshot(path=str(artifacts / f"upload-{width}.png"), full_page=True)
-        a = first.bounding_box()
-        b = second.bounding_box()
+        a, b = upload.bounding_box(), reload.bounding_box()
         assert a is not None and b is not None, f"{width}: invisible button"
         assert_disjoint(a, b, width)
-        assert first.get_attribute("type") == second.get_attribute("type") == "button"
-        assert first.is_enabled() and second.is_enabled()
-        # Both controls must open a native picker via pointer and keyboard at
-        # each breakpoint, not merely occupy separate DOM rectangles.
-        with page.expect_file_chooser(timeout=12000) as image_chooser:
-            first.click()
-        image_chooser.value.set_files([])
-        second.focus()
-        assert second.evaluate("(node) => node === document.activeElement")
-        with page.expect_file_chooser(timeout=12000) as video_chooser:
+        assert upload.get_attribute("type") == reload.get_attribute("type") == "button"
+        assert upload.is_enabled() and reload.is_enabled()
+        # The current unified picker must work with pointer AND keyboard.
+        with page.expect_file_chooser(timeout=12000) as chooser:
+            upload.click()
+        chooser.value.set_files([])
+        upload.focus()
+        assert upload.evaluate("(node) => node === document.activeElement")
+        with page.expect_file_chooser(timeout=12000) as chooser:
             page.keyboard.press("Space")
-        video_chooser.value.set_files([])
+        chooser.value.set_files([])
         checks.append(f"nonoverlap_pointer_and_keyboard_{width}px")
 
 
@@ -138,55 +135,47 @@ def perform(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) ->
                     api_json(ctx, "POST", base, "/auth/setup", {
                         "username": "media_agent", "password": "Local-Media-Private-12345!",
                     }, expected=201)
-                    csrf = admin_login(ctx, base, "media_agent", "Local-Media-Private-12345!")
+                    csrf = admin_login(ctx, base, "media_agent", "Local-Media-Private-12345!", cms_locale="vi")
                     page.goto(base + "/admin/#/media", wait_until="domcontentloaded")
                     expect(page.locator("#od-media-title")).to_be_visible(timeout=25000)
                     expect(page.get_by_role("button", name="Tải lại")).to_be_enabled(timeout=15000)
 
-                    # The baseline has both labels stacked on grid-row:1/grid-column:1.
-                    # Capture first; a missing wrapper is a clear baseline FAIL too.
+                    # Unified media upload replaces the old separate controls.
                     page.screenshot(path=str(artifacts / "baseline-or-new-desktop.png"), full_page=True)
-                    controls = page.locator(".od-media-upload")
-                    assert controls.count() == 2
-                    a, b = controls.nth(0).bounding_box(), controls.nth(1).bounding_box()
-                    assert a is not None and b is not None
-                    assert_disjoint(a, b, 1440)
-                    checks.append("baseline_overlap_absent")
-
                     verify_layout(page, artifacts, (1440, 768, 390), checks)
                     page.set_viewport_size({"width": 1440, "height": 900})
-                    image_button = page.get_by_role("button", name="+ Tải ảnh lên", exact=True)
-                    video_button = page.get_by_role("button", name="+ Tải video MP4", exact=True)
-                    assert image_button.count() == video_button.count() == 1
-                    assert page.locator("#od-media-files").get_attribute("accept") == "image/jpeg,image/png,image/webp"
-                    assert page.locator("#od-media-video-file").get_attribute("accept") == "video/mp4,.mp4"
-                    checks.append("distinct_button_names_and_file_accept")
+                    upload = page.get_by_role("button", name="+ Tải tệp lên", exact=True)
+                    expect(upload).to_have_count(1)
+                    file_input = page.locator("#od-media-files")
+                    assert file_input.get_attribute("accept") == "image/jpeg,image/png,image/webp,video/mp4,.jpg,.jpeg,.png,.webp,.mp4"
+                    assert file_input.get_attribute("multiple") is not None
+                    checks.append("unified_upload_accepts_images_video_and_multiple_files")
 
-                    file_chooser_upload(page, image_button, images[0])
-                    expect(page.get_by_role("status").filter(has_text="Đã tải thành công 1 ảnh")).to_be_visible(timeout=25000)
+                    file_chooser_upload(page, upload, images[0])
+                    expect(page.get_by_role("status").filter(has_text="Đã tải thành công 1 tệp")).to_be_visible(timeout=25000)
                     checks.append("image_png_pointer_upload")
-                    file_chooser_upload(page, image_button, images[1], key="Enter")
+                    file_chooser_upload(page, upload, images[1], key="Enter")
                     expect(page.locator(".od-media-card")).to_have_count(2, timeout=25000)
                     checks.append("image_jpeg_keyboard_enter")
-                    file_chooser_upload(page, image_button, images[2], key="Space")
+                    file_chooser_upload(page, upload, images[2], key="Space")
                     expect(page.locator(".od-media-card")).to_have_count(3, timeout=25000)
                     checks.append("image_webp_keyboard_space")
 
                     # Cancel file chooser without losing existing items, then
                     # reselect exactly the same file after input value was reset.
                     with page.expect_file_chooser() as chooser_info:
-                        image_button.click()
+                        upload.click()
                     chooser_info.value.set_files([])
                     expect(page.locator(".od-media-card")).to_have_count(3)
-                    file_chooser_upload(page, image_button, images[2])
-                    expect(page.get_by_role("status").filter(has_text="Đã tải thành công 1 ảnh")).to_be_visible(timeout=25000)
+                    file_chooser_upload(page, upload, images[2])
+                    expect(page.get_by_role("status").filter(has_text="Đã tải thành công 1 tệp")).to_be_visible(timeout=25000)
                     checks.append("file_chooser_cancel_same_file_reselect")
 
-                    file_chooser_upload(page, video_button, fixture, key="Enter")
-                    expect(page.get_by_role("status").filter(has_text="Đã tải thành công video")).to_be_visible(timeout=30000)
+                    file_chooser_upload(page, upload, fixture, key="Enter")
+                    expect(page.get_by_role("status").filter(has_text="Đã tải thành công 1 tệp")).to_be_visible(timeout=30000)
                     page.get_by_role("button", name="Video", exact=True).click()
                     expect(page.locator(".od-media-video-placeholder")).to_have_count(1, timeout=15000)
-                    checks.append("mp4_separate_keyboard_upload")
+                    checks.append("mp4_unified_keyboard_upload")
                     page.get_by_role("button", name="Tất cả", exact=True).click()
                     expect(page.locator(".od-media-card")).to_have_count(4, timeout=15000)
                     page.screenshot(path=str(artifacts / "both-kinds-persisted.png"), full_page=True)

@@ -13,6 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 
 from content_types_smoke import running
 
@@ -32,8 +33,8 @@ def verify(binary: Path, chromium: str | None):
             page.locator("#auth-username").fill("taxonomyadmin")
             page.locator("#auth-password").fill("taxonomy-password-123")
             page.locator("#auth-setup").click()
-            expect(page.locator("#status")).to_contain_text("Đã tạo")
-            page.locator("#auth-login").click()
+            expect(page.locator("#status")).to_contain_text("Administrator created")
+            login_legacy_vi(page, base)
             expect(page.get_by_role("heading", name="Danh mục và thẻ")).to_be_visible()
 
             def no_overflow():

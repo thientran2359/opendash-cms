@@ -47,7 +47,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     ctx = browser.new_context(viewport={'width': 1280, 'height': 800})
                     api(ctx, base, 'POST', '/auth/setup', 201,
                         {'username': 'c2_t02_admin', 'password': 'Isolated-Only-C2-T02-Pass!2026'})
-                    csrf = admin_login(ctx, base, 'c2_t02_admin', 'Isolated-Only-C2-T02-Pass!2026')
+                    csrf = admin_login(ctx, base, 'c2_t02_admin', 'Isolated-Only-C2-T02-Pass!2026', cms_locale="vi")
                     initial_site_id = api(ctx, base, 'GET', '/auth/me')['site_instance_id']
                     check(initial_site_id and initial_site_id != 'default-site',
                           'site instance ID is available for scoped draft recovery')

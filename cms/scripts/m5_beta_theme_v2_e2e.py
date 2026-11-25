@@ -56,8 +56,8 @@ def theme_zip(theme_id: str, version: str, *, sample: bool = False) -> bytes:
     memory = io.BytesIO()
     with ZipFile(memory, "w", ZIP_DEFLATED) as archive:
         add_zip_file(archive,"theme.json",json.dumps(manifest,ensure_ascii=False,sort_keys=True))
-        for file in sorted((demo / "templates").glob("*.html")):
-            add_zip_file(archive,"templates/"+file.name,file.read_bytes())
+        for file in sorted(demo.glob("*.html")):
+            add_zip_file(archive,file.name,file.read_bytes())
         add_zip_file(archive,"assets/style.css",(demo / "assets/style.css").read_bytes())
     return memory.getvalue()
 
@@ -101,7 +101,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> int:
                 browser_version = browser.version
                 ctx = browser.new_context(viewport={"width": 1440, "height": 900})
                 api_json(ctx, "POST", base, "/auth/setup", {"username": "admin", "password": "F02-AdminPassword123!"}, expected=201)
-                csrf = admin_login(ctx, base, "admin", "F02-AdminPassword123!")
+                csrf = admin_login(ctx, base, "admin", "F02-AdminPassword123!", cms_locale="vi")
                 page = ctx.new_page()
                 page.on("pageerror", lambda e: errors.append(str(e)))
                 page.goto(base + "/admin#/appearance/themes", wait_until="domcontentloaded")

@@ -7,6 +7,7 @@ import sqlite3
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from m7_beta_menu_picker_e2e import login_legacy_vi
 from windows_smoke import running, sample_theme
 
 
@@ -20,7 +21,7 @@ def verify(binary: Path, browser_path: str | None):
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(base + "/admin/")
-            expect(page.locator("#status")).to_contain_text("Vui lòng đăng nhập")
+            expect(page.locator("#status")).to_contain_text("Please sign in")
             password = secrets.token_hex(14)
 
             def fill_credentials():
@@ -29,8 +30,8 @@ def verify(binary: Path, browser_path: str | None):
 
             fill_credentials()
             page.locator("#auth-setup").click()
-            expect(page.locator("#status")).to_contain_text("Đã tạo")
-            page.locator("#auth-login").click()
+            expect(page.locator("#status")).to_contain_text("Administrator created")
+            login_legacy_vi(page, base)
             expect(page.locator("#user-info")).to_contain_text("qaadmin")
             # Dashboard replaced the legacy Settings/health status widget. Assert
             # the actual Dashboard heading/counts and check health via API.

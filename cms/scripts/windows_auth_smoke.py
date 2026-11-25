@@ -17,40 +17,18 @@ from threading import Barrier, Thread
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from zipfile import ZIP_DEFLATED, ZipFile
+from windows_smoke import running
 
 
-def sample_theme(descriptor="block.json"):
+def sample_theme():
+    """Package the checked-in v3 theme for current installation endpoints."""
+    root = Path(__file__).resolve().parents[1] / "fixtures/demo-website/theme-moc-studio"
     archive = io.BytesIO()
     with ZipFile(archive, "w", ZIP_DEFLATED) as theme:
-        theme.writestr(
-            descriptor,
-            json.dumps({
-                "id": "sample/banner",
-                "fields": {"title": "Tiêu đề", "note": "Mô tả"},
-            }),
-        )
-        theme.writestr(
-            "block.html",
-            "<article><h2>{{ values.title }}</h2><p>{{ values.note }}</p></article>",
-        )
+        for file in sorted(root.rglob("*")):
+            if file.is_file():
+                theme.write(file, file.relative_to(root).as_posix())
     return archive.getvalue()
-
-
-@contextmanager
-def running(binary, database):
-    env = dict(os.environ, OPENDASH_PORT="0", OPENDASH_SITE_ROOT=str(database.parent), OPENDASH_DB_PATH=str(database))
-    with subprocess.Popen(
-        [str(binary)], env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8"
-    ) as process:
-        output = Queue()
-        Thread(target=lambda: output.put(process.stdout.readline()), daemon=True).start()
-        try:
-            line = output.get(timeout=20).strip()
-            assert line.startswith("OpenDash: http://127.0.0.1:") and line.endswith("/builder"), line
-            base = line.removeprefix("OpenDash: ").removesuffix("/builder")
-            yield base
-        finally:
-            process.terminate()
 
 
 def request(base, path, data=None, content_type=None, headers=None, method=None, timeout=5):
@@ -150,10 +128,14 @@ def test_origin_validation(binary):
             assert request(base, "/auth/setup", admin_input, "application/json", headers={"Origin": base})[0] == 201
 
 
-def test_auth_and_rbac(binary):
+def test_auth_and_rbac(binary, baseline_db):
     print("Testing auth, validations, RBAC, CSRF, expiry, and logout...")
     with TemporaryDirectory(prefix="opendash-auth-") as folder:
         database = Path(folder) / "cms.sqlite"
+        # Legacy preview/save remain supported for migrated legacy blocks.
+        # Seed from the immutable pre-M1.1 fixture, never from a live site.
+        with closing(sqlite3.connect(baseline_db.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)) as src, closing(sqlite3.connect(database)) as dst:
+            src.backup(dst)
         with running(binary, database) as base:
             # 1. Validation errors on setup
             assert request(base, "/auth/setup", b'{"username":"a","password":"password123"}', "application/json")[0] == 400
@@ -168,7 +150,7 @@ def test_auth_and_rbac(binary):
             wrong_creds = json.dumps({"username": "admin", "password": "wrongpassword"}).encode()
             status, body, _ = request(base, "/auth/login", wrong_creds, "application/json")
             assert status == 401
-            assert "Tên đăng nhập hoặc mật khẩu không chính xác." in body
+            assert "Incorrect username or password." in body
 
             # 4. Login correct
             status, body, cookie_hdr = request(base, "/auth/login", admin_creds, "application/json")
@@ -200,12 +182,12 @@ def test_auth_and_rbac(binary):
             auth_null_origin = {"Cookie": admin_cookie, "X-CSRF-Token": admin_csrf, "Origin": "null"}
             auth_good = {"Cookie": admin_cookie, "X-CSRF-Token": admin_csrf}
 
-            assert request(base, "/theme", theme_bytes, "application/zip", headers=auth_no_csrf)[0] == 403
-            assert request(base, "/theme", theme_bytes, "application/zip", headers=auth_bad_csrf)[0] == 403
-            assert request(base, "/theme", theme_bytes, "application/zip", headers=auth_alien_origin)[0] == 403
-            assert request(base, "/theme", theme_bytes, "application/zip", headers=auth_https_origin)[0] == 403
-            assert request(base, "/theme", theme_bytes, "application/zip", headers=auth_null_origin)[0] == 403
-            assert request(base, "/theme", theme_bytes, "application/zip", headers=auth_good)[0] == 201
+            assert request(base, "/api/admin/themes", theme_bytes, "application/zip", headers=auth_no_csrf)[0] == 403
+            assert request(base, "/api/admin/themes", theme_bytes, "application/zip", headers=auth_bad_csrf)[0] == 403
+            assert request(base, "/api/admin/themes", theme_bytes, "application/zip", headers=auth_alien_origin)[0] == 403
+            assert request(base, "/api/admin/themes", theme_bytes, "application/zip", headers=auth_https_origin)[0] == 403
+            assert request(base, "/api/admin/themes", theme_bytes, "application/zip", headers=auth_null_origin)[0] == 403
+            assert request(base, "/api/admin/themes", theme_bytes, "application/zip", headers=auth_good)[0] == 201
 
             # 7. Admin creates Editor
             editor_input = json.dumps({"username": "editor1", "password": "editorpassword"}).encode()
@@ -235,10 +217,21 @@ def test_auth_and_rbac(binary):
             block_data = json.dumps({"type": "sample/banner", "values": {"title": "Tác phẩm Editor", "note": "Ghi chú"}}).encode()
             assert request(base, "/preview", block_data, "application/json", headers=editor_auth)[0] == 200
             assert request(base, "/save", block_data, "application/json", headers=editor_auth)[0] == 200
-            assert "Tác phẩm Editor" in request(base, "/")[1]
+            assert json.loads(request(base, "/page", headers=editor_read)[1]) == json.loads(block_data)
+            # The v3 public home is independent of legacy Builder data. Exercise
+            # Editor publication on the actual public content route as well.
+            assert "Tác phẩm Editor" not in request(base, "/")[1]
+            status, body, _ = request(base, "/api/admin/content-types/post/entries", json.dumps({"title": "Editor public post", "slug": "editor-public-post", "locale": "vi", "values": {}}).encode(), "application/json", headers=editor_auth)
+            assert status == 201, body
+            entry = json.loads(body)
+            assert request(base, "/editor-public-post")[0] == 404
+            status, body, _ = request(base, f"/api/admin/content-types/post/entries/{entry['id']}/publication", b'{"status":"published"}', "application/json", headers={**editor_auth, "If-Match": f'"v{entry["version"]}"'})
+            assert status == 200, body
+            status, body, _ = request(base, "/editor-public-post")
+            assert status == 200 and "Editor public post" in body, body
 
             # Editor CANNOT install theme -> 403
-            assert request(base, "/theme", theme_bytes, "application/zip", headers=editor_auth)[0] == 403
+            assert request(base, "/api/admin/themes", theme_bytes, "application/zip", headers=editor_auth)[0] == 403
             # Editor CANNOT create users -> 403
             new_ed = json.dumps({"username": "editor2", "password": "editorpassword"}).encode()
             assert request(base, "/api/admin/users", new_ed, "application/json", headers=editor_auth)[0] == 403
@@ -296,10 +289,10 @@ def test_database_upgrade(binary, baseline_db_path: Path):
         src.close()
 
         with running(binary, test_db) as base:
-            # 1. Public page still renders Baseline Title from pre-M1.1 database
+            # 1. V3 public home stays unconfigured; legacy data is not implicitly published.
             pub_status, pub_html, _ = request(base, "/")
             assert pub_status == 200
-            assert "Baseline Title" in pub_html, f"Expected 'Baseline Title' in public HTML, got: {pub_html}"
+            assert "Baseline Title" not in pub_html and "noindex,nofollow" in pub_html, pub_html
 
             # 2. Admin endpoints protected on upgraded DB
             assert request(base, "/registry")[0] == 401
@@ -329,12 +322,14 @@ def test_database_upgrade(binary, baseline_db_path: Path):
                 "values": {"title": "Upgraded Title", "note": "Upgraded Note"},
             }).encode()
             assert request(base, "/save", new_block, "application/json", headers=auth_headers)[0] == 200
-            assert "Upgraded Title" in request(base, "/")[1]
+            assert json.loads(request(base, "/page", headers=read_headers)[1])["values"]["title"] == "Upgraded Title"
+            assert "Upgraded Title" not in request(base, "/")[1]
 
         # 7. Restart and verify persistence on upgraded DB
         with running(binary, test_db) as base:
             assert request(base, "/page", headers=read_headers)[0] == 200
-            assert "Upgraded Title" in request(base, "/")[1]
+            assert json.loads(request(base, "/page", headers=read_headers)[1])["values"]["title"] == "Upgraded Title"
+            assert "Upgraded Title" not in request(base, "/")[1]
 
 
 def json_request(base, path, payload=None, headers=None, method=None, timeout=5):
@@ -681,7 +676,7 @@ def verify_all(binary, baseline_db: Path, baseline_binary: Path | None = None):
     test_concurrent_setup(binary)
     test_argon2_burst_and_public_responsiveness(binary)
     test_origin_validation(binary)
-    test_auth_and_rbac(binary)
+    test_auth_and_rbac(binary, baseline_db)
     test_database_upgrade(binary, baseline_db)
     test_user_management(binary)
     test_user_mutation_races(binary)

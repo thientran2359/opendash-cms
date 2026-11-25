@@ -21,6 +21,7 @@ from tempfile import TemporaryDirectory
 from playwright.sync_api import expect, sync_playwright
 
 from media_smoke import make_png
+from m7_beta_menu_picker_e2e import login_legacy_vi
 from windows_distribution_smoke import assert_migrations, release_migration_versions
 from windows_smoke import running, sample_theme
 
@@ -59,12 +60,15 @@ def browser_flow(binary: Path, chrome: str | None, folder: Path) -> None:
             api_ok(admin_context.request.get(base + "/api/admin/dashboard"), 401, "guest Dashboard")
             api_ok(admin_context.request.get(base + "/api/admin/users"), 401, "guest Users")
             page.goto(base + "/admin/#/dashboard")
-            expect(page.get_by_role("heading", name="Đăng nhập quản trị")).to_be_visible()
+            bootstrap = admin_context.request.get(base + "/api/i18n/admin")
+            assert bootstrap.status in (200, 404), bootstrap.text()
+            current = bootstrap.status == 200
+            expect(page.get_by_role("heading", name="Admin sign in" if current else "Đăng nhập quản trị")).to_be_visible()
             page.locator("#auth-username").fill("m3releaseadmin")
             page.locator("#auth-password").fill(password)
             page.locator("#auth-setup").click()
-            expect(page.locator("#status")).to_contain_text("Đã tạo")
-            page.locator("#auth-login").click()
+            expect(page.locator("#status")).to_contain_text("Administrator created" if current else "Đã tạo")
+            login_legacy_vi(page, base, historical=True)
             expect(page.get_by_role("heading", name="Thống kê nội dung")).to_be_visible()
             for metric in ("post-draft", "post-published", "page-draft", "page-published"):
                 expect(page.locator(f'[data-dashboard-metric="{metric}"]')).to_contain_text("0")
