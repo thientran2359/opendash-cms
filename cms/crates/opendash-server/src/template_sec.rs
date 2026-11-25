@@ -15,6 +15,9 @@ use minijinja::{
 };
 
 pub const MAX_RENDERED_HTML_BYTES: usize = 512 * 1024;
+/// Mirrors `document::MAX_PUBLIC_DOCUMENT_BYTES` without coupling `template_sec.rs`
+/// to `crate::document` (some integration tests include `template_sec.rs` standalone).
+pub const MAX_ICON_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 pub const ICON_NONCE_PREFIX: &str = "OD_ICON_";
 pub const MAX_ICONS_PER_REQUEST: usize = 128;
 pub const TEMPLATE_FUEL_LIMIT: u64 = 10_000;
@@ -400,12 +403,12 @@ impl IconNonceTable {
             out.push_str(before);
             out.push_str(svg);
             cursor = offset + nonce.len();
-            if out.len() > 4 * 1024 * 1024 {
+            if out.len() > MAX_ICON_DOCUMENT_BYTES {
                 return Err("Document chứa icon vượt giới hạn HTML.");
             }
         }
         out.push_str(&html[cursor..]);
-        if out.len() > 4 * 1024 * 1024 {
+        if out.len() > MAX_ICON_DOCUMENT_BYTES {
             return Err("Document chứa icon vượt giới hạn HTML.");
         }
         Ok(out)
@@ -1607,13 +1610,14 @@ pub fn validate_template_csec_with_theme_urls(
     source: &str,
     policy: &ThemeUrlPolicy,
 ) -> Result<(), &'static str> {
-    validate_template_csec_with_usage_flags(name, source, policy).map(|_| ())
+    validate_template_csec_with_usage_flags(name, source, policy, false).map(|_| ())
 }
 
 fn validate_template_csec_with_usage_flags(
     name: &str,
     source: &str,
     policy: &ThemeUrlPolicy,
+    allow_od_icon: bool,
 ) -> Result<ThemeTemplateUsageFlags, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
@@ -1624,7 +1628,7 @@ fn validate_template_csec_with_usage_flags(
     let ast = parse(source, name, SyntaxConfig::default())
         .map_err(|_| "Cú pháp template MiniJinja không hợp lệ.")?;
 
-    validate_stmt_with_icons(&ast, true, false)?;
+    validate_stmt_with_icons(&ast, allow_od_icon, false)?;
     reject_reserved_context_rebinding(&ast)?;
     let is_full_doctype_doc = source
         .trim_start()
@@ -1753,7 +1757,7 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
     }
     // This last check catches dangerous markup introduced across part boundaries,
     // in addition to the independent source checks before expansion.
-    let usage = validate_template_csec_with_usage_flags(root_name, &compiled_source, policy)?;
+    let usage = validate_template_csec_with_usage_flags(root_name, &compiled_source, policy, true)?;
     Ok(CompiledCsecComposition {
         source: compiled_source,
         name: root_name.to_owned(),
