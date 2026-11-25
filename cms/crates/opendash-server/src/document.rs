@@ -11,6 +11,7 @@ pub struct SafeDocumentParts {
     pub body_attributes: Vec<(String, String)>,
     pub body_fragment: String,
     pub authorized_styles: Vec<String>,
+    pub authorized_head_scripts: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,9 +44,15 @@ enum TokenKind<'a> {
         name_lower: &'a str,
     },
     StyleBlock(&'a str),
+    ScriptBlock(&'a str),
 }
 
-fn is_forbidden_tag(name_lower: &str) -> bool {
+fn is_forbidden_tag(name_lower: &str, allow_trusted_theme_markup: bool) -> bool {
+    if allow_trusted_theme_markup
+        && matches!(name_lower, "script" | "svg" | "math" | "foreignobject")
+    {
+        return false;
+    }
     matches!(
         name_lower,
         "script"
@@ -69,6 +76,7 @@ fn is_forbidden_tag(name_lower: &str) -> bool {
 
 fn parse_attributes(
     attrs_raw: &str,
+    allow_trusted_theme_markup: bool,
 ) -> Result<Vec<(String, String)>, DocumentNormalizationDiagnostic> {
     let bytes = attrs_raw.as_bytes();
     let mut i = 0;
@@ -93,7 +101,7 @@ fn parse_attributes(
             i += 1;
             continue;
         }
-        if name.starts_with("on") {
+        if name.starts_with("on") && !allow_trusted_theme_markup {
             return Err(DocumentNormalizationDiagnostic::new(
                 "forbidden_event_handler",
                 format!("Thuộc tính sự kiện `{name}` không được phép."),
@@ -250,6 +258,42 @@ fn find_case_insensitive_end_style(
     Ok(None)
 }
 
+// HTML script data is raw text: operators such as `a < b`, HTML-like strings,
+// and quotes inside JavaScript must not be parsed as ordinary HTML tokens.
+// A matching end tag begins with `</script` (ASCII case insensitive), followed
+// by an HTML5 tag-name delimiter. Reject malformed closing tags rather than
+// accidentally emitting a second executable script from the remaining bytes.
+fn find_case_insensitive_end_script(
+    raw: &str,
+    start: usize,
+) -> Result<Option<usize>, DocumentNormalizationDiagnostic> {
+    let bytes = raw.as_bytes();
+    let needle = b"</script";
+    let mut i = start;
+    while i + needle.len() < bytes.len() {
+        if bytes[i..i + needle.len()].eq_ignore_ascii_case(needle) {
+            let next = bytes[i + needle.len()];
+            if next == b'>' {
+                return Ok(Some(i + needle.len() + 1));
+            }
+            if next.is_ascii_whitespace() || next == b'/' {
+                let end = find_tag_end(raw, i + needle.len())?;
+                // A browser recognizes whitespace after the script end-tag name.
+                // Do not accept trailing attributes or a slash on closing tags.
+                if !raw[i + needle.len()..end].trim().is_empty() {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "malformed_tag",
+                        "Thẻ đóng </script> chứa ký tự không hợp lệ.",
+                    ));
+                }
+                return Ok(Some(end + 1));
+            }
+        }
+        i += 1;
+    }
+    Ok(None)
+}
+
 fn find_html5_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
     let after_open = start + 4;
     if bytes.get(after_open) == Some(&b'>') {
@@ -271,7 +315,10 @@ fn find_html5_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
     None
 }
 
-fn tokenize(raw: &str) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormalizationDiagnostic> {
+fn tokenize(
+    raw: &str,
+    allow_trusted_theme_markup: bool,
+) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormalizationDiagnostic> {
     if raw.len() > MAX_PUBLIC_DOCUMENT_BYTES {
         return Err(DocumentNormalizationDiagnostic::new(
             "document_too_large",
@@ -370,10 +417,16 @@ fn tokenize(raw: &str) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormaliza
                     ));
                 }
                 let name_lower = name_slice.to_ascii_lowercase();
-                if is_forbidden_tag(&name_lower) {
+                if is_forbidden_tag(&name_lower, allow_trusted_theme_markup) {
                     return Err(DocumentNormalizationDiagnostic::new(
                         "forbidden_tag",
                         format!("Thẻ `{name_lower}` không được phép."),
+                    ));
+                }
+                if name_lower == "script" {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "unexpected_close_script",
+                        "Thẻ </script> không có thẻ mở tương ứng.",
                     ));
                 }
                 out.push((TokenKind::CloseTag { name_lower: "" }, name_lower));
@@ -405,14 +458,35 @@ fn tokenize(raw: &str) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormaliza
                     ));
                 }
                 let name_lower = name_slice.to_ascii_lowercase();
-                if is_forbidden_tag(&name_lower) {
+                if is_forbidden_tag(&name_lower, allow_trusted_theme_markup) {
                     return Err(DocumentNormalizationDiagnostic::new(
                         "forbidden_tag",
                         format!("Thẻ `{name_lower}` không được phép."),
                     ));
                 }
                 let attrs_raw = &inner_clean[name_end..];
-                let attrs = parse_attributes(attrs_raw)?;
+                let attrs = parse_attributes(attrs_raw, allow_trusted_theme_markup)?;
+                if name_lower == "script" {
+                    if self_closing {
+                        return Err(DocumentNormalizationDiagnostic::new(
+                            "self_closing_script",
+                            "Thẻ <script/> tự đóng không được phép.",
+                        ));
+                    }
+                    let Some(after_close) = find_case_insensitive_end_script(raw, end + 1)? else {
+                        return Err(DocumentNormalizationDiagnostic::new(
+                            "unclosed_script",
+                            "Thẻ <script> chưa được đóng.",
+                        ));
+                    };
+                    let _ = attrs;
+                    out.push((
+                        TokenKind::ScriptBlock(&raw[i..after_close]),
+                        "script".to_string(),
+                    ));
+                    i = after_close;
+                    continue;
+                }
                 if name_lower == "style" && !self_closing {
                     let Some((style_end, after_close)) =
                         find_case_insensitive_end_style(raw, end + 1)?
@@ -452,7 +526,14 @@ fn tokenize(raw: &str) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormaliza
 pub fn normalize_public_document(
     raw_html: &str,
 ) -> Result<SafeDocumentParts, DocumentNormalizationDiagnostic> {
-    let tokens = tokenize(raw_html)?;
+    normalize_public_document_with_options(raw_html, false)
+}
+
+pub fn normalize_public_document_with_options(
+    raw_html: &str,
+    allow_trusted_theme_markup: bool,
+) -> Result<SafeDocumentParts, DocumentNormalizationDiagnostic> {
+    let tokens = tokenize(raw_html, allow_trusted_theme_markup)?;
 
     let has_envelope = tokens.iter().any(|(tok, name)| {
         matches!(tok, TokenKind::Doctype(_))
@@ -465,24 +546,38 @@ pub fn normalize_public_document(
 
     if !has_envelope {
         let mut authorized_styles = Vec::new();
+        let authorized_head_scripts = Vec::new();
         let mut body_fragment = String::with_capacity(raw_html.len());
+        let mut svg_depth = 0usize;
         for (tok, name) in tokens {
             match tok {
                 TokenKind::Text(t) | TokenKind::Comment(t) => body_fragment.push_str(t),
                 TokenKind::StyleBlock(s) => authorized_styles.push(s.to_string()),
-                TokenKind::OpenTag { raw, attrs_raw, .. } => {
+                TokenKind::ScriptBlock(s) => body_fragment.push_str(s),
+                TokenKind::OpenTag {
+                    raw,
+                    attrs_raw,
+                    self_closing,
+                    ..
+                } => {
                     if name == "link" {
-                        let attrs = parse_attributes(attrs_raw)?;
+                        let attrs = parse_attributes(attrs_raw, allow_trusted_theme_markup)?;
                         if is_authorized_stylesheet_link(&attrs) {
                             authorized_styles.push(raw.to_string());
                         }
-                    } else if name != "meta" && name != "title" {
+                    } else if name != "meta" && (name != "title" || svg_depth > 0) {
                         body_fragment.push_str(raw);
+                    }
+                    if name == "svg" && !self_closing {
+                        svg_depth += 1;
                     }
                 }
                 TokenKind::CloseTag { .. } => {
-                    if name != "title" {
+                    if name != "title" || svg_depth > 0 {
                         body_fragment.push_str(&format!("</{name}>"));
+                    }
+                    if name == "svg" {
+                        svg_depth = svg_depth.saturating_sub(1);
                     }
                 }
                 TokenKind::Doctype(_) => {}
@@ -494,6 +589,7 @@ pub fn normalize_public_document(
             body_attributes: Vec::new(),
             body_fragment,
             authorized_styles,
+            authorized_head_scripts,
         });
     }
 
@@ -516,7 +612,9 @@ pub fn normalize_public_document(
     let mut html_dir: Option<String> = None;
     let mut body_attributes = Vec::new();
     let mut authorized_styles = Vec::new();
+    let mut authorized_head_scripts = Vec::new();
     let mut body_fragment = String::new();
+    let mut svg_depth = 0usize;
 
     for (tok, name) in tokens {
         match tok {
@@ -559,6 +657,16 @@ pub fn normalize_public_document(
                     ));
                 }
             },
+            TokenKind::ScriptBlock(s) => match phase {
+                Phase::InHead => authorized_head_scripts.push(s.to_string()),
+                Phase::InBody => body_fragment.push_str(s),
+                _ => {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "script_outside_envelope",
+                        "Thẻ <script> nằm ngoài <head>/<body>.",
+                    ));
+                }
+            },
             TokenKind::OpenTag {
                 raw,
                 attrs_raw,
@@ -572,7 +680,7 @@ pub fn normalize_public_document(
                             "Thẻ <html> trùng lặp hoặc lồng nhau.",
                         ));
                     }
-                    let attrs = parse_attributes(attrs_raw)?;
+                    let attrs = parse_attributes(attrs_raw, allow_trusted_theme_markup)?;
                     for (k, v) in attrs {
                         if k == "lang" {
                             let trimmed = v.trim();
@@ -612,7 +720,7 @@ pub fn normalize_public_document(
                         ));
                     }
                     seen_body = true;
-                    let attrs = parse_attributes(attrs_raw)?;
+                    let attrs = parse_attributes(attrs_raw, allow_trusted_theme_markup)?;
                     for (k, v) in attrs {
                         if is_safe_body_attr(&k) {
                             body_attributes.push((k, v));
@@ -623,7 +731,7 @@ pub fn normalize_public_document(
                 _ => match phase {
                     Phase::InHead => {
                         if name == "link" {
-                            let attrs = parse_attributes(attrs_raw)?;
+                            let attrs = parse_attributes(attrs_raw, allow_trusted_theme_markup)?;
                             if is_authorized_stylesheet_link(&attrs) {
                                 authorized_styles.push(raw.to_string());
                             }
@@ -632,12 +740,15 @@ pub fn normalize_public_document(
                     }
                     Phase::InBody => {
                         if name == "link" {
-                            let attrs = parse_attributes(attrs_raw)?;
+                            let attrs = parse_attributes(attrs_raw, allow_trusted_theme_markup)?;
                             if is_authorized_stylesheet_link(&attrs) {
                                 authorized_styles.push(raw.to_string());
                             }
-                        } else if name != "meta" && name != "title" {
+                        } else if name != "meta" && (name != "title" || svg_depth > 0) {
                             body_fragment.push_str(raw);
+                        }
+                        if name == "svg" && !self_closing {
+                            svg_depth += 1;
                         }
                     }
                     _ => {
@@ -679,8 +790,11 @@ pub fn normalize_public_document(
                 _ => match phase {
                     Phase::InHead => {}
                     Phase::InBody => {
-                        if name != "title" {
+                        if name != "title" || svg_depth > 0 {
                             body_fragment.push_str(&format!("</{name}>"));
+                        }
+                        if name == "svg" {
+                            svg_depth = svg_depth.saturating_sub(1);
                         }
                     }
                     _ => {
@@ -707,12 +821,134 @@ pub fn normalize_public_document(
         body_attributes,
         body_fragment,
         authorized_styles,
+        authorized_head_scripts,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trusted_head_and_body_scripts_preserve_raw_text_and_split_authorization() {
+        let html = r#"<!doctype html><html><head>
+            <script type="module">const x = 1 < 2; const s = "<div>"; const t = "</scripture>";</ScRiPt >
+            <title>SEO owned by composer</title>
+            </head><body><main><script>if (a < b) { console.log("<span>"); }</SCRIPT></main></body></html>"#;
+        let parts = normalize_public_document_with_options(html, true).unwrap();
+        assert_eq!(parts.authorized_head_scripts.len(), 1);
+        assert!(parts.authorized_head_scripts[0].contains("1 < 2"));
+        assert!(parts.authorized_head_scripts[0].contains("</scripture>"));
+        assert!(parts.authorized_head_scripts[0].ends_with("</ScRiPt >"));
+        assert!(parts.body_fragment.contains("if (a < b)"));
+        assert!(parts.body_fragment.contains("console.log(\"<span>\")"));
+        assert!(!parts.body_fragment.contains("SEO owned by composer"));
+        assert!(!parts.body_fragment.contains("const x"));
+        assert!(parts.authorized_styles.is_empty());
+    }
+
+    #[test]
+    fn trusted_fragment_preserves_svg_titles_static_handlers_and_scripts() {
+        let html = r#"<svg xmlns="http://www.w3.org/2000/svg" onload="ready()"><title>Icon label</title>
+            <svg><title>Nested label</title></svg>
+            <foreignObject><div onclick="run()">content</div></foreignObject>
+            <path d="M0 0 L1 1" /></svg>
+            <script>const isLess = 1 < 2;</script><title>Discard this HTML title</title>"#;
+        let parts = normalize_public_document_with_options(html, true).unwrap();
+        assert_eq!(parts.authorized_head_scripts, Vec::<String>::new());
+        assert!(parts.body_fragment.contains(r#"onload="ready()""#));
+        assert!(parts.body_fragment.contains(r#"onclick="run()""#));
+        assert!(parts.body_fragment.contains("<title>Icon label</title>"));
+        assert!(parts.body_fragment.contains("<title>Nested label</title>"));
+        assert!(parts.body_fragment.contains("const isLess = 1 < 2;"));
+        assert!(
+            !parts
+                .body_fragment
+                .contains("<title>Discard this HTML title</title>")
+        );
+    }
+
+    #[test]
+    fn trusted_envelope_keeps_svg_title_but_filters_body_attrs() {
+        let html = r#"<html lang="en" onload="bad()"><head></head><body class="ok" onload="bad()" data-live="1">
+            <svg onpointerdown="onStatic()"><title>Accessible SVG</title></svg>
+            <title>Document title</title></body></html>"#;
+        let parts = normalize_public_document_with_options(html, true).unwrap();
+        assert!(
+            parts
+                .body_fragment
+                .contains("<title>Accessible SVG</title>")
+        );
+        assert!(
+            !parts
+                .body_fragment
+                .contains("<title>Document title</title>")
+        );
+        assert!(
+            parts
+                .body_fragment
+                .contains(r#"onpointerdown="onStatic()""#)
+        );
+        assert_eq!(
+            parts.body_attributes,
+            vec![
+                ("class".to_string(), "ok".to_string()),
+                ("data-live".to_string(), "1".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn trusted_scripts_require_matching_end_tag_and_valid_envelope_position() {
+        for (html, code) in [
+            ("<script>const x = 1 < 2", "unclosed_script"),
+            ("<script/>", "self_closing_script"),
+            ("<script src=\"/app.js\" />", "self_closing_script"),
+            ("</script>", "unexpected_close_script"),
+            ("<script>x</script></SCRIPT>", "unexpected_close_script"),
+            (
+                "<html><script>x</script><body></body></html>",
+                "script_outside_envelope",
+            ),
+            (
+                "<html><head></head><script>x</script><body></body></html>",
+                "script_outside_envelope",
+            ),
+            (
+                "<html><head></head><body></body><script>x</script></html>",
+                "script_outside_envelope",
+            ),
+            (
+                "<html><head></head><body></body></html><script>x</script>",
+                "script_outside_envelope",
+            ),
+        ] {
+            let result = normalize_public_document_with_options(html, true);
+            assert_eq!(result.unwrap_err().code, code, "input: {html}");
+        }
+        assert!(
+            normalize_public_document_with_options("<iframe src='/a'></iframe>", true).is_err()
+        );
+    }
+
+    #[test]
+    fn strict_wrapper_rejects_scripts_svg_and_event_handlers() {
+        for html in [
+            "<script>const x = 1 < 2;</script>",
+            "<svg><title>Icon</title></svg>",
+            "<div onmouseover='run()'>text</div>",
+            "<math><mi>x</mi></math>",
+        ] {
+            assert!(normalize_public_document(html).is_err(), "input: {html}");
+            assert!(
+                normalize_public_document_with_options(html, false).is_err(),
+                "input: {html}"
+            );
+        }
+        let parts = normalize_public_document("<p>safe</p>").unwrap();
+        assert!(parts.authorized_head_scripts.is_empty());
+        assert_eq!(parts.body_fragment, "<p>safe</p>");
+    }
 
     #[test]
     fn normalizes_mixed_case_body_attrs_comments_style_and_strips_forged_head_tags() {
@@ -789,7 +1025,7 @@ mod tests {
         assert!(parts.body_fragment.contains("a < b"));
         assert!(parts.body_fragment.contains("< !doctype>"));
 
-        let tokens = tokenize("< !doctype><p>1 < 2</p>").expect("text lt tokenizes cleanly");
+        let tokens = tokenize("< !doctype><p>1 < 2</p>", false).expect("text lt tokenizes cleanly");
         assert!(matches!(tokens[0].0, TokenKind::Text("<")));
         assert!(
             !tokens
