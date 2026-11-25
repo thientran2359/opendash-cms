@@ -1,7 +1,7 @@
 # Trusted Theme HTML (Unrestricted Inline SVG & JS) & WordPress-Style Asset Enqueue System
 
 * **Author:** Elephant (Antigravity)
-* **Status:** Approved
+* **Status:** Verified
 * **Date:** 2026-11-25
 * **Baseline:** `main@537c8a1`
 * **Approved By:** Owner
@@ -75,7 +75,7 @@ Theo chỉ đạo sản phẩm của Chủ dự án (2026-11-25), OpenDash mở 
 * **When:** Admin cài theme (hoặc chạy `--check-theme`), kích hoạt theme, và truy cập `/` (Home) vs `/gioi-thieu` (Page).
 * **Then:**
   - Nếu `deps` có vòng lặp hoặc tham chiếu handle không tồn tại hoặc file thiếu trong `assets`, `--check-theme` và API cài theme từ chối ngay.
-  - Trên `/`: `<head>` chứa `opendash-tailwind.css` → `base.css` → `home.css` → `<script type="module" src="/theme/<digest>/assets/init.mjs"></script>`; cuối `<body>` chứa `<script src="/theme/<digest>/assets/vendor.js" defer></script>` → `<script src="/theme/<digest>/assets/app.js" defer></script>` đúng thứ tự phụ thuộc.
+  - Trên `/`: `<head>` chứa `opendash-tailwind.css` → `base.css` → `home.css` → `<script src="/theme/<digest>/assets/init.mjs" type="module"></script>`; cuối `<body>` chứa `<script src="/theme/<digest>/assets/vendor.js" defer></script>` → `<script src="/theme/<digest>/assets/app.js" defer></script>` đúng thứ tự phụ thuộc.
   - Trên `/gioi-thieu`: không nạp `home.css`, nhưng vẫn nạp `base.css` và các script chung.
   - `GET /theme/<digest>/assets/app.js` trả HTTP `200` với `Content-Type: text/javascript; charset=utf-8`; `GET /theme/<digest>/assets/logo.svg` trả HTTP `200` với `Content-Type: image/svg+xml` kèm header `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`.
 
@@ -196,9 +196,9 @@ Theo chỉ đạo sản phẩm của Chủ dự án (2026-11-25), OpenDash mở 
      - **Auto-promote cross-location deps cho `scripts`:** Nếu một script `location == Head` phụ thuộc (trực tiếp hoặc bắc cầu) vào một script `location == Footer`, tự động promote script phụ thuộc đó lên `head_scripts` (kiểu `WP_Scripts`) để bảo đảm thứ tự thực thi luôn đúng.
      - Sắp xếp topo-sort bảo toàn thứ tự khai báo tương đối, chống trùng handle, và xuất HTML sạch:
        - Style: `<link rel="stylesheet" href="/theme/{digest}/{src}">` (kèm ` media="..."` nếu có).
-       - Script: `<script src="/theme/{digest}/{src}"{type_attr}{strategy_attr}></script>` (` type="module"` nếu `module == true`; với `module == true` chỉ thêm ` async` nếu `strategy == Async`, bỏ qua `defer`/`blocking` vì HTML5 module mặc định defer; với `module == false` thêm ` defer` khi `Defer`, ` async` khi `Async`, không thêm thuộc tính khi `Blocking`).
+       - Script: `<script src="/theme/{digest}/{src}"{type_attr}{strategy_attr}></script>` (` type="module"` nếu `module == true`; với `module == true` chỉ thêm ` async` nếu `strategy == Async` và script không nằm trong chuỗi phụ thuộc `deps`, bỏ qua `defer`/`blocking` vì HTML5 module mặc định defer; với `module == false` thêm ` defer` khi `Defer`, ` async` khi `Async`, không thêm thuộc tính khi `Blocking`; đồng thời tự động bảo vệ thứ tự thực thi trên các script có cạnh `deps`: hạ `async` → `defer` (hoặc bỏ `async` ở module) và nâng `blocking` → `defer` nếu phụ thuộc vào `module`/`defer`/script đã hạ từ `async`).
 2. **Asset Allowlist, UTF-8 Check & MIME (`cms/crates/opendash-server/src/theme.rs` & `routes/themes.rs`):**
-   - `v3_entry_cap_and_allowlist`: thêm `"js" | "mjs" | "svg" => Ok(V2_MAX_TEXT_BYTES)` (512 KiB).
+   - `v3_entry_cap_and_allowlist`: thêm `"js" | "mjs" | "svg" => Ok(V3_MAX_ACTIVE_ASSET_BYTES)` (512 KiB, tách riêng để không nới cap text v2 cũ).
    - `validate_theme_v3_files`: kiểm tra `std::str::from_utf8(raw)` cho `.js`, `.mjs`, `.svg` (không chạy `validate_safe_css` lên chúng).
    - `theme_asset_mime`: thêm `"js" | "mjs" => Some("text/javascript; charset=utf-8")` và `"svg" => Some("image/svg+xml")`.
    - `routes/themes.rs::theme_asset`: khi `mime == "image/svg+xml"`, đính kèm header `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox` (chặn chạy script nếu mở trực tiếp file `.svg` ở tab riêng, không ảnh hưởng `<img src="...svg">`).

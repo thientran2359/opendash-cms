@@ -79,7 +79,7 @@ Bảng dưới đây thống nhất thuật ngữ dùng trong mã nguồn (`cms/
 | **Page Layout** | `page-layouts/*.html` (`full_width`, `sidebar`, `canvas`…) | Page Templates | Bố cục có tên chọn ở sidebar màn sửa Page; không thay đổi nội dung hay trạng thái xuất bản của Page. `canvas` không gọi `header`/`footer`. |
 | **Content Slot** | `{{ od_content() }}` (Theme HTML) · Block `core/content_slot` (Visual Builder) | `the_content()` / Post Content block | Đúng 1 vị trí do core kiểm soát để chèn nội dung bản ghi (editor HTML đã lọc hoặc Builder AST đã render) vào entry template. |
 | **Reading Settings** | `site_reading_settings` · `/api/admin/settings/reading` | Settings → Reading (Homepage / Posts page) | Cấu hình atomic 2 Page ID độc lập (`homepage_page_id` cho `/`, `posts_page_id` cho archive `post`) đi qua 1 route authority (`storage/permalinks.rs`). |
-| **C-SEC** | `opendash_server::template_sec` ([M5_THEME_TEMPLATES.md](M5_THEME_TEMPLATES.md)) | N/A (Ràng buộc bảo mật OpenDash) | Tập con an toàn MiniJinja: auto-escape HTML bắt buộc, cấm `{% include %}`/`{% extends %}`/`\|safe`/thẻ `<script>`, giới hạn fuel (`10_000`), recursion (`16`) và dung lượng render (`512 KiB`). |
+| **C-SEC** | `opendash_server::template_sec` ([M5_THEME_TEMPLATES.md](M5_THEME_TEMPLATES.md)) | N/A (Ràng buộc bảo mật OpenDash) | Tập con an toàn MiniJinja: auto-escape HTML bắt buộc, cấm `{% include %}`/`{% extends %}`/`\|safe`, giới hạn fuel (`10_000`), recursion (`16`) và dung lượng render (`512 KiB`). Đường legacy/untrusted cấm `<script>`/`<svg>`/`on*`; nguồn Theme v3 & Declarative Block được mở inline `<svg>`/`<script>`/`on*` tĩnh (cấm nội suy động) — `Superseded by` [trusted-theme-js-svg-and-asset-enqueue.md](../designs/trusted-theme-js-svg-and-asset-enqueue.md). |
 
 ---
 
