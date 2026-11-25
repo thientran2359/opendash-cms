@@ -531,7 +531,7 @@ export function MenusPanel({
                         next[idx] = { ...item, external_url: e.target.value };
                         setItemsDraft(next);
                       }}
-                      placeholder="https://example.com/gioi-thieu"
+                      placeholder={translate('feature.menus.menuspanel.external_url_placeholder')}
                       className="min-w-[200px] rounded border border-slate-300 bg-white px-2 py-1 text-sm"
                     />
                   )}

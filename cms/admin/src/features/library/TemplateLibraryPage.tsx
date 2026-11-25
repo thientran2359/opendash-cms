@@ -129,11 +129,11 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
         {overrides.map(item => <article key={item.id} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
           <div className="min-w-0">
             <strong className="break-all">{item.canonical_target_key}</strong>
-            <p className="text-xs text-slate-600">{tStatic("feature.users.userprofilepanel.version_v")}{item.version} · {item.effective_source?.label ?? 'Site override'}</p>
+            <p className="text-xs text-slate-600">{tStatic("feature.users.userprofilepanel.version_v")}{item.version} · {item.effective_source?.label ?? tStatic("feature.library.templatelibrarypage.site_override")}</p>
             <p className="break-all text-xs text-slate-500">{tStatic("feature.library.templatelibrarypage.original_theme")}{' '}{item.base_theme_id ?? 'Core'} · {item.base_revision_digest?.slice(0, 12) ?? tStatic("feature.library.templatelibrarypage.no_revision")}</p>
           </div>
           <button type="button" className="btn-secondary" disabled={!!applying || loading} onClick={() => void resetSiteOverride(item)}>
-            {applying === item.canonical_target_key ? tStatic("feature.library.templatelibrarypage.resetting") : 'Reset override'}
+            {applying === item.canonical_target_key ? tStatic("feature.library.templatelibrarypage.resetting") : tStatic("feature.library.templatelibrarypage.reset_override")}
           </button>
         </article>)}
         {!overrides.length && <p className="text-sm text-slate-600">{tStatic("feature.library.templatelibrarypage.no_site_owned_override_the_resolver_uses_active_theme")}</p>}

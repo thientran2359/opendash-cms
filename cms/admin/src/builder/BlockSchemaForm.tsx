@@ -241,7 +241,11 @@ function FieldControl({ field, current, viewport, disabled, onSet, onPickMedia }
     ? {
         differs,
         viewport,
-        summary: `Desktop: ${formatSummaryVal(effDesktop)} · Tablet: ${formatSummaryVal(effTablet)} · Mobile: ${formatSummaryVal(effMobile)}`,
+        summary: t('builder.block_schema_form.responsive_summary', {
+          desktop: formatSummaryVal(effDesktop),
+          tablet: formatSummaryVal(effTablet),
+          mobile: formatSummaryVal(effMobile),
+        }),
         onReset: resetResponsive,
         testId: `field-amber-${field.key}`,
       }

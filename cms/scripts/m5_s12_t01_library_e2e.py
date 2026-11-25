@@ -106,7 +106,7 @@ def shared_preview_checks(page, admin, anon, base, csrf, source_path, image_id, 
     picker.get_by_role('button', name='Chọn Section', exact=True).click()
     expect(picker.get_by_text('UI library banner', exact=False)).to_be_visible(timeout=12000)
     picker.get_by_role('button', name='Chèn bản sao').click()
-    expect(workspace).to_contain_text('Đã chèn bản SAO', timeout=15000)
+    expect(workspace).to_contain_text('Đã chèn bản sao', timeout=15000)
     response = preview()
     payload = response.request.post_data_json
     assert payload['target'] == {'kind': 'part', 'part_key': 'header'}
@@ -404,7 +404,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     for attempt in (1, 2):
                         picker.get_by_role('button', name='Chèn bản sao').click()
                         expect(page.get_by_test_id('builder-workspace')).to_contain_text(
-                            'Đã chèn bản SAO', timeout=15000)
+                            'Đã chèn bản sao', timeout=15000)
                         assert api_json(admin, 'GET', base, page_scope(page_id))['document'] is None
                         assert api_json(admin, 'GET', base, source_path)['document'] == source_document
                     page.screenshot(path=str(artifacts / 'two-copies-unsaved.png'), full_page=True)
@@ -477,7 +477,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     expect(ep.get_by_role('heading', name=f'Page Builder #{page_id}')).to_be_visible(timeout=15000)
                     ep.get_by_test_id('builder-local-library').get_by_role('button', name='Chọn Section', exact=True).click()
                     ep.get_by_test_id('builder-local-library').get_by_role('button', name='Chèn bản sao').click()
-                    expect(ep.get_by_test_id('builder-workspace')).to_contain_text('Đã chèn bản SAO', timeout=15000)
+                    expect(ep.get_by_test_id('builder-workspace')).to_contain_text('Đã chèn bản sao', timeout=15000)
                     ep.screenshot(path=str(artifacts / 'editor-copy-390.png'), full_page=True)
                     assert ep.evaluate('document.body.scrollWidth <= innerWidth + 2'), '390px horizontal overflow'
                     assert api_json(admin, 'GET', base, page_scope(page_id)) == saved or api_json(admin, 'GET', base, page_scope(page_id))['document'] == saved['document']

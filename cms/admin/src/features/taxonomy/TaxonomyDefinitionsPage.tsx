@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { getEffectiveBcp47, tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { listContentTypes } from '../../api/content.ts';
 import type { OwnedContentTypeWithSettings } from '../../api/content.ts';
@@ -141,7 +141,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   const typeEditable = user?.role === 'admin' && typeKey !== 'section' && !!selectedType;
   const eligibilityVersionMismatch = eligibilityTypeVersion !== null && !!selectedType
     && selectedType.version !== eligibilityTypeVersion;
-  const ordered = useMemo(() => [...definitions].sort((a, b) => a.label.localeCompare(b.label, 'vi') || a.key.localeCompare(b.key)), [definitions]);
+  const ordered = useMemo(() => [...definitions].sort((a, b) => a.label.localeCompare(b.label, getEffectiveBcp47()) || a.key.localeCompare(b.key)), [definitions]);
 
   useEffect(() => { reportDirtyRef.current?.(dirty); }, [dirty]);
   useEffect(() => () => reportDirtyRef.current?.(false), []);

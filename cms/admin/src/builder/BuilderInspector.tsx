@@ -321,9 +321,9 @@ export function BuilderInspector({
             value={sectionNode.style?.content_width ?? ''}
             options={[
               { value: '', label: t('builder.builder_inspector.default'), title: t('builder.builder_inspector.theme') },
-              { value: 'boxed', label: 'Boxed', title: t('builder.builder_inspector.boxed') },
-              { value: 'wide', label: 'Wide', title: t('builder.builder_inspector.wide') },
-              { value: 'full', label: 'Full', title: t('builder.builder_inspector.full') },
+              { value: 'boxed', label: t('builder.builder_inspector.width_boxed'), title: t('builder.builder_inspector.boxed') },
+              { value: 'wide', label: t('builder.builder_inspector.width_wide'), title: t('builder.builder_inspector.wide') },
+              { value: 'full', label: t('builder.builder_inspector.width_full'), title: t('builder.builder_inspector.full') },
             ]}
             testIdPrefix="inspector-section-width"
             onChange={val => onSectionStyleChange(sectionNode.id, {
@@ -756,9 +756,9 @@ export function BuilderInspector({
             <span className="block text-xs font-medium text-zinc-700">{t('builder.builder_inspector.visibility')}</span>
             <div className="grid grid-cols-3 gap-1.5" role="group" aria-label={t('builder.builder_inspector.screens')}>
               {([
-                { key: 'hide_desktop', label: 'Desktop' },
-                { key: 'hide_tablet', label: 'Tablet' },
-                { key: 'hide_mobile', label: 'Mobile' },
+                { key: 'hide_desktop', label: t('studio.desktop') },
+                { key: 'hide_tablet', label: t('studio.tablet') },
+                { key: 'hide_mobile', label: t('studio.mobile') },
               ] as const).map(dev => {
                 const hidden = Boolean(vis[dev.key]);
                 return (

@@ -20,7 +20,7 @@ const PAGE_SIZE = 48;
 export const MediaPicker: React.FC<MediaPickerProps> = ({
   mode, acceptKind = 'image', selectedIds, csrfToken, onApply, onClose, onError,
 }) => {
-  const { t: translate } = useI18n();
+  const { t: translate, tCount } = useI18n();
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [picked, setPicked] = useState<string[]>(selectedIds);
   const [filter, setFilter] = useState<'all' | MediaKind>(acceptKind === 'any' ? 'all' : acceptKind);
@@ -178,7 +178,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
         </div>
         <div className="media-toolbar">
           <label className="media-upload-control">
-            <span>{acceptKind === 'image' ? translate('feature.media.mediapicker.upload_image') : acceptKind === 'video' ? '+ Upload video' : '+ Upload media'}</span>
+            <span>{acceptKind === 'image' ? translate('feature.media.mediapicker.upload_image') : acceptKind === 'video' ? translate('feature.media.mediapicker.upload_video') : translate('feature.media.mediapicker.upload_media')}</span>
             <input
               type="file"
               accept={acceptKind === 'any' ? 'image/jpeg,image/png,image/webp,video/mp4'
@@ -256,7 +256,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
               type="button"
               onClick={() => onApply(picked)}
               disabled={busy}
-            >{translate('feature.media.mediapicker.use')}{' '}{mode === 'gallery' ? `${picked.length} file` : translate('feature.media.mediapicker.selected_media')}</button>
+            >{translate('feature.media.mediapicker.use')}{' '}{mode === 'gallery' ? tCount('feature.media.mediapicker.selected_file_count', picked.length) : translate('feature.media.mediapicker.selected_media')}</button>
           )}
         </div>
       </div>

@@ -38,15 +38,15 @@ function BlockTypeOptions({
   const { t } = useI18n();
   const BLOCK_CATEGORY_LABELS: Record<string, string> = {
     layout: t('builder.builder_workspace.category_layout'), media: t('builder.builder_workspace.media_tab'), interactive: t('builder.builder_workspace.category_interactive'),
-    content: t('builder.builder_workspace.category_content'), marketing: 'Marketing', plugin: 'Plugin',
+    content: t('builder.builder_workspace.category_content'), marketing: t('studio.marketing'), plugin: t('builder.builder_workspace.category_plugin'),
   };
   const available = availableSchemas(catalog);
   return <>
     <optgroup label={t('builder.builder_workspace.core_blocks')}>
       {legacyTypes.map(type => <option key={type} value={type}>
-        {type === 'core/pattern_ref' ? 'Reusable Pattern'
-          : type === 'core/content_slot' ? 'Content Slot'
-            : type === 'core/template_part' ? 'Template Part' : type}
+        {type === 'core/pattern_ref' ? t('builder.document.pattern')
+          : type === 'core/content_slot' ? t('builder.document.content_slot')
+            : type === 'core/template_part' ? t('feature.common.ui_template_part') : type}
       </option>)}
     </optgroup>
     {BLOCK_CATEGORY_ORDER.map(category => {
@@ -1330,7 +1330,7 @@ export function BuilderWorkspace({
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
         <div>
           <h2 className="!m-0 text-lg font-bold text-slate-900">
-            {scopedEntry ? `${scopeTypeKey === 'page' ? 'Page' : scopedPattern ? 'Pattern' : scopeTypeKey} Builder #${scopeEntryId}` : 'Override: ' + targetRole}
+            {scopedEntry ? `${scopeTypeKey === 'page' ? 'Page' : scopedPattern ? 'Pattern' : scopeTypeKey} Builder #${scopeEntryId}` : t('builder.builder_workspace.override_heading', { role: targetRole })}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
             {t('builder.builder_workspace.source_etag', { source, etag: version === null ? t('builder.builder_workspace.not_loaded') : '"v' + version + '"' })}

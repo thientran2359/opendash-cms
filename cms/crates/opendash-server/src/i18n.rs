@@ -11722,7 +11722,7 @@ async fn read_bounded_error_body(
     if body
         .size_hint()
         .upper()
-        .is_none_or(|n| n > MAX_LOCALIZED_ERROR_BYTES as u64)
+        .is_some_and(|n| n > MAX_LOCALIZED_ERROR_BYTES as u64)
     {
         return Err(body);
     }
@@ -11958,6 +11958,52 @@ mod localization_middleware_tests {
             .await
             .unwrap();
         assert_eq!(actual.as_ref(), exact.as_slice());
+    }
+
+    #[tokio::test]
+    async fn error_body_limit_buffers_unsized_streams_until_cap() {
+        struct UnsizedChunkBody {
+            chunks: std::collections::VecDeque<axum::body::Bytes>,
+        }
+        impl http_body::Body for UnsizedChunkBody {
+            type Data = axum::body::Bytes;
+            type Error = std::convert::Infallible;
+
+            fn poll_frame(
+                mut self: std::pin::Pin<&mut Self>,
+                _cx: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>>
+            {
+                std::task::Poll::Ready(
+                    self.chunks
+                        .pop_front()
+                        .map(|b| Ok(http_body::Frame::data(b))),
+                )
+            }
+        }
+
+        let small_msg = axum::body::Bytes::from_static("Cần đăng nhập.".as_bytes());
+        let small = Body::new(UnsizedChunkBody {
+            chunks: std::collections::VecDeque::from([small_msg.clone()]),
+        });
+        assert!(http_body::Body::size_hint(&small).upper().is_none());
+        let actual = read_bounded_error_body(small)
+            .await
+            .expect("unsized error stream within cap must still be localized");
+        assert_eq!(actual.as_ref(), small_msg.as_ref());
+
+        let half = axum::body::Bytes::from(vec![b'a'; (MAX_LOCALIZED_ERROR_BYTES / 2) + 1]);
+        let oversized = Body::new(UnsizedChunkBody {
+            chunks: std::collections::VecDeque::from([half.clone(), half.clone()]),
+        });
+        let replay = read_bounded_error_body(oversized)
+            .await
+            .expect_err("unsized stream exceeding cap must replay unread frames");
+        let replayed = to_bytes(replay, MAX_LOCALIZED_ERROR_BYTES + 16)
+            .await
+            .unwrap();
+        assert_eq!(replayed.len(), half.len() * 2);
+        assert!(replayed.iter().all(|&b| b == b'a'));
     }
 
     #[tokio::test]

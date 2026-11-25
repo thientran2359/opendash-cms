@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { getEffectiveBcp47, tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   listAllTaxonomyTerms,
@@ -38,7 +38,7 @@ const fieldClass = 'block w-full min-w-0 rounded-lg border border-slate-300 bg-w
 const maxTerms = (kind: TaxonomyKind): number => kind === 'category' ? 32 : 64;
 
 function sortTerms(a: TaxonomyTerm, b: TaxonomyTerm): number {
-  return a.name.localeCompare(b.name, 'vi') || a.id - b.id;
+  return a.name.localeCompare(b.name, getEffectiveBcp47()) || a.id - b.id;
 }
 
 /** Order hierarchical terms by parent without hiding an orphan if the tree changed mid-fetch. */
@@ -148,7 +148,8 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
     return result;
   }, [selectedIds, known]);
   const unknownIds = selectedIds.filter(id => !known.has(id));
-  const normalizedSearch = search.trim().toLocaleLowerCase('vi');
+  const bcp47 = getEffectiveBcp47();
+  const normalizedSearch = search.trim().toLocaleLowerCase(bcp47);
 
   const toggle = (id: number, checked: boolean) => {
     const term = known.get(id);
@@ -204,9 +205,9 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
         )}
         {groups.map(group => {
           const isCollapsed = Boolean(collapsedKinds[group.kind]);
-          const q = (searchByKind[group.kind] ?? '').trim().toLocaleLowerCase('vi');
+          const q = (searchByKind[group.kind] ?? '').trim().toLocaleLowerCase(bcp47);
           const visible = group.terms.filter(({ term }) =>
-            !q || term.name.toLocaleLowerCase('vi').includes(q) || term.slug.toLocaleLowerCase('vi').includes(q));
+            !q || term.name.toLocaleLowerCase(bcp47).includes(q) || term.slug.toLocaleLowerCase(bcp47).includes(q));
           const pickedInGroup = group.terms.filter(({ term }) => selected.has(term.id));
           return (
             <section
@@ -357,8 +358,8 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
       <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
         {groups.map(group => {
           const visible = group.terms.filter(({ term }) =>
-            !normalizedSearch || term.name.toLocaleLowerCase('vi').includes(normalizedSearch) ||
-            term.slug.toLocaleLowerCase('vi').includes(normalizedSearch));
+            !normalizedSearch || term.name.toLocaleLowerCase(bcp47).includes(normalizedSearch) ||
+            term.slug.toLocaleLowerCase(bcp47).includes(normalizedSearch));
           return (
             <fieldset key={group.kind} disabled={disabled} className="min-w-0 rounded-lg border border-slate-200 p-3">
               <legend className="px-1 text-sm font-semibold text-slate-800">

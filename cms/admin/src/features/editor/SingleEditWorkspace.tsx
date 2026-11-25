@@ -747,7 +747,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const templatePanelNode = showTemplateBox ? (
     <div className="space-y-1.5" data-testid="theme-template-selection">
       <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-theme-selector">
-        <span>{typeKey === 'page' ? 'Page Template / Layout' : 'Custom Single Template'}</span>
+        <span>{typeKey === 'page' ? tStatic("feature.editor.singleeditworkspace.page_template_layout") : tStatic("feature.editor.singleeditworkspace.custom_single_template")}</span>
         <select
           id="entry-theme-selector"
           className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
@@ -862,7 +862,13 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
                     >
                       [{tr.locale}] {tr.title || `#${tr.id}`}
                     </a>
-                    <span className="shrink-0 text-[11px] text-zinc-500">{tr.publication_status}</span>
+                    <span className="shrink-0 text-[11px] text-zinc-500">
+                      {tr.publication_status === 'published'
+                        ? tStatic("feature.editor.singleeditworkspace.status_published")
+                        : tr.publication_status === 'draft'
+                          ? tStatic("feature.editor.singleeditworkspace.status_draft")
+                          : tr.publication_status}
+                    </span>
                   </li>
                 ))}
               </ul>

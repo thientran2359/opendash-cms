@@ -227,7 +227,7 @@ export function RangeNumberControl({
 }
 
 export function TailwindGapControl({
-  id, label = 'Gap', value, disabled = false, responsiveInfo, onChange, testIdPrefix,
+  id, label, value, disabled = false, responsiveInfo, onChange, testIdPrefix,
 }: {
   id?: string;
   label?: string;
@@ -238,6 +238,7 @@ export function TailwindGapControl({
   testIdPrefix?: string;
 }) {
   const { t } = useI18n();
+  const displayLabel = label ?? t('builder.studio_field_controls.gap');
   const autoId = useId();
   const inputId = id ?? autoId;
   const matchedStep = pxToTwStep(value, TW_GAP_STEPS);
@@ -253,7 +254,7 @@ export function TailwindGapControl({
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          <label htmlFor={inputId} className="text-xs font-semibold text-zinc-800">{label}</label>
+          <label htmlFor={inputId} className="text-xs font-semibold text-zinc-800">{displayLabel}</label>
           <ResponsiveDot info={responsiveInfo} />
         </div>
         <div className="flex items-center gap-1.5">
@@ -433,10 +434,10 @@ export function ColorSwatchControl({
   ];
 
   const TOKEN_SWATCHES = [
-    { value: 'var(--od-token-primary)', label: 'Primary' },
-    { value: 'var(--od-token-accent)', label: 'Accent' },
-    { value: 'var(--od-token-surface)', label: 'Surface' },
-    { value: 'var(--od-token-text)', label: 'Text' },
+    { value: 'var(--od-token-primary)', label: t('builder.studio_field_controls.token_primary') },
+    { value: 'var(--od-token-accent)', label: t('builder.studio_field_controls.token_accent') },
+    { value: 'var(--od-token-surface)', label: t('builder.studio_field_controls.token_surface') },
+    { value: 'var(--od-token-text)', label: t('builder.studio_field_controls.token_text') },
   ];
   const autoId = useId();
   const inputId = id ?? autoId;
@@ -454,7 +455,7 @@ export function ColorSwatchControl({
             onClick={() => setShowTokens(v => !v)}
             className={RESET_BTN_CLASS}
           >
-            {showTokens ? t('builder.studio_field_controls.hide_tokens') : 'Theme tokens'}
+            {showTokens ? t('builder.studio_field_controls.hide_tokens') : t('builder.studio_field_controls.theme_tokens')}
           </button>
           {value && (
             <button type="button" disabled={disabled} className={RESET_BTN_CLASS} onClick={() => onChange('')}>
@@ -550,7 +551,7 @@ export function MediaCardControl({
   useEffect(() => setImgBroken(false), [value]);
 
   const showImageThumb = Boolean(value) && acceptKind !== 'video' && !imgBroken;
-  const kindText = acceptKind === 'video' ? 'Video MP4' : t('builder.studio_field_controls.image');
+  const kindText = acceptKind === 'video' ? t('builder.studio_field_controls.video_mp4') : t('builder.studio_field_controls.image');
 
   return (
     <div className="space-y-1.5" data-testid={testId}>
@@ -566,7 +567,7 @@ export function MediaCardControl({
             />
           ) : (
             <div className="flex h-11 w-14 shrink-0 items-center justify-center rounded border border-zinc-200 bg-zinc-200/80 text-[10px] font-semibold uppercase text-zinc-700">
-              {acceptKind === 'video' ? 'MP4' : 'Media'}
+              {acceptKind === 'video' ? 'MP4' : t('builder.studio_field_controls.media_short')}
             </div>
           )
         ) : (
