@@ -1,21 +1,32 @@
-# Working research
+# Working research & EGM Drift Reports
 
-Document open questions, candidate designs, source revision, evidence, testing,
-tradeoffs and unresolved risks. Status PROPOSED is not implementation approval.
-Use ../templates/RESEARCH.md; promote only accepted conclusions into docs/.
+Lưu các ghi chú nghiên cứu đang mở, tài liệu vận hành CoS còn dùng, thử nghiệm EGM và các báo cáo `/egm-drift-report` sau mỗi Design Spec (`docs/designs/`). Luôn tham chiếu [`../templates/RESEARCH.md`](../templates/RESEARCH.md) khi tạo ghi chú nghiên cứu mới.
 
-## Open proposals (not implementation-ready)
+## Báo cáo Drift EGM (`2026-11-21` – `2026-11-25`)
 
-- [OpenDash coding standards & maintainability audit — Forge / Aster review, 18/11/2026](2026-11-18-coding-standards-audit-for-atlas.md) — 13 findings on account-scoped drafts, Builder/menu/media, CSRF checker/CI, service boundaries and hardening; provenance limits and Aster dispositions included; **PROPOSED, Aster re-review pending on PR #382**.
-- [M3-P07/P08/P16 — G2 publication boundary + G3 work packages](m3-post-page-integrated-g2-g3-proposal.md) — `main@658fc26`, 5 staged work packages; ngăn lộ draft/media, giữ legacy/Builder, migration collision + rollback; **G2 PROPOSED tại thời điểm viết, được owner phê duyệt trực tiếp 10/11/2026 trong [ADR-0004 chính thức](../../docs/decisions/ADR-0004-m3-post-page-publication-boundary.md)**; [G3 mới vẫn DRAFT](../../docs/archive/plans/milestones/M3/slices/2026-11-10-post-page-publication-g3.md), không Ready. Giữ nguyên nội dung proposal lịch sử.
-- [M3-P07 — built-in Post/Page G1 source audit + G2 proposal](m3-p07-built-in-post-page-g1-g2.md) — `main@dfdcae2`, Core CPT seed, migration/owner conflict, draft-public/media security dependencies; **G2 PROPOSED, peer-review pending**.
-- [Muse Orchestrator POC — CoS Windows](muse-cos-win-orchestrator-poc.md) — kiến trúc remote dispatch, ranh giới quyền, phân giai đoạn và các quyết định chưa chốt (**PROPOSED**).
-- [Muse → CoS Windows POC test matrix](muse-cos-win-poc-test-matrix.md) — điều kiện PASS/FAIL/BLOCKED/NOT_RUN cho từng gate (**chưa chạy test runtime**).
+- [Spec 1 Drift Report (2026-11-21)](2026-11-21_SPEC1_DRIFT_REPORT.md)
+- [Spec 2 S01–S03 Drift Report (2026-11-21)](2026-11-21-spec2-closure/2026-11-21_DRIFT_REPORT.md)
+- [Spec 2 Post-Conformance Drift Report (2026-11-22)](2026-11-22-spec2-closure/2026-11-22_DRIFT_REPORT.md)
+- [Admin Style A Drift Report (2026-11-22)](2026-11-22_ADMIN_STYLE_A_DRIFT_REPORT.md)
+- [Declarative Block Engine Drift Report (2026-11-22)](2026-11-22_DECLARATIVE_BLOCK_ENGINE_DRIFT_REPORT.md)
+- [OpenDash Studio Drift Report (2026-11-22)](2026-11-22_OPENDASH_STUDIO_DRIFT_REPORT.md)
+- [WordPress Permalinks Drift Report (2026-11-22)](2026-11-22_WORDPRESS_PERMALINKS_DRIFT_REPORT.md)
+- [Starter URL Delta — Goldfish Review (2026-11-23)](2026-11-23-starter-url-delta/goldfish_review_report.md)
+- [Studio UX Upgrade Drift Report (2026-11-23)](2026-11-23_STUDIO_UX_UPGRADE_DRIFT_REPORT.md)
+- [Tailwind Starter Drift Report (2026-11-23)](2026-11-23_TAILWIND_STARTER_DRIFT_REPORT.md)
+- [Multilingual Content & Theme L10n Drift Report (2026-11-24)](2026-11-24_MULTILINGUAL_DRIFT_REPORT.md)
+- [Spec 2 Plugin Hooks & Projections Drift Report (2026-11-24)](2026-11-24_SPEC2_PLUGIN_HOOKS_DRIFT_REPORT.md)
+- [Spec 3 Dual SDK Drift Report (2026-11-24)](2026-11-24_SPEC3_DUAL_SDK_DRIFT_REPORT.md)
+- [Starter Specs Drift Report (2026-11-24)](2026-11-24_STARTER_SPECS_DRIFT_REPORT.md)
+- [Theme Ergonomics & C-SEC Helpers Drift Report (2026-11-24)](2026-11-24_THEME_ERGONOMICS_DRIFT_REPORT.md)
+- [Admin i18n & Multilingual Settings Drift Report (2026-11-25)](2026-11-25-admin-i18n-drift-report.md)
 
-## M7 research promoted by design PR (2026-11-14)
+## Ghi chú CoS Dispatch & EGM Pilot
 
-- [M7 G1 source inventory](2026-11-14-m7-site-features-g1.md): all8 candidates, actual source/alternatives; authority after merge is ADR-0014 and M7 contract/G3. Runtime NOT_RUN.
+- [CoS One-Shot Adapter (2026-11-12)](2026-11-12-cos-one-shot-adapter.md)
+- [CoS PR Dispatch Plan (2026-11-13)](2026-11-13-cos-pr-dispatch-plan.md)
+- [Aster CoS Post-Review (2026-11-19)](2026-11-19-aster-cos-post-review.md)
+- [CoS Resume Protocol (2026-11-19)](2026-11-19-cos-resume.md)
+- [EGM Builder Pilot (2026-11-20)](egm-builder-pilot-2026-11-20/README.md)
 
-## M8 source research — 14/11/2026
-
-- [M8 operations/release G1](2026-11-14-m8-operations-release-g1.md): all8 candidates, actual M7 source, official library/SQLite references and alternatives. Promoted authority is ADR-0015/contract/full G3 after PR merge; runtime NOT_RUN.
+> Các tài liệu nghiên cứu G1/G2 và POC trước EGM (2026-11-11 – 2026-11-18) đã được dọn về Git history.

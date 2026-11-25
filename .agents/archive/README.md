@@ -1,9 +1,5 @@
 # Archived agent tooling
 
-The `skills/` directory contains retired `antigravity-handoff`,
-`dispatch-plan-tasks` and `opendash-orchestrator` skills; `legacy-handoff/`
-preserves their former PowerShell hook/scripts.
+Các skill điều phối cũ (`antigravity-handoff`, `dispatch-plan-tasks`, `opendash-orchestrator`, `discussion-turn-responder`) và các hook/script PowerShell cũ (`legacy-handoff/`) đã được dọn khỏi cây thư mục làm việc để tránh nạp nhầm ngữ cảnh; toàn bộ vẫn được lưu trong Git history.
 
-These files are historical reference only, NOT installed skills or registered
-hooks. Their instructions describe obsolete transport, may refer to stale
-paths and must not be executed without explicit review/approval.
+Quy trình làm việc hiện hành sử dụng 4 skill chủ động trong [`../skills/`](../skills/README.md) kết hợp với EGM.

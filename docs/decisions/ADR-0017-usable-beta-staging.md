@@ -35,7 +35,7 @@ security/data, CI, human test hoặc release authorization.
 ## Context and evidence
 
 [PRD](../product/PRODUCT_REQUIREMENTS.md) yêu cầu CMS dễ dùng từ browser.
-[Windows Admin evidence](../verification/2026-11-16-m7-s13-t01-admin-nav-single-edit-windows.md)
+`Windows Admin evidence` (`2026-11-16-m7-s13-t01-admin-nav-single-edit-windows.md`, Git history)
 ghi capability tests trên binary riêng; dev.py Mộc Studio là demo được seed.
 Cả hai không chứng minh người dùng dựng site từ đầu không cần trợ giúp kỹ thuật.
 Project snapshot 16/11: #157/#188 In progress; #214/#215/#242/#245/#246/#247/#248
@@ -59,7 +59,7 @@ Preview chưa lưu không đổi public. Đổi theme/tắt plugin bảo toàn d
 
 ## Acceptance and work ownership
 
-[G3 checkpoint](../archive/plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md)
+`G3 checkpoint` (Git history)
 quy định đủ bốn task: Forge audit Windows; Atlas triage/G3 fixes; Forge QA + human
 dogfood; Atlas Beta readiness. Nova là responsible mặc định cho UX fixes được giao
 G3 riêng. Harbor giữ #188 và phần macOS; Forge giữ #242/#245. Một task active mỗi

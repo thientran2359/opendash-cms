@@ -51,10 +51,10 @@ flowchart LR
    - **`plugin/`:** Vòng đời plugin revisions, worker cô lập tiến trình (`--plugin-worker`), `host_ops` (`kv_get`, `kv_set`, `http_request`, `content_save`) và HTTP egress chống SSRF (`egress.rs`).
    - **Hạ tầng server:** `SiteCoordinator` (`operations.rs`), `SitePaths` (`paths.rs`), `template_sec.rs` (`C-SEC`), `document.rs` (`normalize_public_document`), `backup*.rs` & `restore.rs` (`age` encrypted), `media*.rs`, `smtp.rs`, `secrets.rs`, `config.rs`, và `rust-embed` (`app.rs`).
 3. **`cms/admin/` (Giao diện quản trị và Builder trên trình duyệt):**
-   - **`api/` (19 modules):** Mọi lời gọi HTTP đi qua [`client.ts`](../../cms/admin/src/api/client.ts).
+   - **`api/` (21 modules):** Mọi lời gọi HTTP đi qua [`client.ts`](../../cms/admin/src/api/client.ts).
    - **`shell/`:** `AdminShell.tsx` (điều hướng 3 nhóm `Nội dung`, `Giao diện`, `Tùy chỉnh`), `router.ts`, `AuthPanel.tsx`.
    - **`builder/`:** `BuilderWorkspace.tsx`, `BuilderTree.tsx`, `BuilderCanvas.tsx`, `BuilderInspector.tsx` (hỗ trợ Homepage, Template Overrides, Page-scoped Builder và private Section CPT).
-   - **`features/` (18 thư mục):** `contact/`, `content/`, `dashboard/`, `editor/` (`SingleEditWorkspace.tsx`, `EditorDraftStore.ts`), `extensions/`, `library/`, `media/`, `menus/`, `operations/`, `plugins/`, `posts/`, `sections/`, `seo/`, `settings/`, `system/`, `taxonomy/`, `themes/`, `users/`.
+   - **`features/` (18 thư mục):** `contact/`, `content/`, `dashboard/`, `editor/` (`SingleEditWorkspace.tsx`, `EditorDraftStore.ts`), `extensions/`, `library/`, `media/`, `operations/`, `patterns/`, `plugins/`, `posts/`, `seo/`, `settings/`, `shared/`, `system/`, `taxonomy/`, `themes/`, `users/`.
 
 ### 1.2. Luồng Xem trước (Preview), Lưu (Save), Xuất bản (Publish) và Quyền sở hữu Dữ liệu
 
@@ -84,7 +84,7 @@ opendash-cms/
 │   ├── migrations/                         # 40 migrations SQLite (0001–0041, bỏ qua số 0016)
 │   ├── fixtures/                           # Database mẫu kiểm tra nâng cấp (baseline_0001.sqlite)
 │   ├── sdk/                                # AssemblyScript Plugin SDK (sdk/as/opendash.ts)
-│   ├── examples/                           # Plugin/Theme mẫu (sample-plugin, sample-theme, moc-studio)
+│   ├── examples/                           # Plugin/Theme mẫu (sample-plugin, rust-seo-plugin, sample-theme-v3)
 │   ├── deploy/                             # Cấu hình systemd & nginx mẫu cho Linux VPS
 │   └── scripts/                            # build.ps1, build-release-linux.sh, check-standards.py, check-plans.py, E2E scripts
 ├── docs/                                   # Tài liệu sản phẩm, kiến trúc, contracts, designs (EGM), verification, archive
@@ -93,4 +93,4 @@ opendash-cms/
 └── README.md                               # Hướng dẫn chạy dev & build release
 ```
 
-> Hồ sơ lịch sử chuyển đổi cấu trúc M1/M2 từ 1 crate sang 2 crate được lưu tại [`docs/archive/migrations/2026-11-07-m1-m2-module-map.md`](../archive/migrations/2026-11-07-m1-m2-module-map.md) và [`docs/verification/2026-11-07-layout-migration.md`](../verification/2026-11-07-layout-migration.md).
+> Hồ sơ lịch sử chuyển đổi cấu trúc M1/M2 từ 1 crate sang 2 crate (`2026-11-07-m1-m2-module-map.md` và `2026-11-07-layout-migration.md`) được lưu giữ trong Git history.

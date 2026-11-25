@@ -3,7 +3,7 @@
 - **State:** **G2 AGREED — OWNER-DIRECT APPROVAL, 2026-11-10**. This is a design decision; G4/G5 are not complete.
 - **Scope:** M3-P07/P08/P16 only, across CNT-01/02/04/05 and SITE-02; M3 remains PARTIAL.
 - **Authority:** the owner explicitly agreed to Harbor's integrated G2 proposal in Chat On Steroids, 2026-11-10, and waived the **formal GitHub review for this G2 decision only**. There was **no Atlas/Nova review**, recorded independent consensus or GitHub review. No immutable chat URL is available; do not invent one.
-- **Sources:** [Harbor G2 v0.2 proposal](../../.agents/research/m3-post-page-integrated-g2-g3-proposal.md), [PR #21](https://github.com/thientran2359/opendash-cms/pull/21), [PRD](../product/PRODUCT_REQUIREMENTS.md), [M3 plan](../archive/plans/milestones/M3/TASK_PLAN.md).
+- **Sources:** `Harbor G2 v0.2 proposal` (Git history), [PR #21](https://github.com/thientran2359/opendash-cms/pull/21), [PRD](../product/PRODUCT_REQUIREMENTS.md), `M3 TASK_PLAN` (Git history).
 - **Code baseline checked:** `main@f72dc69ca4c6303f289559308257e18f7d584ff1`. M3.1–M3.6 evidence is historical and scoped to its own SHA/OS; no new SQLx migration, HTTP regression or Windows G5 has run for this decision.
 - **Governance exception:** narrowly replaces the formal GitHub technical-review/independent decision requirement of [ADR-0003](ADR-0003-agent-consensus-governance.md) for **this owner-approved G2**. It does **not** waive security/data blockers, CI, branch protection, implementation review, individual G3 Project Ready gates or G5. ADR-0003 itself remains unchanged.
 
@@ -43,7 +43,7 @@
 
 ## Gate handoff and required tests
 
-The [five G3 packages](../archive/plans/milestones/M3/slices/2026-11-10-post-page-publication-g3.md) remain **DRAFT**, not GitHub Issues/Project Ready. Coordinator assigns actual task IDs, exact file ownership, assignee and independent implementation reviewer, pinned source/base SHAs and Project #3 status before pickup.
+The `five G3 packages` (Git history) remain **DRAFT**, not GitHub Issues/Project Ready. Coordinator assigns actual task IDs, exact file ownership, assignee and independent implementation reviewer, pinned source/base SHAs and Project #3 status before pickup.
 
 **Hard acceptance:** fresh/legacy/collision copies and atomic fail-closed migration; new built-ins draft; legacy Save-public and Builder `/` unchanged; archive filter before pagination; draft single and draft-only `image/gallery` public media `404`; shared referenced media `200`; publish/unpublish ETag CAS and restart; `401/403/400/404/412` and CSRF/Origin; authenticated preview with no-store/CSP/XSS protection; Windows and macOS evidence separately. Stop-and-Propose on unsafe migration, unprovable interim deny-all, changed ACL or any data/security blocker.
 

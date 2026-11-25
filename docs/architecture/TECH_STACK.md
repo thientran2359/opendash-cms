@@ -17,5 +17,5 @@ Stack kỹ thuật của OpenDash được chốt và pin cứng phiên bản tr
 
 ## Ghi chú lịch sử đánh giá
 
-- Bản thử nghiệm Python ban đầu ở [`cms/spikes/stack-v1`](../../cms/spikes/README.md) sử dụng Wasmtime 50.0.1 qua binding Python để chứng minh luồng fuel/memory trước khi chốt **Wasmi (`=2.0.0`)** thuần Rust.
-- Các quy trình phản biện và kiểm chứng bản nhập M1/M2 được lưu tại [`docs/verification/2026-11-07-m1-m2-import.md`](../verification/2026-11-07-m1-m2-import.md) và [`docs/verification/2026-11-07-m2-5-core-kernel.md`](../verification/2026-11-07-m2-5-core-kernel.md).
+- Bản thử nghiệm Python ban đầu (`cms/spikes/stack-v1`, xem Git history) sử dụng Wasmtime 50.0.1 qua binding Python để chứng minh luồng fuel/memory trước khi chốt **Wasmi (`=2.0.0`)** thuần Rust.
+- Các quy trình phản biện và kiểm chứng bản nhập M1/M2 ban đầu (`2026-11-07-m1-m2-import.md` và `2026-11-07-m2-5-core-kernel.md`) được lưu giữ trong Git history.

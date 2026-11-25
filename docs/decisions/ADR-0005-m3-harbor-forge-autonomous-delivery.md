@@ -5,7 +5,7 @@
 - **Trạng thái:** **AGREED — owner direct, 2026-11-11**, áp dụng sau khi tài liệu này merge vào `main`.
 - **Phạm vi:** chỉ **M3 — Core CMS & WordPress-like Admin** và các PR/tác vụ M3 phát hành sau quyết định này; không sửa hồi tố hồ sơ, không ủy quyền thay đổi các dự án/phase khác.
 - **Nguồn:** owner trực tiếp yêu cầu Harbor (CoS macOS) và Forge (CoS Windows) chọn và triển khai **toàn bộ M3 từng task từ đầu đến cuối**, **không gọi thêm agent khác review**, đồng thời đồng ý quy trình Harbor đề xuất: agent tự lập G2/G3 phù hợp, triển khai, kiểm thử, tạo PR và **tự merge khi gate PASS**. Xác nhận trong Chat On Steroids ngày 2026-11-11; không tạo URL chat không tồn tại.
-- **Baseline:** `main@35fd12f657095602ab43f9a0ca3506d0f97e728c`, [ADR-0004 Post/Page](ADR-0004-m3-post-page-publication-boundary.md), [M3 TASK_PLAN](../archive/plans/milestones/M3/TASK_PLAN.md), [Project #3](https://github.com/users/thientran2359/projects/3). Tác giả ban đầu: **Harbor (CoS macOS)**.
+- **Baseline:** `main@35fd12f657095602ab43f9a0ca3506d0f97e728c`, [ADR-0004 Post/Page](ADR-0004-m3-post-page-publication-boundary.md), `M3 TASK_PLAN` (Git history), [Project #3](https://github.com/users/thientran2359/projects/3). Tác giả ban đầu: **Harbor (CoS macOS)**.
 - **Ngoại lệ:** ghi nhận thay đổi **riêng M3** so với [ADR-0003](ADR-0003-agent-consensus-governance.md) và các quy trình/skill trước đó yêu cầu Atlas/Nova, coordinator/reviewer độc lập và cấm self-merge. Không giả là có peer review. Mọi phạm vi ngoài M3 vẫn theo governance chung.
 
 ## Phân quyền và cách phối hợp
@@ -28,7 +28,7 @@
 
 Khởi đầu song song không trùng file:
 
-- **Harbor:** [M3-S20-T01 — Post/Page publication backend an toàn](../archive/plans/milestones/M3/slices/2026-11-11-m3-autonomous-first-tasks.md) (M3-P07/P08/P16; Rust/SQLite/public routes).
-- **Forge:** [M3-S21-T01 — AdminShell Tailwind](../archive/plans/milestones/M3/slices/2026-11-11-m3-autonomous-first-tasks.md) (M3-P09; Admin frontend; không đổi API/DB).
+- **Harbor:** `M3-S20-T01 — Post/Page publication backend an toàn` (Git history) (M3-P07/P08/P16; Rust/SQLite/public routes).
+- **Forge:** `M3-S21-T01 — AdminShell Tailwind` (Git history) (M3-P09; Admin frontend; không đổi API/DB).
 
 Hai task chỉ thực sự pickup khi đặc tả G3 trên `main`, Issue và **Project #3 Ready** tồn tại; không giả Forge Windows đã nhận việc chỉ vì Issue hoặc label được tạo trên GitHub. Các task M3 tiếp theo được chọn từng task có dependency; đích nghiệm thu M3 vẫn cần P10–P19 và G5 macOS/Windows, không đóng mốc sớm.

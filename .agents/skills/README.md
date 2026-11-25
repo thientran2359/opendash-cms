@@ -17,4 +17,4 @@ OpenDash kết hợp **EGM (Elephant-Goldfish Model)** cho khâu nghiên cứu, 
 4. **`/egm-bootstrap`**: Tạo/cập nhật cây `README.md` cấp thư mục trong `cms/`.
 5. **`/egm-drift-report`**: Đối chiếu định kỳ `docs/` với `cms/` để phát hiện độ lệch.
 
-> Skill tranh luận liên-agent cũ (`discussion-turn-responder`) và các hook/watcher nền đã được lưu trữ tại [`../archive/skills/`](../archive/skills/) vì khâu phản biện thiết kế đã do Goldfish đảm nhiệm. Không tải hoặc chạy các skill trong `archive/`.
+> Skill tranh luận liên-agent cũ (`discussion-turn-responder`) và các hook/watcher nền đã được lưu trữ tại [`../archive/`](../archive/README.md) vì khâu phản biện thiết kế đã do Goldfish đảm nhiệm. Không tải hoặc chạy các skill trong `archive/`.

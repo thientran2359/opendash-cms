@@ -30,7 +30,7 @@ Từ ngày **20/11/2026**, OpenDash áp dụng quy trình **EGM (Elephant soạn
 | **Hợp đồng kỹ thuật (Contracts)** | [`contracts/`](contracts/CORE_FOUNDATION.md) — [Core Foundation](contracts/CORE_FOUNDATION.md) · [Plugin ABI](contracts/PLUGIN_ABI.md) · [Writer Inventory](contracts/M8_WRITER_INVENTORY.md) · [M5](contracts/M5_THEME_TEMPLATES.md) · [M6](contracts/M6_PLUGIN_EXTENSIONS.md) · [M7](contracts/M7_SITE_FEATURES.md) · [M8](contracts/M8_OPERATIONS_RELEASE.md) · [Admin Nav & Single Edit](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) · [Admin Review 2026-11](contracts/ADMIN_REVIEW_2026_11.md) · [Content Foundation 2026-11](contracts/CONTENT_FOUNDATION_2026_11.md) | Hợp đồng kỹ thuật và bất biến hệ thống; dùng làm `GoldfishContext` khi review spec và kiểm tra drift |
 | **Quyết định kiến trúc (ADR)** | [`decisions/`](decisions/ADR-0001-workspace-layout.md) (`ADR-0001` đến `ADR-0019`) | Hồ sơ các quyết định kiến trúc đã chốt qua các giai đoạn phát triển |
 | **Bằng chứng thực thi** | [`verification/`](verification/README.md) | Kết quả build, test, smoke/E2E và audit thực chạy kèm SHA và môi trường |
-| **Hồ sơ lịch sử** | [`archive/`](archive/README.md) (`archive/plans/`, `archive/discussions/`, `archive/migrations/`, [`research/`](research/README.md)) | Lưu trữ toàn bộ kế hoạch G0–G5 cũ, thảo luận cũ và tài liệu nghiên cứu ban đầu để truy vết lịch sử |
+| **Hồ sơ lịch sử** | [`archive/`](archive/README.md) · [`research/`](research/README.md) | Trỏ tới lịch sử kế hoạch G0–G5 trong Git, ghi chú CoS và các báo cáo `/egm-drift-report` |
 
 Sau khi cập nhật tài liệu trong `docs/`, luôn chạy:
 

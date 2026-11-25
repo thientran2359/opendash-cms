@@ -1,6 +1,6 @@
 # Sample Theme v3 (`sample-theme-v3`)
 
-Theme mẫu v3 tối giản minh họa [Đặc tả Theme Format v3](../../../../docs/designs/theme-format-and-template-resolver.md), các C-SEC helpers trong [Theme Ergonomics](../../../../docs/designs/theme-ergonomics-and-csec-helpers.md), và tích hợp write-time projection `entry.ext["rust-seo-plugin"]` từ [rust-seo-plugin](../../plugins/rust-seo-plugin/README.md). Thư mục [`sample-theme`](../sample-theme/README.md) cũ được giữ nguyên làm tài liệu v2 tham khảo.
+Theme mẫu v3 tối giản minh họa [Đặc tả Theme Format v3](../../../../docs/designs/theme-format-and-template-resolver.md), các C-SEC helpers trong [Theme Ergonomics](../../../../docs/designs/theme-ergonomics-and-csec-helpers.md), và tích hợp write-time projection `entry.ext["rust-seo-plugin"]` từ [rust-seo-plugin](../../plugins/rust-seo-plugin/README.md).
 
 ## Cấu trúc gói Theme v3
 

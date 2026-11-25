@@ -4,7 +4,7 @@
 
 ## Context
 
-Owner requested full M8 G1→G2→G3 this chat while Nova owns M7. [Source inventory](../../.agents/research/2026-11-14-m8-operations-release-g1.md) uses main `8c5b90072c231c1f0813eb593d7be4447fb0a11d`, migration0031. [PRD](../product/PRODUCT_REQUIREMENTS.md) and [M8 candidates](../archive/plans/milestones/M8/TASK_PLAN.md) require media lifecycle, manual backup/restore, Linux and V1 acceptance. M7 Windows acceptance exists; macOS/full closure remains deferred by ADR-0014.
+Owner requested full M8 G1→G2→G3 this chat while Nova owns M7. `2026-11-14-m8-operations-release-g1.md` (Git history) uses main `8c5b90072c231c1f0813eb593d7be4447fb0a11d`, migration0031. [PRD](../product/PRODUCT_REQUIREMENTS.md) and `M8 TASK_PLAN` (Git history) require media lifecycle, manual backup/restore, Linux and V1 acceptance. M7 Windows acceptance exists; macOS/full closure remains deferred by ADR-0014.
 
 ## Final Decision
 
@@ -27,6 +27,6 @@ Live file copies or DB-only backup can lose references. Hot replacement across a
 
 ## Contract and authority
 
-Normative [M8 contract](../contracts/M8_OPERATIONS_RELEASE.md) and [full G3](../archive/plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md). Atlas records this Final Decision under [ADR-0010](ADR-0010-agent-project-and-merge-authority.md); source/standards evidence and exact reviewed head/checks belong the PR. No Nova branch/file reassignment, active Issue pickup, scheduler, runtime changes or product release in this planning delivery.
+Normative [M8 contract](../contracts/M8_OPERATIONS_RELEASE.md) and `M8 full G3` (Git history). Atlas records this Final Decision under [ADR-0010](ADR-0010-agent-project-and-merge-authority.md); source/standards evidence and exact reviewed head/checks belong the PR. No Nova branch/file reassignment, active Issue pickup, scheduler, runtime changes or product release in this planning delivery.
 
 M8 implementation pickup waits merged immutable G3, actual M7 Windows acceptance (#213), ownership and Project Ready, not a fabricated full M7 closure. Final M8/V1 acceptance waits M5#157/M6#188/M7#214/#215 full required native evidence. Linux absence/performance failure/secret recovery/security findings block the corresponding acceptance. Owner chooses project license before public release; agents do not fill that product decision with a guess.

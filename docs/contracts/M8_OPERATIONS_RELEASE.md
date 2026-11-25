@@ -11,7 +11,7 @@
 > 14/11, không phải kết luận hiện trạng implementation; tra Issue/Project và evidence.
 
 **Owner:** Atlas · **Date:** 2026-11-14 · **G2:** AGREED on merge with [ADR-0015](../decisions/ADR-0015-m8-operations-release.md). **Implementation:** NOT_STARTED. **Verification:** NOT_RUN.
-Baseline `8c5b90072c231c1f0813eb593d7be4447fb0a11d`, migration0031. [G1](../../.agents/research/2026-11-14-m8-operations-release-g1.md) · [PRD](../product/PRODUCT_REQUIREMENTS.md) · [G3](../archive/plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md). New interfaces below are future implementation contracts, not current functionality.
+Baseline `8c5b90072c231c1f0813eb593d7be4447fb0a11d`, migration0031. `G1` (`2026-11-14-m8-operations-release-g1.md`, Git history) · [PRD](../product/PRODUCT_REQUIREMENTS.md) · `G3` (`2026-11-14-m8-operations-release-g3.md`, Git history). New interfaces below are future implementation contracts, not current functionality.
 
 ## 1. Scope, versions and gates
 

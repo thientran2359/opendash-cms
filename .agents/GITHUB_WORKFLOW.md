@@ -139,7 +139,7 @@ và [Research/Design](../.github/ISSUE_TEMPLATE/research-design.yml).
   `Roadmap`, `My items` vẫn được giữ. View `Team items` hiển thị
   `Labels` và `Milestone` bên cạnh Status/PR để phân biệt module và mốc.
 - **27 label `module:*`:** theo toàn bộ ID trong
-  [Module Catalog](../docs/archive/plans/MODULE_CATALOG_V1.md), chia màu theo nhóm
+  `Module Catalog` (đã dọn về Git history), chia màu theo nhóm
   FND/CNT/BLD/THM/PLG/SITE/OPS. Các nhóm khác:
   `type:implementation|research|design|verification|process`,
   `agent:atlas|nova|forge|harbor|orion`, `area:agent-workflow`.
@@ -202,7 +202,7 @@ Active trên default branch: yêu cầu PR, cấm xóa và force-push, không b�
 buộc số review của tài khoản khác. Workflow
 `.github/workflows/governance.yml` kiểm tra tài liệu/task handoff trên Ubuntu
 và Windows, read-only, cho mọi PR vào `main` và push `main`. Xem
-[báo cáo G5](../docs/verification/2026-11-09-github-governance-g5.md): chỉ
+báo cáo G5 (`2026-11-09-github-governance-g5.md`, Git history): chỉ
 bật required checks sau khi GitHub phát sinh đúng tên check và có PASS.
 Hai required checks hiện đã bật sau khi [run đầu tiên của PR #3](https://github.com/thientran2359/opendash-cms/actions/runs/42572931323)
 PASS trên cả Ubuntu và Windows: `governance-ubuntu-latest` và

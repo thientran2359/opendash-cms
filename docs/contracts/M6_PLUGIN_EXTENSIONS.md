@@ -81,5 +81,5 @@
 [content foundation C4](CONTENT_FOUNDATION_2026_11.md) extend the D08 category/tag-only
 declaration boundary with custom taxonomy definitions and bounded rewrite defaults.
 This is the forward design contract; implementation/G5 are tracked separately in
-[M6 G3](../archive/plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md).
+`M6 G3` (`2026-11-18-content-foundation-g3.md`, Git history).
 Historical category/tag verification does not prove the extended bridge.
