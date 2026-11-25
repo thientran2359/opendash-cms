@@ -1,5 +1,5 @@
 import { formatNumber } from '../../i18n/format.ts';
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { getEffectiveBcp47, tStatic, useI18n } from '../../i18n/index.tsx';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { deleteTaxonomyTerm, getTaxonomyDefinition, listAllTaxonomyTerms,
@@ -23,7 +23,8 @@ interface TaxonomyPageProps {
 const PAGE_SIZE = 20;
 
 function orderedTerms(hierarchical: boolean, terms: TaxonomyTerm[]): Array<{ term: TaxonomyTerm; depth: number }> {
-  const sort = (a: TaxonomyTerm, b: TaxonomyTerm) => a.name.localeCompare(b.name, 'vi') || a.id - b.id;
+  const bcp47 = getEffectiveBcp47();
+  const sort = (a: TaxonomyTerm, b: TaxonomyTerm) => a.name.localeCompare(b.name, bcp47) || a.id - b.id;
   if (!hierarchical) return [...terms].sort(sort).map(term => ({ term, depth: 0 }));
   const ids = new Set(terms.map(term => term.id));
   const children = new Map<number | null, TaxonomyTerm[]>();
@@ -106,8 +107,9 @@ export function TaxonomyPage({
   }, [refresh]);
 
   const ordered = useMemo(() => orderedTerms(Boolean(definition?.hierarchical), terms), [definition?.hierarchical, terms]);
-  const query = search.trim().toLocaleLowerCase('vi');
-  const filtered = ordered.filter(({term}) => !query || term.name.toLocaleLowerCase('vi').includes(query)
+  const bcp47 = getEffectiveBcp47();
+  const query = search.trim().toLocaleLowerCase(bcp47);
+  const filtered = ordered.filter(({term}) => !query || term.name.toLocaleLowerCase(bcp47).includes(query)
     || term.slug.includes(query) || String(term.id) === query);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pages - 1);
@@ -207,13 +209,13 @@ export function TaxonomyPage({
                 </h3>
                 <p className="break-all text-xs text-zinc-500">/{term.slug} · ID #{term.id} · v{term.version}</p>
                 {definition?.hierarchical && <p className="text-xs text-zinc-500">
-                  {term.parent_id === null ? tStatic("feature.taxonomy.taxonomypage.root_category") : `Cha: ${byId.get(term.parent_id)?.name ?? `#${term.parent_id}`}`} {tStatic("feature.taxonomy.taxonomypage.level")}{' '}{depth + 1}
+                  {term.parent_id === null ? tStatic("feature.taxonomy.taxonomypage.root_category") : tStatic("feature.taxonomy.taxonomypage.parent_prefix", { parent: byId.get(term.parent_id)?.name ?? `#${term.parent_id}` })} {tStatic("feature.taxonomy.taxonomypage.level")}{' '}{depth + 1}
                 </p>}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 <AdminButton variant="secondary" size="sm" disabled={busy}
                   aria-label={tStatic("feature.taxonomy.taxonomypage.open_editor_for_value_id_value", { value1: term.name, value2: term.id })}
-                  onClick={() => onNavigateHash(editHash(term.id))}>{admin ? tStatic("multilingual.edit") : 'Extensions'}</AdminButton>
+                  onClick={() => onNavigateHash(editHash(term.id))}>{admin ? tStatic("multilingual.edit") : tStatic("feature.taxonomy.taxonomypage.extensions")}</AdminButton>
                 {admin && <AdminButton variant="danger" size="sm" disabled={busy}
                   aria-label={tStatic("feature.content.entrylistpage.delete_value_id_value", { value1: term.name, value2: term.id })}
                   onClick={() => void remove(term)}>{tStatic("multilingual.delete")}</AdminButton>}

@@ -293,7 +293,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                     <span>{tStatic("feature.editor.panelregionrenderer.custom_path_custom_path")}</span>
                     <input
                       type="text"
-                      placeholder="/duong-dan-tuy-chinh"
+                      placeholder={tStatic("feature.editor.panelregionrenderer.custom_path_placeholder")}
                       className="h-8 w-full rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
                       value={customPath}
                       onChange={e => onCustomPathChange(e.target.value)}

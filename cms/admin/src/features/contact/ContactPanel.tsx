@@ -34,7 +34,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
   const { t: translate } = useI18n();
   const [forms, setForms] = useState<ContactFormRecord[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [slug, setSlug] = useState('lien-he');
+  const [slug, setSlug] = useState(() => tStatic('feature.contact.contactpanel.default_slug'));
   const [title, setTitle] = useState(tStatic('shell.contact'));
   const [status, setStatus] = useState<'active' | 'disabled'>('active');
   const [fields, setFields] = useState<ContactFormField[]>(defaultFields);
@@ -65,7 +65,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
   const selectForm = (form: ContactFormRecord | null) => {
     if (!form) {
       setSelectedId(null);
-      setSlug('lien-he');
+      setSlug(tStatic('feature.contact.contactpanel.default_slug'));
       setTitle(tStatic('shell.contact'));
       setStatus('active');
       setFields(defaultFields());

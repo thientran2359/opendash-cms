@@ -39,7 +39,7 @@ export function BuilderContactFormFields({ element, onChange, onError }: Props) 
           value={String(formId)}
           onChange={(e) => onChange(element.id, 'form_id', Number(e.target.value))}
         >
-          {forms.length === 0 && <option value={String(formId)}>Form #{formId}</option>}
+          {forms.length === 0 && <option value={String(formId)}>{t('builder.builder_contact_form_fields.form_fallback', { id: formId })}</option>}
           {forms.map((f) => (
             <option key={f.id} value={String(f.id)}>
               {f.title} (#{f.id} · {f.status})

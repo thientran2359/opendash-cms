@@ -412,7 +412,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
             </label>
             <label className="od-posts-field">
               <span>{tStatic("feature.posts.postpageworkspace.permalink_slug")}{' '}<span aria-hidden="true">*</span></span>
-              <input type="text" required maxLength={64} value={editor.slug} onChange={event => setEditor(previous => previous && { ...previous, slug: event.target.value })} disabled={busy} placeholder="duong-dan-noi-dung" pattern="[a-z](?:[a-z0-9]|-){0,63}" title={tStatic("feature.posts.postpageworkspace.start_with_a_lowercase_letter_a_z_followed_by")} />
+              <input type="text" required maxLength={64} value={editor.slug} onChange={event => setEditor(previous => previous && { ...previous, slug: event.target.value })} disabled={busy} placeholder={tStatic("feature.posts.postpageworkspace.slug_placeholder")} pattern="[a-z](?:[a-z0-9]|-){0,63}" title={tStatic("feature.posts.postpageworkspace.start_with_a_lowercase_letter_a_z_followed_by")} />
               <small>{tStatic("feature.posts.postpageworkspace.use_lowercase_ascii_letters_digits_and_hyphens_the_slug")}{' '}{label.toLowerCase()}.</small>
             </label>
             <label className="od-posts-field">

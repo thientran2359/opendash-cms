@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { getEffectiveBcp47, tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { createTaxonomyTerm, getTaxonomyTerm, getEffectiveTermConfig, getTaxonomyDefinition,
@@ -80,7 +80,7 @@ function allowedParents(terms: TaxonomyTerm[], targetId: number | null): Taxonom
       current = current.parent_id === null ? undefined : byId.get(current.parent_id);
     }
     return true;
-  }).sort((a,b) => a.name.localeCompare(b.name,'vi') || a.id-b.id);
+  }).sort((a,b) => a.name.localeCompare(b.name, getEffectiveBcp47()) || a.id-b.id);
 }
 
 /** A full-route editor; extension mount slots intentionally contain no fake fields. */
