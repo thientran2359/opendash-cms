@@ -402,6 +402,7 @@ pub(crate) async fn render_not_found_response_for_locale(
         &view,
         &["od-route-not-found"],
     )?;
+    let html = content_render::finalize_document_icons(html, &budget.render_budget.icon_nonces)?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
         html,
         body.has_active_contact_form || shell_has_form,
@@ -648,12 +649,15 @@ pub(crate) async fn render_canonical_archive(
     .await?;
     let type_class = format!("od-type-{type_key}");
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::compose_document_with_seo_with_body_classes(
-            header.as_deref(),
-            &body.html,
-            footer.as_deref(),
-            &seo_view,
-            &["od-route-archive", &type_class],
+        content_render::finalize_document_icons(
+            content_render::compose_document_with_seo_with_body_classes(
+                header.as_deref(),
+                &body.html,
+                footer.as_deref(),
+                &seo_view,
+                &["od-route-archive", &type_class],
+            )?,
+            &budget.render_budget.icon_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,
     ))
@@ -943,12 +947,15 @@ async fn render_entry_response_with_cache(
         &["od-route-single", &type_class]
     };
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::compose_document_with_seo_with_body_classes(
-            header.as_deref(),
-            &body.html,
-            footer.as_deref(),
-            &seo_view,
-            body_classes,
+        content_render::finalize_document_icons(
+            content_render::compose_document_with_seo_with_body_classes(
+                header.as_deref(),
+                &body.html,
+                footer.as_deref(),
+                &seo_view,
+                body_classes,
+            )?,
+            &budget.render_budget.icon_nonces,
         )?,
         body.has_active_contact_form || entry_has_form || shell_has_form,
     ))
@@ -1268,12 +1275,15 @@ pub(crate) async fn render_canonical_taxonomy(
     .await?;
     let tax_class = format!("od-tax-{}", schema.key);
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::compose_document_with_seo_with_body_classes(
-            header.as_deref(),
-            &body.html,
-            footer.as_deref(),
-            &seo_view,
-            &["od-route-taxonomy", &tax_class],
+        content_render::finalize_document_icons(
+            content_render::compose_document_with_seo_with_body_classes(
+                header.as_deref(),
+                &body.html,
+                footer.as_deref(),
+                &seo_view,
+                &["od-route-taxonomy", &tax_class],
+            )?,
+            &budget.render_budget.icon_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,
     ))

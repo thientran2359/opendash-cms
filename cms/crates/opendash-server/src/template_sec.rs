@@ -15,6 +15,8 @@ use minijinja::{
 };
 
 pub const MAX_RENDERED_HTML_BYTES: usize = 512 * 1024;
+pub const ICON_NONCE_PREFIX: &str = "OD_ICON_";
+pub const MAX_ICONS_PER_REQUEST: usize = 128;
 pub const TEMPLATE_FUEL_LIMIT: u64 = 10_000;
 pub const TEMPLATE_RECURSION_LIMIT: usize = 16;
 const MAX_COMPOSITION_PART_DEPTH: usize = 3;
@@ -222,7 +224,26 @@ impl CompiledCsecComposition {
         fuel_remaining: &mut u64,
         fmt_cfg: &RenderFormattingConfig,
     ) -> Result<String, &'static str> {
-        if *fuel_remaining == 0 || *fuel_remaining > TEMPLATE_FUEL_LIMIT {
+        let mut budget = RenderBudget::new();
+        budget.fuel_remaining = *fuel_remaining;
+        let result = self.render_with_config_and_budget(
+            context,
+            sanitized_content_html,
+            &mut budget,
+            fmt_cfg,
+        );
+        *fuel_remaining = budget.fuel_remaining;
+        result
+    }
+
+    pub(crate) fn render_with_config_and_budget(
+        &self,
+        context: Value,
+        sanitized_content_html: Option<&str>,
+        budget: &mut RenderBudget,
+        fmt_cfg: &RenderFormattingConfig,
+    ) -> Result<String, &'static str> {
+        if budget.fuel_remaining == 0 || budget.fuel_remaining > TEMPLATE_FUEL_LIMIT {
             return Err("Fuel composition không hợp lệ hoặc đã hết.");
         }
         let nonce = if self.content_count == 1 {
@@ -244,39 +265,62 @@ impl CompiledCsecComposition {
             self.source.clone()
         };
         let mut env = restricted_environment_with_config(fmt_cfg);
-        env.set_fuel(Some(*fuel_remaining));
+        let local = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        install_icon_function(
+            &mut env,
+            &budget.icon_nonces,
+            &local,
+            budget.html_bytes_used,
+            &overflowed,
+        );
+        env.set_fuel(Some(budget.fuel_remaining));
         env.add_template(&self.name, &source)
             .map_err(|_| "Không thể biên dịch theme composition.")?;
         let captured = env
             .get_template(&self.name)
             .map_err(|_| "Không tìm thấy theme composition.")?
             .render_captured(context)
-            .map_err(|_| "Lỗi thực thi theme composition (fuel/recursion/undefined).")?;
+            .map_err(|_| {
+                if overflowed.load(std::sync::atomic::Ordering::Relaxed) {
+                    budget.html_bytes_used = MAX_RENDERED_HTML_BYTES + 1;
+                }
+                "Lỗi thực thi theme composition (fuel/recursion/undefined)."
+            })?;
         let (consumed, remaining) = captured
             .state()
             .fuel_levels()
             .ok_or("Thiếu bộ theo dõi fuel composition.")?;
-        if fuel_remaining.checked_sub(consumed) != Some(remaining) {
+        if budget.fuel_remaining.checked_sub(consumed) != Some(remaining) {
             return Err("Fuel composition không hợp lệ.");
         }
-        *fuel_remaining = remaining;
+        budget.fuel_remaining = remaining;
         let shell = captured.output();
         if shell.len() > MAX_RENDERED_HTML_BYTES {
             return Err("HTML render vượt quá giới hạn 512 KiB.");
         }
         validate_html_and_css_context(&shell, true)?;
-        let Some(nonce) = nonce else {
-            return Ok(shell.to_owned());
+        let out = if let Some(nonce) = nonce {
+            if shell.matches(&nonce).count() != 1 {
+                return Err("Nonce nội dung của theme không xuất hiện đúng một lần.");
+            }
+            let content = sanitized_content_html.unwrap_or("");
+            let final_len = shell.len() - nonce.len() + content.len();
+            if final_len > MAX_RENDERED_HTML_BYTES {
+                return Err("HTML sau khi chèn nội dung vượt quá giới hạn 512 KiB.");
+            }
+            shell.replacen(&nonce, content, 1)
+        } else {
+            shell.to_owned()
         };
-        if shell.matches(&nonce).count() != 1 {
-            return Err("Nonce nội dung của theme không xuất hiện đúng một lần.");
-        }
-        let content = sanitized_content_html.unwrap_or("");
-        let final_len = shell.len() - nonce.len() + content.len();
-        if final_len > MAX_RENDERED_HTML_BYTES {
-            return Err("HTML sau khi chèn nội dung vượt quá giới hạn 512 KiB.");
-        }
-        Ok(shell.replacen(&nonce, content, 1))
+        let additions = local.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let icon_growth: usize = additions
+            .iter()
+            .map(|(n, s)| s.len().saturating_sub(n.len()))
+            .sum();
+        budget.charge_html_bytes(icon_growth)?;
+        budget.icon_nonces.extend(additions);
+        Ok(out)
     }
 }
 
@@ -290,6 +334,135 @@ const PREVIEW_PART_NONCE_PREFIX: &str = "OD_PREVIEW_PART_";
 // Reserved only by the block RichText post-render nonce replacer.
 pub const BLOCK_RICHTEXT_NONCE_PREFIX: &str = "OD_RICHTEXT_";
 
+#[derive(Debug, Clone, Default)]
+pub struct IconNonceTable {
+    entries: Vec<(String, String)>,
+}
+
+impl IconNonceTable {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn extend(&mut self, entries: Vec<(String, String)>) {
+        self.entries.extend(entries);
+    }
+
+    /// Substitute server-generated SVG only after document normalization. Any
+    /// nonce that disappeared during slot fallback is intentionally ignored.
+    pub fn substitute_into_document(&self, html: String) -> Result<String, &'static str> {
+        if self.entries.is_empty() {
+            return Ok(html);
+        }
+        let mut replacements = Vec::new();
+        for (nonce, svg) in &self.entries {
+            let mut matches = html.match_indices(nonce);
+            if let Some((offset, _)) = matches.next() {
+                if matches.next().is_some() {
+                    return Err("Nonce icon xuất hiện nhiều hơn một lần.");
+                }
+                replacements.push((offset, nonce.as_str(), svg.as_str()));
+            }
+        }
+        replacements.sort_unstable_by_key(|(offset, _, _)| *offset);
+        let mut out = String::with_capacity(html.len());
+        let mut state = HtmlScanState::Body;
+        let mut cursor = 0;
+        let mut in_diagnostic = false;
+        let mut diagnostic_pre = false;
+        for (offset, nonce, svg) in replacements {
+            let before = html
+                .get(cursor..offset)
+                .ok_or("Vị trí nonce icon không hợp lệ.")?;
+            for (index, byte) in before.bytes().enumerate() {
+                // The normalizer's diagnostic markup is server-owned. A nonce
+                // printed as escaped diagnostic text must never become SVG.
+                let suffix = &before.as_bytes()[index..];
+                if state == HtmlScanState::Body && suffix.starts_with(b"<main data-doc-diagnostic=")
+                {
+                    in_diagnostic = true;
+                } else if state == HtmlScanState::Body && suffix.starts_with(b"</main>") {
+                    in_diagnostic = false;
+                    diagnostic_pre = false;
+                } else if state == HtmlScanState::Body
+                    && in_diagnostic
+                    && suffix.starts_with(b"<pre")
+                {
+                    diagnostic_pre = true;
+                } else if state == HtmlScanState::Body && suffix.starts_with(b"</pre>") {
+                    diagnostic_pre = false;
+                }
+                state = state.consume(byte);
+            }
+            if state != HtmlScanState::Body || diagnostic_pre || in_diagnostic {
+                return Err("Nonce icon không nằm trong thân HTML an toàn.");
+            }
+            out.push_str(before);
+            out.push_str(svg);
+            cursor = offset + nonce.len();
+            if out.len() > 4 * 1024 * 1024 {
+                return Err("Document chứa icon vượt giới hạn HTML.");
+            }
+        }
+        out.push_str(&html[cursor..]);
+        if out.len() > 4 * 1024 * 1024 {
+            return Err("Document chứa icon vượt giới hạn HTML.");
+        }
+        Ok(out)
+    }
+}
+
+fn new_icon_nonce() -> Result<String, &'static str> {
+    let mut bytes = [0_u8; 16];
+    OsRng
+        .try_fill_bytes(&mut bytes)
+        .map_err(|_| "Không tạo được nonce icon.")?;
+    let mut nonce = ICON_NONCE_PREFIX.to_owned();
+    for byte in bytes {
+        use std::fmt::Write;
+        write!(&mut nonce, "{byte:02x}").map_err(|_| "Không tạo được nonce icon.")?;
+    }
+    Ok(nonce)
+}
+
+fn install_icon_function(
+    env: &mut Environment<'_>,
+    existing: &IconNonceTable,
+    local: &std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>,
+    html_bytes_used: usize,
+    overflowed: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let existing_count = existing.entries.len();
+    let local = local.clone();
+    let overflowed = overflowed.clone();
+    env.add_function(
+        "od_icon",
+        move |name: &str, class: Option<&str>| -> Result<String, minijinja::Error> {
+            let svg = opendash_core::icons::render_core_icon_svg(name, class)
+                .ok_or_else(|| filter_invalid_op("od_icon: tên icon hoặc class không hợp lệ"))?;
+            let mut table = local.lock().unwrap_or_else(|e| e.into_inner());
+            if existing_count.saturating_add(table.len()) >= MAX_ICONS_PER_REQUEST {
+                return Err(filter_invalid_op("od_icon vượt quá 128 icon/request"));
+            }
+            let nonce = new_icon_nonce().map_err(filter_invalid_op)?;
+            let local_growth: usize = table
+                .iter()
+                .map(|(n, s)| s.len().saturating_sub(n.len()))
+                .sum();
+            if html_bytes_used
+                .saturating_add(local_growth)
+                .saturating_add(svg.len().saturating_sub(nonce.len()))
+                > MAX_RENDERED_HTML_BYTES
+            {
+                overflowed.store(true, std::sync::atomic::Ordering::Relaxed);
+                return Err(filter_invalid_op("od_icon vượt giới hạn HTML 512 KiB"));
+            }
+            table.push((nonce.clone(), svg));
+            Ok(nonce)
+        },
+    );
+}
+
 // Per-node fuel cap within the shared 10,000 request RenderBudget.
 pub const MAX_BLOCK_FUEL_PER_NODE: u64 = 2_000;
 
@@ -298,6 +471,7 @@ pub struct RenderBudget {
     pub fuel_remaining: u64,
     pub html_bytes_used: usize,
     pub locale: String,
+    pub icon_nonces: IconNonceTable,
 }
 
 impl Default for RenderBudget {
@@ -306,6 +480,7 @@ impl Default for RenderBudget {
             fuel_remaining: TEMPLATE_FUEL_LIMIT,
             html_bytes_used: 0,
             locale: "vi".to_owned(),
+            icon_nonces: IconNonceTable::default(),
         }
     }
 }
@@ -333,6 +508,7 @@ pub(crate) struct PreviewCompositionBudget {
     pub html_bytes_used: usize,
     pub expansions: usize,
     pub stack: Vec<String>,
+    pub icon_nonces: IconNonceTable,
 }
 
 impl Default for PreviewCompositionBudget {
@@ -342,6 +518,7 @@ impl Default for PreviewCompositionBudget {
             html_bytes_used: 0,
             expansions: 0,
             stack: Vec::new(),
+            icon_nonces: IconNonceTable::default(),
         }
     }
 }
@@ -357,6 +534,7 @@ impl PreviewCompositionBudget {
             html_bytes_used: rb.html_bytes_used,
             expansions: 0,
             stack: Vec::new(),
+            icon_nonces: rb.icon_nonces,
         }
     }
 
@@ -365,12 +543,14 @@ impl PreviewCompositionBudget {
             fuel_remaining: self.fuel_remaining,
             html_bytes_used: self.html_bytes_used,
             locale: "vi".to_owned(),
+            icon_nonces: self.icon_nonces.clone(),
         }
     }
 
     pub(crate) fn sync_from_render_budget(&mut self, rb: &RenderBudget) {
         self.fuel_remaining = rb.fuel_remaining;
         self.html_bytes_used = rb.html_bytes_used;
+        self.icon_nonces = rb.icon_nonces.clone();
     }
 }
 
@@ -425,7 +605,7 @@ fn preview_composition_sites(
     if source.len() > MAX_RENDERED_HTML_BYTES {
         return Err("Template hoặc part vượt giới hạn 512 KiB.");
     }
-    if source.contains(PREVIEW_PART_NONCE_PREFIX) {
+    if source.contains(PREVIEW_PART_NONCE_PREFIX) || source.contains(ICON_NONCE_PREFIX) {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
     composition_sites(name, source, true, policy)
@@ -503,6 +683,15 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
     // cannot detect markup or syntax introduced by concatenation.
     validate_template_csec_with_theme_urls(name, &program, policy)?;
     let mut env = restricted_environment_with_config(fmt_cfg);
+    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    install_icon_function(
+        &mut env,
+        &budget.icon_nonces,
+        &local_icons,
+        budget.html_bytes_used,
+        &overflowed,
+    );
     env.set_fuel(Some(budget.fuel_remaining));
     env.add_template(name, &program)
         .map_err(|_| "Không thể biên dịch theme preview.")?;
@@ -510,7 +699,12 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
         .get_template(name)
         .map_err(|_| "Không tìm thấy theme preview.")?
         .render_captured(context)
-        .map_err(|_| "Lỗi thực thi theme preview (fuel/recursion/undefined).")?;
+        .map_err(|_| {
+            if overflowed.load(std::sync::atomic::Ordering::Relaxed) {
+                budget.html_bytes_used = MAX_RENDERED_HTML_BYTES + 1;
+            }
+            "Lỗi thực thi theme preview (fuel/recursion/undefined)."
+        })?;
     let (consumed, remaining) = captured
         .state()
         .fuel_levels()
@@ -528,7 +722,21 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
         return Err("HTML render vượt quá giới hạn 512 KiB.");
     }
     validate_html_and_css_context(shell, true)?;
-    insert_preview_fragments(shell, &compiler.nonces)
+    let out = insert_preview_fragments(shell, &compiler.nonces)?;
+    let additions = local_icons
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let icon_growth: usize = additions
+        .iter()
+        .map(|(n, s)| s.len().saturating_sub(n.len()))
+        .sum();
+    budget.html_bytes_used = budget.html_bytes_used.saturating_add(icon_growth);
+    if budget.html_bytes_used > MAX_RENDERED_HTML_BYTES {
+        return Err("HTML preview chứa icon vượt giới hạn 512 KiB.");
+    }
+    budget.icon_nonces.extend(additions);
+    Ok(out)
 }
 
 struct PreviewFragmentCompiler<'a> {
@@ -1410,10 +1618,13 @@ fn validate_template_csec_with_usage_flags(
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
+    if source.contains(ICON_NONCE_PREFIX) {
+        return Err("Theme HTML chứa marker icon nội bộ bị cấm.");
+    }
     let ast = parse(source, name, SyntaxConfig::default())
         .map_err(|_| "Cú pháp template MiniJinja không hợp lệ.")?;
 
-    validate_stmt(&ast)?;
+    validate_stmt_with_icons(&ast, true, false)?;
     reject_reserved_context_rebinding(&ast)?;
     let is_full_doctype_doc = source
         .trim_start()
@@ -1665,7 +1876,7 @@ fn composition_sites(
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
-    if source.contains(CONTENT_SLOT_TOKEN) {
+    if source.contains(CONTENT_SLOT_TOKEN) || source.contains(ICON_NONCE_PREFIX) {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
     let ast = parse(source, name, SyntaxConfig::default())
@@ -1706,6 +1917,9 @@ fn collect_composition_sites(
             }
         }
         Stmt::EmitExpr(e) => {
+            if parse_od_icon_call(&e.expr)?.is_some() {
+                return Ok(());
+            }
             let Some(call) = parse_composition_call(&e.expr)? else {
                 return Ok(());
             };
@@ -1808,6 +2022,68 @@ fn parse_composition_call(expr: &Expr<'_>) -> Result<Option<CompositionCall>, &'
             Ok(Some(CompositionCall::Part(key.to_owned())))
         }
         _ => Err("C-SEC cấm lời gọi hàm Call ngoài od_part/od_content."),
+    }
+}
+
+fn parse_od_icon_call<'a>(
+    expr: &'a Expr<'_>,
+) -> Result<Option<(&'a str, Option<&'a str>)>, &'static str> {
+    let Expr::Call(call) = expr else {
+        return Ok(None);
+    };
+    let Expr::Var(var) = &call.expr else {
+        return Ok(None);
+    };
+    if var.id != "od_icon" {
+        return Ok(None);
+    }
+    let [
+        minijinja::machinery::ast::CallArg::Pos(Expr::Const(name)),
+        rest @ ..,
+    ] = call.args.as_slice()
+    else {
+        return Err("od_icon() yêu cầu string literal name và class tùy chọn.");
+    };
+    let name = name
+        .value
+        .as_str()
+        .ok_or("od_icon() name phải là string literal.")?;
+    if opendash_core::icons::lookup_core_icon_paths(name).is_none() {
+        return Err("od_icon() tên icon không tồn tại trong core registry.");
+    }
+    let class = match rest {
+        [] => None,
+        [minijinja::machinery::ast::CallArg::Pos(Expr::Const(class))] => {
+            let class = class
+                .value
+                .as_str()
+                .ok_or("od_icon() class phải là string literal.")?;
+            if !opendash_core::icons::valid_icon_class_attr(class) {
+                return Err("od_icon() class không hợp lệ.");
+            }
+            Some(class)
+        }
+        _ => return Err("od_icon() chỉ nhận name và class string literal tùy chọn."),
+    };
+    Ok(Some((name, class)))
+}
+
+fn reject_icons_in_set_block(children: &[Stmt<'_>]) -> Result<(), &'static str> {
+    fn contains_icon(stmt: &Stmt<'_>) -> bool {
+        match stmt {
+            Stmt::EmitExpr(e) => parse_od_icon_call(&e.expr).is_ok_and(|v| v.is_some()),
+            Stmt::IfCond(c) => c.true_body.iter().chain(&c.false_body).any(contains_icon),
+            Stmt::ForLoop(c) => c.body.iter().chain(&c.else_body).any(contains_icon),
+            Stmt::WithBlock(c) => c.body.iter().any(contains_icon),
+            Stmt::SetBlock(c) => c.body.iter().any(contains_icon),
+            Stmt::Template(c) => c.children.iter().any(contains_icon),
+            _ => false,
+        }
+    }
+    if children.iter().any(contains_icon) {
+        Err("C-SEC cấm od_icon() trong set block.")
+    } else {
+        Ok(())
     }
 }
 
@@ -2188,15 +2464,29 @@ pub fn json_context_with_shared_locale(
 }
 
 fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
+    validate_stmt_with_icons(stmt, false, false)
+}
+
+fn validate_stmt_with_icons(
+    stmt: &Stmt<'_>,
+    allow_od_icon: bool,
+    in_set_block: bool,
+) -> Result<(), &'static str> {
     match stmt {
         Stmt::Template(t) => {
             for child in &t.children {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             Ok(())
         }
         Stmt::EmitRaw(_) => Ok(()),
-        Stmt::EmitExpr(e) => validate_expr(&e.expr),
+        Stmt::EmitExpr(e) => {
+            if allow_od_icon && !in_set_block && parse_od_icon_call(&e.expr)?.is_some() {
+                Ok(())
+            } else {
+                validate_expr(&e.expr)
+            }
+        }
         Stmt::ForLoop(f) => {
             validate_expr(&f.target)?;
             validate_expr(&f.iter)?;
@@ -2204,20 +2494,20 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
                 validate_expr(cond)?;
             }
             for child in &f.body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             for child in &f.else_body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             Ok(())
         }
         Stmt::IfCond(i) => {
             validate_expr(&i.expr)?;
             for child in &i.true_body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             for child in &i.false_body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             Ok(())
         }
@@ -2227,7 +2517,7 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
                 validate_expr(v)?;
             }
             for child in &w.body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
             }
             Ok(())
         }
@@ -2241,7 +2531,7 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
             }
             validate_expr(&sb.target)?;
             for child in &sb.body {
-                validate_stmt(child)?;
+                validate_stmt_with_icons(child, allow_od_icon, true)?;
             }
             Ok(())
         }
@@ -2259,6 +2549,7 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
 }
 
 const RESERVED_CONTEXT_VARS: &[&str] = &[
+    "od_icon",
     "options",
     "theme_options",
     "theme_assets",
@@ -3904,6 +4195,12 @@ fn walk_theme_stmt_with_url_scopes(
         }
         Stmt::EmitExpr(expr) => {
             reject_style_control_flow(&states)?;
+            if parse_od_icon_call(&expr.expr)?.is_some() {
+                if states.iter().any(|s| *s != ThemeHtmlState::Body) {
+                    return Err("od_icon() chỉ được xuất trong thân HTML.");
+                }
+                return Ok((states, scopes));
+            }
             if parse_composition_call(&expr.expr)?.is_some() {
                 if states.iter().any(|s| *s != ThemeHtmlState::Body) {
                     return Err("od_part/od_content chỉ được xuất hiện trong thân HTML.");
@@ -4103,6 +4400,7 @@ fn walk_theme_stmt_with_url_scopes(
         }
         Stmt::SetBlock(sb) => {
             reject_style_control_flow(&states)?;
+            reject_icons_in_set_block(&sb.body)?;
             if sb.filter.is_some() {
                 return Err("C-SEC cấm modifier filter trong khối set.");
             }
@@ -4721,8 +5019,10 @@ impl BlockSchemaTemplateContext {
     }
 
     fn is_sensitive_name(&self, id: &str, active_loops: &BTreeMap<String, String>) -> bool {
-        matches!(id, "options" | "theme_options" | "od_is_preview")
-            || self.richtext_vars.contains(id)
+        matches!(
+            id,
+            "options" | "theme_options" | "od_is_preview" | "od_icon"
+        ) || self.richtext_vars.contains(id)
             || self.href_vars.contains(id)
             || self.src_vars.contains(id)
             || self.media_raw_vars.contains(id)
@@ -5049,6 +5349,12 @@ fn walk_block_ast_stmt(
             Ok(result)
         }
         Stmt::EmitExpr(e) => {
+            if parse_od_icon_call(&e.expr)?.is_some() {
+                if states.iter().any(|s| *s != HtmlScanState::Body) {
+                    return Err("od_icon() chỉ được xuất trong thân HTML của block.");
+                }
+                return Ok(states.clone());
+            }
             check_block_expr_restrictions(&e.expr, ctx, active_loops)?;
             if let Some(kind) = classify_bare_sensitive_expr(&e.expr, ctx, active_loops) {
                 match kind {
@@ -5161,6 +5467,7 @@ fn walk_block_ast_stmt(
             Ok(states.clone())
         }
         Stmt::SetBlock(sb) => {
+            reject_icons_in_set_block(&sb.body)?;
             if sb.filter.is_some() {
                 return Err("C-SEC cấm modifier filter trong khối set.");
             }
@@ -5264,6 +5571,7 @@ pub fn validate_block_template_csec(
     if source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
         || source.contains(CONTENT_SLOT_TOKEN)
         || source.contains(PREVIEW_PART_NONCE_PREFIX)
+        || source.contains(ICON_NONCE_PREFIX)
     {
         return Err("Template block chứa chuỗi nonce nội bộ bị cấm.");
     }
@@ -5274,7 +5582,7 @@ pub fn validate_block_template_csec(
 
     let ast = parse(source, block_id, SyntaxConfig::default())
         .map_err(|_| "Cú pháp MiniJinja của template block không hợp lệ.")?;
-    validate_stmt(&ast)?;
+    validate_stmt_with_icons(&ast, true, false)?;
 
     let final_states = walk_block_ast_stmt(
         &ast,
@@ -5721,6 +6029,15 @@ pub fn render_block_csec_with_options_and_budget_and_config(
         .or_insert_with(|| Value::from(is_preview));
 
     let mut env = restricted_environment_with_config(fmt_cfg);
+    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    install_icon_function(
+        &mut env,
+        &budget.icon_nonces,
+        &local_icons,
+        budget.html_bytes_used,
+        &overflowed,
+    );
     env.set_fuel(Some(node_fuel));
     env.add_template(block_id, template_source)
         .map_err(|_| "Không thể biên dịch template block.")?;
@@ -5728,7 +6045,12 @@ pub fn render_block_csec_with_options_and_budget_and_config(
         .get_template(block_id)
         .map_err(|_| "Không tìm thấy template block.")?
         .render_captured(Value::from_pairs(ctx_map))
-        .map_err(|_| "Lỗi thực thi template block (fuel/recursion/undefined).")?;
+        .map_err(|_| {
+            if overflowed.load(std::sync::atomic::Ordering::Relaxed) {
+                budget.html_bytes_used = MAX_RENDERED_HTML_BYTES + 1;
+            }
+            "Lỗi thực thi template block (fuel/recursion/undefined)."
+        })?;
 
     let (consumed, _remaining) = captured
         .state()
@@ -5753,6 +6075,16 @@ pub fn render_block_csec_with_options_and_budget_and_config(
     };
 
     budget.charge_html_bytes(out.len())?;
+    let additions = local_icons
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let icon_growth: usize = additions
+        .iter()
+        .map(|(n, s)| s.len().saturating_sub(n.len()))
+        .sum();
+    budget.charge_html_bytes(icon_growth)?;
+    budget.icon_nonces.extend(additions);
     Ok(out)
 }
 
@@ -5862,6 +6194,205 @@ mod composition_tests {
             )
             .unwrap();
         assert!(!Arc::ptr_eq(&invalid_digest, &uncached));
+    }
+
+    #[test]
+    fn curated_icon_is_replaced_only_after_document_normalization() {
+        let compiled = validate_and_compile_csec_composition(
+            "page",
+            "<main>{{ od_icon('calendar', 'w-3.5 h-3.5') }}{{ od_content() }}</main>",
+            &BTreeMap::new(),
+            CsecContentKind::Entry,
+        )
+        .unwrap();
+        let mut budget = RenderBudget::new();
+        let shell = compiled
+            .render_with_config_and_budget(
+                json_to_safe_value(&serde_json::json!({})),
+                Some("<p>OK</p>"),
+                &mut budget,
+                &RenderFormattingConfig::default(),
+            )
+            .unwrap();
+        assert!(shell.contains(ICON_NONCE_PREFIX));
+        assert!(!shell.contains("<svg"));
+        // Exercise the same document-normalization boundary without coupling
+        // this module's unit tests to the server's SEO/content-render modules.
+        let composed = format!("<!doctype html><html><body>{shell}</body></html>");
+        let final_html = budget
+            .icon_nonces
+            .substitute_into_document(composed)
+            .unwrap();
+        assert!(final_html.contains("class=\"w-3.5 h-3.5\""));
+        assert!(final_html.contains("<svg xmlns="));
+        assert!(!final_html.contains(ICON_NONCE_PREFIX));
+    }
+
+    #[test]
+    fn icon_security_validation_rejects_unsafe_contexts() {
+        let invalid = [
+            "<main>OD_ICON_0123456789abcdef0123456789abcdef</main>",
+            "<main><svg><path d='M0 0'/></svg></main>",
+            "<main>{{ od_icon('not-in-registry') }}</main>",
+            "<main>{{ od_icon('calendar', 'w-3 onclick=alert(1)') }}</main>",
+            "<main>{{ od_icon('calendar') | upper }}</main>",
+            "<main>{{ od_icon(name) }}</main>",
+            "<div title=\"{{ od_icon('calendar') }}\">x</div>",
+            "<style>{{ od_icon('calendar') }}</style>",
+            "{% set foo %}{{ od_icon('calendar') }}{% endset %}<main>x</main>",
+            "{% set od_icon = 'fake' %}<main>test</main>",
+        ];
+        for source in invalid {
+            assert!(
+                validate_and_compile_csec_composition(
+                    "t",
+                    source,
+                    &BTreeMap::new(),
+                    CsecContentKind::NonEntry
+                )
+                .is_err(),
+                "should reject: {source}"
+            );
+        }
+        assert!(
+            render_csec(
+                "legacy",
+                "<main>{{ od_icon('calendar') }}</main>",
+                Value::from(())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn icon_nonce_rejects_attribute_and_style_and_duplicate_substitution() {
+        let nonce = "OD_ICON_0123456789abcdef0123456789abcdef".to_owned();
+        let table = IconNonceTable {
+            entries: vec![(nonce.clone(), "<svg/>".to_owned())],
+        };
+        assert!(
+            table
+                .substitute_into_document(format!("<p>{nonce}</p>"))
+                .unwrap()
+                .contains("<svg/>")
+        );
+        assert!(
+            table
+                .substitute_into_document(format!("<div title=\"{nonce}\"></div>"))
+                .is_err()
+        );
+        assert!(
+            table
+                .substitute_into_document(format!("<!-- {nonce} -->"))
+                .is_err()
+        );
+        assert!(
+            table
+                .substitute_into_document(format!("<style>{nonce}</style>"))
+                .is_err()
+        );
+        assert!(
+            table
+                .substitute_into_document(format!("<p>{nonce}{nonce}</p>"))
+                .is_err()
+        );
+        assert!(
+            table
+                .substitute_into_document("<p>nonce missing</p>".to_owned())
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn icon_budget_caps_128_total_across_segments_and_charges_growth() {
+        let compiled = validate_and_compile_csec_composition(
+            "p",
+            "<p>{{ od_icon('check') }}</p>",
+            &BTreeMap::new(),
+            CsecContentKind::NonEntry,
+        )
+        .unwrap();
+        let mut budget = RenderBudget::new();
+        for _ in 0..MAX_ICONS_PER_REQUEST {
+            compiled
+                .render_with_config_and_budget(
+                    Value::from(()),
+                    None,
+                    &mut budget,
+                    &RenderFormattingConfig::default(),
+                )
+                .unwrap();
+        }
+        assert_eq!(budget.icon_nonces.entries.len(), MAX_ICONS_PER_REQUEST);
+        assert!(budget.html_bytes_used > 0);
+        assert!(
+            compiled
+                .render_with_config_and_budget(
+                    Value::from(()),
+                    None,
+                    &mut budget,
+                    &RenderFormattingConfig::default()
+                )
+                .is_err()
+        );
+
+        let mut budget = RenderBudget::new();
+        budget.html_bytes_used = MAX_RENDERED_HTML_BYTES - 1;
+        assert!(
+            compiled
+                .render_with_config_and_budget(
+                    Value::from(()),
+                    None,
+                    &mut budget,
+                    &RenderFormattingConfig::default()
+                )
+                .is_err()
+        );
+        assert!(budget.html_bytes_used > MAX_RENDERED_HTML_BYTES);
+        assert!(budget.icon_nonces.is_empty());
+    }
+
+    #[test]
+    fn declarative_block_icon_renders_once_and_rejects_attribute_spoofing() {
+        let source = "<div>{{ od_icon('arrow-right', 'w-3.5') }}</div>";
+        let schema: opendash_core::block_schema::BlockSchemaV1 =
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 1,
+                "id": "test-icon",
+                "title": "Test",
+                "category": "content",
+                "render": "render.html",
+                "fields": []
+            }))
+            .unwrap();
+        validate_block_template_csec("test-icon", source, &schema).unwrap();
+        let mut budget = RenderBudget::new();
+        let shell = render_block_csec_with_budget(
+            "test-icon",
+            source,
+            &schema,
+            &BTreeMap::new(),
+            false,
+            &mut budget,
+        )
+        .unwrap();
+        assert!(shell.contains(ICON_NONCE_PREFIX));
+        assert!(!shell.contains("<svg"));
+        let final_html = budget.icon_nonces.substitute_into_document(shell).unwrap();
+        assert!(final_html.contains("<svg "));
+        assert!(final_html.contains("class=\"w-3.5\""));
+        for invalid in [
+            "<div title=\"{{ od_icon('check') }}\">hi</div>",
+            "<div>{{ od_icon('missing') }}</div>",
+            "{% set captured %}{{ od_icon('check') }}{% endset %}<div>ok</div>",
+            "<div>OD_ICON_0123456789abcdef0123456789abcdef</div>",
+            "<div><svg><path d='x'/></svg></div>",
+        ] {
+            assert!(
+                validate_block_template_csec("test-icon", invalid, &schema).is_err(),
+                "{invalid}"
+            );
+        }
     }
 
     #[test]
