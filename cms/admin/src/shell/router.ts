@@ -120,6 +120,22 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
       }
       return { view: 'patterns', sub: segs.length === 2 ? 'list' : 'invalid', rawHash: '#/patterns' };
     }
+    if (segs[2] === 'taxonomy') {
+      const taxKey = segs[3] ? decodeURIComponent(segs[3]) : '';
+      const validType = /^[a-z][a-z0-9_]{0,63}$/.test(typeKey);
+      const validTax = Boolean(taxKey && /^[a-z][a-z0-9_]{0,63}$/.test(taxKey) && taxKey !== 'pattern' && taxKey !== 'section');
+      const root = `#/cpt/${encodeURIComponent(typeKey)}/taxonomy/${encodeURIComponent(taxKey)}`;
+      if (validType && validTax && segs.length === 4) {
+        return { view: 'taxonomy', sub: 'terms', typeKey, taxonomyKind: taxKey, taxonomyMode: 'list', rawHash: root };
+      }
+      if (validType && validTax && segs.length === 5 && segs[4] === 'new') {
+        return { view: 'taxonomy', sub: 'terms', typeKey, taxonomyKind: taxKey, taxonomyMode: 'new', rawHash: `${root}/new` };
+      }
+      if (validType && validTax && segs.length === 6 && segs[5] === 'edit' && /^[1-9]\d*$/.test(segs[4]) && Number.isSafeInteger(Number(segs[4]))) {
+        return { view: 'taxonomy', sub: 'terms', typeKey, taxonomyKind: taxKey, taxonomyMode: 'edit', entryId: Number(segs[4]), rawHash: `${root}/${segs[4]}/edit` };
+      }
+      return { view: 'taxonomy', sub: 'invalid', typeKey, taxonomyMode: 'invalid', rawHash: hash };
+    }
     if (segs[2] === 'new') {
       return { view: 'cpt', sub: 'new', typeKey, rawHash: `#/cpt/${typeKey}/new` };
     }

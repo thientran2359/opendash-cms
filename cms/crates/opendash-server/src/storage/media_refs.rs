@@ -367,6 +367,17 @@ pub async fn collect_pins_in_tx(
         }
     }
 
+    // 9. Taxonomy term featured images
+    let term_rows: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM taxonomy_terms WHERE featured_image_media_id = ? ORDER BY id",
+    )
+    .bind(media_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    for term_id in term_rows {
+        push_pin(&mut summary, "taxonomy_term", term_id.to_string());
+    }
+
     Ok(summary)
 }
 

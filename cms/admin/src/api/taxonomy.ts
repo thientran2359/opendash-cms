@@ -94,6 +94,7 @@ export interface TaxonomyTerm {
   version: number;
   locale?: string;
   translation_group_id?: string;
+  featured_image_media_id?: string | null;
   extensions?: TermExtensionValues;
   schema_token?: string;
 }
@@ -117,9 +118,10 @@ export interface TaxonomyTermInput {
   parent_id?: number | null;
   locale?: string;
   source_term_id?: number | null;
+  featured_image_media_id?: string | null;
 }
 
-export type TaxonomyTermChanges = Partial<Pick<TaxonomyTerm, 'name' | 'slug' | 'parent_id'>> & {
+export type TaxonomyTermChanges = Partial<Pick<TaxonomyTerm, 'name' | 'slug' | 'parent_id' | 'featured_image_media_id'>> & {
   extensions?: TermExtensionValues;
   schema_token?: string;
 };

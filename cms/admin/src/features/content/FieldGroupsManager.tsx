@@ -1,5 +1,5 @@
 import { tStatic, useI18n } from '../../i18n/index.tsx';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   createFieldGroup,
   deleteFieldGroup,
@@ -22,6 +22,7 @@ interface FieldGroupsManagerProps {
   csrfToken: string | null;
   onApiError: (error: unknown, fallback: string) => void;
   onChanged: () => void;
+  onCountChange?: (count: number) => void;
 }
 
 export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
@@ -29,9 +30,11 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
   csrfToken,
   onApiError,
   onChanged,
+  onCountChange,
 }) => {
   useI18n();
   const [groups, setGroups] = useState<FieldGroupRecord[]>([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [localKey, setLocalKey] = useState('');
   const [title, setTitle] = useState('');
   const [defaultRegion, setDefaultRegion] = useState<EditorRegion>('main_bottom');
@@ -42,6 +45,8 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
   const [minEditRole, setMinEditRole] = useState<FieldRole>('editor');
   const [publicExposure, setPublicExposure] = useState<PublicExposure>('private');
   const [saving, setSaving] = useState(false);
+  const onCountChangeRef = useRef(onCountChange);
+  onCountChangeRef.current = onCountChange;
 
   const reload = async () => {
     try {
@@ -53,10 +58,15 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
   };
 
   useEffect(() => {
+    setShowCreateForm(false);
     void reload();
   }, [typeKey]);
 
   const relevantGroups = groups.filter(g => g.targets.some(t => t.type_key === typeKey));
+
+  useEffect(() => {
+    onCountChangeRef.current?.(relevantGroups.length);
+  }, [relevantGroups.length]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,6 +99,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
       setTitle('');
       setFieldKey('');
       setFieldLabel('');
+      setShowCreateForm(false);
       await reload();
       onChanged();
     } catch (err) {
@@ -137,11 +148,23 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
 
   return (
     <div className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5" data-testid="field-groups-manager">
-      <h3 className="text-base font-semibold text-zinc-950">
-        {tStatic("feature.content.fieldgroupsmanager.extension_field_groups_associated_with")}{' '}<code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs text-zinc-700">{typeKey}</code>
-      </h3>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-base font-semibold text-zinc-950">
+          {tStatic("feature.content.fieldgroupsmanager.extension_field_groups_associated_with")}{' '}<code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs text-zinc-700">{typeKey}</code>
+        </h3>
+        <AdminButton
+          variant={showCreateForm ? 'secondary' : 'primary'}
+          size="sm"
+          disabled={!csrfToken || saving}
+          onClick={() => setShowCreateForm(prev => !prev)}
+        >
+          {showCreateForm
+            ? tStatic('content_types.close_field_group_form')
+            : tStatic('content_types.add_field_group_toggle')}
+        </AdminButton>
+      </div>
       {relevantGroups.length === 0 ? (
-        <p className="text-sm text-zinc-500">{tStatic("feature.content.fieldgroupsmanager.no_extension_field_groups_are_associated_with_this_content")}</p>
+        <p className="rounded-lg border border-dashed border-zinc-300 p-4 text-sm text-zinc-500">{tStatic("feature.content.fieldgroupsmanager.no_extension_field_groups_are_associated_with_this_content")}</p>
       ) : (
         <ul className="space-y-2">
           {relevantGroups.map(g => (
@@ -171,7 +194,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
         </ul>
       )}
 
-      <form onSubmit={handleCreate} className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/50 p-4">
+      {showCreateForm && <form onSubmit={handleCreate} className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/50 p-4">
         <div className="text-sm font-semibold text-zinc-900">{tStatic("feature.content.fieldgroupsmanager.add_new_extension_field_group")}</div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <input
@@ -252,7 +275,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
         <AdminButton type="submit" variant="primary" size="sm" disabled={saving || !csrfToken}>
           {saving ? tStatic("feature.content.fieldgroupsmanager.creating") : tStatic("feature.content.fieldgroupsmanager.create_field_group")}
         </AdminButton>
-      </form>
+      </form>}
     </div>
   );
 };

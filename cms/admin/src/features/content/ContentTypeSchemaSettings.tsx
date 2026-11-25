@@ -20,7 +20,16 @@ import {
 } from './ContentTypeForm.tsx';
 import { EditorLayoutConfigurator } from './EditorLayoutConfigurator.tsx';
 import { FieldGroupsManager } from './FieldGroupsManager.tsx';
-import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  AdminAlert,
+  AdminBadge,
+  AdminButton,
+  AdminTabPanel,
+  AdminTabs,
+  type AdminTabItem,
+} from '../../components/AdminPrimitives.tsx';
+
+type ContentTypeTabId = 'overview' | 'taxonomies' | 'field_groups' | 'layout';
 
 interface ContentTypeSchemaSettingsProps {
   /** Passed by App from its authenticated server session; RAM recovery is off without these. */
@@ -143,6 +152,9 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   } | null>(null);
   const createNotice = createNoticeState?.scope === createScope ? createNoticeState.message : '';
   const [revision, setRevision] = useState(0);
+  const [activeTab, setActiveTab] = useState<ContentTypeTabId>('overview');
+  const [fieldGroupCount, setFieldGroupCount] = useState<number>(0);
+  const [layoutVersion, setLayoutVersion] = useState<number | null>(null);
   const [taxonomyState, setTaxonomyState] = useState<LoadedTaxonomyState | null>(null);
   const [taxonomyDraft, setTaxonomyDraft] = useState<string[]>([]);
   const [taxonomyBusy, setTaxonomyBusy] = useState(false);
@@ -710,209 +722,339 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         })}
       </div>
 
-      {activeType && (
-        <div className="space-y-6">
-          <div className="rounded-xl border border-zinc-200 bg-white p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-100 pb-3">
-              <div>
-                <h3 className="text-base font-semibold text-zinc-950">
-                  {tStatic("feature.content.contenttypeschemasettings.schema_information")}{' '}{activeType.descriptor.label}
-                </h3>
-                <p className="mt-0.5 text-xs text-zinc-500">
-                  {tStatic("feature.common.key")}: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> {tStatic("feature.content.contenttypeschemasettings.owner")}{' '}{activeType.owner.kind}
-                </p>
-              </div>
-              <AdminBadge tone="neutral">v{activeType.version}</AdminBadge>
-            </div>
-            <div className="mt-3 text-xs text-zinc-600">
-              {tStatic("feature.common.base_fields")} ({activeType.descriptor.fields.length}):{' '}
-              {activeType.descriptor.fields.map(f => f.key).join(', ') || tStatic("feature.content.contenttypeschemasettings.none")}
-            </div>
-            {canEditSettings ? (
-              <form onSubmit={handleUpdateSettings} className="mt-5 space-y-4" aria-label={tStatic("feature.content.contenttypeschemasettings.content_type_configuration")}>
-                {activeType.owner.kind === 'user' && (
-                  <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-                    <span>{tStatic("multilingual.label")}</span>
-                    <input type="text" value={editLabel} required maxLength={100}
-                      disabled={!csrfToken || savingSettings} onChange={event => changeEditLabel(event.target.value)}
-                      className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent" />
-                  </label>
-                )}
-                <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
-                  <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeschemasettings.public_visibility")}</legend>
-                  <label className="flex items-center gap-2 text-sm text-zinc-800">
-                    <input type="checkbox" checked={editSettings.public}
-                      disabled={!csrfToken || savingSettings}
-                      onChange={event => changeEditSettings({ public: event.target.checked })} />
-                    {tStatic("feature.content.contenttypeschemasettings.public_content_public")}
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-zinc-800">
-                    <input type="checkbox" checked={editSettings.has_archive}
-                      disabled={!csrfToken || savingSettings}
-                      onChange={event => changeEditSettings({ has_archive: event.target.checked })} />
-                    {tStatic("feature.content.contenttypeform.enable_archive_has_archive")}
-                  </label>
-                  <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-                    <span>{tStatic("feature.content.contenttypeform.publishing_workflow")}</span>
-                    <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-                      value={editSettings.publication} disabled={!csrfToken || savingSettings || isBuiltin}
-                      onChange={event => changeEditSettings({
-                        publication: event.target.value as ContentPublicationPolicy,
-                      })}>
-                      <option value="immediate">{tStatic("feature.content.contenttypeform.save_publishes_immediately_immediate")}</option>
-                      <option value="draft_publish">{tStatic("feature.content.contenttypeform.save_draft_publish_draft_publish")}</option>
-                    </select>
-                  </label>
-                  {isBuiltin && <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.posts_and_pages_always_use_save_draft_publish")}</p>}
-                </fieldset>
-                <fieldset className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
-                  <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeform.editor_screen_features")}</legend>
-                  <label className="flex items-center gap-2 text-sm text-zinc-800">
-                    <input type="checkbox" checked={editSettings.supports.includes('editor')}
-                      disabled={!csrfToken || savingSettings}
-                      onChange={event => toggleSupport('editor', event.target.checked)} />
-                    {tStatic("feature.content.contenttypeform.editor_editor")}
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-zinc-800">
-                    <input type="checkbox" checked={editSettings.supports.includes('featured_image')}
-                      disabled={!csrfToken || savingSettings}
-                      onChange={event => toggleSupport('featured_image', event.target.checked)} />
-                    {tStatic("feature.content.contenttypeform.featured_image_featured_image")}
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-zinc-800">
-                    <input type="checkbox" checked={editSettings.supports.includes('builder')}
-                      disabled={!csrfToken || savingSettings}
-                      onChange={event => toggleSupport('builder', event.target.checked)} />
-                    {tStatic("feature.common.visual_builder")}
-                  </label>
-                  <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.enable_builder_to_design_individual_entries_disabling_a_feature")}</p>
-                </fieldset>
-                {settingsError && <AdminAlert tone="error">{settingsError}</AdminAlert>}
-                {settingsStale && <AdminAlert tone="warning" role="alert" className="space-y-2">
-                  <p>{tStatic("feature.content.contenttypeschemasettings.the_cpt_version_changed_your_input_is_retained_but")}</p>
-                  <AdminButton variant="secondary" size="sm"
-                    disabled={savingSettings || taxonomyBusy} onClick={() => void rebaseSettingsDraft()}>
-                    {tStatic("feature.content.contenttypeschemasettings.review_latest_cpt_and_keep_current_changes")}
-                  </AdminButton>
-                </AdminAlert>}
-                <div className="flex flex-wrap items-center gap-2">
-                  <AdminButton type="submit" variant="primary" size="md"
-                    disabled={!settingsChanged || settingsStale || !csrfToken || savingSettings || taxonomyBusy}>
-                    {savingSettings ? tStatic("feature.users.userprofilepanel.saving") : tStatic("feature.content.contenttypeschemasettings.save_configuration")}
-                  </AdminButton>
-                  <AdminButton variant="secondary" size="md" disabled={savingSettings || taxonomyBusy}
-                    onClick={() => {
-                      if (selectedScope) settingsDraftMemory.delete(selectedScope);
-                      setSettingsStale(false);
-                      if (activeType && canonicalSettings) {
-                        setEditLabel(activeType.descriptor.label);
-                        setEditSettings(copySettings(canonicalSettings));
-                        setDraftIdentity(currentIdentity);
-                      }
-                      setRevision(r => r + 1);
-                      setSettingsError('');
-                    }}>
-                    {tStatic("feature.content.contenttypeschemasettings.reload_from_server_discard_edits")}
-                  </AdminButton>
-                </div>
-              </form>
-            ) : (
-              <p className="mt-4 text-sm text-zinc-600">
-                {isPattern ? tStatic("feature.content.contenttypeschemasettings.pattern_is_a_private_content_type_and_its_public")
-                  : tStatic("feature.content.contenttypeschemasettings.this_configuration_is_provider_owned_and_read_only_here")}
-              </p>
-            )}
-          </div>
+      {activeType && (() => {
+        const cptTabs: AdminTabItem<ContentTypeTabId>[] = [
+          {
+            id: 'overview',
+            label: tStatic('content_types.tab_overview'),
+            dirty: settingsChanged || settingsStale,
+          },
+          {
+            id: 'taxonomies',
+            label: tStatic('content_types.tab_taxonomies'),
+            badge: isPattern ? undefined : taxonomyLoaded ? taxonomyDraft.length : undefined,
+            dirty: Boolean(taxonomyChanged || taxonomyLoaded?.stale),
+          },
+          {
+            id: 'field_groups',
+            label: tStatic('content_types.tab_field_groups'),
+            badge: fieldGroupCount,
+          },
+          {
+            id: 'layout',
+            label: tStatic('content_types.tab_layout'),
+            badge: layoutVersion !== null ? `v${layoutVersion}` : undefined,
+          },
+        ];
 
-          <section className="rounded-xl border border-zinc-200 bg-white p-5" aria-label={tStatic("feature.content.contenttypeschemasettings.taxonomies_applicable_to_the_content_type")}>
-            <h3 className="text-base font-semibold text-zinc-950">{tStatic("feature.content.contenttypeschemasettings.applicable_taxonomies")}</h3>
-            <p className="mt-1 text-sm text-zinc-600">
-              {tStatic("feature.content.contenttypeschemasettings.select_taxonomies_that_may_be_associated_with")}{' '}{activeType.descriptor.label}{tStatic("feature.content.contenttypeschemasettings.clearing_a_selection_does_not_delete_saved_associations")}
-            </p>
-            {isPattern ? <p className="mt-3 text-sm text-zinc-600">{tStatic("feature.content.contenttypeschemasettings.patterns_do_not_support_taxonomies")}</p>
-              : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-zinc-600">{tStatic("feature.content.contenttypeschemasettings.loading_applicable_taxonomies")}</p>
-                : <form className="mt-3.5 space-y-3.5" onSubmit={handleUpdateTaxonomies}>
-                    <div className="grid gap-2.5 sm:grid-cols-2">
-                      {taxonomyLoaded.available.filter(def =>
-                        (def.provider_status === 'active' && def.declaration_state === 'declared')
-                        || taxonomyDraft.includes(def.key)).map(def => (
-                        <label key={def.key} className="flex items-start gap-2.5 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3 text-sm text-zinc-700 hover:border-zinc-300">
-                          <input type="checkbox" className="mt-1" checked={taxonomyDraft.includes(def.key)}
-                            disabled={!canEditTaxonomies || !csrfToken || taxonomyBusy || savingSettings
-                              || (!taxonomyDraft.includes(def.key) &&
-                                (def.provider_status !== 'active' || def.declaration_state !== 'declared'))}
-                            onChange={event => {
-                              const next = event.target.checked
-                                ? Array.from(new Set([...taxonomyDraft, def.key]))
-                                : taxonomyDraft.filter(value => value !== def.key);
-                              setTaxonomyDraft(next);
-                              rememberTaxonomyDraft(taxonomyLoaded, next);
-                              setTaxonomyNotice('');
-                            }} />
-                          <span><strong className="block font-medium text-zinc-900">{def.label}</strong>
-                            <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700">{def.key}</code> · <span className="text-xs text-zinc-500">{def.hierarchical ? tStatic("feature.content.contenttypeschemasettings.hierarchical") : tStatic("feature.content.contenttypeschemasettings.non_hierarchical")}</span>
-                            {(def.provider_status !== 'active' || def.declaration_state !== 'declared')
-                              && <span className="mt-0.5 block text-xs text-amber-700">{tStatic("feature.content.contenttypeschemasettings.the_provider_is_inactive_or_its_declaration_was_withdrawn")}</span>}
-                          </span>
+        const clearAllTaxonomies = () => {
+          if (!taxonomyLoaded || !canEditTaxonomies || taxonomyBusy || savingSettings) return;
+          setTaxonomyDraft([]);
+          rememberTaxonomyDraft(taxonomyLoaded, []);
+          setTaxonomyNotice('');
+        };
+
+        return (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-zinc-200 bg-white px-5 pt-5 pb-0">
+              <div className="flex flex-wrap items-start justify-between gap-3 pb-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-lg font-semibold text-zinc-950">
+                      {activeType.descriptor.label}
+                    </h3>
+                    <AdminBadge tone="neutral">v{activeType.version}</AdminBadge>
+                    {canonicalSettings && (
+                      <AdminBadge tone={canonicalSettings.public ? 'success' : 'neutral'}>
+                        {canonicalSettings.public
+                          ? tStatic('content_types.badge_public')
+                          : tStatic('content_types.badge_private')}
+                      </AdminBadge>
+                    )}
+                    {canonicalSettings?.has_archive && (
+                      <AdminBadge tone="neutral">{tStatic('content_types.badge_archive')}</AdminBadge>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {tStatic("feature.common.key")}: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> · {tStatic("feature.content.contenttypeschemasettings.owner")}{' '}{activeType.owner.kind}
+                  </p>
+                </div>
+                <div className="text-xs text-zinc-600">
+                  {tStatic("feature.common.base_fields")} ({activeType.descriptor.fields.length}):{' '}
+                  <span className="font-mono text-zinc-700">
+                    {activeType.descriptor.fields.map(f => f.key).join(', ') || tStatic("feature.content.contenttypeschemasettings.none")}
+                  </span>
+                </div>
+              </div>
+
+              <AdminTabs
+                tabs={cptTabs}
+                activeId={activeTab}
+                onChange={setActiveTab}
+                ariaLabel={tStatic('content_types.tabs_label')}
+                testId="content-type-tabs"
+                idPrefix="content-type"
+                className="border-b-0"
+              />
+            </div>
+
+            <AdminTabPanel
+              active={activeTab === 'overview'}
+              id="content-type-panel-overview"
+              labelledBy="content-type-tab-overview"
+            >
+              <div className="rounded-xl border border-zinc-200 bg-white p-5">
+                <h4 className="text-sm font-semibold text-zinc-950">
+                  {tStatic("feature.content.contenttypeschemasettings.schema_information")}{' '}{activeType.descriptor.label}
+                </h4>
+                {canEditSettings ? (
+                  <form onSubmit={handleUpdateSettings} className="mt-4 space-y-4" aria-label={tStatic("feature.content.contenttypeschemasettings.content_type_configuration")}>
+                    {activeType.owner.kind === 'user' && (
+                      <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+                        <span>{tStatic("multilingual.label")}</span>
+                        <input type="text" value={editLabel} required maxLength={100}
+                          disabled={!csrfToken || savingSettings} onChange={event => changeEditLabel(event.target.value)}
+                          className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent" />
+                      </label>
+                    )}
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
+                        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeschemasettings.public_visibility")}</legend>
+                        <label className="flex items-center gap-2 text-sm text-zinc-800">
+                          <input type="checkbox" checked={editSettings.public}
+                            disabled={!csrfToken || savingSettings}
+                            onChange={event => changeEditSettings({ public: event.target.checked })} />
+                          {tStatic("feature.content.contenttypeschemasettings.public_content_public")}
                         </label>
-                      ))}
-                      {taxonomyDraft.filter(key => !taxonomyLoaded.available.some(def => def.key === key)).map(key => (
-                        <label key={key} className="flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50/50 p-3 text-sm text-amber-950">
-                          <input type="checkbox" checked disabled={!canEditTaxonomies || taxonomyBusy || savingSettings}
-                            onChange={() => {
-                              const next = taxonomyDraft.filter(value => value !== key);
-                              setTaxonomyDraft(next);
-                              rememberTaxonomyDraft(taxonomyLoaded, next);
-                            }} />
-                          <span>{key} {tStatic("feature.content.contenttypeschemasettings.taxonomy_no_longer_exists_in_the_current_list_clear")}</span>
+                        <label className="flex items-center gap-2 text-sm text-zinc-800">
+                          <input type="checkbox" checked={editSettings.has_archive}
+                            disabled={!csrfToken || savingSettings}
+                            onChange={event => changeEditSettings({ has_archive: event.target.checked })} />
+                          {tStatic("feature.content.contenttypeform.enable_archive_has_archive")}
                         </label>
-                      ))}
+                        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+                          <span>{tStatic("feature.content.contenttypeform.publishing_workflow")}</span>
+                          <select className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                            value={editSettings.publication} disabled={!csrfToken || savingSettings || isBuiltin}
+                            onChange={event => changeEditSettings({
+                              publication: event.target.value as ContentPublicationPolicy,
+                            })}>
+                            <option value="immediate">{tStatic("feature.content.contenttypeform.save_publishes_immediately_immediate")}</option>
+                            <option value="draft_publish">{tStatic("feature.content.contenttypeform.save_draft_publish_draft_publish")}</option>
+                          </select>
+                        </label>
+                        {isBuiltin && <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.posts_and_pages_always_use_save_draft_publish")}</p>}
+                      </fieldset>
+
+                      <div className="space-y-4">
+                        <fieldset className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
+                          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeform.editor_screen_features")}</legend>
+                          <label className="flex items-center gap-2 text-sm text-zinc-800">
+                            <input type="checkbox" checked={editSettings.supports.includes('editor')}
+                              disabled={!csrfToken || savingSettings}
+                              onChange={event => toggleSupport('editor', event.target.checked)} />
+                            {tStatic("feature.content.contenttypeform.editor_editor")}
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-zinc-800">
+                            <input type="checkbox" checked={editSettings.supports.includes('featured_image')}
+                              disabled={!csrfToken || savingSettings}
+                              onChange={event => toggleSupport('featured_image', event.target.checked)} />
+                            {tStatic("feature.content.contenttypeform.featured_image_featured_image")}
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-zinc-800">
+                            <input type="checkbox" checked={editSettings.supports.includes('builder')}
+                              disabled={!csrfToken || savingSettings}
+                              onChange={event => toggleSupport('builder', event.target.checked)} />
+                            {tStatic("feature.common.visual_builder")}
+                          </label>
+                          <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.enable_builder_to_design_individual_entries_disabling_a_feature")}</p>
+                        </fieldset>
+
+                        <div className="rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-700">
+                            {tStatic("feature.common.base_fields")} ({activeType.descriptor.fields.length})
+                          </div>
+                          {activeType.descriptor.fields.length === 0 ? (
+                            <p className="mt-1.5 text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.none")}</p>
+                          ) : (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {activeType.descriptor.fields.map(field => (
+                                <span
+                                  key={field.key}
+                                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                                >
+                                  <span className="font-medium text-zinc-900">{field.label}</span>
+                                  <code className="font-mono text-[11px] text-zinc-500">{field.key}</code>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    {!canEditTaxonomies && <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.only_administrators_can_change_taxonomies_patterns_do_not_support")}</p>}
-                    {taxonomyChanged && <p className="text-xs text-zinc-500" role="status">
-                      {selectedScope
-                        ? tStatic("feature.content.contenttypeschemasettings.unsaved_taxonomy_selections_are_kept_in_this_session_s")
-                        : tStatic("feature.content.contenttypeschemasettings.unsaved_selections_will_be_lost_when_leaving_the_screen")}
-                    </p>}
-                    {taxonomyNotice && <AdminAlert tone="info">{taxonomyNotice}</AdminAlert>}
-                    {taxonomyLoaded.stale && <AdminAlert tone="warning" className="space-y-2">
-                      <p role="alert">{tStatic("feature.content.contenttypeschemasettings.the_cpt_version_schema_or_taxonomy_configuration_changed_your")}</p>
+
+                    {settingsError && <AdminAlert tone="error">{settingsError}</AdminAlert>}
+                    {settingsStale && <AdminAlert tone="warning" role="alert" className="space-y-2">
+                      <p>{tStatic("feature.content.contenttypeschemasettings.the_cpt_version_changed_your_input_is_retained_but")}</p>
                       <AdminButton variant="secondary" size="sm"
-                        disabled={taxonomyBusy || savingSettings || !csrfToken}
-                        onClick={() => void rebaseTaxonomyDraft()}>
-                        {tStatic("feature.content.contenttypeschemasettings.review_server_version_and_keep_current_selections")}
+                        disabled={savingSettings || taxonomyBusy} onClick={() => void rebaseSettingsDraft()}>
+                        {tStatic("feature.content.contenttypeschemasettings.review_latest_cpt_and_keep_current_changes")}
                       </AdminButton>
                     </AdminAlert>}
-                    {taxonomyError && <AdminAlert tone="error">{taxonomyError}</AdminAlert>}
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <AdminButton type="submit" variant="primary" size="md"
-                        disabled={!canEditTaxonomies || !taxonomyChanged || taxonomyBusy || savingSettings || !csrfToken || taxonomyLoaded.stale}>
-                        {taxonomyBusy ? tStatic("reading.saving") : tStatic("feature.content.contenttypeschemasettings.save_applicable_taxonomies")}
+                        disabled={!settingsChanged || settingsStale || !csrfToken || savingSettings || taxonomyBusy}>
+                        {savingSettings ? tStatic("feature.users.userprofilepanel.saving") : tStatic("feature.content.contenttypeschemasettings.save_configuration")}
                       </AdminButton>
-                      <AdminButton variant="secondary" size="md"
-                        disabled={taxonomyBusy || savingSettings} onClick={discardTaxonomyDraft}>
-                        {tStatic("feature.content.contenttypeschemasettings.discard_unsaved_selections")}
+                      <AdminButton variant="secondary" size="md" disabled={savingSettings || taxonomyBusy}
+                        onClick={() => {
+                          if (selectedScope) settingsDraftMemory.delete(selectedScope);
+                          setSettingsStale(false);
+                          if (activeType && canonicalSettings) {
+                            setEditLabel(activeType.descriptor.label);
+                            setEditSettings(copySettings(canonicalSettings));
+                            setDraftIdentity(currentIdentity);
+                          }
+                          setRevision(r => r + 1);
+                          setSettingsError('');
+                        }}>
+                        {tStatic("feature.content.contenttypeschemasettings.reload_from_server_discard_edits")}
                       </AdminButton>
                     </div>
-                  </form>}
-            {!taxonomyLoaded && taxonomyError && <AdminAlert tone="error" className="mt-3">{taxonomyError}</AdminAlert>}
-          </section>
+                  </form>
+                ) : (
+                  <p className="mt-3 text-sm text-zinc-600">
+                    {isPattern ? tStatic("feature.content.contenttypeschemasettings.pattern_is_a_private_content_type_and_its_public")
+                      : tStatic("feature.content.contenttypeschemasettings.this_configuration_is_provider_owned_and_read_only_here")}
+                  </p>
+                )}
+              </div>
+            </AdminTabPanel>
 
-          <FieldGroupsManager
-            typeKey={activeType.descriptor.key}
-            csrfToken={csrfToken}
-            onApiError={onApiError}
-            onChanged={() => setRevision(r => r + 1)}
-          />
+            <AdminTabPanel
+              active={activeTab === 'taxonomies'}
+              id="content-type-panel-taxonomies"
+              labelledBy="content-type-tab-taxonomies"
+            >
+              <section className="rounded-xl border border-zinc-200 bg-white p-5" aria-label={tStatic("feature.content.contenttypeschemasettings.taxonomies_applicable_to_the_content_type")}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-base font-semibold text-zinc-950">{tStatic("feature.content.contenttypeschemasettings.applicable_taxonomies")}</h3>
+                    <p className="mt-1 text-sm text-zinc-600">
+                      {tStatic("feature.content.contenttypeschemasettings.select_taxonomies_that_may_be_associated_with")}{' '}{activeType.descriptor.label}{tStatic("feature.content.contenttypeschemasettings.clearing_a_selection_does_not_delete_saved_associations")}
+                    </p>
+                  </div>
+                  {!isPattern && canEditTaxonomies && taxonomyLoaded && taxonomyDraft.length > 0 && (
+                    <AdminButton
+                      variant="ghost"
+                      size="sm"
+                      disabled={taxonomyBusy || savingSettings}
+                      onClick={clearAllTaxonomies}
+                    >
+                      {tStatic('content_types.clear_all_taxonomies')}
+                    </AdminButton>
+                  )}
+                </div>
+                {isPattern ? <p className="mt-3 text-sm text-zinc-600">{tStatic("feature.content.contenttypeschemasettings.patterns_do_not_support_taxonomies")}</p>
+                  : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-zinc-600">{tStatic("feature.content.contenttypeschemasettings.loading_applicable_taxonomies")}</p>
+                    : <form className="mt-3.5 space-y-3.5" onSubmit={handleUpdateTaxonomies}>
+                        <div className="grid gap-2.5 sm:grid-cols-2">
+                          {taxonomyLoaded.available.filter(def =>
+                            (def.provider_status === 'active' && def.declaration_state === 'declared')
+                            || taxonomyDraft.includes(def.key)).map(def => (
+                            <label key={def.key} className="flex items-start gap-2.5 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3 text-sm text-zinc-700 hover:border-zinc-300">
+                              <input type="checkbox" className="mt-1" checked={taxonomyDraft.includes(def.key)}
+                                disabled={!canEditTaxonomies || !csrfToken || taxonomyBusy || savingSettings
+                                  || (!taxonomyDraft.includes(def.key) &&
+                                    (def.provider_status !== 'active' || def.declaration_state !== 'declared'))}
+                                onChange={event => {
+                                  const next = event.target.checked
+                                    ? Array.from(new Set([...taxonomyDraft, def.key]))
+                                    : taxonomyDraft.filter(value => value !== def.key);
+                                  setTaxonomyDraft(next);
+                                  rememberTaxonomyDraft(taxonomyLoaded, next);
+                                  setTaxonomyNotice('');
+                                }} />
+                              <span><strong className="block font-medium text-zinc-900">{def.label}</strong>
+                                <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700">{def.key}</code> · <span className="text-xs text-zinc-500">{def.hierarchical ? tStatic("feature.content.contenttypeschemasettings.hierarchical") : tStatic("feature.content.contenttypeschemasettings.non_hierarchical")}</span>
+                                {(def.provider_status !== 'active' || def.declaration_state !== 'declared')
+                                  && <span className="mt-0.5 block text-xs text-amber-700">{tStatic("feature.content.contenttypeschemasettings.the_provider_is_inactive_or_its_declaration_was_withdrawn")}</span>}
+                              </span>
+                            </label>
+                          ))}
+                          {taxonomyDraft.filter(key => !taxonomyLoaded.available.some(def => def.key === key)).map(key => (
+                            <label key={key} className="flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50/50 p-3 text-sm text-amber-950">
+                              <input type="checkbox" checked disabled={!canEditTaxonomies || taxonomyBusy || savingSettings}
+                                onChange={() => {
+                                  const next = taxonomyDraft.filter(value => value !== key);
+                                  setTaxonomyDraft(next);
+                                  rememberTaxonomyDraft(taxonomyLoaded, next);
+                                }} />
+                              <span>{key} {tStatic("feature.content.contenttypeschemasettings.taxonomy_no_longer_exists_in_the_current_list_clear")}</span>
+                            </label>
+                          ))}
+                        </div>
+                        {!canEditTaxonomies && <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.only_administrators_can_change_taxonomies_patterns_do_not_support")}</p>}
+                        {taxonomyChanged && <p className="text-xs text-zinc-500" role="status">
+                          {selectedScope
+                            ? tStatic("feature.content.contenttypeschemasettings.unsaved_taxonomy_selections_are_kept_in_this_session_s")
+                            : tStatic("feature.content.contenttypeschemasettings.unsaved_selections_will_be_lost_when_leaving_the_screen")}
+                        </p>}
+                        {taxonomyNotice && <AdminAlert tone="info">{taxonomyNotice}</AdminAlert>}
+                        {taxonomyLoaded.stale && <AdminAlert tone="warning" className="space-y-2">
+                          <p role="alert">{tStatic("feature.content.contenttypeschemasettings.the_cpt_version_schema_or_taxonomy_configuration_changed_your")}</p>
+                          <AdminButton variant="secondary" size="sm"
+                            disabled={taxonomyBusy || savingSettings || !csrfToken}
+                            onClick={() => void rebaseTaxonomyDraft()}>
+                            {tStatic("feature.content.contenttypeschemasettings.review_server_version_and_keep_current_selections")}
+                          </AdminButton>
+                        </AdminAlert>}
+                        {taxonomyError && <AdminAlert tone="error">{taxonomyError}</AdminAlert>}
+                        <div className="flex flex-wrap gap-2">
+                          <AdminButton type="submit" variant="primary" size="md"
+                            disabled={!canEditTaxonomies || !taxonomyChanged || taxonomyBusy || savingSettings || !csrfToken || taxonomyLoaded.stale}>
+                            {taxonomyBusy ? tStatic("reading.saving") : tStatic("feature.content.contenttypeschemasettings.save_applicable_taxonomies")}
+                          </AdminButton>
+                          <AdminButton variant="secondary" size="md"
+                            disabled={taxonomyBusy || savingSettings} onClick={discardTaxonomyDraft}>
+                            {tStatic("feature.content.contenttypeschemasettings.discard_unsaved_selections")}
+                          </AdminButton>
+                        </div>
+                      </form>}
+                {!taxonomyLoaded && taxonomyError && <AdminAlert tone="error" className="mt-3">{taxonomyError}</AdminAlert>}
+              </section>
+            </AdminTabPanel>
 
-          <EditorLayoutConfigurator
-            typeKey={activeType.descriptor.key}
-            baseFields={activeType.descriptor.fields}
-            csrfToken={csrfToken}
-            onApiError={onApiError}
-          />
-        </div>
-      )}
+            <AdminTabPanel
+              active={activeTab === 'field_groups'}
+              id="content-type-panel-field_groups"
+              labelledBy="content-type-tab-field_groups"
+            >
+              <FieldGroupsManager
+                typeKey={activeType.descriptor.key}
+                csrfToken={csrfToken}
+                onApiError={onApiError}
+                onChanged={() => setRevision(r => r + 1)}
+                onCountChange={setFieldGroupCount}
+              />
+            </AdminTabPanel>
+
+            <AdminTabPanel
+              active={activeTab === 'layout'}
+              id="content-type-panel-layout"
+              labelledBy="content-type-tab-layout"
+            >
+              <EditorLayoutConfigurator
+                typeKey={activeType.descriptor.key}
+                baseFields={activeType.descriptor.fields}
+                csrfToken={csrfToken}
+                onApiError={onApiError}
+                onVersionChange={setLayoutVersion}
+              />
+            </AdminTabPanel>
+          </div>
+        );
+      })()}
     </section>
   );
 };

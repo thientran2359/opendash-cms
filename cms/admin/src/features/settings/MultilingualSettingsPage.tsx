@@ -5,7 +5,15 @@ import {
   setDefaultLocale, setMultilingualEnabled, updateLocale,
   type AdminLocaleState, type LocaleDirection, type SiteLocale, type SiteLocalesSnapshot,
 } from '../../api/locales.ts';
-import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  AdminAlert,
+  AdminBadge,
+  AdminButton,
+  AdminTabPanel,
+  AdminTabs,
+} from '../../components/AdminPrimitives.tsx';
+
+type MultilingualTabId = 'languages' | 'orphans';
 import { useI18n, tStatic, getEffectiveBcp47 } from '../../i18n/index.tsx';
 
 interface Props {
@@ -60,6 +68,7 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
   const [edit, setEdit] = useState<Edit | null>(null);
   const [modal, setModal] = useState<Modal | null>(null);
   const [confirmCode, setConfirmCode] = useState('');
+  const [activeTab, setActiveTab] = useState<MultilingualTabId>('languages');
   const onApiErrorRef = useRef(onApiError);
   onApiErrorRef.current = onApiError;
   const onLocalesChangedRef = useRef(onLocalesChanged);
@@ -246,6 +255,8 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
     </AdminAlert>
   );
 
+  const orphanCount = orphans?.items.length ?? 0;
+
   return (
     <section className="min-w-0 space-y-6">
       <div>
@@ -257,132 +268,167 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
       {!modal && conflictPanel}
       {!modal && stalePanel}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
-      <div data-testid="multilingual-toggle-section" className="space-y-3">
-        <h3 className="text-lg font-semibold">{t('multilingual.support')}</h3>
-        <label className="flex items-center gap-2 text-sm font-medium">
-          <input type="checkbox" data-testid="multilingual-enabled-checkbox" checked={enabled}
-            disabled={blocked || !!edit || showAdd} onChange={(event) => toggle(event.target.checked)} />
-          {t('multilingual.enable')}
-        </label>
-        <p className="text-sm text-zinc-600">{t('multilingual.toggle_help')}</p>
-      </div>
-      <div data-testid="content-locales-section" className="space-y-4 border-t border-zinc-200 pt-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold">{t('multilingual.locales')}</h3>
-            <p className="mt-1 text-sm text-zinc-600">{t('multilingual.locales_help', { max: snap?.max_locales ?? localeState.maxLocales })}</p>
+      <AdminTabs
+        tabs={[
+          {
+            id: 'languages',
+            label: t('multilingual.tab_languages'),
+            badge: snap ? snap.items.length : undefined,
+            dirty: Boolean(edit || showAdd),
+          },
+          {
+            id: 'orphans',
+            label: t('multilingual.tab_orphans'),
+            badge: orphans ? orphanCount : undefined,
+            badgeTone: orphanCount > 0 ? 'warning' : 'neutral',
+          },
+        ]}
+        activeId={activeTab}
+        onChange={setActiveTab}
+        ariaLabel={t('multilingual.tabs_label')}
+        testId="multilingual-tabs"
+        idPrefix="multilingual"
+      />
+      <AdminTabPanel
+        active={activeTab === 'languages'}
+        id="multilingual-panel-languages"
+        labelledBy="multilingual-tab-languages"
+        className="space-y-6"
+      >
+        <div data-testid="multilingual-toggle-section" className="space-y-3">
+          <h3 className="text-lg font-semibold">{t('multilingual.support')}</h3>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" data-testid="multilingual-enabled-checkbox" checked={enabled}
+              disabled={blocked || !!edit || showAdd} onChange={(event) => toggle(event.target.checked)} />
+            {t('multilingual.enable')}
+          </label>
+          <p className="text-sm text-zinc-600">{t('multilingual.toggle_help')}</p>
+        </div>
+        <div data-testid="content-locales-section" className="space-y-4 border-t border-zinc-200 pt-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">{t('multilingual.locales')}</h3>
+              <p className="mt-1 text-sm text-zinc-600">{t('multilingual.locales_help', { max: snap?.max_locales ?? localeState.maxLocales })}</p>
+            </div>
+            {enabled && snap && snap.items.length < snap.max_locales && !showAdd && (
+              <AdminButton size="sm" data-testid="add-locale-btn" disabled={blocked || !!edit} onClick={() => setShowAdd(true)}>
+                {t('multilingual.add')}
+              </AdminButton>
+            )}
           </div>
-          {enabled && snap && snap.items.length < snap.max_locales && !showAdd && (
-            <AdminButton size="sm" data-testid="add-locale-btn" disabled={blocked || !!edit} onClick={() => setShowAdd(true)}>
-              {t('multilingual.add')}
-            </AdminButton>
+          {!enabled && <AdminAlert tone="info">{t('multilingual.disabled_help')}</AdminAlert>}
+          {(editUnavailable || addUnavailable) && (
+            <AdminAlert tone="warning">
+              <p>{t('multilingual.draft_unavailable')}</p>
+              <p className="mt-1 break-all">{editUnavailable ? edit?.label : newCode + ' / ' + newLabel}</p>
+              <AdminButton size="sm" disabled={busy} onClick={() => { setEdit(null); setShowAdd(false); }}>{t('multilingual.cancel')}</AdminButton>
+            </AdminAlert>
+          )}
+          {snap && (
+            <div className="overflow-x-auto rounded-lg border border-zinc-200">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-600">
+                  <tr><th className={CELL}>{t('multilingual.label')}</th><th className={CELL}>{t('multilingual.code')}</th>
+                    <th className={CELL}>{t('multilingual.direction')}</th><th className={CELL}>{t('multilingual.status')}</th><th className={CELL}>{t('multilingual.actions')}</th></tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200">
+                  {snap.items.map((item) => (
+                    <tr key={item.code} data-testid={'locale-row-' + item.code}>
+                      <td className={CELL}>{edit?.code === item.code && enabled ? (
+                        <input className={FIELD} aria-label={t('multilingual.label')} data-testid={'edit-locale-label-' + item.code}
+                          disabled={busy} required maxLength={80} value={edit.label} onChange={(event) => setEdit({ ...edit, label: event.target.value })} />
+                      ) : <>{item.label}{' '}{item.is_default && <AdminBadge tone="success">{t('multilingual.default')}</AdminBadge>}</>}</td>
+                      <td className={CELL}><code>{item.bcp47_tag}</code></td>
+                      <td className={CELL}>{edit?.code === item.code && enabled ? (
+                        <select className={FIELD} aria-label={t('multilingual.direction')} data-testid={'edit-locale-direction-' + item.code}
+                          disabled={busy} value={edit.direction} onChange={(event) => setEdit({ ...edit, direction: event.target.value as LocaleDirection })}>
+                          <option value="ltr">{t('multilingual.ltr')}</option><option value="rtl">{t('multilingual.rtl')}</option>
+                        </select>
+                      ) : item.direction === 'ltr' ? t('multilingual.ltr') : t('multilingual.rtl')}</td>
+                      <td className={CELL}><AdminBadge tone={item.enabled ? 'success' : 'neutral'}>{item.enabled ? t('multilingual.active') : t('multilingual.inactive')}</AdminBadge></td>
+                      <td className={CELL}><div className="flex flex-wrap gap-1.5">
+                        {edit?.code === item.code && enabled ? (
+                          <>
+                            <AdminButton size="sm" variant="primary" data-testid={'save-locale-' + item.code} disabled={blocked || !edit.label.trim()} onClick={() => saveEdit(item)}>{t('multilingual.save')}</AdminButton>
+                            <AdminButton size="sm" data-testid={'cancel-edit-locale-' + item.code} disabled={busy} onClick={() => setEdit(null)}>{t('multilingual.cancel')}</AdminButton>
+                          </>
+                        ) : (
+                          <>
+                            {enabled && <AdminButton size="sm" data-testid={'edit-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => setEdit({ code: item.code, label: item.label, direction: item.direction })}>{t('multilingual.edit')}</AdminButton>}
+                            {enabled && !item.is_default && item.enabled && <AdminButton size="sm" data-testid={'set-default-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => makeDefault(item)}>{t('multilingual.set_default')}</AdminButton>}
+                            {enabled && !item.is_default && <AdminButton size="sm" data-testid={'toggle-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => toggleLocale(item)}>{item.enabled ? t('multilingual.disable') : t('multilingual.reenable')}</AdminButton>}
+                            {!item.is_default && <AdminButton variant="danger" size="sm" data-testid={'delete-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => openModal({ kind: 'delete', code: item.code })}>{t('multilingual.delete')}</AdminButton>}
+                          </>
+                        )}
+                      </div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {showAdd && enabled && (
+            <form data-testid="add-locale-form" className="max-w-xl space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4" onSubmit={add}>
+              <h4 className="text-sm font-semibold">{t('multilingual.add')}</h4>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="flex flex-col gap-1 text-xs">{t('multilingual.code')}
+                  <input className={FIELD} data-testid="new-locale-code" required maxLength={35} disabled={busy} value={newCode} onChange={(event) => setNewCode(event.target.value)} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs">{t('multilingual.label')}
+                  <input className={FIELD} data-testid="new-locale-label" required maxLength={80} disabled={busy} value={newLabel} onChange={(event) => setNewLabel(event.target.value)} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs">{t('multilingual.direction')}
+                  <select className={FIELD} data-testid="new-locale-direction" disabled={busy} value={newDirection} onChange={(event) => setNewDirection(event.target.value as LocaleDirection)}>
+                    <option value="ltr">{t('multilingual.ltr')}</option><option value="rtl">{t('multilingual.rtl')}</option>
+                  </select>
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <AdminButton size="sm" variant="primary" type="submit" disabled={blocked}>{t('multilingual.add')}</AdminButton>
+                <AdminButton size="sm" disabled={busy} onClick={() => setShowAdd(false)}>{t('multilingual.cancel')}</AdminButton>
+              </div>
+            </form>
           )}
         </div>
-        {!enabled && <AdminAlert tone="info">{t('multilingual.disabled_help')}</AdminAlert>}
-        {(editUnavailable || addUnavailable) && (
-          <AdminAlert tone="warning">
-            <p>{t('multilingual.draft_unavailable')}</p>
-            <p className="mt-1 break-all">{editUnavailable ? edit?.label : newCode + ' / ' + newLabel}</p>
-            <AdminButton size="sm" disabled={busy} onClick={() => { setEdit(null); setShowAdd(false); }}>{t('multilingual.cancel')}</AdminButton>
-          </AdminAlert>
-        )}
-        {snap && (
-          <div className="overflow-x-auto rounded-lg border border-zinc-200">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-600">
-                <tr><th className={CELL}>{t('multilingual.label')}</th><th className={CELL}>{t('multilingual.code')}</th>
-                  <th className={CELL}>{t('multilingual.direction')}</th><th className={CELL}>{t('multilingual.status')}</th><th className={CELL}>{t('multilingual.actions')}</th></tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-200">
-                {snap.items.map((item) => (
-                  <tr key={item.code} data-testid={'locale-row-' + item.code}>
-                    <td className={CELL}>{edit?.code === item.code && enabled ? (
-                      <input className={FIELD} aria-label={t('multilingual.label')} data-testid={'edit-locale-label-' + item.code}
-                        disabled={busy} required maxLength={80} value={edit.label} onChange={(event) => setEdit({ ...edit, label: event.target.value })} />
-                    ) : <>{item.label}{' '}{item.is_default && <AdminBadge tone="success">{t('multilingual.default')}</AdminBadge>}</>}</td>
-                    <td className={CELL}><code>{item.bcp47_tag}</code></td>
-                    <td className={CELL}>{edit?.code === item.code && enabled ? (
-                      <select className={FIELD} aria-label={t('multilingual.direction')} data-testid={'edit-locale-direction-' + item.code}
-                        disabled={busy} value={edit.direction} onChange={(event) => setEdit({ ...edit, direction: event.target.value as LocaleDirection })}>
-                        <option value="ltr">{t('multilingual.ltr')}</option><option value="rtl">{t('multilingual.rtl')}</option>
-                      </select>
-                    ) : item.direction === 'ltr' ? t('multilingual.ltr') : t('multilingual.rtl')}</td>
-                    <td className={CELL}><AdminBadge tone={item.enabled ? 'success' : 'neutral'}>{item.enabled ? t('multilingual.active') : t('multilingual.inactive')}</AdminBadge></td>
-                    <td className={CELL}><div className="flex flex-wrap gap-1.5">
-                      {edit?.code === item.code && enabled ? (
-                        <>
-                          <AdminButton size="sm" variant="primary" data-testid={'save-locale-' + item.code} disabled={blocked || !edit.label.trim()} onClick={() => saveEdit(item)}>{t('multilingual.save')}</AdminButton>
-                          <AdminButton size="sm" data-testid={'cancel-edit-locale-' + item.code} disabled={busy} onClick={() => setEdit(null)}>{t('multilingual.cancel')}</AdminButton>
-                        </>
-                      ) : (
-                        <>
-                          {enabled && <AdminButton size="sm" data-testid={'edit-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => setEdit({ code: item.code, label: item.label, direction: item.direction })}>{t('multilingual.edit')}</AdminButton>}
-                          {enabled && !item.is_default && item.enabled && <AdminButton size="sm" data-testid={'set-default-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => makeDefault(item)}>{t('multilingual.set_default')}</AdminButton>}
-                          {enabled && !item.is_default && <AdminButton size="sm" data-testid={'toggle-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => toggleLocale(item)}>{item.enabled ? t('multilingual.disable') : t('multilingual.reenable')}</AdminButton>}
-                          {!item.is_default && <AdminButton variant="danger" size="sm" data-testid={'delete-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => openModal({ kind: 'delete', code: item.code })}>{t('multilingual.delete')}</AdminButton>}
-                        </>
-                      )}
-                    </div></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {showAdd && enabled && (
-          <form data-testid="add-locale-form" className="max-w-xl space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4" onSubmit={add}>
-            <h4 className="text-sm font-semibold">{t('multilingual.add')}</h4>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <label className="flex flex-col gap-1 text-xs">{t('multilingual.code')}
-                <input className={FIELD} data-testid="new-locale-code" required maxLength={35} disabled={busy} value={newCode} onChange={(event) => setNewCode(event.target.value)} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs">{t('multilingual.label')}
-                <input className={FIELD} data-testid="new-locale-label" required maxLength={80} disabled={busy} value={newLabel} onChange={(event) => setNewLabel(event.target.value)} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs">{t('multilingual.direction')}
-                <select className={FIELD} data-testid="new-locale-direction" disabled={busy} value={newDirection} onChange={(event) => setNewDirection(event.target.value as LocaleDirection)}>
-                  <option value="ltr">{t('multilingual.ltr')}</option><option value="rtl">{t('multilingual.rtl')}</option>
-                </select>
-              </label>
+      </AdminTabPanel>
+      <AdminTabPanel
+        active={activeTab === 'orphans'}
+        id="multilingual-panel-orphans"
+        labelledBy="multilingual-tab-orphans"
+        className="space-y-4"
+      >
+        <div data-testid="orphaned-locales-section" className="space-y-4">
+          <h3 className="text-lg font-semibold">{t('multilingual.orphans')}</h3>
+          <p className="text-sm text-zinc-600">{t('multilingual.orphans_help')}</p>
+          {orphans && !orphans.items.length && <p className="text-sm text-zinc-500">{t('multilingual.no_orphans')}</p>}
+          {!!orphans?.items.length && (
+            <div className="overflow-x-auto rounded-lg border border-zinc-200">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-600">
+                  <tr><th className={CELL}>{t('multilingual.code')}</th><th className={CELL}>{t('multilingual.entries')}</th>
+                    <th className={CELL}>{t('multilingual.terms')}</th><th className={CELL}>{t('multilingual.settings')}</th>
+                    <th className={CELL}>{t('multilingual.menu_slots')}</th><th className={CELL}>{t('multilingual.routes')}</th>
+                    <th className={CELL}>{t('multilingual.projections')}</th><th className={CELL}>{t('multilingual.media_seo_refs')}</th>
+                    <th className={CELL}>{t('multilingual.total')}</th><th className={CELL}>{t('multilingual.actions')}</th></tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200">
+                  {orphans.items.map((item) => (
+                    <tr key={item.code} data-testid={'orphan-locale-row-' + item.code}>
+                      <td className={CELL}>{item.label} (<code>{item.code}</code>)</td>
+                      <td className={CELL}>{formatCount(item.counts.entries)}</td><td className={CELL}>{formatCount(item.counts.terms)}</td>
+                      <td className={CELL}>{formatCount(item.counts.settings)}</td><td className={CELL}>{formatCount(item.counts.menu_slots)}</td>
+                      <td className={CELL}>{formatCount(item.counts.routes)}</td><td className={CELL}>{formatCount(item.counts.projections)}</td>
+                      <td className={CELL}>{formatCount(item.counts.media_seo_refs)}</td><td className={CELL}>{formatCount(item.counts.total)}</td>
+                      <td className={CELL}><AdminButton variant="danger" size="sm" data-testid={'purge-orphan-' + item.code}
+                        disabled={blocked || !!edit || showAdd} onClick={() => openModal({ kind: 'purge', code: item.code })}>{t('multilingual.purge')}</AdminButton></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="flex gap-2">
-              <AdminButton size="sm" variant="primary" type="submit" disabled={blocked}>{t('multilingual.add')}</AdminButton>
-              <AdminButton size="sm" disabled={busy} onClick={() => setShowAdd(false)}>{t('multilingual.cancel')}</AdminButton>
-            </div>
-          </form>
-        )}
-      </div>
-      <div data-testid="orphaned-locales-section" className="space-y-4 border-t border-zinc-200 pt-6">
-        <h3 className="text-lg font-semibold">{t('multilingual.orphans')}</h3>
-        <p className="text-sm text-zinc-600">{t('multilingual.orphans_help')}</p>
-        {orphans && !orphans.items.length && <p className="text-sm text-zinc-500">{t('multilingual.no_orphans')}</p>}
-        {!!orphans?.items.length && (
-          <div className="overflow-x-auto rounded-lg border border-zinc-200">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-600">
-                <tr><th className={CELL}>{t('multilingual.code')}</th><th className={CELL}>{t('multilingual.entries')}</th>
-                  <th className={CELL}>{t('multilingual.terms')}</th><th className={CELL}>{t('multilingual.settings')}</th>
-                  <th className={CELL}>{t('multilingual.menu_slots')}</th><th className={CELL}>{t('multilingual.routes')}</th>
-                  <th className={CELL}>{t('multilingual.projections')}</th><th className={CELL}>{t('multilingual.media_seo_refs')}</th>
-                  <th className={CELL}>{t('multilingual.total')}</th><th className={CELL}>{t('multilingual.actions')}</th></tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-200">
-                {orphans.items.map((item) => (
-                  <tr key={item.code} data-testid={'orphan-locale-row-' + item.code}>
-                    <td className={CELL}>{item.label} (<code>{item.code}</code>)</td>
-                    <td className={CELL}>{formatCount(item.counts.entries)}</td><td className={CELL}>{formatCount(item.counts.terms)}</td>
-                    <td className={CELL}>{formatCount(item.counts.settings)}</td><td className={CELL}>{formatCount(item.counts.menu_slots)}</td>
-                    <td className={CELL}>{formatCount(item.counts.routes)}</td><td className={CELL}>{formatCount(item.counts.projections)}</td>
-                    <td className={CELL}>{formatCount(item.counts.media_seo_refs)}</td><td className={CELL}>{formatCount(item.counts.total)}</td>
-                    <td className={CELL}><AdminButton variant="danger" size="sm" data-testid={'purge-orphan-' + item.code}
-                      disabled={blocked || !!edit || showAdd} onClick={() => openModal({ kind: 'purge', code: item.code })}>{t('multilingual.purge')}</AdminButton></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      </AdminTabPanel>
       {modal && (
         <ConfirmDialog testId={modal.kind === 'disable' ? 'disable-multilingual-modal' : modal.kind === 'delete' ? 'delete-locale-modal' : 'purge-orphan-modal'}
           title={modal.kind === 'disable' ? t('multilingual.confirm_disable') : modal.kind === 'delete' ? t('multilingual.confirm_delete') : t('multilingual.confirm_purge')}

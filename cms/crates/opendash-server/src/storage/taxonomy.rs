@@ -36,6 +36,7 @@ pub struct TaxonomyTerm {
     pub slug: String,
     pub parent_id: Option<i64>,
     pub version: i64,
+    pub featured_image_media_id: Option<String>,
     pub translations: Vec<TermTranslationSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions: Option<BTreeMap<String, BTreeMap<String, Value>>>,
@@ -68,6 +69,7 @@ type TermRow = (
     i64,
     String,
     String,
+    Option<String>,
 );
 
 fn term(row: TermRow) -> TaxonomyTerm {
@@ -80,6 +82,7 @@ fn term(row: TermRow) -> TaxonomyTerm {
         slug: row.3,
         parent_id: row.4,
         version: row.5,
+        featured_image_media_id: row.8,
         translations: Vec::new(),
         extensions: None,
         schema_token: None,
@@ -618,12 +621,36 @@ async fn begin_admin_write<'a>(
     }
 }
 
+async fn validate_featured_image_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    raw: &str,
+) -> ApiResult<String> {
+    let trimmed = raw.trim();
+    if trimmed.len() != 64
+        || !trimmed
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return Err(ApiError::bad_request("ID ảnh đại diện không hợp lệ."));
+    }
+    let exists: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active'",
+    )
+    .bind(trimmed)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(mutation_error)?;
+    exists.ok_or_else(|| {
+        ApiError::bad_request("Ảnh đại diện không tồn tại hoặc không phải ảnh đang hoạt động.")
+    })
+}
+
 async fn term_in_write(
     tx: &mut Transaction<'_, Sqlite>,
     id: i64,
 ) -> ApiResult<Option<TaxonomyTerm>> {
     let row: Option<TermRow> = sqlx::query_as(
-        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id
+        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id, featured_image_media_id
          FROM taxonomy_terms WHERE id = ?",
     )
     .bind(id)
@@ -805,7 +832,7 @@ pub(crate) async fn list_terms_for_host(
     .fetch_one(&mut *tx)
     .await?;
     let rows: Vec<TermRow> = sqlx::query_as(
-        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id
+        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id, featured_image_media_id
            FROM taxonomy_terms
           WHERE (? IS NULL OR kind = ?)
             AND (? IS NULL OR locale = ?)
@@ -881,7 +908,7 @@ pub async fn resolve_term_labels(
 pub async fn get_term(db: &SqlitePool, id: i64) -> ApiResult<Option<TaxonomyTerm>> {
     let mut tx = db.begin().await?;
     let row: Option<TermRow> = sqlx::query_as(
-        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id
+        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id, featured_image_media_id
            FROM taxonomy_terms WHERE id = ?",
     )
     .bind(id)
@@ -926,7 +953,7 @@ pub async fn create_term(
     slug: &str,
     parent_id: Option<i64>,
 ) -> ApiResult<TaxonomyTerm> {
-    create_term_with_locale(db, actor, kind, name, slug, parent_id, None, None).await
+    create_term_with_locale(db, actor, kind, name, slug, parent_id, None, None, None).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -939,6 +966,7 @@ pub async fn create_term_with_locale(
     parent_id: Option<i64>,
     locale: Option<&str>,
     source_term_id: Option<i64>,
+    featured_image_media_id: Option<&str>,
 ) -> ApiResult<TaxonomyTerm> {
     if !opendash_core::content::valid_content_type_key(kind) {
         return Err(ApiError::bad_request("Khóa taxonomy không hợp lệ."));
@@ -1041,18 +1069,24 @@ pub async fn create_term_with_locale(
     if taxonomy.hierarchical {
         check_taxonomy_parent(&mut tx, kind, effective_parent_id, None, 1, &target_locale).await?;
     }
-    let id =
-        sqlx::query("INSERT INTO taxonomy_terms(kind, locale, translation_group_id, name, slug, parent_id) VALUES (?, ?, ?, ?, ?, ?)")
-            .bind(kind)
-            .bind(&target_locale)
-            .bind(&group_id)
-            .bind(name)
-            .bind(slug)
-            .bind(effective_parent_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(mutation_error)?
-            .last_insert_rowid();
+    let validated_featured_image = match featured_image_media_id {
+        Some(raw) => Some(validate_featured_image_in_tx(&mut tx, raw).await?),
+        None => None,
+    };
+    let id = sqlx::query(
+        "INSERT INTO taxonomy_terms(kind, locale, translation_group_id, name, slug, parent_id, featured_image_media_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(kind)
+    .bind(&target_locale)
+    .bind(&group_id)
+    .bind(name)
+    .bind(slug)
+    .bind(effective_parent_id)
+    .bind(validated_featured_image.as_deref())
+    .execute(&mut *tx)
+    .await
+    .map_err(mutation_error)?
+    .last_insert_rowid();
     let created = term_in_write(&mut tx, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải term vừa tạo."))?;
@@ -1061,6 +1095,7 @@ pub async fn create_term_with_locale(
     Ok(created)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn patch_term(
     db: &SqlitePool,
     actor: &SessionContext,
@@ -1069,6 +1104,7 @@ pub async fn patch_term(
     name: Option<&str>,
     slug: Option<&str>,
     parent_id: Option<Option<i64>>,
+    featured_image_media_id: Option<Option<&str>>,
     extensions: Option<&BTreeMap<String, Value>>,
     schema_token: Option<&str>,
 ) -> ApiResult<TaxonomyTerm> {
@@ -1082,6 +1118,7 @@ pub async fn patch_term(
         && name.is_none()
         && slug.is_none()
         && parent_id.is_none()
+        && featured_image_media_id.is_none()
         && extensions.is_some();
     let mut tx = begin_admin_write(db, actor, editor_extension_only).await?;
     if actor.user.role != crate::auth::Role::Admin && !editor_extension_only {
@@ -1091,6 +1128,11 @@ pub async fn patch_term(
     }
     let existing = current_term(&mut tx, id, expected_version).await?;
     let next_parent = parent_id.unwrap_or(existing.parent_id);
+    let next_featured_image = match featured_image_media_id {
+        Some(Some(raw)) => Some(validate_featured_image_in_tx(&mut tx, raw).await?),
+        Some(None) => None,
+        None => existing.featured_image_media_id.clone(),
+    };
     let definition = definition_in_write(&mut tx, &existing.kind)
         .await?
         .ok_or_else(|| ApiError::bad_request("Taxonomy không tồn tại."))?;
@@ -1132,12 +1174,13 @@ pub async fn patch_term(
     }
     let updated = sqlx::query(
         "UPDATE taxonomy_terms
-            SET name = ?, slug = ?, parent_id = ?, version = version + 1
+            SET name = ?, slug = ?, parent_id = ?, featured_image_media_id = ?, version = version + 1
           WHERE id = ? AND version = ?",
     )
     .bind(name.unwrap_or(&existing.name))
     .bind(slug.unwrap_or(&existing.slug))
     .bind(next_parent)
+    .bind(next_featured_image.as_deref())
     .bind(id)
     .bind(expected_version)
     .execute(&mut *tx)
@@ -1341,6 +1384,7 @@ mod tests {
             Some(Some(tail.id)),
             None,
             None,
+            None,
         )
         .await
         .unwrap_err();
@@ -1353,6 +1397,7 @@ mod tests {
             None,
             None,
             Some(Some(branch_leaf.id)),
+            None,
             None,
             None,
         )
@@ -1400,6 +1445,7 @@ mod tests {
             Some(None),
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1412,6 +1458,7 @@ mod tests {
                 child.id,
                 1,
                 Some("Stale"),
+                None,
                 None,
                 None,
                 None,
@@ -1493,6 +1540,7 @@ mod tests {
                 None,
                 Some(Some(b.id)),
                 None,
+                None,
                 None
             ),
             patch_term(
@@ -1503,6 +1551,7 @@ mod tests {
                 None,
                 None,
                 Some(Some(a.id)),
+                None,
                 None,
                 None
             )
@@ -1536,5 +1585,131 @@ mod tests {
         assert!(!(a_parent == Some(b.id) && b_parent == Some(a.id)));
         db.close().await;
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn persists_and_clears_term_featured_image_and_validates_asset() {
+        let (db, actor) = memory_fixture().await;
+        let image_id = "a".repeat(64);
+        let video_id = "b".repeat(64);
+        let deleting_id = "c".repeat(64);
+        sqlx::query(
+            "INSERT INTO media_assets (id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height, lifecycle_state)
+             VALUES (?, 'image', 'cover.webp', 'image/webp', 'webp', 1024, 800, 600, 320, 240, 'active')",
+        )
+        .bind(&image_id)
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO media_assets (id, kind, filename, mime_type, extension, byte_size, width, height, duration_ms, video_codec, lifecycle_state)
+             VALUES (?, 'video', 'clip.mp4', 'video/mp4', 'mp4', 2048, 1280, 720, 5000, 'h264', 'active')",
+        )
+        .bind(&video_id)
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO media_assets (id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height, lifecycle_state)
+             VALUES (?, 'image', 'old.webp', 'image/webp', 'webp', 1024, 800, 600, 320, 240, 'deleting')",
+        )
+        .bind(&deleting_id)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let created = create_term_with_locale(
+            &db,
+            &actor,
+            "category",
+            "News",
+            "news",
+            None,
+            None,
+            None,
+            Some(&image_id),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            created.featured_image_media_id.as_deref(),
+            Some(image_id.as_str())
+        );
+
+        let fetched = get_term(&db, created.id).await.unwrap().unwrap();
+        assert_eq!(
+            fetched.featured_image_media_id.as_deref(),
+            Some(image_id.as_str())
+        );
+
+        let listed = list_terms(&db, Some("category"), 50, 0).await.unwrap();
+        assert_eq!(
+            listed
+                .items
+                .iter()
+                .find(|t| t.id == created.id)
+                .unwrap()
+                .featured_image_media_id
+                .as_deref(),
+            Some(image_id.as_str())
+        );
+
+        let cleared = patch_term(
+            &db,
+            &actor,
+            created.id,
+            created.version,
+            None,
+            None,
+            None,
+            Some(None),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(cleared.featured_image_media_id, None);
+        assert_eq!(cleared.version, 2);
+
+        let reattached = patch_term(
+            &db,
+            &actor,
+            created.id,
+            cleared.version,
+            None,
+            None,
+            None,
+            Some(Some(&image_id)),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reattached.featured_image_media_id.as_deref(),
+            Some(image_id.as_str())
+        );
+
+        for bad in ["not-hex", &"d".repeat(64), &video_id, &deleting_id] {
+            let err = patch_term(
+                &db,
+                &actor,
+                created.id,
+                reattached.version,
+                None,
+                None,
+                None,
+                Some(Some(bad)),
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(
+                err.0,
+                axum::http::StatusCode::BAD_REQUEST,
+                "must reject {bad}"
+            );
+        }
     }
 }

@@ -1392,8 +1392,18 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                      OR (term.slug = json_extract(ov.target_json, '$.selector_slug') AND sl.code IS NOT NULL))
                ))
              )
+         ) OR EXISTS (
+           SELECT 1
+           FROM taxonomy_terms AS term
+           JOIN taxonomy_definitions AS d ON d.key = term.kind
+           JOIN site_locales AS sl ON sl.code = term.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+           WHERE term.featured_image_media_id = ?
+             AND d.public = 1
+             AND d.provider_status = 'active'
+             AND d.declaration_state = 'declared'
          )"#,
     )
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)

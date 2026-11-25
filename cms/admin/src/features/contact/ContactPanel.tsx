@@ -16,6 +16,9 @@ import {
   type ContactSubmissionSummary,
 } from '../../api/contact.ts';
 import { notifyContactSubmission } from '../../api/smtp.ts';
+import { AdminTabPanel, AdminTabs } from '../../components/AdminPrimitives.tsx';
+
+type ContactTabId = 'forms' | 'inbox';
 
 interface Props {
   csrfToken: string | null;
@@ -44,6 +47,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
   const [ackDupRisk, setAckDupRisk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [activeTab, setActiveTab] = useState<ContactTabId>('forms');
 
   const loadAll = async (filterFormId?: number) => {
     try {
@@ -172,14 +176,33 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
         <button
           type="button"
           className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
-          onClick={() => selectForm(null)}
+          onClick={() => {
+            selectForm(null);
+            setActiveTab('forms');
+          }}
         >{translate('feature.contact.contactpanel.new_form')}</button>
       </div>
 
       {notice && <p className="mt-3 rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p>}
 
-      <div className="mt-4 grid gap-6 lg:grid-cols-2">
-        <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
+      <AdminTabs
+        tabs={[
+          { id: 'forms', label: translate('contact.tab_forms'), badge: forms.length },
+          { id: 'inbox', label: translate('contact.tab_inbox'), badge: submissions.length },
+        ]}
+        activeId={activeTab}
+        onChange={setActiveTab}
+        ariaLabel={translate('contact.tabs_label')}
+        testId="contact-tabs"
+        idPrefix="contact"
+      />
+
+      <AdminTabPanel
+        active={activeTab === 'forms'}
+        id="contact-panel-forms"
+        labelledBy="contact-tab-forms"
+      >
+        <div className="max-w-3xl space-y-4 rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex flex-wrap gap-2">
             {forms.map((f) => (
               <button
@@ -350,8 +373,14 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
             </div>
           </form>
         </div>
+      </AdminTabPanel>
 
-        <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+      <AdminTabPanel
+        active={activeTab === 'inbox'}
+        id="contact-panel-inbox"
+        labelledBy="contact-tab-inbox"
+      >
+        <div className="max-w-3xl space-y-3 rounded-lg border border-slate-200 bg-white p-4">
           <h3 className="text-sm font-semibold text-slate-900">{translate('feature.contact.contactpanel.contact_inbox')}{submissions.length})</h3>
           {submissions.length === 0 ? (
             <p className="text-sm text-slate-500">{translate('feature.contact.contactpanel.no_contact_messages_yet')}</p>
@@ -443,7 +472,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
             </div>
           )}
         </div>
-      </div>
+      </AdminTabPanel>
     </section>
   );
 }

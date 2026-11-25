@@ -9,7 +9,14 @@ import {
   type TaxonomyDefinition,
 } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
-import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  AdminAlert,
+  AdminButton,
+  AdminTabPanel,
+  AdminTabs,
+} from '../../components/AdminPrimitives.tsx';
+
+type TaxonomyDefsTabId = 'definitions' | 'eligibility';
 
 interface Props {
   user: AuthUser | null;
@@ -121,6 +128,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   const eligibilityRequestEpochRef = useRef(0);
   const [eligibilityConflict, setEligibilityConflict] = useState(recovered?.eligibilityConflict ?? false);
   const [configuredEffective, setConfiguredEffective] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<TaxonomyDefsTabId>('definitions');
   const onErrorRef = useRef(onApiError);
   onErrorRef.current = onApiError;
   const reportDirtyRef = useRef(onDirtyChange);
@@ -491,82 +499,116 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       {tStatic("feature.common.ui_taxonomy")} {activeKey} {tStatic("feature.taxonomy.taxonomydefinitionspage.was_deleted_or_is_no_longer_accessible_your_input")}
     </AdminAlert>}
     {loading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.loading_taxonomies")}</p>}
-    <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-      <div className="min-w-0 space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-zinc-950">{tStatic("feature.taxonomy.taxonomydefinitionspage.definitions")}{definitions.length}/64)</h3>
-          {user.role === 'admin' && <AdminButton variant="primary" size="sm" disabled={busy || definitions.length >= 64}
-            onClick={() => choose('__new__')}>{tStatic("feature.taxonomy.taxonomydefinitionspage.add_taxonomy")}</AdminButton>}
-        </div>
-        {ordered.map(item => <div key={item.key} className={`rounded-xl border p-3.5 transition-colors ${activeKey === item.key ? 'border-od-accent bg-blue-50/50' : 'border-zinc-200 bg-white'}`}>
+    <AdminTabs
+      tabs={[
+        {
+          id: 'definitions',
+          label: tStatic('taxonomy_defs.tab_definitions'),
+          badge: `${definitions.length}/64`,
+          dirty: configDirty || conflict,
+        },
+        {
+          id: 'eligibility',
+          label: tStatic('taxonomy_defs.tab_eligibility'),
+          dirty: eligibleDirty || eligibilityConflict || eligibilityVersionMismatch,
+        },
+      ]}
+      activeId={activeTab}
+      onChange={setActiveTab}
+      ariaLabel={tStatic('taxonomy_defs.tabs_label')}
+      testId="taxonomy-definitions-tabs"
+      idPrefix="taxonomy-defs"
+    />
+    <AdminTabPanel
+      active={activeTab === 'definitions'}
+      id="taxonomy-defs-panel-definitions"
+      labelledBy="taxonomy-defs-tab-definitions"
+    >
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="break-words text-sm font-semibold text-zinc-950">{item.label} <span className="font-normal text-zinc-500">({item.key})</span></p>
-              <p className="mt-0.5 text-xs text-zinc-500">{item.hierarchical ? tStatic("feature.content.contenttypeschemasettings.hierarchical") : tStatic("feature.taxonomy.taxonomydefinitionspage.flat")} · {item.public ? tStatic("feature.editor.panelregionrenderer.public") : tStatic("feature.editor.panelregionrenderer.private")} · {item.owner.kind} · v{item.version}</p>
-              {item.provider_status !== 'active' || item.declaration_state !== 'declared' ?
-                <p className="mt-0.5 text-xs text-amber-800">{tStatic("feature.common.ui_provider")} {item.provider_status}{tStatic("feature.taxonomy.taxonomydefinitionspage.declaration")}{' '}{item.declaration_state}{tStatic("feature.taxonomy.taxonomydefinitionspage.data_is_retained")}</p> : null}
-            </div>
-            <div className="flex gap-1.5">
-              <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => choose(item.key)}>{tStatic("feature.taxonomy.taxonomydefinitionspage.configuration")}</AdminButton>
-              <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => {
-                if (dirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.there_are_unsaved_changes_leave_this_page"))) return;
-                onNavigateHash(termsHash(item.key));
-              }}>{tStatic("feature.common.ui_term")}</AdminButton>
-            </div>
+            <h3 className="text-sm font-semibold text-zinc-950">{tStatic("feature.taxonomy.taxonomydefinitionspage.definitions")}{definitions.length}/64)</h3>
+            {user.role === 'admin' && <AdminButton variant="primary" size="sm" disabled={busy || definitions.length >= 64}
+              onClick={() => choose('__new__')}>{tStatic("feature.taxonomy.taxonomydefinitionspage.add_taxonomy")}</AdminButton>}
           </div>
-        </div>)}
+          {ordered.map(item => <div key={item.key} className={`rounded-xl border p-3.5 transition-colors ${activeKey === item.key ? 'border-od-accent bg-blue-50/50' : 'border-zinc-200 bg-white'}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="break-words text-sm font-semibold text-zinc-950">{item.label} <span className="font-normal text-zinc-500">({item.key})</span></p>
+                <p className="mt-0.5 text-xs text-zinc-500">{item.hierarchical ? tStatic("feature.content.contenttypeschemasettings.hierarchical") : tStatic("feature.taxonomy.taxonomydefinitionspage.flat")} · {item.public ? tStatic("feature.editor.panelregionrenderer.public") : tStatic("feature.editor.panelregionrenderer.private")} · {item.owner.kind} · v{item.version}</p>
+                {item.provider_status !== 'active' || item.declaration_state !== 'declared' ?
+                  <p className="mt-0.5 text-xs text-amber-800">{tStatic("feature.common.ui_provider")} {item.provider_status}{tStatic("feature.taxonomy.taxonomydefinitionspage.declaration")}{' '}{item.declaration_state}{tStatic("feature.taxonomy.taxonomydefinitionspage.data_is_retained")}</p> : null}
+              </div>
+              <div className="flex gap-1.5">
+                <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => choose(item.key)}>{tStatic("feature.taxonomy.taxonomydefinitionspage.configuration")}</AdminButton>
+                <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => {
+                  if (dirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.there_are_unsaved_changes_leave_this_page"))) return;
+                  onNavigateHash(termsHash(item.key));
+                }}>{tStatic("feature.common.ui_term")}</AdminButton>
+              </div>
+            </div>
+          </div>)}
+        </div>
+        <div className="min-w-0 space-y-4">
+          {(isNew || active || missingDefinition) && <form onSubmit={event => void saveDefinition(event)} className="space-y-4 rounded-xl border border-zinc-200 bg-white p-4">
+            <h3 className="text-sm font-semibold text-zinc-950">{isNew ? tStatic("feature.taxonomy.taxonomydefinitionspage.create_definition") : tStatic("feature.taxonomy.taxonomydefinitionspage.edit_value", { value1: active?.key ?? activeKey })}</h3>
+            <label className="block text-xs font-medium text-zinc-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.key")}
+              <input className={fieldClass} value={form.key} maxLength={64} required disabled={!isNew || busy || !canEdit}
+                onChange={event => setForm(previous => ({ ...previous, key: event.target.value }))}/>
+              <span className="mt-1 block text-xs font-normal text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.use_lowercase_letters_digits_and_underscores_the_key_cannot")}</span>
+            </label>
+            <label className="block text-xs font-medium text-zinc-700">{tStatic("feature.content.contenttypeform.display_name")}
+              <input className={fieldClass} value={form.label} maxLength={100} required disabled={busy || !canEdit}
+                onChange={event => setForm(previous => ({ ...previous, label: event.target.value }))}/>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.hierarchical}
+              disabled={busy || !canEdit || active?.owner.kind === 'core'} onChange={event => setForm(previous => ({ ...previous, hierarchical: event.target.checked }))}/>
+              {tStatic("feature.taxonomy.taxonomydefinitionspage.allow_parent_child_hierarchy_up_to_8_levels")}</label>
+            <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.public}
+              disabled={busy || !canEdit} onChange={event => setForm(previous => ({ ...previous, public: event.target.checked }))}/>
+              {tStatic("feature.taxonomy.taxonomydefinitionspage.allow_public_visibility")}</label>
+            {active && active.owner.kind !== 'user' && <p className="text-xs text-zinc-500">{active.owner.kind === 'core'
+              ? tStatic("feature.taxonomy.taxonomydefinitionspage.core_taxonomies_retain_their_key_and_hierarchy_mode")
+              : tStatic("feature.taxonomy.taxonomydefinitionspage.the_definition_is_provider_managed_only_the_provider_can")}</p>}
+            {conflict && <AdminAlert tone="warning" role="alert" className="space-y-2">
+              <p>{tStatic("feature.taxonomy.taxonomydefinitionspage.version_is_stale_your_input_is_retained_review_the")}</p>
+              <AdminButton variant="secondary" size="sm" disabled={busy || !active}
+                onClick={() => void rebaseDefinition()}>{tStatic("feature.taxonomy.taxonomydefinitionspage.review_latest_version_and_retain_edited_fields")}</AdminButton>
+            </AdminAlert>}
+            <div className="flex flex-wrap gap-2">
+              <AdminButton type="submit" variant="primary" disabled={busy || !csrfToken || !canEdit || conflict || (!isNew && !configDirty)}>
+                {busy ? tStatic("reading.saving") : tStatic("feature.taxonomy.taxonomydefinitionspage.save_definition")}</AdminButton>
+              {canDelete && <AdminButton variant="danger" disabled={busy || !csrfToken || conflict} onClick={() => void remove()}>{tStatic("multilingual.delete")}</AdminButton>}
+              {missingDefinition && <AdminButton variant="secondary" onClick={() => choose('')}>
+                {tStatic("feature.taxonomy.taxonomydefinitionspage.discard_input_whose_save_target_no_longer_exists")}
+              </AdminButton>}
+            </div>
+          </form>}
+        </div>
       </div>
-      <div className="min-w-0 space-y-4">
-        {(isNew || active || missingDefinition) && <form onSubmit={event => void saveDefinition(event)} className="space-y-4 rounded-xl border border-zinc-200 bg-white p-4">
-          <h3 className="text-sm font-semibold text-zinc-950">{isNew ? tStatic("feature.taxonomy.taxonomydefinitionspage.create_definition") : tStatic("feature.taxonomy.taxonomydefinitionspage.edit_value", { value1: active?.key ?? activeKey })}</h3>
-          <label className="block text-xs font-medium text-zinc-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.key")}
-            <input className={fieldClass} value={form.key} maxLength={64} required disabled={!isNew || busy || !canEdit}
-              onChange={event => setForm(previous => ({ ...previous, key: event.target.value }))}/>
-            <span className="mt-1 block text-xs font-normal text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.use_lowercase_letters_digits_and_underscores_the_key_cannot")}</span>
-          </label>
-          <label className="block text-xs font-medium text-zinc-700">{tStatic("feature.content.contenttypeform.display_name")}
-            <input className={fieldClass} value={form.label} maxLength={100} required disabled={busy || !canEdit}
-              onChange={event => setForm(previous => ({ ...previous, label: event.target.value }))}/>
-          </label>
-          <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.hierarchical}
-            disabled={busy || !canEdit || active?.owner.kind === 'core'} onChange={event => setForm(previous => ({ ...previous, hierarchical: event.target.checked }))}/>
-            {tStatic("feature.taxonomy.taxonomydefinitionspage.allow_parent_child_hierarchy_up_to_8_levels")}</label>
-          <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.public}
-            disabled={busy || !canEdit} onChange={event => setForm(previous => ({ ...previous, public: event.target.checked }))}/>
-            {tStatic("feature.taxonomy.taxonomydefinitionspage.allow_public_visibility")}</label>
-          {active && active.owner.kind !== 'user' && <p className="text-xs text-zinc-500">{active.owner.kind === 'core'
-            ? tStatic("feature.taxonomy.taxonomydefinitionspage.core_taxonomies_retain_their_key_and_hierarchy_mode")
-            : tStatic("feature.taxonomy.taxonomydefinitionspage.the_definition_is_provider_managed_only_the_provider_can")}</p>}
-          {conflict && <AdminAlert tone="warning" role="alert" className="space-y-2">
-            <p>{tStatic("feature.taxonomy.taxonomydefinitionspage.version_is_stale_your_input_is_retained_review_the")}</p>
-            <AdminButton variant="secondary" size="sm" disabled={busy || !active}
-              onClick={() => void rebaseDefinition()}>{tStatic("feature.taxonomy.taxonomydefinitionspage.review_latest_version_and_retain_edited_fields")}</AdminButton>
-          </AdminAlert>}
-          <div className="flex flex-wrap gap-2">
-            <AdminButton type="submit" variant="primary" disabled={busy || !csrfToken || !canEdit || conflict || (!isNew && !configDirty)}>
-              {busy ? tStatic("reading.saving") : tStatic("feature.taxonomy.taxonomydefinitionspage.save_definition")}</AdminButton>
-            {canDelete && <AdminButton variant="danger" disabled={busy || !csrfToken || conflict} onClick={() => void remove()}>{tStatic("multilingual.delete")}</AdminButton>}
-            {missingDefinition && <AdminButton variant="secondary" onClick={() => choose('')}>
-              {tStatic("feature.taxonomy.taxonomydefinitionspage.discard_input_whose_save_target_no_longer_exists")}
-            </AdminButton>}
-          </div>
-        </form>}
-        <div className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
-          <h3 className="text-sm font-semibold text-zinc-950">{tStatic("feature.taxonomy.taxonomydefinitionspage.associate_taxonomies_with_content_types")}</h3>
-          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>{tStatic("feature.taxonomy.taxonomydefinitionspage.content_type")}</span>
-            <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 disabled:opacity-50" value={typeKey} disabled={busy || eligibilityLoading || loading}
-              onChange={event => {
-                if (eligibleDirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.discard_unsaved_taxonomy_changes"))) return;
-                recoveredRef.current = null;
-                setTypeKey(event.target.value); setError('');
-              }}>
-              {types.filter(item => item.descriptor.key !== 'section').map(item =>
-                <option key={item.descriptor.key} value={item.descriptor.key}>{item.descriptor.label} ({item.descriptor.key})</option>)}
-            </select>
-          </label>
-          {eligibilityLoading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.loading_eligibility_configuration")}</p>}
-          {!eligibilityLoading && definitions.map(item => <label key={item.key} className="flex items-start gap-2 text-sm text-zinc-800">
+    </AdminTabPanel>
+    <AdminTabPanel
+      active={activeTab === 'eligibility'}
+      id="taxonomy-defs-panel-eligibility"
+      labelledBy="taxonomy-defs-tab-eligibility"
+    >
+      <div className="max-w-2xl space-y-3 rounded-xl border border-zinc-200 bg-white p-5">
+        <h3 className="text-sm font-semibold text-zinc-950">{tStatic("feature.taxonomy.taxonomydefinitionspage.associate_taxonomies_with_content_types")}</h3>
+        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+          <span>{tStatic("feature.taxonomy.taxonomydefinitionspage.content_type")}</span>
+          <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 disabled:opacity-50" value={typeKey} disabled={busy || eligibilityLoading || loading}
+            onChange={event => {
+              if (eligibleDirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.discard_unsaved_taxonomy_changes"))) return;
+              recoveredRef.current = null;
+              setTypeKey(event.target.value); setError('');
+            }}>
+            {types.filter(item => item.descriptor.key !== 'section').map(item =>
+              <option key={item.descriptor.key} value={item.descriptor.key}>{item.descriptor.label} ({item.descriptor.key})</option>)}
+          </select>
+        </label>
+        {eligibilityLoading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.loading_eligibility_configuration")}</p>}
+        <div className="grid gap-2.5 sm:grid-cols-2">
+          {!eligibilityLoading && definitions.map(item => <label key={item.key} className="flex items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3 text-sm text-zinc-800 hover:border-zinc-300">
             <input type="checkbox" className="mt-1" checked={eligible.includes(item.key)}
               disabled={!typeEditable || busy || eligibilityLoading || eligibilityConflict}
               onChange={event => setEligible(previous => event.target.checked
@@ -576,21 +618,21 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
                 <span className="block text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.provider_inactive_or_declaration_withdrawn_configured_associations_are_retained")}</span>}
             </span>
           </label>)}
-          {(eligibilityConflict || eligibilityVersionMismatch) && <AdminAlert tone="warning" role="alert" className="space-y-2">
-            <p>{tStatic("feature.taxonomy.taxonomydefinitionspage.cpt_version_differs_from_the_taxonomy_snapshot_or_the")}</p>
-            <AdminButton variant="secondary" size="sm" disabled={busy || eligibilityLoading}
-              onClick={() => void rebaseEligibility()}>{tStatic("feature.taxonomy.taxonomydefinitionspage.review_latest_schema_and_retain_changed_selections")}</AdminButton>
-          </AdminAlert>}
-          {eligible.some(key => !definitions.some(item => item.key === key)) &&
-            <p role="status" className="text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.configured_taxonomies_are_missing_from_the_list_they_are")}</p>}
-          {definitions.some(item => eligible.includes(item.key) && !configuredEffective.includes(item.key)) &&
-            <p role="status" className="text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.inactive_taxonomies_do_not_appear_in_the_picker_but")}</p>}
-          <AdminButton variant="primary" onClick={() => void saveEligibility()}
-            disabled={!typeEditable || !csrfToken || !eligibleDirty || busy || eligibilityLoading ||
-              eligibilityConflict || eligibilityTypeVersion === null || eligibilityVersionMismatch}>{tStatic("feature.taxonomy.taxonomydefinitionspage.save_applicable_types")}</AdminButton>
-          {!typeEditable && typeKey && <p className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.only_admins_can_edit_applicable_taxonomies_for_valid_cpts")}</p>}
         </div>
+        {(eligibilityConflict || eligibilityVersionMismatch) && <AdminAlert tone="warning" role="alert" className="space-y-2">
+          <p>{tStatic("feature.taxonomy.taxonomydefinitionspage.cpt_version_differs_from_the_taxonomy_snapshot_or_the")}</p>
+          <AdminButton variant="secondary" size="sm" disabled={busy || eligibilityLoading}
+            onClick={() => void rebaseEligibility()}>{tStatic("feature.taxonomy.taxonomydefinitionspage.review_latest_schema_and_retain_changed_selections")}</AdminButton>
+        </AdminAlert>}
+        {eligible.some(key => !definitions.some(item => item.key === key)) &&
+          <p role="status" className="text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.configured_taxonomies_are_missing_from_the_list_they_are")}</p>}
+        {definitions.some(item => eligible.includes(item.key) && !configuredEffective.includes(item.key)) &&
+          <p role="status" className="text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.inactive_taxonomies_do_not_appear_in_the_picker_but")}</p>}
+        <AdminButton variant="primary" onClick={() => void saveEligibility()}
+          disabled={!typeEditable || !csrfToken || !eligibleDirty || busy || eligibilityLoading ||
+            eligibilityConflict || eligibilityTypeVersion === null || eligibilityVersionMismatch}>{tStatic("feature.taxonomy.taxonomydefinitionspage.save_applicable_types")}</AdminButton>
+        {!typeEditable && typeKey && <p className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.only_admins_can_edit_applicable_taxonomies_for_valid_cpts")}</p>}
       </div>
-    </div>
+    </AdminTabPanel>
   </section>;
 }

@@ -2,6 +2,7 @@ import { formatNumber } from '../../i18n/format.ts';
 import { getEffectiveBcp47, tStatic, useI18n } from '../../i18n/index.tsx';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
+import { mediaThumbnailUrl } from '../../api/media.ts';
 import { deleteTaxonomyTerm, getTaxonomyDefinition, listAllTaxonomyTerms,
   type TaxonomyDefinition, type TaxonomyKind, type TaxonomyTerm } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
@@ -10,13 +11,19 @@ import {
   type AdminLocaleState,
 } from '../../api/locales.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { TermEditPage } from './TermEditPage.tsx';
 
 interface TaxonomyPageProps {
   kind: TaxonomyKind;
+  cptTypeKey?: string;
+  routeMode?: 'new' | 'edit';
+  selectedTermId?: number | null;
   user: AuthUser | null;
+  siteInstanceId?: string;
   csrfToken: string | null;
   localeState?: AdminLocaleState;
   onApiError: (error: unknown, fallback: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   onNavigateHash: (hash: string) => void;
 }
 
@@ -53,10 +60,15 @@ function orderedTerms(hierarchical: boolean, terms: TaxonomyTerm[]): Array<{ ter
 /** Route chooses the fixed taxonomy kind. Lists never mount an editor form. */
 export function TaxonomyPage({
   kind,
+  cptTypeKey,
+  routeMode = 'new',
+  selectedTermId = null,
   user,
+  siteInstanceId,
   csrfToken,
   localeState = EMPTY_ADMIN_LOCALE_STATE,
   onApiError,
+  onDirtyChange,
   onNavigateHash,
 }: TaxonomyPageProps) {
   useI18n();
@@ -70,9 +82,10 @@ export function TaxonomyPage({
   const [filterLocale, setFilterLocale] = useState('all');
   const [page, setPage] = useState(0);
   const admin = user?.role === 'admin';
-  const listHash = kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
-    : `#/taxonomy/${encodeURIComponent(kind)}/terms`;
-  const newHash = `${listHash}/new`;
+  const listHash = cptTypeKey
+    ? `#/cpt/${encodeURIComponent(cptTypeKey)}/taxonomy/${encodeURIComponent(kind)}`
+    : kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
+      : `#/taxonomy/${encodeURIComponent(kind)}/terms`;
   const editHash = (id: number) => `${listHash}/${id}/edit`;
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
@@ -123,6 +136,9 @@ export function TaxonomyPage({
     try {
       await deleteTaxonomyTerm(term.id, term.version, csrfToken);
       setNotice(tStatic("feature.taxonomy.taxonomypage.deleted_value", { value1: term.id }));
+      if (selectedTermId === term.id) {
+        onNavigateHash(listHash);
+      }
       await refresh();
     } catch (cause) {
       setError(cause instanceof ApiClientError && cause.status === 412
@@ -151,89 +167,157 @@ export function TaxonomyPage({
             onClick={() => onNavigateHash('#/taxonomy/definitions')}>{tStatic("feature.taxonomy.taxonomypage.taxonomy_definitions")}</AdminButton>
           <AdminButton variant="secondary" size="sm" disabled={loading || busy}
             onClick={() => void refresh()}>{tStatic("feature.users.userspanel.refresh")}</AdminButton>
-          {admin && <AdminButton variant="primary" size="sm" disabled={busy || loading || !definition || definition.provider_status !== 'active' || definition.declaration_state !== 'declared'}
-            onClick={() => onNavigateHash(newHash)}>{tStatic("feature.content.entrylistpage.add_new")}</AdminButton>}
+          {admin && routeMode === 'edit' && (
+            <AdminButton variant="primary" size="sm" disabled={busy || loading || !definition || definition.provider_status !== 'active' || definition.declaration_state !== 'declared'}
+              onClick={() => onNavigateHash(listHash)}>{tStatic("feature.content.entrylistpage.add_new")}</AdminButton>
+          )}
         </div>
       </header>
 
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
-      <div className="flex flex-wrap items-end gap-3">
-        <label htmlFor="taxonomy-search" className="flex max-w-md flex-1 flex-col gap-1 text-xs font-medium text-zinc-600">
-          <span>{tStatic("feature.taxonomy.taxonomypage.search_by_name_slug_or_id")}</span>
-          <input id="taxonomy-search" type="search" value={search}
-            onChange={event => { setSearch(event.target.value); setPage(0); }}
-            placeholder={tStatic("feature.taxonomy.taxonomypage.enter_name_slug_or_id")}
-            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900" />
-        </label>
-        {localeState.hasMultipleLocales && (
-          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600">
-            <span>{tStatic("feature.content.entrylistpage.language")}</span>
-            <select
-              aria-label={tStatic("feature.taxonomy.taxonomypage.filter_taxonomy_language")}
-              data-testid="taxonomy-locale-filter"
-              value={filterLocale}
-              onChange={(event) => {
-                setFilterLocale(event.target.value);
-                setPage(0);
-              }}
-              className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
-            >
-              <option value="all">{tStatic("feature.content.entrylistpage.all_languages")}</option>
-              {localeState.allLocales.map((loc) => (
-                <option key={loc.code} value={loc.code}>
-                  {loc.label} ({loc.code})
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-      </div>
-      {loading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomypage.loading_list")}</p>}
-      <div className="space-y-2" aria-busy={loading}>
-        {!loading && visible.length === 0 && <p className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500">
-          {search ? tStatic("feature.taxonomy.taxonomypage.no_matching_items") : tStatic("feature.taxonomy.taxonomypage.no_items_yet")}
-        </p>}
-        {visible.map(({term, depth}) => (
-          <article key={term.id} data-term-id={term.id} className="rounded-xl border border-zinc-200 bg-white px-4 py-3 transition-colors hover:bg-zinc-50/70">
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0 space-y-0.5">
-                <h3 className="break-words text-sm font-semibold text-zinc-950">
-                  {definition?.hierarchical && depth > 0 && <span aria-hidden="true" className="mr-1 text-zinc-400">{'— '.repeat(Math.min(depth, 7))}</span>}
-                  {term.name}
-                  {localeState.hasMultipleLocales && term.locale && (
-                    <span className="ml-2 inline-block align-middle">
-                      <AdminBadge tone="neutral">{term.locale}</AdminBadge>
-                    </span>
-                  )}
-                </h3>
-                <p className="break-all text-xs text-zinc-500">/{term.slug} · ID #{term.id} · v{term.version}</p>
-                {definition?.hierarchical && <p className="text-xs text-zinc-500">
-                  {term.parent_id === null ? tStatic("feature.taxonomy.taxonomypage.root_category") : tStatic("feature.taxonomy.taxonomypage.parent_prefix", { parent: byId.get(term.parent_id)?.name ?? `#${term.parent_id}` })} {tStatic("feature.taxonomy.taxonomypage.level")}{' '}{depth + 1}
-                </p>}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                <AdminButton variant="secondary" size="sm" disabled={busy}
-                  aria-label={tStatic("feature.taxonomy.taxonomypage.open_editor_for_value_id_value", { value1: term.name, value2: term.id })}
-                  onClick={() => onNavigateHash(editHash(term.id))}>{admin ? tStatic("multilingual.edit") : tStatic("feature.taxonomy.taxonomypage.extensions")}</AdminButton>
-                {admin && <AdminButton variant="danger" size="sm" disabled={busy}
-                  aria-label={tStatic("feature.content.entrylistpage.delete_value_id_value", { value1: term.name, value2: term.id })}
-                  onClick={() => void remove(term)}>{tStatic("multilingual.delete")}</AdminButton>}
-              </div>
+
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]" data-testid="taxonomy-split-layout">
+        <div className="min-w-0 space-y-3" data-testid="taxonomy-list-column">
+          <div className="flex flex-wrap items-end gap-3">
+            <label htmlFor="taxonomy-search" className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-zinc-600">
+              <span>{tStatic("feature.taxonomy.taxonomypage.search_by_name_slug_or_id")}</span>
+              <input id="taxonomy-search" type="search" value={search}
+                onChange={event => { setSearch(event.target.value); setPage(0); }}
+                placeholder={tStatic("feature.taxonomy.taxonomypage.enter_name_slug_or_id")}
+                className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900" />
+            </label>
+            {localeState.hasMultipleLocales && (
+              <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600">
+                <span>{tStatic("feature.content.entrylistpage.language")}</span>
+                <select
+                  aria-label={tStatic("feature.taxonomy.taxonomypage.filter_taxonomy_language")}
+                  data-testid="taxonomy-locale-filter"
+                  value={filterLocale}
+                  onChange={(event) => {
+                    setFilterLocale(event.target.value);
+                    setPage(0);
+                  }}
+                  className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
+                >
+                  <option value="all">{tStatic("feature.content.entrylistpage.all_languages")}</option>
+                  {localeState.allLocales.map((loc) => (
+                    <option key={loc.code} value={loc.code}>
+                      {loc.label} ({loc.code})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          {loading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomypage.loading_list")}</p>}
+          <div className="space-y-2" aria-busy={loading}>
+            {!loading && visible.length === 0 && <p className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500">
+              {search ? tStatic("feature.taxonomy.taxonomypage.no_matching_items") : tStatic("feature.taxonomy.taxonomypage.no_items_yet")}
+            </p>}
+            {visible.map(({term, depth}) => {
+              const isSelected = routeMode === 'edit' && selectedTermId === term.id;
+              return (
+                <article
+                  key={term.id}
+                  data-term-id={term.id}
+                  className={`rounded-xl border px-3.5 py-3 transition-colors ${
+                    isSelected
+                      ? 'border-od-accent bg-od-accent-soft/20'
+                      : 'border-zinc-200 bg-white hover:bg-zinc-50/70'
+                  }`}
+                >
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      {term.featured_image_media_id && (
+                        <img
+                          src={mediaThumbnailUrl(term.featured_image_media_id)}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded-md border border-zinc-200 bg-zinc-50 object-cover"
+                        />
+                      )}
+                      <div className="min-w-0 space-y-0.5">
+                        <h3 className="break-words text-sm font-semibold text-zinc-950">
+                          {definition?.hierarchical && depth > 0 && <span aria-hidden="true" className="mr-1 text-zinc-400">{'— '.repeat(Math.min(depth, 7))}</span>}
+                          {term.name}
+                          {localeState.hasMultipleLocales && term.locale && (
+                            <span className="ml-2 inline-block align-middle">
+                              <AdminBadge tone="neutral">{term.locale}</AdminBadge>
+                            </span>
+                          )}
+                        </h3>
+                        <p className="break-all text-xs text-zinc-500">/{term.slug} · ID #{term.id} · v{term.version}</p>
+                        {definition?.hierarchical && <p className="text-xs text-zinc-500">
+                          {term.parent_id === null ? tStatic("feature.taxonomy.taxonomypage.root_category") : tStatic("feature.taxonomy.taxonomypage.parent_prefix", { parent: byId.get(term.parent_id)?.name ?? `#${term.parent_id}` })} {tStatic("feature.taxonomy.taxonomypage.level")}{' '}{depth + 1}
+                        </p>}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <AdminButton variant={isSelected ? 'primary' : 'secondary'} size="sm" disabled={busy}
+                        aria-label={tStatic("feature.taxonomy.taxonomypage.open_editor_for_value_id_value", { value1: term.name, value2: term.id })}
+                        onClick={() => onNavigateHash(editHash(term.id))}>{admin ? tStatic("multilingual.edit") : tStatic("feature.taxonomy.taxonomypage.extensions")}</AdminButton>
+                      {admin && <AdminButton variant="danger" size="sm" disabled={busy}
+                        aria-label={tStatic("feature.content.entrylistpage.delete_value_id_value", { value1: term.name, value2: term.id })}
+                        onClick={() => void remove(term)}>{tStatic("multilingual.delete")}</AdminButton>}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          <nav aria-label={tStatic("feature.taxonomy.taxonomypage.taxonomy_pagination")} className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
+            <span>{tStatic("feature.taxonomy.taxonomypage.showing")}{' '}{filtered.length ? currentPage * PAGE_SIZE + 1 : 0}–{Math.min(filtered.length, (currentPage + 1) * PAGE_SIZE)} / {filtered.length}</span>
+            <div className="flex items-center gap-2">
+              <AdminButton variant="secondary" size="sm" disabled={loading || currentPage === 0}
+                onClick={() => setPage(currentPage - 1)}>{tStatic("feature.users.userspanel.previous")}</AdminButton>
+              <span className="tabular-nums">{tStatic("feature.common.page_number", { page: formatNumber(currentPage + 1) })}/{formatNumber(pages)}</span>
+              <AdminButton variant="secondary" size="sm" disabled={loading || currentPage + 1 >= pages}
+                onClick={() => setPage(currentPage + 1)}>{tStatic("feature.common.next")}</AdminButton>
             </div>
-          </article>
-        ))}
-      </div>
-      <nav aria-label={tStatic("feature.taxonomy.taxonomypage.taxonomy_pagination")} className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
-        <span>{tStatic("feature.taxonomy.taxonomypage.showing")}{' '}{filtered.length ? currentPage * PAGE_SIZE + 1 : 0}–{Math.min(filtered.length, (currentPage + 1) * PAGE_SIZE)} / {filtered.length}</span>
-        <div className="flex items-center gap-2">
-          <AdminButton variant="secondary" size="sm" disabled={loading || currentPage === 0}
-            onClick={() => setPage(currentPage - 1)}>{tStatic("feature.users.userspanel.previous")}</AdminButton>
-          <span className="tabular-nums">{tStatic("feature.common.page_number", { page: formatNumber(currentPage + 1) })}/{formatNumber(pages)}</span>
-          <AdminButton variant="secondary" size="sm" disabled={loading || currentPage + 1 >= pages}
-            onClick={() => setPage(currentPage + 1)}>{tStatic("feature.common.next")}</AdminButton>
+          </nav>
         </div>
-      </nav>
+
+        <div className="min-w-0" data-testid="taxonomy-form-column">
+          {routeMode === 'edit' && selectedTermId !== null ? (
+            <TermEditPage
+              key={`edit-${kind}-${selectedTermId}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
+              embedded
+              kind={kind}
+              mode="edit"
+              cptTypeKey={cptTypeKey}
+              termId={selectedTermId}
+              user={user}
+              siteInstanceId={siteInstanceId}
+              csrfToken={csrfToken}
+              localeState={localeState}
+              onApiError={onApiError}
+              onDirtyChange={onDirtyChange ?? (() => {})}
+              onNavigateHash={onNavigateHash}
+              onSaved={() => void refresh()}
+              onCancelEdit={() => onNavigateHash(listHash)}
+            />
+          ) : admin ? (
+            <TermEditPage
+              key={`new-${kind}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
+              embedded
+              kind={kind}
+              mode="new"
+              cptTypeKey={cptTypeKey}
+              termId={null}
+              user={user}
+              siteInstanceId={siteInstanceId}
+              csrfToken={csrfToken}
+              localeState={localeState}
+              onApiError={onApiError}
+              onDirtyChange={onDirtyChange ?? (() => {})}
+              onNavigateHash={onNavigateHash}
+              onSaved={() => void refresh()}
+            />
+          ) : (
+            <AdminAlert tone="info">{tStatic('taxonomy.editor_select_term_hint')}</AdminAlert>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

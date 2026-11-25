@@ -77,6 +77,8 @@ pub struct NewTaxonomyTerm {
     locale: Option<String>,
     #[serde(default)]
     source_term_id: Option<i64>,
+    #[serde(default)]
+    featured_image_media_id: Option<String>,
 }
 
 // Missing parent_id means "keep current parent"; explicit null means root.
@@ -87,6 +89,17 @@ where
     Option::<i64>::deserialize(deserializer).map(Some)
 }
 
+// Missing featured_image_media_id keeps existing value; null or "" clears it.
+fn present_optional_media_id<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    Ok(Some(value))
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatchTaxonomyTerm {
@@ -94,6 +107,8 @@ pub struct PatchTaxonomyTerm {
     slug: Option<String>,
     #[serde(default, deserialize_with = "present_optional_parent")]
     parent_id: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "present_optional_media_id")]
+    featured_image_media_id: Option<Option<String>>,
     #[serde(default)]
     extensions: Option<BTreeMap<String, Value>>,
     #[serde(default)]
@@ -320,6 +335,11 @@ pub async fn taxonomy_create(
 ) -> ApiResult<Response> {
     let actor = require_admin_with_csrf(&headers, &db).await?;
     let input = parse_body(payload)?;
+    let featured_image_media_id = input
+        .featured_image_media_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let created = taxonomy::create_term_with_locale(
         &db,
         &actor,
@@ -329,6 +349,7 @@ pub async fn taxonomy_create(
         input.parent_id,
         input.locale.as_deref(),
         input.source_term_id,
+        featured_image_media_id,
     )
     .await?;
     let created = taxonomy::term_with_effective_extensions(&db, created, "admin").await?;
@@ -349,10 +370,11 @@ pub async fn taxonomy_patch(
     if input.name.is_none()
         && input.slug.is_none()
         && input.parent_id.is_none()
+        && input.featured_image_media_id.is_none()
         && input.extensions.is_none()
     {
         return Err(ApiError::bad_request(
-            "Cần name, slug, parent_id hoặc extensions để cập nhật.",
+            "Cần name, slug, parent_id, featured_image_media_id hoặc extensions để cập nhật.",
         ));
     }
     let updated = taxonomy::patch_term(
@@ -363,6 +385,10 @@ pub async fn taxonomy_patch(
         input.name.as_deref(),
         input.slug.as_deref(),
         input.parent_id,
+        input
+            .featured_image_media_id
+            .as_ref()
+            .map(|opt| opt.as_deref()),
         input.extensions.as_ref(),
         input.schema_token.as_deref(),
     )
@@ -531,6 +557,23 @@ mod tests {
         assert_eq!(child.parent_id, Some(Some(42)));
         assert!(serde_json::from_str::<PatchTaxonomyTerm>(r#"{"kind":"tag"}"#).is_err());
         assert!(serde_json::from_str::<PatchTaxonomyTerm>(r#"{"locale":"en"}"#).is_err());
+    }
+
+    #[test]
+    fn featured_image_patch_distinguishes_omitted_clear_and_set() {
+        let omitted: PatchTaxonomyTerm = serde_json::from_str(r#"{"name":"Changed"}"#).unwrap();
+        assert_eq!(omitted.featured_image_media_id, None);
+        let cleared_null: PatchTaxonomyTerm =
+            serde_json::from_str(r#"{"featured_image_media_id":null}"#).unwrap();
+        assert_eq!(cleared_null.featured_image_media_id, Some(None));
+        let cleared_empty: PatchTaxonomyTerm =
+            serde_json::from_str(r#"{"featured_image_media_id":""}"#).unwrap();
+        assert_eq!(cleared_empty.featured_image_media_id, Some(None));
+        let media_id = "a".repeat(64);
+        let set: PatchTaxonomyTerm =
+            serde_json::from_str(&format!(r#"{{"featured_image_media_id":"{media_id}"}}"#))
+                .unwrap();
+        assert_eq!(set.featured_image_media_id, Some(Some(media_id)));
     }
 
     #[test]

@@ -35,10 +35,8 @@ import { SeoPanel } from './features/seo/SeoPanel.tsx';
 import { ContactPanel } from './features/contact/ContactPanel.tsx';
 import { SmtpSettingsPanel } from './features/contact/SmtpSettingsPanel.tsx';
 import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
-import { BackupsPanel } from './features/operations/BackupsPanel.tsx';
-import { RestorePanel } from './features/operations/RestorePanel.tsx';
+import { BackupToolsPanel } from './features/operations/BackupToolsPanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
-import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
 import { TaxonomyDefinitionsPage } from './features/taxonomy/TaxonomyDefinitionsPage.tsx';
 import { PatternsPage } from './features/patterns/PatternsPage.tsx';
 import { TemplateLibraryPage } from './features/library/TemplateLibraryPage.tsx';
@@ -724,10 +722,13 @@ const AppContent: React.FC = () => {
         />
       }
       toolsContent={route.sub === 'backup'
-        ? <>
-            <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.backup_error"))} />
-            <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.restore_error"))} />
-          </>
+        ? (
+          <BackupToolsPanel
+            csrfToken={csrfToken}
+            onBackupError={(error) => handleApiError(error, tStatic("app.backup_error"))}
+            onRestoreError={(error) => handleApiError(error, tStatic("app.restore_error"))}
+          />
+        )
         : route.sub === 'media-reconcile'
           ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.reconcile_error"))} />
           : route.sub === 'health' ? <SystemStatus /> : null}
@@ -850,16 +851,13 @@ const AppContent: React.FC = () => {
         ? <TaxonomyDefinitionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}`}
             user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={scopedTaxonomyApiError}
             onNavigateHash={navigateHash} onDirtyChange={markTermDirty} />
-        : route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
-          ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
-              kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
-              termId={route.entryId ?? null} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
-              localeState={localeState}
-              onApiError={scopedTaxonomyApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
-          : <TaxonomyPage key={`terms-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
-              kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
-              localeState={localeState}
-              onApiError={scopedTaxonomyApiError} onNavigateHash={navigateHash} />}
+        : <TaxonomyPage key={`terms-${route.typeKey ?? 'taxonomy'}-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
+            kind={route.taxonomyKind ?? 'category'} cptTypeKey={route.typeKey}
+            routeMode={route.taxonomyMode === 'edit' ? 'edit' : 'new'}
+            selectedTermId={route.taxonomyMode === 'edit' ? (route.entryId ?? null) : null}
+            user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+            localeState={localeState}
+            onApiError={scopedTaxonomyApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />}
     />
   );
 };
