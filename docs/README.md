@@ -17,8 +17,8 @@ Từ ngày **20/11/2026**, OpenDash áp dụng quy trình **EGM (Elephant soạn
 1. Chỉ đạo mới nhất của chủ dự án.
 2. [Yêu cầu sản phẩm V1](product/PRODUCT_REQUIREMENTS.md) — phạm vi sản phẩm và ràng buộc nghiệp vụ đã xác nhận.
 3. [Bộ khung lõi & Quy chuẩn code](contracts/CORE_FOUNDATION.md), [Plugin ABI](contracts/PLUGIN_ABI.md) và [Writer & Recovery Inventory](contracts/M8_WRITER_INVENTORY.md) — các bất biến phân tầng, Base APIs, sandbox Wasmi và khóa bảo trì `SiteCoordinator`.
-4. [Design Sitemap (`docs/designs/SITEMAP.md`)](designs/SITEMAP.md) — danh mục các đặc tả thiết kế EGM và các hợp đồng nền tảng (`M5`–`M8`, Admin Navigation, Owner Admin Review, Content Foundation `0001`–`0041`).
-5. [Tech stack](architecture/TECH_STACK.md) và [Kiến trúc CMS](architecture/CMS_ARCHITECTURE.md) — cấu trúc workspace 2 crate (`opendash-core`, `opendash-server`) + React Admin.
+4. [Design Sitemap (`docs/designs/SITEMAP.md`)](designs/SITEMAP.md) — danh mục các đặc tả thiết kế EGM (`0042`–`0052`) và các hợp đồng nền tảng (`M5`–`M8`, Admin Navigation, Owner Admin Review, Content Foundation `0001`–`0041`).
+5. [Tech stack](architecture/TECH_STACK.md) và [Kiến trúc CMS](architecture/CMS_ARCHITECTURE.md) — cấu trúc workspace 3 crate (`opendash-core`, `opendash-server`, `opendash-plugin-sdk`) + React Admin.
 
 ## Cấu trúc Thư mục `docs/`
 

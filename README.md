@@ -2,7 +2,7 @@
 
 CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress. Rust, SQLite, một file thực thi cho mỗi bản cài và hệ theme/plugin riêng.
 
-**Hiện trạng:** Hệ thống đã triển khai qua các cột mốc nền tảng (`0001`–`0041` SQLite migrations): Auth/RBAC (`Admin`/`Editor`), Posts/Pages (`draft`/`published`), CPT & Field Groups có cấu hình `publication` (`immediate` | `draft_publish`), Custom Taxonomy, Media Library (ảnh + MP4 video + lifecycle/reconcile), Visual Builder 4 tầng (`Section → Row → Column → Element`, Homepage, Template Overrides, Page-scoped Builder, private Section CPT & Local Template Library), Theme ZIP v2 (Theme Options, selective sample import), Plugin ZIP (Wasmi worker cô lập, hooks, actions, declarative Admin UI, DNS-pinned egress), Menus, SEO/Permalinks/Sitemap, Contact Form + SMTP, và Encrypted Backup/Restore.
+**Hiện trạng:** Hệ thống đã triển khai xuyên suốt các cột mốc nền tảng và các đặc tả EGM (`0001`–`0052`, 51 SQLite migrations): Auth/RBAC (`Admin`/`Editor`), Posts/Pages (`draft`/`published`), CPT & Field Groups có cấu hình `publication` (`immediate` | `draft_publish`), Custom Taxonomy (kèm ảnh đại diện term), Media Library (ảnh + MP4 video + lifecycle/reconcile), **OpenDash Studio** (Customizer Mode 1 + Entry/Pattern UX Builder Mode 2, 4 tầng `Section → Row → Column → Element`, Declarative `block.json`, private Pattern CPT & Pattern Library), **Theme Format v3** (built-in `opendash-starter`, Tailwind-first public frontend, C-SEC helpers, trusted inline JS/SVG & asset enqueue, CLI `--check-theme`), **Plugin ZIP** (`manifest_schema: 1..=3`, Wasmi worker cô lập, hooks/filters, write-time projections, `SecretStore`, Dual Guest SDK Rust + AssemblyScript, CLI `--check-plugin`), WordPress-style Permalinks, Admin UI & API i18n (`en`/`vi`), Đa ngôn ngữ nội dung & Theme L10n, Menus, SEO/Sitemap, Contact Form + SMTP, và Encrypted Backup/Restore.
 
 Quá trình thiết kế và kiểm chứng tuân theo quy trình **EGM (Elephant-Goldfish Model)** trong [`AGENTS.md`](AGENTS.md) và [`docs/designs/SITEMAP.md`](docs/designs/SITEMAP.md).
 
@@ -10,7 +10,7 @@ Quá trình thiết kế và kiểm chứng tuân theo quy trình **EGM (Elephan
 
 | Thư mục | Nội dung |
 |---|---|
-| [`cms/`](cms/README.md) | Mã nguồn và công cụ phát triển: `crates/` (`opendash-core`, `opendash-server`), `admin/`, `sdk/`, `examples/`, `migrations/` (`0001`–`0041`), `fixtures/`, `deploy/`, `scripts/`; chứa `Cargo.toml` và `Cargo.lock` |
+| [`cms/`](cms/README.md) | Mã nguồn và công cụ phát triển: `crates/` (`opendash-core`, `opendash-server`, `opendash-plugin-sdk`), `admin/`, `sdk/`, `examples/`, `migrations/` (`0001`–`0052`, bỏ `0016`), `fixtures/`, `deploy/`, `scripts/`; chứa `Cargo.toml` và `Cargo.lock` |
 | [`docs/`](docs/README.md) | Tài liệu sản phẩm, kiến trúc, contracts, thiết kế EGM (`designs/`), quyết định (`decisions/`), bằng chứng (`verification/`) và lưu trữ lịch sử (`archive/`) |
 | [`themes/`](themes/README.md) | Theme đã cài của website |
 | [`plugins/`](plugins/README.md) | Plugin đã cài của website |
@@ -49,7 +49,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File cms/scripts/build.ps1 -Relea
 bash cms/scripts/build-release-linux.sh
 ```
 
-Binary bind loopback mặc định tại cổng `18766`, tự chạy migrations `0001`–`0041` khi khởi động. Đặt `OPENDASH_SITE_ROOT`, `OPENDASH_DB_PATH`, `OPENDASH_PORT` để tùy biến site và cổng.
+Binary bind loopback mặc định tại cổng `18766`, tự chạy migrations `0001`–`0052` khi khởi động. Đặt `OPENDASH_SITE_ROOT`, `OPENDASH_DB_PATH`, `OPENDASH_PORT` để tùy biến site và cổng.
 
 ## Kiểm chứng tại workspace
 

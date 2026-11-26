@@ -14,7 +14,7 @@ export interface LocalThemeTemplateDescriptor {
 
 export interface LocalTemplateLibrary {
   active_theme_id: string | null;
-  theme_state: 'no_active_theme' | 'active' | 'legacy_theme_unsupported'
+  theme_state: 'no_active_theme' | 'active' | 'unsupported_theme_format'
     | 'active_theme_unavailable' | 'admin_only';
   theme_templates: LocalThemeTemplateDescriptor[];
 }

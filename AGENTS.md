@@ -59,7 +59,7 @@ EGM phụ trách **tạo và review đặc tả kỹ thuật**, còn việc tri�
 
 ## 2. Ngữ cảnh Hệ thống và Ranh giới Kỹ thuật Bắt buộc
 
-- **Cấu trúc Workspace:** Mã nguồn, build scripts, migrations (`0001`–`0041`) và SDK đặt trong [`cms/`](cms/README.md); tài liệu đặt tại [`docs/`](docs/README.md); dữ liệu vận hành của website (`database/`, `themes/`, `plugins/`, `uploads/`) nằm ở root và tách biệt với mã nguồn. Xem [README.md](README.md) và [Kiến trúc CMS](docs/architecture/CMS_ARCHITECTURE.md).
+- **Cấu trúc Workspace:** Mã nguồn, build scripts, migrations (`0001`–`0052`, 51 migrations) và SDK đặt trong [`cms/`](cms/README.md); tài liệu đặt tại [`docs/`](docs/README.md); dữ liệu vận hành của website (`database/`, `themes/`, `plugins/`, `uploads/`) nằm ở root và tách biệt với mã nguồn. Xem [README.md](README.md) và [Kiến trúc CMS](docs/architecture/CMS_ARCHITECTURE.md).
 - **Ràng buộc Sản phẩm ([`PRODUCT_REQUIREMENTS.md`](docs/product/PRODUCT_REQUIREMENTS.md)):**
   - Rust + SQLite, đóng gói thành **một file thực thi duy nhất**, Visual Builder 4 tầng (`Section → Row → Column → Element`) và plugin chạy logic server qua **Wasmi (`=2.0.0`)** trong worker cô lập tiến trình.
   - **Bảo toàn dữ liệu:** Giữ khả năng quản lý CPT, custom fields, taxonomy terms và nội dung khi đổi theme hoặc tắt plugin; bảo toàn bố cục đã chỉnh khi cập nhật theme; giữ thay đổi chưa lưu trong preview và khi gặp lỗi `401`/`412`.
