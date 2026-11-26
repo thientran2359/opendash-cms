@@ -112,8 +112,10 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::content",
             "storage::entries",
             "storage::entry_table",
+            "storage::fields",
             "storage::taxonomy",
             "routes::entries",
+            "routes::fields",
             "routes::taxonomy",
         ),
     ),
@@ -124,6 +126,8 @@ GROUPS: tuple[GroupSpec, ...] = (
             "m6_*",
             "plugin_*",
             "unified_js_runtime_*",
+            "custom_routes_*",
+            "render_hooks_*",
         ),
         unit_filters=(
             "plugin::",
@@ -361,10 +365,12 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "storage/content.rs": {"content"},
             "storage/entries.rs": {"content"},
             "storage/entry_table.rs": {"content"},
+            "storage/fields.rs": {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
             "storage/taxonomy.rs": {"content"},
             "storage/dashboard.rs": {"content"},
             "routes/content.rs": {"content"},
             "routes/entries.rs": {"content"},
+            "routes/fields.rs": {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
             "routes/taxonomy.rs": {"content"},
             "routes/dashboard.rs": {"content"},
             # Plugins & Hooks
@@ -678,11 +684,29 @@ class RunTestsSelfTest(unittest.TestCase):
         for critical in (
             "cms/Cargo.toml",
             "cms/crates/opendash-core/src/id.rs",
+            "cms/crates/opendash-core/src/field_schema.rs",
             "cms/crates/opendash-server/src/app.rs",
             "cms/crates/opendash-server/src/auth.rs",
         ):
             plan = build_plan_from_files([critical], all_tests)
             self.assertTrue(plan.run_all_workspace, f"{critical} must escalate to all")
+
+    def test_fields_endpoints_route_to_domain_groups(self) -> None:
+        all_tests = discover_integration_tests()
+        plan = build_plan_from_files(
+            [
+                "cms/crates/opendash-server/src/storage/fields.rs",
+                "cms/crates/opendash-server/src/routes/fields.rs",
+            ],
+            all_tests,
+        )
+        self.assertFalse(plan.run_all_workspace)
+        self.assertEqual(
+            set(plan.groups),
+            {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
+        )
+        self.assertIn("storage::fields", plan.unit_filters)
+        self.assertIn("routes::fields", plan.unit_filters)
 
     def test_domain_migration_stays_targeted(self) -> None:
         all_tests = discover_integration_tests()

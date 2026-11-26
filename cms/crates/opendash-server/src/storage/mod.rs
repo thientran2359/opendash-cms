@@ -8,6 +8,7 @@ pub mod dashboard;
 pub mod entries;
 pub mod entry_lifecycle;
 pub mod entry_table;
+pub mod fields;
 pub mod import;
 pub mod media;
 pub mod media_lifecycle;

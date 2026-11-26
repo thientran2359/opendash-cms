@@ -629,6 +629,23 @@ def check(root):
         if path.suffix in {'.ts', '.tsx'} and path != admin / 'api/client.ts':
             if re.search(r'\bfetch\s*\(', mask_literals(path.read_text(encoding='utf-8'))):
                 errors.append(f'HTTP must use api/client.ts: {path.relative_to(root)}')
+    core_icons_path = core / 'src/icons.rs'
+    ts_icons_path = admin / 'fields/icons.ts'
+    if not core_icons_path.is_file() or not ts_icons_path.is_file():
+        errors.append('CORE_ICONS registry missing in icons.rs or fields/icons.ts')
+    else:
+        core_icon_pairs = re.findall(
+            r'\(\s*"([a-z0-9-]+)"\s*,\s*r#"(.*?)"#[\s,]*\)',
+            core_icons_path.read_text(encoding='utf-8'),
+            flags=re.DOTALL,
+        )
+        ts_icon_pairs = re.findall(
+            r"\{\s*name:\s*'([a-z0-9-]+)'\s*,\s*paths:\s*'(.*?)'[\s,]*\}",
+            ts_icons_path.read_text(encoding='utf-8'),
+            flags=re.DOTALL,
+        )
+        if not core_icon_pairs or core_icon_pairs != ts_icon_pairs:
+            errors.append('CORE_ICONS mismatch between opendash-core/src/icons.rs and fields/icons.ts')
     app = production_source((server / 'app.rs').read_text(encoding='utf-8'))
     imports, constructors, import_errors = app_imports(app)
     errors.extend(import_errors)
@@ -642,6 +659,7 @@ def self_test():
         files = {
             'cms/crates/opendash-core/Cargo.toml': '[dependencies]\nserde = "1"\n',
             'cms/crates/opendash-core/src/lib.rs': '',
+            'cms/crates/opendash-core/src/icons.rs': 'pub const CORE_ICONS: &[(&str, &str)] = &[("star", r#"<path d="M1 1"/>"#)];\n',
             'cms/crates/opendash-server/src/plugin/mod.rs': '#[cfg(test)]\nmod tests;\n#[cfg(test)]\nmod review_regressions;',
             'cms/crates/opendash-server/src/app.rs': 'use crate::routes::page::save;\npost(save)',
             'cms/crates/opendash-server/src/routes/mod.rs':
@@ -662,6 +680,7 @@ def self_test():
                 'pub async fn auth_login() {}\npub async fn auth_setup() {}',
             'cms/crates/opendash-server/src/storage/page.rs': 'sqlx::query("SELECT 1");',
             'cms/admin/src/api/client.ts': 'fetch("/api");',
+            'cms/admin/src/fields/icons.ts': "export const CORE_ICONS = [{ name: 'star', paths: '<path d=\"M1 1\"/>' }];\n",
         }
         for name, content in files.items():
             path = root / name
@@ -1059,6 +1078,7 @@ pub async fn upload_restore_archive_with_timeout() -> ApiResult<Response> {
             'cms/crates/opendash-core/src/lib.rs': 'use std::fs;',
             'cms/crates/opendash-core/Cargo.toml': '[dependencies]\naxum = "0.8"',
             'cms/admin/src/rogue.ts': 'fetch("/api");',
+            'cms/admin/src/fields/icons.ts': "export const CORE_ICONS = [{ name: 'other', paths: '<path d=\"M1 1\"/>' }];\n",
         }
         for name, content in violations.items():
             path = root / name
