@@ -1637,6 +1637,49 @@ impl HookDispatcher {
         }
         Some(sanitized)
     }
+
+    pub async fn resolve_extension_route(
+        &self,
+        pkg: &str,
+        method: opendash_core::plugin::RouteMethod,
+        subpath: &str,
+    ) -> Result<
+        Option<crate::plugin::manager::ResolvedExtensionRoute>,
+        (axum::http::StatusCode, String),
+    > {
+        self.plugin_manager
+            .resolve_extension_route(pkg, method, subpath)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_resolved_route(
+        &self,
+        resolved: crate::plugin::manager::ResolvedExtensionRoute,
+        payload: Value,
+        execution_mode: HookExecutionMode,
+        principal: ExecutionPrincipal,
+        timeout: Duration,
+        actor: Option<&crate::auth::SessionContext>,
+    ) -> Result<
+        crate::plugin::manager::ExtensionRouteExecOutput,
+        (
+            axum::http::StatusCode,
+            crate::plugin::manager::PluginRunResponse,
+        ),
+    > {
+        self.plugin_manager
+            .execute_resolved_route(
+                resolved,
+                payload,
+                execution_mode,
+                principal,
+                timeout,
+                actor,
+                self,
+            )
+            .await
+    }
 }
 
 pub const RENDER_HOOK_CALL_TIMEOUT: Duration = Duration::from_millis(1000);

@@ -388,6 +388,8 @@ pub fn check_read_policy(
                 HookExecutionMode::Standard
                     | HookExecutionMode::AsyncPostCommit
                     | HookExecutionMode::FilterRender
+                    | HookExecutionMode::RouteGet
+                    | HookExecutionMode::RoutePost
             ) {
                 return Err("kv_list chỉ được phép trong action hoặc async post-commit hook.");
             }
@@ -457,6 +459,7 @@ pub fn check_read_policy(
                 HookExecutionMode::Standard
                     | HookExecutionMode::AsyncPostCommit
                     | HookExecutionMode::FilterContactBeforeSubmit
+                    | HookExecutionMode::RoutePost
             ) {
                 return Err("plugin_secret_get bị cấm trong hook/filter hiện tại.");
             }
@@ -485,7 +488,10 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
     }
 
     ctx.host_calls_count += 1;
-    let max_calls = if ctx.execution_mode == HookExecutionMode::FilterRender {
+    let max_calls = if matches!(
+        ctx.execution_mode,
+        HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+    ) {
         MAX_RENDER_HOST_CALLS
     } else {
         MAX_HOST_CALLS
@@ -524,6 +530,8 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
                 HookExecutionMode::Standard
                     | HookExecutionMode::AsyncPostCommit
                     | HookExecutionMode::FilterContactBeforeSubmit
+                    | HookExecutionMode::RouteGet
+                    | HookExecutionMode::RoutePost
             ) {
                 return HostOperationResponse::err(
                     "Gọi HTTP ngoài bị cấm trong chế độ thực thi này.",
@@ -534,18 +542,12 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             {
                 return HostOperationResponse::err("permission_denied: action:http");
             }
-            if let Ok(parsed) = url::Url::parse(&url) {
-                let path = parsed.path().to_ascii_lowercase();
-                if path.starts_with("/api/admin")
-                    || path == "/save"
-                    || path == "/preview"
-                    || path == "/theme"
-                    || path.starts_with("/api/p/")
-                {
-                    return HostOperationResponse::err(
-                        "Cấm gọi HTTP loopback tới Admin/CMS nội bộ (/api/admin, /save, /preview, /theme, /api/p/).",
-                    );
-                }
+            if let Ok(parsed) = url::Url::parse(&url)
+                && super::egress::is_forbidden_internal_path(parsed.path())
+            {
+                return HostOperationResponse::err(
+                    "Cấm gọi HTTP loopback tới Admin/CMS nội bộ (/api/admin, /save, /preview, /theme, /p/, /api/p/, /api/public/p/).",
+                );
             }
             handle_http_request(ctx, &method, &url, headers, body, timeout_ms)
         }
@@ -560,8 +562,16 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             values,
             term_ids,
         } => {
-            if ctx.execution_mode != HookExecutionMode::Standard {
+            if !matches!(
+                ctx.execution_mode,
+                HookExecutionMode::Standard | HookExecutionMode::RoutePost
+            ) {
                 return HostOperationResponse::err("Ghi nội dung bị cấm ngoài action mode.");
+            }
+            if ctx.principal == ExecutionPrincipal::Public {
+                return HostOperationResponse::err(
+                    "permission_denied: content_save bị cấm ở public route.",
+                );
             }
             if let Some(ref caps) = ctx.action_capabilities
                 && !caps.iter().any(|c| c == "content_write")
@@ -598,9 +608,17 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             entry_id,
             expected_version,
         } => {
-            if ctx.execution_mode != HookExecutionMode::Standard {
+            if !matches!(
+                ctx.execution_mode,
+                HookExecutionMode::Standard | HookExecutionMode::RoutePost
+            ) {
                 return HostOperationResponse::err(
                     "content_delete chỉ được phép trong action mode.",
+                );
+            }
+            if ctx.principal == ExecutionPrincipal::Public {
+                return HostOperationResponse::err(
+                    "permission_denied: content_delete bị cấm ở public route.",
                 );
             }
             if let Some(ref caps) = ctx.action_capabilities
@@ -829,7 +847,10 @@ fn handle_kv_list(
     prefix: Option<String>,
     limit: Option<usize>,
 ) -> HostOperationResponse {
-    let max_limit = if ctx.execution_mode == HookExecutionMode::FilterRender {
+    let max_limit = if matches!(
+        ctx.execution_mode,
+        HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+    ) {
         50
     } else {
         100
@@ -898,7 +919,9 @@ fn check_kv_write_preconditions(
     }
     if !matches!(
         ctx.execution_mode,
-        HookExecutionMode::Standard | HookExecutionMode::AsyncPostCommit
+        HookExecutionMode::Standard
+            | HookExecutionMode::AsyncPostCommit
+            | HookExecutionMode::RoutePost
     ) {
         return Err(HostOperationResponse::err(
             "Ghi/xóa KV bị cấm trong hook đồng bộ hiện tại.",
@@ -1004,7 +1027,7 @@ fn handle_http_request(
     }
     let call_cap = match ctx.execution_mode {
         HookExecutionMode::FilterContactBeforeSubmit => 1,
-        HookExecutionMode::FilterRender => MAX_RENDER_HTTP_CALLS,
+        HookExecutionMode::FilterRender | HookExecutionMode::RouteGet => MAX_RENDER_HTTP_CALLS,
         _ => super::egress::MAX_HTTP_CALLS_PER_INVOCATION,
     };
     if ctx.http_calls_count >= call_cap {
