@@ -910,6 +910,7 @@ pub async fn save_typed_override(
         .ok_or_else(|| ApiError::internal("Template override not readable after save."))?;
     refresh_override_media_refs_in_tx(&mut tx, saved.id, document).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(saved)
 }
 
@@ -967,6 +968,7 @@ pub async fn reset_typed_override(
         .await?
         .effective_source();
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(ResetTemplateOutcome {
         reset_id: existing.id,
         canonical_target_key: existing.canonical_target_key,
@@ -1892,6 +1894,22 @@ pub async fn preview_typed_override_with_cache_and_locale(
     )
     .await?;
     rendered.diagnostics.append(&mut body_diagnostics);
+    if !budget.hook_nonces.is_empty() {
+        let clear: Vec<(String, String)> = budget
+            .hook_nonces
+            .entries()
+            .iter()
+            .map(|h| (h.nonce.clone(), String::new()))
+            .collect();
+        rendered.html = content_render::apply_render_hooks_to_document(
+            rendered.html,
+            "",
+            &[],
+            &[],
+            "",
+            &clear,
+        )?;
+    }
     rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
     tx.rollback().await?;
     Ok(rendered)
@@ -3603,6 +3621,17 @@ pub async fn preview_studio_with_cache_and_locale(
         &enqueued,
         true,
     )?;
+    let full_html = if !preview_budget.hook_nonces.is_empty() {
+        let clear: Vec<(String, String)> = preview_budget
+            .hook_nonces
+            .entries()
+            .iter()
+            .map(|h| (h.nonce.clone(), String::new()))
+            .collect();
+        content_render::apply_render_hooks_to_document(full_html, "", &[], &[], "", &clear)?
+    } else {
+        full_html
+    };
     let full_html =
         content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
     tx.rollback().await?;
@@ -3823,6 +3852,17 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
         &enqueued,
         true,
     )?;
+    let full_html = if !preview_budget.hook_nonces.is_empty() {
+        let clear: Vec<(String, String)> = preview_budget
+            .hook_nonces
+            .entries()
+            .iter()
+            .map(|h| (h.nonce.clone(), String::new()))
+            .collect();
+        content_render::apply_render_hooks_to_document(full_html, "", &[], &[], "", &clear)?
+    } else {
+        full_html
+    };
     let full_html =
         content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
     Ok(RenderedLayout {

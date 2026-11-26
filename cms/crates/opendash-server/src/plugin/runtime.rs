@@ -167,11 +167,15 @@ impl std::fmt::Display for PluginError {
 
 impl std::error::Error for PluginError {}
 
+pub const MAX_PUBLIC_RENDER_INVOCATIONS: usize = 4;
+pub const PUBLIC_RENDER_SEMAPHORE_WAIT: Duration = Duration::from_millis(200);
+
 #[derive(Clone)]
 pub struct PluginRuntime {
     engine: Engine,
     admin_semaphore: Arc<Semaphore>,
     background_public_semaphore: Arc<Semaphore>,
+    public_render_semaphore: Arc<Semaphore>,
     active_workers: Arc<AtomicUsize>,
     secrets_root: PathBuf,
 }
@@ -194,6 +198,7 @@ impl PluginRuntime {
             background_public_semaphore: Arc::new(Semaphore::new(
                 MAX_BACKGROUND_PUBLIC_INVOCATIONS,
             )),
+            public_render_semaphore: Arc::new(Semaphore::new(MAX_PUBLIC_RENDER_INVOCATIONS)),
             active_workers: Arc::new(AtomicUsize::new(0)),
             secrets_root,
         }
@@ -213,6 +218,10 @@ impl PluginRuntime {
 
     pub fn background_public_semaphore(&self) -> &Arc<Semaphore> {
         &self.background_public_semaphore
+    }
+
+    pub fn public_render_semaphore(&self) -> &Arc<Semaphore> {
+        &self.public_render_semaphore
     }
 
     pub async fn run_plugin(
@@ -383,16 +392,27 @@ impl PluginRuntime {
     ) -> Result<ActionExecutionOutput, PluginError> {
         let cancellation_token = Arc::new(AtomicBool::new(false));
 
-        // Respect global 6-worker ceiling: 4 admin + 2 background/public
-        let target_sem = match execution_mode {
-            HookExecutionMode::AsyncPostCommit | HookExecutionMode::FilterContactBeforeSubmit => {
-                &self.background_public_semaphore
+        // Respect global 10-worker ceiling: 4 admin + 2 background/public + 4 public_render
+        let permit = if execution_mode == HookExecutionMode::FilterRender {
+            match tokio::time::timeout(
+                PUBLIC_RENDER_SEMAPHORE_WAIT,
+                self.public_render_semaphore.clone().acquire_owned(),
+            )
+            .await
+            {
+                Ok(Ok(p)) => p,
+                _ => return Err(PluginError::ConcurrencyLimit),
             }
-            _ => &self.admin_semaphore,
-        };
-        let permit = match target_sem.clone().try_acquire_owned() {
-            Ok(p) => p,
-            Err(_) => return Err(PluginError::ConcurrencyLimit),
+        } else {
+            let target_sem = match execution_mode {
+                HookExecutionMode::AsyncPostCommit
+                | HookExecutionMode::FilterContactBeforeSubmit => &self.background_public_semaphore,
+                _ => &self.admin_semaphore,
+            };
+            match target_sem.clone().try_acquire_owned() {
+                Ok(p) => p,
+                Err(_) => return Err(PluginError::ConcurrencyLimit),
+            }
         };
 
         let start = Instant::now();
@@ -654,7 +674,10 @@ impl PluginRuntime {
             ));
         }
 
-        if !staged_kv.is_empty() || !staged_logs.is_empty() {
+        if execution_mode != HookExecutionMode::FilterRender
+            && (!staged_kv.is_empty() || !staged_logs.is_empty())
+        {
+            let had_kv_writes = !staged_kv.is_empty();
             if cancellation_token.load(Ordering::Relaxed) || Instant::now() >= deadline {
                 guard.cleanup();
                 return Err(PluginError::Timeout);
@@ -896,6 +919,9 @@ impl PluginRuntime {
             match commit_res {
                 Ok(_) => {
                     commit_guard.committed = true;
+                    if had_kv_writes {
+                        crate::cache::SiteCacheEpoch::global().bump();
+                    }
                 }
                 Err(e) => {
                     let _ = plugin_kv::rollback(conn).await;

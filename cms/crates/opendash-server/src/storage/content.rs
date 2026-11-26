@@ -455,6 +455,7 @@ pub async fn insert_user_content_type(
                 .map_err(|e| map_transition_error(e, true))?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
             tx.commit().await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(ContentTypeApiItem {
                 base: effective.base,
                 version: effective.base_version,
@@ -563,6 +564,7 @@ pub async fn update_user_content_type(
 
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(ContentTypeApiItem {
         base: new_effective.base,
         version: new_effective.base_version,
@@ -869,6 +871,7 @@ pub async fn create_user_field_group(
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group vừa tạo."))?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(created)
 }
 
@@ -1027,6 +1030,7 @@ pub async fn update_user_field_group(
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group sau cập nhật."))?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(updated)
 }
 
@@ -1088,6 +1092,7 @@ pub async fn withdraw_user_field_group(
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group sau khi rút."))?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(withdrawn)
 }
 
@@ -2160,6 +2165,7 @@ pub async fn put_site_taxonomy_eligibility(
         .ok_or_else(|| ApiError::internal("Không thể tải schema CPT."))?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(ContentTypeApiItem {
         base: effective.base,
         version: effective.base_version,
@@ -2338,6 +2344,7 @@ pub async fn put_editor_layout(
     .await?;
 
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(EditorLayoutSnapshot {
         layout,
         panels,

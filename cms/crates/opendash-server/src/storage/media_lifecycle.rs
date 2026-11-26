@@ -293,6 +293,7 @@ pub async fn finalize_delete_job(
     .await?;
 
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(())
 }
 

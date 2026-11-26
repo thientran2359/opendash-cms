@@ -4,6 +4,7 @@ mod backup;
 mod backup_archive;
 mod backup_worker;
 mod builtin_themes;
+mod cache;
 mod config;
 mod contact;
 mod content_render;
@@ -135,7 +136,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.iter().any(|a| a == "--plugin-worker")
         || std::env::var_os("OPENDASH_WORKER_CHILD").is_some()
     {
-        let _ = std::thread::spawn(crate::plugin::worker::run_worker_from_stdio).join();
+        if let Ok(handle) = std::thread::Builder::new()
+            .name("opendash-plugin-worker".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(crate::plugin::worker::run_worker_from_stdio)
+        {
+            let _ = handle.join();
+        }
         return Ok(());
     }
 
@@ -216,6 +223,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         coordinator,
         backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
         block_template_cache: crate::page::BlockTemplateCache::global().clone(),
+        site_cache_epoch: Arc::clone(crate::cache::SiteCacheEpoch::global()),
+        render_cache: Arc::new(crate::cache::ExtensionRenderCache::new()),
         recovery,
         runtime_config: runtime_cfg.clone(),
     };

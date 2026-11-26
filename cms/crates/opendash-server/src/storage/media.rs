@@ -118,6 +118,7 @@ pub async fn save(db: &SqlitePool, asset: &MediaAsset) -> ApiResult<MediaAsset> 
             ));
         }
         tx.commit().await?;
+        crate::cache::SiteCacheEpoch::global().bump();
         return find(db, &asset.id)
             .await?
             .ok_or_else(|| ApiError::internal("Không thể tải media vừa lưu."));
@@ -169,6 +170,7 @@ pub async fn save(db: &SqlitePool, asset: &MediaAsset) -> ApiResult<MediaAsset> 
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
 
     find(db, &asset.id)
         .await?

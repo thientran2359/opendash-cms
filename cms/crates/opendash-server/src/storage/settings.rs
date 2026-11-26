@@ -442,6 +442,7 @@ pub async fn set_multilingual_enabled(
     }
     let snapshot = list_locales_in_conn(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(snapshot)
 }
 
@@ -612,6 +613,7 @@ pub async fn delete_locale(
         .await?;
     let snapshot = list_locales_in_conn(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(DeleteLocaleResponse {
         snapshot,
         deleted_code: code,
@@ -758,6 +760,7 @@ pub async fn purge_orphan_locale(
     deleted.update_total();
     let snapshot = list_orphaned_locales_in_conn(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(PurgeOrphanLocaleResult {
         snapshot,
         purged_code: code,
@@ -837,6 +840,7 @@ pub async fn create_locale(
     match res {
         Ok(snap) => {
             conn.commit().await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(snap)
         }
         Err(err) => {
@@ -899,6 +903,7 @@ pub async fn update_locale(
     match res {
         Ok(snap) => {
             conn.commit().await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(snap)
         }
         Err(err) => {
@@ -971,6 +976,7 @@ pub async fn set_default_locale(
     match res {
         Ok(snap) => {
             conn.commit().await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(snap)
         }
         Err(err) => {
@@ -1196,6 +1202,7 @@ pub async fn save_reading_for_locale(
     match res {
         Ok(saved) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(saved)
         }
         Err(err) => {
@@ -1509,6 +1516,7 @@ pub async fn save_general_for_locale(
     match res {
         Ok(outcome) if matches!(outcome, SaveOutcome::Saved(_)) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(outcome)
         }
         Ok(outcome) => {
@@ -2386,6 +2394,7 @@ pub async fn put_global_site_options(
     let outcome = put_global_site_options_in_conn(&mut tx, expected_version, submitted).await?;
     if matches!(outcome, GlobalSiteOptionsOutcome::Saved(_)) {
         tx.commit().await?;
+        crate::cache::SiteCacheEpoch::global().bump();
     }
     Ok(outcome)
 }
@@ -2728,6 +2737,7 @@ pub async fn put_theme_options_for_locale(
     match outcome {
         Ok(ThemeOptionsOutcome::Saved(snap)) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(ThemeOptionsOutcome::Saved(snap))
         }
         Ok(other) => {
@@ -4272,6 +4282,7 @@ pub async fn put_plugin_settings(
         cleanup_new_refs(&newly_created_refs);
         return Err(err.into());
     }
+    crate::cache::SiteCacheEpoch::global().bump();
 
     for old_ref in old_refs_to_remove {
         store.remove_plugin_secret(&old_ref);
@@ -4475,6 +4486,7 @@ pub async fn save_public(
     match res {
         Ok(PublicSaveOutcome::Saved(saved)) => {
             conn.commit().await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(PublicSaveOutcome::Saved(saved))
         }
         Ok(other) => {

@@ -1873,6 +1873,7 @@ async fn mutate_entry_builder(
     }
     let saved = entry_builder_snapshot(&mut tx, type_key, id).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     let _ = crate::storage::plugin_projections::recompute_entry_projections(db, hooks, id).await;
     hooks
         .dispatch_content_after_save_for_actor(
@@ -1958,6 +1959,7 @@ pub async fn migrate_demo_entry_builder_docs_on_startup(db: &SqlitePool) -> ApiR
         migrated += 1;
     }
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(migrated)
 }
 

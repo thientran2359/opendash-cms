@@ -141,6 +141,7 @@ pub async fn create(db: &SqlitePool, input: &PatternInput) -> ApiResult<PatternR
     .await?;
     let created = get_in_tx(&mut tx, id).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(created)
 }
 
@@ -182,6 +183,7 @@ pub async fn update(
     }
     let record = get_in_tx(&mut tx, id).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(record)
 }
 
@@ -254,6 +256,7 @@ pub async fn delete(
     // Builder AST, media pins and backlink projections cascade with the entry.
     // Callers still retain their original AST with a now-missing pattern_id.
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(DeleteOutcome::Deleted)
 }
 

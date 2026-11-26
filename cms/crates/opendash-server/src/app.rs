@@ -90,6 +90,8 @@ pub struct AppState {
     pub coordinator: Arc<crate::operations::SiteCoordinator>,
     pub backup_registry: Arc<crate::backup::BackupRuntimeRegistry>,
     pub block_template_cache: Arc<crate::page::BlockTemplateCache>,
+    pub site_cache_epoch: Arc<crate::cache::SiteCacheEpoch>,
+    pub render_cache: Arc<crate::cache::ExtensionRenderCache>,
     pub recovery: crate::config::RecoveryState,
     pub runtime_config: crate::config::RuntimeConfigV1,
 }
@@ -130,6 +132,18 @@ impl axum::extract::FromRef<AppState> for Arc<crate::operations::SiteCoordinator
 impl axum::extract::FromRef<AppState> for Arc<crate::page::BlockTemplateCache> {
     fn from_ref(state: &AppState) -> Self {
         state.block_template_cache.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<crate::cache::SiteCacheEpoch> {
+    fn from_ref(state: &AppState) -> Self {
+        state.site_cache_epoch.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<crate::cache::ExtensionRenderCache> {
+    fn from_ref(state: &AppState) -> Self {
+        state.render_cache.clone()
     }
 }
 

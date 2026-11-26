@@ -54,6 +54,15 @@ pub struct ExtensionSubscriber {
     pub theme_fence: Option<(String, i64)>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderFilterSubscriber {
+    pub priority: i32,
+    pub owner: RuntimeOwner,
+    pub revision_key: String,
+    pub render_cache: opendash_core::plugin::RenderCachePolicy,
+    pub render_trusted_html: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginSummary {
     pub id: String,
@@ -1288,6 +1297,45 @@ impl PluginManager {
         Ok(subs)
     }
 
+    pub fn is_safe_mode(&self) -> bool {
+        self.recovery.is_safe_mode()
+    }
+
+    pub async fn owner_render_filter_subscriptions(
+        &self,
+        event: HookEvent,
+    ) -> Result<Vec<RenderFilterSubscriber>, String> {
+        let mut subs = Vec::new();
+        let cache = self.ensure_manifest_cache().await?;
+        for (id, item) in cache {
+            if item.manifest.filters.contains(&event) {
+                let revision_key = item
+                    .revision_digest
+                    .unwrap_or_else(|| format!("gen:{}", item.revision_generation));
+                subs.push(RenderFilterSubscriber {
+                    priority: item.manifest.hook_priority,
+                    owner: RuntimeOwner::plugin(id),
+                    revision_key,
+                    render_cache: item.manifest.render_cache,
+                    render_trusted_html: item.manifest.permissions.render_trusted_html,
+                });
+            }
+        }
+        if let Some(theme) = self.ensure_active_theme_cache().await?
+            && theme.manifest.filters.contains(&event)
+        {
+            subs.push(RenderFilterSubscriber {
+                priority: theme.manifest.hook_priority,
+                owner: RuntimeOwner::theme(theme.theme_id),
+                revision_key: format!("{}:v{}", theme.revision_digest, theme.selection_version),
+                render_cache: theme.manifest.render_cache,
+                render_trusted_html: theme.manifest.permissions.render_trusted_html,
+            });
+        }
+        subs.sort_by(|a, b| (a.priority, &a.owner).cmp(&(b.priority, &b.owner)));
+        Ok(subs)
+    }
+
     #[allow(dead_code)]
     pub async fn filter_content_payload_for_plugin(
         &self,
@@ -1622,16 +1670,18 @@ impl PluginManager {
 
         match run_res {
             Ok(val) => {
-                plugin_storage::record_owner_execution_result(
-                    &self.db_pool,
-                    ExtensionOwnerKind::Theme,
-                    &cached.theme_id,
-                    &correlation_id,
-                    "info",
-                    "Thực thi thành công",
-                    None,
-                )
-                .await;
+                if execution_mode != HookExecutionMode::FilterRender {
+                    plugin_storage::record_owner_execution_result(
+                        &self.db_pool,
+                        ExtensionOwnerKind::Theme,
+                        &cached.theme_id,
+                        &correlation_id,
+                        "info",
+                        "Thực thi thành công",
+                        None,
+                    )
+                    .await;
+                }
                 Ok(PluginRunResponse {
                     success: true,
                     data: Some(val),
@@ -1654,16 +1704,18 @@ impl PluginManager {
                     PluginError::ModuleCompilation(_) => ("module_compilation", err.to_string()),
                     PluginError::Internal(_) => ("internal_error", err.to_string()),
                 };
-                plugin_storage::record_owner_execution_result(
-                    &self.db_pool,
-                    ExtensionOwnerKind::Theme,
-                    &cached.theme_id,
-                    &correlation_id,
-                    "error",
-                    &err_msg,
-                    Some(&err_msg),
-                )
-                .await;
+                if execution_mode != HookExecutionMode::FilterRender {
+                    plugin_storage::record_owner_execution_result(
+                        &self.db_pool,
+                        ExtensionOwnerKind::Theme,
+                        &cached.theme_id,
+                        &correlation_id,
+                        "error",
+                        &err_msg,
+                        Some(&err_msg),
+                    )
+                    .await;
+                }
                 Err((
                     StatusCode::BAD_REQUEST,
                     PluginRunResponse {
@@ -1803,15 +1855,17 @@ impl PluginManager {
 
         match run_res {
             Ok(val) => {
-                plugin_storage::record_plugin_execution_result(
-                    &self.db_pool,
-                    id,
-                    &correlation_id,
-                    "info",
-                    "Thực thi thành công",
-                    None,
-                )
-                .await;
+                if execution_mode != HookExecutionMode::FilterRender {
+                    plugin_storage::record_plugin_execution_result(
+                        &self.db_pool,
+                        id,
+                        &correlation_id,
+                        "info",
+                        "Thực thi thành công",
+                        None,
+                    )
+                    .await;
+                }
 
                 Ok(PluginRunResponse {
                     success: true,
@@ -1836,15 +1890,17 @@ impl PluginManager {
                     PluginError::Internal(_) => ("internal_error", err.to_string()),
                 };
 
-                plugin_storage::record_plugin_execution_result(
-                    &self.db_pool,
-                    id,
-                    &correlation_id,
-                    "error",
-                    &err_msg,
-                    Some(&err_msg),
-                )
-                .await;
+                if execution_mode != HookExecutionMode::FilterRender {
+                    plugin_storage::record_plugin_execution_result(
+                        &self.db_pool,
+                        id,
+                        &correlation_id,
+                        "error",
+                        &err_msg,
+                        Some(&err_msg),
+                    )
+                    .await;
+                }
 
                 Err((
                     StatusCode::BAD_REQUEST,

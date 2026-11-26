@@ -31,7 +31,14 @@ wat = "=1.263.0"
 zip = { version = "=9.3.0", default-features = false, features = ["deflate"] }
 
 # Keep workspace crates fast to compile in dev/test while optimizing heavy
-# dependencies (argon2, ring, sqlx, wasmi, image, minijinja) so grouped test
+# dependencies (argon2, ring, sqlx, image, minijinja, boa_engine) so grouped test
 # runs execute near release speed without waiting for full -O3 recompilation.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Wasmi 2.0 selects its tail-call dispatch backend at opt-level >= 2, but Cargo's
+# dev profile keeps debug-assertions = true, which blocks LLVM sibling-call
+# lowering and overflows the native stack in Wasm loops. opt-level = 1 uses
+# Wasmi's portable loop backend safely while remaining fast in dev/test.
+[profile.dev.package.wasmi]
+opt-level = 1

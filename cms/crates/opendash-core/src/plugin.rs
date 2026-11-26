@@ -166,6 +166,21 @@ pub struct PluginActionDeclaration {
     pub capabilities: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderCachePolicy {
+    #[default]
+    ByRoute,
+    Global,
+    None,
+}
+
+impl RenderCachePolicy {
+    pub fn is_default(&self) -> bool {
+        *self == Self::ByRoute
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
@@ -192,6 +207,8 @@ pub struct PluginManifest {
     pub hook_priority: i32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<PluginActionDeclaration>,
+    #[serde(default, skip_serializing_if = "RenderCachePolicy::is_default")]
+    pub render_cache: RenderCachePolicy,
     #[serde(
         default,
         skip_serializing_if = "crate::content::CntDeclarations::is_empty"
@@ -630,6 +647,7 @@ impl PluginManifest {
             );
         }
         let uses_v3_features = self.entrypoint == "plugin.js"
+            || self.render_cache != RenderCachePolicy::ByRoute
             || !self.filters.is_empty()
             || !self.settings_schema.is_empty()
             || self.permissions.content_read_all_public

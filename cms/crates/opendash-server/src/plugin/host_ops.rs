@@ -37,6 +37,8 @@ impl RuntimeOwner {
 }
 
 pub const MAX_HOST_CALLS: usize = 100;
+pub const MAX_RENDER_HOST_CALLS: usize = 64;
+pub const MAX_RENDER_HTTP_CALLS: usize = 2;
 pub const MAX_KV_KEY_BYTES: usize = 256;
 pub const MAX_KV_VALUE_BYTES: usize = 512 * 1024;
 pub const MAX_IPC_FRAME_BYTES: usize = 2 * 1024 * 1024;
@@ -383,7 +385,9 @@ pub fn check_read_policy(
         HostReadRequest::KvList { .. } => {
             if !matches!(
                 execution_mode,
-                HookExecutionMode::Standard | HookExecutionMode::AsyncPostCommit
+                HookExecutionMode::Standard
+                    | HookExecutionMode::AsyncPostCommit
+                    | HookExecutionMode::FilterRender
             ) {
                 return Err("kv_list chỉ được phép trong action hoặc async post-commit hook.");
             }
@@ -481,8 +485,15 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
     }
 
     ctx.host_calls_count += 1;
-    if ctx.host_calls_count > MAX_HOST_CALLS {
-        return HostOperationResponse::err("Vượt quá số lần gọi host tối đa (100).");
+    let max_calls = if ctx.execution_mode == HookExecutionMode::FilterRender {
+        MAX_RENDER_HOST_CALLS
+    } else {
+        MAX_HOST_CALLS
+    };
+    if ctx.host_calls_count > max_calls {
+        return HostOperationResponse::err(format!(
+            "Vượt quá số lần gọi host tối đa ({max_calls})."
+        ));
     }
 
     let req: HostOperationRequest = match serde_json::from_str(req_json) {
@@ -502,7 +513,13 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             body,
             timeout_ms,
         } => {
-            if !matches!(
+            if ctx.execution_mode == HookExecutionMode::FilterRender {
+                if ctx.manifest.render_cache == opendash_core::plugin::RenderCachePolicy::None {
+                    return HostOperationResponse::err(
+                        "Gọi HTTP ngoài trong filter:render/* yêu cầu bật render_cache khác none.",
+                    );
+                }
+            } else if !matches!(
                 ctx.execution_mode,
                 HookExecutionMode::Standard
                     | HookExecutionMode::AsyncPostCommit
@@ -812,7 +829,12 @@ fn handle_kv_list(
     prefix: Option<String>,
     limit: Option<usize>,
 ) -> HostOperationResponse {
-    let clamped = limit.unwrap_or(50).clamp(1, 100);
+    let max_limit = if ctx.execution_mode == HookExecutionMode::FilterRender {
+        50
+    } else {
+        100
+    };
+    let clamped = limit.unwrap_or(50).clamp(1, max_limit);
     let prefix_val = prefix.unwrap_or_default();
     if prefix_val.len() > MAX_KV_KEY_BYTES {
         return HostOperationResponse::err("Prefix quá dài.");
@@ -980,10 +1002,10 @@ fn handle_http_request(
     if ctx.is_cancelled() {
         return HostOperationResponse::err("Quá thời gian thực thi (deadline exceeded).");
     }
-    let call_cap = if ctx.execution_mode == HookExecutionMode::FilterContactBeforeSubmit {
-        1
-    } else {
-        super::egress::MAX_HTTP_CALLS_PER_INVOCATION
+    let call_cap = match ctx.execution_mode {
+        HookExecutionMode::FilterContactBeforeSubmit => 1,
+        HookExecutionMode::FilterRender => MAX_RENDER_HTTP_CALLS,
+        _ => super::egress::MAX_HTTP_CALLS_PER_INVOCATION,
     };
     if ctx.http_calls_count >= call_cap {
         return HostOperationResponse::err(format!(

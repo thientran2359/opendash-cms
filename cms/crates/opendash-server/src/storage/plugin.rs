@@ -555,6 +555,7 @@ pub async fn install_plugin_revision(
     tx.commit()
         .await
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi commit cài đặt plugin: {e}")))?;
+    crate::cache::SiteCacheEpoch::global().bump();
 
     Ok(revision_id)
 }
@@ -735,6 +736,7 @@ pub async fn set_plugin_enabled(
             .map_err(|e| format!("Lỗi xóa plugin projections: {e}"))?;
     }
     tx.commit().await.map_err(|e| e.to_string())?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(())
 }
 
@@ -826,6 +828,7 @@ pub async fn set_plugin_enabled_cas(
     tx.commit()
         .await
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi commit trạng thái plugin: {e}")))?;
+    crate::cache::SiteCacheEpoch::global().bump();
 
     Ok(next_cas)
 }
@@ -1283,6 +1286,7 @@ pub async fn delete_entry_with_plugin_fence(
     super::plugin_projections::delete_entry_projections_in_tx(&mut tx, entry_id).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(())
 }
 

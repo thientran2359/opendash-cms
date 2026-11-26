@@ -1,16 +1,23 @@
+use std::sync::Arc;
+
 use axum::{
     Extension,
     extract::{RawQuery, State},
-    http::header,
+    http::{HeaderMap, header},
     response::{Html, IntoResponse, Response},
 };
 use sqlx::SqlitePool;
 
 use crate::{
+    cache::ExtensionRenderCache,
     content_render,
     error::{ApiError, ApiResult},
+    hooks::HookDispatcher,
     public_context::validate_single_query,
-    routes::themes::ThemeStoreRoot,
+    routes::{
+        public_content::{PublicRenderServices, extract_origin_host},
+        themes::ThemeStoreRoot,
+    },
     storage::{
         public_content,
         seo::{self, ReadingPageState},
@@ -24,6 +31,7 @@ pub(crate) async fn render_home_for_locale(
     locale: &str,
     canonical_path: String,
     raw_query: Option<&str>,
+    services: Option<&PublicRenderServices>,
 ) -> ApiResult<Response> {
     validate_single_query(raw_query).map_err(ApiError::bad_request)?;
     match seo::reading_page_state_for_locale(db, Some(locale), true).await? {
@@ -35,6 +43,7 @@ pub(crate) async fn render_home_for_locale(
                     db,
                     themes_root,
                     Some(locale),
+                    services,
                 )
                 .await;
             };
@@ -43,6 +52,7 @@ pub(crate) async fn render_home_for_locale(
                     db,
                     themes_root,
                     Some(locale),
+                    services,
                 )
                 .await;
             }
@@ -52,6 +62,7 @@ pub(crate) async fn render_home_for_locale(
                 page,
                 canonical_path,
                 raw_query,
+                services,
             )
             .await
         }
@@ -60,6 +71,7 @@ pub(crate) async fn render_home_for_locale(
                 db,
                 themes_root,
                 Some(locale),
+                services,
             )
             .await
         }
@@ -71,12 +83,39 @@ pub(crate) async fn render_home_for_locale(
             view.robots = "noindex,nofollow".to_owned();
             view.alternates.clear();
             let l10n = content_render::core_l10n(locale);
-            let html = content_render::compose_document_with_seo(
+            let mut html = content_render::compose_document_with_seo(
                 None,
                 &format!("<main><p>{}</p></main>", l10n.home_unconfigured),
                 None,
                 &view,
             )?;
+            if let Some(svc) = services {
+                let ctx = crate::hooks::RenderHookContext {
+                    route_kind: "home",
+                    route_path: &canonical_path,
+                    canonical_query: "",
+                    is_not_found: false,
+                    locale,
+                    origin_host: &svc.origin_host,
+                    site: serde_json::json!({}),
+                    options: serde_json::json!({}),
+                    entry: None,
+                    entries: None,
+                    principal: opendash_core::hooks::ExecutionPrincipal::Public,
+                };
+                let rendered = svc
+                    .hooks
+                    .dispatch_render_hooks(&ctx, &[], &svc.render_cache)
+                    .await;
+                html = content_render::apply_render_hooks_to_document(
+                    html,
+                    &rendered.head_html,
+                    &rendered.head_styles,
+                    &rendered.head_scripts,
+                    &rendered.footer_html,
+                    &rendered.slot_replacements,
+                )?;
+            }
             Ok(rendered_layout(html))
         }
     }
@@ -84,16 +123,25 @@ pub(crate) async fn render_home_for_locale(
 
 pub async fn public_page(
     State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    State(render_cache): State<Arc<ExtensionRenderCache>>,
     themes_root: Option<Extension<ThemeStoreRoot>>,
+    headers: HeaderMap,
     RawQuery(raw): RawQuery,
 ) -> ApiResult<Response> {
     let default_locale = settings::get_default_locale_code(&db).await?;
+    let services = PublicRenderServices {
+        hooks,
+        render_cache,
+        origin_host: extract_origin_host(&headers),
+    };
     render_home_for_locale(
         &db,
         themes_root,
         &default_locale,
         "/".to_owned(),
         raw.as_deref(),
+        Some(&services),
     )
     .await
 }
