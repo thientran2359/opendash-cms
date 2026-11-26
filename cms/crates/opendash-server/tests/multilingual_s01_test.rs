@@ -752,25 +752,19 @@ async fn locale_registry_single_locale_rename_overlays_and_theme_options_e2e() {
         .as_i64()
         .unwrap();
 
-    // Schema reject translatable=true on non-string/url option types (400)
-    for bad_type in ["number", "boolean", "select", "image_ref"] {
-        let mut def = match bad_type {
-            "number" => {
-                json!({ "key": "bad_opt", "label": "Bad", "type": "number", "default": 1, "translatable": true })
+    // Schema rejects translatable=true on UI-only types and forbids secret in Options (400)
+    for bad_type in ["tab", "accordion", "message"] {
+        let def = match bad_type {
+            "tab" => {
+                json!({ "key": "bad_opt", "label": "Bad", "type": "tab", "translatable": true })
             }
-            "boolean" => {
-                json!({ "key": "bad_opt", "label": "Bad", "type": "boolean", "default": true, "translatable": true })
-            }
-            "select" => {
-                json!({ "key": "bad_opt", "label": "Bad", "type": "select", "default": "a", "choices": [{ "value": "a", "label": "A" }], "translatable": true })
+            "accordion" => {
+                json!({ "key": "bad_opt", "label": "Bad", "type": "accordion", "translatable": true })
             }
             _ => {
-                json!({ "key": "bad_opt", "label": "Bad", "type": "image_ref", "default": null, "translatable": true })
+                json!({ "key": "bad_opt", "label": "Bad", "type": "message", "body": "Info", "translatable": true })
             }
         };
-        if bad_type == "boolean" {
-            def["public"] = json!(true);
-        }
         let zip_bad = build_theme_zip("theme-bad-tr", "1.0.0", json!([def]));
         let r = client
             .post(format!("{origin}/api/admin/themes"))
@@ -794,11 +788,55 @@ async fn locale_registry_single_locale_rename_overlays_and_theme_options_e2e() {
         );
     }
 
+    let r_secret = client
+        .post(format!("{origin}/api/admin/themes"))
+        .header(header::COOKIE, &admin_cookie)
+        .header("X-CSRF-Token", &admin_csrf)
+        .header(header::CONTENT_TYPE, "application/zip")
+        .body(build_theme_zip(
+            "theme-bad-secret",
+            "1.0.0",
+            json!([{ "key": "bad_sec", "label": "Bad", "type": "secret", "translatable": true }]),
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r_secret.status(), StatusCode::BAD_REQUEST);
+
+    // Unified Field Engine V1: select, media, gallery, group, repeater ARE translatable-capable in Options
+    let r_complex_tr = client
+        .post(format!("{origin}/api/admin/themes"))
+        .header(header::COOKIE, &admin_cookie)
+        .header("X-CSRF-Token", &admin_csrf)
+        .header(header::CONTENT_TYPE, "application/zip")
+        .body(build_theme_zip(
+            "theme-complex-tr",
+            "1.0.0",
+            json!([
+                { "key": "hero_title", "label": "Hero", "type": "text", "default": "H", "public": true, "translatable": true },
+                { "key": "tr_sel", "label": "Sel", "type": "select", "default": "a", "options": [{ "value": "a", "label": "A" }], "public": true, "translatable": true },
+                { "key": "tr_media", "label": "Media", "type": "media", "public": true, "translatable": true },
+                { "key": "tr_gal", "label": "Gal", "type": "gallery", "public": true, "translatable": true },
+                { "key": "tr_grp", "label": "Grp", "type": "group", "public": true, "translatable": true, "fields": [{ "key": "sub", "label": "Sub", "type": "text" }] },
+                { "key": "tr_rep", "label": "Rep", "type": "repeater", "public": true, "translatable": true, "fields": [{ "key": "cap", "label": "Cap", "type": "text" }] }
+            ]),
+        ))
+        .send()
+        .await
+        .unwrap();
+    let tr_status = r_complex_tr.status();
+    let tr_body = r_complex_tr.text().await.unwrap();
+    assert_eq!(
+        tr_status,
+        StatusCode::CREATED,
+        "complex translatable failed: {tr_body}"
+    );
+
     // Install & activate theme-s01 with translatable and non-translatable options
     let theme_opts = json!([
-        { "key": "hero_title", "label": "Hero", "type": "string", "default": "Default Hero", "public": true, "translatable": true },
+        { "key": "hero_title", "label": "Hero", "type": "text", "default": "Default Hero", "public": true, "translatable": true },
         { "key": "cta_url", "label": "CTA URL", "type": "url", "default": "/contact", "public": true, "translatable": true },
-        { "key": "accent_hex", "label": "Accent", "type": "string", "default": "#111111", "public": true, "translatable": false }
+        { "key": "accent_hex", "label": "Accent", "type": "text", "default": "#111111", "public": true, "translatable": false }
     ]);
     let zip_v1 = build_theme_zip("theme-s01", "1.0.0", theme_opts);
     let inst_v1 = client
@@ -1444,9 +1482,9 @@ async fn locale_registry_single_locale_rename_overlays_and_theme_options_e2e() {
         "theme-s01",
         "2.0.0",
         json!([
-            { "key": "hero_title", "label": "Hero", "type": "string", "default": "Default Hero", "public": true, "translatable": true },
+            { "key": "hero_title", "label": "Hero", "type": "text", "default": "Default Hero", "public": true, "translatable": true },
             { "key": "cta_url", "label": "CTA Num", "type": "number", "default": 1, "public": true },
-            { "key": "accent_hex", "label": "Accent", "type": "string", "default": "#111111", "public": true }
+            { "key": "accent_hex", "label": "Accent", "type": "text", "default": "#111111", "public": true }
         ]),
     );
     let inst_v2 = client

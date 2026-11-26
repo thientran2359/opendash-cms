@@ -561,7 +561,12 @@ pub fn check_plugin_path(path: &Path) -> Result<PluginCheckSummary, String> {
         filters,
         actions,
         blocks,
-        settings_count: pkg.manifest.settings_schema.len(),
+        settings_count: pkg
+            .manifest
+            .settings_schema
+            .iter()
+            .filter(|s| !s.is_ui_only())
+            .count(),
     })
 }
 

@@ -199,8 +199,24 @@ pub async fn collect_pins_in_tx(
             push_pin(&mut summary, pin_kind, entity);
         }
     }
+    let opt_loc_rows = sqlx::query(
+        "SELECT theme_id, locale, option_key, value_json FROM theme_option_locale_values",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    for row in opt_loc_rows {
+        let theme_id: String = row.try_get("theme_id")?;
+        let locale: String = row.try_get("locale")?;
+        let option_key: String = row.try_get("option_key")?;
+        let value_json: String = row.try_get("value_json")?;
+        if parse_json_and_check_pin(&value_json, media_id, "theme_option_locale_values")? {
+            let entity = format!("{theme_id}:{option_key}:{locale}");
+            seen_owner_opts.insert(("theme".to_owned(), format!("{theme_id}:{option_key}")));
+            push_pin(&mut summary, "theme_option", entity);
+        }
+    }
     let opt_ref_rows = sqlx::query(
-        "SELECT owner_kind, owner_id, option_key FROM theme_option_media_refs WHERE media_id = ?",
+        "SELECT DISTINCT owner_kind, owner_id, option_key FROM theme_option_media_refs WHERE media_id = ?",
     )
     .bind(media_id)
     .fetch_all(&mut *conn)
@@ -493,15 +509,9 @@ pub async fn collect_referenced_extension_secret_refs(
         let Ok(val) = serde_json::from_str::<serde_json::Value>(&value_json) else {
             continue;
         };
-        let Some(obj) = val.as_object() else {
+        let Some(secret_ref) = crate::storage::settings::is_secret_sentinel(&val) else {
             continue;
         };
-        let Some(secret_ref) = obj.get("secret_ref").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        if !opendash_core::backup::is_valid_sha256_hex(secret_ref) {
-            continue;
-        }
         let owner_subdir = match owner_kind.as_str() {
             "plugin" => "plugins",
             "theme_functions" => "themes",

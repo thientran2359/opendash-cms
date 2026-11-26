@@ -245,12 +245,12 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
         "version": "1.0.0",
         "templates": [{ "kind": "home", "file": "home.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
         "options": [
-            { "key": "banner_text", "label": "Banner", "type": "string", "default": "Welcome", "public": true },
+            { "key": "banner_text", "label": "Banner", "type": "text", "default": "Welcome", "public": true },
             { "key": "cols", "label": "Columns", "type": "number", "default": 3, "min": 1, "max": 6, "public": true },
             { "key": "show_banner", "label": "Show Banner", "type": "boolean", "default": true, "public": true },
-            { "key": "tone", "label": "Tone", "type": "select", "default": "light", "choices": [{"value":"light","label":"Light"},{"value":"dark","label":"Dark"}], "public": true },
-            { "key": "logo_ref", "label": "Logo", "type": "image_ref", "default": null, "public": true },
-            { "key": "internal_note", "label": "Internal", "type": "string", "default": "SECRET_ADMIN_ONLY", "public": false }
+            { "key": "tone", "label": "Tone", "type": "select", "default": "light", "options": [{"value":"light","label":"Light"},{"value":"dark","label":"Dark"}], "public": true },
+            { "key": "logo_ref", "label": "Logo", "type": "media", "public": true },
+            { "key": "internal_note", "label": "Internal", "type": "text", "default": "SECRET_ADMIN_ONLY", "public": false }
         ]
     }"#;
     let zip_a = build_zip(&[

@@ -245,7 +245,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
     setSettingsError('');
     setSettingsNotice('');
     try {
-      const payload = buildOwnerOptionsSubmitPayload(settingsSnapshot.schema, settingsDraft);
+      const payload = buildOwnerOptionsSubmitPayload(settingsSnapshot.fields, settingsDraft);
       const saved = await savePluginSettings(
         settingsSnapshot.plugin_id,
         payload,
@@ -437,15 +437,15 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           {!settingsLoading && !settingsSnapshot && settingsError && (
             <AdminAlert tone="error">{settingsError}</AdminAlert>
           )}
-          {!settingsLoading && settingsSnapshot && settingsSnapshot.schema.length === 0 && (
+          {!settingsLoading && settingsSnapshot && settingsSnapshot.fields.length === 0 && (
             <p className="text-xs text-zinc-500">{translate('feature.plugins.pluginspanel.this_plugin_does_not_declare_a_settings_schema_settings_schema')}</p>
           )}
-          {!settingsLoading && settingsSnapshot && settingsSnapshot.schema.length > 0 && (
+          {!settingsLoading && settingsSnapshot && settingsSnapshot.fields.length > 0 && (
             <OwnerOptionsForm
               ownerKind="plugin"
               ownerId={settingsSnapshot.plugin_id}
               title={translate('feature.plugins.pluginspanel.plugin_settings_value1', { value1: settingsTargetPlugin.name })}
-              schema={settingsSnapshot.schema}
+              fields={settingsSnapshot.fields}
               values={settingsDraft}
               savedValues={settingsSnapshot.values}
               version={settingsSnapshot.version}

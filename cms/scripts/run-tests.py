@@ -70,6 +70,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "template_sec::",
             "content_render::",
             "document::",
+            "field_hydrate::",
             "public_context::",
             "package::",
             "storage::theme",
@@ -90,6 +91,7 @@ GROUPS: tuple[GroupSpec, ...] = (
         ),
         unit_filters=(
             "page::",
+            "field_hydrate::",
             "storage::builder",
             "storage::page",
             "routes::builder",
@@ -109,6 +111,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "entry_lifecycle_*",
         ),
         unit_filters=(
+            "field_hydrate::",
             "storage::content",
             "storage::entries",
             "storage::entry_table",
@@ -132,6 +135,7 @@ GROUPS: tuple[GroupSpec, ...] = (
         unit_filters=(
             "plugin::",
             "hooks::",
+            "field_hydrate::",
             "storage::plugin",
             "routes::plugin",
         ),
@@ -146,6 +150,7 @@ GROUPS: tuple[GroupSpec, ...] = (
         ),
         unit_filters=(
             "i18n::",
+            "field_hydrate::",
             "storage::settings",
             "routes::settings",
         ),
@@ -168,6 +173,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "media::",
             "media_video::",
             "smtp::",
+            "field_hydrate::",
             "storage::menu",
             "storage::permalinks",
             "storage::seo",
@@ -366,6 +372,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "storage/entries.rs": {"content"},
             "storage/entry_table.rs": {"content"},
             "storage/fields.rs": {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
+            "field_hydrate.rs": {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
             "storage/taxonomy.rs": {"content"},
             "storage/dashboard.rs": {"content"},
             "routes/content.rs": {"content"},
@@ -695,6 +702,7 @@ class RunTestsSelfTest(unittest.TestCase):
         all_tests = discover_integration_tests()
         plan = build_plan_from_files(
             [
+                "cms/crates/opendash-server/src/field_hydrate.rs",
                 "cms/crates/opendash-server/src/storage/fields.rs",
                 "cms/crates/opendash-server/src/routes/fields.rs",
             ],
@@ -705,6 +713,7 @@ class RunTestsSelfTest(unittest.TestCase):
             set(plan.groups),
             {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
         )
+        self.assertIn("field_hydrate::", plan.unit_filters)
         self.assertIn("storage::fields", plan.unit_filters)
         self.assertIn("routes::fields", plan.unit_filters)
 

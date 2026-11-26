@@ -113,15 +113,14 @@ fn build_studio_theme_v3_zip() -> Vec<u8> {
                 {
                     "key": "banner_text",
                     "label": "Banner",
-                    "type": "string",
+                    "type": "text",
                     "default": "Saved Banner",
                     "public": true
                 },
                 {
                     "key": "logo_ref",
                     "label": "Logo",
-                    "type": "image_ref",
-                    "default": null,
+                    "type": "media",
                     "public": true
                 }
             ]
@@ -130,7 +129,7 @@ fn build_studio_theme_v3_zip() -> Vec<u8> {
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
         zip.start_file("header.html", opts).unwrap();
         zip.write_all(
-            b"<header data-theme-header=\"1\"><span>{{ site.title }}</span><em>{{ options.banner_text }}</em>{% if options.logo_ref %}<img src=\"{{ options.logo_ref }}\" alt=\"Logo\">{% endif %}</header>",
+            b"<header data-theme-header=\"1\"><span>{{ site.title }}</span><em>{{ options.banner_text }}</em>{% if options.logo_ref %}<img src=\"{{ options.logo_ref.url }}\" alt=\"Logo\">{% endif %}</header>",
         )
         .unwrap();
         zip.start_file("footer.html", opts).unwrap();

@@ -100,6 +100,75 @@ export interface OdMediaAsset {
   alt: string | null;
 }
 
+export interface OdHydratedMedia {
+  id: string;
+  url: string;
+  thumbnail_url: string;
+  alt: string;
+  width: number | null;
+  height: number | null;
+  kind: string;
+}
+
+export interface OdHydratedLink {
+  url: string;
+  label: string;
+  target: "" | "_blank";
+  rel: string;
+  new_tab: boolean;
+  nofollow: boolean;
+}
+
+export interface OdHydratedIcon {
+  name: string;
+}
+
+export interface OdHydratedSpacing {
+  top: number | null;
+  right: number | null;
+  bottom: number | null;
+  left: number | null;
+  css: string;
+  classes: string;
+}
+
+export interface OdHydratedEntryRef {
+  id: number;
+  type_key: string;
+  title: string;
+  slug: string;
+  url: string;
+  cover_url: string | null;
+  excerpt: string;
+}
+
+export interface OdHydratedTermRef {
+  id: number;
+  kind: string;
+  name: string;
+  slug: string;
+  url: string;
+  featured_image: OdHydratedMedia | null;
+}
+
+export type OdHydratedOptionValue =
+  | string
+  | number
+  | boolean
+  | null
+  | string[]
+  | OdHydratedMedia
+  | OdHydratedMedia[]
+  | OdHydratedLink
+  | OdHydratedIcon
+  | OdHydratedSpacing
+  | OdHydratedEntryRef
+  | OdHydratedEntryRef[]
+  | OdHydratedTermRef
+  | OdHydratedTermRef[]
+  | { [key: string]: OdHydratedOptionValue }
+  | Array<{ [key: string]: OdHydratedOptionValue }>;
+
 export interface OdHttpRequestParams {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD";
   url: string;
@@ -209,7 +278,12 @@ export interface OpenDashHostApi {
   };
 
   readonly site: {
-    options(locale?: string): { options: Record<string, unknown> };
+    /**
+     * Returns merged public global site options + active theme public options
+     * hydrated to Unified Field Schema V1 shapes (`media`/`link`/`icon`/
+     * `spacing`/`entry_ref`/`term_ref` objects and plain sanitized `richtext` HTML).
+     */
+    options(locale?: string): { options: Record<string, OdHydratedOptionValue> };
   };
 
   readonly settings: {

@@ -10,8 +10,9 @@ use std::{
 
 use opendash_core::{
     content::{FieldRole, PublicExposure},
+    field_schema::{FieldType, default_value_for_field_spec},
     hooks::{ExecutionPrincipal, ExtensionOwnerKind, ExtensionRuntimeKind, HookExecutionMode},
-    plugin::{PluginSettingFieldType, plugin_can_read_field_for_owner},
+    plugin::plugin_can_read_field_for_owner,
     registry::ProviderStatus,
 };
 use serde_json::{Value, json};
@@ -1361,7 +1362,7 @@ pub async fn execute_host_read_request_for_owner(
         HostReadRequest::SiteOptionsGet { locale } => {
             match settings::get_active_public_theme_options_for_locale(db, locale.as_deref()).await
             {
-                Ok(map) => HostOperationResponse::ok_data(json!({ "options": map })),
+                Ok((_, map)) => HostOperationResponse::ok_data(json!({ "options": map })),
                 Err(e) => HostOperationResponse::err(e.1.to_string()),
             }
         }
@@ -1373,18 +1374,24 @@ pub async fn execute_host_read_request_for_owner(
                 };
             let mut settings_map = serde_json::Map::new();
             for field in &manifest.settings_schema {
-                if field.field_type == PluginSettingFieldType::Secret {
+                if field.is_ui_only() {
+                    continue;
+                }
+                if field.field_type == FieldType::Secret {
                     let configured = raw_map
                         .get(&field.key)
-                        .and_then(|v| v.get("secret_ref"))
-                        .and_then(Value::as_str)
+                        .and_then(settings::is_secret_sentinel)
                         .is_some();
                     settings_map.insert(field.key.clone(), json!({ "configured": configured }));
                 } else {
                     let val = raw_map
                         .get(&field.key)
+                        .filter(|val| {
+                            !val.as_object()
+                                .is_some_and(|obj| obj.contains_key("secret_ref"))
+                        })
                         .cloned()
-                        .unwrap_or_else(|| field.default.clone());
+                        .unwrap_or_else(|| default_value_for_field_spec(field));
                     settings_map.insert(field.key.clone(), val);
                 }
             }
@@ -1394,7 +1401,7 @@ pub async fn execute_host_read_request_for_owner(
             if !manifest
                 .settings_schema
                 .iter()
-                .any(|f| f.key == key && f.field_type == PluginSettingFieldType::Secret)
+                .any(|f| f.key == key && f.field_type == FieldType::Secret)
             {
                 return HostOperationResponse::err(
                     "Khóa secret không tồn tại trong settings_schema.",
@@ -1405,11 +1412,7 @@ pub async fn execute_host_read_request_for_owner(
                     Ok(m) => m,
                     Err(e) => return HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
                 };
-            let Some(secret_ref) = raw_map
-                .get(&key)
-                .and_then(|v| v.get("secret_ref"))
-                .and_then(Value::as_str)
-            else {
+            let Some(secret_ref) = raw_map.get(&key).and_then(settings::is_secret_sentinel) else {
                 return HostOperationResponse::ok_data(json!({ "value": Value::Null }));
             };
             let Some(sec_root) = secrets_root else {

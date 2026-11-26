@@ -752,7 +752,7 @@ pub struct ThemeFunctionsSettingsResponse {
     pub revision_id: Option<String>,
     pub has_functions: bool,
     pub version: i64,
-    pub schema: Vec<opendash_core::plugin::PluginSettingField>,
+    pub fields: Vec<opendash_core::field_schema::FieldSpec>,
     pub values: serde_json::Map<String, serde_json::Value>,
     pub actions: Vec<opendash_core::plugin::PluginActionDeclaration>,
 }
@@ -782,7 +782,7 @@ pub async fn theme_functions_get_settings(
             revision_id: Some(revision_id),
             has_functions: true,
             version: snapshot.version,
-            schema: snapshot.schema,
+            fields: snapshot.fields,
             values: snapshot.values,
             actions: manifest.actions,
         };
@@ -798,7 +798,7 @@ pub async fn theme_functions_get_settings(
         revision_id: selection.revision_id,
         has_functions: false,
         version: 0,
-        schema: Vec::new(),
+        fields: Vec::new(),
         values: serde_json::Map::new(),
         actions: Vec::new(),
     };
@@ -887,7 +887,7 @@ pub async fn theme_functions_put_settings(
         revision_id: Some(revision_id),
         has_functions: true,
         version: outcome.snapshot.version,
-        schema: outcome.snapshot.schema,
+        fields: outcome.snapshot.fields,
         values: outcome.snapshot.values,
         actions: manifest.actions,
     };

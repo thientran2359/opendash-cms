@@ -141,7 +141,7 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
         "assets": ["assets/hero.png"],
         "templates": [{ "kind": "home", "file": "home.html" }],
         "options": [
-            { "key": "brand_title", "label": "Brand", "type": "string", "default": "Default", "public": true }
+            { "key": "brand_title", "label": "Brand", "type": "text", "default": "Default", "public": true }
         ],
         "sample": {
             "sample_key": "starter",
@@ -348,7 +348,7 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
         "assets": ["assets/hero.png"],
         "templates": [{ "kind": "home", "file": "home.html" }],
         "options": [
-            { "key": "brand_title", "label": "Brand", "type": "string", "default": "Default", "public": true }
+            { "key": "brand_title", "label": "Brand", "type": "text", "default": "Default", "public": true }
         ],
         "sample": {
             "sample_key": "starter",

@@ -775,7 +775,9 @@ fn build_theme_check_summary(pkg: &ThemeV3Package) -> Result<ThemeCheckSummary, 
 
     let options_count = crate::storage::settings::parse_theme_options_schema(&pkg.manifest_json)
         .map_err(str::to_owned)?
-        .len();
+        .into_iter()
+        .filter(|spec| !spec.is_ui_only())
+        .count();
 
     Ok(ThemeCheckSummary {
         ok: true,

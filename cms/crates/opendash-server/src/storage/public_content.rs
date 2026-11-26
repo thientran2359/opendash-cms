@@ -1286,21 +1286,6 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            LIMIT 1
          ) OR EXISTS (
            SELECT 1
-           FROM theme_option_media_refs AS tom
-           JOIN theme_revisions AS r ON r.theme_id = tom.owner_id
-           JOIN theme_active_selection AS a ON a.revision_id = r.revision_id AND a.id = 1
-           JOIN json_each(
-             CASE
-               WHEN json_type(r.manifest_json, '$.options') = 'array' THEN json_extract(r.manifest_json, '$.options')
-               ELSE '[]'
-             END
-           ) AS opt
-           WHERE tom.owner_kind = 'theme'
-             AND tom.media_id = ?
-             AND json_extract(opt.value, '$.key') = tom.option_key
-             AND json_extract(opt.value, '$.public') = 1
-         ) OR EXISTS (
-           SELECT 1
            FROM site_global_option_media_refs AS gom
            WHERE gom.media_id = ?
          ) OR EXISTS (
@@ -1414,11 +1399,50 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     .bind(id)
     .bind(id)
     .bind(id)
-    .bind(id)
     .fetch_one(db)
     .await?;
     if result != 0 {
         return Ok(true);
+    }
+
+    let theme_option_candidates: Vec<(String, String)> = sqlx::query_as(
+        "SELECT tom.option_key, r.manifest_json
+           FROM theme_option_media_refs AS tom
+           JOIN theme_revisions AS r ON r.theme_id = tom.owner_id
+           JOIN theme_active_selection AS a ON a.revision_id = r.revision_id AND a.id = 1
+           LEFT JOIN site_locales AS sl
+             ON sl.code = tom.locale
+            AND tom.locale != ''
+          WHERE tom.owner_kind = 'theme'
+            AND tom.media_id = ?
+            AND (
+              tom.locale = ''
+              OR (
+                sl.code IS NOT NULL
+                AND sl.enabled = 1
+                AND sl.deleted_at IS NULL
+                AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+              )
+            )",
+    )
+    .bind(id)
+    .fetch_all(db)
+    .await?;
+    if !theme_option_candidates.is_empty()
+        && let Some((_, first_manifest)) = theme_option_candidates.first()
+        && let Ok(specs) = crate::storage::settings::parse_theme_options_schema(first_manifest)
+    {
+        let public_keys: std::collections::BTreeSet<&str> = specs
+            .iter()
+            .filter(|s| !s.is_ui_only() && s.public)
+            .map(|s| s.key.as_str())
+            .collect();
+        if theme_option_candidates
+            .iter()
+            .any(|(opt_key, _)| public_keys.contains(opt_key.as_str()))
+        {
+            return Ok(true);
+        }
     }
 
     // Builder + one-hop Pattern ACL projections are only candidates: a change

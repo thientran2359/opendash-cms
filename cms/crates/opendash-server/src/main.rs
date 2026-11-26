@@ -11,6 +11,7 @@ mod content_render;
 mod dev_mode;
 mod document;
 mod error;
+mod field_hydrate;
 mod hooks;
 mod i18n;
 mod media;

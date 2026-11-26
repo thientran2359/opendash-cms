@@ -6,11 +6,11 @@ use std::collections::BTreeMap;
 
 pub const STARTER_THEME_ID: &str = "opendash-starter";
 pub const STARTER_THEME_NAME: &str = "OpenDash Starter";
-pub const STARTER_THEME_VERSION: &str = "1.1.1";
+pub const STARTER_THEME_VERSION: &str = "1.0.0";
 
-/// Immutable embedded Starter theme resources, validated using the same v3
+/// Immutable embedded Starter V1 theme resources, validated using the same v3
 /// boundary as uploaded packages before publishing an on-disk revision.
-pub fn builtin_starter_theme_v100_files() -> BTreeMap<String, Vec<u8>> {
+pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
     BTreeMap::from([
         (
             "404.html".to_owned(),
@@ -59,6 +59,14 @@ pub fn builtin_starter_theme_v100_files() -> BTreeMap<String, Vec<u8>> {
         (
             "index.html".to_owned(),
             include_bytes!("opendash-starter/index.html").to_vec(),
+        ),
+        (
+            "locales/en.json".to_owned(),
+            include_bytes!("opendash-starter/locales/en.json").to_vec(),
+        ),
+        (
+            "locales/vi.json".to_owned(),
+            include_bytes!("opendash-starter/locales/vi.json").to_vec(),
         ),
         (
             "page-layouts/canvas.html".to_owned(),
@@ -113,6 +121,10 @@ pub fn builtin_starter_theme_v100_files() -> BTreeMap<String, Vec<u8>> {
             include_bytes!("opendash-starter/taxonomy.html").to_vec(),
         ),
         (
+            "template-part/language-switcher.html".to_owned(),
+            include_bytes!("opendash-starter/template-part/language-switcher.html").to_vec(),
+        ),
+        (
             "template-part/post-card.html".to_owned(),
             include_bytes!("opendash-starter/template-part/post-card.html").to_vec(),
         ),
@@ -121,102 +133,4 @@ pub fn builtin_starter_theme_v100_files() -> BTreeMap<String, Vec<u8>> {
             include_bytes!("opendash-starter/theme.json").to_vec(),
         ),
     ])
-}
-
-/// v1.0.1 shares immutable assets, layouts, patterns and blocks with the
-/// frozen v1.0.0 snapshot, changing only the four explicitly overlaid files.
-pub fn builtin_starter_theme_v101_files() -> BTreeMap<String, Vec<u8>> {
-    let mut files = builtin_starter_theme_v100_files();
-    for (path, bytes) in [
-        (
-            "theme.json",
-            include_bytes!("opendash-starter-1.0.1/theme.json").as_slice(),
-        ),
-        (
-            "header.html",
-            include_bytes!("opendash-starter-1.0.1/header.html").as_slice(),
-        ),
-        (
-            "home.html",
-            include_bytes!("opendash-starter-1.0.1/home.html").as_slice(),
-        ),
-        (
-            "single-post.html",
-            include_bytes!("opendash-starter-1.0.1/single-post.html").as_slice(),
-        ),
-    ] {
-        files.insert(path.to_owned(), bytes.to_vec());
-    }
-    files
-}
-
-/// Frozen v1.1.0 snapshot building on v1.0.1 with Theme v3 L10n dictionaries,
-/// `language-switcher` template part, and localized starter templates.
-pub fn builtin_starter_theme_v110_files() -> BTreeMap<String, Vec<u8>> {
-    let mut files = builtin_starter_theme_v101_files();
-    for (path, bytes) in [
-        (
-            "theme.json",
-            include_bytes!("opendash-starter-1.1.0/theme.json").as_slice(),
-        ),
-        (
-            "locales/vi.json",
-            include_bytes!("opendash-starter-1.1.0/locales/vi.json").as_slice(),
-        ),
-        (
-            "locales/en.json",
-            include_bytes!("opendash-starter-1.1.0/locales/en.json").as_slice(),
-        ),
-        (
-            "template-part/language-switcher.html",
-            include_bytes!("opendash-starter-1.1.0/template-part/language-switcher.html")
-                .as_slice(),
-        ),
-        (
-            "header.html",
-            include_bytes!("opendash-starter-1.1.0/header.html").as_slice(),
-        ),
-        (
-            "footer.html",
-            include_bytes!("opendash-starter-1.1.0/footer.html").as_slice(),
-        ),
-        (
-            "archive-post.html",
-            include_bytes!("opendash-starter-1.1.0/archive-post.html").as_slice(),
-        ),
-        (
-            "archive.html",
-            include_bytes!("opendash-starter-1.1.0/archive.html").as_slice(),
-        ),
-        (
-            "single-post.html",
-            include_bytes!("opendash-starter-1.1.0/single-post.html").as_slice(),
-        ),
-        (
-            "taxonomy.html",
-            include_bytes!("opendash-starter-1.1.0/taxonomy.html").as_slice(),
-        ),
-        (
-            "index.html",
-            include_bytes!("opendash-starter-1.1.0/index.html").as_slice(),
-        ),
-        (
-            "404.html",
-            include_bytes!("opendash-starter-1.1.0/404.html").as_slice(),
-        ),
-    ] {
-        files.insert(path.to_owned(), bytes.to_vec());
-    }
-    files
-}
-
-/// v1.1.1 overlays the frozen v1.1.0 snapshot with `"chrome": "none"` on the
-/// `canvas` page layout without mutating earlier immutable revision digests.
-pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
-    let mut files = builtin_starter_theme_v110_files();
-    files.insert(
-        "theme.json".to_owned(),
-        include_bytes!("opendash-starter-1.1.1/theme.json").to_vec(),
-    );
-    files
 }

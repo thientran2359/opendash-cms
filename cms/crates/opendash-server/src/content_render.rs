@@ -894,6 +894,7 @@ pub fn authenticated_preview_view_with_context(
 
 pub struct PublicThemeContextInput<'a> {
     pub site: &'a SiteContext<'a>,
+    pub site_options: &'a BTreeMap<String, Value>,
     pub options: &'a BTreeMap<String, Value>,
     pub theme_assets: &'a BTreeMap<String, String>,
     pub menus: &'a BTreeMap<String, crate::storage::menu::MenuViewModel>,
@@ -921,6 +922,7 @@ struct SerializedRouteContext<'a> {
 #[derive(Serialize)]
 struct SerializedThemeContext<'a> {
     site: &'a SiteContext<'a>,
+    site_options: &'a BTreeMap<String, Value>,
     options: &'a BTreeMap<String, Value>,
     theme_options: &'a BTreeMap<String, Value>,
     theme_assets: &'a BTreeMap<String, String>,
@@ -942,6 +944,7 @@ struct SerializedThemeContext<'a> {
 pub fn build_public_theme_context(input: PublicThemeContextInput<'_>) -> ApiResult<Value> {
     let payload = SerializedThemeContext {
         site: input.site,
+        site_options: input.site_options,
         options: input.options,
         theme_options: input.options,
         theme_assets: input.theme_assets,
@@ -1003,6 +1006,23 @@ pub fn finalize_document_icons(
         return Ok(html);
     }
     icon_nonces
+        .substitute_into_document(html)
+        .map_err(ApiError::internal)
+}
+
+/// Server-owned sanitized RichText nonce substitution happens strictly after
+/// document normalization inside safe `HtmlScanState::Body` regions.
+pub fn finalize_document_richtext(
+    mut html: String,
+    richtext_nonces: &crate::template_sec::RichTextNonceTable,
+) -> ApiResult<String> {
+    if html.contains(HEAD_END_MARKER) {
+        html = html.replace(HEAD_END_MARKER, "");
+    }
+    if richtext_nonces.is_empty() {
+        return Ok(html);
+    }
+    richtext_nonces
         .substitute_into_document(html)
         .map_err(ApiError::internal)
 }
@@ -2051,12 +2071,14 @@ mod tests {
 
     #[test]
     fn build_public_theme_context_includes_all_strict_base_keys() {
+        let site_opts = BTreeMap::new();
         let opts = BTreeMap::new();
         let assets = BTreeMap::new();
         let menus = BTreeMap::new();
         let pagination = PaginationView::empty();
         let ctx = build_public_theme_context(PublicThemeContextInput {
             site: &DEFAULT_SITE,
+            site_options: &site_opts,
             options: &opts,
             theme_assets: &assets,
             menus: &menus,
@@ -2077,6 +2099,7 @@ mod tests {
         .unwrap();
         for key in [
             "site",
+            "site_options",
             "options",
             "theme_options",
             "theme_assets",

@@ -394,7 +394,7 @@ pub struct ThemeFunctionsSpec {
     )]
     pub render_cache: crate::plugin::RenderCachePolicy,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub settings_schema: Vec<crate::plugin::PluginSettingField>,
+    pub settings_schema: Vec<crate::field_schema::FieldSpec>,
 }
 
 impl ThemeFunctionsSpec {
@@ -458,6 +458,41 @@ impl ThemeFunctionsSpec {
     }
 }
 
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+pub fn validate_theme_options_fields(
+    specs: &[crate::field_schema::FieldSpec],
+) -> Result<(), &'static str> {
+    crate::field_schema::validate_field_specs(specs, crate::field_schema::FieldContext::Options)?;
+    for spec in specs {
+        if spec.is_ui_only() {
+            continue;
+        }
+        if crate::field_schema::GLOBAL_PUBLIC_URL_OPTION_KEYS.contains(&spec.key.as_str())
+            && spec.field_type != crate::field_schema::FieldType::Url
+        {
+            return Err(
+                "Theme option cannot override a global public URL option with a non-url type",
+            );
+        }
+        if crate::field_schema::GLOBAL_PUBLIC_MEDIA_OPTION_KEYS.contains(&spec.key.as_str())
+            && !(spec.field_type == crate::field_schema::FieldType::Media
+                && spec.effective_media_kind() == crate::field_schema::MediaFieldKind::Image)
+        {
+            return Err(
+                "Theme option cannot override a global public media option with an incompatible type",
+            );
+        }
+    }
+    Ok(())
+}
+
 /// v3 is additive in S01: v2 manifests are still readable by existing callers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -483,8 +518,12 @@ pub struct ThemeV3Manifest {
     pub styles: Vec<ThemeStyleEnqueueDecl>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<ThemeScriptEnqueueDecl>,
-    #[serde(default)]
-    pub options: Option<serde_json::Value>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_null_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub options: Vec<crate::field_schema::FieldSpec>,
     #[serde(default)]
     pub menus: Option<serde_json::Value>,
     #[serde(default)]
@@ -570,6 +609,7 @@ impl ThemeV3Manifest {
             }
         }
         self.enqueue_graphs(&asset_paths)?;
+        validate_theme_options_fields(&self.options)?;
         if let Some(functions) = &self.functions {
             functions.validate()?;
         }
@@ -993,7 +1033,7 @@ mod tests {
             assets: vec!["assets/images/hero.webp".into(), "assets/styles.css".into()],
             styles: Vec::new(),
             scripts: Vec::new(),
-            options: None,
+            options: Vec::new(),
             menus: None,
             sample: None,
             declarations: None,
@@ -1648,6 +1688,50 @@ mod tests {
         manifest.templates.last_mut().unwrap().allowed_types.pop();
         manifest.templates.last_mut().unwrap().label = None;
         assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn v3_options_accept_null_and_reject_global_type_overrides() {
+        let mut raw = serde_json::to_value(v3_manifest()).unwrap();
+        raw["options"] = json!(null);
+        let parsed: ThemeV3Manifest = serde_json::from_value(raw.clone()).unwrap();
+        assert!(parsed.options.is_empty());
+        assert!(parsed.validate().is_ok());
+
+        // Rejects overriding global URL option with non-url type
+        raw["options"] = json!([
+            { "key": "social_facebook", "label": "FB", "type": "text", "public": true }
+        ]);
+        let bad_url: ThemeV3Manifest = serde_json::from_value(raw.clone()).unwrap();
+        assert!(bad_url.validate().is_err());
+
+        // Rejects overriding site_logo with non-image or text type
+        raw["options"] = json!([
+            { "key": "site_logo", "label": "Logo", "type": "text", "public": true }
+        ]);
+        assert!(
+            serde_json::from_value::<ThemeV3Manifest>(raw.clone())
+                .unwrap()
+                .validate()
+                .is_err()
+        );
+        raw["options"] = json!([
+            { "key": "site_logo", "label": "Logo", "type": "media", "media_kind": "video", "public": true }
+        ]);
+        assert!(
+            serde_json::from_value::<ThemeV3Manifest>(raw.clone())
+                .unwrap()
+                .validate()
+                .is_err()
+        );
+
+        // Accepts compatible global overrides
+        raw["options"] = json!([
+            { "key": "social_facebook", "label": "FB", "type": "url", "public": true },
+            { "key": "site_logo", "label": "Logo", "type": "media", "media_kind": "image", "public": true }
+        ]);
+        let ok_manifest: ThemeV3Manifest = serde_json::from_value(raw).unwrap();
+        assert!(ok_manifest.validate().is_ok());
     }
 }
 

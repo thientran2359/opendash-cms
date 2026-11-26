@@ -3,10 +3,12 @@
   "theme_id": "opendash-starter",
   "name": "OpenDash Starter",
   "version": "1.0.0",
+  "default_locale": "vi",
   "parts": {
     "header": "header.html",
     "footer": "footer.html",
-    "post-card": "template-part/post-card.html"
+    "post-card": "template-part/post-card.html",
+    "language-switcher": "template-part/language-switcher.html"
   },
   "templates": [
     {
@@ -62,7 +64,8 @@
     {
       "key": "canvas",
       "label": "Landing Page (Ẩn Header & Footer)",
-      "file": "page-layouts/canvas.html"
+      "file": "page-layouts/canvas.html",
+      "chrome": "none"
     }
   ],
   "patterns": [
@@ -120,30 +123,34 @@
     {
       "key": "header_badge",
       "label": "Nhãn đầu trang",
-      "type": "string",
+      "type": "text",
       "default": "OPENDASH STARTER",
-      "public": true
+      "public": true,
+      "translatable": true
     },
     {
       "key": "header_cta_label",
       "label": "Nhãn nút đầu trang",
-      "type": "string",
+      "type": "text",
       "default": "Khám phá ngay",
-      "public": true
+      "public": true,
+      "translatable": true
     },
     {
       "key": "header_cta_url",
       "label": "Đường dẫn nút đầu trang",
-      "type": "string",
+      "type": "url",
       "default": "/gioi-thieu",
-      "public": true
+      "public": true,
+      "translatable": true
     },
     {
       "key": "footer_copyright",
       "label": "Bản quyền chân trang",
-      "type": "string",
+      "type": "text",
       "default": "Xây dựng trên nền tảng OpenDash CMS — Single-Binary Rust + SQLite & Tailwind CSS v4.",
-      "public": true
+      "public": true,
+      "translatable": true
     },
     {
       "key": "show_tagline",

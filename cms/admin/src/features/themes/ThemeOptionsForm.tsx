@@ -8,18 +8,29 @@ import {
 import {
   getThemeOptions,
   saveThemeOptions,
-  type ThemeOptionDef,
   type ThemeOptionsSnapshot,
 } from '../../api/themes.ts';
 import type { BuilderViewport } from '../../builder/document.ts';
 import { LocaleTabs } from '../../components/LocaleTabs.tsx';
-import type { BlockFieldSpec } from '../../types.ts';
+import { isUiOnlyFieldType } from '../../fields/helpers.ts';
+import type { FieldSpec } from '../../fields/types.ts';
 import {
   buildOwnerOptionsSubmitPayload,
   OwnerOptionsForm,
   sameOwnerOptionValues,
-  upcastOwnerDefToBlockField,
 } from '../shared/OwnerOptionsForm.tsx';
+
+function formatReadOnlyOptionValue(val: unknown): string {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+    return String(val);
+  }
+  try {
+    return JSON.stringify(val);
+  } catch {
+    return String(val);
+  }
+}
 
 interface Props {
   themeId: string;
@@ -30,7 +41,7 @@ interface Props {
   onApiError: (error: unknown, fallback: string) => void;
   onValuesChange?: (
     values: Record<string, unknown>,
-    meta: { version: number; dirty: boolean; schema: ThemeOptionDef[] },
+    meta: { version: number; dirty: boolean; fields: FieldSpec[] },
   ) => void;
   externalValues?: Record<string, unknown> | null;
   hideSubmitButton?: boolean;
@@ -96,7 +107,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
         onValuesChangeRef.current?.(initial, {
           version: res.version,
           dirty: !sameOwnerOptionValues(initial, res.values),
-          schema: res.schema,
+          fields: res.fields,
         });
       })
       .catch((cause) => {
@@ -123,25 +134,18 @@ export const ThemeOptionsForm: React.FC<Props> = ({
     }
   }, [externalValues, snapshot]);
 
-  const visibleFields: BlockFieldSpec[] = useMemo(() => {
+  const visibleFields: FieldSpec[] = useMemo(() => {
     if (!snapshot) return [];
-    const allFields =
-      snapshot.fields && snapshot.fields.length > 0
-        ? snapshot.fields
-        : snapshot.schema
-            .map(upcastOwnerDefToBlockField)
-            .filter((f): f is BlockFieldSpec => f !== null);
-    const translatableKeys = new Set(
-      snapshot.schema.filter((d) => d.translatable).map((d) => d.key),
-    );
     return isSecondaryLocale
-      ? allFields.filter((f) => translatableKeys.has(f.key))
-      : allFields;
+      ? snapshot.fields.filter((f) => !isUiOnlyFieldType(f.type) && Boolean(f.translatable))
+      : snapshot.fields;
   }, [snapshot, isSecondaryLocale]);
 
-  const readOnlyGlobalOptions = useMemo(() => {
+  const readOnlyGlobalOptions: FieldSpec[] = useMemo(() => {
     if (!snapshot || !isSecondaryLocale) return [];
-    return snapshot.schema.filter((d) => !d.translatable);
+    return snapshot.fields.filter(
+      (f) => !isUiOnlyFieldType(f.type) && !f.translatable && f.type !== 'secret',
+    );
   }, [snapshot, isSecondaryLocale]);
 
   if (loading) {
@@ -161,7 +165,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
     onValuesChangeRef.current?.(normalized, {
       version: snapshot.version,
       dirty: !sameOwnerOptionValues(normalized, snapshot.values),
-      schema: snapshot.schema,
+      fields: snapshot.fields,
     });
   };
 
@@ -172,9 +176,13 @@ export const ThemeOptionsForm: React.FC<Props> = ({
     setNotice('');
     try {
       const translatableKeys = isSecondaryLocale
-        ? new Set(snapshot.schema.filter((d) => d.translatable).map((d) => d.key))
+        ? new Set(
+            snapshot.fields
+              .filter((f) => !isUiOnlyFieldType(f.type) && Boolean(f.translatable))
+              .map((f) => f.key),
+          )
         : undefined;
-      const payload = buildOwnerOptionsSubmitPayload(snapshot.schema, draft, translatableKeys);
+      const payload = buildOwnerOptionsSubmitPayload(snapshot.fields, draft, translatableKeys);
       const saved = await saveThemeOptions(
         themeId,
         payload,
@@ -187,7 +195,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
       onValuesChangeRef.current?.(saved.values, {
         version: saved.version,
         dirty: false,
-        schema: saved.schema,
+        fields: saved.fields,
       });
       setNotice(tStatic('feature.themes.themeoptionsform.theme_options_saved'));
     } catch (cause) {
@@ -210,13 +218,13 @@ export const ThemeOptionsForm: React.FC<Props> = ({
       ownerKind="theme"
       ownerId={themeId}
       title={translate('feature.themes.themeoptionsform.theme_options_value1', { value1: themeId })}
-      schema={snapshot.schema}
       fields={visibleFields}
       values={draft}
       savedValues={snapshot.values}
       version={snapshot.version}
       csrfToken={csrfToken}
       viewport={viewport}
+      locale={effectiveLocale}
       saving={saving}
       notice={notice}
       error={error}
@@ -248,7 +256,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
                 >
                   <dt className="font-medium text-zinc-700">{def.label}</dt>
                   <dd className="font-mono text-zinc-600">
-                    {String(draft[def.key] ?? def.default ?? '')}
+                    {formatReadOnlyOptionValue(draft[def.key] ?? def.default)}
                   </dd>
                 </div>
               ))}
