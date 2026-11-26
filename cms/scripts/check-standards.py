@@ -196,6 +196,13 @@ def route_functions(routes):
                     existing = [file for file in candidates if file.is_file()]
                     if len(existing) == 1:
                         visit(existing[0], module + '::' + name)
+                        if re.search(rf'(?m)^\s*pub\s+use\s+{re.escape(name)}\s*::\s*\*\s*;', code[low:high]):
+                            sub_prefix = module + '::' + name + '::'
+                            for fq, fn_info in list(functions.items()):
+                                if fq.startswith(sub_prefix):
+                                    fn_short = fq[len(sub_prefix):]
+                                    if '::' not in fn_short:
+                                        functions.setdefault(module + '::' + fn_short, []).extend(fn_info)
                 elif marker >= 0:
                     end = block_end(code, marker)
                     if end <= high:
