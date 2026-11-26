@@ -993,9 +993,12 @@ pub fn compose_document_with_seo(
 
 /// Server-owned SVG substitution happens only after document normalization.
 pub fn finalize_document_icons(
-    html: String,
+    mut html: String,
     icon_nonces: &crate::template_sec::IconNonceTable,
 ) -> ApiResult<String> {
+    if html.contains(HEAD_END_MARKER) {
+        html = html.replace(HEAD_END_MARKER, "");
+    }
     if icon_nonces.is_empty() {
         return Ok(html);
     }
@@ -1005,6 +1008,7 @@ pub fn finalize_document_icons(
 }
 
 pub const MAX_RENDER_HOOK_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
+pub const HEAD_END_MARKER: &str = "<!-- opendash-head-end -->";
 
 /// Applies already-sanitized per-subscriber render-hook outputs (`OD_HOOK_<32hex>` slots,
 /// `filter:render/head` fragments/styles/scripts, and `filter:render/footer` fragments)
@@ -1048,7 +1052,26 @@ pub fn apply_render_hooks_to_document(
 
         let has_head_additions =
             !head_styles.is_empty() || !head_scripts.is_empty() || !head_html.is_empty();
-        if has_head_additions && let Some(pos) = html.find("</head>") {
+        if let Some(marker_pos) = html.find(HEAD_END_MARKER) {
+            let mut injected = String::new();
+            if has_head_additions {
+                for style in head_styles {
+                    injected.push_str(style);
+                }
+                for script in head_scripts {
+                    injected.push_str(script);
+                }
+                injected.push_str(head_html);
+            }
+            let new_len = html
+                .len()
+                .saturating_sub(HEAD_END_MARKER.len())
+                .saturating_add(injected.len());
+            if new_len > MAX_RENDER_HOOK_DOCUMENT_BYTES {
+                return Err("Document chứa render hooks vượt giới hạn HTML.");
+            }
+            html.replace_range(marker_pos..marker_pos + HEAD_END_MARKER.len(), &injected);
+        } else if has_head_additions && let Some(pos) = html.find("</head>") {
             let mut injected = String::new();
             for style in head_styles {
                 injected.push_str(style);
@@ -1274,7 +1297,7 @@ pub fn compose_document_with_seo_with_assets(
     }
     let dir = if seo.dir == "rtl" { "rtl" } else { "ltr" };
     Ok(format!(
-        "<!doctype html><html lang=\"{}\" dir=\"{}\"><head>{head}</head><body{body_attrs_str}>{header}{body_fragment}{footer}{}</body></html>",
+        "<!doctype html><html lang=\"{}\" dir=\"{}\"><head>{head}{HEAD_END_MARKER}</head><body{body_attrs_str}>{header}{body_fragment}{footer}{}</body></html>",
         escape_html_attr(&seo.lang),
         dir,
         enqueued.footer_scripts.concat(),
@@ -2073,5 +2096,46 @@ mod tests {
         ] {
             assert!(ctx.get(key).is_some(), "missing key {key}");
         }
+    }
+
+    #[test]
+    fn apply_render_hooks_injects_at_head_end_marker_despite_head_script_literal() {
+        let seo = crate::seo::SeoView::for_noindex_page("vi", "Marker Test");
+        let assets = ResolvedEnqueuedAssets::default();
+        let composed = compose_document_with_seo_with_assets(
+            None,
+            concat!(
+                "<!doctype html><html><head>",
+                "<script>window.x = \"</head>\";</script>",
+                "</head><body><main>Body</main></body></html>"
+            ),
+            None,
+            &seo,
+            &[],
+            &assets,
+            true,
+        )
+        .unwrap();
+        assert!(composed.contains(HEAD_END_MARKER));
+
+        let final_html = apply_render_hooks_to_document(
+            composed,
+            r#"<meta name="x-hook" content="ok">"#,
+            &[],
+            &[],
+            "",
+            &[],
+        )
+        .unwrap();
+        assert!(!final_html.contains(HEAD_END_MARKER));
+        let script_end = final_html.find("</script>").unwrap();
+        let hook_pos = final_html
+            .find(r#"<meta name="x-hook" content="ok">"#)
+            .unwrap();
+        let real_head_end = final_html.rfind("</head>").unwrap();
+        assert!(
+            script_end < hook_pos && hook_pos < real_head_end,
+            "head hook must be injected AFTER inline head script and BEFORE real </head>: {final_html}"
+        );
     }
 }

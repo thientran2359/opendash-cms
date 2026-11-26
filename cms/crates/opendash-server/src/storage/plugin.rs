@@ -1136,7 +1136,8 @@ pub async fn list_owner_logs(
 }
 
 /// Synchronizes a mounted `--dev-plugin` manifest, declarations, admin extensions,
-/// and blocks into SQLite without polluting immutable `plugin_revisions`.
+/// and blocks into SQLite without polluting immutable `plugin_revisions` or
+/// persisting raw dev code bytes into `plugins.wasm_blob`.
 pub async fn sync_dev_plugin_in_db(
     db_pool: &SqlitePool,
     snap: &crate::dev_mode::DevPluginSnapshot,
@@ -1144,29 +1145,56 @@ pub async fn sync_dev_plugin_in_db(
     let manifest = &snap.manifest;
     let mut tx = db_pool.begin_with("BEGIN IMMEDIATE").await?;
 
-    sqlx::query(
-        "INSERT INTO plugins (id, version, name, description, manifest_json, wasm_blob, enabled, last_error, revision_generation, cas_version, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 1, NULL, 1, 1, datetime('now'))
-         ON CONFLICT(id) DO UPDATE SET
-             version = excluded.version,
-             name = excluded.name,
-             description = excluded.description,
-             manifest_json = excluded.manifest_json,
-             wasm_blob = excluded.wasm_blob,
-             enabled = 1,
-             last_error = NULL,
-             revision_generation = plugins.revision_generation + 1,
-             cas_version = plugins.cas_version + 1,
-             updated_at = excluded.updated_at",
-    )
-    .bind(&manifest.id)
-    .bind(&manifest.version)
-    .bind(&manifest.name)
-    .bind(&manifest.description)
-    .bind(&snap.manifest_json)
-    .bind(&snap.code_bytes)
-    .execute(&mut *tx)
-    .await?;
+    let existing_committed: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT active_revision_id FROM plugins WHERE id = ?")
+            .bind(&manifest.id)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    if existing_committed.flatten().is_some() {
+        // Preserve committed plugin revision metadata and executable blob untouched;
+        // live Dev Mode execution reads code & manifest from DevOverlayConfig directly.
+        sqlx::query(
+            "UPDATE plugins
+             SET enabled = 1,
+                 last_error = NULL,
+                 revision_generation = revision_generation + 1,
+                 cas_version = cas_version + 1,
+                 updated_at = datetime('now')
+             WHERE id = ?",
+        )
+        .bind(&manifest.id)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        // Dev-only plugin (never installed as a committed ZIP revision): store an empty
+        // placeholder blob so raw dev code never enters SQLite or VACUUM INTO backups,
+        // and cannot execute once the server restarts without --dev-plugin.
+        let empty_blob: &[u8] = &[];
+        sqlx::query(
+            "INSERT INTO plugins (id, version, name, description, manifest_json, wasm_blob, enabled, last_error, revision_generation, cas_version, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 1, NULL, 1, 1, datetime('now'))
+             ON CONFLICT(id) DO UPDATE SET
+                 version = excluded.version,
+                 name = excluded.name,
+                 description = excluded.description,
+                 manifest_json = excluded.manifest_json,
+                 wasm_blob = excluded.wasm_blob,
+                 enabled = 1,
+                 last_error = NULL,
+                 revision_generation = plugins.revision_generation + 1,
+                 cas_version = plugins.cas_version + 1,
+                 updated_at = excluded.updated_at",
+        )
+        .bind(&manifest.id)
+        .bind(&manifest.version)
+        .bind(&manifest.name)
+        .bind(&manifest.description)
+        .bind(&snap.manifest_json)
+        .bind(empty_blob)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     crate::storage::content::sync_plugin_cnt_declarations_in_tx(
         &mut tx,

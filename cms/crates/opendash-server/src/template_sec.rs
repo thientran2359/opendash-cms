@@ -5453,7 +5453,7 @@ fn validate_tag_attributes(
     block_url_vars: Option<&BlockUrlVarAllowlist>,
     allow_trusted_theme_markup: bool,
 ) -> Result<(), &'static str> {
-    let attrs = parse_attributes(attr_slice)?;
+    let attrs = parse_attributes(attr_slice, post_render)?;
 
     if tag_name == "meta" {
         if !attrs
@@ -5569,7 +5569,10 @@ fn validate_tag_attributes(
     Ok(())
 }
 
-fn parse_attributes(slice: &str) -> Result<BTreeMap<String, String>, &'static str> {
+fn parse_attributes(
+    slice: &str,
+    post_render: bool,
+) -> Result<BTreeMap<String, String>, &'static str> {
     let mut map = BTreeMap::new();
     let bytes = slice.as_bytes();
     let mut i = 0;
@@ -5580,8 +5583,13 @@ fn parse_attributes(slice: &str) -> Result<BTreeMap<String, String>, &'static st
         if i >= bytes.len() {
             break;
         }
-        // Skip Jinja control/expr tokens inside tag if any (e.g. {% if ... %})
-        if bytes[i] == b'{' && i + 1 < bytes.len() && (bytes[i + 1] == b'%' || bytes[i + 1] == b'{')
+        // Skip Jinja control/expr tokens inside tag ONLY during pre-render template
+        // validation. Post-render HTML must parse every token as raw HTML attributes
+        // so `{{ href="javascript:..." }}` cannot smuggle attributes past C-SEC.
+        if !post_render
+            && bytes[i] == b'{'
+            && i + 1 < bytes.len()
+            && (bytes[i + 1] == b'%' || bytes[i + 1] == b'{')
         {
             let needle = if bytes[i + 1] == b'%' { "%}" } else { "}}" };
             if let Some(end) = slice[i + 2..].find(needle) {
@@ -8296,5 +8304,28 @@ mod spec1_s01_tests {
         .unwrap();
         assert!(comp_related.uses_related_entries);
         assert!(!comp_related.uses_recent_posts);
+    }
+
+    #[test]
+    fn untrusted_extension_html_rejects_jinja_smuggled_attributes() {
+        for bad in [
+            r#"<a {{ href="javascript:alert(1)" }}>Click</a>"#,
+            r#"<a {% href="javascript:alert(1)" %}>Click</a>"#,
+            r#"<button {{ formaction="javascript:alert(1)" }}>Submit</button>"#,
+            r#"<div {{ style="background:url(https://attacker.test/exfil)" }}>x</div>"#,
+            r#"<div {% style="expression(alert(1))" %}>x</div>"#,
+            r#"<a href="https://safe.example" href="javascript:alert(1)">dup</a>"#,
+        ] {
+            assert!(
+                validate_untrusted_extension_html_fragment(bad).is_err(),
+                "expected untrusted C-SEC validator to reject: {bad}"
+            );
+        }
+        assert!(
+            validate_untrusted_extension_html_fragment(
+                r#"<div class="ok"><a href="https://safe.example">safe</a></div>"#
+            )
+            .is_ok()
+        );
     }
 }

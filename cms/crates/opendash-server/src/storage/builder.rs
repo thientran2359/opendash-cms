@@ -1444,6 +1444,22 @@ pub async fn preview_entry_builder_with_cache(
     .await?;
     let out = if type_key == "pattern" {
         let mut rendered = rendered;
+        if !render_budget.hook_nonces.is_empty() {
+            let clear: Vec<(String, String)> = render_budget
+                .hook_nonces
+                .entries()
+                .iter()
+                .map(|h| (h.nonce.clone(), String::new()))
+                .collect();
+            rendered.html = crate::content_render::apply_render_hooks_to_document(
+                rendered.html,
+                "",
+                &[],
+                &[],
+                "",
+                &clear,
+            )?;
+        }
         rendered.html = crate::content_render::finalize_document_icons(
             rendered.html,
             &render_budget.icon_nonces,

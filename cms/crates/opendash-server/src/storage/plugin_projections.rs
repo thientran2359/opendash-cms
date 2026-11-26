@@ -584,6 +584,7 @@ pub async fn recompute_entry_projections(
         // the writer before deciding whether existing projections are stale.
         projection_write_allowed_in_tx(&mut tx, entry_id, None).await?;
         tx.commit().await?;
+        crate::cache::SiteCacheEpoch::global().bump();
         return Ok(());
     };
 
@@ -592,6 +593,7 @@ pub async fn recompute_entry_projections(
     let mut tx = db.begin().await?;
     write_entry_projections_in_tx(&mut tx, entry_id, &source.locale, &items, None).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(())
 }
 
@@ -775,7 +777,9 @@ pub async fn spawn_recompute_owner_projections_batched(
                         break;
                     }
                 }
-                let _ = tx.commit().await;
+                if tx.commit().await.is_ok() {
+                    crate::cache::SiteCacheEpoch::global().bump();
+                }
             }
             drop(lease);
         }

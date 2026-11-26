@@ -1628,8 +1628,7 @@ impl HookDispatcher {
             .ok()?;
 
         let raw_val = run_resp.data.unwrap_or(Value::Null);
-        let trusted = sub.owner.kind == opendash_core::hooks::ExtensionOwnerKind::Theme
-            || sub.render_trusted_html;
+        let trusted = sub.render_trusted_html;
         let sanitized = parse_and_sanitize_render_output(event, &raw_val, trusted)?;
 
         if let Some(key) = cache_key {

@@ -223,6 +223,11 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
         )
         .route(
+            "/api/public/p/{pkg}",
+            post(crate::routes::extensions::extension_public_post_root)
+                .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
+        )
+        .route(
             "/api/public/p/{pkg}/{*subpath}",
             post(crate::routes::extensions::extension_public_post)
                 .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),

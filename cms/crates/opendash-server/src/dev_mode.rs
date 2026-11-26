@@ -231,6 +231,17 @@ impl DevOverlayConfig {
         read_dev_theme_asset_from_root(&theme.root, rel_path)
     }
 
+    pub fn read_dev_theme_pattern(&self, rel_path: &str) -> Result<Vec<u8>, String> {
+        if self.recovery.is_safe_mode() {
+            return Err("Safe mode đang bật.".to_owned());
+        }
+        let Some(ref theme) = self.dev_theme else {
+            return Err("Không có dev theme đang gắn.".to_owned());
+        };
+        read_bounded_contract_file(&theme.root, rel_path, V2_MAX_TEXT_BYTES)
+            .map(|(bytes, _, _)| bytes)
+    }
+
     pub fn load_dev_plugin_by_id(
         &self,
         plugin_id: &str,

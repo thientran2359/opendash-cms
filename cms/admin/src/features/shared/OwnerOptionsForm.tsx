@@ -339,7 +339,7 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
       <div data-testid={testId} className="space-y-3">
         <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
           <span>
-            {ownerKind === 'theme' ? translate('feature.shared.owneroptionsform.theme_prefix') : translate('feature.shared.owneroptionsform.plugin_prefix')}
+            {ownerKind === 'theme' || ownerKind === 'theme_functions' ? translate('feature.shared.owneroptionsform.theme_prefix') : translate('feature.shared.owneroptionsform.plugin_prefix')}
             <strong className="font-medium text-zinc-700">{ownerId}</strong>
           </span>
           <AdminBadge tone="neutral">v{version}</AdminBadge>

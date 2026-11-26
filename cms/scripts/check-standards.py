@@ -54,7 +54,11 @@ BOOTSTRAP = {'crate::routes::auth::auth_login', 'crate::routes::auth::auth_setup
 # source shape. They must never be granted by a name-only match.
 PUBLIC_ORIGIN = 'crate::routes::contact::public_submit'
 PUBLIC_ORIGIN_HELPER = 'crate::routes::contact::check_strict_contact_origin'
-PUBLIC_EXTENSION_POST = 'crate::routes::extensions::extension_public_post'
+PUBLIC_EXTENSION_POST = {
+    'crate::routes::extensions::extension_public_post',
+    'crate::routes::extensions::extension_public_post_root',
+}
+PUBLIC_EXTENSION_POST_HELPER = 'crate::routes::extensions::execute_public_post'
 DELEGATED_CSRF = 'crate::routes::operations::upload_restore_archive'
 DELEGATED_CSRF_HELPER = 'crate::routes::operations::upload_restore_archive_with_timeout'
 
@@ -377,9 +381,29 @@ def _check_public_origin_helper(functions):
     return None
 
 
-def public_extension_post_guarded(functions, handler):
-    """Verify /api/public/p/* rejects Session|Admin, rate-limits, checks Origin for Public, admits mutation, and forces Public principal."""
-    code, _raw = handler
+def public_extension_post_guarded(functions, handler, canonical):
+    """Verify /api/public/p/{pkg} and /api/public/p/{pkg}/{*subpath} delegate cleanly to execute_public_post, which enforces all security invariants."""
+    wrapper_code, _raw = handler
+    expected_subpath = (
+        r'None'
+        if canonical.endswith('::extension_public_post_root')
+        else r'Some\s*\(\s*subpath\s*\)'
+    )
+    if not re.fullmatch(
+        r'\{\s*execute_public_post\s*\(\s*'
+        r'coordinator\s*,\s*hooks\s*,\s*db\s*,\s*rate_limiter\s*,\s*'
+        r'listener_origin\s*,\s*runtime_cfg\s*,\s*connect_info\s*,\s*'
+        rf'pkg\s*,\s*{expected_subpath}\s*,\s*uri\s*,\s*headers\s*,\s*body\s*,?\s*'
+        r'\)\s*\.await\s*\}',
+        wrapper_code,
+    ):
+        return 'public extension POST wrapper must return awaited exact execute_public_post helper without bypass'
+
+    helper = unique_body(functions, PUBLIC_EXTENSION_POST_HELPER)
+    if helper is None:
+        return f'public extension POST helper missing/ambiguous: {PUBLIC_EXTENSION_POST_HELPER}'
+    code, _helper_raw = helper
+
     helper_err = _check_public_origin_helper(functions)
     if helper_err:
         return helper_err
@@ -549,8 +573,8 @@ def mutation_handlers(app, imports, functions, constructors=None):
                 errors.append(f'{location}: {canonical}: {violation}')
             else:
                 public += 1
-        elif canonical == PUBLIC_EXTENSION_POST:
-            violation = public_extension_post_guarded(functions, bodies[0])
+        elif canonical in PUBLIC_EXTENSION_POST:
+            violation = public_extension_post_guarded(functions, bodies[0], canonical)
             if violation:
                 errors.append(f'{location}: {canonical}: {violation}')
             else:
@@ -952,10 +976,10 @@ pub async fn upload_restore_archive_with_timeout() -> ApiResult<Response> {
         operations_path.write_text(delegated_fixture, encoding='utf-8')
         run(0, 'delegated_csrf_guarded=1 public_origin_guarded=1')
 
-        # Negative regressions for PUBLIC_EXTENSION_POST (/api/public/p/*)
+        # Negative regressions for PUBLIC_EXTENSION_POST (/api/public/p/{pkg} and /api/public/p/{pkg}/*)
         ext_path = root / 'cms/crates/opendash-server/src/routes/extensions.rs'
         ext_fixture = (
-            'pub async fn extension_public_post() {\n'
+            'async fn execute_public_post() {\n'
             '    if matches!(resolved.route.access, RouteAccess::Session | RouteAccess::Admin) {\n'
             '        return Ok((StatusCode::FORBIDDEN, "forbidden").into_response());\n'
             '    }\n'
@@ -978,6 +1002,12 @@ pub async fn upload_restore_archive_with_timeout() -> ApiResult<Response> {
             '    let _lease = coordinator.admit_mutation();\n'
             '    hooks.execute_resolved_route(resolved, payload, HookExecutionMode::RoutePost, ExecutionPrincipal::Public, timeout, None).await\n'
             '}\n'
+            'pub async fn extension_public_post_root() {\n'
+            '    execute_public_post(coordinator, hooks, db, rate_limiter, listener_origin, runtime_cfg, connect_info, pkg, None, uri, headers, body).await\n'
+            '}\n'
+            'pub async fn extension_public_post() {\n'
+            '    execute_public_post(coordinator, hooks, db, rate_limiter, listener_origin, runtime_cfg, connect_info, pkg, Some(subpath), uri, headers, body).await\n'
+            '}\n'
         )
         route_mod.write_text(
             route_mod.read_text(encoding='utf-8') + '\npub mod extensions;\n',
@@ -986,11 +1016,15 @@ pub async fn upload_restore_archive_with_timeout() -> ApiResult<Response> {
         ext_path.write_text(ext_fixture, encoding='utf-8')
         app_path.write_text(
             app_path.read_text(encoding='utf-8')
-            + '\npost(crate::routes::extensions::extension_public_post)\n',
+            + '\npost(crate::routes::extensions::extension_public_post_root)\n'
+            + 'post(crate::routes::extensions::extension_public_post)\n',
             encoding='utf-8',
         )
-        run(0, 'delegated_csrf_guarded=1 public_origin_guarded=2')
+        run(0, 'delegated_csrf_guarded=1 public_origin_guarded=3')
         ext_failures = [
+            ('wrapper bypass on root',
+             ext_fixture.replace('execute_public_post(coordinator, hooks, db, rate_limiter, listener_origin, runtime_cfg, connect_info, pkg, None', 'if true { return Ok(done); } execute_public_post(coordinator, hooks, db, rate_limiter, listener_origin, runtime_cfg, connect_info, pkg, None'),
+             'wrapper must return awaited exact execute_public_post helper'),
             ('missing session/admin reject',
              ext_fixture.replace('RouteAccess::Session | RouteAccess::Admin', 'RouteAccess::Webhook'),
              'explicitly reject Session | Admin'),
@@ -1011,7 +1045,7 @@ pub async fn upload_restore_archive_with_timeout() -> ApiResult<Response> {
             ext_path.write_text(candidate, encoding='utf-8')
             run(1, diagnostic)
         ext_path.write_text(ext_fixture, encoding='utf-8')
-        run(0, 'delegated_csrf_guarded=1 public_origin_guarded=2')
+        run(0, 'delegated_csrf_guarded=1 public_origin_guarded=3')
 
         # Remove synthetic policy routes before checking legacy regressions.
         app_path.write_text(files['cms/crates/opendash-server/src/app.rs'], encoding='utf-8')
