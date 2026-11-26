@@ -655,6 +655,16 @@ def check(root):
     }
     for path in server.rglob('*.rs'):
         relative = path.relative_to(server).as_posix()
+        if relative.startswith('plugin/tests/') or relative == 'plugin/tests.rs':
+            mod_source = (server / 'plugin/mod.rs').read_text(encoding='utf-8')
+            if not re.search(r'#\[cfg\(test\)\]\s*mod\s+tests\s*;', mod_source):
+                errors.append(f'test SQL exemption requires cfg(test): {relative}')
+            continue
+        if relative.startswith('plugin/review_regressions/') or relative == 'plugin/review_regressions.rs':
+            mod_source = (server / 'plugin/mod.rs').read_text(encoding='utf-8')
+            if not re.search(r'#\[cfg\(test\)\]\s*mod\s+review_regressions\s*;', mod_source):
+                errors.append(f'test SQL exemption requires cfg(test): {relative}')
+            continue
         if relative in test_files:
             mod_file, pattern = test_files[relative]
             mod_source = (server / mod_file).read_text(encoding='utf-8')

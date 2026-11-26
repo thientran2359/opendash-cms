@@ -1,3 +1,5 @@
+use super::*;
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -198,7 +200,7 @@ mod tests {
     fn test_package_validation_sample_zip() {
         let runtime = PluginRuntime::new();
         let zip_bytes =
-            include_bytes!("../../../../examples/plugins/sample-plugin/sample-plugin.zip");
+            include_bytes!("../../../../../examples/plugins/sample-plugin/sample-plugin.zip");
         let pkg =
             PluginPackage::from_zip(zip_bytes, runtime.engine()).expect("Sample ZIP phải hợp lệ");
         assert_eq!(pkg.manifest.id, "sample-plugin");
@@ -211,7 +213,7 @@ mod tests {
         let db = create_test_db().await;
         let manager = PluginManager::new(db.clone(), true);
         let zip_bytes =
-            include_bytes!("../../../../examples/plugins/sample-plugin/sample-plugin.zip");
+            include_bytes!("../../../../../examples/plugins/sample-plugin/sample-plugin.zip");
 
         // 1. Install
         let summary = manager
@@ -748,7 +750,7 @@ mod tests {
 
         let manager = PluginManager::new(pool.clone(), true);
         let zip_bytes =
-            include_bytes!("../../../../examples/plugins/sample-plugin/sample-plugin.zip");
+            include_bytes!("../../../../../examples/plugins/sample-plugin/sample-plugin.zip");
         manager.install_plugin(zip_bytes).await.unwrap();
 
         let initial_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plugin_kv")
@@ -844,7 +846,7 @@ mod tests {
         let db = create_test_db().await;
         let manager = PluginManager::new(db.clone(), true);
         let zip_bytes =
-            include_bytes!("../../../../examples/plugins/sample-plugin/sample-plugin.zip");
+            include_bytes!("../../../../../examples/plugins/sample-plugin/sample-plugin.zip");
         manager.install_plugin(zip_bytes).await.unwrap();
 
         // Complex JSON input containing escaped quotes, newlines, backslashes and unicode

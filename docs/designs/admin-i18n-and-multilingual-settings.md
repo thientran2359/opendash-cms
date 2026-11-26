@@ -238,7 +238,7 @@ Thiết kế giải quyết triệt để hiệu năng `0`-query khi lỗi, an t
         - **Body rỗng** (ví dụ `400` bad Host `app.rs#L744` hoặc `405` rỗng): sinh body `text/plain; charset=utf-8` tương ứng (`Invalid Host header.` / `Header Host không hợp lệ.`), gắn `X-OpenDash-Error-Code`.
         - **Content-Type `text/plain` (hoặc không rõ nhưng không HTML/JSON):** `translate_api_message` -> gắn `X-OpenDash-Error-Code`.
         - **Content-Type `application/json`:** parse `serde_json::Value`:
-          - Nếu có `"error": String` (`PermalinkConflictError`, `{"error": "..."}`, [`PluginRunResponse`](../../cms/crates/opendash-server/src/plugin/manager.rs#L55-L62)): dịch `"error"` khi khớp bảng hệ thống/runtime, giữ nguyên `"conflicts"`, `"code"`, `"correlation_id"`.
+          - Nếu có `"error": String` (`PermalinkConflictError`, `{"error": "..."}`, [`PluginRunResponse`](../../cms/crates/opendash-server/src/plugin/manager/mod.rs)): dịch `"error"` khi khớp bảng hệ thống/runtime, giữ nguyên `"conflicts"`, `"code"`, `"correlation_id"`.
           - Nếu có `"message": String` ([`ContentBeforeSaveVeto`](../../cms/crates/opendash-server/src/hooks/mod.rs) `422` tại tất cả `5` điểm trả ở `routes/entries.rs#L547, L683, L1020, L1141, L1231`, và `PluginRunResponse.data` chứa veto lồng nhau): dịch `"message"` + chuỗi giá trị trong `"field_errors"` nếu khớp bảng hệ thống, giữ nguyên `"code"`.
           - Gắn `X-OpenDash-Error-Code`.
         - **Bắt buộc khi thay đổi bytes body:** gọi **`resp.headers_mut().remove(header::CONTENT_LENGTH)`**, **`resp.headers_mut().remove(header::TRANSFER_ENCODING)`**, rồi ghi lại exact `HeaderValue::from(new_bytes.len())` vào `header::CONTENT_LENGTH`!
@@ -398,7 +398,7 @@ Tất cả endpoint ghi dưới đây dùng `AdmittedMutation`, `require_admin_w
    - `get_counts`: lọc `EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = content_entries.locale AND sl.deleted_at IS NULL)`.
 10. **[`storage/builder_binding.rs`](../../cms/crates/opendash-server/src/storage/builder_binding.rs#L113) & [`storage/media_refs.rs`](../../cms/crates/opendash-server/src/storage/media_refs.rs#L319):**
     - `builder_binding.rs#L113`: lọc `sl.deleted_at IS NULL` và trên public (`authenticated_preview == 0`) lọc thêm `(sl.is_default = 1 OR multilingual_enabled = 1)`. `media_refs.rs#L319`: `AND deleted_at IS NULL`.
-11. **[`storage/plugin.rs`](../../cms/crates/opendash-server/src/storage/plugin.rs#L1040-L1058) & [`plugin/runtime.rs`](../../cms/crates/opendash-server/src/plugin/runtime.rs#L965-L1123):**
+11. **[`storage/plugin.rs`](../../cms/crates/opendash-server/src/storage/plugin.rs#L1040-L1058) & [`plugin/runtime.rs`](../../cms/crates/opendash-server/src/plugin/runtime/mod.rs):**
     - `plugin::count_entries_for_host_list` (`storage/plugin.rs#L1040-L1058`) bổ sung tham số `enforce_public_locale: bool` (hoặc join `site_locales sl ON sl.code = content_entries.locale AND sl.deleted_at IS NULL` và khi public: `sl.enabled = 1 AND (sl.is_default = 1 OR multilingual_enabled = 1)`), đồng bộ hoàn toàn giữa `items` và `total`.
     - `entries::list_published_filtered` và `HostReadRequest::{ContentGet, ContentList, TaxonomyList}` (`plugin/runtime.rs#L965-L1123`) thực thi gating `sl.deleted_at IS NULL`, và khi `is_public_scope == true` chỉ cho phép các ngôn ngữ thực sự public (`sl.enabled = 1` + `multilingual_enabled = 1` cho phụ), ngăn plugin rò rỉ dữ liệu ngôn ngữ đã xóa/tạm ngưng qua public hook/filter.
 

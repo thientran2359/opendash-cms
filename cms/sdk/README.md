@@ -16,7 +16,7 @@
 
 ### Host Imports (`"opendash_v1"`) & Buffer Constants
 
-Declared in [`as/opendash.ts`](as/opendash.ts) and bound by [`runtime.rs`](../crates/opendash-server/src/plugin/runtime.rs):
+Declared in [`as/opendash.ts`](as/opendash.ts) and bound by [`runtime.rs`](../crates/opendash-server/src/plugin/runtime/mod.rs):
 
 - `host_get_input_len(): i32`
 - `host_read_input(destPtr: usize, maxLen: i32): i32`
@@ -30,7 +30,7 @@ Declared in [`as/opendash.ts`](as/opendash.ts) and bound by [`runtime.rs`](../cr
 
 - **Core I/O & JSON:** `getInput()`, `setOutput(jsonStr)`, `hostCall(opJson)`, `escapeJsonString(str)`, `stringifyValue(val)`.
 - **Unified Input:** `readEnvelope(): Envelope | null` normalizes both `HookEnvelope` v1 (defaulting `envelopeVersion = 1`, `kind = "hook"`, `principal = "system"`, `dispatchDepth = 0`) and `PluginEnvelopeV2` (`envelopeVersion`, `kind`, `event`, `occurredAtMs`, `correlationId`, `locale`, `principal`, `dispatchDepth`, `payload`, `raw`).
-- **19 Host Ops** (matching [`host_ops.rs`](../crates/opendash-server/src/plugin/host_ops.rs) and supporting both v1 top-level and `{"ok":true,"data":{...}}` responses):
+- **19 Host Ops** (matching [`host_ops.rs`](../crates/opendash-server/src/plugin/host_ops/mod.rs) and supporting both v1 top-level and `{"ok":true,"data":{...}}` responses):
   - **KV Store:** `kvGet(key)`, `kvSet(key, valueJson)`, `kvDelete(key)`, `kvList(prefix = null, limit = 50)`.
   - **HTTP Egress:** `httpRequest(method, url, headersJson = "{}", body = "")` (forbidden inside actions declaring `content_restore` or `content_purge`).
   - **Content, Trash Lifecycle & Taxonomy:** `contentGet(typeKey, entryId, locale = null)`, `contentList(typeKey, locale = null, limit = 20, offset = 0, publishedOnly = false)`, `contentSave(opObj)`, `contentDelete(typeKey, entryId, expectedVersion)` (recoverable Trash), `contentTrashGet(typeKey, entryId, locale = null)`, `contentTrashList(typeKey, locale = null, limit = 20, offset = 0)`, `contentRestore(typeKey, entryId, expectedVersion)`, `contentPurge(typeKey, entryId, expectedVersion)`, `taxonomyList(kind, locale = null, limit = 50)`.
@@ -44,7 +44,7 @@ Guest modules must export `opendash_run(): i32` (returning `0` on success, non-z
 
 - **Single-invocation `-2` readback:** When `host_call()` returns `BUFFER_TOO_SMALL` (`-2`), [`as/opendash.ts:hostCall`](as/opendash.ts) reads `host_last_resp_len()`, allocates an exact `ArrayBuffer(fullLen)` (bounded by `MAX_IPC_FRAME_BYTES = 2 MiB`), and calls `host_read_last_resp()` without re-invoking `host_call()` — consuming only one `host_calls_count` quota unit.
 - **RFC 8259 JSON safety:** All SDK request builders and output helpers serialize via `JSON.Obj` and `stringifyValue()` / `escapeJsonString()` rather than raw string concatenation.
-- **Host permission & mode enforcement:** Capabilities (`permissions.*`, `plugin_settings_read`, `plugin_secrets_read`), `kv_list`/`content_save`/`content_delete` execution-mode restrictions, CAS `expected_version` checks, and DNS-pinned HTTP allowlists are enforced by the host in [`host_ops.rs`](../crates/opendash-server/src/plugin/host_ops.rs) and [`CONTENT_FOUNDATION_2026_11.md`](../../docs/contracts/CONTENT_FOUNDATION_2026_11.md).
+- **Host permission & mode enforcement:** Capabilities (`permissions.*`, `plugin_settings_read`, `plugin_secrets_read`), `kv_list`/`content_save`/`content_delete` execution-mode restrictions, CAS `expected_version` checks, and DNS-pinned HTTP allowlists are enforced by the host in [`host_ops.rs`](../crates/opendash-server/src/plugin/host_ops/mod.rs) and [`CONTENT_FOUNDATION_2026_11.md`](../../docs/contracts/CONTENT_FOUNDATION_2026_11.md).
 
 ## Side Effects
 

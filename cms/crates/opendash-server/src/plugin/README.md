@@ -10,7 +10,7 @@ See [Plugin ABI](../../../../../docs/contracts/PLUGIN_ABI.md) and [M6 Plugin Ext
 
 - **Module Facade** ([`mod.rs`](mod.rs)):
   - Re-exports `[manager.rs:PluginManager]`, `[manager.rs:PluginSummary]`, `[manifest:PluginManifest]`, `[manifest:PluginPermissions]`, `[package.rs:PluginPackage]`, `[package.rs:PluginCheckSummary]`, `[package.rs:check_plugin_path]`, `[runtime.rs:PluginRuntime]`, and `[runtime.rs:PluginError]`.
-- **Lifecycle, Actions, Routes & Hook Routing** ([`manager.rs`](manager.rs), [`lifecycle_confirmation.rs`](lifecycle_confirmation.rs)):
+- **Lifecycle, Actions, Routes & Hook Routing** ([`manager.rs`](manager/mod.rs), [`lifecycle_confirmation.rs`](lifecycle_confirmation.rs)):
   - `[manager.rs:PluginManager::install_plugin]`, `[manager.rs:PluginManager::install_plugin_checked]`, `[manager.rs:PluginManager::enable_plugin_cas]`, `[manager.rs:PluginManager::disable_plugin_cas]`, `[manager.rs:PluginManager::list_plugins]`, `[manager.rs:PluginManager::get_plugin]`.
   - `[manager.rs:PluginManager::execute_plugin_action]`, `[manager.rs:PluginManager::execute_owner_action]`, `[manager.rs:PluginManager::resolve_plugin_lifecycle_confirmation]`, `[manager.rs:ActionCommitOutcome]`, `[manager.rs:PluginManager::run_plugin]`, `[manager.rs:PluginManager::run_plugin_correlated]`, `[manager.rs:PluginManager::run_plugin_with_mode]`, `[manager.rs:PluginManager::run_plugin_dispatch]`, `[manager.rs:PluginManager::resolve_extension_route]`, `[manager.rs:PluginManager::execute_resolved_route]`.
   - `[lifecycle_confirmation.rs:LifecycleConfirmationStore]` (bounded in-memory one-use confirmation store: 1 per actor/session/plugin/action, 32 global, 120s TTL, maintenance epoch + session/generation bound).
@@ -19,10 +19,10 @@ See [Plugin ABI](../../../../../docs/contracts/PLUGIN_ABI.md) and [M6 Plugin Ext
   - `[package.rs:PluginPackage::from_zip]`, `[package.rs:PluginPackage::from_dir]`, `[package.rs:PluginPackage::from_path]`, `[package.rs:check_plugin_path]`, `[package.rs:PluginCheckSummary]`, and bounds (`MAX_PLUGIN_ZIP_BYTES = 5 MiB`, `MAX_UNCOMPRESSED_TOTAL_BYTES = 10 MiB`, `MAX_WASM_BYTES = 2 MiB`, `MAX_MANIFEST_BYTES = 64 KiB`, `MAX_PLUGIN_FILES = 72`, `MAX_PLUGIN_DIR_DEPTH = 4`).
 - **JS Sandbox Runtime** ([`js_runtime.rs`](js_runtime.rs)):
   - `[js_runtime.rs:validate_js_module_syntax]` (static syntax check without executing top-level code), `[js_runtime.rs:execute_js_worker]` (fresh Boa `Context`, immutable `globalThis.od.*` SDK matching `cms/sdk/js/opendash.d.ts`, top-level I/O rejection).
-- **Host Runtime & IPC Worker** ([`runtime.rs`](runtime.rs), [`worker.rs`](worker.rs)):
+- **Host Runtime & IPC Worker** ([`runtime.rs`](runtime/mod.rs), [`worker.rs`](worker.rs)):
   - `[runtime.rs:PluginRuntime::run_owner_action_with_principal]`, `[runtime.rs:PluginRuntime::run_plugin_action_with_principal]`, `[runtime.rs:execute_host_read_request]`, `[runtime.rs:ActionActorFence]`, `[runtime.rs:ActionExecutionOutput]`, and three independent concurrency semaphores (`MAX_CONCURRENT_INVOCATIONS = 4`, `MAX_BACKGROUND_PUBLIC_INVOCATIONS = 2`, `public_render_semaphore = 4`, `INVOCATION_DEADLINE = 5s`).
   - `[worker.rs:run_worker_from_stdio]`, `[worker.rs:WorkerInvocationRequest]`, `[worker.rs:IPC_STREAM_MAGIC]`, `[worker.rs:read_ipc_frame]`, `[worker.rs:write_ipc_frame]`.
-- **Host Operations & Policy** ([`host_ops.rs`](host_ops.rs)):
+- **Host Operations & Policy** ([`host_ops.rs`](host_ops/mod.rs)):
   - `[host_ops.rs:RuntimeOwner]`, `[host_ops.rs:HostContext]`, `[host_ops.rs:HostOperationRequest]`, `[host_ops.rs:HostReadRequest]`, `[host_ops.rs:HostOperationResponse]`, `[host_ops.rs:WorkerExecutionResult]`, `[host_ops.rs:check_read_policy]`, `[host_ops.rs:handle_host_call]`, `[host_ops.rs:StagedContentCommand]`, `[host_ops.rs:StagedLifecycleCommand]`, `[host_ops.rs:StagedLifecycleOperation]`, and `[host_ops.rs:StagedPluginLog]`.
   - Enforces defense-in-depth HTTP denial before network I/O on actions declaring `content_restore` or `content_purge`, and scopes `content_trash_get`/`content_trash_list` to Standard authenticated actions with `min_host_version >= 0.1.1`.
 - **SSRF-Hardened HTTP Egress** ([`egress.rs`](egress.rs)):
