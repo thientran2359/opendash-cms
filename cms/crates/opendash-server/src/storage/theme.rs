@@ -631,9 +631,10 @@ pub async fn ensure_default_starter_theme(
     use crate::builtin_themes::{
         STARTER_THEME_ID, STARTER_THEME_NAME, STARTER_THEME_VERSION, builtin_starter_theme_files,
         builtin_starter_theme_v100_files, builtin_starter_theme_v101_files,
+        builtin_starter_theme_v110_files,
     };
-    // Pre-existing canonical v1.0.0 / v1.0.1 records are eligible for exact-byte
-    // repair. Fresh sites must never receive a fabricated legacy revision.
+    // Pre-existing canonical v1.0.0 / v1.0.1 / v1.1.0 records are eligible for
+    // exact-byte repair. Fresh sites must never receive a fabricated legacy revision.
     for (legacy_version, repair_label, legacy_files) in [
         (
             "1.0.0",
@@ -644,6 +645,11 @@ pub async fn ensure_default_starter_theme(
             "1.0.1",
             "bootstrap-starter-v101-repair",
             builtin_starter_theme_v101_files(),
+        ),
+        (
+            "1.1.0",
+            "bootstrap-starter-v110-repair",
+            builtin_starter_theme_v110_files(),
         ),
     ] {
         let (legacy_digest, legacy_file_digests) = compute_canonical_file_map_digest(&legacy_files);
