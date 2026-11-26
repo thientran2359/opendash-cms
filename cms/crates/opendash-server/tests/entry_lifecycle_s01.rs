@@ -61,7 +61,7 @@ impl Site {
             .unwrap();
         let base = format!("http://127.0.0.1:{port}");
         let client = Client::new();
-        for _ in 0..160 {
+        for _ in 0..400 {
             if client
                 .get(format!("{base}/api/health"))
                 .send()
@@ -482,8 +482,8 @@ async fn s01_public_and_writer_closure_across_routes_seo_media_studio_and_query_
     assert!(pre_sitemap.contains("/custom-target-url"), "{pre_sitemap}");
     assert!(pre_sitemap.contains("/en/target-post-en"), "{pre_sitemap}");
 
-    // S01 has NO user-facing Trash HTTP route yet: POST .../trash must remain 404/405.
-    let s01_no_trash_route = client
+    // Post-S02 activation: POST .../trash is live and enforces If-Match (428 when missing).
+    let s02_trash_missing_if_match = client
         .post(format!(
             "{}/api/admin/content-types/post/entries/{target_id}/trash",
             site.base
@@ -491,15 +491,14 @@ async fn s01_public_and_writer_closure_across_routes_seo_media_studio_and_query_
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::ORIGIN, &site.base)
-        .header(header::IF_MATCH, format!("\"v{target_ver}\""))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
-    assert!(matches!(
-        s01_no_trash_route.status(),
-        StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
-    ));
+    assert_eq!(
+        s02_trash_missing_if_match.status(),
+        StatusCode::PRECONDITION_REQUIRED
+    );
 
     // Retired Phase 2 legacy endpoints remain 404.
     for retired in ["/api/admin/builder/page", "/api/admin/builder/registry"] {

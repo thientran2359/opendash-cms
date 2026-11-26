@@ -81,6 +81,7 @@ export async function invokePluginAction(
       contentType: 'application/json',
       body: JSON.stringify(payload ?? {}),
       signal,
+      expectLifecycleConfirmation: true,
       defaultErrorMessage: tStatic('api.plugins.execute_the_action'),
     },
   );
@@ -100,7 +101,29 @@ export async function runPluginAction(
       csrfToken,
       contentType: 'application/json',
       body: JSON.stringify(payload ?? {}),
+      expectLifecycleConfirmation: true,
       defaultErrorMessage: tStatic('api.plugins.execute_the_plugin_action'),
+    },
+  );
+}
+
+export async function confirmPluginLifecycleAction(
+  id: string,
+  actionId: string,
+  confirmationId: string,
+  decision: 'confirm' | 'cancel',
+  csrfToken: string,
+  signal?: AbortSignal,
+): Promise<PluginRunResult> {
+  return requestJson<PluginRunResult>(
+    `/api/admin/plugins/${encodeURIComponent(id)}/actions/${encodeURIComponent(actionId)}/confirm-lifecycle`,
+    {
+      method: 'POST',
+      csrfToken,
+      contentType: 'application/json',
+      body: JSON.stringify({ confirmation_id: confirmationId, decision }),
+      signal,
+      defaultErrorMessage: tStatic('api.plugins.confirm_lifecycle_action'),
     },
   );
 }

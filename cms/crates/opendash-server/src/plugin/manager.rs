@@ -14,9 +14,20 @@ use serde_json::Value;
 use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
-use crate::storage::plugin as plugin_storage;
+use crate::storage::{
+    entry_lifecycle::{
+        EntryCommitReceipt, EntryMutationKind, LifecycleAuthority, LifecycleCommand,
+        LifecycleConfirmationEvidence, LifecycleOperation, LifecycleScope, SecondaryOutcome,
+    },
+    plugin as plugin_storage,
+};
 
 use super::{
+    host_ops::StagedLifecycleOperation,
+    lifecycle_confirmation::{
+        ConfirmationStoreError, LifecycleActionOrigin, LifecycleConfirmationStore,
+        NewPendingConfirmation, PluginLifecycleConfirmation,
+    },
     manifest::{PluginManifest, PluginPermissions},
     package::PluginPackage,
     runtime::{PluginError, PluginRuntime},
@@ -59,6 +70,67 @@ pub struct PluginRunResponse {
     pub error: Option<String>,
     pub code: Option<String>,
     pub correlation_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirmation: Option<PluginLifecycleConfirmation>,
+}
+
+/// Host-only internal outcome of executing or confirming a plugin action.
+/// Never serialized directly to HTTP; routes serialize `response` and dispatch hooks
+/// strictly from the trusted server-owned `committed` receipt.
+#[derive(Debug, Clone)]
+pub struct ActionCommitOutcome {
+    pub response: PluginRunResponse,
+    pub committed: Option<EntryCommitReceipt>,
+    pub secondary: SecondaryOutcome,
+}
+
+fn lifecycle_data_value(receipt: &EntryCommitReceipt, op: &str) -> Value {
+    serde_json::json!({
+        "operation": op,
+        "id": receipt.id,
+        "type_key": receipt.type_key,
+        "locale": receipt.locale,
+        "version": receipt.version_after.or(receipt.version_before),
+        "publication_status": receipt
+            .publication_after
+            .as_deref()
+            .or(receipt.publication_before.as_deref()),
+        "trashed_at": receipt.trashed_at,
+        "published_at": receipt.published_at,
+    })
+}
+
+fn map_lifecycle_api_error_code(err: &crate::error::ApiError) -> &'static str {
+    let msg = err.1.as_ref();
+    if msg.starts_with("confirmation_required:") {
+        "confirmation_required"
+    } else if msg.starts_with("entry_trashed:") {
+        "entry_trashed"
+    } else if msg.starts_with("entry_not_trashed:") {
+        "entry_not_trashed"
+    } else if msg.starts_with("reading_page_assigned:") {
+        "reading_page_assigned"
+    } else if msg.starts_with("provider_inactive:") {
+        "provider_inactive"
+    } else if msg.starts_with("locale_disabled:") {
+        "locale_disabled"
+    } else if msg.starts_with("locale_deleted:") {
+        "locale_deleted"
+    } else if msg.starts_with("entry_purge_forbidden:") {
+        "entry_purge_forbidden"
+    } else if msg.starts_with("entry_lifecycle_forbidden:") {
+        "entry_lifecycle_forbidden"
+    } else if err.0 == StatusCode::UNAUTHORIZED {
+        "unauthorized"
+    } else if err.0 == StatusCode::FORBIDDEN {
+        "rbac_revoked"
+    } else if err.0 == StatusCode::PRECONDITION_FAILED {
+        "version_conflict"
+    } else if err.0 == StatusCode::NOT_FOUND {
+        "not_found"
+    } else {
+        "content_lifecycle_fenced"
+    }
 }
 
 struct ActionLeaseGuard {
@@ -78,6 +150,7 @@ pub struct PluginManager {
     db_pool: SqlitePool,
     runtime: PluginRuntime,
     active_action_leases: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    confirmation_store: Arc<LifecycleConfirmationStore>,
     allow_loopback: bool,
     plugins_root: PathBuf,
     secrets_root: PathBuf,
@@ -127,6 +200,7 @@ impl PluginManager {
             active_action_leases: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
+            confirmation_store: Arc::new(LifecycleConfirmationStore::new()),
             allow_loopback,
             plugins_root,
             secrets_root,
@@ -238,7 +312,9 @@ impl PluginManager {
         >,
         hooks: &crate::hooks::HookDispatcher,
         correlation_id: String,
-    ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
+        origin: LifecycleActionOrigin,
+        maintenance_epoch: u64,
+    ) -> Result<ActionCommitOutcome, (StatusCode, PluginRunResponse)> {
         let mk_err = |status: StatusCode, code: &str, msg: String| {
             (
                 status,
@@ -248,6 +324,7 @@ impl PluginManager {
                     error: Some(msg),
                     code: Some(code.into()),
                     correlation_id: correlation_id.clone(),
+                    confirmation: None,
                 },
             )
         };
@@ -301,6 +378,7 @@ impl PluginManager {
                     ),
                     code: Some("safe_mode".into()),
                     correlation_id,
+                    confirmation: None,
                 },
             ));
         }
@@ -347,6 +425,18 @@ impl PluginManager {
             crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
             crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
         };
+        let declares_http = action_decl.capabilities.iter().any(|c| c == "http");
+        let declares_lifecycle_confirm_write = action_decl
+            .capabilities
+            .iter()
+            .any(|c| c == "content_restore" || c == "content_purge");
+        if declares_http && declares_lifecycle_confirm_write {
+            return Err(mk_err(
+                StatusCode::FORBIDDEN,
+                "capability_denied",
+                "Action khai báo content_restore hoặc content_purge không được kết hợp capability http.".into(),
+            ));
+        }
         for cap in &action_decl.capabilities {
             let allowed = match cap.as_str() {
                 "kv_read" => manifest.has_sqlite_perm("kv_read"),
@@ -357,6 +447,9 @@ impl PluginManager {
                 "content_write" => !manifest.permissions.content_write.is_empty(),
                 "content_write_private" => !manifest.permissions.content_write_private.is_empty(),
                 "content_delete" => !manifest.permissions.content_delete.is_empty(),
+                "content_trash_read" => !manifest.permissions.content_trash_read.is_empty(),
+                "content_restore" => !manifest.permissions.content_restore.is_empty(),
+                "content_purge" => !manifest.permissions.content_purge.is_empty(),
                 "http" => {
                     !manifest.permissions.http.is_empty()
                         || !manifest.permissions.network.is_empty()
@@ -626,6 +719,7 @@ impl PluginManager {
                         error: Some(veto.message),
                         code: Some(veto.code),
                         correlation_id,
+                        confirmation: None,
                     },
                 ));
             }
@@ -635,6 +729,7 @@ impl PluginManager {
                 expected_generation: revision_generation,
                 required_role: action_decl.required_role.clone(),
             };
+            let version_before = cmd.expected_version;
             let saved_res = match cmd.entry_id {
                 Some(entry_id) => {
                     let expected_ver = cmd.expected_version.ok_or_else(|| {
@@ -674,10 +769,11 @@ impl PluginManager {
                     return Err(mk_err(err.0, "content_commit_fenced", err.1.to_string()));
                 }
             };
-            let _ = crate::storage::plugin_projections::recompute_entry_projections(
+            let projection = crate::storage::entry_lifecycle::recompute_projections_nonfatal(
                 &self.db_pool,
                 hooks,
                 record.id,
+                true,
             )
             .await;
             hooks
@@ -696,63 +792,267 @@ impl PluginManager {
                 None,
             )
             .await;
-            return Ok(PluginRunResponse {
-                success: true,
-                data: Some(serde_json::json!({
-                    "output": exec_out.output,
-                    "entry": record,
-                })),
-                error: None,
-                code: None,
-                correlation_id,
+            let receipt = EntryCommitReceipt {
+                operation: EntryMutationKind::Save,
+                id: record.id,
+                type_key: record.content_type_key.clone(),
+                locale: record.locale.clone(),
+                translation_group_id: record.translation_group_id.clone(),
+                version_before,
+                version_after: Some(record.version),
+                publication_before: None,
+                publication_after: Some(record.publication_status.clone()),
+                trashed_at: None,
+                published_at: record.published_at.clone(),
+            };
+            return Ok(ActionCommitOutcome {
+                response: PluginRunResponse {
+                    success: true,
+                    data: Some(serde_json::json!({
+                        "output": exec_out.output,
+                        "entry": record,
+                    })),
+                    error: None,
+                    code: None,
+                    correlation_id,
+                    confirmation: None,
+                },
+                committed: Some(receipt),
+                secondary: SecondaryOutcome {
+                    projection,
+                    hook_enqueued: 0,
+                    hook_dropped: 0,
+                },
             });
         }
 
-        if let Some(del) = exec_out.staged_content_delete {
-            if !manifest.can_delete_content_type(&del.type_key) {
+        if let Some(staged) = exec_out.staged_lifecycle_command {
+            // Exhaustive conversion from wire StagedLifecycleOperation to storage LifecycleOperation.
+            let domain_op = match staged.operation {
+                StagedLifecycleOperation::Trash => LifecycleOperation::Trash,
+                StagedLifecycleOperation::Restore => LifecycleOperation::Restore,
+                StagedLifecycleOperation::Purge => LifecycleOperation::Purge,
+            };
+            let (required_cap, has_manifest_grant) = match domain_op {
+                LifecycleOperation::Trash => (
+                    "content_delete",
+                    manifest.can_delete_content_type(&staged.type_key),
+                ),
+                LifecycleOperation::Restore => (
+                    "content_restore",
+                    manifest.can_restore_content_type(&staged.type_key),
+                ),
+                LifecycleOperation::Purge => (
+                    "content_purge",
+                    manifest.can_purge_content_type(&staged.type_key),
+                ),
+            };
+            if !action_decl.capabilities.iter().any(|c| c == required_cap) || !has_manifest_grant {
                 return Err(mk_err(
                     StatusCode::FORBIDDEN,
-                    "content_delete_denied",
-                    "Plugin không có quyền xóa loại nội dung này.".into(),
+                    "content_lifecycle_denied",
+                    format!("Plugin không có quyền '{required_cap}' cho loại nội dung này."),
                 ));
             }
+            if domain_op == LifecycleOperation::Purge && actor.user.role != crate::auth::Role::Admin
+            {
+                return Err(mk_err(
+                    StatusCode::FORBIDDEN,
+                    "entry_purge_forbidden",
+                    "Chỉ Quản trị viên được phép xóa vĩnh viễn nội dung.".into(),
+                ));
+            }
+
+            let command = LifecycleCommand {
+                operation: domain_op,
+                type_key: staged.type_key.clone(),
+                entry_id: staged.entry_id,
+                expected_version: staged.expected_version,
+            };
             let fence = crate::storage::entries::PluginActionFence {
                 plugin_id: id.to_string(),
                 expected_generation: revision_generation,
                 required_role: action_decl.required_role.clone(),
             };
-            if let Err(err) = plugin_storage::delete_entry_with_plugin_fence(
-                &self.db_pool,
-                actor,
-                &del.type_key,
-                del.entry_id,
-                del.expected_version,
-                &fence,
-            )
-            .await
-            {
-                return Err(mk_err(err.0, "content_delete_fenced", err.1.to_string()));
+
+            match domain_op {
+                LifecycleOperation::Trash => {
+                    let authority = LifecycleAuthority {
+                        session: actor,
+                        plugin_fence: Some(&fence),
+                        confirmation: LifecycleConfirmationEvidence::None,
+                        scope: LifecycleScope::Ordinary,
+                    };
+                    let receipt = crate::storage::entry_lifecycle::execute_lifecycle_transition(
+                        &self.db_pool,
+                        &command,
+                        &authority,
+                    )
+                    .await
+                    .map_err(|err| {
+                        mk_err(err.0, map_lifecycle_api_error_code(&err), err.1.to_string())
+                    })?;
+                    plugin_storage::record_plugin_execution_result(
+                        &self.db_pool,
+                        id,
+                        &correlation_id,
+                        "info",
+                        "Thực thi action thành công",
+                        None,
+                    )
+                    .await;
+                    return Ok(ActionCommitOutcome {
+                        response: PluginRunResponse {
+                            success: true,
+                            data: Some(serde_json::json!({
+                                "output": exec_out.output,
+                                "deleted_entry_id": receipt.id,
+                                "deleted_type_key": receipt.type_key,
+                                "lifecycle": lifecycle_data_value(&receipt, "trash"),
+                            })),
+                            error: None,
+                            code: None,
+                            correlation_id,
+                            confirmation: None,
+                        },
+                        committed: Some(receipt),
+                        secondary: SecondaryOutcome::none(),
+                    });
+                }
+                LifecycleOperation::Restore | LifecycleOperation::Purge => {
+                    let preview =
+                        crate::storage::entry_lifecycle::preflight_plugin_lifecycle_confirmation(
+                            &self.db_pool,
+                            actor,
+                            &command,
+                            &fence,
+                        )
+                        .await
+                        .map_err(|err| {
+                            mk_err(err.0, map_lifecycle_api_error_code(&err), err.1.to_string())
+                        })?;
+
+                    if !preview.needs_confirmation {
+                        let authority = LifecycleAuthority {
+                            session: actor,
+                            plugin_fence: Some(&fence),
+                            confirmation: LifecycleConfirmationEvidence::None,
+                            scope: LifecycleScope::Ordinary,
+                        };
+                        let receipt =
+                            crate::storage::entry_lifecycle::execute_lifecycle_transition(
+                                &self.db_pool,
+                                &command,
+                                &authority,
+                            )
+                            .await
+                            .map_err(|err| {
+                                mk_err(err.0, map_lifecycle_api_error_code(&err), err.1.to_string())
+                            })?;
+                        let projection =
+                            crate::storage::entry_lifecycle::recompute_projections_nonfatal(
+                                &self.db_pool,
+                                hooks,
+                                receipt.id,
+                                receipt.publication_after.as_deref() == Some("published"),
+                            )
+                            .await;
+                        plugin_storage::record_plugin_execution_result(
+                            &self.db_pool,
+                            id,
+                            &correlation_id,
+                            "info",
+                            "Thực thi action thành công",
+                            None,
+                        )
+                        .await;
+                        return Ok(ActionCommitOutcome {
+                            response: PluginRunResponse {
+                                success: true,
+                                data: Some(serde_json::json!({
+                                    "output": exec_out.output,
+                                    "lifecycle": lifecycle_data_value(&receipt, "restore"),
+                                })),
+                                error: None,
+                                code: None,
+                                correlation_id,
+                                confirmation: None,
+                            },
+                            committed: Some(receipt),
+                            secondary: SecondaryOutcome {
+                                projection,
+                                hook_enqueued: 0,
+                                hook_dropped: 0,
+                            },
+                        });
+                    }
+
+                    // Purge or immediate-mode public Restore requires explicit host-owned confirmation.
+                    let site_id = crate::storage::auth::compute_site_instance_id(&self.db_pool)
+                        .await
+                        .unwrap_or_else(|| "default-site".into());
+                    let display = self
+                        .confirmation_store
+                        .insert(
+                            maintenance_epoch,
+                            NewPendingConfirmation {
+                                command,
+                                site_id,
+                                session_token_hash: actor.token_hash.clone(),
+                                actor_id: actor.user.id,
+                                actor_role: actor.user.role,
+                                plugin_id: id.to_string(),
+                                action_id: action_id.to_string(),
+                                expected_generation: revision_generation,
+                                origin,
+                                correlation_id: correlation_id.clone(),
+                                initiating_maintenance_epoch: maintenance_epoch,
+                                locale: preview.locale,
+                                title: preview.title,
+                                slug: preview.slug,
+                            },
+                        )
+                        .map_err(|err| match err {
+                            ConfirmationStoreError::ScopeAlreadyPending => mk_err(
+                                StatusCode::CONFLICT,
+                                "confirmation_pending_limit",
+                                "Đang có một yêu cầu xác nhận chưa hoàn tất cho phiên và action này.".into(),
+                            ),
+                            ConfirmationStoreError::GlobalCapacityReached => mk_err(
+                                StatusCode::TOO_MANY_REQUESTS,
+                                "confirmation_capacity_reached",
+                                "Quá nhiều yêu cầu xác nhận đang chờ trên hệ thống; hãy thử lại sau.".into(),
+                            ),
+                            ConfirmationStoreError::ItemTooLarge => mk_err(
+                                StatusCode::PAYLOAD_TOO_LARGE,
+                                "confirmation_too_large",
+                                "Dữ liệu xác nhận vượt quá giới hạn cho phép.".into(),
+                            ),
+                            ConfirmationStoreError::LockPoisoned => mk_err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "confirmation_store_error",
+                                "Lỗi nội bộ bộ nhớ xác nhận.".into(),
+                            ),
+                        })?;
+
+                    let prompt_msg = if domain_op == LifecycleOperation::Purge {
+                        "Thao tác xóa vĩnh viễn nội dung cần xác nhận rõ ràng không thể hoàn tác từ Quản trị viên."
+                    } else {
+                        "Khôi phục nội dung chế độ lưu ngay sẽ hiển thị công khai ngay lập tức; cần xác nhận rõ ràng."
+                    };
+                    return Err((
+                        StatusCode::CONFLICT,
+                        PluginRunResponse {
+                            success: false,
+                            data: None,
+                            error: Some(prompt_msg.into()),
+                            code: Some("confirmation_required".into()),
+                            correlation_id,
+                            confirmation: Some(display),
+                        },
+                    ));
+                }
             }
-            plugin_storage::record_plugin_execution_result(
-                &self.db_pool,
-                id,
-                &correlation_id,
-                "info",
-                "Thực thi action thành công",
-                None,
-            )
-            .await;
-            return Ok(PluginRunResponse {
-                success: true,
-                data: Some(serde_json::json!({
-                    "output": exec_out.output,
-                    "deleted_entry_id": del.entry_id,
-                    "deleted_type_key": del.type_key,
-                })),
-                error: None,
-                code: None,
-                correlation_id,
-            });
         }
 
         plugin_storage::record_plugin_execution_result(
@@ -765,12 +1065,289 @@ impl PluginManager {
         )
         .await;
 
-        Ok(PluginRunResponse {
-            success: true,
-            data: Some(exec_out.output),
-            error: None,
-            code: None,
-            correlation_id,
+        Ok(ActionCommitOutcome {
+            response: PluginRunResponse {
+                success: true,
+                data: Some(exec_out.output),
+                error: None,
+                code: None,
+                correlation_id,
+                confirmation: None,
+            },
+            committed: None,
+            secondary: SecondaryOutcome::none(),
+        })
+    }
+
+    /// Resolves a host-owned single-use lifecycle confirmation (`confirm` or `cancel`)
+    /// without ever re-invoking guest Wasm or accepting replacement targets.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn resolve_plugin_lifecycle_confirmation(
+        &self,
+        id: &str,
+        action_id: &str,
+        actor: &crate::auth::SessionContext,
+        confirmation_id: &str,
+        decision: &str,
+        hooks: &crate::hooks::HookDispatcher,
+        correlation_id: String,
+        maintenance_epoch: u64,
+    ) -> Result<ActionCommitOutcome, (StatusCode, PluginRunResponse)> {
+        let mk_err = |status: StatusCode, code: &str, msg: String| {
+            (
+                status,
+                PluginRunResponse {
+                    success: false,
+                    data: None,
+                    error: Some(msg),
+                    code: Some(code.into()),
+                    correlation_id: correlation_id.clone(),
+                    confirmation: None,
+                },
+            )
+        };
+
+        if self.recovery.is_safe_mode() {
+            return Err(mk_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "safe_mode",
+                "Hệ thống đang ở safe mode sau khi khôi phục; plugin bị tạm khóa.".into(),
+            ));
+        }
+        if !matches!(decision, "confirm" | "cancel") {
+            return Err(mk_err(
+                StatusCode::BAD_REQUEST,
+                "invalid_decision",
+                "Quyết định xác nhận chỉ chấp nhận 'confirm' hoặc 'cancel'.".into(),
+            ));
+        }
+
+        let site_id = crate::storage::auth::compute_site_instance_id(&self.db_pool)
+            .await
+            .unwrap_or_else(|| "default-site".into());
+        let pending_opt = self
+            .confirmation_store
+            .consume(
+                confirmation_id,
+                &site_id,
+                &actor.token_hash,
+                actor.user.id,
+                id,
+                action_id,
+                maintenance_epoch,
+            )
+            .map_err(|_| {
+                mk_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "confirmation_store_error",
+                    "Lỗi nội bộ bộ nhớ xác nhận.".into(),
+                )
+            })?;
+
+        let Some(pending) = pending_opt else {
+            return Err(mk_err(
+                StatusCode::CONFLICT,
+                "confirmation_invalid",
+                "Yêu cầu xác nhận không hợp lệ, đã hết hạn hoặc đã được sử dụng.".into(),
+            ));
+        };
+
+        if decision == "cancel" {
+            return Ok(ActionCommitOutcome {
+                response: PluginRunResponse {
+                    success: false,
+                    data: None,
+                    error: None,
+                    code: Some("confirmation_cancelled".into()),
+                    correlation_id,
+                    confirmation: None,
+                },
+                committed: None,
+                secondary: SecondaryOutcome::none(),
+            });
+        }
+
+        // Reauthorize installed plugin, manifest, generation, capability, and origin before commit.
+        if actor.user.role != pending.actor_role {
+            return Err(mk_err(
+                StatusCode::FORBIDDEN,
+                "rbac_revoked",
+                "Quyền của tài khoản đã thay đổi kể từ khi tạo yêu cầu xác nhận.".into(),
+            ));
+        }
+        let row_opt = plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
+            .await
+            .map_err(|e| {
+                mk_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "db_error",
+                    format!("Lỗi cơ sở dữ liệu: {e}"),
+                )
+            })?;
+        let Some((_, manifest_json, enabled, revision_generation, _)) = row_opt else {
+            return Err(mk_err(
+                StatusCode::CONFLICT,
+                "generation_changed",
+                "Plugin đã bị gỡ hoặc thay đổi phiên bản.".into(),
+            ));
+        };
+        if !enabled || revision_generation != pending.expected_generation {
+            return Err(mk_err(
+                StatusCode::CONFLICT,
+                "generation_changed",
+                "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc chờ xác nhận.".into(),
+            ));
+        }
+        let manifest = serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
+            mk_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "corrupt_manifest",
+                format!("Manifest không hợp lệ: {e}"),
+            )
+        })?;
+        let Some(action_decl) = manifest.action(action_id).cloned() else {
+            return Err(mk_err(
+                StatusCode::NOT_FOUND,
+                "action_not_found",
+                "Action không tồn tại trong manifest.".into(),
+            ));
+        };
+        if action_decl.required_role == "admin" && actor.user.role != crate::auth::Role::Admin {
+            return Err(mk_err(
+                StatusCode::FORBIDDEN,
+                "rbac_denied",
+                "Tài khoản không đủ quyền thực thi action này.".into(),
+            ));
+        }
+        let (required_cap, has_manifest_grant, evidence, op_label) = match pending.command.operation
+        {
+            LifecycleOperation::Purge => (
+                "content_purge",
+                manifest.can_purge_content_type(&pending.command.type_key),
+                LifecycleConfirmationEvidence::ExplicitPurge {
+                    type_key: pending.command.type_key.clone(),
+                    entry_id: pending.command.entry_id,
+                    expected_version: pending.command.expected_version,
+                    session_token_hash: actor.token_hash.clone(),
+                },
+                "purge",
+            ),
+            LifecycleOperation::Restore => (
+                "content_restore",
+                manifest.can_restore_content_type(&pending.command.type_key),
+                LifecycleConfirmationEvidence::PublicRestore {
+                    type_key: pending.command.type_key.clone(),
+                    entry_id: pending.command.entry_id,
+                    expected_version: pending.command.expected_version,
+                    session_token_hash: actor.token_hash.clone(),
+                },
+                "restore",
+            ),
+            LifecycleOperation::Trash => {
+                return Err(mk_err(
+                    StatusCode::CONFLICT,
+                    "confirmation_invalid",
+                    "Yêu cầu xác nhận không hợp lệ, đã hết hạn hoặc đã được sử dụng.".into(),
+                ));
+            }
+        };
+        if !action_decl.capabilities.iter().any(|c| c == required_cap)
+            || !has_manifest_grant
+            || action_decl.capabilities.iter().any(|c| c == "http")
+        {
+            return Err(mk_err(
+                StatusCode::FORBIDDEN,
+                "capability_denied",
+                format!("Plugin không còn quyền '{required_cap}' hợp lệ."),
+            ));
+        }
+
+        if let LifecycleActionOrigin::ProviderRow { type_key, entry_id } = &pending.origin {
+            if type_key != &pending.command.type_key || *entry_id != pending.command.entry_id {
+                return Err(mk_err(
+                    StatusCode::CONFLICT,
+                    "confirmation_invalid",
+                    "Yêu cầu xác nhận không khớp phạm vi hàng dữ liệu ban đầu.".into(),
+                ));
+            }
+            let actor_role = match actor.user.role {
+                crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+                crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+            };
+            let list_cfg = crate::storage::admin_extensions::effective_list(
+                &self.db_pool,
+                type_key,
+                actor_role,
+            )
+            .await
+            .map_err(|err| mk_err(err.0, "provider_config_error", err.1.to_string()))?;
+            if !list_cfg.columns.iter().any(|col| {
+                col.owner_kind == "plugin"
+                    && col.owner_id == id
+                    && col.action_id.as_deref() == Some(action_id)
+            }) {
+                return Err(mk_err(
+                    StatusCode::FORBIDDEN,
+                    "provider_action_revoked",
+                    "Action không còn thuộc cấu hình cột hiệu lực.".into(),
+                ));
+            }
+        }
+
+        let fence = crate::storage::entries::PluginActionFence {
+            plugin_id: id.to_string(),
+            expected_generation: pending.expected_generation,
+            required_role: action_decl.required_role.clone(),
+        };
+        let authority = LifecycleAuthority {
+            session: actor,
+            plugin_fence: Some(&fence),
+            confirmation: evidence,
+            scope: LifecycleScope::Ordinary,
+        };
+        let receipt = crate::storage::entry_lifecycle::execute_lifecycle_transition(
+            &self.db_pool,
+            &pending.command,
+            &authority,
+        )
+        .await
+        .map_err(|err| mk_err(err.0, map_lifecycle_api_error_code(&err), err.1.to_string()))?;
+
+        let projection = crate::storage::entry_lifecycle::recompute_projections_nonfatal(
+            &self.db_pool,
+            hooks,
+            receipt.id,
+            pending.command.operation == LifecycleOperation::Restore
+                && receipt.publication_after.as_deref() == Some("published"),
+        )
+        .await;
+        plugin_storage::record_plugin_execution_result(
+            &self.db_pool,
+            id,
+            &correlation_id,
+            "info",
+            "Xác nhận và hoàn tất thao tác vòng đời thành công",
+            None,
+        )
+        .await;
+
+        Ok(ActionCommitOutcome {
+            response: PluginRunResponse {
+                success: true,
+                data: Some(serde_json::json!({
+                    "lifecycle": lifecycle_data_value(&receipt, op_label),
+                })),
+                error: None,
+                code: None,
+                correlation_id,
+                confirmation: None,
+            },
+            committed: Some(receipt),
+            secondary: SecondaryOutcome {
+                projection,
+                hook_enqueued: 0,
+                hook_dropped: 0,
+            },
         })
     }
 
@@ -1086,6 +1663,7 @@ impl PluginManager {
                     error: Some("Envelope kind route/cron chưa mở ở V1.".into()),
                     code: Some("unsupported_envelope_kind".into()),
                     correlation_id,
+                    confirmation: None,
                 },
             ));
         }
@@ -1134,6 +1712,7 @@ impl PluginManager {
                         error: Some(format!("Lỗi cơ sở dữ liệu: {e}")),
                         code: Some("db_error".into()),
                         correlation_id: correlation_id.clone(),
+                        confirmation: None,
                     },
                 )
             })?;
@@ -1149,6 +1728,7 @@ impl PluginManager {
                     ),
                     code: Some("safe_mode".into()),
                     correlation_id,
+                    confirmation: None,
                 },
             ));
         }
@@ -1163,6 +1743,7 @@ impl PluginManager {
                     error: Some("Plugin không tồn tại.".into()),
                     code: Some("not_found".into()),
                     correlation_id,
+                    confirmation: None,
                 },
             ));
         };
@@ -1176,6 +1757,7 @@ impl PluginManager {
                     error: Some("Plugin chưa được bật hoặc đã bị vô hiệu hóa.".into()),
                     code: Some("disabled".into()),
                     correlation_id,
+                    confirmation: None,
                 },
             ));
         }
@@ -1189,6 +1771,7 @@ impl PluginManager {
                     error: Some(format!("Manifest trong database không hợp lệ: {e}")),
                     code: Some("corrupt_manifest".into()),
                     correlation_id: correlation_id.clone(),
+                    confirmation: None,
                 },
             )
         })?;
@@ -1205,6 +1788,7 @@ impl PluginManager {
                         error: Some(err),
                         code: Some("corrupt_revision".into()),
                         correlation_id,
+                        confirmation: None,
                     },
                 ));
             }
@@ -1253,6 +1837,7 @@ impl PluginManager {
                     error: None,
                     code: None,
                     correlation_id,
+                    confirmation: None,
                 })
             }
             Err(err) => {
@@ -1288,6 +1873,7 @@ impl PluginManager {
                         error: Some(err_msg),
                         code: Some(code_str.to_string()),
                         correlation_id,
+                        confirmation: None,
                     },
                 ))
             }

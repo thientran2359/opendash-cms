@@ -82,6 +82,13 @@ pub async fn content_type_update(
     Ok((no_store_headers(Some(result.version)), Json(result)))
 }
 
+#[derive(serde::Serialize)]
+struct PublicationCommitResponse {
+    #[serde(flatten)]
+    entry: entry_storage::ContentEntryRecord,
+    secondary: crate::storage::entry_lifecycle::SecondaryOutcome,
+}
+
 /// Publication policy is persisted per CPT; one CAS endpoint handles Post/Page
 /// and opted-in user CPTs with the same authorization and transaction semantics.
 pub async fn content_entry_publication(
@@ -100,34 +107,44 @@ pub async fn content_entry_publication(
     let entry =
         entry_storage::set_publication_status(&db, &type_key, id, expected_version, &input.status)
             .await?;
-    crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, entry.id).await?;
+    let projection = crate::storage::entry_lifecycle::recompute_projections_nonfatal(
+        &db, &hooks, entry.id, true,
+    )
+    .await;
     let principal = match actor.user.role {
         Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
         Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
     };
-    let hook_event = if entry.publication_status == "published" {
-        opendash_core::hooks::HookEvent::ContentAfterPublish
-    } else {
-        opendash_core::hooks::HookEvent::ContentAfterUnpublish
+    let receipt = crate::storage::entry_lifecycle::EntryCommitReceipt {
+        operation: if entry.publication_status == "published" {
+            crate::storage::entry_lifecycle::EntryMutationKind::Publish
+        } else {
+            crate::storage::entry_lifecycle::EntryMutationKind::Unpublish
+        },
+        id: entry.id,
+        type_key: entry.content_type_key.clone(),
+        locale: entry.locale.clone(),
+        translation_group_id: entry.translation_group_id.clone(),
+        version_before: Some(expected_version),
+        version_after: Some(entry.version),
+        publication_before: None,
+        publication_after: Some(entry.publication_status.clone()),
+        trashed_at: None,
+        published_at: entry.published_at.clone(),
     };
-    hooks.enqueue_async(crate::hooks::AsyncHookJob {
-        event: hook_event,
-        principal,
-        locale: Some(entry.locale.clone()),
-        type_key: Some(type_key),
-        payload: serde_json::json!({
-            "type_key": &entry.content_type_key,
-            "id": entry.id,
-            "entry_id": entry.id,
-            "version": entry.version,
-            "locale": &entry.locale,
-            "publication_status": &entry.publication_status,
-            "translation_group_id": &entry.translation_group_id,
-        }),
-        dispatch_depth: 0,
-        lease,
-    });
-    Ok((no_store_headers(Some(entry.version)), Json(entry)))
+    let hook_out = hooks.enqueue_entry_lifecycle_hooks(principal, &receipt, lease);
+    let response = PublicationCommitResponse {
+        entry,
+        secondary: crate::storage::entry_lifecycle::SecondaryOutcome {
+            projection,
+            hook_enqueued: hook_out.enqueued,
+            hook_dropped: hook_out.dropped,
+        },
+    };
+    Ok((
+        no_store_headers(Some(response.entry.version)),
+        Json(response),
+    ))
 }
 
 /// Private authenticated preview never uses the published-content reader.

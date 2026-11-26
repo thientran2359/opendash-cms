@@ -29,7 +29,8 @@ Thanh điều hướng Admin (desktop sidebar thu gọn được + mobile drawer
 
 - Mỗi màn hình có URL riêng hỗ trợ reload, back/forward; ẩn menu không thay thế kiểm quyền server.
 - Tổng quát lưu CMS Language (`cms_locale`) toàn site; màn hình Đa ngôn ngữ riêng quản lý ngôn ngữ nội dung, công tắc `multilingual_enabled`, xóa và dọn dữ liệu mồ côi. Tắt đa ngôn ngữ ẩn các công cụ ngôn ngữ phụ nhưng giữ dữ liệu và vẫn cho phép mở màn hình cấu hình này.
-- Khu vực `Loại nội dung & Trường` chỉ dùng để cấu hình schema/field groups/editor layout, tuyệt đối không chứa danh sách hay form nhập liệu entry.
+- Khu vực `Loại nội dung & Trường` dùng để cấu hình schema/field groups/editor layout và quản trị **Bảo trì Thùng rác được giữ lại** (`retained_trash=true`, chỉ Admin, chỉ cho phép xóa vĩnh viễn khi CPT ở trạng thái `provider_inactive`) theo [`entry-lifecycle-bulk-quick-edit.md`](../designs/entry-lifecycle-bulk-quick-edit.md); tuyệt đối không chứa danh sách active hay form nhập liệu entry.
+- Danh sách nội dung (`EntryListPage`) có tab/bộ lọc **Thùng rác** (`status=trash`, trả hàng metadata-only) với hành động Chuyển vào thùng rác, Khôi phục (Admin/Editor) và Xóa vĩnh viễn (chỉ Admin, có xác nhận rõ ràng); mở entry trong Thùng rác qua Single Edit hoặc OpenDash Studio đều trả về trạng thái bị chặn `409 entry_trashed` / `404` và dẫn người dùng quay lại Thùng rác.
 - Khi phiên hết hạn (`401`), `EditorDraftStore` quarantine bản nháp và kiểm tra lại quyền hiệu lực (`effective-editor-config`) sau khi đăng nhập lại; logout hoặc đổi tài khoản sẽ xóa sạch bản nháp.
 
 ## 3. Các Vùng của Màn hình Single Edit

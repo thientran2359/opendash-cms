@@ -157,6 +157,34 @@ pub struct ContentListResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrashEntrySummary {
+    pub id: i64,
+    pub type_key: String,
+    pub locale: String,
+    pub title: String,
+    pub slug: String,
+    #[serde(default)]
+    pub publication_status: String,
+    #[serde(default)]
+    pub version: i64,
+    pub trashed_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContentTrashListResult {
+    #[serde(default)]
+    pub items: Vec<TrashEntrySummary>,
+    #[serde(default)]
+    pub total: u64,
+    #[serde(default)]
+    pub limit: usize,
+    #[serde(default)]
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaxonomyTerm {
     pub id: i64,
     pub kind: String,

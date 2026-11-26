@@ -3244,35 +3244,29 @@ pub async fn commit_entry_translation(
     Ok(record)
 }
 
+/// Legacy DELETE compatibility wrapper: at S02 activation this moves an authorized
+/// active ordinary entry into recoverable Trash (never physical deletion).
 pub async fn delete_entry(
     db: &SqlitePool,
+    actor: &crate::auth::SessionContext,
     type_key: &str,
     id: i64,
     expected_version: i64,
-) -> ApiResult<()> {
+) -> ApiResult<super::entry_lifecycle::EntryCommitReceipt> {
     forbid_generic_pattern_write(type_key)?;
-    let mut tx = db.begin().await?;
-    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
-        .execute(&mut *tx)
-        .await?;
-    let Some(row) =
-        super::entry_lifecycle::load_retained_entry_identity_in_tx(&mut tx, type_key, id).await?
-    else {
-        return Err(ApiError::not_found("Không tìm thấy nội dung."));
+    let cmd = super::entry_lifecycle::LifecycleCommand {
+        operation: super::entry_lifecycle::LifecycleOperation::Trash,
+        type_key: type_key.to_owned(),
+        entry_id: id,
+        expected_version,
     };
-    if row.version != expected_version {
-        return Err(ApiError::precondition_failed(
-            "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
-        ));
-    }
-    if row.trashed_at.is_some() {
-        return Err(ApiError::conflict(
-            "entry_trashed: Nội dung đang ở trong Thùng rác và không thể xóa theo luồng thường.",
-        ));
-    }
-    super::entry_lifecycle::physical_delete_cleanup_in_tx(&mut tx, &row).await?;
-    tx.commit().await?;
-    Ok(())
+    let authority = super::entry_lifecycle::LifecycleAuthority {
+        session: actor,
+        plugin_fence: None,
+        confirmation: super::entry_lifecycle::LifecycleConfirmationEvidence::None,
+        scope: super::entry_lifecycle::LifecycleScope::Ordinary,
+    };
+    super::entry_lifecycle::execute_lifecycle_transition(db, &cmd, &authority).await
 }
 
 /// Version-CAS transition. Save/update never touches publication_status.

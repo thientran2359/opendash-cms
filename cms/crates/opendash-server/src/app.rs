@@ -6,7 +6,7 @@ use axum::{
     http::{StatusCode, header},
     middleware::{self, Next},
     response::IntoResponse,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
 };
 use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
 use rust_embed::RustEmbed;
@@ -594,6 +594,18 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
         )
         .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/trash",
+            post(crate::routes::entries::entry_trash).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/restore",
+            post(crate::routes::entries::entry_restore).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/purge",
+            delete(crate::routes::entries::entry_purge),
+        )
+        .route(
             "/api/admin/content-types/{type_key}/entries/{id}/publication",
             post(content_entry_publication).layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
         )
@@ -648,6 +660,11 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/plugins/{id}/actions/{action}",
             post(plugin_action).layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/plugins/{id}/actions/{action}/confirm-lifecycle",
+            post(crate::routes::plugin::plugin_action_confirm_lifecycle)
+                .layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/plugins/{id}/ui-schema", get(plugin_ui_schema))
         .route(

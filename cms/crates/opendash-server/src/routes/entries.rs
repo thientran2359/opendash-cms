@@ -33,6 +33,24 @@ pub struct PublicationInput {
     pub status: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyLifecycleInput {}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct RestoreEntryInput {
+    #[serde(default)]
+    pub confirm_public_restore: bool,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct PurgeEntryQuery {
+    #[serde(default)]
+    pub retained_trash: bool,
+}
+
 fn is_builtin(key: &str) -> bool {
     matches!(key, "post" | "page")
 }
@@ -129,8 +147,11 @@ pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTable
                     return Err(ApiError::bad_request("Tìm kiếm quá dài hoặc không hợp lệ."));
                 }
             }
-            "status" if matches!(value, "all" | "draft" | "published") => {
+            "status" if matches!(value, "all" | "draft" | "published" | "trash") => {
                 filter.status = value.into();
+            }
+            "retained_trash" if matches!(value, "true" | "false") => {
+                filter.retained_trash = value == "true";
             }
             "locale" => {
                 let norm = value.trim().to_ascii_lowercase();
@@ -186,7 +207,12 @@ pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTable
                 }
                 filter.updated_month = Some(value.into());
             }
-            "sort" if matches!(value, "title" | "created_at" | "updated_at" | "id") => {
+            "sort"
+                if matches!(
+                    value,
+                    "title" | "created_at" | "updated_at" | "id" | "trashed_at"
+                ) =>
+            {
                 filter.sort = value.into();
             }
             "order" if matches!(value, "asc" | "desc") => {
@@ -221,6 +247,19 @@ pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTable
         return Err(ApiError::bad_request(
             "include_descendants cần taxonomy filter.",
         ));
+    }
+    if filter.retained_trash {
+        if filter.status != "trash" {
+            return Err(ApiError::bad_request(
+                "retained_trash=true chỉ hỗ trợ cùng status=trash.",
+            ));
+        }
+        let allowed_keys = ["status", "retained_trash", "locale", "limit", "offset"];
+        if keys.iter().any(|k| !allowed_keys.contains(&k.as_str())) {
+            return Err(ApiError::bad_request(
+                "Chế độ bảo trì retained_trash không hỗ trợ bộ lọc bổ sung.",
+            ));
+        }
     }
     Ok(filter)
 }
@@ -331,6 +370,11 @@ pub async fn entry_table_provider_action(
         "values": record.values,
     });
     let correlation_id = format!("row-{}", crate::auth::generate_random_token());
+    let origin = crate::plugin::lifecycle_confirmation::LifecycleActionOrigin::ProviderRow {
+        type_key: type_key.clone(),
+        entry_id: record.id,
+    };
+    let maint_epoch = lease.maintenance_epoch();
     match plugins
         .execute_plugin_action(
             &plugin_id,
@@ -340,18 +384,30 @@ pub async fn entry_table_provider_action(
             &content_registry,
             &hooks,
             correlation_id,
+            origin,
+            maint_epoch,
         )
         .await
     {
-        Ok(response) => {
+        Ok(outcome) => {
             hooks.enqueue_plugin_action_hooks(
                 execution_principal_for_actor(&actor),
-                response.data.as_ref(),
+                outcome.committed.as_ref(),
                 lease,
             );
-            Ok((StatusCode::OK, Json(response)).into_response())
+            Ok((
+                StatusCode::OK,
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(outcome.response),
+            )
+                .into_response())
         }
-        Err((status, response)) => Ok((status, Json(response)).into_response()),
+        Err((status, response)) => Ok((
+            status,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(response),
+        )
+            .into_response()),
     }
 }
 
@@ -725,77 +781,186 @@ pub async fn entry_delete(
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
-) -> ApiResult<StatusCode> {
+) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     let version = expected_version(&headers)?;
     valid_type_key(&type_key)?;
-    let existing_meta = entry_storage::get_entry_locale_and_group(&db, &type_key, id).await?;
-    entry_storage::delete_entry(&db, &type_key, id, version).await?;
-    hooks.enqueue_async(crate::hooks::AsyncHookJob {
-        event: opendash_core::hooks::HookEvent::ContentAfterDelete,
-        principal: execution_principal_for_actor(&actor),
-        locale: existing_meta.as_ref().map(|(l, _)| l.clone()),
-        type_key: Some(type_key.clone()),
-        payload: json!({
-            "type_key": &type_key,
-            "id": id,
-            "entry_id": id,
-            "version": version,
-            "locale": existing_meta.as_ref().map(|(l, _)| l.as_str()),
-            "translation_group_id": existing_meta.as_ref().map(|(_, g)| g.as_str()),
-        }),
-        dispatch_depth: 0,
-        lease,
-    });
-    Ok(StatusCode::NO_CONTENT)
+    let receipt = entry_storage::delete_entry(&db, &actor, &type_key, id, version).await?;
+    hooks.enqueue_entry_lifecycle_hooks(execution_principal_for_actor(&actor), &receipt, lease);
+    Ok((
+        StatusCode::NO_CONTENT,
+        [(header::CACHE_CONTROL, "no-store")],
+    )
+        .into_response())
 }
 
-/// Publish/Unpublish is a separate, authenticated optimistic-CAS operation.
-/// Ordinary PUT/Save deliberately never alters the current status.
-pub async fn entry_publication(
+/// Moves an authorized active ordinary entry into recoverable Trash.
+pub async fn entry_trash(
     crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
-    Json(input): Json<PublicationInput>,
+    Json(_input): Json<EmptyLifecycleInput>,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
-    valid_type_key(&type_key)?;
-    if !is_builtin(&type_key) || !matches!(input.status.as_str(), "draft" | "published") {
-        return Err(ApiError::bad_request(
-            "Chỉ Post/Page hỗ trợ draft/published.",
-        ));
-    }
     let version = expected_version(&headers)?;
-    let record =
-        entry_storage::set_publication_status(&db, &type_key, id, version, &input.status).await?;
-    crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, record.id).await?;
-    let hook_event = if record.publication_status == "published" {
-        opendash_core::hooks::HookEvent::ContentAfterPublish
-    } else {
-        opendash_core::hooks::HookEvent::ContentAfterUnpublish
+    valid_type_key(&type_key)?;
+    let cmd = crate::storage::entry_lifecycle::LifecycleCommand {
+        operation: crate::storage::entry_lifecycle::LifecycleOperation::Trash,
+        type_key,
+        entry_id: id,
+        expected_version: version,
     };
-    hooks.enqueue_async(crate::hooks::AsyncHookJob {
-        event: hook_event,
-        principal: execution_principal_for_actor(&actor),
-        locale: Some(record.locale.clone()),
-        type_key: Some(type_key.clone()),
-        payload: json!({
-            "type_key": &type_key,
-            "id": record.id,
-            "entry_id": record.id,
-            "version": record.version,
-            "locale": &record.locale,
-            "publication_status": &record.publication_status,
-            "translation_group_id": &record.translation_group_id,
-        }),
-        dispatch_depth: 0,
-        lease,
-    });
-    // No success hooks are emitted until state is durable; on CAS failures
-    // storage returns 404/412 without any external side effects.
-    Ok(([(header::ETAG, etag(record.version))], Json(record)).into_response())
+    let authority = crate::storage::entry_lifecycle::LifecycleAuthority {
+        session: &actor,
+        plugin_fence: None,
+        confirmation: crate::storage::entry_lifecycle::LifecycleConfirmationEvidence::None,
+        scope: crate::storage::entry_lifecycle::LifecycleScope::Ordinary,
+    };
+    let receipt =
+        crate::storage::entry_lifecycle::execute_lifecycle_transition(&db, &cmd, &authority)
+            .await?;
+    let hook_out =
+        hooks.enqueue_entry_lifecycle_hooks(execution_principal_for_actor(&actor), &receipt, lease);
+    let summary = crate::storage::entry_lifecycle::LifecycleSummary::from_receipt(
+        &receipt,
+        crate::storage::entry_lifecycle::SecondaryOutcome {
+            projection: crate::storage::entry_lifecycle::ProjectionOutcome::NotNeeded,
+            hook_enqueued: hook_out.enqueued,
+            hook_dropped: hook_out.dropped,
+        },
+    );
+    Ok((
+        StatusCode::OK,
+        [
+            (header::ETAG, etag(summary.version)),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+        ],
+        Json(summary),
+    )
+        .into_response())
+}
+
+/// Restores a trashed entry to draft (draft_publish) or published (immediate, with explicit
+/// `confirm_public_restore: true` when public).
+pub async fn entry_restore(
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    Json(input): Json<RestoreEntryInput>,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    let version = expected_version(&headers)?;
+    valid_type_key(&type_key)?;
+    let confirmation = if input.confirm_public_restore {
+        crate::storage::entry_lifecycle::LifecycleConfirmationEvidence::PublicRestore {
+            type_key: type_key.clone(),
+            entry_id: id,
+            expected_version: version,
+            session_token_hash: actor.token_hash.clone(),
+        }
+    } else {
+        crate::storage::entry_lifecycle::LifecycleConfirmationEvidence::None
+    };
+    let cmd = crate::storage::entry_lifecycle::LifecycleCommand {
+        operation: crate::storage::entry_lifecycle::LifecycleOperation::Restore,
+        type_key,
+        entry_id: id,
+        expected_version: version,
+    };
+    let authority = crate::storage::entry_lifecycle::LifecycleAuthority {
+        session: &actor,
+        plugin_fence: None,
+        confirmation,
+        scope: crate::storage::entry_lifecycle::LifecycleScope::Ordinary,
+    };
+    let receipt =
+        crate::storage::entry_lifecycle::execute_lifecycle_transition(&db, &cmd, &authority)
+            .await?;
+    let projection = crate::storage::entry_lifecycle::recompute_projections_nonfatal(
+        &db,
+        &hooks,
+        receipt.id,
+        receipt.publication_after.as_deref() == Some("published"),
+    )
+    .await;
+    let hook_out =
+        hooks.enqueue_entry_lifecycle_hooks(execution_principal_for_actor(&actor), &receipt, lease);
+    let summary = crate::storage::entry_lifecycle::LifecycleSummary::from_receipt(
+        &receipt,
+        crate::storage::entry_lifecycle::SecondaryOutcome {
+            projection,
+            hook_enqueued: hook_out.enqueued,
+            hook_dropped: hook_out.dropped,
+        },
+    );
+    Ok((
+        StatusCode::OK,
+        [
+            (header::ETAG, etag(summary.version)),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+        ],
+        Json(summary),
+    )
+        .into_response())
+}
+
+/// Permanently deletes a trashed entry (Admin only, requires `If-Match` and `X-Confirm-Purge: true`).
+/// Accepts optional `?retained_trash=true` exclusively for dormant/withdrawn ordinary CPT maintenance.
+pub async fn entry_purge(
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    Query(query): Query<PurgeEntryQuery>,
+) -> ApiResult<Response> {
+    let actor = crate::auth::require_admin_with_csrf(&headers, &db).await?;
+    let version = expected_version(&headers)?;
+    valid_type_key(&type_key)?;
+    let explicit_confirm = headers
+        .get("x-confirm-purge")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == "true");
+    let confirmation = if explicit_confirm {
+        crate::storage::entry_lifecycle::LifecycleConfirmationEvidence::ExplicitPurge {
+            type_key: type_key.clone(),
+            entry_id: id,
+            expected_version: version,
+            session_token_hash: actor.token_hash.clone(),
+        }
+    } else {
+        crate::storage::entry_lifecycle::LifecycleConfirmationEvidence::None
+    };
+    let scope = if query.retained_trash {
+        crate::storage::entry_lifecycle::LifecycleScope::RetainedAdmin
+    } else {
+        crate::storage::entry_lifecycle::LifecycleScope::Ordinary
+    };
+    let cmd = crate::storage::entry_lifecycle::LifecycleCommand {
+        operation: crate::storage::entry_lifecycle::LifecycleOperation::Purge,
+        type_key,
+        entry_id: id,
+        expected_version: version,
+    };
+    let authority = crate::storage::entry_lifecycle::LifecycleAuthority {
+        session: &actor,
+        plugin_fence: None,
+        confirmation,
+        scope,
+    };
+    let receipt =
+        crate::storage::entry_lifecycle::execute_lifecycle_transition(&db, &cmd, &authority)
+            .await?;
+    hooks.enqueue_entry_lifecycle_hooks(execution_principal_for_actor(&actor), &receipt, lease);
+    Ok((
+        StatusCode::NO_CONTENT,
+        [(header::CACHE_CONTROL, "no-store")],
+    )
+        .into_response())
 }
 
 pub(crate) async fn render_admin_single_fallback_html(

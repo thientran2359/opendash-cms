@@ -47,6 +47,7 @@ Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-sp
 - [`admin_nav_single_edit_e2e.py`](admin_nav_single_edit_e2e.py) — Bounded Chrome Admin navigation, RBAC, and single-edit acceptance.
 - [`egm_cpt_builder_s01_e2e.py`](egm_cpt_builder_s01_e2e.py) — CPT builder browser smoke on an isolated site.
 - [`egm_pattern_library_s03_e2e.py`](egm_pattern_library_s03_e2e.py) — Pattern library, Studio Mode 2 Pattern (`#/studio/entry/pattern/:id`), and RBAC Chrome + API E2E suite.
+- [`entry_lifecycle_s02_e2e.py`](entry_lifecycle_s02_e2e.py) — Entry Trash/Restore/Purge, Reading guard, dormant retained-Trash maintenance, Editor vs Admin RBAC, Studio/Editor trashed guards, and plugin host confirmation Chrome E2E suite.
 - [`general_settings_browser.py`](general_settings_browser.py) — General Settings (`SITE-01`) embedded Admin browser test.
 - [`m4_s11_t01_page_builder_e2e.py`](m4_s11_t01_page_builder_e2e.py) — Page builder Studio Mode 2 E2E acceptance (`ui_create_page`, `new_heading`, `change_heading`).
 - [`m5_s12_t01_library_e2e.py`](m5_s12_t01_library_e2e.py) — Local template library, Pattern CRUD (`create_ui_pattern`), and Studio override E2E test.

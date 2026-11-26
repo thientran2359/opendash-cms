@@ -30,10 +30,10 @@ Declared in [`as/opendash.ts`](as/opendash.ts) and bound by [`runtime.rs`](../cr
 
 - **Core I/O & JSON:** `getInput()`, `setOutput(jsonStr)`, `hostCall(opJson)`, `escapeJsonString(str)`, `stringifyValue(val)`.
 - **Unified Input:** `readEnvelope(): Envelope | null` normalizes both `HookEnvelope` v1 (defaulting `envelopeVersion = 1`, `kind = "hook"`, `principal = "system"`, `dispatchDepth = 0`) and `PluginEnvelopeV2` (`envelopeVersion`, `kind`, `event`, `occurredAtMs`, `correlationId`, `locale`, `principal`, `dispatchDepth`, `payload`, `raw`).
-- **15 Host Ops** (matching [`host_ops.rs`](../crates/opendash-server/src/plugin/host_ops.rs) and supporting both v1 top-level and `{"ok":true,"data":{...}}` responses):
+- **19 Host Ops** (matching [`host_ops.rs`](../crates/opendash-server/src/plugin/host_ops.rs) and supporting both v1 top-level and `{"ok":true,"data":{...}}` responses):
   - **KV Store:** `kvGet(key)`, `kvSet(key, valueJson)`, `kvDelete(key)`, `kvList(prefix = null, limit = 50)`.
-  - **HTTP Egress:** `httpRequest(method, url, headersJson = "{}", body = "")`.
-  - **Content & Taxonomy:** `contentGet(typeKey, entryId, locale = null)`, `contentList(typeKey, locale = null, limit = 20, offset = 0, publishedOnly = false)`, `contentSave(opObj)`, `contentDelete(typeKey, entryId, expectedVersion)`, `taxonomyList(kind, locale = null, limit = 50)`.
+  - **HTTP Egress:** `httpRequest(method, url, headersJson = "{}", body = "")` (forbidden inside actions declaring `content_restore` or `content_purge`).
+  - **Content, Trash Lifecycle & Taxonomy:** `contentGet(typeKey, entryId, locale = null)`, `contentList(typeKey, locale = null, limit = 20, offset = 0, publishedOnly = false)`, `contentSave(opObj)`, `contentDelete(typeKey, entryId, expectedVersion)` (recoverable Trash), `contentTrashGet(typeKey, entryId, locale = null)`, `contentTrashList(typeKey, locale = null, limit = 20, offset = 0)`, `contentRestore(typeKey, entryId, expectedVersion)`, `contentPurge(typeKey, entryId, expectedVersion)`, `taxonomyList(kind, locale = null, limit = 50)`.
   - **Media & Settings:** `mediaGet(mediaId)`, `siteOptionsGet(locale = null)`, `pluginSettingsGet()`, `pluginSecretGet(key)`.
   - **Diagnostics:** `log(level, message)`.
 - **Typed Output Helpers:** `outputAllow()`, `outputVeto(code, message, fieldErrorsObj = null)`, `outputPrepareSavePatch(patchObj)`, `outputContactAllow()`, `outputContactReject(code, message)`, `outputSeoHead(seoObj)`, `outputEntryView(extObj)`.

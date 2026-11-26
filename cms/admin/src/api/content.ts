@@ -11,9 +11,11 @@ import {
   EditorLayoutSnapshot,
   EffectiveEditorConfigProjection,
   FieldGroupRecord,
+  LifecycleSummary,
   OwnedContentType,
   UserFieldGroupInput,
 } from '../features/content/types.ts';
+import type { PluginRunResult } from '../types.ts';
 import { requestJson, requestText } from './client.ts';
 import { appendEntryTermFilters, type EntryTermFilters } from './taxonomy.ts';
 import type { EffectiveListConfig } from '../features/extensions/AdminContributionRenderer.tsx';
@@ -252,12 +254,33 @@ export function runEntryProviderAction(
   providerId: string,
   actionId: string,
   csrfToken: string,
-): Promise<{ success: boolean; data: unknown; error?: string | null }> {
-  return requestJson(
+): Promise<PluginRunResult> {
+  return requestJson<PluginRunResult>(
     `${entryPath(typeKey, row.id)}/admin-actions/${encodeURIComponent(providerId)}/${encodeURIComponent(actionId)}`,
-    { method: 'POST', csrfToken, ifMatchVersion: row.version,
-      defaultErrorMessage: tStatic('api.content.run_the_provider_action') },
+    {
+      method: 'POST',
+      csrfToken,
+      ifMatchVersion: row.version,
+      expectLifecycleConfirmation: true,
+      defaultErrorMessage: tStatic('api.content.run_the_provider_action'),
+    },
   );
+}
+
+/** Explicit Admin-only maintenance read for Trash rows retained under inactive/withdrawn CPTs. */
+export function queryRetainedTrashTable(
+  typeKey: string,
+  filter: { locale?: string; limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+): Promise<EntryTableResult> {
+  const query = new URLSearchParams({ status: 'trash', retained_trash: 'true' });
+  if (filter.locale) query.set('locale', filter.locale);
+  if (filter.limit !== undefined) query.set('limit', String(filter.limit));
+  if (filter.offset !== undefined) query.set('offset', String(filter.offset));
+  return requestJson<EntryTableResult>(`${contentTypePath(typeKey)}/entry-table?${query}`, {
+    signal,
+    defaultErrorMessage: tStatic('api.content.load_retained_trash'),
+  });
 }
 
 /** Effective, active taxonomies include the site's explicit CPT override. */
@@ -315,6 +338,63 @@ export function updateEntryComposite(
   });
 }
 
+export function trashContentEntry(
+  typeKey: string,
+  id: number,
+  version: number,
+  csrfToken: string,
+  signal?: AbortSignal,
+): Promise<LifecycleSummary> {
+  return requestJson<LifecycleSummary>(`${entryPath(typeKey, id)}/trash`, {
+    method: 'POST',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: '{}',
+    signal,
+    defaultErrorMessage: tStatic('api.content.trash_the_entry'),
+  });
+}
+
+export function restoreContentEntry(
+  typeKey: string,
+  id: number,
+  version: number,
+  csrfToken: string,
+  options?: { confirmPublicRestore?: boolean; signal?: AbortSignal },
+): Promise<LifecycleSummary> {
+  return requestJson<LifecycleSummary>(`${entryPath(typeKey, id)}/restore`, {
+    method: 'POST',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify(
+      options?.confirmPublicRestore ? { confirm_public_restore: true } : {},
+    ),
+    signal: options?.signal,
+    defaultErrorMessage: tStatic('api.content.restore_the_entry'),
+  });
+}
+
+export function purgeContentEntry(
+  typeKey: string,
+  id: number,
+  version: number,
+  csrfToken: string,
+  options?: { retainedTrash?: boolean; signal?: AbortSignal },
+): Promise<void> {
+  const suffix = options?.retainedTrash ? '?retained_trash=true' : '';
+  return requestText(`${entryPath(typeKey, id)}/purge${suffix}`, {
+    method: 'DELETE',
+    csrfToken,
+    ifMatchVersion: version,
+    confirmPurge: true,
+    signal: options?.signal,
+    defaultErrorMessage: tStatic('api.content.purge_the_entry'),
+  }).then(() => undefined);
+}
+
+/** Legacy HTTP DELETE alias now performs recoverable Trash. */
 export function deleteContentEntry(
   typeKey: string,
   id: number,
@@ -325,6 +405,6 @@ export function deleteContentEntry(
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: tStatic('api.content.delete_the_entry'),
+    defaultErrorMessage: tStatic('api.content.trash_the_entry'),
   }).then(() => undefined);
 }

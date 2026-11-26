@@ -188,6 +188,7 @@ pub async fn plugin_action(
             .unwrap_or_default()
             .as_nanos()
     );
+    let maint_epoch = lease.maintenance_epoch();
     match plugins
         .execute_plugin_action(
             &id,
@@ -197,18 +198,84 @@ pub async fn plugin_action(
             &content_registry,
             &hooks,
             correlation_id,
+            crate::plugin::lifecycle_confirmation::LifecycleActionOrigin::Generic,
+            maint_epoch,
         )
         .await
     {
-        Ok(resp) => {
+        Ok(outcome) => {
             let principal = match actor.user.role {
                 crate::auth::Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
                 crate::auth::Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
             };
-            hooks.enqueue_plugin_action_hooks(principal, resp.data.as_ref(), lease);
-            Ok((StatusCode::OK, Json(resp)).into_response())
+            hooks.enqueue_plugin_action_hooks(principal, outcome.committed.as_ref(), lease);
+            Ok((
+                StatusCode::OK,
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(outcome.response),
+            )
+                .into_response())
         }
-        Err((status, resp)) => Ok((status, Json(resp)).into_response()),
+        Err((status, resp)) => {
+            Ok((status, [(header::CACHE_CONTROL, "no-store")], Json(resp)).into_response())
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfirmPluginLifecycleInput {
+    pub confirmation_id: String,
+    pub decision: String,
+}
+
+pub async fn plugin_action_confirm_lifecycle(
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(plugins): State<Arc<PluginManager>>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    axum::extract::Path((id, action)): axum::extract::Path<(String, String)>,
+    Json(input): Json<ConfirmPluginLifecycleInput>,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    let correlation_id = format!(
+        "plc-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let maint_epoch = lease.maintenance_epoch();
+    match plugins
+        .resolve_plugin_lifecycle_confirmation(
+            &id,
+            &action,
+            &actor,
+            &input.confirmation_id,
+            &input.decision,
+            &hooks,
+            correlation_id,
+            maint_epoch,
+        )
+        .await
+    {
+        Ok(outcome) => {
+            let principal = match actor.user.role {
+                crate::auth::Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
+                crate::auth::Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
+            };
+            hooks.enqueue_plugin_action_hooks(principal, outcome.committed.as_ref(), lease);
+            Ok((
+                StatusCode::OK,
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(outcome.response),
+            )
+                .into_response())
+        }
+        Err((status, resp)) => {
+            Ok((status, [(header::CACHE_CONTROL, "no-store")], Json(resp)).into_response())
+        }
     }
 }
 

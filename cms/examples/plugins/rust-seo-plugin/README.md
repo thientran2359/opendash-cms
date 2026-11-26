@@ -20,6 +20,7 @@ Directory layout:
 - **Permissions & Settings ([manifest.json](manifest.json)):**
   - `permissions`: `sqlite` (`["kv_read", "kv_write"]`), `content_read: ["*"]`, `plugin_settings_read: true`, `plugin_secrets_read: ["webhook_token"]`, and `network` (`POST https://hooks.example.com:443/seo-ping`).
   - `settings_schema`: `brand_name` (text, default `"OpenDash"`), `default_badge` (text, default `"Mới"`), `webhook_token` (secret, `default: null`).
+  - **Host `0.1.1` Lifecycle Opt-In Note:** `rust-seo-plugin` intentionally declares no Trash/Restore/Purge grants. Plugins opting into `content_trash_read`, `content_restore`, or Admin-only `content_purge` must declare `manifest_schema: 3`, `min_host_version: "0.1.1"`, explicit action capabilities (with `http` excluded from any restore/purge action), and follow the host confirmation flow documented in [PLUGIN_ABI.md](../../../../docs/contracts/PLUGIN_ABI.md).
 
 ## Invariants
 

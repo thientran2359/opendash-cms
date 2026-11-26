@@ -185,6 +185,19 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [entryHadExistingDoc, setEntryHadExistingDoc] = useState(false);
   const [entryDoc, setEntryDoc] = useState<BuilderDocument>(EMPTY_DOCUMENT);
   const [entrySelectedNodeId, setEntrySelectedNodeId] = useState<string | null>(null);
+  const [entryTrashedBlocked, setEntryTrashedBlocked] = useState(false);
+
+  const isTrashedConflict = (cause: unknown): boolean =>
+    !isPatternEntry &&
+    cause instanceof api.ApiClientError &&
+    cause.status === 409 &&
+    (cause.errorCode === 'entry.trashed' || cause.message.includes('entry_trashed'));
+
+  const mode2TrashHash = entryTypeKey === 'page'
+    ? '#/pages?status=trash'
+    : entryTypeKey === 'post'
+      ? '#/posts?status=trash'
+      : `#/cpt/${encodeURIComponent(entryTypeKey)}?status=trash`;
 
   // Undo / Redo stack for active BuilderDocument
   const undoStackRef = useRef<HistorySnapshot[]>([]);
@@ -251,6 +264,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     setEntrySavedDoc(EMPTY_DOCUMENT);
     setEntryVersion(null);
     setEntryHadExistingDoc(false);
+    setEntryTrashedBlocked(false);
   };
 
   // Dirty flags
@@ -502,15 +516,27 @@ export const StudioWorkspace: React.FC<Props> = ({
     let alive = true;
     setLoading(true);
     setStatus(t("studio.loading_the_page_builder"));
-    Promise.all([
+    Promise.allSettled([
       builderApi.getEntryBuilder(entryTypeKey, entryId),
       getContentEntry(entryTypeKey, entryId),
       listPatterns(),
     ])
-      .then(([opened, entryRec, patRes]) => {
+      .then(([builderRes, entryRes, patSettled]) => {
         if (!alive || seq !== loadSeqRef.current || authorityRef.current !== reqAuthority) return;
+        if (builderRes.status === 'rejected' && isTrashedConflict(builderRes.reason)) {
+          setEntryTrashedBlocked(true);
+          setStatus(t("entry_lifecycle.studio_entry_trashed_blocked"), true);
+          return;
+        }
+        if (builderRes.status === 'rejected') throw builderRes.reason;
+        if (entryRes.status === 'rejected') throw entryRes.reason;
+        if (patSettled.status === 'rejected') throw patSettled.reason;
+        const opened = builderRes.value;
+        const entryRec = entryRes.value;
+        const patRes = patSettled.value;
         setPatterns(patRes.items);
         setPatternsLoaded(true);
+        setEntryTrashedBlocked(false);
         setEntryTitle(entryRec.title);
         setEntryPublicationStatus(opened.publication_status);
         setEntryPublicationPolicy(opened.publication_policy);
@@ -535,8 +561,13 @@ export const StudioWorkspace: React.FC<Props> = ({
       })
       .catch(cause => {
         if (alive && seq === loadSeqRef.current && authorityRef.current === reqAuthority) {
-          setStatus(t("studio.cannot_open_the_page_builder_for_this_content"), true);
-          onApiError(cause, t("studio.cannot_open_the_page_builder"));
+          if (isTrashedConflict(cause)) {
+            setEntryTrashedBlocked(true);
+            setStatus(t("entry_lifecycle.studio_entry_trashed_blocked"), true);
+          } else {
+            setStatus(t("studio.cannot_open_the_page_builder_for_this_content"), true);
+            onApiError(cause, t("studio.cannot_open_the_page_builder"));
+          }
         }
       })
       .finally(() => {
@@ -638,7 +669,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   useEffect(() => {
     if (!active || !user || !csrfToken) return;
     if (!isMode2 && (!previewTargetCandidate || !effectivePreviewLocale || previewLocaleInvalid || ((localeReloadPending || localeBaselineMismatch) && !localeDraftConflict))) return;
-    if (isMode2 && (!entryTypeKey || entryId === null || entryVersion === null)) return;
+    if (isMode2 && (!entryTypeKey || entryId === null || entryVersion === null || entryTrashedBlocked)) return;
 
     const seq = ++previewSeqRef.current;
     const timer = window.setTimeout(() => {
@@ -655,6 +686,11 @@ export const StudioWorkspace: React.FC<Props> = ({
           })
           .catch(cause => {
             if (controller.signal.aborted || seq !== previewSeqRef.current) return;
+            if (isTrashedConflict(cause)) {
+              setEntryTrashedBlocked(true);
+              setStatus(t("entry_lifecycle.studio_entry_trashed_blocked"), true);
+              return;
+            }
             onApiError(cause, t("studio.cannot_create_a_page_builder_preview"));
           });
         return;
@@ -878,7 +914,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   };
 
   const handleSaveMode2 = async (intent?: 'draft' | 'published') => {
-    if (!active || !user || !csrfToken || !isMode2 || entryId === null || entryVersion === null || savingRef.current) return;
+    if (!active || !user || !csrfToken || !isMode2 || entryId === null || entryVersion === null || savingRef.current || entryTrashedBlocked) return;
 
     const refs = allNodes(entryDoc)
       .filter(node => node.kind === 'element' && isElement(node.node) && node.node.type === 'core/pattern_ref')
@@ -940,7 +976,10 @@ export const StudioWorkspace: React.FC<Props> = ({
             : t("studio.saved_and_published_changes_v_version", { version: currentVersion }),
       );
     } catch (cause) {
-      if (cause instanceof api.ApiClientError && cause.status === 412) {
+      if (isTrashedConflict(cause)) {
+        setEntryTrashedBlocked(true);
+        setStatus(t("entry_lifecycle.studio_entry_trashed_blocked"), true);
+      } else if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
         setStatus(t("studio.content_changed_in_another_session_412_your_page_builder_draft_is_retained"), true);
       } else {
@@ -1021,8 +1060,9 @@ export const StudioWorkspace: React.FC<Props> = ({
   void canDeleteElement;
 
   const canSaveMode2 =
-    entryDirty ||
-    (entryPublicationPolicy === 'draft_publish' && entryPublicationStatus === 'draft');
+    !entryTrashedBlocked &&
+    (entryDirty ||
+      (entryPublicationPolicy === 'draft_publish' && entryPublicationStatus === 'draft'));
 
   const builderActive = isMode2 || Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled);
   const handleCanvasMenu = (
@@ -1162,16 +1202,25 @@ export const StudioWorkspace: React.FC<Props> = ({
               </select>
             </div>
           )}
-          {(error || conflict || localeDraftBlocked) && (
+          {(error || conflict || localeDraftBlocked || entryTrashedBlocked) && (
             <div
               role="alert"
               data-testid="studio-sidebar-alert"
               className="flex items-center justify-between gap-2 border-b border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-800"
             >
-              <span className="min-w-0 flex-1 truncate" title={localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : notice || t("studio.data_version_conflict")}>
-                {localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : error && notice ? notice : t("studio.data_changed_on_the_server_412")}
+              <span className="min-w-0 flex-1 truncate" title={entryTrashedBlocked ? t("entry_lifecycle.studio_entry_trashed_blocked") : localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : notice || t("studio.data_version_conflict")}>
+                {entryTrashedBlocked ? t("entry_lifecycle.studio_entry_trashed_blocked") : localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : error && notice ? notice : t("studio.data_changed_on_the_server_412")}
               </span>
-              {(conflict || localeDraftBlocked) && (
+              {entryTrashedBlocked && !isPatternEntry ? (
+                <button
+                  type="button"
+                  data-testid="studio-open-trash-link"
+                  onClick={() => onNavigateHash(mode2TrashHash)}
+                  className="shrink-0 rounded border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100"
+                >
+                  {t("entry_lifecycle.open_trash_view")}
+                </button>
+              ) : (conflict || localeDraftBlocked) && (
                 <button
                   type="button"
                   onClick={handleReloadConflict}

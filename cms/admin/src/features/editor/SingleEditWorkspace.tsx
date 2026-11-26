@@ -4,11 +4,11 @@ import {
   createEntryComposite,
   createEntryTranslation,
   contentEntryPreviewPath,
-  deleteContentEntry,
   effectiveContentTypeSettings,
   getContentEntry,
   getEffectiveEditorConfig,
   listContentTypes,
+  trashContentEntry,
   type ContentTypeSettings,
   type EffectiveEditorConfigWithSettings,
   updateEntryComposite,
@@ -24,7 +24,7 @@ import {
   EMPTY_ADMIN_LOCALE_STATE,
   type AdminLocaleState,
 } from '../../api/locales.ts';
-import type { AuthUser } from '../../types.ts';
+import type { AuthUser, PluginLifecycleConfirmation as PluginLifecycleConfirmationDto } from '../../types.ts';
 import type {
   ContentFieldValue,
   EffectiveEditorConfigProjection,
@@ -35,6 +35,7 @@ import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
 import { MediaPicker } from '../media/MediaPicker.tsx';
 import { EntryListPage, entryTableHash, parseEntryTableHash, safePublicPath } from '../content/EntryListPage.tsx';
+import { PluginLifecycleConfirmation } from '../plugins/PluginLifecycleConfirmation.tsx';
 
 interface FieldMediaPickerTarget {
   fieldKey: string;
@@ -188,6 +189,13 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [actionOutputs, setActionOutputs] = useState<Record<string, string>>({});
   const [actionBusy, setActionBusy] = useState<Record<string, boolean>>({});
+  const [pendingActionConfirmation, setPendingActionConfirmation] = useState<{
+    pluginId: string;
+    actionId: string;
+    panelId: string;
+    confirmation: PluginLifecycleConfirmationDto;
+  } | null>(null);
+  const [trashedBlockedReason, setTrashedBlockedReason] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const saveInFlightRef = useRef(false);
   const [dirty, setDirty] = useState(false);
@@ -226,6 +234,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
 
   useEffect(() => {
     setMediaPicker(null);
+    setPendingActionConfirmation(null);
+    setTrashedBlockedReason(null);
   }, [mediaScopeKey]);
 
   const applyMediaSelection = (target: FieldMediaPickerTarget, ids: string[]) => {
@@ -468,6 +478,21 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         if (err instanceof ApiClientError && err.status === 401) {
           editorDraftStore.quarantineAll();
         }
+        // Direct URL load of a trashed or absent entry: block editing without discarding
+        // any authorized RAM draft, and offer direct navigation to the Trash view.
+        if (
+          mode === 'edit' &&
+          entryId !== null &&
+          err instanceof ApiClientError &&
+          (err.status === 404 || err.status === 409)
+        ) {
+          setConfig(null);
+          baselineRef.current = null;
+          draftRef.current = null;
+          setDirty(false);
+          setTrashedBlockedReason(err.message);
+          return;
+        }
         // Fail closed: do not leave the previous account/entry form visible.
         setConfig(null);
         baselineRef.current = null;
@@ -693,6 +718,14 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       }
       if (err instanceof ApiClientError && err.status === 412) {
         setStatusNote(tStatic("feature.editor.singleeditworkspace.version_or_schema_conflict_412_your_draft_is_retained"));
+      } else if (
+        err instanceof ApiClientError &&
+        err.status === 409 &&
+        (err.errorCode === 'entry.trashed' || err.message.includes('entry_trashed'))
+      ) {
+        // Entry was moved to Trash in another session: retain dirty RAM draft and direct user to Trash.
+        setTrashedBlockedReason(err.message);
+        setStatusNote(tStatic("entry_lifecycle.editor_entry_trashed_on_save"));
       } else if (err instanceof ApiClientError && err.status === 409) {
         setStatusNote(tStatic("feature.editor.singleeditworkspace.static_path_or_slug_conflict_409_choose_another_path"));
       }
@@ -721,6 +754,36 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   }
 
   if (!config) {
+    if (trashedBlockedReason) {
+      return (
+        <div
+          className="max-w-xl space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950"
+          role="alert"
+          data-testid="single-edit-trashed-guard"
+        >
+          <p className="font-semibold">{tStatic("entry_lifecycle.editor_entry_unavailable_title")}</p>
+          <p className="text-xs leading-5 text-amber-900">{trashedBlockedReason}</p>
+          <p className="text-xs text-amber-800">{tStatic("entry_lifecycle.editor_entry_unavailable_hint")}</p>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button
+              type="button"
+              data-testid="single-edit-open-trash-btn"
+              onClick={() => onNavigateHash(`${listHashPrefix}?status=trash`)}
+              className="inline-flex h-8 items-center rounded-md bg-od-accent px-3 text-xs font-medium text-white hover:bg-od-accent-hover"
+            >
+              {tStatic("entry_lifecycle.open_trash_view")}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateHash(listHashPrefix)}
+              className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
+            >
+              {tStatic("entry_lifecycle.back_to_list")}
+            </button>
+          </div>
+        </div>
+      );
+    }
     return <p className="text-sm text-slate-600">{tStatic("feature.editor.singleeditworkspace.loading_editor_configuration")}</p>;
   }
 
@@ -906,16 +969,16 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const handleDelete = async () => {
     const version = baselineRef.current?.version;
     if (entryId === null || version === null || version === undefined || !csrfToken || saving) return;
-    if (!window.confirm(tStatic("feature.editor.singleeditworkspace.permanently_delete_this_content_this_cannot_be_undone"))) return;
+    if (!window.confirm(tStatic("entry_lifecycle.confirm_move_to_trash_single"))) return;
     setSaving(true);
     try {
-      await deleteContentEntry(typeKey, entryId, version, csrfToken);
+      await trashContentEntry(typeKey, entryId, version, csrfToken);
       editorDraftStore.delete(draftKey);
       setDirty(false);
       onDirtyChange(false);
       onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)));
     } catch (err) {
-      onApiError(err, tStatic("api.postPage.delete_the_entry"));
+      onApiError(err, tStatic("api.content.trash_the_entry"));
     } finally {
       setSaving(false);
     }
@@ -927,6 +990,48 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
 
   return (
     <div className="space-y-3">
+      {trashedBlockedReason && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950"
+          role="alert"
+          data-testid="single-edit-trashed-banner"
+        >
+          <span>{trashedBlockedReason}</span>
+          <button
+            type="button"
+            data-testid="single-edit-banner-open-trash"
+            onClick={() => onNavigateHash(`${listHashPrefix}?status=trash`)}
+            className="inline-flex h-7 items-center rounded border border-amber-400 bg-white px-2.5 text-xs font-medium text-amber-950 hover:bg-amber-100"
+          >
+            {tStatic("entry_lifecycle.open_trash_view")}
+          </button>
+        </div>
+      )}
+      {pendingActionConfirmation && (
+        <PluginLifecycleConfirmation
+          pluginId={pendingActionConfirmation.pluginId}
+          actionId={pendingActionConfirmation.actionId}
+          confirmation={pendingActionConfirmation.confirmation}
+          csrfToken={csrfToken}
+          onResolved={res => {
+            const panelId = pendingActionConfirmation.panelId;
+            setPendingActionConfirmation(null);
+            setActionOutputs(prev => ({ ...prev, [panelId]: JSON.stringify(res, null, 2) }));
+          }}
+          onCancelled={res => {
+            const panelId = pendingActionConfirmation.panelId;
+            setPendingActionConfirmation(null);
+            setActionOutputs(prev => ({
+              ...prev,
+              [panelId]: res ? JSON.stringify(res, null, 2) : tStatic("plugin_lifecycle.cancelled_notice"),
+            }));
+          }}
+          onFailed={message => {
+            setPendingActionConfirmation(null);
+            setStatusNote(message);
+          }}
+        />
+      )}
       {statusNote && (
         <div className={statusNote.includes('(412)') || statusNote.includes('(409)')
           ? 'rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800'
@@ -1049,6 +1154,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         }}
         onRunAction={async (pluginId, actionId, panelId) => {
           if (!csrfToken) return;
+          setPendingActionConfirmation(null);
           setActionBusy(prev => ({ ...prev, [panelId]: true }));
           try {
             const res = await runPluginAction(
@@ -1059,7 +1165,16 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             );
             setActionOutputs(prev => ({ ...prev, [panelId]: JSON.stringify(res, null, 2) }));
           } catch (err) {
-            onApiError(err, tStatic("feature.editor.singleeditworkspace.error_running_plugin_action"));
+            if (err instanceof ApiClientError && err.confirmation) {
+              setPendingActionConfirmation({
+                pluginId,
+                actionId,
+                panelId,
+                confirmation: err.confirmation,
+              });
+            } else {
+              onApiError(err, tStatic("feature.editor.singleeditworkspace.error_running_plugin_action"));
+            }
           } finally {
             setActionBusy(prev => ({ ...prev, [panelId]: false }));
           }

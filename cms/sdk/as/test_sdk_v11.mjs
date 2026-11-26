@@ -283,4 +283,73 @@ for (const [which, expected] of [
   assert.deepEqual(res.outputJson, expected);
 }
 
-console.log("PASS test_sdk_v11.mjs: all ABI v1.1 (-2 readback), Envelope v1/v2, 15 Host Ops & output helper checks passed.");
+// 6. Test S02 entry lifecycle host ops (content_trash_get, content_trash_list, content_restore, content_purge)
+{
+  const res = await runHarness(
+    {
+      envelope_version: 2,
+      kind: "action",
+      event: "test/lifecycle_ops",
+      occurred_at_ms: 666,
+      correlation_id: "corr-lifecycle",
+      principal: "admin",
+      dispatch_depth: 0,
+      payload: {},
+    },
+    {
+      onHostCall(op) {
+        switch (op.op) {
+          case "content_trash_get":
+            assert.equal(op.type_key, "post");
+            assert.equal(op.entry_id, 100);
+            assert.equal(op.locale, "vi");
+            return {
+              ok: true,
+              data: {
+                entry: {
+                  id: 100,
+                  type_key: "post",
+                  locale: "vi",
+                  title: "Trashed Post",
+                  slug: "trashed-post",
+                  publication_status: "draft",
+                  version: 4,
+                  trashed_at: "2026-01-01T00:00:00Z",
+                },
+              },
+            };
+          case "content_trash_list":
+            assert.equal(op.type_key, "post");
+            assert.equal(op.locale, "vi");
+            assert.equal(op.limit, 15);
+            assert.equal(op.offset, 5);
+            return {
+              ok: true,
+              data: { items: [{ id: 100 }], total: 1, limit: 15, offset: 5 },
+            };
+          case "content_restore":
+            assert.equal(op.type_key, "post");
+            assert.equal(op.entry_id, 100);
+            assert.equal(op.expected_version, 4);
+            return { ok: true, data: { staged: true, operation: "restore", entry_id: 100 } };
+          case "content_purge":
+            assert.equal(op.type_key, "post");
+            assert.equal(op.entry_id, 101);
+            assert.equal(op.expected_version, 2);
+            return { ok: true, data: { staged: true, operation: "purge", entry_id: 101 } };
+          default:
+            throw new Error(`Unexpected lifecycle op: ${op.op}`);
+        }
+      },
+    }
+  );
+
+  assert.equal(res.code, 0);
+  assert.equal(res.recordedOps.length, 4);
+  assert.equal(res.outputJson.trash_get.data.entry.slug, "trashed-post");
+  assert.equal(res.outputJson.trash_list.data.total, 1);
+  assert.equal(res.outputJson.restore.data.operation, "restore");
+  assert.equal(res.outputJson.purge.data.operation, "purge");
+}
+
+console.log("PASS test_sdk_v11.mjs: all ABI v1.1 (-2 readback), Envelope v1/v2, 19 Host Ops & output helper checks passed.");

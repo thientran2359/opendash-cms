@@ -47,7 +47,7 @@ pub struct HostContext {
     pub execution_mode: HookExecutionMode,
     pub principal: ExecutionPrincipal,
     pub staged_content_command: Option<StagedContentCommand>,
-    pub staged_content_delete: Option<StagedContentDeleteCommand>,
+    pub staged_lifecycle_command: Option<StagedLifecycleCommand>,
     pub action_capabilities: Option<Vec<String>>,
 }
 
@@ -68,8 +68,17 @@ pub struct StagedContentCommand {
     pub term_ids: Option<Vec<i64>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StagedContentDeleteCommand {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StagedLifecycleOperation {
+    Trash,
+    Restore,
+    Purge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StagedLifecycleCommand {
+    pub operation: StagedLifecycleOperation,
     pub type_key: String,
     pub entry_id: i64,
     pub expected_version: i64,
@@ -93,7 +102,7 @@ impl HostContext {
     }
 
     fn has_content_stage(&self) -> bool {
-        self.staged_content_command.is_some() || self.staged_content_delete.is_some()
+        self.staged_content_command.is_some() || self.staged_lifecycle_command.is_some()
     }
 }
 
@@ -125,6 +134,21 @@ pub enum HostReadRequest {
         offset: Option<usize>,
         #[serde(default)]
         published_only: Option<bool>,
+    },
+    ContentTrashGet {
+        type_key: String,
+        entry_id: i64,
+        #[serde(default)]
+        locale: Option<String>,
+    },
+    ContentTrashList {
+        type_key: String,
+        #[serde(default)]
+        locale: Option<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+        #[serde(default)]
+        offset: Option<usize>,
     },
     TaxonomyList {
         kind: String,
@@ -199,6 +223,16 @@ pub enum HostOperationRequest {
         entry_id: i64,
         expected_version: i64,
     },
+    ContentRestore {
+        type_key: String,
+        entry_id: i64,
+        expected_version: i64,
+    },
+    ContentPurge {
+        type_key: String,
+        entry_id: i64,
+        expected_version: i64,
+    },
     ContentGet {
         type_key: String,
         entry_id: i64,
@@ -215,6 +249,21 @@ pub enum HostOperationRequest {
         offset: Option<usize>,
         #[serde(default)]
         published_only: Option<bool>,
+    },
+    ContentTrashGet {
+        type_key: String,
+        entry_id: i64,
+        #[serde(default)]
+        locale: Option<String>,
+    },
+    ContentTrashList {
+        type_key: String,
+        #[serde(default)]
+        locale: Option<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+        #[serde(default)]
+        offset: Option<usize>,
     },
     TaxonomyList {
         kind: String,
@@ -318,7 +367,7 @@ pub struct WorkerExecutionResult {
     #[serde(default)]
     pub staged_content_command: Option<StagedContentCommand>,
     #[serde(default)]
-    pub staged_content_delete: Option<StagedContentDeleteCommand>,
+    pub staged_lifecycle_command: Option<StagedLifecycleCommand>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -338,6 +387,7 @@ pub enum HostToWorkerFrame {
 pub fn check_read_policy(
     manifest: &PluginManifest,
     execution_mode: HookExecutionMode,
+    principal: ExecutionPrincipal,
     action_caps: Option<&[String]>,
     req: &HostReadRequest,
 ) -> Result<(), &'static str> {
@@ -382,6 +432,24 @@ pub fn check_read_policy(
                 && !caps.iter().any(|c| c == "content_read")
             {
                 return Err("permission_denied: action:content_read");
+            }
+        }
+        HostReadRequest::ContentTrashGet { type_key, .. }
+        | HostReadRequest::ContentTrashList { type_key, .. } => {
+            if execution_mode != HookExecutionMode::Standard {
+                return Err("content_trash_read chỉ được phép trong action mode.");
+            }
+            if !matches!(
+                principal,
+                ExecutionPrincipal::Admin | ExecutionPrincipal::Editor
+            ) {
+                return Err("permission_denied: authenticated_actor_required");
+            }
+            if !action_caps.is_some_and(|caps| caps.iter().any(|c| c == "content_trash_read")) {
+                return Err("permission_denied: action:content_trash_read");
+            }
+            if !manifest.can_read_trash_content_type(type_key) {
+                return Err("permission_denied: content_trash_read");
             }
         }
         HostReadRequest::TaxonomyList { .. } => {
@@ -489,10 +557,18 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
                     "Gọi HTTP ngoài bị cấm trong chế độ thực thi này.",
                 );
             }
-            if let Some(ref caps) = ctx.action_capabilities
-                && !caps.iter().any(|c| c == "http")
-            {
-                return HostOperationResponse::err("permission_denied: action:http");
+            if let Some(ref caps) = ctx.action_capabilities {
+                if caps
+                    .iter()
+                    .any(|c| c == "content_restore" || c == "content_purge")
+                {
+                    return HostOperationResponse::err(
+                        "permission_denied: http_forbidden_with_lifecycle_write",
+                    );
+                }
+                if !caps.iter().any(|c| c == "http") {
+                    return HostOperationResponse::err("permission_denied: action:http");
+                }
             }
             if let Ok(parsed) = url::Url::parse(&url) {
                 let path = parsed.path().to_ascii_lowercase();
@@ -528,7 +604,7 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             {
                 return HostOperationResponse::err("permission_denied: action:content_write");
             }
-            if ctx.has_any_kv_stage() || ctx.staged_content_delete.is_some() {
+            if ctx.has_any_kv_stage() || ctx.staged_lifecycle_command.is_some() {
                 return HostOperationResponse::err(
                     "ERR_MIXED_WRITE_SCOPE: Không cho phép trộn ghi nội dung với KV hoặc xóa nội dung trong cùng action.",
                 );
@@ -557,40 +633,35 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             type_key,
             entry_id,
             expected_version,
-        } => {
-            if ctx.execution_mode != HookExecutionMode::Standard {
-                return HostOperationResponse::err(
-                    "content_delete chỉ được phép trong action mode.",
-                );
-            }
-            if let Some(ref caps) = ctx.action_capabilities
-                && !caps.iter().any(|c| c == "content_delete")
-            {
-                return HostOperationResponse::err("permission_denied: action:content_delete");
-            }
-            if ctx.has_any_kv_stage() || ctx.staged_content_command.is_some() {
-                return HostOperationResponse::err(
-                    "ERR_MIXED_WRITE_SCOPE: Không cho phép trộn content_delete với KV hoặc content_save.",
-                );
-            }
-            if ctx.staged_content_delete.is_some() {
-                return HostOperationResponse::err(
-                    "Mỗi action chỉ được thực thi tối đa một lệnh content_delete.",
-                );
-            }
-            if !ctx.manifest.can_delete_content_type(&type_key) {
-                return HostOperationResponse::err("permission_denied: content_delete");
-            }
-            if entry_id <= 0 || expected_version < 1 {
-                return HostOperationResponse::err("entry_id hoặc expected_version không hợp lệ.");
-            }
-            ctx.staged_content_delete = Some(StagedContentDeleteCommand {
-                type_key,
-                entry_id,
-                expected_version,
-            });
-            HostOperationResponse::ok_data(json!({ "staged": true, "entry_id": entry_id }))
-        }
+        } => stage_lifecycle_command(
+            ctx,
+            StagedLifecycleOperation::Trash,
+            type_key,
+            entry_id,
+            expected_version,
+        ),
+        HostOperationRequest::ContentRestore {
+            type_key,
+            entry_id,
+            expected_version,
+        } => stage_lifecycle_command(
+            ctx,
+            StagedLifecycleOperation::Restore,
+            type_key,
+            entry_id,
+            expected_version,
+        ),
+        HostOperationRequest::ContentPurge {
+            type_key,
+            entry_id,
+            expected_version,
+        } => stage_lifecycle_command(
+            ctx,
+            StagedLifecycleOperation::Purge,
+            type_key,
+            entry_id,
+            expected_version,
+        ),
         HostOperationRequest::ContentGet {
             type_key,
             entry_id,
@@ -617,6 +688,32 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
                 limit,
                 offset,
                 published_only,
+            },
+        ),
+        HostOperationRequest::ContentTrashGet {
+            type_key,
+            entry_id,
+            locale,
+        } => dispatch_host_read(
+            ctx,
+            HostReadRequest::ContentTrashGet {
+                type_key,
+                entry_id,
+                locale,
+            },
+        ),
+        HostOperationRequest::ContentTrashList {
+            type_key,
+            locale,
+            limit,
+            offset,
+        } => dispatch_host_read(
+            ctx,
+            HostReadRequest::ContentTrashList {
+                type_key,
+                locale,
+                limit,
+                offset,
             },
         ),
         HostOperationRequest::TaxonomyList {
@@ -670,6 +767,92 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
     }
 }
 
+fn stage_lifecycle_command(
+    ctx: &mut HostContext,
+    operation: StagedLifecycleOperation,
+    type_key: String,
+    entry_id: i64,
+    expected_version: i64,
+) -> HostOperationResponse {
+    if ctx.execution_mode != HookExecutionMode::Standard {
+        return HostOperationResponse::err(match operation {
+            StagedLifecycleOperation::Trash => "content_delete chỉ được phép trong action mode.",
+            StagedLifecycleOperation::Restore => "content_restore chỉ được phép trong action mode.",
+            StagedLifecycleOperation::Purge => "content_purge chỉ được phép trong action mode.",
+        });
+    }
+    if !matches!(
+        ctx.principal,
+        ExecutionPrincipal::Admin | ExecutionPrincipal::Editor
+    ) {
+        return HostOperationResponse::err("permission_denied: authenticated_actor_required");
+    }
+    if operation == StagedLifecycleOperation::Purge && ctx.principal != ExecutionPrincipal::Admin {
+        return HostOperationResponse::err("permission_denied: admin_required");
+    }
+    let (cap_name, has_manifest_perm) = match operation {
+        StagedLifecycleOperation::Trash => (
+            "content_delete",
+            ctx.manifest.can_delete_content_type(&type_key),
+        ),
+        StagedLifecycleOperation::Restore => (
+            "content_restore",
+            ctx.manifest.can_restore_content_type(&type_key),
+        ),
+        StagedLifecycleOperation::Purge => (
+            "content_purge",
+            ctx.manifest.can_purge_content_type(&type_key),
+        ),
+    };
+    let cap_allowed = match operation {
+        // Legacy content_delete checks declared action capabilities when present; new restore/purge
+        // require an explicit declared action (never unrestricted /run).
+        StagedLifecycleOperation::Trash => ctx
+            .action_capabilities
+            .as_deref()
+            .is_none_or(|caps| caps.iter().any(|c| c == cap_name)),
+        StagedLifecycleOperation::Restore | StagedLifecycleOperation::Purge => ctx
+            .action_capabilities
+            .as_deref()
+            .is_some_and(|caps| caps.iter().any(|c| c == cap_name)),
+    };
+    if !cap_allowed {
+        return HostOperationResponse::err(format!("permission_denied: action:{cap_name}"));
+    }
+    if ctx.has_any_kv_stage() || ctx.staged_content_command.is_some() {
+        return HostOperationResponse::err(
+            "ERR_MIXED_WRITE_SCOPE: Không cho phép trộn thao tác vòng đời nội dung với KV hoặc content_save.",
+        );
+    }
+    if ctx.staged_lifecycle_command.is_some() {
+        return HostOperationResponse::err(
+            "Mỗi action chỉ được thực thi tối đa một lệnh vòng đời nội dung.",
+        );
+    }
+    if !has_manifest_perm {
+        return HostOperationResponse::err(format!("permission_denied: {cap_name}"));
+    }
+    if entry_id <= 0 || expected_version < 1 {
+        return HostOperationResponse::err("entry_id hoặc expected_version không hợp lệ.");
+    }
+    let op_str = match operation {
+        StagedLifecycleOperation::Trash => "trash",
+        StagedLifecycleOperation::Restore => "restore",
+        StagedLifecycleOperation::Purge => "purge",
+    };
+    ctx.staged_lifecycle_command = Some(StagedLifecycleCommand {
+        operation,
+        type_key,
+        entry_id,
+        expected_version,
+    });
+    HostOperationResponse::ok_data(json!({
+        "staged": true,
+        "operation": op_str,
+        "entry_id": entry_id,
+    }))
+}
+
 fn dispatch_host_read(ctx: &HostContext, req: HostReadRequest) -> HostOperationResponse {
     if ctx.is_cancelled() {
         return HostOperationResponse::err("Quá thời gian thực thi (deadline exceeded).");
@@ -677,6 +860,7 @@ fn dispatch_host_read(ctx: &HostContext, req: HostReadRequest) -> HostOperationR
     if let Err(msg) = check_read_policy(
         &ctx.manifest,
         ctx.execution_mode,
+        ctx.principal,
         ctx.action_capabilities.as_deref(),
         &req,
     ) {
@@ -737,6 +921,7 @@ fn handle_kv_get(ctx: &mut HostContext, key: &str) -> HostOperationResponse {
     if let Err(msg) = check_read_policy(
         &ctx.manifest,
         ctx.execution_mode,
+        ctx.principal,
         ctx.action_capabilities.as_deref(),
         &HostReadRequest::KvGet {
             key: key.to_string(),
@@ -1027,7 +1212,7 @@ mod egress_quota_tests {
             execution_mode: HookExecutionMode::Standard,
             principal: ExecutionPrincipal::Admin,
             staged_content_command: None,
-            staged_content_delete: None,
+            staged_lifecycle_command: None,
             action_capabilities: caps,
         }
     }

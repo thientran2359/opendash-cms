@@ -1083,6 +1083,8 @@ pub(crate) async fn list_entries_for_host(
     Ok(result)
 }
 
+/// Legacy plugin `content_delete` wrapper: at S02 activation routes to recoverable Trash
+/// through the shared lifecycle transaction while preserving role & plugin generation fences.
 pub async fn delete_entry_with_plugin_fence(
     db: &SqlitePool,
     actor: &crate::auth::SessionContext,
@@ -1090,47 +1092,20 @@ pub async fn delete_entry_with_plugin_fence(
     entry_id: i64,
     expected_version: i64,
     fence: &crate::storage::entries::PluginActionFence,
-) -> crate::error::ApiResult<()> {
-    use crate::error::ApiError;
-    if matches!(type_key, "pattern" | "section") {
-        return Err(ApiError::bad_request(
-            "Không thể xóa Pattern/Section qua action plugin.",
-        ));
-    }
-    if expected_version < 1 {
-        return Err(ApiError::bad_request("expected_version không hợp lệ."));
-    }
-    let mut tx = db.begin().await?;
-    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
-        .execute(&mut *tx)
-        .await?;
-    if !is_plugin_generation_active(&mut *tx, &fence.plugin_id, fence.expected_generation).await? {
-        return Err(ApiError::conflict(
-            "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc thực thi.",
-        ));
-    }
-    if !is_actor_role_active(&mut *tx, actor.user.id, &fence.required_role).await? {
-        return Err(ApiError::forbidden("Quyền của tài khoản đã bị thu hồi."));
-    }
-    let Some(row) =
-        super::entry_lifecycle::load_retained_entry_identity_in_tx(&mut tx, type_key, entry_id)
-            .await?
-    else {
-        return Err(ApiError::not_found("Không tìm thấy nội dung cần xóa."));
+) -> crate::error::ApiResult<super::entry_lifecycle::EntryCommitReceipt> {
+    let cmd = super::entry_lifecycle::LifecycleCommand {
+        operation: super::entry_lifecycle::LifecycleOperation::Trash,
+        type_key: type_key.to_owned(),
+        entry_id,
+        expected_version,
     };
-    if row.version != expected_version {
-        return Err(ApiError::precondition_failed(
-            "Nội dung đã bị thay đổi trước đó (xung đột version).",
-        ));
-    }
-    if row.trashed_at.is_some() {
-        return Err(ApiError::conflict(
-            "entry_trashed: Nội dung đang ở trong Thùng rác và không thể xóa theo luồng thường.",
-        ));
-    }
-    super::entry_lifecycle::physical_delete_cleanup_in_tx(&mut tx, &row).await?;
-    tx.commit().await?;
-    Ok(())
+    let authority = super::entry_lifecycle::LifecycleAuthority {
+        session: actor,
+        plugin_fence: Some(fence),
+        confirmation: super::entry_lifecycle::LifecycleConfirmationEvidence::None,
+        scope: super::entry_lifecycle::LifecycleScope::Ordinary,
+    };
+    super::entry_lifecycle::execute_lifecycle_transition(db, &cmd, &authority).await
 }
 
 pub async fn is_actor_role_active(

@@ -2,6 +2,7 @@ import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { getPluginUiSchema, invokePluginAction } from '../../api/plugins.ts';
+import type { PluginLifecycleConfirmation as PluginLifecycleConfirmationDto } from '../../types.ts';
 import {
   CheckboxField,
   SelectField,
@@ -15,6 +16,7 @@ import {
   type DeclarativeUiSchemaV1,
   type UiNode,
 } from './declarativeSchema.ts';
+import { PluginLifecycleConfirmation } from './PluginLifecycleConfirmation.tsx';
 
 interface DeclarativePluginUiProps {
   pluginId: string;
@@ -35,6 +37,10 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
   const [loadError, setLoadError] = useState<string>('');
   const [actionResult, setActionResult] = useState<string>('');
   const [actionError, setActionError] = useState<string>('');
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    actionId: string;
+    confirmation: PluginLifecycleConfirmationDto;
+  } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [, setDraftTick] = useState<number>(0);
   const submittingRef = useRef<boolean>(false);
@@ -42,12 +48,14 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
   useEffect(() => {
     if (!pluginId) {
       setSchema(null);
+      setPendingConfirmation(null);
       return;
     }
     const controller = new AbortController();
     setLoadError('');
     setActionResult('');
     setActionError('');
+    setPendingConfirmation(null);
     getPluginUiSchema(pluginId, controller.signal)
       .then(data => {
         const validated = validateDeclarativeSchemaV1(data);
@@ -83,6 +91,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
     setIsSubmitting(true);
     setActionError('');
     setActionResult('');
+    setPendingConfirmation(null);
 
     const draftKey = buildDraftKey(
       schema.plugin_id,
@@ -109,6 +118,8 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
         // Keep draft in memory; never auto-resubmit after re-login.
         onUnauthorized();
         setActionError(tStatic('feature.plugins.declarativepluginui.your_session_has_expired_401_sign_in_again_the_draft_has_been_retained'));
+      } else if (err instanceof ApiClientError && err.confirmation) {
+        setPendingConfirmation({ actionId, confirmation: err.confirmation });
       } else if (err instanceof ApiClientError) {
         const codeLabel = [403, 412, 422].includes(err.status) ? ` (${err.status})` : '';
         setActionError(`${err.message}${codeLabel}`);
@@ -265,6 +276,35 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
         </div>
       )}
       {activeScreen.nodes.map(node => renderNode(node, 'default'))}
+      {pendingConfirmation && (
+        <div className="mt-3">
+          <PluginLifecycleConfirmation
+            pluginId={schema.plugin_id}
+            actionId={pendingConfirmation.actionId}
+            confirmation={pendingConfirmation.confirmation}
+            csrfToken={csrfToken}
+            onUnauthorized={onUnauthorized}
+            onResolved={result => {
+              setPendingConfirmation(null);
+              setActionError('');
+              setActionResult(JSON.stringify(result, null, 2));
+            }}
+            onCancelled={result => {
+              setPendingConfirmation(null);
+              setActionError('');
+              setActionResult(
+                result
+                  ? JSON.stringify(result, null, 2)
+                  : translate('plugin_lifecycle.cancelled_notice'),
+              );
+            }}
+            onFailed={message => {
+              setPendingConfirmation(null);
+              setActionError(message);
+            }}
+          />
+        </div>
+      )}
       {actionError && <div className="notice notice-error">{actionError}</div>}
       {actionResult && <pre>{actionResult}</pre>}
     </section>

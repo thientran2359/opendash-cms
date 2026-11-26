@@ -103,46 +103,86 @@ export interface ContentEntryRecord extends ContentEntryInput {
   translations?: TranslationLinkSummary[];
 }
 
-/** M7-S16-T05: authenticated, ACL-projected server-side table result. */
+export type ProjectionOutcome =
+  | { status: 'not_needed' }
+  | { status: 'current' }
+  | { status: 'failed'; reason: string };
+
+export interface SecondaryOutcome {
+  projection: ProjectionOutcome;
+  hook_enqueued: number;
+  hook_dropped: number;
+}
+
+export interface LifecycleSummary {
+  id: number;
+  type_key: string;
+  locale: string;
+  version: number;
+  publication_status: 'draft' | 'published';
+  trashed_at: string | null;
+  published_at: string | null;
+  secondary?: SecondaryOutcome;
+}
+
+export interface EntryRowCapabilities {
+  edit: boolean;
+  quick_edit: boolean;
+  publish: boolean;
+  unpublish: boolean;
+  trash: boolean;
+  restore: boolean;
+  immediate_public_restore: boolean;
+  purge: boolean;
+}
+
+/** M7-S16-T05 + S02: authenticated, ACL-projected server-side table result. */
 export interface EntryTableRow {
   id: number;
   type_key: string;
   title: string;
   slug: string;
   publication_status: 'draft' | 'published';
+  lifecycle?: 'active' | 'trash';
   version: number;
   created_at: string;
   updated_at: string;
+  published_at?: string | null;
+  trashed_at?: string | null;
   term_ids: number[];
   locale?: string;
   translation_group_id?: string;
-  /** Null for draft or any entry without a publicly routable URL. */
+  /** Null for draft, Trash, or any entry without a publicly routable URL. */
   public_url: string | null;
-  /** Only custom fields the current actor is authorized to read. */
+  /** Only custom fields the current actor is authorized to read (empty for Trash). */
   fields: Record<string, ContentFieldValue>;
+  capabilities?: EntryRowCapabilities;
+  blocked_reasons?: Record<string, string>;
 }
 
 export interface EntryTableResult {
   schema_version: 1;
   items: EntryTableRow[];
   total: number;
-  status_counts: { all: number; draft: number; published: number };
+  status_counts: { all: number; draft: number; published: number; trash?: number };
   limit: number;
   offset: number;
+  schema_token?: string | null;
 }
 
 export interface EntryTableQuery {
   q?: string;
-  status?: 'all' | 'draft' | 'published';
+  status?: 'all' | 'draft' | 'published' | 'trash';
   locale?: string;
   category_id?: number;
   tag_id?: number;
   include_descendants?: boolean;
   updated_month?: string;
-  sort?: 'title' | 'created_at' | 'updated_at' | 'id';
+  sort?: 'title' | 'created_at' | 'updated_at' | 'trashed_at' | 'id';
   order?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+  retained_trash?: boolean;
 }
 
 export interface UserFieldGroupInput {

@@ -24,7 +24,6 @@ use crate::{
 
 /// Shared storage-owned SQL lifecycle fragments for explicit alias application.
 pub(crate) const ACTIVE_ENTRY_PREDICATE: &str = "e.trashed_at IS NULL";
-#[allow(dead_code)]
 pub(crate) const TRASHED_ENTRY_PREDICATE: &str = "e.trashed_at IS NOT NULL";
 pub(crate) const ACTIVE_ENTRY_UNALIASED: &str = "trashed_at IS NULL";
 
@@ -116,7 +115,6 @@ pub struct LifecycleAuthority<'a> {
 /// Secondary post-commit projection work outcome, kept separate from durable DB commit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-#[allow(dead_code)]
 pub enum ProjectionOutcome {
     NotNeeded,
     Current,
@@ -125,7 +123,6 @@ pub enum ProjectionOutcome {
 
 /// Bounded post-commit secondary work summary returned alongside committed responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[allow(dead_code)]
 pub struct SecondaryOutcome {
     pub projection: ProjectionOutcome,
     pub hook_enqueued: u32,
@@ -133,7 +130,6 @@ pub struct SecondaryOutcome {
 }
 
 impl SecondaryOutcome {
-    #[allow(dead_code)]
     pub fn none() -> Self {
         Self {
             projection: ProjectionOutcome::NotNeeded,
@@ -141,6 +137,69 @@ impl SecondaryOutcome {
             hook_dropped: 0,
         }
     }
+}
+
+/// Authorized HTTP response summary for Trash and Restore transitions.
+/// Deliberately excludes entry body, private values, and public URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LifecycleSummary {
+    pub id: i64,
+    pub type_key: String,
+    pub locale: String,
+    pub version: i64,
+    pub publication_status: String,
+    pub trashed_at: Option<String>,
+    pub published_at: Option<String>,
+    pub secondary: SecondaryOutcome,
+}
+
+impl LifecycleSummary {
+    pub fn from_receipt(receipt: &EntryCommitReceipt, secondary: SecondaryOutcome) -> Self {
+        Self {
+            id: receipt.id,
+            type_key: receipt.type_key.clone(),
+            locale: receipt.locale.clone(),
+            version: receipt
+                .version_after
+                .or(receipt.version_before)
+                .unwrap_or(1),
+            publication_status: receipt
+                .publication_after
+                .clone()
+                .or_else(|| receipt.publication_before.clone())
+                .unwrap_or_else(|| "draft".into()),
+            trashed_at: receipt.trashed_at.clone(),
+            published_at: receipt.published_at.clone(),
+            secondary,
+        }
+    }
+}
+
+/// Bounded metadata-only Trash entry view returned to authorized plugins (`content_trash_get`/`list`).
+/// Never includes body, field values, SEO private data, or public URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TrashEntryMetadata {
+    pub id: i64,
+    pub type_key: String,
+    pub locale: String,
+    pub title: String,
+    pub slug: String,
+    pub publication_status: String,
+    pub version: i64,
+    pub trashed_at: String,
+    pub published_at: Option<String>,
+}
+
+/// Read-snapshot preflight result used by plugin confirmation creation (holds no writer lock).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LifecycleConfirmationPreview {
+    pub type_key: String,
+    pub entry_id: i64,
+    pub locale: String,
+    pub title: String,
+    pub slug: String,
+    pub version: i64,
+    pub needs_confirmation: bool,
 }
 
 /// Private storage-scope snapshot of a retained entry row loaded under a reserved writer
@@ -855,8 +914,6 @@ pub(super) async fn apply_lifecycle_in_tx(
 
 /// Storage wrapper that reserves the SQLite writer, executes `apply_lifecycle_in_tx`,
 /// commits the transaction, and returns the trusted `EntryCommitReceipt`.
-///
-/// S01 exposes this at crate/integration-test storage boundary only (not yet via HTTP/guest).
 pub async fn execute_lifecycle_transition(
     db: &SqlitePool,
     command: &LifecycleCommand,
@@ -869,6 +926,372 @@ pub async fn execute_lifecycle_transition(
     let receipt = apply_lifecycle_in_tx(&mut tx, command, authority).await?;
     tx.commit().await?;
     Ok(receipt)
+}
+
+/// Recomputes post-commit projections without ever turning a durable DB commit into a failure.
+pub async fn recompute_projections_nonfatal(
+    db: &SqlitePool,
+    hooks: &crate::hooks::HookDispatcher,
+    entry_id: i64,
+    needed: bool,
+) -> ProjectionOutcome {
+    if !needed {
+        return ProjectionOutcome::NotNeeded;
+    }
+    match crate::storage::plugin_projections::recompute_entry_projections(db, hooks, entry_id).await
+    {
+        Ok(()) => ProjectionOutcome::Current,
+        Err(err) => {
+            eprintln!(
+                "projection_recompute_failed entry_id={entry_id} status={}",
+                err.0.as_u16()
+            );
+            ProjectionOutcome::Failed {
+                reason: "projection_recompute_failed".into(),
+            }
+        }
+    }
+}
+
+/// Loads all currently assigned Reading page IDs across all retained `site_reading_settings` rows
+/// within the caller's read transaction so active table rows can expose exact blocked reasons.
+pub(crate) async fn load_assigned_reading_page_ids_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+) -> ApiResult<HashSet<i64>> {
+    let rows: Vec<(Option<i64>, Option<i64>)> =
+        sqlx::query_as("SELECT homepage_page_id, posts_page_id FROM site_reading_settings")
+            .fetch_all(&mut **tx)
+            .await?;
+    let mut ids = HashSet::new();
+    for (home, posts) in rows {
+        if let Some(id) = home {
+            ids.insert(id);
+        }
+        if let Some(id) = posts {
+            ids.insert(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// Read-only snapshot preflight for plugin `content_restore` / `content_purge` confirmation creation.
+/// Validates authority, plugin fence, active CPT, CAS (412 before 409), trashed state, locale, and
+/// determines whether explicit host confirmation is required without holding a SQLite writer.
+pub async fn preflight_plugin_lifecycle_confirmation(
+    db: &SqlitePool,
+    session: &SessionContext,
+    command: &LifecycleCommand,
+    fence: &PluginActionFence,
+) -> ApiResult<LifecycleConfirmationPreview> {
+    if !valid_content_type_key(&command.type_key) {
+        return Err(ApiError::bad_request("Khóa loại nội dung không hợp lệ."));
+    }
+    if matches!(command.type_key.as_str(), "pattern" | "section") {
+        return Err(ApiError::forbidden(
+            "entry_lifecycle_forbidden: Không hỗ trợ thao tác vòng đời chung cho Pattern hoặc Section.",
+        ));
+    }
+    if command.entry_id < 1 {
+        return Err(ApiError::bad_request("ID nội dung không hợp lệ."));
+    }
+    if command.expected_version < 1 {
+        return Err(ApiError::bad_request("expected_version không hợp lệ."));
+    }
+    if command.operation == LifecycleOperation::Purge && session.user.role != Role::Admin {
+        return Err(ApiError::forbidden(
+            "entry_purge_forbidden: Chỉ Quản trị viên được phép xóa vĩnh viễn nội dung.",
+        ));
+    }
+
+    let mut tx = db.begin().await?;
+    verify_live_session_and_role_in_tx(&mut tx, session).await?;
+    verify_plugin_fence_in_tx(&mut tx, session, fence).await?;
+
+    let ct_row: Option<(String, String)> = sqlx::query_as(
+        "SELECT provider_status, declaration_state FROM content_types WHERE key = ?",
+    )
+    .bind(&command.type_key)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((provider_status, declaration_state)) = ct_row else {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    };
+    if provider_status != "active" || declaration_state != "declared" {
+        return Err(ApiError::conflict(
+            "provider_inactive: Loại nội dung hiện không hoạt động hoặc đã bị thu hồi.",
+        ));
+    }
+
+    let Some(row) =
+        load_retained_entry_identity_in_tx(&mut tx, &command.type_key, command.entry_id).await?
+    else {
+        return Err(ApiError::not_found("Không tìm thấy nội dung."));
+    };
+    if row.version != command.expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi thao tác.",
+        ));
+    }
+    if row.trashed_at.is_none() {
+        return Err(ApiError::conflict(match command.operation {
+            LifecycleOperation::Purge => {
+                "entry_not_trashed: Chỉ có thể xóa vĩnh viễn nội dung đã nằm trong Thùng rác."
+            }
+            _ => "entry_not_trashed: Nội dung hiện không nằm trong Thùng rác.",
+        }));
+    }
+
+    let locale_row: Option<(i64, Option<String>)> =
+        sqlx::query_as("SELECT enabled, deleted_at FROM site_locales WHERE code = ?")
+            .bind(&row.locale)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((locale_enabled, locale_deleted_at)) = locale_row else {
+        return Err(ApiError::conflict(
+            "locale_deleted: Ngôn ngữ của nội dung đã bị xóa; hãy xử lý trong mục bảo trì ngôn ngữ.",
+        ));
+    };
+    if locale_deleted_at.is_some() {
+        return Err(ApiError::conflict(
+            "locale_deleted: Ngôn ngữ của nội dung đã bị xóa; hãy xử lý trong mục bảo trì ngôn ngữ.",
+        ));
+    }
+
+    let needs_confirmation = match command.operation {
+        LifecycleOperation::Purge => true,
+        LifecycleOperation::Restore => {
+            if locale_enabled == 0 {
+                return Err(ApiError::conflict(
+                    "locale_disabled: Không thể khôi phục khi ngôn ngữ của nội dung đang tắt.",
+                ));
+            }
+            let Some(effective) = crate::storage::content::load_effective_content_schema_in_tx(
+                &mut *tx,
+                &row.type_key,
+            )
+            .await?
+            else {
+                return Err(ApiError::conflict(
+                    "provider_inactive: Không thể tải schema hiện hành của loại nội dung.",
+                ));
+            };
+            validate_restore_compatibility_in_tx(&mut tx, &row, &effective).await?;
+            effective.base.descriptor.settings.publication == ContentPublication::Immediate
+                && effective.base.descriptor.settings.public
+        }
+        LifecycleOperation::Trash => false,
+    };
+
+    tx.commit().await?;
+    Ok(LifecycleConfirmationPreview {
+        type_key: row.type_key,
+        entry_id: row.id,
+        locale: row.locale,
+        title: row.title,
+        slug: row.slug,
+        version: row.version,
+        needs_confirmation,
+    })
+}
+
+/// Authorized plugin metadata-only single Trash lookup (`content_trash_get`).
+/// Scoped to active ordinary CPTs and currently manageable (non-deleted) locales only.
+pub async fn get_trashed_entry_metadata_for_host(
+    db: &SqlitePool,
+    type_key: &str,
+    entry_id: i64,
+    locale: Option<&str>,
+) -> ApiResult<Option<TrashEntryMetadata>> {
+    if !valid_content_type_key(type_key) || matches!(type_key, "pattern" | "section") {
+        return Ok(None);
+    }
+    if entry_id < 1 {
+        return Ok(None);
+    }
+    let mut tx = db.begin().await?;
+    let ct_active: Option<(String, String)> = sqlx::query_as(
+        "SELECT provider_status, declaration_state FROM content_types WHERE key = ?",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((provider_status, declaration_state)) = ct_active else {
+        return Ok(None);
+    };
+    if provider_status != "active" || declaration_state != "declared" {
+        return Ok(None);
+    }
+    let resolved_locale = match locale {
+        Some(raw) => Some(
+            crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, Some(raw)).await?,
+        ),
+        None => None,
+    };
+    type Row = (
+        i64,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        Option<String>,
+    );
+    let sql = format!(
+        "SELECT e.id, e.content_type_key, e.locale, e.title, e.slug,
+                e.publication_status, e.version, e.trashed_at, e.published_at
+           FROM content_entries e
+          WHERE e.content_type_key = ?
+            AND e.id = ?
+            AND {TRASHED_ENTRY_PREDICATE}
+            AND (? IS NULL OR e.locale = ?)
+            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)"
+    );
+    let row: Option<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(type_key)
+        .bind(entry_id)
+        .bind(resolved_locale.as_deref())
+        .bind(resolved_locale.as_deref())
+        .fetch_optional(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(row.map(
+        |(
+            id,
+            type_key,
+            locale,
+            title,
+            slug,
+            publication_status,
+            version,
+            trashed_at,
+            published_at,
+        )| {
+            TrashEntryMetadata {
+                id,
+                type_key,
+                locale,
+                title,
+                slug,
+                publication_status,
+                version,
+                trashed_at,
+                published_at,
+            }
+        },
+    ))
+}
+
+/// Authorized plugin metadata-only Trash list (`content_trash_list`) in one read snapshot.
+/// Deterministic ordering: `trashed_at DESC, id DESC`.
+pub async fn list_trashed_entries_metadata_for_host(
+    db: &SqlitePool,
+    type_key: &str,
+    locale: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> ApiResult<(Vec<TrashEntryMetadata>, i64)> {
+    if !valid_content_type_key(type_key) || matches!(type_key, "pattern" | "section") {
+        return Ok((Vec::new(), 0));
+    }
+    let clamped_limit = limit.clamp(1, 50);
+    let clamped_offset = offset.clamp(0, 10_000);
+
+    let mut tx = db.begin().await?;
+    let ct_active: Option<(String, String)> = sqlx::query_as(
+        "SELECT provider_status, declaration_state FROM content_types WHERE key = ?",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((provider_status, declaration_state)) = ct_active else {
+        return Ok((Vec::new(), 0));
+    };
+    if provider_status != "active" || declaration_state != "declared" {
+        return Ok((Vec::new(), 0));
+    }
+    let resolved_locale = match locale {
+        Some(raw) => Some(
+            crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, Some(raw)).await?,
+        ),
+        None => None,
+    };
+
+    let count_sql = format!(
+        "SELECT COUNT(*)
+           FROM content_entries e
+          WHERE e.content_type_key = ?
+            AND {TRASHED_ENTRY_PREDICATE}
+            AND (? IS NULL OR e.locale = ?)
+            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)"
+    );
+    let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(count_sql))
+        .bind(type_key)
+        .bind(resolved_locale.as_deref())
+        .bind(resolved_locale.as_deref())
+        .fetch_one(&mut *tx)
+        .await?;
+
+    type Row = (
+        i64,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        Option<String>,
+    );
+    let rows_sql = format!(
+        "SELECT e.id, e.content_type_key, e.locale, e.title, e.slug,
+                e.publication_status, e.version, e.trashed_at, e.published_at
+           FROM content_entries e
+          WHERE e.content_type_key = ?
+            AND {TRASHED_ENTRY_PREDICATE}
+            AND (? IS NULL OR e.locale = ?)
+            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)
+          ORDER BY e.trashed_at DESC, e.id DESC
+          LIMIT ? OFFSET ?"
+    );
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(rows_sql))
+        .bind(type_key)
+        .bind(resolved_locale.as_deref())
+        .bind(resolved_locale.as_deref())
+        .bind(clamped_limit)
+        .bind(clamped_offset)
+        .fetch_all(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    let items = rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                type_key,
+                locale,
+                title,
+                slug,
+                publication_status,
+                version,
+                trashed_at,
+                published_at,
+            )| TrashEntryMetadata {
+                id,
+                type_key,
+                locale,
+                title,
+                slug,
+                publication_status,
+                version,
+                trashed_at,
+                published_at,
+            },
+        )
+        .collect();
+    Ok((items, total))
 }
 
 #[cfg(test)]

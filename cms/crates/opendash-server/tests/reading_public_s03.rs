@@ -328,7 +328,9 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
             .fetch_one(&db)
             .await
             .unwrap();
-    let deleted = client
+    // S02: deleting/trashing a Page still assigned in Reading Settings must be rejected (409)
+    // and leave site_reading_settings version untouched.
+    let blocked_delete = client
         .delete(format!(
             "{}/api/admin/content-types/page/entries/{blog}",
             site.base
@@ -339,15 +341,41 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
         .send()
         .await
         .unwrap();
-    assert!(deleted.status().is_success(), "{}", deleted.status());
-    let (saved_home, saved_blog, version_after): (Option<i64>, Option<i64>, i64) = sqlx::query_as(
-        "SELECT homepage_page_id,posts_page_id,version FROM site_reading_settings WHERE locale='vi'",
-    )
-    .fetch_one(&db)
-    .await
-    .unwrap();
+    assert_eq!(blocked_delete.status(), StatusCode::CONFLICT);
+    let (saved_home, saved_blog, version_unchanged): (Option<i64>, Option<i64>, i64) =
+        sqlx::query_as(
+            "SELECT homepage_page_id,posts_page_id,version FROM site_reading_settings WHERE locale='vi'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
     assert_eq!((saved_home, saved_blog), (Some(home), Some(blog)));
-    assert_eq!(version_after, version_before + 1);
+    assert_eq!(version_unchanged, version_before);
+
+    // Reassign Reading Settings to clear posts_page_id, then trash and purge the Page cleanly.
+    let reassigned = client
+        .put(format!("{}/api/admin/settings/reading", site.base))
+        .header(header::COOKIE, &cookie)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{version_before}\""))
+        .json(&json!({"homepage_page_id":null,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reassigned.status(), StatusCode::OK);
+
+    let trashed = client
+        .delete(format!(
+            "{}/api/admin/content-types/page/entries/{blog}",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{blog_version}\""))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(trashed.status(), StatusCode::NO_CONTENT);
     let missing_blog = client
         .get(format!("{}/s03-blog", site.base))
         .send()
@@ -358,16 +386,35 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
         missing_blog.headers().get("X-Robots-Tag").unwrap(),
         "noindex"
     );
-    let sitemap_after_delete = client
+    let sitemap_after_trash = client
         .get(format!("{}/sitemaps/1.xml", site.base))
         .send()
         .await
         .unwrap();
-    assert_eq!(sitemap_after_delete.status(), StatusCode::OK);
-    let xml_after_delete = sitemap_after_delete.text().await.unwrap();
-    assert!(
-        !xml_after_delete.contains("/s03-blog"),
-        "{xml_after_delete}"
-    );
+    assert_eq!(sitemap_after_trash.status(), StatusCode::OK);
+    let xml_after_trash = sitemap_after_trash.text().await.unwrap();
+    assert!(!xml_after_trash.contains("/s03-blog"), "{xml_after_trash}");
+
+    // Explicit Admin Purge removes the trashed Page physically and cleans up cleanly.
+    let purged = client
+        .delete(format!(
+            "{}/api/admin/content-types/page/entries/{blog}/purge",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{}\"", blog_version + 1))
+        .header("X-Confirm-Purge", "true")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(purged.status(), StatusCode::NO_CONTENT);
+    let remaining_blog: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM content_entries WHERE id = ?")
+            .bind(blog)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(remaining_blog, 0);
     db.close().await;
 }

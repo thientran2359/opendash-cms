@@ -260,16 +260,23 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     checks.append('bulk_draft_versioned_write_and_public_view_removed')
 
                     root.get_by_label(f'Select item #{target["id"]}').check()
-                    verify = accept_once(page, 'permanently delete', accept=False)
-                    root.get_by_role('button', name='Delete selected').click()
+                    verify = accept_once(page, 'trash', accept=False)
+                    root.get_by_test_id('bulk-move-to-trash-btn').click()
                     verify()
                     assert ctx.request.get(base + f'/api/admin/content-types/post/entries/{target["id"]}').status == 200
-                    verify = accept_once(page, 'permanently delete')
-                    root.get_by_role('button', name='Delete selected').click()
+                    verify = accept_once(page, 'trash')
+                    root.get_by_test_id('bulk-move-to-trash-btn').click()
                     verify()
-                    expect(root.get_by_text(f'#{target["id"]}: permanently delete succeeded.')).to_be_visible(timeout=20000)
+                    expect(root.get_by_text(f'#{target["id"]}: Move to Trash succeeded.')).to_be_visible(timeout=20000)
                     assert ctx.request.get(base + f'/api/admin/content-types/post/entries/{target["id"]}').status == 404
-                    checks.append('bulk_delete_cancel_and_confirm_with_real_durable_delete')
+                    # Verify entry moved into recoverable Trash, then explicitly purge it from Trash.
+                    root.get_by_test_id('entry-status-tab-trash').click()
+                    wait_count(root, 1)
+                    verify = accept_once(page, 'permanently delete')
+                    root.get_by_test_id(f'entry-purge-btn-{target["id"]}').click()
+                    verify()
+                    wait_count(root, 0)
+                    checks.append('bulk_trash_cancel_and_confirm_plus_explicit_purge_from_trash')
 
                     root.get_by_role('button', name='Clear filters').click()
                     wait_count(root, 124)

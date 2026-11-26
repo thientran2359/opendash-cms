@@ -155,6 +155,24 @@ export interface BlockData {
 export interface PluginPermissions {
   sqlite: string[];
   http: string[];
+  content_read?: string[];
+  content_write?: string[];
+  content_delete?: string[];
+  content_trash_read?: string[];
+  content_restore?: string[];
+  content_purge?: string[];
+}
+
+export interface PluginLifecycleConfirmation {
+  confirmation_id: string;
+  operation: 'purge' | 'restore';
+  type_key: string;
+  entry_id: number;
+  locale: string;
+  title: string;
+  slug: string;
+  version: number;
+  expires_at: string;
 }
 
 export interface PluginSummary {
@@ -172,9 +190,10 @@ export interface PluginSummary {
 export interface PluginRunResult {
   success: boolean;
   data: unknown;
-  error?: string;
-  code?: string;
+  error?: string | null;
+  code?: string | null;
   correlation_id: string;
+  confirmation?: PluginLifecycleConfirmation;
 }
 
 export type PluginSettingFieldType =

@@ -7,17 +7,18 @@ pub mod types;
 pub use serde_json;
 
 pub use host::{
-    content_delete, content_get, content_list, content_save, http_request, kv_delete, kv_get,
-    kv_list, kv_set, log, media_get, plugin_secret_get, plugin_settings_get, read_envelope,
-    site_options_get, taxonomy_list, write_output,
+    content_delete, content_get, content_list, content_purge, content_restore, content_save,
+    content_trash_get, content_trash_list, http_request, kv_delete, kv_get, kv_list, kv_set, log,
+    media_get, plugin_secret_get, plugin_settings_get, read_envelope, site_options_get,
+    taxonomy_list, write_output,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use mock::{MockHost, MockHostOutcome, run_in_mock_host};
 pub use types::{
     BeforeSaveDecision, ContactBeforeSubmitDecision, ContentEntry, ContentListResult,
-    ContentPrepareSavePatch, ContentSaveInput, EntryViewOutput, Envelope, HostResponse,
-    HttpRequestInput, HttpResponse, KvItem, LogLevel, MediaAsset, SdkError, SeoHeadOutput,
-    TaxonomyTerm,
+    ContentPrepareSavePatch, ContentSaveInput, ContentTrashListResult, EntryViewOutput, Envelope,
+    HostResponse, HttpRequestInput, HttpResponse, KvItem, LogLevel, MediaAsset, SdkError,
+    SeoHeadOutput, TaxonomyTerm, TrashEntrySummary,
 };
 
 #[macro_export]
@@ -369,5 +370,85 @@ mod tests {
         });
         assert!(panic_res.is_err());
         assert_eq!(read_envelope(), Err(SdkError::MockNotInitialized));
+    }
+
+    #[test]
+    fn s02_trash_read_restore_and_purge_ops_work_on_mock_host() {
+        let mut host = MockHost::default();
+        host.entries.insert(
+            ("post".to_owned(), 21),
+            ContentEntry {
+                id: 21,
+                type_key: "post".to_owned(),
+                slug: "draft-a".to_owned(),
+                title: "Draft A".to_owned(),
+                status: "draft".to_owned(),
+                version: 1,
+                locale: "vi".to_owned(),
+                values: Map::new(),
+                term_ids: vec![],
+            },
+        );
+        host.trashed_entries.insert(
+            ("post".to_owned(), 22),
+            TrashEntrySummary {
+                id: 22,
+                type_key: "post".to_owned(),
+                locale: "en".to_owned(),
+                title: "Trashed B".to_owned(),
+                slug: "trashed-b".to_owned(),
+                publication_status: "published".to_owned(),
+                version: 4,
+                trashed_at: "2026-02-01T00:00:00Z".to_owned(),
+                published_at: Some("2026-01-10T00:00:00Z".to_owned()),
+            },
+        );
+
+        let env = sample_envelope_v2("plugin/lifecycle_action", json!({}));
+        let out = run_in_mock_host(host, &env, || -> Result<(), SdkError> {
+            // Move entry 21 to trash via content_delete
+            content_delete("post", 21, 1)?;
+            assert_eq!(content_get("post", 21, None)?, None);
+
+            // Inspect trash metadata
+            let trashed_21 = content_trash_get("post", 21, Some("vi"))?.expect("trashed 21");
+            assert_eq!(trashed_21.version, 2);
+            assert_eq!(trashed_21.slug, "draft-a");
+            assert_eq!(content_trash_get("post", 21, Some("en"))?, None);
+
+            let trash_list = content_trash_list("post", None, Some(10), Some(0))?;
+            assert_eq!(trash_list.total, 2);
+            assert_eq!(trash_list.limit, 10);
+            assert_eq!(trash_list.offset, 0);
+            // Sorted newest trashed_at DESC
+            assert_eq!(trash_list.items[0].id, 22);
+            assert_eq!(trash_list.items[1].id, 21);
+
+            // Stale version fails on restore/purge
+            assert!(matches!(
+                content_restore("post", 21, 1),
+                Err(SdkError::HostError(_))
+            ));
+            assert!(matches!(
+                content_purge("post", 22, 3),
+                Err(SdkError::HostError(_))
+            ));
+
+            // Valid restore & purge succeed
+            content_restore("post", 21, 2)?;
+            content_purge("post", 22, 4)?;
+            Ok(())
+        });
+
+        assert_eq!(out.result, Ok(()));
+        assert_eq!(out.staged_content_deletes, vec![("post".to_owned(), 21, 1)]);
+        assert_eq!(
+            out.staged_content_restores,
+            vec![("post".to_owned(), 21, 2)]
+        );
+        assert_eq!(out.staged_content_purges, vec![("post".to_owned(), 22, 4)]);
+        assert!(out.entries.contains_key(&("post".to_owned(), 21)));
+        assert_eq!(out.entries[&("post".to_owned(), 21)].version, 3);
+        assert!(!out.trashed_entries.contains_key(&("post".to_owned(), 22)));
     }
 }

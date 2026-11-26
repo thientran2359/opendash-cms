@@ -31,6 +31,9 @@ fn map_maintenance_error(err: MaintenanceError) -> ApiError {
         MaintenanceError::DrainTimeout { .. } => {
             ApiError::service_unavailable("Hệ thống đang bận xử lý ghi; vui lòng thử lại sau.")
         }
+        MaintenanceError::EpochOverflow => {
+            ApiError::service_unavailable("Hệ thống đang bận xử lý ghi; vui lòng thử lại sau.")
+        }
     }
 }
 

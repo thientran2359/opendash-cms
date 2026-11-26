@@ -41,6 +41,12 @@ function permissionDetails(plugin: PluginSummary): string[] {
   return [
     ...(permissions?.sqlite ?? []).map(value => 'SQLite: ' + value),
     ...(permissions?.http ?? []).map(value => 'HTTP: ' + value),
+    ...(permissions?.content_read ?? []).map(value => tStatic('plugin_lifecycle.perm_content_read', { value1: value })),
+    ...(permissions?.content_write ?? []).map(value => tStatic('plugin_lifecycle.perm_content_write', { value1: value })),
+    ...(permissions?.content_delete ?? []).map(value => tStatic('plugin_lifecycle.perm_content_delete_trash', { value1: value })),
+    ...(permissions?.content_trash_read ?? []).map(value => tStatic('plugin_lifecycle.perm_content_trash_read', { value1: value })),
+    ...(permissions?.content_restore ?? []).map(value => tStatic('plugin_lifecycle.perm_content_restore', { value1: value })),
+    ...(permissions?.content_purge ?? []).map(value => tStatic('plugin_lifecycle.perm_content_purge_permanent', { value1: value })),
   ];
 }
 

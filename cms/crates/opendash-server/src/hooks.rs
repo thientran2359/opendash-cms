@@ -357,9 +357,9 @@ impl AsyncHookQueue {
         }
     }
 
-    pub fn enqueue(&self, job: AsyncHookJob) {
+    pub fn enqueue(&self, job: AsyncHookJob) -> bool {
         if job.dispatch_depth >= 2 || *self.maint_rx.borrow() || *self.shut_rx.borrow() {
-            return;
+            return false;
         }
         match self.tx.try_send(job) {
             Ok(()) => {
@@ -371,7 +371,9 @@ impl AsyncHookQueue {
                             while guard.try_recv().is_ok() {}
                         });
                     }
+                    return false;
                 }
+                true
             }
             Err(err) => {
                 let event_name = match &err {
@@ -379,89 +381,257 @@ impl AsyncHookQueue {
                     | tokio::sync::mpsc::error::TrySendError::Closed(j) => j.event.as_str(),
                 };
                 eprintln!("AsyncHookQueue drop {event_name}: queue full or closed");
+                false
             }
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HookEnqueueOutcome {
+    pub enqueued: u32,
+    pub dropped: u32,
+}
+
+impl HookEnqueueOutcome {
+    fn record(&mut self, accepted: bool) {
+        if accepted {
+            self.enqueued = self.enqueued.saturating_add(1);
+        } else {
+            self.dropped = self.dropped.saturating_add(1);
+        }
+    }
+}
+
 impl HookDispatcher {
+    /// Dispatches post-commit async hooks strictly from a trusted server-generated
+    /// `EntryCommitReceipt`. Never inspects untrusted guest JSON output.
     pub fn enqueue_plugin_action_hooks(
         &self,
         principal: ExecutionPrincipal,
-        data: Option<&Value>,
+        receipt: Option<&crate::storage::entry_lifecycle::EntryCommitReceipt>,
         lease: crate::operations::MutationLease,
-    ) {
-        let Some(data) = data else {
-            return;
+    ) -> HookEnqueueOutcome {
+        use crate::storage::entry_lifecycle::EntryMutationKind;
+
+        let mut outcome = HookEnqueueOutcome::default();
+        let Some(receipt) = receipt else {
+            return outcome;
         };
-        if let Some(entry) = data.get("entry").filter(|v| v.is_object()) {
-            let entry_id = entry.get("id").and_then(|v| v.as_i64());
-            let type_key = entry
-                .get("content_type_key")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            let locale = entry
-                .get("locale")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            let version = entry.get("version").and_then(|v| v.as_i64());
-            let publication_status = entry.get("publication_status").and_then(|v| v.as_str());
-            let translation_group_id = entry.get("translation_group_id").and_then(|v| v.as_str());
-            if publication_status == Some("published") {
-                self.enqueue_async(AsyncHookJob {
-                    event: HookEvent::ContentAfterPublish,
+        let type_key = Some(receipt.type_key.clone());
+        let locale = Some(receipt.locale.clone());
+        match receipt.operation {
+            EntryMutationKind::Save => {
+                if receipt.publication_after.as_deref() == Some("published") {
+                    let accepted = self.enqueue_async(AsyncHookJob {
+                        event: HookEvent::ContentAfterPublish,
+                        principal,
+                        locale: locale.clone(),
+                        type_key: type_key.clone(),
+                        payload: serde_json::json!({
+                            "type_key": &receipt.type_key,
+                            "id": receipt.id,
+                            "entry_id": receipt.id,
+                            "version": receipt.version_after,
+                            "locale": &receipt.locale,
+                            "publication_status": receipt.publication_after.as_deref(),
+                            "translation_group_id": &receipt.translation_group_id,
+                        }),
+                        dispatch_depth: 0,
+                        lease: lease.clone(),
+                    });
+                    outcome.record(accepted);
+                }
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterSave,
                     principal,
-                    locale: locale.clone(),
-                    type_key: type_key.clone(),
+                    locale,
+                    type_key,
                     payload: serde_json::json!({
-                        "type_key": &type_key,
-                        "id": entry_id,
-                        "entry_id": entry_id,
-                        "version": version,
-                        "locale": &locale,
-                        "publication_status": publication_status,
-                        "translation_group_id": translation_group_id,
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "operation": "plugin_action",
+                        "version": receipt.version_after,
+                        "locale": &receipt.locale,
+                        "translation_group_id": &receipt.translation_group_id,
                     }),
                     dispatch_depth: 0,
-                    lease: lease.clone(),
+                    lease,
                 });
+                outcome.record(accepted);
             }
-            self.enqueue_async(AsyncHookJob {
-                event: HookEvent::ContentAfterSave,
-                principal,
-                locale,
-                type_key,
-                payload: serde_json::json!({
-                    "type_key": entry.get("content_type_key").and_then(|v| v.as_str()),
-                    "id": entry_id,
-                    "entry_id": entry_id,
-                    "operation": "plugin_action",
-                    "version": version,
-                    "locale": entry.get("locale").and_then(|v| v.as_str()),
-                    "translation_group_id": translation_group_id,
-                }),
-                dispatch_depth: 0,
-                lease,
-            });
-        } else if let Some(deleted_id) = data.get("deleted_entry_id").and_then(|v| v.as_i64()) {
-            let type_key = data
-                .get("deleted_type_key")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            self.enqueue_async(AsyncHookJob {
-                event: HookEvent::ContentAfterDelete,
-                principal,
-                locale: None,
-                type_key: type_key.clone(),
-                payload: serde_json::json!({
-                    "type_key": &type_key,
-                    "id": deleted_id,
-                    "entry_id": deleted_id,
-                }),
-                dispatch_depth: 0,
-                lease,
-            });
+            EntryMutationKind::Metadata => {
+                if receipt.publication_before != receipt.publication_after {
+                    let event = if receipt.publication_after.as_deref() == Some("published") {
+                        HookEvent::ContentAfterPublish
+                    } else {
+                        HookEvent::ContentAfterUnpublish
+                    };
+                    let accepted = self.enqueue_async(AsyncHookJob {
+                        event,
+                        principal,
+                        locale: locale.clone(),
+                        type_key: type_key.clone(),
+                        payload: serde_json::json!({
+                            "type_key": &receipt.type_key,
+                            "id": receipt.id,
+                            "entry_id": receipt.id,
+                            "version": receipt.version_after,
+                            "locale": &receipt.locale,
+                            "publication_status": receipt.publication_after.as_deref(),
+                            "translation_group_id": &receipt.translation_group_id,
+                        }),
+                        dispatch_depth: 0,
+                        lease: lease.clone(),
+                    });
+                    outcome.record(accepted);
+                }
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterSave,
+                    principal,
+                    locale,
+                    type_key,
+                    payload: serde_json::json!({
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "operation": "metadata",
+                        "version": receipt.version_after,
+                        "locale": &receipt.locale,
+                        "translation_group_id": &receipt.translation_group_id,
+                    }),
+                    dispatch_depth: 0,
+                    lease,
+                });
+                outcome.record(accepted);
+            }
+            EntryMutationKind::Publish => {
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterPublish,
+                    principal,
+                    locale,
+                    type_key,
+                    payload: serde_json::json!({
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "version": receipt.version_after,
+                        "locale": &receipt.locale,
+                        "publication_status": "published",
+                        "translation_group_id": &receipt.translation_group_id,
+                    }),
+                    dispatch_depth: 0,
+                    lease,
+                });
+                outcome.record(accepted);
+            }
+            EntryMutationKind::Unpublish => {
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterUnpublish,
+                    principal,
+                    locale,
+                    type_key,
+                    payload: serde_json::json!({
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "version": receipt.version_after,
+                        "locale": &receipt.locale,
+                        "publication_status": "draft",
+                        "translation_group_id": &receipt.translation_group_id,
+                    }),
+                    dispatch_depth: 0,
+                    lease,
+                });
+                outcome.record(accepted);
+            }
+            EntryMutationKind::Trash => {
+                // Trash of a published entry emits ContentAfterUnpublish with lifecycle context;
+                // draft Trash emits no publication event. Trash NEVER emits ContentAfterDelete.
+                if receipt.publication_before.as_deref() == Some("published") {
+                    let accepted = self.enqueue_async(AsyncHookJob {
+                        event: HookEvent::ContentAfterUnpublish,
+                        principal,
+                        locale,
+                        type_key,
+                        payload: serde_json::json!({
+                            "type_key": &receipt.type_key,
+                            "id": receipt.id,
+                            "entry_id": receipt.id,
+                            "version": receipt.version_after,
+                            "locale": &receipt.locale,
+                            "publication_status": receipt.publication_after.as_deref(),
+                            "translation_group_id": &receipt.translation_group_id,
+                            "lifecycle_transition": "trash",
+                            "trashed_at": receipt.trashed_at.as_deref(),
+                        }),
+                        dispatch_depth: 0,
+                        lease,
+                    });
+                    outcome.record(accepted);
+                }
+            }
+            EntryMutationKind::Restore => {
+                // Only immediate-mode Restore transitioning to published emits ContentAfterPublish;
+                // draft Restore emits no publication event.
+                if receipt.publication_after.as_deref() == Some("published") {
+                    let accepted = self.enqueue_async(AsyncHookJob {
+                        event: HookEvent::ContentAfterPublish,
+                        principal,
+                        locale,
+                        type_key,
+                        payload: serde_json::json!({
+                            "type_key": &receipt.type_key,
+                            "id": receipt.id,
+                            "entry_id": receipt.id,
+                            "version": receipt.version_after,
+                            "locale": &receipt.locale,
+                            "publication_status": "published",
+                            "translation_group_id": &receipt.translation_group_id,
+                            "lifecycle_transition": "restore",
+                            "published_at": receipt.published_at.as_deref(),
+                        }),
+                        dispatch_depth: 0,
+                        lease,
+                    });
+                    outcome.record(accepted);
+                }
+            }
+            EntryMutationKind::Purge => {
+                // Actual Purge emits ContentAfterDelete exactly once with retained pre-delete metadata.
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterDelete,
+                    principal,
+                    locale,
+                    type_key,
+                    payload: serde_json::json!({
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "version": receipt.version_before,
+                        "locale": &receipt.locale,
+                        "translation_group_id": &receipt.translation_group_id,
+                        "lifecycle_transition": "purge",
+                        "trashed_at": receipt.trashed_at.as_deref(),
+                        "published_at": receipt.published_at.as_deref(),
+                    }),
+                    dispatch_depth: 0,
+                    lease,
+                });
+                outcome.record(accepted);
+            }
         }
+        outcome
+    }
+
+    pub fn enqueue_entry_lifecycle_hooks(
+        &self,
+        principal: ExecutionPrincipal,
+        receipt: &crate::storage::entry_lifecycle::EntryCommitReceipt,
+        lease: crate::operations::MutationLease,
+    ) -> HookEnqueueOutcome {
+        self.enqueue_plugin_action_hooks(principal, Some(receipt), lease)
     }
 }
 
@@ -498,14 +668,17 @@ impl HookDispatcher {
         dispatcher
     }
 
-    pub fn enqueue_async(&self, job: AsyncHookJob) {
+    pub fn enqueue_async(&self, job: AsyncHookJob) -> bool {
         if let Some(ref queue) = self.async_queue {
-            queue.enqueue(job);
+            queue.enqueue(job)
         } else if job.dispatch_depth < 2 && tokio::runtime::Handle::try_current().is_ok() {
             let pm = Arc::clone(&self.plugin_manager);
             tokio::spawn(async move {
                 run_async_hook_job(&pm, job).await;
             });
+            true
+        } else {
+            false
         }
     }
 

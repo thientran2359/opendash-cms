@@ -252,6 +252,76 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "confirmation_required: Permanent deletion requires explicit irreversible confirmation.",
     ),
     (
+        "entry.retained_trash_invalid_status",
+        "retained_trash=true chỉ hỗ trợ cùng status=trash.",
+        "retained_trash=true is only supported with status=trash.",
+    ),
+    (
+        "entry.retained_trash_extra_filters",
+        "Chế độ bảo trì retained_trash không hỗ trợ bộ lọc bổ sung.",
+        "Retained trash maintenance mode does not support additional filters.",
+    ),
+    (
+        "entry.retained_trash_forbidden",
+        "retained_trash_forbidden: Chỉ Quản trị viên được phép xem vùng bảo trì Thùng rác.",
+        "retained_trash_forbidden: Only administrators can inspect retained Trash maintenance.",
+    ),
+    (
+        "entry.lifecycle_forbidden",
+        "entry_lifecycle_forbidden: Không hỗ trợ thao tác vòng đời chung cho Pattern hoặc Section.",
+        "entry_lifecycle_forbidden: Generic entry lifecycle operations are not supported for Pattern or Section.",
+    ),
+    (
+        "entry.purge_forbidden",
+        "entry_purge_forbidden: Chỉ Quản trị viên được phép xóa vĩnh viễn nội dung.",
+        "entry_purge_forbidden: Only administrators can permanently delete entries.",
+    ),
+    (
+        "entry.provider_inactive",
+        "provider_inactive: Loại nội dung hiện không hoạt động hoặc đã bị thu hồi.",
+        "provider_inactive: Content type provider is inactive or withdrawn.",
+    ),
+    (
+        "entry.provider_inactive",
+        "provider_inactive: Không thể tải schema hiện hành của loại nội dung.",
+        "provider_inactive: Could not load the active schema for this content type.",
+    ),
+    (
+        "entry.provider_active",
+        "provider_active: Loại nội dung đang hoạt động; hãy sử dụng Thùng rác thông thường.",
+        "provider_active: Content type provider is active; use the ordinary Trash view instead.",
+    ),
+    (
+        "entry.locale_deleted",
+        "locale_deleted: Ngôn ngữ của nội dung đã bị xóa; hãy xử lý trong mục bảo trì ngôn ngữ.",
+        "locale_deleted: The entry's language has been deleted; handle it from language maintenance.",
+    ),
+    (
+        "entry.expected_version_invalid",
+        "expected_version không hợp lệ.",
+        "Invalid expected_version.",
+    ),
+    (
+        "entry.confirmation_invalid",
+        "confirmation_invalid: Yêu cầu xác nhận không tồn tại, đã hết hạn hoặc không khớp ngữ cảnh phiên hiện tại.",
+        "confirmation_invalid: Confirmation request is missing, expired, or does not match the current session context.",
+    ),
+    (
+        "entry.confirmation_decision_invalid",
+        "decision phải là confirm hoặc cancel.",
+        "decision must be either confirm or cancel.",
+    ),
+    (
+        "entry.confirmation_id_required",
+        "Thiếu confirmation_id hợp lệ.",
+        "Missing a valid confirmation_id.",
+    ),
+    (
+        "operations.writer_busy",
+        "Hệ thống đang bận xử lý ghi; vui lòng thử lại sau.",
+        "System is busy processing a write; please try again shortly.",
+    ),
+    (
         "request.invalid_body",
         "Body của DELETE locale phải rỗng.",
         "DELETE locale body must be empty.",
@@ -11913,6 +11983,17 @@ fn localize_json_error(value: &mut serde_json::Value, locale: &str) -> Option<&'
     }
     if is_veto {
         Some("hook.before_save_veto")
+    } else if is_plugin
+        && obj.get("code").and_then(serde_json::Value::as_str) == Some("confirmation_required")
+        && obj
+            .get("confirmation")
+            .is_some_and(serde_json::Value::is_object)
+    {
+        Some("confirmation_required")
+    } else if is_plugin
+        && obj.get("code").and_then(serde_json::Value::as_str) == Some("confirmation_invalid")
+    {
+        Some("confirmation_invalid")
     } else if is_plugin {
         code.or(Some("plugin.error"))
     } else {
@@ -12076,6 +12157,8 @@ pub(crate) async fn localize_error_response(
     };
     let code = if guard || code == "server.unknown" {
         fallback_code
+    } else if code == "entry.confirmation_required" {
+        "confirmation_required"
     } else {
         code
     };

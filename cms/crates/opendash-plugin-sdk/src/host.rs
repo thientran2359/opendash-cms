@@ -4,8 +4,9 @@ use serde_json::{Map, Value, json};
 use crate::{
     abi::{host_call_raw, read_input_bytes, write_output_bytes},
     types::{
-        ContentEntry, ContentListResult, ContentSaveInput, Envelope, HostResponse,
-        HttpRequestInput, HttpResponse, KvItem, LogLevel, MediaAsset, SdkError, TaxonomyTerm,
+        ContentEntry, ContentListResult, ContentSaveInput, ContentTrashListResult, Envelope,
+        HostResponse, HttpRequestInput, HttpResponse, KvItem, LogLevel, MediaAsset, SdkError,
+        TaxonomyTerm, TrashEntrySummary,
     },
 };
 
@@ -144,6 +145,88 @@ pub fn content_delete(
         "expected_version": expected_version,
     }))?;
     Ok(())
+}
+
+pub fn content_restore(
+    type_key: &str,
+    entry_id: i64,
+    expected_version: i64,
+) -> Result<(), SdkError> {
+    let _ = call_host(&json!({
+        "op": "content_restore",
+        "type_key": type_key,
+        "entry_id": entry_id,
+        "expected_version": expected_version,
+    }))?;
+    Ok(())
+}
+
+pub fn content_purge(type_key: &str, entry_id: i64, expected_version: i64) -> Result<(), SdkError> {
+    let _ = call_host(&json!({
+        "op": "content_purge",
+        "type_key": type_key,
+        "entry_id": entry_id,
+        "expected_version": expected_version,
+    }))?;
+    Ok(())
+}
+
+pub fn content_trash_get(
+    type_key: &str,
+    entry_id: i64,
+    locale: Option<&str>,
+) -> Result<Option<TrashEntrySummary>, SdkError> {
+    #[derive(Serialize)]
+    struct ContentTrashGetReq<'a> {
+        op: &'static str,
+        type_key: &'a str,
+        entry_id: i64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        locale: Option<&'a str>,
+    }
+    let resp = call_host(&ContentTrashGetReq {
+        op: "content_trash_get",
+        type_key,
+        entry_id,
+        locale,
+    })?;
+    let mut map = extract_data_obj(resp)?;
+    match map.remove("entry") {
+        None | Some(Value::Null) => Ok(None),
+        Some(val) => serde_json::from_value(val)
+            .map(Some)
+            .map_err(|e| SdkError::UnexpectedResponse(e.to_string())),
+    }
+}
+
+pub fn content_trash_list(
+    type_key: &str,
+    locale: Option<&str>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<ContentTrashListResult, SdkError> {
+    #[derive(Serialize)]
+    struct ContentTrashListReq<'a> {
+        op: &'static str,
+        type_key: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        locale: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        offset: Option<usize>,
+    }
+    let resp = call_host(&ContentTrashListReq {
+        op: "content_trash_list",
+        type_key,
+        locale,
+        limit,
+        offset,
+    })?;
+    let data = resp
+        .data
+        .ok_or_else(|| SdkError::UnexpectedResponse("missing content_trash_list `data`".into()))?;
+    serde_json::from_value(data).map_err(|e| SdkError::UnexpectedResponse(e.to_string()))
 }
 
 pub fn content_get(
