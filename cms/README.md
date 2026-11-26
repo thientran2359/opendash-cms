@@ -13,7 +13,7 @@
 ## Subdirectories & System Boundaries
 
 ### Rust Crates
-- `crates/opendash-core`: [`./crates/opendash-core/README.md`](./crates/opendash-core/README.md) — Pure-Rust domain types, validators, Builder AST/codec, declarative block schema, RichText sanitizer, and backup contracts (14 modules in `src/lib.rs`).
+- `crates/opendash-core`: [`./crates/opendash-core/README.md`](./crates/opendash-core/README.md) — Pure-Rust domain types, validators, Builder AST/codec, declarative block schema, RichText sanitizer, icons, and backup contracts (15 modules in `src/lib.rs`).
 - `crates/opendash-plugin-sdk`: [`./crates/opendash-plugin-sdk/README.md`](./crates/opendash-plugin-sdk/README.md) — Guest-side Rust SDK targeting `opendash_v1` ABI v1/v1.1 with `export_plugin!`, typed host wrappers, and native `MockHost`.
 - `crates/opendash-server`: [`./crates/opendash-server/README.md`](./crates/opendash-server/README.md) — Single-binary Axum server (`opendash`) embedding `cms/admin/dist/` and orchestrating `SiteCoordinator`, `SitePaths`, C-SEC rendering, media/SMTP, and backup/restore.
   - `src/routes/`: [`./crates/opendash-server/src/routes/README.md`](./crates/opendash-server/src/routes/README.md) — 22 Axum HTTP handler modules (auth/RBAC, CSRF, `If-Match`, `AdmittedMutation`; zero direct SQL).
@@ -25,14 +25,14 @@
 - `admin/src/shell`: [`./admin/src/shell/README.md`](./admin/src/shell/README.md) — 3-group navigation frame (`AdminShell`), auth/bootstrap panel, RBAC guards, and hash URL router (`router.ts`).
 - `admin/src/studio`: [`./admin/src/studio/README.md`](./admin/src/studio/README.md) — Fullscreen OpenDash Studio workspace combining Mode 1 site customizer/template overrides and Mode 2 entry visual page builder.
 - `admin/src/builder`: [`./admin/src/builder/README.md`](./admin/src/builder/README.md) — Custom 4-layer AST visual builder (`Section -> Row -> Column -> Element`), schema-driven forms, responsive controls, and sandboxed preview frame.
-- `admin/src/features`: [`./admin/src/features/README.md`](./admin/src/features/README.md) — Domain feature panels/workspaces across 18 `features/*` subdirectories (`editor/`, `content/`, `media/`, `themes/`, `plugins/`, `operations/`, etc.).
+- `admin/src/features`: [`./admin/src/features/README.md`](./admin/src/features/README.md) — Domain feature panels/workspaces across 17 `features/*` subdirectories (`editor/`, `content/`, `media/`, `themes/`, `plugins/`, `operations/`, etc.).
 - `admin/src/components`: [`./admin/src/components/README.md`](./admin/src/components/README.md) — Reusable Tailwind + React 18 UI, form, and locale-tab primitives.
-- `admin/src/i18n`: [`./admin/src/i18n/README.md`](./admin/src/i18n/README.md) — Site-wide i18n provider, `Intl` formatters, and 2,300-key `en`/`vi` translation catalogs.
+- `admin/src/i18n`: [`./admin/src/i18n/README.md`](./admin/src/i18n/README.md) — Site-wide i18n provider, `Intl` formatters, and `en`/`vi` translation catalogs (`2,150` keys).
 
 ### Database, SDK, Tooling & Deployment
 - `migrations/`: [`./migrations/README.md`](./migrations/README.md) — 51 embedded forward-only SQLite migrations (`0001`–`0052`, omitting `0016`).
 - `sdk/`: [`./sdk/README.md`](./sdk/README.md) — AssemblyScript guest SDK (`sdk/as/opendash.ts`) for `opendash_v1` ABI v1/v1.1 and Node test harness.
-- `scripts/`: [`./scripts/README.md`](./scripts/README.md) — 34 build, health, architecture/plan/i18n gate, CodeGraph, smoke, and live-browser E2E scripts.
+- `scripts/`: [`./scripts/README.md`](./scripts/README.md) — 32 build, grouped fast test, health, architecture/plan/i18n gate, CodeGraph, smoke, and live-browser E2E scripts.
 - `deploy/`: [`./deploy/README.md`](./deploy/README.md) — Linux installer, hardened `systemd` unit, and Nginx TLS reverse-proxy template.
 
 ### Examples & Fixtures
@@ -56,4 +56,4 @@
 
 - Run: `python cms/scripts/check-standards.py && python cms/scripts/check-plans.py && python .agents/scripts/check-agent-artifacts.py`
 - Run: `node cms/scripts/check-i18n.mjs --strict && npm --prefix cms/admin run typecheck && npm --prefix cms/admin run build`
-- Run: `cargo fmt --manifest-path cms/Cargo.toml --all --check && cargo test --manifest-path cms/Cargo.toml --workspace --release --locked`
+- Run: `cargo fmt --manifest-path cms/Cargo.toml --all --check && python cms/scripts/run-tests.py --changed` (pre-release full suite: `python cms/scripts/run-tests.py --group all --release`)

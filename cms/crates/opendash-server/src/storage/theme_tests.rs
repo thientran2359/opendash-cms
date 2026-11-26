@@ -587,3 +587,202 @@ async fn unpublished_id_specific_override_is_pinned_but_not_publicly_readable() 
     );
     db.close().await;
 }
+
+#[test]
+fn builtin_starter_frozen_snapshots_preserve_canonical_digests_and_v111_canvas_chrome() {
+    use crate::builtin_themes::{
+        STARTER_THEME_VERSION, builtin_starter_theme_files, builtin_starter_theme_v100_files,
+        builtin_starter_theme_v101_files, builtin_starter_theme_v110_files,
+    };
+    use crate::storage::theme::compute_canonical_file_map_digest;
+
+    let (d100, _) = compute_canonical_file_map_digest(&builtin_starter_theme_v100_files());
+    let (d101, _) = compute_canonical_file_map_digest(&builtin_starter_theme_v101_files());
+    let (d110, _) = compute_canonical_file_map_digest(&builtin_starter_theme_v110_files());
+
+    assert_eq!(
+        d100, "bd639fd557f271048e66c1482f9f26306b3070b96f8e879f29e6e2800b2796e5",
+        "frozen Starter v1.0.0 canonical digest must never drift"
+    );
+    assert_eq!(
+        d101, "7834914ed29130280048a2fdf1935f05d5a2c39855c2ee2b875ca6f7405eddc9",
+        "frozen Starter v1.0.1 canonical digest must never drift"
+    );
+    assert_eq!(
+        d110, "edc31fe40a6ccedfbf3eaa8343fcdcc3c5ed739947a74987ada5009bde0cf60e",
+        "frozen Starter v1.1.0 canonical digest must never drift"
+    );
+
+    let v111_files = builtin_starter_theme_files();
+    let (d111, _) = compute_canonical_file_map_digest(&v111_files);
+    assert_eq!(STARTER_THEME_VERSION, "1.1.1");
+    assert_ne!(d111, d110);
+
+    let validated = crate::theme::validate_theme_v3_files(v111_files)
+        .expect("Starter v1.1.1 must pass v3 validation");
+    assert_eq!(validated.manifest.version, "1.1.1");
+    let canvas = validated
+        .manifest
+        .page_layouts
+        .iter()
+        .find(|layout| layout.key == "canvas")
+        .expect("Starter v1.1.1 must define canvas layout");
+    assert_eq!(
+        serde_json::to_value(canvas).unwrap()["chrome"],
+        json!("none")
+    );
+}
+
+#[tokio::test]
+async fn starter_v111_upgrades_existing_v110_and_transient_v110_sites_without_conflict() {
+    use crate::builtin_themes::{
+        STARTER_THEME_ID, STARTER_THEME_NAME, builtin_starter_theme_v100_files,
+        builtin_starter_theme_v101_files, builtin_starter_theme_v110_files,
+    };
+    use crate::storage::theme::{
+        RevisionActivationOutcome, RevisionInstallOutcome, activate_revision,
+        compute_canonical_file_map_digest, ensure_default_starter_theme, get_active_selection,
+        list_revisions, stage_and_commit_v3_revision,
+    };
+
+    // Part A: pre-60720582 site with frozen 1.0.0, 1.0.1 and active 1.1.0 (plus missing .complete).
+    let tmp = TempDirGuard::new("starter-v110-upgrade");
+    let db_path = tmp.path().join("database").join("opendash.sqlite");
+    fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let themes_root = tmp.path().join("themes");
+    let db = init_db(&db_path).await.unwrap();
+
+    let mut v110_rev_id = String::new();
+    let mut v110_digest = String::new();
+    for (version, label, files) in [
+        ("1.0.0", "seed-100", builtin_starter_theme_v100_files()),
+        ("1.0.1", "seed-101", builtin_starter_theme_v101_files()),
+        ("1.1.0", "seed-110", builtin_starter_theme_v110_files()),
+    ] {
+        let pkg = crate::theme::validate_theme_v3_files(files.clone()).unwrap();
+        let outcome = stage_and_commit_v3_revision(
+            &db,
+            &themes_root,
+            label,
+            STARTER_THEME_ID,
+            STARTER_THEME_NAME,
+            version,
+            &pkg.manifest_json,
+            r#"{"source":"builtin_starter"}"#,
+            &files,
+        )
+        .await
+        .unwrap();
+        if version == "1.1.0" {
+            let (RevisionInstallOutcome::Installed(rec)
+            | RevisionInstallOutcome::AlreadyExists(rec)) = outcome;
+            v110_rev_id = rec.revision_id;
+            v110_digest = rec.revision_digest;
+        }
+    }
+    let activated = activate_revision(&db, &themes_root, &v110_rev_id, Some(1))
+        .await
+        .unwrap();
+    let RevisionActivationOutcome::Activated(before_selection) = activated else {
+        panic!("expected activation of frozen 1.1.0");
+    };
+    let v110_marker = themes_root
+        .join("revisions")
+        .join(&v110_digest)
+        .join(".complete");
+    fs::remove_file(&v110_marker).unwrap();
+
+    let installed = ensure_default_starter_theme(&db, &themes_root)
+        .await
+        .expect("upgrading pre-60720582 site to Starter 1.1.1 must not return 409 Conflict");
+    assert_eq!(installed.version, "1.1.1");
+    assert_eq!(
+        fs::read_to_string(&v110_marker).unwrap().trim(),
+        v110_digest,
+        "frozen 1.1.0 revision marker must be repaired on startup"
+    );
+    let after_selection = get_active_selection(&db).await.unwrap();
+    assert_eq!(
+        after_selection.revision_id.as_deref(),
+        Some(v110_rev_id.as_str())
+    );
+    assert_eq!(after_selection.version, before_selection.version);
+    let mut versions: Vec<String> = list_revisions(&db, STARTER_THEME_ID)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.version)
+        .collect();
+    versions.sort();
+    assert_eq!(versions, vec!["1.0.0", "1.0.1", "1.1.0", "1.1.1"]);
+    db.close().await;
+
+    // Part B: transient post-60720582 site whose stored 1.1.0 digest differs from frozen 1.1.0.
+    let tmp_transient = TempDirGuard::new("starter-v110-transient");
+    let db_path_t = tmp_transient
+        .path()
+        .join("database")
+        .join("opendash.sqlite");
+    fs::create_dir_all(db_path_t.parent().unwrap()).unwrap();
+    let themes_root_t = tmp_transient.path().join("themes");
+    let db_t = init_db(&db_path_t).await.unwrap();
+
+    let mut transient_files = builtin_starter_theme_v110_files();
+    let mut manifest_val: serde_json::Value =
+        serde_json::from_slice(transient_files.get("theme.json").unwrap()).unwrap();
+    for layout in manifest_val["page_layouts"].as_array_mut().unwrap() {
+        if layout["key"] == "canvas" {
+            layout["chrome"] = json!("none");
+        }
+    }
+    transient_files.insert(
+        "theme.json".to_owned(),
+        serde_json::to_vec_pretty(&manifest_val).unwrap(),
+    );
+    let (transient_digest, _) = compute_canonical_file_map_digest(&transient_files);
+    assert_ne!(transient_digest, v110_digest);
+    let transient_pkg = crate::theme::validate_theme_v3_files(transient_files.clone()).unwrap();
+    let transient_rev = match stage_and_commit_v3_revision(
+        &db_t,
+        &themes_root_t,
+        "seed-transient-110",
+        STARTER_THEME_ID,
+        STARTER_THEME_NAME,
+        "1.1.0",
+        &transient_pkg.manifest_json,
+        r#"{"source":"builtin_starter"}"#,
+        &transient_files,
+    )
+    .await
+    .unwrap()
+    {
+        RevisionInstallOutcome::Installed(rec) | RevisionInstallOutcome::AlreadyExists(rec) => rec,
+    };
+    let RevisionActivationOutcome::Activated(transient_sel_before) =
+        activate_revision(&db_t, &themes_root_t, &transient_rev.revision_id, Some(1))
+            .await
+            .unwrap()
+    else {
+        panic!("expected activation of transient 1.1.0");
+    };
+
+    let installed_t = ensure_default_starter_theme(&db_t, &themes_root_t)
+        .await
+        .expect("upgrading transient post-60720582 site to Starter 1.1.1 must succeed");
+    assert_eq!(installed_t.version, "1.1.1");
+    let transient_sel_after = get_active_selection(&db_t).await.unwrap();
+    assert_eq!(
+        transient_sel_after.revision_id.as_deref(),
+        Some(transient_rev.revision_id.as_str())
+    );
+    assert_eq!(transient_sel_after.version, transient_sel_before.version);
+    let mut versions_t: Vec<String> = list_revisions(&db_t, STARTER_THEME_ID)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.version)
+        .collect();
+    versions_t.sort();
+    assert_eq!(versions_t, vec!["1.1.0", "1.1.1"]);
+    db_t.close().await;
+}

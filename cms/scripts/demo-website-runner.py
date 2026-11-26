@@ -682,9 +682,9 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
         "Điều hướng chính",
         [
             {"id": None, "client_key": "home", "parent_id": None, "parent_client_key": None, "position": 0, "label": "Trang chủ", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/"},
-            {"id": None, "client_key": "dv", "parent_id": None, "parent_client_key": None, "position": 1, "label": "Dịch vụ", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/content/dich_vu"},
-            {"id": None, "client_key": "da", "parent_id": None, "parent_client_key": None, "position": 2, "label": "Dự án", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/content/du_an"},
-            {"id": None, "client_key": "post", "parent_id": None, "parent_client_key": None, "position": 3, "label": "Bài viết", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/content/post"},
+            {"id": None, "client_key": "dv", "parent_id": None, "parent_client_key": None, "position": 1, "label": "Dịch vụ", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/dich_vu"},
+            {"id": None, "client_key": "da", "parent_id": None, "parent_client_key": None, "position": 2, "label": "Dự án", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/du_an"},
+            {"id": None, "client_key": "post", "parent_id": None, "parent_client_key": None, "position": 3, "label": "Bài viết", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/posts"},
             {"id": None, "client_key": "about", "parent_id": None, "parent_client_key": None, "position": 4, "label": "Giới thiệu", "target_kind": "entry", "target_entry_id": page_about["id"], "target_term_id": None, "external_url": None},
             {"id": None, "client_key": "contact", "parent_id": None, "parent_client_key": None, "position": 5, "label": "Liên hệ", "target_kind": "entry", "target_entry_id": page_contact["id"], "target_term_id": None, "external_url": None},
         ],
@@ -739,7 +739,7 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
                                 "children": [
                                     {"id": "h-hero", "type": "core/heading", "props": {"level": 1, "text": "Không gian sống mộc mạc, thoáng sáng và bền vững theo năm tháng"}},
                                     {"id": "t-hero", "type": "core/text", "props": {"text": "Mộc Studio thiết kế và thi công trọn gói nhà phố, căn hộ và biệt thự vườn với vật liệu tự nhiên bản địa."}},
-                                    {"id": "b-hero", "type": "core/button", "props": {"label": "Khám phá hồ sơ dự án", "url": "/content/du_an"}},
+                                    {"id": "b-hero", "type": "core/button", "props": {"label": "Khám phá hồ sơ dự án", "url": "/du_an"}},
                                 ],
                             },
                             {
@@ -1032,17 +1032,17 @@ def run_smoke_and_capture(base: str, meta: dict, out_dir: Path | None) -> dict:
             # Back to Desktop 1440x900 for remaining public routes
             page.set_viewport_size({"width": 1440, "height": 900})
             pub_routes = [
-                ("PUB-04", "/content/dich_vu", "pub-04-dich-vu-archive.png"),
-                ("PUB-05", "/content/dich_vu/thiet-ke-kien-truc-nha-pho", "pub-05-dich-vu-single.png"),
-                ("PUB-06", "/content/du_an", "pub-06-du-an-archive.png"),
-                ("PUB-07", "/content/du_an/nha-hien-nam-thao-dien", "pub-07-du-an-single.png"),
-                ("PUB-08", "/content/post", "pub-08-post-archive-p1.png"),
-                ("PUB-09", "/content/post?page=2", "pub-09-post-archive-p2.png"),
-                ("PUB-10", f"/content/post/{meta['first_post_slug']}", "pub-10-post-single.png"),
-                ("PUB-11", f"/taxonomy/category/{meta['cat_slug']}", "pub-11-taxonomy-category.png"),
-                ("PUB-12", f"/taxonomy/tag/{meta['tag_slug']}", "pub-12-taxonomy-tag.png"),
-                ("PUB-13", "/content/page/gioi-thieu", "pub-13-page-gioi-thieu.png"),
-                ("PUB-14", "/content/page/lien-he", "pub-14-page-lien-he.png"),
+                ("PUB-04", "/dich_vu", "pub-04-dich-vu-archive.png"),
+                ("PUB-05", "/dich_vu/thiet-ke-kien-truc-nha-pho", "pub-05-dich-vu-single.png"),
+                ("PUB-06", "/du_an", "pub-06-du-an-archive.png"),
+                ("PUB-07", "/du_an/nha-hien-nam-thao-dien", "pub-07-du-an-single.png"),
+                ("PUB-08", "/posts", "pub-08-post-archive-p1.png"),
+                ("PUB-09", "/posts?page=2", "pub-09-post-archive-p2.png"),
+                ("PUB-10", f"/{meta['first_post_slug']}", "pub-10-post-single.png"),
+                ("PUB-11", f"/category/{meta['cat_slug']}", "pub-11-taxonomy-category.png"),
+                ("PUB-12", f"/tag/{meta['tag_slug']}", "pub-12-taxonomy-tag.png"),
+                ("PUB-13", "/gioi-thieu", "pub-13-page-gioi-thieu.png"),
+                ("PUB-14", "/lien-he", "pub-14-page-lien-he.png"),
             ]
             for cid, route, fname in pub_routes:
                 print(f"[check] {cid} {route}")
@@ -1058,7 +1058,7 @@ def run_smoke_and_capture(base: str, meta: dict, out_dir: Path | None) -> dict:
             ignore_404_check = True
             for cid, route, fname in [
                 ("ERR-01", "/duong-dan-khong-ton-tai", "err-01-public-404.png"),
-                ("ERR-02", f"/content/post/{meta['draft_post_slug']}", "err-02-draft-hidden-404.png"),
+                ("ERR-02", f"/{meta['draft_post_slug']}", "err-02-draft-hidden-404.png"),
             ]:
                 print(f"[check] {cid} {route}")
                 resp = page.goto(f"{base}{route}", wait_until="load")
@@ -1092,14 +1092,14 @@ def run_smoke_and_capture(base: str, meta: dict, out_dir: Path | None) -> dict:
                 ("ADM-02", "dashboard", "adm-02-dashboard.png"),
                 ("ADM-03", "posts", "adm-03-posts.png"),
                 ("ADM-04", "pages", "adm-04-pages.png"),
-                ("ADM-05", "content", "adm-05-content-types.png"),
+                ("ADM-05", "appearance/content-types", "adm-05-content-types.png"),
                 ("ADM-06", "media", "adm-06-media.png"),
-                ("ADM-07", "taxonomy", "adm-07-taxonomy.png"),
-                ("ADM-08", "themes", "adm-08-themes.png"),
-                ("ADM-09", "builder", "adm-09-builder.png"),
+                ("ADM-07", "posts/categories", "adm-07-taxonomy.png"),
+                ("ADM-08", "appearance/themes", "adm-08-themes.png"),
+                ("ADM-09", "studio", "adm-09-studio.png"),
                 ("ADM-10", "plugins", "adm-10-plugins.png"),
                 ("ADM-11", "users", "adm-11-users.png"),
-                ("ADM-12", "settings", "adm-12-settings.png"),
+                ("ADM-12", "settings/general", "adm-12-settings.png"),
             ]
             for cid, view, fname in admin_views:
                 print(f"[check] {cid} /admin#/{view}", flush=True)

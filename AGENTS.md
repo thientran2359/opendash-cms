@@ -59,7 +59,7 @@ EGM phụ trách **tạo và review đặc tả kỹ thuật**, còn việc tri�
 
 ## 2. Ngữ cảnh Hệ thống và Ranh giới Kỹ thuật Bắt buộc
 
-- **Cấu trúc Workspace:** Mã nguồn, build scripts, migrations (`0001`–`0041`) và SDK đặt trong [`cms/`](cms/README.md); tài liệu đặt tại [`docs/`](docs/README.md); dữ liệu vận hành của website (`database/`, `themes/`, `plugins/`, `uploads/`) nằm ở root và tách biệt với mã nguồn. Xem [README.md](README.md) và [Kiến trúc CMS](docs/architecture/CMS_ARCHITECTURE.md).
+- **Cấu trúc Workspace:** Mã nguồn, build scripts, migrations (`0001`–`0052`, 51 migrations) và SDK đặt trong [`cms/`](cms/README.md); tài liệu đặt tại [`docs/`](docs/README.md); dữ liệu vận hành của website (`database/`, `themes/`, `plugins/`, `uploads/`) nằm ở root và tách biệt với mã nguồn. Xem [README.md](README.md) và [Kiến trúc CMS](docs/architecture/CMS_ARCHITECTURE.md).
 - **Ràng buộc Sản phẩm ([`PRODUCT_REQUIREMENTS.md`](docs/product/PRODUCT_REQUIREMENTS.md)):**
   - Rust + SQLite, đóng gói thành **một file thực thi duy nhất**, Visual Builder 4 tầng (`Section → Row → Column → Element`) và plugin chạy logic server qua **Wasmi (`=2.0.0`)** trong worker cô lập tiến trình.
   - **Bảo toàn dữ liệu:** Giữ khả năng quản lý CPT, custom fields, taxonomy terms và nội dung khi đổi theme hoặc tắt plugin; bảo toàn bố cục đã chỉnh khi cập nhật theme; giữ thay đổi chưa lưu trong preview và khi gặp lỗi `401`/`412`.
@@ -75,7 +75,7 @@ EGM phụ trách **tạo và review đặc tả kỹ thuật**, còn việc tri�
 
 ## 3. Kiểm chứng, Git và CodeGraph
 
-- **Lệnh kiểm chứng bắt buộc sau khi sửa code hoặc tài liệu:**
+- **Lệnh kiểm chứng bắt buộc sau khi sửa code hoặc tài liệu (2 tầng — `Owner Directive 2026-11-26`):**
   ```powershell
   python cms/scripts/check-standards.py
   python cms/scripts/check-standards.py --self-test
@@ -83,10 +83,13 @@ EGM phụ trách **tạo và review đặc tả kỹ thuật**, còn việc tri�
   python cms/scripts/check-plans.py --self-test
   python .agents/scripts/check-agent-artifacts.py
   cargo fmt --manifest-path cms/Cargo.toml --all --check
-  cargo build --manifest-path cms/Cargo.toml --locked
-  cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
+  # Tầng 1 (mặc định cho mọi task/Slice PR): chỉ build & chạy nhóm test Rust liên quan tới file đã sửa
+  # (dùng fast dev profile với [profile.dev.package."*"] opt-level = 2; tự nhận nhóm qua --changed hoặc --group <domain>)
+  python cms/scripts/run-tests.py --changed
   git diff --check
   ```
+  - **Danh sách 7 nhóm test miền** (`python cms/scripts/run-tests.py --list`): `theme`, `builder`, `content`, `plugin`, `i18n`, `site-media-seo`, `ops` (luôn kèm `opendash-core` và mọi file `tests/*.rs` vừa thêm/sửa). Khi sửa file lõi dùng chung (`Cargo.toml`, `app.rs`, `auth.rs`, `opendash-core/src/{lib,id,registry}.rs`…), `--changed` tự động leo thang sang toàn bộ workspace.
+  - **Tầng 2 (trước khi release / đóng đợt kiểm chứng lớn):** chạy đầy đủ bản release `python cms/scripts/run-tests.py --group all --release` (tương đương `cargo test --manifest-path cms/Cargo.toml --workspace --release --locked`).
 - **Không báo đã build/test/benchmark nếu chưa thực chạy trên mã thật.** Phân biệt rõ trạng thái thiết kế (`Approved` trong `docs/designs/`) với trạng thái đã triển khai (`Implemented`) và đã kiểm chứng (`Verified` có biên bản trong `docs/verification/`).
 - **Tra cứu quan hệ mã nguồn với CodeGraph:**
   - Trước khi sửa code hoặc khi Goldfish/Elephant đối chiếu thiết kế với codebase, ưu tiên dùng MCP CodeGraph (`codegraph_symbol_search`, `codegraph_get_callers`, `codegraph_get_callees`, `codegraph_get_call_graph`, `codegraph_analyze_impact`, `codegraph_get_edit_context`, `codegraph_search_docs`) hoặc CLI `node cms/scripts/codegraph-query.mjs`, sau đó luôn đọc file mã nguồn thật để xác minh.

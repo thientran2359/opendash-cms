@@ -2,14 +2,15 @@
 
 ## Overview
 
-`cms/scripts/` contains **31** operational scripts covering workspace builds, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
+`cms/scripts/` contains **32** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
 
 ## Interface
 
-### Build, Packaging & Health (6)
+### Build, Packaging, Test Runner & Health (7)
 
 | Script | Purpose & CLI Interface |
 | --- | --- |
+| [`run-tests.py`](run-tests.py) | Grouped & change-aware Rust test runner (`--list`, `--changed [--base origin/main]`, `--group <theme\|builder\|content\|plugin\|i18n\|site-media-seo\|ops\|core\|all>`, `--release`, `--dry-run`, `--self-test`). Maps changed files to domain test groups, auto-resolves macOS `TMPDIR`, and uses the fast `dev` profile (`[profile.dev.package."*"] opt-level = 2`) by default. |
 | [`build.ps1`](build.ps1) | Windows build pipeline (`[-Release]`): runs `npm ci && npm run build` in `cms/admin` and `cms/examples/plugins/sample-plugin`, then `cargo build --locked -p opendash-server`. |
 | [`build-release-linux.sh`](build-release-linux.sh) | Builds reproducible-input `x86_64-unknown-linux-musl` release bundle (`[--out-dir <dir>] [--skip-npm-ci]`) with `opendash`, `deploy/`, `release-manifest.json`, and `checksums.txt`. |
 | [`verify-release-artifact.py`](verify-release-artifact.py) | Verifies release bundle manifest, SHA-256 checksums, secret/runtime file hygiene, static ELF linking on Linux, and `--check-config` (`verify_bundle`, `run_self_test`; accepts `<bundle_dir>` or `--self-test`). |
@@ -80,6 +81,8 @@ python cms/scripts/check-standards.py --self-test
 python cms/scripts/check-plans.py
 python cms/scripts/check-plans.py --self-test
 python cms/scripts/verify-release-artifact.py --self-test
+python cms/scripts/run-tests.py --self-test
+python cms/scripts/run-tests.py --list
 node cms/scripts/check-i18n.mjs --strict
 node cms/scripts/codegraph-index-docs.mjs --list-sources
 python -m unittest cms/scripts/test_dev_launcher.py
