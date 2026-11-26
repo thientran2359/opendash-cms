@@ -586,7 +586,7 @@ pub async fn canonical_entry_path_in_tx(
             AND c.locale = e.locale
            JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types t ON t.key=e.content_type_key
-          WHERE e.id=? AND e.content_type_key NOT IN ('pattern', 'section')
+          WHERE e.id=? AND e.trashed_at IS NULL AND e.content_type_key NOT IN ('pattern', 'section')
             AND t.provider_status='active'
             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1",
     )
@@ -2072,7 +2072,7 @@ pub async fn resolve_public_path(
                    SELECT 1 FROM content_entries e
                    JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                    JOIN content_types t ON t.key=e.content_type_key
-                   WHERE e.id=? AND e.locale=? AND e.publication_status='published'
+                   WHERE e.id=? AND e.locale=? AND e.trashed_at IS NULL AND e.publication_status='published'
                      AND e.content_type_key NOT IN ('pattern', 'section')
                      AND t.provider_status='active'
                      AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1
@@ -2142,6 +2142,7 @@ pub async fn resolve_public_path(
                            SELECT 1 FROM content_entries e
                            JOIN content_types t ON t.key = e.content_type_key
                           WHERE e.id = ? AND e.locale = ? AND e.content_type_key = 'page'
+                            AND e.trashed_at IS NULL
                             AND e.publication_status = 'published'
                             AND t.provider_status = 'active'
                             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1

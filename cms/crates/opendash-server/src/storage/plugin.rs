@@ -1038,7 +1038,7 @@ pub(crate) async fn get_entry_for_host(
     let visible: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM content_entries e
           JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
-          WHERE e.id = ? AND e.content_type_key = ?
+          WHERE e.id = ? AND e.content_type_key = ? AND e.trashed_at IS NULL
             AND (? = 0 OR (sl.enabled = 1 AND e.publication_status = 'published'
               AND (sl.is_default = 1 OR
                   (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))))",
@@ -1112,41 +1112,23 @@ pub async fn delete_entry_with_plugin_fence(
     if !is_actor_role_active(&mut *tx, actor.user.id, &fence.required_role).await? {
         return Err(ApiError::forbidden("Quyền của tài khoản đã bị thu hồi."));
     }
-    let result = sqlx::query(
-        "DELETE FROM content_entries WHERE content_type_key = ? AND id = ? AND version = ?",
-    )
-    .bind(type_key)
-    .bind(entry_id)
-    .bind(expected_version)
-    .execute(&mut *tx)
-    .await?;
-    if result.rows_affected() == 0 {
-        let current_ver: Option<i64> = sqlx::query_scalar(
-            "SELECT version FROM content_entries WHERE content_type_key = ? AND id = ?",
-        )
-        .bind(type_key)
-        .bind(entry_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        return match current_ver {
-            Some(_) => Err(ApiError::precondition_failed(
-                "Nội dung đã bị thay đổi trước đó (xung đột version).",
-            )),
-            None => Err(ApiError::not_found("Không tìm thấy nội dung cần xóa.")),
-        };
+    let Some(row) =
+        super::entry_lifecycle::load_retained_entry_identity_in_tx(&mut tx, type_key, entry_id)
+            .await?
+    else {
+        return Err(ApiError::not_found("Không tìm thấy nội dung cần xóa."));
+    };
+    if row.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Nội dung đã bị thay đổi trước đó (xung đột version).",
+        ));
     }
-    if type_key == "page" {
-        crate::storage::settings::bump_reading_version_on_deleted_entry_in_tx(&mut tx, entry_id)
-            .await?;
+    if row.trashed_at.is_some() {
+        return Err(ApiError::conflict(
+            "entry_trashed: Nội dung đang ở trong Thùng rác và không thể xóa theo luồng thường.",
+        ));
     }
-    sqlx::query(
-        "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?",
-    )
-    .bind(entry_id)
-    .execute(&mut *tx)
-    .await?;
-    super::plugin_projections::delete_entry_projections_in_tx(&mut tx, entry_id).await?;
-    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    super::entry_lifecycle::physical_delete_cleanup_in_tx(&mut tx, &row).await?;
     tx.commit().await?;
     Ok(())
 }

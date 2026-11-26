@@ -70,9 +70,11 @@ pub struct MergedEntryProjection {
 
 struct EntryProjectionSource {
     entry_id: i64,
+    version: i64,
     content_type_key: String,
     locale: String,
     payload: Value,
+    plugin_generations: BTreeMap<String, i64>,
 }
 
 pub async fn delete_entry_projections_in_tx(
@@ -135,7 +137,7 @@ async fn load_published_entry_source(
 ) -> ApiResult<Option<EntryProjectionSource>> {
     let mut tx = db.begin().await?;
     let row = sqlx::query(
-        "SELECT e.id, e.content_type_key, e.locale, e.translation_group_id,
+        "SELECT e.id, e.version, e.content_type_key, e.locale, e.translation_group_id,
                 e.slug, e.title, e.values_json, e.published_at
            FROM content_entries e
            JOIN content_types t ON t.key = e.content_type_key
@@ -143,6 +145,7 @@ async fn load_published_entry_source(
             AND sl.deleted_at IS NULL
             AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
           WHERE e.id = ?
+            AND e.trashed_at IS NULL
             AND e.publication_status = 'published'
             AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
@@ -157,6 +160,7 @@ async fn load_published_entry_source(
         return Ok(None);
     };
 
+    let version: i64 = row.try_get("version")?;
     let content_type_key: String = row.try_get("content_type_key")?;
     let locale: String = row.try_get("locale")?;
     let translation_group_id: String = row.try_get("translation_group_id")?;
@@ -171,6 +175,11 @@ async fn load_published_entry_source(
             .bind(entry_id)
             .fetch_all(&mut *tx)
             .await?;
+    let gen_rows: Vec<(String, i64)> =
+        sqlx::query_as("SELECT id, revision_generation FROM plugins WHERE enabled = 1")
+            .fetch_all(&mut *tx)
+            .await?;
+    let plugin_generations: BTreeMap<String, i64> = gen_rows.into_iter().collect();
     tx.commit().await?;
 
     let payload = json!({
@@ -189,9 +198,11 @@ async fn load_published_entry_source(
 
     Ok(Some(EntryProjectionSource {
         entry_id,
+        version,
         content_type_key,
         locale,
         payload,
+        plugin_generations,
     }))
 }
 
@@ -345,25 +356,26 @@ async fn evaluate_entry_projections(
         .collect())
 }
 
-/// Recheck eligibility after reserving the SQLite writer. A locale-only
-/// visibility change parks existing projections, whereas a missing, draft or
-/// private entry retains the original cleanup behavior. Never apply work
-/// computed for a locale that has since been renamed or changed.
+/// Recheck eligibility, lifecycle, and source version after reserving the SQLite writer.
+/// A trashed, draft, private, or missing entry clears stale public projections. A stale
+/// computation whose entry version or locale moved on (including across trash+restore)
+/// must neither overwrite nor erase projections belonging to the newer version.
 async fn projection_write_allowed_in_tx(
     tx: &mut SqliteConnection,
     entry_id: i64,
     computed_locale: Option<&str>,
+    expected_source_version: Option<i64>,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
         .execute(&mut *tx)
         .await?;
-    let current: Option<(String, bool)> = sqlx::query_as(
-        "SELECT e.locale, (sl.enabled = 1 AND sl.deleted_at IS NULL
+    let current: Option<(String, i64, bool)> = sqlx::query_as(
+        "SELECT e.locale, e.version, (sl.enabled = 1 AND sl.deleted_at IS NULL
                     AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))
            FROM content_entries e
            JOIN content_types t ON t.key = e.content_type_key
            JOIN site_locales sl ON sl.code = e.locale
-          WHERE e.id = ? AND e.publication_status = 'published'
+          WHERE e.id = ? AND e.trashed_at IS NULL AND e.publication_status = 'published'
             AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
@@ -376,7 +388,9 @@ async fn projection_write_allowed_in_tx(
             delete_entry_projections_in_tx(tx, entry_id).await?;
             Ok(false)
         }
-        Some((locale, active)) => Ok(active && computed_locale == Some(locale.as_str())),
+        Some((locale, current_version, active)) => Ok(active
+            && computed_locale == Some(locale.as_str())
+            && expected_source_version.is_none_or(|ver| ver == current_version)),
     }
 }
 
@@ -384,18 +398,29 @@ async fn write_entry_projections_in_tx(
     tx: &mut SqliteConnection,
     entry_id: i64,
     locale: &str,
+    expected_source_version: i64,
+    captured_plugin_generations: &BTreeMap<String, i64>,
     items: &[ComputedPluginProjection],
     plugin_filter: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    if !projection_write_allowed_in_tx(tx, entry_id, Some(locale)).await? {
+    if !projection_write_allowed_in_tx(tx, entry_id, Some(locale), Some(expected_source_version))
+        .await?
+    {
         return Ok(());
     }
     if let Some(pid) = plugin_filter {
-        let enabled: Option<i64> = sqlx::query_scalar("SELECT enabled FROM plugins WHERE id = ?")
-            .bind(pid)
-            .fetch_optional(&mut *tx)
-            .await?;
-        if enabled != Some(1) {
+        let state: Option<(i64, i64)> =
+            sqlx::query_as("SELECT enabled, revision_generation FROM plugins WHERE id = ?")
+                .bind(pid)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let Some((1, current_gen)) = state else {
+            return Ok(());
+        };
+        if captured_plugin_generations
+            .get(pid)
+            .is_some_and(|captured| *captured != current_gen)
+        {
             return Ok(());
         }
         if let Some(item) = items.iter().find(|it| it.plugin_id == pid) {
@@ -427,24 +452,48 @@ async fn write_entry_projections_in_tx(
         return Ok(());
     }
 
-    if items.is_empty() {
+    let current_plugins: BTreeMap<String, i64> =
+        sqlx::query_as("SELECT id, revision_generation FROM plugins WHERE enabled = 1")
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .collect();
+
+    let mut fresh_items = Vec::new();
+    for item in items {
+        if let Some(&cur_gen) = current_plugins.get(&item.plugin_id)
+            && captured_plugin_generations
+                .get(&item.plugin_id)
+                .is_none_or(|captured| *captured == cur_gen)
+        {
+            fresh_items.push(item);
+        }
+    }
+
+    // Preserve rows belonging to plugins enabled or upgraded after our source snapshot.
+    let mut keep_ids: Vec<&str> = fresh_items.iter().map(|it| it.plugin_id.as_str()).collect();
+    for (pid, &cur_gen) in &current_plugins {
+        if captured_plugin_generations.get(pid) != Some(&cur_gen) {
+            keep_ids.push(pid.as_str());
+        }
+    }
+    if keep_ids.is_empty() {
         delete_entry_projections_in_tx(tx, entry_id).await?;
         return Ok(());
     }
 
-    let active_ids: Vec<&str> = items.iter().map(|it| it.plugin_id.as_str()).collect();
-    let active_ids_json = serde_json::to_string(&active_ids).unwrap_or_else(|_| "[]".into());
+    let keep_ids_json = serde_json::to_string(&keep_ids).unwrap_or_else(|_| "[]".into());
     sqlx::query(
         "DELETE FROM plugin_entry_projections
           WHERE entry_id = ?
             AND plugin_id NOT IN (SELECT value FROM json_each(?))",
     )
     .bind(entry_id)
-    .bind(&active_ids_json)
+    .bind(&keep_ids_json)
     .execute(&mut *tx)
     .await?;
 
-    for item in items {
+    for item in fresh_items {
         sqlx::query(
             "INSERT INTO plugin_entry_projections (entry_id, plugin_id, locale, seo_json, ext_json, updated_at)
              VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -474,7 +523,7 @@ pub async fn recompute_entry_projections(
         let mut tx = db.begin().await?;
         // A missing source can mean the locale is parked. Recheck under
         // the writer before deciding whether existing projections are stale.
-        projection_write_allowed_in_tx(&mut tx, entry_id, None).await?;
+        projection_write_allowed_in_tx(&mut tx, entry_id, None, None).await?;
         tx.commit().await?;
         return Ok(());
     };
@@ -482,7 +531,16 @@ pub async fn recompute_entry_projections(
     let _ = &source.content_type_key;
     let items = evaluate_entry_projections(db, hooks, &source, None).await?;
     let mut tx = db.begin().await?;
-    write_entry_projections_in_tx(&mut tx, entry_id, &source.locale, &items, None).await?;
+    write_entry_projections_in_tx(
+        &mut tx,
+        entry_id,
+        &source.locale,
+        source.version,
+        &source.plugin_generations,
+        &items,
+        None,
+    )
+    .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -530,6 +588,7 @@ pub async fn spawn_recompute_plugin_projections_batched(
                     AND sl.deleted_at IS NULL
                     AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                   WHERE e.id > ?
+                    AND e.trashed_at IS NULL
                     AND e.publication_status = 'published'
                     AND e.content_type_key != 'pattern'
                     AND t.provider_status = 'active'
@@ -555,8 +614,13 @@ pub async fn spawn_recompute_plugin_projections_batched(
                 return;
             }
 
-            let mut computed_batch: Vec<(i64, String, Vec<ComputedPluginProjection>)> =
-                Vec::with_capacity(entry_ids.len());
+            let mut computed_batch: Vec<(
+                i64,
+                String,
+                i64,
+                BTreeMap<String, i64>,
+                Vec<ComputedPluginProjection>,
+            )> = Vec::with_capacity(entry_ids.len());
 
             for eid in entry_ids {
                 last_id = eid;
@@ -574,7 +638,13 @@ pub async fn spawn_recompute_plugin_projections_batched(
                     && let Ok(items) =
                         evaluate_entry_projections(&db, &hooks, &source, Some(&plugin_id)).await
                 {
-                    computed_batch.push((eid, source.locale, items));
+                    computed_batch.push((
+                        eid,
+                        source.locale,
+                        source.version,
+                        source.plugin_generations,
+                        items,
+                    ));
                 }
             }
 
@@ -600,11 +670,13 @@ pub async fn spawn_recompute_plugin_projections_batched(
             };
 
             if let Ok(mut tx) = db.begin().await {
-                for (eid, locale, items) in &computed_batch {
+                for (eid, locale, source_version, captured_gens, items) in &computed_batch {
                     if let Err(err) = write_entry_projections_in_tx(
                         &mut tx,
                         *eid,
                         locale,
+                        *source_version,
+                        captured_gens,
                         items,
                         Some(&plugin_id),
                     )
@@ -636,6 +708,9 @@ pub async fn batch_load_entry_projections_in_conn(
         "SELECT pep.entry_id, pep.plugin_id, pep.seo_json, pep.ext_json
            FROM plugin_entry_projections pep
            JOIN json_each(?) ids ON ids.value = pep.entry_id
+           JOIN content_entries e ON e.id = pep.entry_id
+            AND e.trashed_at IS NULL
+            AND e.publication_status = 'published'
            JOIN plugins p ON p.id = pep.plugin_id AND p.enabled = 1
           ORDER BY pep.entry_id ASC, pep.plugin_id ASC",
     )
@@ -751,9 +826,17 @@ mod tests {
             ext_json: Some(r#"{"badge":"original"}"#.into()),
         }];
         let mut tx = pool.begin().await.unwrap();
-        write_entry_projections_in_tx(&mut tx, 1, &source.locale, &items, None)
-            .await
-            .unwrap();
+        write_entry_projections_in_tx(
+            &mut tx,
+            1,
+            &source.locale,
+            source.version,
+            &source.plugin_generations,
+            &items,
+            None,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
 
         for (toggle, locale_enabled, deleted_at) in
@@ -783,16 +866,32 @@ mod tests {
             // Neither the missing-source cleanup nor an in-flight empty
             // computation may erase parked projections.
             assert!(
-                !projection_write_allowed_in_tx(&mut tx, 1, None)
+                !projection_write_allowed_in_tx(&mut tx, 1, None, None)
                     .await
                     .unwrap()
             );
-            write_entry_projections_in_tx(&mut tx, 1, "en", &[], None)
-                .await
-                .unwrap();
-            write_entry_projections_in_tx(&mut tx, 1, "en", &[], Some("projection-test"))
-                .await
-                .unwrap();
+            write_entry_projections_in_tx(
+                &mut tx,
+                1,
+                "en",
+                source.version,
+                &source.plugin_generations,
+                &[],
+                None,
+            )
+            .await
+            .unwrap();
+            write_entry_projections_in_tx(
+                &mut tx,
+                1,
+                "en",
+                source.version,
+                &source.plugin_generations,
+                &[],
+                Some("projection-test"),
+            )
+            .await
+            .unwrap();
             tx.commit().await.unwrap();
             let stored: String = sqlx::query_scalar(
                 "SELECT ext_json FROM plugin_entry_projections WHERE entry_id = 1",
@@ -809,9 +908,17 @@ mod tests {
             .await
             .unwrap();
         // A stale computed locale must not overwrite or erase the current one.
-        write_entry_projections_in_tx(&mut tx, 1, "vi", &[], None)
-            .await
-            .unwrap();
+        write_entry_projections_in_tx(
+            &mut tx,
+            1,
+            "vi",
+            source.version,
+            &source.plugin_generations,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
         assert!(
             load_published_entry_source(&pool, 1)
@@ -831,7 +938,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            !projection_write_allowed_in_tx(&mut tx, 1, None)
+            !projection_write_allowed_in_tx(&mut tx, 1, None, None)
                 .await
                 .unwrap()
         );
@@ -841,6 +948,192 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn stale_projection_cannot_reinsert_during_trash_or_overwrite_after_restore() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO plugins (id,name,version,manifest_json,wasm_blob,enabled,revision_generation)
+             VALUES('projection-race','Projection Race','1.0.0','{}',X'00',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO content_entries
+             (id,content_type_key,locale,translation_group_id,slug,title,values_json,publication_status,version)
+             VALUES(1,'post','vi','grp-race','race-post','Race Post','{}','draft',1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE content_entries SET publication_status = 'published', version = 2 WHERE id = 1",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let v2_source = load_published_entry_source(&pool, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(v2_source.version, 2);
+        let v2_items = vec![ComputedPluginProjection {
+            plugin_id: "projection-race".into(),
+            seo_json: None,
+            ext_json: Some(r#"{"ver":"v2"}"#.into()),
+        }];
+
+        // Entry is trashed (v3): pre-trash v2 computation arrives late and must NOT write.
+        sqlx::query(
+            "UPDATE content_entries SET trashed_at = datetime('now'), version = 3 WHERE id = 1",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            load_published_entry_source(&pool, 1)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        {
+            let mut tx = pool.begin().await.unwrap();
+            write_entry_projections_in_tx(
+                &mut tx,
+                1,
+                &v2_source.locale,
+                v2_source.version,
+                &v2_source.plugin_generations,
+                &v2_items,
+                None,
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+        }
+        let count_trashed: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM plugin_entry_projections WHERE entry_id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count_trashed, 0);
+
+        // Entry is restored (v4) and republished (v5) with fresh projection {"ver":"v5"}.
+        sqlx::query(
+            "UPDATE content_entries SET trashed_at = NULL, publication_status = 'published', version = 5 WHERE id = 1",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let v5_source = load_published_entry_source(&pool, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(v5_source.version, 5);
+        let v5_items = vec![ComputedPluginProjection {
+            plugin_id: "projection-race".into(),
+            seo_json: None,
+            ext_json: Some(r#"{"ver":"v5"}"#.into()),
+        }];
+        {
+            let mut tx = pool.begin().await.unwrap();
+            write_entry_projections_in_tx(
+                &mut tx,
+                1,
+                &v5_source.locale,
+                v5_source.version,
+                &v5_source.plugin_generations,
+                &v5_items,
+                None,
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+        }
+
+        // Pre-trash v2 computation arrives after restore+republish: must NEITHER overwrite NOR erase v5!
+        {
+            let mut tx = pool.begin().await.unwrap();
+            write_entry_projections_in_tx(
+                &mut tx,
+                1,
+                &v2_source.locale,
+                v2_source.version,
+                &v2_source.plugin_generations,
+                &v2_items,
+                None,
+            )
+            .await
+            .unwrap();
+            write_entry_projections_in_tx(
+                &mut tx,
+                1,
+                &v2_source.locale,
+                v2_source.version,
+                &v2_source.plugin_generations,
+                &[],
+                Some("projection-race"),
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+        }
+        let stored_v5: String = sqlx::query_scalar(
+            "SELECT ext_json FROM plugin_entry_projections WHERE entry_id = 1 AND plugin_id = 'projection-race'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored_v5, r#"{"ver":"v5"}"#);
+
+        // Plugin generation advances from 1 to 2: stale gen-1 compute for v5 must not overwrite gen-2 row.
+        sqlx::query("UPDATE plugins SET revision_generation = 2 WHERE id = 'projection-race'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE plugin_entry_projections SET ext_json = '{\"ver\":\"v5-gen2\"}' WHERE entry_id = 1",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        {
+            let mut tx = pool.begin().await.unwrap();
+            write_entry_projections_in_tx(
+                &mut tx,
+                1,
+                &v5_source.locale,
+                v5_source.version,
+                &v5_source.plugin_generations,
+                &v5_items,
+                Some("projection-race"),
+            )
+            .await
+            .unwrap();
+            write_entry_projections_in_tx(
+                &mut tx,
+                1,
+                &v5_source.locale,
+                v5_source.version,
+                &v5_source.plugin_generations,
+                &v5_items,
+                None,
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+        }
+        let stored_gen2: String = sqlx::query_scalar(
+            "SELECT ext_json FROM plugin_entry_projections WHERE entry_id = 1 AND plugin_id = 'projection-race'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored_gen2, r#"{"ver":"v5-gen2"}"#);
     }
 
     #[tokio::test]

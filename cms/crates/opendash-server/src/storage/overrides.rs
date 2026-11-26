@@ -229,6 +229,7 @@ pub(super) async fn build_reset_candidate_chain_for_locale_in_conn(
                   WHERE reading.locale = ?
                     AND e.content_type_key='page'
                     AND e.locale = reading.locale
+                    AND e.trashed_at IS NULL
                     AND e.publication_status='published'",
             )
             .bind(&effective_locale)
@@ -253,7 +254,7 @@ pub(super) async fn build_reset_candidate_chain_for_locale_in_conn(
                 (target.entry_id, target.content_type.as_deref())
             {
                 let slug: Option<String> = sqlx::query_scalar(
-                    "SELECT slug FROM content_entries WHERE id=? AND content_type_key=?",
+                    "SELECT slug FROM content_entries WHERE id=? AND content_type_key=? AND trashed_at IS NULL",
                 )
                 .bind(entry_id)
                 .bind(content_type)
@@ -589,7 +590,7 @@ async fn validate_cpt_target_fields_in_tx(
 
     if let Some(eid) = entry_id {
         let exists: Option<i64> = sqlx::query_scalar(
-            "SELECT id FROM content_entries WHERE id = ? AND content_type_key = ?",
+            "SELECT id FROM content_entries WHERE id = ? AND content_type_key = ? AND trashed_at IS NULL",
         )
         .bind(eid)
         .bind(type_key)
@@ -1583,7 +1584,7 @@ async fn resolve_preview_entry(
             (Some(t), Some(id), _) => Some((t.clone(), id)),
             (Some(t), None, Some(slug)) => {
                 let id: i64 = sqlx::query_scalar(
-                    "SELECT id FROM content_entries WHERE content_type_key = ? AND slug = ? AND locale = ?",
+                    "SELECT id FROM content_entries WHERE content_type_key = ? AND slug = ? AND locale = ? AND trashed_at IS NULL",
                 )
                 .bind(t)
                 .bind(slug)
@@ -3283,7 +3284,7 @@ pub async fn preview_studio_with_cache_and_locale(
         match reading.homepage_page_id {
             Some(id) => {
                 let exists: Option<i64> = sqlx::query_scalar(
-                        "SELECT id FROM content_entries WHERE id = ? AND content_type_key = 'page' AND locale = ?",
+                        "SELECT id FROM content_entries WHERE id = ? AND content_type_key = 'page' AND locale = ? AND trashed_at IS NULL",
                     )
                     .bind(id)
                     .bind(&effective_locale)

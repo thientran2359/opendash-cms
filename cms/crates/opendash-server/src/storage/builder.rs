@@ -912,6 +912,7 @@ struct EntryBuilderSnapshot {
     raw_body_has_blocks: bool,
     page_layout_key: Option<String>,
     custom_template_key: Option<String>,
+    trashed_at: Option<String>,
 }
 
 fn actor_field_role(actor: &SessionContext) -> FieldRole {
@@ -987,6 +988,7 @@ async fn entry_builder_snapshot(
         raw_doc,
         page_layout_key,
         custom_template_key,
+        trashed_at,
     ): (
         String,
         String,
@@ -997,6 +999,7 @@ async fn entry_builder_snapshot(
         String,
         i64,
         String,
+        Option<String>,
         Option<String>,
         Option<String>,
         Option<String>,
@@ -1023,7 +1026,7 @@ async fn entry_builder_snapshot(
         .await?
         .ok_or_else(|| ApiError::not_found("Content entry not found."))?;
         (
-            row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, None, None,
+            row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, None, None, None,
         )
     } else {
         let row: Option<(
@@ -1038,9 +1041,10 @@ async fn entry_builder_snapshot(
             String,
             Option<String>,
             Option<String>,
+            Option<String>,
         )> = sqlx::query_as(
             "SELECT locale, translation_group_id, title, slug, values_json, content_mode, publication_status, version, updated_at,
-                    page_layout_key, custom_template_key
+                    page_layout_key, custom_template_key, trashed_at
                FROM content_entries
               WHERE id = ? AND content_type_key = ?",
         )
@@ -1060,6 +1064,7 @@ async fn entry_builder_snapshot(
             updated_at,
             page_layout_key,
             custom_template_key,
+            trashed_at,
         ) = row.ok_or_else(|| ApiError::not_found("Content entry not found."))?;
         (
             locale,
@@ -1074,6 +1079,7 @@ async fn entry_builder_snapshot(
             None,
             page_layout_key,
             custom_template_key,
+            trashed_at,
         )
     };
     let content_mode = match mode.as_str() {
@@ -1136,6 +1142,7 @@ async fn entry_builder_snapshot(
         raw_body_has_blocks,
         page_layout_key,
         custom_template_key,
+        trashed_at,
     })
 }
 
@@ -1152,6 +1159,11 @@ pub async fn read_entry_builder(
     let current = entry_builder_snapshot(&mut tx, type_key, id).await?;
     if type_key != "pattern" {
         check_entry_body_edit_acl(&current.schema, actor)?;
+        if current.trashed_at.is_some() {
+            return Err(ApiError::conflict(
+                "entry_trashed: Nội dung đang ở trong Thùng rác và không thể mở trong Trình dựng trang.",
+            ));
+        }
     }
     tx.commit().await?;
     Ok(current.opened)
@@ -1429,6 +1441,9 @@ pub(super) async fn preview_saved_page_body_in_tx_with_options_and_budget(
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<Option<RenderedLayout>> {
     let current = entry_builder_snapshot(tx, type_key, id).await?;
+    if type_key != "pattern" && current.trashed_at.is_some() {
+        return Err(ApiError::not_found("Content entry not found."));
+    }
     if !current.raw_body_has_blocks {
         return Ok(None);
     }
@@ -1512,6 +1527,11 @@ pub async fn preview_entry_builder_with_cache(
     let current = entry_builder_snapshot(&mut tx, type_key, id).await?;
     if type_key != "pattern" {
         check_entry_body_edit_acl(&current.schema, actor)?;
+        if current.trashed_at.is_some() {
+            return Err(ApiError::conflict(
+                "entry_trashed: Nội dung đang ở trong Thùng rác và không thể xem trước trong Trình dựng trang.",
+            ));
+        }
     }
     let actor_role = actor_field_role(actor);
     let state = validate_entry_builder_document(&mut tx, &current, actor_role, document).await?;
@@ -1597,6 +1617,11 @@ fn check_entry_builder_cas(
 ) -> ApiResult<()> {
     if current.opened.version != expected_version {
         return Err(ApiError::precondition_failed("Entry version changed."));
+    }
+    if current.opened.type_key != "pattern" && current.trashed_at.is_some() {
+        return Err(ApiError::conflict(
+            "entry_trashed: Nội dung đang ở trong Thùng rác và không thể chỉnh sửa trong Trình dựng trang.",
+        ));
     }
     if matches!(mutation, EntryBuilderMutation::Reset) {
         let has_builder_doc = if current.opened.type_key == "pattern" {
@@ -1850,7 +1875,7 @@ async fn mutate_entry_builder(
             "UPDATE content_entries
                 SET values_json=?, content_mode=?, version=version+1,
                     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-              WHERE id=? AND content_type_key=? AND version=?",
+              WHERE id=? AND content_type_key=? AND version=? AND trashed_at IS NULL",
         )
         .bind(next_values_json)
         .bind(mode_db)

@@ -403,6 +403,7 @@ pub(super) async fn decoded_with_terms(
            JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
           WHERE e.content_type_key = ?
             AND e.translation_group_id = ?
+            AND e.trashed_at IS NULL
           ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
     )
     .bind(&record.content_type_key)
@@ -477,6 +478,7 @@ pub(crate) async fn batch_translations_by_group_in_tx(
                JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
               WHERE e.content_type_key = ?
                 AND e.translation_group_id IN (SELECT value FROM json_each(?))
+                AND e.trashed_at IS NULL
               ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
         )
         .bind(type_key)
@@ -646,7 +648,7 @@ pub async fn get_entry_locale_and_group(
     id: i64,
 ) -> ApiResult<Option<(String, String)>> {
     let row: Option<(String, String)> = sqlx::query_as(
-        "SELECT locale, translation_group_id FROM content_entries WHERE content_type_key = ? AND id = ?",
+        "SELECT locale, translation_group_id FROM content_entries WHERE content_type_key = ? AND id = ? AND trashed_at IS NULL",
     )
     .bind(type_key)
     .bind(id)
@@ -690,20 +692,14 @@ pub(super) async fn current_entry_in_write(
     id: i64,
     expected_version: i64,
 ) -> ApiResult<()> {
-    let version: Option<i64> = sqlx::query_scalar(
-        "SELECT version FROM content_entries WHERE content_type_key = ? AND id = ?",
+    super::entry_lifecycle::ensure_active_entry_version_in_conn(
+        &mut **tx,
+        type_key,
+        id,
+        expected_version,
     )
-    .bind(type_key)
-    .bind(id)
-    .fetch_optional(&mut **tx)
     .await?;
-    match version {
-        None => Err(ApiError::not_found("Không tìm thấy nội dung.")),
-        Some(v) if v != expected_version => Err(ApiError::precondition_failed(
-            "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
-        )),
-        Some(_) => Ok(()),
-    }
+    Ok(())
 }
 
 pub async fn get_entry(
@@ -724,7 +720,7 @@ pub(super) async fn get_entry_in_tx(
 ) -> ApiResult<Option<ContentEntryRecord>> {
     let row: Option<EntryRow> = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
-         FROM content_entries WHERE content_type_key = ? AND id = ?",
+         FROM content_entries WHERE content_type_key = ? AND id = ? AND trashed_at IS NULL",
     )
     .bind(type_key)
     .bind(id)
@@ -1044,6 +1040,7 @@ const FILTERED_ENTRIES_CTE_AND_FROM: &str = "WITH RECURSIVE category_scope(id, d
 const FILTERED_ENTRIES_WHERE: &str = "FROM content_entries e
    JOIN content_types t ON t.key = e.content_type_key
   WHERE e.content_type_key = ?
+    AND e.trashed_at IS NULL
     AND (? = 0 OR (e.publication_status = 'published'
          AND e.content_type_key != 'pattern' AND t.provider_status = 'active'
          AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1))
@@ -1406,7 +1403,7 @@ pub async fn update_entry_with_fence(
         "UPDATE content_entries
          SET slug = ?, title = ?, values_json = ?, version = version + 1,
              updated_at = datetime('now')
-         WHERE content_type_key = ? AND id = ? AND version = ?",
+         WHERE content_type_key = ? AND id = ? AND version = ? AND trashed_at IS NULL",
     )
     .bind(&input.slug)
     .bind(&input.title)
@@ -1587,7 +1584,7 @@ pub async fn update_entry_with_schema_fence(
         "UPDATE content_entries
          SET slug = ?, title = ?, values_json = ?, version = version + 1,
              updated_at = datetime('now')
-         WHERE content_type_key = ? AND id = ? AND version = ?",
+         WHERE content_type_key = ? AND id = ? AND version = ? AND trashed_at IS NULL",
     )
     .bind(&input.slug)
     .bind(&input.title)
@@ -2022,6 +2019,8 @@ pub async fn prepare_composite_entry_save(
         }
         Some(id) => {
             let expected_ver = input.expected_version.unwrap();
+            super::entry_lifecycle::ensure_active_entry_version(db, type_key, id, expected_ver)
+                .await?;
             let existing = get_entry(db, type_key, id)
                 .await?
                 .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
@@ -2630,7 +2629,7 @@ pub async fn commit_composite_entry_save(
                      created_at = COALESCE(?, created_at),
                      version = version + 1,
                      updated_at = COALESCE(?, datetime('now'))
-                 WHERE content_type_key = ? AND id = ? AND version = ?",
+                 WHERE content_type_key = ? AND id = ? AND version = ? AND trashed_at IS NULL",
             )
             .bind(&resolved_slug)
             .bind(&plan.merged_input.title)
@@ -2907,6 +2906,13 @@ pub async fn prepare_entry_translation(
             "Không hỗ trợ tạo bản dịch trực tiếp cho Pattern/Section.",
         ));
     }
+    super::entry_lifecycle::ensure_active_entry_version(
+        db,
+        type_key,
+        source_id,
+        expected_source_version,
+    )
+    .await?;
     let source = get_entry(db, type_key, source_id)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy bài gốc để dịch."))?;
@@ -3246,31 +3252,25 @@ pub async fn delete_entry(
 ) -> ApiResult<()> {
     forbid_generic_pattern_write(type_key)?;
     let mut tx = db.begin().await?;
-    let result = sqlx::query(
-        "DELETE FROM content_entries
-         WHERE content_type_key = ? AND id = ? AND version = ?",
-    )
-    .bind(type_key)
-    .bind(id)
-    .bind(expected_version)
-    .execute(&mut *tx)
-    .await?;
-    if result.rows_affected() == 0 {
-        return Err(missing_or_stale(db, type_key, id).await?);
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
+    let Some(row) =
+        super::entry_lifecycle::load_retained_entry_identity_in_tx(&mut tx, type_key, id).await?
+    else {
+        return Err(ApiError::not_found("Không tìm thấy nội dung."));
+    };
+    if row.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
+        ));
     }
-    if type_key == "page" {
-        // Preserve deleted Reading IDs and advance their CAS token atomically
-        // with removal and permalink-claim rebuilding.
-        crate::storage::settings::bump_reading_version_on_deleted_entry_in_tx(&mut tx, id).await?;
+    if row.trashed_at.is_some() {
+        return Err(ApiError::conflict(
+            "entry_trashed: Nội dung đang ở trong Thùng rác và không thể xóa theo luồng thường.",
+        ));
     }
-    sqlx::query(
-        "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?",
-    )
-    .bind(id)
-    .execute(&mut *tx)
-    .await?;
-    super::plugin_projections::delete_entry_projections_in_tx(&mut tx, id).await?;
-    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    super::entry_lifecycle::physical_delete_cleanup_in_tx(&mut tx, &row).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -3312,7 +3312,7 @@ pub async fn set_publication_status(
              published_at = CASE WHEN ? = 'published' THEN COALESCE(published_at, datetime('now')) ELSE published_at END,
              version = version + 1,
              updated_at = datetime('now')
-         WHERE content_type_key = ? AND id = ? AND version = ?",
+         WHERE content_type_key = ? AND id = ? AND version = ? AND trashed_at IS NULL",
     )
     .bind(status)
     .bind(status)
@@ -3322,17 +3322,20 @@ pub async fn set_publication_status(
     .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
-        return Err(missing_or_stale(db, type_key, id).await?);
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
+        ));
     }
     if status == "draft" {
         super::plugin_projections::delete_entry_projections_in_tx(&mut tx, id).await?;
     }
     crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
-    tx.commit().await?;
-    get_entry(db, type_key, id)
+    let record = get_entry_in_tx(&mut tx, type_key, id)
         .await?
-        .ok_or_else(|| ApiError::internal("Không thể tải trạng thái xuất bản."))
+        .ok_or_else(|| ApiError::internal("Không thể tải trạng thái xuất bản."))?;
+    tx.commit().await?;
+    Ok(record)
 }
 
 async fn missing_or_stale(db: &SqlitePool, type_key: &str, id: i64) -> ApiResult<ApiError> {

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Owns **100% of SQLite queries (`sqlx::query*`, `sqlx::raw_sql`)** in OpenDash across 31 domain storage modules (`admin_extensions`–`theme` and `contact`) wired through [`mod.rs`](mod.rs) (plus `s03_media_acl_tests.rs`, `theme_tests.rs`, and `settings_timezones_2026f.txt`). Configures SQLite WAL mode, `foreign_keys = ON`, and `5s` `busy_timeout`, runs `preflight_builtin_key_collisions`, applies migrations `0001_builder_slice.sql` through `0052_taxonomy_term_featured_image.sql` (51 SQL files; `0016` omitted) from `cms/migrations/`, and seeds embedded core blocks in `[mod.rs:init_db]`.
+Owns **100% of SQLite queries (`sqlx::query*`, `sqlx::raw_sql`)** in OpenDash across 32 domain storage modules (`admin_extensions`–`theme`, `entry_lifecycle`, and `contact`) wired through [`mod.rs`](mod.rs) (plus `s03_media_acl_tests.rs`, `theme_tests.rs`, and `settings_timezones_2026f.txt`). Configures SQLite WAL mode, `foreign_keys = ON`, and `5s` `busy_timeout`, runs `preflight_builtin_key_collisions`, applies migrations `0001_builder_slice.sql` through `0053_entry_lifecycle.sql` (52 SQL files; `0016` omitted) from `cms/migrations/`, and seeds embedded core blocks in `[mod.rs:init_db]`.
 
 See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 Writer Inventory](../../../../../docs/contracts/M8_WRITER_INVENTORY.md) for persistence and admission rules.
 
@@ -10,9 +10,10 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
 
 - **Pool Bootstrap & Health** ([`mod.rs`](mod.rs)): `[mod.rs:init_db]`, `[mod.rs:check_db_ready]`.
 - **Auth & Dashboard** ([`auth.rs`](auth.rs), [`dashboard.rs`](dashboard.rs)): `[auth.rs:UserSummary]`, `[auth.rs:UsersPage]` (plus `pub(crate)` user/session CRUD), `[dashboard.rs:get_counts]`, `[dashboard.rs:DashboardCounts]`, `[dashboard.rs:PublicationCounts]`.
-- **Content Types, Field Groups, Entries, Patterns & Taxonomy** ([`content.rs`](content.rs), [`entries.rs`](entries.rs), [`entry_table.rs`](entry_table.rs), [`patterns.rs`](patterns.rs), [`taxonomy.rs`](taxonomy.rs)):
+- **Content Types, Field Groups, Entries, Lifecycle, Patterns & Taxonomy** ([`content.rs`](content.rs), [`entries.rs`](entries.rs), [`entry_lifecycle.rs`](entry_lifecycle.rs), [`entry_table.rs`](entry_table.rs), [`patterns.rs`](patterns.rs), [`taxonomy.rs`](taxonomy.rs)):
   - `[content.rs:load_effective_content_schema]`, `[content.rs:load_effective_content_schema_in_tx]`, `[content.rs:insert_user_content_type]`, `[content.rs:update_user_content_type]`, `[content.rs:list_content_types_with_meta]`, `[content.rs:load_content_type_catalog]`, `[content.rs:create_user_field_group]`, `[content.rs:update_user_field_group]`, `[content.rs:withdraw_user_field_group]`, `[content.rs:sync_theme_declarations_in_tx]`, `[content.rs:sync_plugin_cnt_declarations_in_tx]`, `[content.rs:get_editor_layout]`, `[content.rs:put_editor_layout]`, `[content.rs:get_effective_editor_config]`.
   - `[entries.rs:get_entry]`, `[entries.rs:list_entries]`, `[entries.rs:list_published_page]`, `[entries.rs:create_entry_with_fence]`, `[entries.rs:update_entry_with_fence]`, `[entries.rs:prepare_composite_entry_save]`, `[entries.rs:commit_composite_entry_save]`, `[entries.rs:prepare_entry_translation]`, `[entries.rs:commit_entry_translation]`, `[entries.rs:delete_entry]`, `[entries.rs:set_publication_status]`, `[entries.rs:PluginActionFence]`.
+  - `[entry_lifecycle.rs:LifecycleOperation]`, `[entry_lifecycle.rs:LifecycleCommand]`, `[entry_lifecycle.rs:EntryMutationKind]`, `[entry_lifecycle.rs:EntryCommitReceipt]`, `[entry_lifecycle.rs:LifecycleScope]`, `[entry_lifecycle.rs:LifecycleConfirmationEvidence]`, `[entry_lifecycle.rs:LifecycleAuthority]`, `[entry_lifecycle.rs:SecondaryOutcome]`, `[entry_lifecycle.rs:ProjectionOutcome]`, `[entry_lifecycle.rs:execute_lifecycle_transition]` (plus internal `apply_lifecycle_in_tx`, `physical_delete_cleanup_in_tx`, `ensure_active_entry_version*`).
   - `[entry_table.rs:query]`, `[entry_table.rs:EntryTableFilter]`, `[entry_table.rs:EntryTableResult]`.
   - `[patterns.rs:list]`, `[patterns.rs:get]`, `[patterns.rs:create]`, `[patterns.rs:update]`, `[patterns.rs:delete]`, `[patterns.rs:list_theme_patterns]`, `[patterns.rs:get_theme_pattern]`.
   - `[taxonomy.rs:list_definitions]`, `[taxonomy.rs:create_definition]`, `[taxonomy.rs:patch_definition]`, `[taxonomy.rs:delete_definition]`, `[taxonomy.rs:list_terms_for_locale]`, `[taxonomy.rs:create_term_with_locale]`, `[taxonomy.rs:patch_term]`, `[taxonomy.rs:delete_term]`.
@@ -55,7 +56,7 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
 
 ## Side Effects
 
-- Creates/opens the site SQLite database in WAL mode, executes migrations `0001`–`0052`, and reads/writes all CMS tables (`[mod.rs:init_db]`).
+- Creates/opens the site SQLite database in WAL mode, executes migrations `0001`–`0053`, and reads/writes all CMS tables (`[mod.rs:init_db]`).
 - Stages and verifies immutable theme and plugin revision directories and `.complete` markers on disk under `themes_root` and `plugins_root` (`[theme.rs:stage_and_commit_v3_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[plugin.rs:stage_and_publish_plugin_revision_with_extensions]`).
 - Creates consistent SQLite snapshot files via `VACUUM INTO` during backup jobs (`[backup.rs:vacuum_into_snapshot]`).
 

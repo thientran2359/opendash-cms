@@ -72,6 +72,186 @@ fn capture_template<'a>(raw: &'a str, pieces: &[&str]) -> Option<Vec<&'a str>> {
 
 const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
     (
+        "entry.trashed",
+        "entry_trashed: Nội dung đang ở trong Thùng rác và không thể chỉnh sửa cho đến khi khôi phục.",
+        "entry_trashed: Entry is in Trash and cannot be edited until restored.",
+    ),
+    (
+        "entry.trashed",
+        "entry_trashed: Nội dung đang ở trong Thùng rác và không thể mở trong Trình dựng trang.",
+        "entry_trashed: Entry is in Trash and cannot be opened in Builder.",
+    ),
+    (
+        "entry.trashed",
+        "entry_trashed: Nội dung đang ở trong Thùng rác và không thể xem trước trong Trình dựng trang.",
+        "entry_trashed: Entry is in Trash and cannot be previewed in Builder.",
+    ),
+    (
+        "entry.trashed",
+        "entry_trashed: Nội dung đang ở trong Thùng rác và không thể chỉnh sửa trong Trình dựng trang.",
+        "entry_trashed: Entry is in Trash and cannot be edited in Builder.",
+    ),
+    (
+        "entry.trashed",
+        "entry_trashed: Nội dung đang ở trong Thùng rác và không thể chỉnh sửa đường dẫn cho đến khi khôi phục.",
+        "entry_trashed: Entry is in Trash and cannot edit route until restored.",
+    ),
+    (
+        "entry.trashed",
+        "entry_trashed: Nội dung đang ở trong Thùng rác và không thể chỉnh sửa SEO cho đến khi khôi phục.",
+        "entry_trashed: Entry is in Trash and cannot edit SEO until restored.",
+    ),
+    (
+        "entry.trashed",
+        "entry_trashed: Nội dung đang ở trong Thùng rác và không thể xóa theo luồng thường.",
+        "entry_trashed: Entry is in Trash and cannot be deleted through the ordinary path.",
+    ),
+    (
+        "entry.version_conflict",
+        "Phiên bản nội dung đã thay đổi trước khi xóa vĩnh viễn.",
+        "Entry version changed before permanent deletion.",
+    ),
+    (
+        "entry.version_conflict",
+        "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi thao tác.",
+        "Entry version changed. Reload before retrying this action.",
+    ),
+    (
+        "entry.version_conflict",
+        "Phiên bản nội dung đã thay đổi trước khi chuyển vào Thùng rác.",
+        "Entry version changed before moving to Trash.",
+    ),
+    (
+        "entry.version_conflict",
+        "Phiên bản nội dung đã thay đổi trước khi khôi phục.",
+        "Entry version changed before restoring.",
+    ),
+    (
+        "entry.restore_schema_conflict",
+        "restore_schema_conflict: Tiêu đề nội dung không còn hợp lệ theo ràng buộc hiện tại.",
+        "restore_schema_conflict: Entry title is no longer valid under current constraints.",
+    ),
+    (
+        "entry.restore_schema_conflict",
+        "restore_schema_conflict: Slug nội dung không còn hợp lệ theo ràng buộc hiện tại.",
+        "restore_schema_conflict: Entry slug is no longer valid under current constraints.",
+    ),
+    (
+        "entry.restore_schema_conflict",
+        "restore_schema_conflict: Dữ liệu trường nội dung đã lưu không thể đọc hợp lệ.",
+        "restore_schema_conflict: Stored entry field values cannot be read validly.",
+    ),
+    (
+        "entry.restore_taxonomy_conflict",
+        "restore_taxonomy_conflict: Term đính kèm không khớp ngôn ngữ của nội dung.",
+        "restore_taxonomy_conflict: Attached term does not match the entry locale.",
+    ),
+    (
+        "entry.restore_taxonomy_conflict",
+        "restore_taxonomy_conflict: Số lượng term vượt giới hạn của taxonomy hiện hành.",
+        "restore_taxonomy_conflict: Term count exceeds the current taxonomy limit.",
+    ),
+    (
+        "entry.restore_taxonomy_conflict",
+        "restore_taxonomy_conflict: Tổng số term hoạt động vượt quá giới hạn cho phép.",
+        "restore_taxonomy_conflict: Total active terms exceed the allowed limit.",
+    ),
+    (
+        "entry.restore_taxonomy_conflict",
+        "restore_taxonomy_conflict: Chuyên mục chính đã lưu không còn thuộc tập chuyên mục hợp lệ.",
+        "restore_taxonomy_conflict: Stored primary category is no longer among valid categories.",
+    ),
+    (
+        "entry.lifecycle_forbidden",
+        "entry_lifecycle_forbidden: Không hỗ trợ thao tác vòng đời chung cho Pattern hoặc Section.",
+        "entry_lifecycle_forbidden: Generic lifecycle operations are not supported for Pattern or Section.",
+    ),
+    (
+        "entry.retained_trash_forbidden",
+        "retained_trash_forbidden: Plugin không có quyền thao tác vùng bảo trì Thùng rác.",
+        "retained_trash_forbidden: Plugins cannot access the retained Trash maintenance scope.",
+    ),
+    (
+        "entry.retained_trash_forbidden",
+        "retained_trash_forbidden: Chỉ Quản trị viên được phép xóa vĩnh viễn dữ liệu bảo lưu.",
+        "retained_trash_forbidden: Only Administrators may permanently delete retained entries.",
+    ),
+    (
+        "entry.retained_trash_forbidden",
+        "retained_trash_forbidden: Vùng bảo trì Thùng rác chỉ hỗ trợ xóa vĩnh viễn.",
+        "retained_trash_forbidden: Retained Trash maintenance scope supports permanent deletion only.",
+    ),
+    (
+        "entry.purge_forbidden",
+        "entry_purge_forbidden: Chỉ Quản trị viên được phép xóa vĩnh viễn nội dung.",
+        "entry_purge_forbidden: Only Administrators may permanently delete entries.",
+    ),
+    (
+        "entry.provider_inactive",
+        "provider_inactive: Loại nội dung hiện không hoạt động hoặc đã bị thu hồi.",
+        "provider_inactive: Content type is currently inactive or withdrawn.",
+    ),
+    (
+        "entry.provider_inactive",
+        "provider_inactive: Không thể tải schema hiện hành của loại nội dung.",
+        "provider_inactive: Unable to load the current content type schema.",
+    ),
+    (
+        "entry.provider_active",
+        "provider_active: Loại nội dung đang hoạt động; hãy sử dụng Thùng rác thông thường.",
+        "provider_active: Content type is active; use the ordinary Trash view instead.",
+    ),
+    (
+        "entry.locale_deleted",
+        "locale_deleted: Ngôn ngữ của nội dung không còn tồn tại trong cấu hình.",
+        "locale_deleted: Entry locale no longer exists in site configuration.",
+    ),
+    (
+        "entry.locale_deleted",
+        "locale_deleted: Ngôn ngữ của nội dung đã bị xóa; hãy dùng công cụ dọn ngôn ngữ mồ côi.",
+        "locale_deleted: Entry locale was deleted; use the orphan locale maintenance workflow.",
+    ),
+    (
+        "entry.locale_parked",
+        "locale_parked: Ngôn ngữ phụ đang bị tạm dừng; hãy bật lại chế độ đa ngôn ngữ trước khi thao tác.",
+        "locale_parked: Secondary locale is parked; re-enable multilingual mode before performing entry actions.",
+    ),
+    (
+        "entry.already_trashed",
+        "entry_already_trashed: Nội dung đã nằm trong Thùng rác.",
+        "entry_already_trashed: Entry is already in Trash.",
+    ),
+    (
+        "entry.reading_page_assigned",
+        "reading_page_assigned: Không thể chuyển vào Thùng rác vì Page đang được gán làm Trang chủ hoặc Trang bài viết trong Cài đặt Đọc.",
+        "reading_page_assigned: Cannot move to Trash because this Page is assigned as Homepage or Posts Page in Reading Settings.",
+    ),
+    (
+        "entry.not_trashed",
+        "entry_not_trashed: Nội dung hiện không nằm trong Thùng rác.",
+        "entry_not_trashed: Entry is not currently in Trash.",
+    ),
+    (
+        "entry.not_trashed",
+        "entry_not_trashed: Chỉ có thể xóa vĩnh viễn nội dung đã nằm trong Thùng rác.",
+        "entry_not_trashed: Only entries already in Trash can be permanently deleted.",
+    ),
+    (
+        "entry.locale_disabled",
+        "locale_disabled: Không thể khôi phục khi ngôn ngữ của nội dung đang tắt.",
+        "locale_disabled: Cannot restore while the entry's locale is disabled.",
+    ),
+    (
+        "entry.confirmation_required",
+        "confirmation_required: Khôi phục nội dung chế độ lưu ngay sẽ hiển thị công khai ngay lập tức; cần xác nhận rõ ràng.",
+        "confirmation_required: Restoring an immediate-mode entry publishes it immediately; explicit confirmation is required.",
+    ),
+    (
+        "entry.confirmation_required",
+        "confirmation_required: Thao tác xóa vĩnh viễn cần xác nhận rõ ràng không thể hoàn tác.",
+        "confirmation_required: Permanent deletion requires explicit irreversible confirmation.",
+    ),
+    (
         "request.invalid_body",
         "Body của DELETE locale phải rỗng.",
         "DELETE locale body must be empty.",
@@ -11393,6 +11573,39 @@ const TEMPLATE_MATCHERS: &[(&str, &[&str], &[&str])] = &[
         "plugin.error",
         &["Lỗi thực thi guest: ", ""],
         &["Guest trap: ", ""],
+    ),
+    (
+        "entry.restore_schema_conflict",
+        &[
+            "restore_schema_conflict: Thiếu trường bắt buộc '",
+            "' theo schema hiện hành.",
+        ],
+        &[
+            "restore_schema_conflict: Missing required field '",
+            "' under current schema.",
+        ],
+    ),
+    (
+        "entry.restore_schema_conflict",
+        &[
+            "restore_schema_conflict: Giá trị trường '",
+            "' không còn tương thích với schema hiện hành.",
+        ],
+        &[
+            "restore_schema_conflict: Value for field '",
+            "' is no longer compatible with current schema.",
+        ],
+    ),
+    (
+        "entry.restore_schema_conflict",
+        &[
+            "restore_schema_conflict: Tham chiếu media không còn hợp lệ để khôi phục (",
+            ").",
+        ],
+        &[
+            "restore_schema_conflict: Media reference is no longer valid for restore (",
+            ").",
+        ],
     ),
     (
         "plugin.error",

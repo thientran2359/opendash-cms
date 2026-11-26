@@ -6,6 +6,7 @@ pub mod builder_binding;
 pub mod content;
 pub mod dashboard;
 pub mod entries;
+pub mod entry_lifecycle;
 pub mod entry_table;
 pub mod import;
 pub mod media;

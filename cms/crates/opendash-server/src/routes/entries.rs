@@ -309,6 +309,8 @@ pub async fn entry_table_provider_action(
             "Action không thuộc cột hiệu lực hoặc không đủ quyền.",
         ));
     }
+    crate::storage::entry_lifecycle::ensure_active_entry_version(&db, &type_key, id, version)
+        .await?;
     let record = entry_storage::get_entry(&db, &type_key, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
@@ -629,7 +631,10 @@ pub async fn entry_update(
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
     media_storage::require_existing_references(&db, &schema, &input).await?;
-    let existing_meta = entry_storage::get_entry_locale_and_group(&db, &type_key, id).await?;
+    let preflight =
+        crate::storage::entry_lifecycle::ensure_active_entry_version(&db, &type_key, id, version)
+            .await?;
+    let existing_meta = Some((preflight.locale, preflight.translation_group_id));
     if let (Some(req_loc), Some((cur_loc, _))) = (&input.locale, &existing_meta)
         && req_loc.trim().to_ascii_lowercase() != *cur_loc
     {

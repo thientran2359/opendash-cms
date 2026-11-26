@@ -68,6 +68,7 @@ pub async fn reading_page_state_for_locale(
                         EXISTS(SELECT 1 FROM content_entries e
                             JOIN content_types t ON t.key=e.content_type_key
                             WHERE e.id=r.{col} AND e.locale=r.locale AND e.content_type_key='page'
+                            AND e.trashed_at IS NULL
                             AND e.publication_status='published' AND t.provider_status='active'
                             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
                    FROM site_reading_settings r
@@ -85,6 +86,7 @@ pub async fn reading_page_state_for_locale(
                         EXISTS(SELECT 1 FROM content_entries e
                             JOIN content_types t ON t.key=e.content_type_key
                             WHERE e.id=r.{col} AND e.locale=r.locale AND e.content_type_key='page'
+                            AND e.trashed_at IS NULL
                             AND e.publication_status='published' AND t.provider_status='active'
                             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
                    FROM site_reading_settings r
@@ -123,7 +125,7 @@ pub async fn resolve_public_entry_path_in_tx(
     let visible: i64 = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM content_entries e
            JOIN content_types t ON t.key=e.content_type_key
-           WHERE e.id=? AND e.publication_status='published'
+           WHERE e.id=? AND e.trashed_at IS NULL AND e.publication_status='published'
              AND e.content_type_key NOT IN ('pattern', 'section')
              AND t.provider_status='active'
              AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)",
@@ -157,6 +159,7 @@ pub async fn resolve_public_entry_paths_by_entry_ids_in_conn(
                 AND c.target_id = CAST(e.id AS TEXT)
                 AND c.locale = e.locale
               WHERE e.id IN (SELECT value FROM json_each(?))
+                AND e.trashed_at IS NULL
                 AND e.publication_status = 'published'
                 AND e.content_type_key NOT IN ('pattern', 'section')
                 AND t.provider_status = 'active'
@@ -430,18 +433,23 @@ async fn set_entry_route_in_tx(
     expected_entry_version: i64,
     custom_path: Option<&str>,
 ) -> ApiResult<EntryRouteSnapshot> {
-    let row: Option<(i64, i64, String)> = sqlx::query_as(
-        "SELECT version, has_been_published, locale FROM content_entries WHERE id = ?",
+    let row: Option<(i64, i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT version, has_been_published, locale, trashed_at FROM content_entries WHERE id = ?",
     )
     .bind(entry_id)
     .fetch_optional(&mut *conn)
     .await?;
-    let Some((current_ver, has_been_published, entry_locale)) = row else {
+    let Some((current_ver, has_been_published, entry_locale, trashed_at)) = row else {
         return Err(ApiError::not_found("Không tìm thấy nội dung."));
     };
     if current_ver != expected_entry_version {
         return Err(ApiError::precondition_failed(
             "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
+        ));
+    }
+    if trashed_at.is_some() {
+        return Err(ApiError::conflict(
+            "entry_trashed: Nội dung đang ở trong Thùng rác và không thể chỉnh sửa đường dẫn cho đến khi khôi phục.",
         ));
     }
 
@@ -467,7 +475,7 @@ async fn set_entry_route_in_tx(
         "UPDATE content_entries
             SET version = version + 1,
                 updated_at = datetime('now')
-          WHERE id = ? AND version = ?",
+          WHERE id = ? AND version = ? AND trashed_at IS NULL",
     )
     .bind(entry_id)
     .bind(expected_entry_version)
@@ -542,7 +550,7 @@ pub async fn get_entry_route(
         "SELECT e.version, p.path
            FROM content_entries e
            LEFT JOIN entry_public_paths p ON p.entry_id = e.id
-          WHERE e.content_type_key = ? AND e.id = ?",
+          WHERE e.content_type_key = ? AND e.id = ? AND e.trashed_at IS NULL",
     )
     .bind(type_key)
     .bind(entry_id)
@@ -615,6 +623,7 @@ pub async fn custom_path_for_published_slug(
            JOIN entry_public_paths p ON p.entry_id = e.id
           WHERE e.content_type_key = ?
             AND e.slug = ?
+            AND e.trashed_at IS NULL
             AND e.publication_status = 'published'
             AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
@@ -662,6 +671,7 @@ pub async fn resolve_custom_or_redirect_path(
                JOIN content_types t ON t.key = e.content_type_key
               WHERE p.locale = ?
                 AND p.path = ?
+                AND e.trashed_at IS NULL
                 AND e.publication_status = 'published'
                 AND e.content_type_key != 'pattern'
                 AND t.provider_status = 'active'
@@ -698,6 +708,7 @@ pub async fn resolve_custom_or_redirect_path(
            JOIN content_types t ON t.key = e.content_type_key
           WHERE r.locale = ?
             AND r.source_path = ?
+            AND e.trashed_at IS NULL
             AND e.publication_status = 'published'
             AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
@@ -741,6 +752,7 @@ pub async fn sync_entry_seo_media_ref_in_tx(
            JOIN content_entries e ON e.id = s.entry_id
            JOIN content_types t ON t.key = e.content_type_key
           WHERE s.entry_id = ?
+            AND e.trashed_at IS NULL
             AND e.publication_status = 'published'
             AND t.provider_status = 'active'
             AND e.content_type_key != 'pattern'
@@ -789,7 +801,7 @@ pub async fn get_entry_seo(
     entry_id: i64,
 ) -> ApiResult<EntrySeoSnapshot> {
     let entry_version: Option<i64> = sqlx::query_scalar(
-        "SELECT version FROM content_entries WHERE content_type_key = ? AND id = ?",
+        "SELECT version FROM content_entries WHERE content_type_key = ? AND id = ? AND trashed_at IS NULL",
     )
     .bind(type_key)
     .bind(entry_id)
@@ -834,14 +846,14 @@ pub async fn put_entry_seo(
     let mut conn = db.acquire().await?;
     sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
     let res = async {
-        let current_ver: Option<i64> = sqlx::query_scalar(
-            "SELECT version FROM content_entries WHERE content_type_key = ? AND id = ?",
+        let current_row: Option<(i64, Option<String>)> = sqlx::query_as(
+            "SELECT version, trashed_at FROM content_entries WHERE content_type_key = ? AND id = ?",
         )
         .bind(type_key)
         .bind(entry_id)
         .fetch_optional(&mut *conn)
         .await?;
-        let Some(current_ver) = current_ver else {
+        let Some((current_ver, trashed_at)) = current_row else {
             return Err(ApiError::not_found("Không tìm thấy nội dung."));
         };
         if current_ver != expected_version {
@@ -849,12 +861,17 @@ pub async fn put_entry_seo(
                 "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
             ));
         }
+        if trashed_at.is_some() {
+            return Err(ApiError::conflict(
+                "entry_trashed: Nội dung đang ở trong Thùng rác và không thể chỉnh sửa SEO cho đến khi khôi phục.",
+            ));
+        }
         verify_og_media_exists_in_tx(&mut conn, clean.og_image_id.as_deref()).await?;
 
         let bumped = sqlx::query(
             "UPDATE content_entries
                 SET version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-              WHERE id = ? AND version = ?",
+              WHERE id = ? AND version = ? AND trashed_at IS NULL",
         )
         .bind(entry_id)
         .bind(expected_version)
@@ -1133,11 +1150,12 @@ pub async fn build_entry_seo_view(
     canonical_path: &str,
 ) -> ApiResult<SeoView> {
     let mut conn = db.acquire().await?;
-    let locale: Option<String> =
-        sqlx::query_scalar("SELECT locale FROM content_entries WHERE id = ?")
-            .bind(entry_id)
-            .fetch_optional(&mut *conn)
-            .await?;
+    let locale: Option<String> = sqlx::query_scalar(
+        "SELECT locale FROM content_entries WHERE id = ? AND trashed_at IS NULL",
+    )
+    .bind(entry_id)
+    .fetch_optional(&mut *conn)
+    .await?;
     drop(conn);
     build_entry_seo_view_for_locale(db, entry_id, entry_title, locale.as_deref(), canonical_path)
         .await
@@ -1237,7 +1255,9 @@ pub async fn build_entry_seo_view_for_locale(
                 AND claims.locale = sib.locale
                LEFT JOIN entry_seo s ON s.entry_id = sib.id
               WHERE cur.id = ? AND cur.locale = ?
+                AND cur.trashed_at IS NULL
                 AND cur.publication_status = 'published'
+                AND sib.trashed_at IS NULL
                 AND sib.publication_status = 'published'
                 AND sib.content_type_key NOT IN ('pattern', 'section')
                 AND NOT EXISTS (
@@ -1395,6 +1415,7 @@ pub async fn build_home_seo_view_for_locale(
                LEFT JOIN site_home_seo h ON h.locale = reading.locale
               WHERE e.content_type_key = 'page'
                 AND e.locale = reading.locale
+                AND e.trashed_at IS NULL
                 AND e.publication_status = 'published'
                 AND t.provider_status = 'active'
                 AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
@@ -1470,6 +1491,7 @@ pub async fn build_archive_seo_view_for_locale(
                WHERE reading.locale = sl.code
                  AND reading.posts_page_id IS NOT NULL
                  AND (blog.id IS NULL OR blog.content_type_key != 'page'
+                   OR blog.trashed_at IS NOT NULL
                    OR blog.publication_status != 'published'
                    OR blog_type.provider_status IS NULL OR blog_type.provider_status != 'active'
                    OR COALESCE(json_extract(blog_type.definition_json, '$.settings.public'), 1) != 1)
@@ -1478,6 +1500,7 @@ pub async fn build_archive_seo_view_for_locale(
                 SELECT 1 FROM content_entries e
                  WHERE e.content_type_key = t.key
                    AND e.locale = sl.code
+                   AND e.trashed_at IS NULL
                    AND e.publication_status = 'published'
             )
           ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
@@ -1488,7 +1511,7 @@ pub async fn build_archive_seo_view_for_locale(
     let current_is_indexable: i64 = sqlx::query_scalar(
         "SELECT EXISTS(
            SELECT 1 FROM content_entries e
-            WHERE e.content_type_key = ? AND e.locale = ? AND e.publication_status = 'published'
+            WHERE e.content_type_key = ? AND e.locale = ? AND e.trashed_at IS NULL AND e.publication_status = 'published'
          )",
     )
     .bind(type_key)
@@ -1549,6 +1572,7 @@ pub async fn build_term_seo_view_for_locale(
                 JOIN content_types ct ON ct.key = e.content_type_key
                WHERE et.term_id = sib.id
                  AND e.locale = sib.locale
+                 AND e.trashed_at IS NULL
                  AND e.publication_status = 'published'
                  AND ct.provider_status = 'active'
                  AND e.content_type_key != 'pattern'
@@ -1687,7 +1711,7 @@ pub(crate) async fn build_theme_locale_context_in_conn(
                 "SELECT sr.locale
                    FROM site_reading_settings sr
                    JOIN content_entries e ON e.id = sr.homepage_page_id
-                  WHERE e.publication_status = 'published' AND e.content_type_key = 'page'",
+                  WHERE e.trashed_at IS NULL AND e.publication_status = 'published' AND e.content_type_key = 'page'",
             )
             .fetch_all(&mut *conn)
             .await?;
@@ -1703,7 +1727,7 @@ pub(crate) async fn build_theme_locale_context_in_conn(
         }
         ThemeLocaleTarget::Entry { entry_id } => {
             let group: Option<(String, String)> = sqlx::query_as(
-                "SELECT content_type_key, translation_group_id FROM content_entries WHERE id = ?",
+                "SELECT content_type_key, translation_group_id FROM content_entries WHERE id = ? AND trashed_at IS NULL",
             )
             .bind(entry_id)
             .fetch_optional(&mut *conn)
@@ -1716,6 +1740,7 @@ pub(crate) async fn build_theme_locale_context_in_conn(
                          ON c.target_kind = 'entry' AND c.target_id = e.id AND c.locale = e.locale
                       WHERE e.content_type_key = ?
                         AND e.translation_group_id = ?
+                        AND e.trashed_at IS NULL
                         AND e.publication_status = 'published'",
                 )
                 .bind(type_key)

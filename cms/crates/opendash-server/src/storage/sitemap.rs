@@ -48,6 +48,7 @@ WITH indexable AS (
       LEFT JOIN site_home_seo h ON h.locale = reading.locale
      WHERE e.content_type_key = 'page'
        AND e.locale = reading.locale
+       AND e.trashed_at IS NULL
        AND e.publication_status = 'published'
        AND t.provider_status = 'active'
        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
@@ -79,7 +80,8 @@ WITH indexable AS (
        AND claims.target_id = CAST(e.id AS TEXT)
        AND claims.locale = e.locale
       LEFT JOIN entry_seo s ON s.entry_id = e.id
-     WHERE e.publication_status = 'published'
+     WHERE e.trashed_at IS NULL
+       AND e.publication_status = 'published'
        AND e.content_type_key != 'pattern'
        AND NOT EXISTS (
            SELECT 1 FROM site_reading_settings reading
@@ -122,6 +124,7 @@ WITH indexable AS (
           WHERE reading.locale = sl.code
             AND reading.posts_page_id IS NOT NULL
             AND (blog.id IS NULL OR blog.content_type_key != 'page'
+              OR blog.trashed_at IS NOT NULL
               OR blog.publication_status != 'published'
               OR blog_type.provider_status IS NULL OR blog_type.provider_status != 'active'
               OR COALESCE(json_extract(blog_type.definition_json, '$.settings.public'), 1) != 1)
@@ -130,6 +133,7 @@ WITH indexable AS (
            SELECT 1 FROM content_entries e
             WHERE e.content_type_key = t.key
               AND e.locale = sl.code
+              AND e.trashed_at IS NULL
               AND e.publication_status = 'published'
        )
 
@@ -158,6 +162,7 @@ WITH indexable AS (
            JOIN content_types ct ON ct.key = e.content_type_key
           WHERE et.term_id = tm.id
             AND e.locale = tm.locale
+            AND e.trashed_at IS NULL
             AND e.publication_status = 'published'
             AND ct.provider_status = 'active'
             AND e.content_type_key != 'pattern'
@@ -255,6 +260,7 @@ pub async fn list_indexable_routes_in_tx(
                    LEFT JOIN site_home_seo h ON h.locale = reading.locale
                   WHERE e.content_type_key = 'page'
                     AND e.locale = reading.locale
+                    AND e.trashed_at IS NULL
                     AND e.publication_status = 'published'
                     AND t.provider_status = 'active'
                     AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
@@ -293,6 +299,8 @@ pub async fn list_indexable_routes_in_tx(
                     AND claims.locale = sib.locale
                    LEFT JOIN entry_seo s ON s.entry_id = sib.id
                   WHERE cur.id IN (SELECT value FROM json_each(?1))
+                    AND cur.trashed_at IS NULL
+                    AND sib.trashed_at IS NULL
                     AND sib.publication_status = 'published'
                     AND sib.content_type_key NOT IN ('pattern', 'section')
                     AND NOT EXISTS (
@@ -380,6 +388,7 @@ pub async fn list_indexable_routes_in_tx(
                         JOIN content_types ct ON ct.key = e.content_type_key
                        WHERE et.term_id = sib.id
                          AND e.locale = sib.locale
+                         AND e.trashed_at IS NULL
                          AND e.publication_status = 'published'
                          AND ct.provider_status = 'active'
                          AND e.content_type_key != 'pattern'

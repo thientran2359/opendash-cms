@@ -1020,7 +1020,7 @@ async fn inspect_reading_page_in_conn(
                 e.locale
            FROM content_entries e
            JOIN content_types t ON t.key = e.content_type_key
-          WHERE e.id = ? AND t.provider_status = 'active'",
+          WHERE e.id = ? AND e.trashed_at IS NULL AND t.provider_status = 'active'",
     )
     .bind(id)
     .fetch_optional(&mut *conn)

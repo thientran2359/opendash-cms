@@ -108,6 +108,7 @@ const CATEGORY_SCOPE: &str = "
 const SCOPE: &str = "
  FROM content_entries e
  WHERE e.content_type_key = ?
+   AND e.trashed_at IS NULL
    AND (? IS NULL OR e.locale = ?)
    AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)
    AND (? = '' OR instr(lower(e.title), lower(?)) > 0

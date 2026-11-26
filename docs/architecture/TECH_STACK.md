@@ -7,7 +7,7 @@ Stack kỹ thuật của OpenDash được chốt và pin cứng phiên bản tr
 | Thành phần | Công nghệ & Phiên bản đã pin | Vai trò trong `cms/` |
 |---|---|---|
 | **HTTP server** | **Axum `=0.8.9` + Tokio `=1.54.1` + Tower** | Router, middleware xác thực (`AuthSession`, RBAC `Admin`/`Editor`), `Origin` / `X-CSRF-Token`, `SiteCoordinator` admission lease (`AdmittedMutation`). |
-| **SQLite & Migrations** | **SQLx `=0.9.0`** (`sqlite`, `migrate`, `macros`) | Kết nối WAL + `foreign_keys = ON`, migrations nhúng (`0001`–`0041`), transaction `BEGIN IMMEDIATE`, `VACUUM INTO` snapshot. |
+| **SQLite & Migrations** | **SQLx `=0.9.0`** (`sqlite`, `migrate`, `macros`) | Kết nối WAL + `foreign_keys = ON`, migrations nhúng (`0001`–`0053`, bỏ qua `0016`; nâng cấp thuận chiều và từ chối binary cũ trên schema mới), transaction `BEGIN IMMEDIATE`, `VACUUM INTO` snapshot. |
 | **Admin & Visual Builder** | **React `=18.3.1` + TypeScript `=5.6.3` + Vite `=6.4.6` + Tailwind CSS `4.1.17`** | Giao diện quản trị 3 nhóm (`Nội dung`, `Giao diện`, `Tùy chỉnh`), Single Edit (`EditorDraftStore`), và Visual Builder 4 tầng (`Section → Row → Column → Element`) tự dựng (không dùng `dnd-kit` hay `Puck`). |
 | **Theme & Public Render** | **MiniJinja `=3.0.5`** (`fuel`, `unstable_machinery`) | Template engine runtime với safe subset (`C-SEC`), `AutoEscape::Html`, fuel/recursion limit và trình chuẩn hóa HTML `document::normalize_public_document`. |
 | **Plugin Runtime (Wasm)** | **Wasmi `=2.0.0`** (`wat = "=1.263.0"` cho test) + **Reqwest `=0.12.12`** (`rustls-tls`) | Thực thi plugin WebAssembly trong tiến trình worker cô lập (`--plugin-worker`), fuel/memory limits, `StagedCommitGuard`, và HTTP egress với DNS pinning chống SSRF. |
