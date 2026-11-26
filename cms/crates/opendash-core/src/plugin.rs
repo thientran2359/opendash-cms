@@ -50,45 +50,6 @@ pub struct ScopedFieldGrant {
     pub field_keys: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PluginSettingFieldType {
-    Text,
-    Textarea,
-    Number,
-    Boolean,
-    Select,
-    Url,
-    Media,
-    Secret,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct PluginSettingChoice {
-    pub value: String,
-    pub label: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct PluginSettingField {
-    pub key: String,
-    pub label: String,
-    #[serde(rename = "type")]
-    pub field_type: PluginSettingFieldType,
-    #[serde(default)]
-    pub required: bool,
-    #[serde(default)]
-    pub default: serde_json::Value,
-    #[serde(default)]
-    pub min: Option<f64>,
-    #[serde(default)]
-    pub max: Option<f64>,
-    #[serde(default)]
-    pub choices: Vec<PluginSettingChoice>,
-}
-
 fn default_true() -> bool {
     true
 }
@@ -270,7 +231,7 @@ pub struct PluginManifest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub editor_panels: Vec<crate::content::ManifestActionPanelInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub settings_schema: Vec<PluginSettingField>,
+    pub settings_schema: Vec<crate::field_schema::FieldSpec>,
 }
 
 pub const CURRENT_HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -392,58 +353,16 @@ pub(crate) fn validate_hooks_and_filters(
 }
 
 pub(crate) fn validate_settings_schema(
-    settings_schema: &[PluginSettingField],
+    settings_schema: &[crate::field_schema::FieldSpec],
 ) -> Result<HashSet<&str>, &'static str> {
-    if settings_schema.len() > 64 {
-        return Err("settings_schema không được vượt quá 64 trường.");
-    }
-    let mut seen_settings = HashSet::new();
+    crate::field_schema::validate_field_specs(
+        settings_schema,
+        crate::field_schema::FieldContext::OwnerSettings,
+    )?;
     let mut secret_keys = HashSet::new();
     for field in settings_schema {
-        if !crate::id::valid_snake_key(&field.key) || !seen_settings.insert(field.key.as_str()) {
-            return Err("Khóa trường trong settings_schema phải là snake_case và không trùng lặp.");
-        }
-        if field.label.trim().is_empty() || field.label.chars().count() > 100 {
-            return Err("Nhãn trường trong settings_schema không hợp lệ.");
-        }
-        if field.field_type == PluginSettingFieldType::Secret {
-            if !field.default.is_null() {
-                return Err(
-                    "Trường settings kiểu secret không được đặt giá trị mặc định khác null.",
-                );
-            }
+        if field.field_type == crate::field_schema::FieldType::Secret {
             secret_keys.insert(field.key.as_str());
-        }
-        if let Some(min) = field.min
-            && !min.is_finite()
-        {
-            return Err("settings_schema min không hợp lệ.");
-        }
-        if let Some(max) = field.max
-            && !max.is_finite()
-        {
-            return Err("settings_schema max không hợp lệ.");
-        }
-        if let (Some(min), Some(max)) = (field.min, field.max)
-            && min > max
-        {
-            return Err("settings_schema yêu cầu min <= max.");
-        }
-        if field.field_type == PluginSettingFieldType::Select {
-            if field.choices.is_empty() || field.choices.len() > 64 {
-                return Err("Trường select trong settings_schema phải có 1..=64 lựa chọn.");
-            }
-            let mut seen_choices = HashSet::new();
-            for ch in &field.choices {
-                if ch.value.trim().is_empty()
-                    || ch.value.chars().count() > 100
-                    || ch.label.trim().is_empty()
-                    || ch.label.chars().count() > 100
-                    || !seen_choices.insert(ch.value.as_str())
-                {
-                    return Err("Lựa chọn của trường select trong settings_schema không hợp lệ.");
-                }
-            }
         }
     }
     Ok(secret_keys)
@@ -1505,7 +1424,7 @@ mod hook_tests {
             "filters": ["filter:seo/head", "filter:entry/view"],
             "settings_schema": [
                 { "key": "api_key", "label": "API Key", "type": "secret", "required": true },
-                { "key": "mode", "label": "Mode", "type": "select", "default": "sync", "choices": [
+                { "key": "mode", "label": "Mode", "type": "select", "default": "sync", "options": [
                     { "value": "sync", "label": "Sync" },
                     { "value": "dry", "label": "Dry" }
                 ]}

@@ -637,62 +637,8 @@ pub async fn ensure_default_starter_theme(
 ) -> ApiResult<ThemeRevisionRecord> {
     use crate::builtin_themes::{
         STARTER_THEME_ID, STARTER_THEME_NAME, STARTER_THEME_VERSION, builtin_starter_theme_files,
-        builtin_starter_theme_v100_files, builtin_starter_theme_v101_files,
-        builtin_starter_theme_v110_files,
     };
-    // Pre-existing canonical v1.0.0 / v1.0.1 / v1.1.0 records are eligible for
-    // exact-byte repair. Fresh sites must never receive a fabricated legacy revision.
-    for (legacy_version, repair_label, legacy_files) in [
-        (
-            "1.0.0",
-            "bootstrap-starter-v100-repair",
-            builtin_starter_theme_v100_files(),
-        ),
-        (
-            "1.0.1",
-            "bootstrap-starter-v101-repair",
-            builtin_starter_theme_v101_files(),
-        ),
-        (
-            "1.1.0",
-            "bootstrap-starter-v110-repair",
-            builtin_starter_theme_v110_files(),
-        ),
-    ] {
-        let (legacy_digest, legacy_file_digests) = compute_canonical_file_map_digest(&legacy_files);
-        let installed_legacy = {
-            let mut conn = db.acquire().await?;
-            find_revision_by_digest(&mut conn, &legacy_digest).await?
-        };
-        if let Some(old) = installed_legacy {
-            if old.theme_id == STARTER_THEME_ID
-                && old.version == legacy_version
-                && old.source_format == ThemeSourceFormat::V3
-            {
-                repair_builtin_starter_revision_dir_if_needed(
-                    themes_root,
-                    &legacy_digest,
-                    &legacy_file_digests,
-                )?;
-                let old_pkg =
-                    crate::theme::validate_theme_v3_files(legacy_files.clone()).map_err(|_| {
-                        ApiError::internal("Frozen Starter legacy snapshot không hợp lệ.")
-                    })?;
-                stage_and_commit_v3_revision(
-                    db,
-                    themes_root,
-                    repair_label,
-                    STARTER_THEME_ID,
-                    STARTER_THEME_NAME,
-                    legacy_version,
-                    &old_pkg.manifest_json,
-                    r#"{"source":"builtin_starter"}"#,
-                    &legacy_files,
-                )
-                .await?;
-            }
-        }
-    }
+
     let files = builtin_starter_theme_files();
     let pkg = crate::theme::validate_theme_v3_files(files.clone()).map_err(|error| {
         eprintln!("Built-in Starter Theme validation: {error:?}");
@@ -700,6 +646,56 @@ pub async fn ensure_default_starter_theme(
     })?;
     let (digest, file_digests) = compute_canonical_file_map_digest(&files);
     repair_builtin_starter_revision_dir_if_needed(themes_root, &digest, &file_digests)?;
+
+    // Cleanly replace any pre-V1 opendash-starter revisions with differing digests
+    // without triggering 409 version conflicts or FK ON DELETE RESTRICT failures.
+    let stale_rev_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT revision_id FROM theme_revisions
+          WHERE theme_id = ? AND source_format = 'v3' AND revision_digest != ?",
+    )
+    .bind(STARTER_THEME_ID)
+    .bind(&digest)
+    .fetch_all(db)
+    .await?;
+    if !stale_rev_ids.is_empty() {
+        let mut conn = db.acquire().await?;
+        sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+        let res: ApiResult<()> = async {
+            let active_rev: Option<String> =
+                sqlx::query_scalar("SELECT revision_id FROM theme_active_selection WHERE id = 1")
+                    .fetch_optional(&mut *conn)
+                    .await?
+                    .flatten();
+            if active_rev
+                .as_deref()
+                .is_some_and(|id| stale_rev_ids.iter().any(|stale| stale == id))
+            {
+                sqlx::query("UPDATE theme_active_selection SET revision_id = NULL WHERE id = 1")
+                    .execute(&mut *conn)
+                    .await?;
+            }
+            sqlx::query(
+                "DELETE FROM theme_revisions
+                  WHERE theme_id = ? AND source_format = 'v3' AND revision_digest != ?",
+            )
+            .bind(STARTER_THEME_ID)
+            .bind(&digest)
+            .execute(&mut *conn)
+            .await?;
+            Ok(())
+        }
+        .await;
+        match res {
+            Ok(()) => {
+                sqlx::query("COMMIT").execute(&mut *conn).await?;
+                crate::cache::SiteCacheEpoch::global().bump();
+            }
+            Err(err) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                return Err(err);
+            }
+        }
+    }
 
     let starter = match stage_and_commit_v3_revision(
         db,
@@ -903,15 +899,8 @@ pub async fn activate_revision(
             };
             let is_stored_secret = serde_json::from_str::<serde_json::Value>(&value_json)
                 .ok()
-                .and_then(|v| {
-                    v.as_object()
-                        .and_then(|m| m.get("secret_ref"))
-                        .and_then(serde_json::Value::as_str)
-                        .map(|_| true)
-                })
-                .unwrap_or(false);
-            let wants_secret =
-                field.field_type == opendash_core::plugin::PluginSettingFieldType::Secret;
+                .is_some_and(|v| crate::storage::settings::is_secret_sentinel(&v).is_some());
+            let wants_secret = field.field_type == opendash_core::field_schema::FieldType::Secret;
             if is_stored_secret != wants_secret {
                 return Err(ApiError::conflict(
                     "Schema option của revision mới không tương thích với giá trị đã lưu (409).",

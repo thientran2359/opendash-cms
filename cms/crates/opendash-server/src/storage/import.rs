@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use axum::http::StatusCode;
+use opendash_core::field_schema::{FieldContext, FieldSpec, FieldType, validate_field_values};
 use opendash_core::id::{valid_kebab_segment_with_limit, valid_snake_key};
 use opendash_core::theme::ThemeV3Manifest;
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,7 @@ use crate::{
     error::{ApiError, ApiResult},
     package::validate_theme_relative_path,
     storage::{
-        settings::{self, ThemeOptionDef, ThemeOptionType},
+        settings,
         theme::{ThemeSourceFormat, find_revision_by_id, get_active_selection},
     },
 };
@@ -194,28 +195,38 @@ fn valid_object_key(raw: &str) -> bool {
 /// mutation on install, dry-run and execute.
 pub(crate) fn validate_sample_option_values(
     sample: &ThemeSampleManifest,
-    schema: &[ThemeOptionDef],
+    fields: &[FieldSpec],
 ) -> Result<(), &'static str> {
-    let definitions: BTreeMap<&str, &ThemeOptionDef> =
-        schema.iter().map(|def| (def.key.as_str(), def)).collect();
+    let definitions: BTreeMap<&str, &FieldSpec> = fields
+        .iter()
+        .filter(|s| !s.is_ui_only())
+        .map(|spec| (spec.key.as_str(), spec))
+        .collect();
     let image_keys: HashSet<&str> = sample
         .media
         .iter()
         .map(|item| item.object_key.as_str())
         .collect();
     for setting in &sample.settings {
-        let def = definitions
+        let spec = definitions
             .get(setting.option_key.as_str())
             .ok_or("Sample setting có option_key ngoài schema revision.")?;
         if let Some(media_ref) = setting.media_ref.as_deref() {
-            if def.option_type != ThemeOptionType::ImageRef
+            if spec.field_type != FieldType::Media
                 || !setting.value.is_null()
                 || !image_keys.contains(media_ref)
             {
                 return Err("Sample media_ref chỉ dùng với image_ref, null và media có khai báo.");
             }
         } else {
-            settings::validate_option_value(def, &setting.value)?;
+            let map = BTreeMap::from([(setting.option_key.clone(), setting.value.clone())]);
+            validate_field_values(
+                std::slice::from_ref(spec),
+                FieldContext::Options,
+                &map,
+                None,
+            )?;
+            settings::validate_url_or_link_spec_strict(spec, &setting.value)?;
         }
     }
     Ok(())
@@ -230,7 +241,7 @@ mod url_sample_tests {
         let schema = settings::parse_theme_options_schema(&serde_json::json!({
             "options": [
                 {"key":"cta_url", "label":"CTA", "type":"url", "default":"/contact", "public":true},
-                {"key":"hero_image", "label":"Hero", "type":"image_ref", "default":null, "public":true}
+                {"key":"hero_image", "label":"Hero", "type":"media", "default":null, "public":true}
             ]
         }).to_string()).unwrap();
         let sample = |setting: serde_json::Value| -> ThemeSampleManifest {
@@ -270,7 +281,7 @@ mod url_sample_tests {
 fn validate_sample_manifest(
     sample: &ThemeSampleManifest,
     file_digests: &BTreeMap<String, String>,
-    schema: &[ThemeOptionDef],
+    schema: &[FieldSpec],
 ) -> ApiResult<()> {
     if !valid_object_key(&sample.sample_key) || sample.sample_key.len() > 64 {
         return Err(ApiError(
@@ -1424,20 +1435,31 @@ pub async fn execute_sample_import_with_cutpoint(
                         .get(mref)
                         .ok_or_else(|| ApiError::internal("Thiếu media_id cho sample setting."))?;
                     let resolved = serde_json::Value::String(mid.clone());
-                    let def = option_schema.iter().find(|def| def.key == s.option_key)
-                        .ok_or_else(|| ApiError::unprocessable("Sample option key không tồn tại."))?;
-                    settings::validate_option_value(def, &resolved).map_err(ApiError::unprocessable)?;
+                    let spec = option_schema
+                        .iter()
+                        .find(|spec| spec.key == s.option_key && !spec.is_ui_only())
+                        .ok_or_else(|| {
+                            ApiError::unprocessable("Sample option key không tồn tại.")
+                        })?;
+                    let single_map = BTreeMap::from([(s.option_key.clone(), resolved.clone())]);
+                    validate_field_values(
+                        std::slice::from_ref(spec),
+                        FieldContext::Options,
+                        &single_map,
+                        None,
+                    )
+                    .map_err(ApiError::unprocessable)?;
                     sqlx::query(
                         "DELETE FROM theme_option_media_refs
-                          WHERE owner_kind = 'theme' AND owner_id = ? AND option_key = ?",
+                          WHERE owner_kind = 'theme' AND owner_id = ? AND locale = '' AND option_key = ?",
                     )
                     .bind(theme_id)
                     .bind(&s.option_key)
                     .execute(&mut *conn)
                     .await?;
                     sqlx::query(
-                        "INSERT INTO theme_option_media_refs (theme_id, owner_kind, owner_id, option_key, media_id)
-                         VALUES (?, 'theme', ?, ?, ?)",
+                        "INSERT INTO theme_option_media_refs (theme_id, owner_kind, owner_id, locale, option_key, media_id)
+                         VALUES (?, 'theme', ?, '', ?, ?)",
                     )
                     .bind(theme_id)
                     .bind(theme_id)
@@ -1449,9 +1471,20 @@ pub async fn execute_sample_import_with_cutpoint(
                 } else {
                     s.value.clone()
                 };
-                let def = option_schema.iter().find(|def| def.key == s.option_key)
+                let spec = option_schema
+                    .iter()
+                    .find(|spec| spec.key == s.option_key && !spec.is_ui_only())
                     .ok_or_else(|| ApiError::unprocessable("Sample option key không tồn tại."))?;
-                settings::validate_option_value(def, &val).map_err(ApiError::unprocessable)?;
+                let single_map = BTreeMap::from([(s.option_key.clone(), val.clone())]);
+                validate_field_values(
+                    std::slice::from_ref(spec),
+                    FieldContext::Options,
+                    &single_map,
+                    None,
+                )
+                .map_err(ApiError::unprocessable)?;
+                settings::validate_url_or_link_spec_strict(spec, &val)
+                    .map_err(ApiError::unprocessable)?;
                 let val_json = serde_json::to_string(&val)?;
                 sqlx::query(
                     "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json)

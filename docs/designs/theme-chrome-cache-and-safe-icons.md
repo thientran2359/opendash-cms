@@ -121,7 +121,7 @@
      - `storage/overrides.rs`: `preview_studio_with_cache_and_locale` (3 điểm: khởi tạo tại `L3596`, `DbOverride` tại `L3649`, `ActiveTheme` tại `L3688`, kèm reset tường minh `canvas_layout = false` ở nhánh `CoreFallback` tại `L3708` khi `document.is_none()`).
      - `storage/overrides.rs`: `wrap_entry_body_in_preview_shell_in_tx_with_budget` (2 điểm: `DbOverride` tại `L3887` và `ActiveTheme` tại `L3921`).
 3. **Built-in Starter themes:**
-   - Cập nhật [`opendash-starter/theme.json`](../../cms/crates/opendash-server/src/builtin_themes/opendash-starter/theme.json), [`opendash-starter-1.0.1/theme.json`](../../cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.0.1/theme.json) và [`opendash-starter-1.1.0/theme.json`](../../cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.1.0/theme.json): thêm `"chrome": "none"` cho layout `"canvas"`. Giữ nguyên `"default"` và `"full_width"` (mặc định `"chrome": "default"`).
+   - Cập nhật [`opendash-starter/theme.json`](../../cms/crates/opendash-server/src/builtin_themes/opendash-starter/theme.json), `opendash-starter-1.0.1/theme.json` và `opendash-starter-1.1.0/theme.json` *(cả 2 thư mục overlay tiền-V1 sau đó đã được gộp Clean-Slate V1 về `opendash-starter/`)*: thêm `"chrome": "none"` cho layout `"canvas"`. Giữ nguyên `"default"` và `"full_width"` (mặc định `"chrome": "default"`).
 
 ### B. `ThemeCompositionCache` (In-Memory Revision Cache)
 

@@ -154,6 +154,7 @@ async fn resolve_public_template_html(
     candidates: &[opendash_core::theme::TemplateCandidate],
     active: Option<&theme_storage::ActiveThemeV3>,
     site_ctx: &SiteContext<'_>,
+    site_opts: &BTreeMap<String, serde_json::Value>,
     theme_opts: &BTreeMap<String, serde_json::Value>,
     locale: Option<&str>,
     fallback_html: &str,
@@ -175,6 +176,7 @@ async fn resolve_public_template_html(
         resolution,
         active,
         site_ctx,
+        site_opts,
         theme_opts,
         locale,
         fallback_html,
@@ -192,6 +194,7 @@ async fn render_resolved_public_template_html(
     resolution: TemplateResolution,
     active: Option<&theme_storage::ActiveThemeV3>,
     site_ctx: &SiteContext<'_>,
+    site_opts: &BTreeMap<String, serde_json::Value>,
     theme_opts: &BTreeMap<String, serde_json::Value>,
     locale: Option<&str>,
     fallback_html: &str,
@@ -238,6 +241,7 @@ async fn render_resolved_public_template_html(
         .unwrap_or_default();
     let context = content_render::build_public_theme_context(PublicThemeContextInput {
         site: site_ctx,
+        site_options: site_opts,
         options: theme_opts,
         theme_assets: &theme_assets,
         menus: &menus,
@@ -404,7 +408,13 @@ pub(crate) async fn render_not_found_response_for_locale(
     };
     let site = settings::get_general_for_locale(db, locale).await?;
     let pub_settings = settings::get_public(db).await?;
-    let opts = settings::get_active_public_theme_options_for_locale(db, locale).await?;
+    let mut richtext_nonces = crate::template_sec::RichTextNonceTable::default();
+    let (site_opts, opts) = settings::get_active_public_theme_options_for_locale_with_nonces(
+        db,
+        locale,
+        Some(&mut richtext_nonces),
+    )
+    .await?;
     let (resolved_locale, bcp47_tag, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
@@ -417,6 +427,7 @@ pub(crate) async fn render_not_found_response_for_locale(
         timezone: site.timezone.clone(),
     };
     let mut budget = overrides::PublicCompositionBudget::default();
+    budget.render_budget.richtext_nonces.extend(richtext_nonces);
     let locale_ctx =
         seo::build_theme_locale_context(db, Some(&resolved_locale), seo::ThemeLocaleTarget::None)
             .await?;
@@ -435,6 +446,7 @@ pub(crate) async fn render_not_found_response_for_locale(
         &overrides::build_candidates(&PublicTemplateContext::NotFound)?,
         active.as_ref(),
         &site_ctx,
+        &site_opts,
         &opts,
         locale,
         &format!("<main><h1>{}</h1></main>", l10n.not_found_title),
@@ -499,6 +511,8 @@ pub(crate) async fn render_not_found_response_for_locale(
     )
     .await?;
     let html = content_render::finalize_document_icons(html, &budget.render_budget.icon_nonces)?;
+    let html =
+        content_render::finalize_document_richtext(html, &budget.render_budget.richtext_nonces)?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
         html,
         body.has_active_contact_form || shell_has_form,
@@ -654,8 +668,13 @@ pub(crate) async fn render_canonical_archive(
     };
     let site = settings::get_general_for_locale(&db, Some(&locale)).await?;
     let pub_settings = settings::get_public(&db).await?;
-    let theme_opts =
-        settings::get_active_public_theme_options_for_locale(&db, Some(&locale)).await?;
+    let mut richtext_nonces = crate::template_sec::RichTextNonceTable::default();
+    let (site_opts, theme_opts) = settings::get_active_public_theme_options_for_locale_with_nonces(
+        &db,
+        Some(&locale),
+        Some(&mut richtext_nonces),
+    )
+    .await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
@@ -683,6 +702,7 @@ pub(crate) async fn render_canonical_archive(
         content_type: type_key.clone(),
     })?;
     let mut budget = overrides::PublicCompositionBudget::default();
+    budget.render_budget.richtext_nonces.extend(richtext_nonces);
     let locale_ctx = seo::build_theme_locale_context(
         &db,
         Some(&locale),
@@ -702,6 +722,7 @@ pub(crate) async fn render_canonical_archive(
         &candidates,
         active_v3.as_ref(),
         &site_ctx,
+        &site_opts,
         &theme_opts,
         Some(&locale),
         &fallback_html,
@@ -775,7 +796,10 @@ pub(crate) async fn render_canonical_archive(
     )
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+        content_render::finalize_document_richtext(
+            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            &budget.render_budget.richtext_nonces,
+        )?,
         body.has_active_contact_form || shell_has_form,
     ))
 }
@@ -928,8 +952,13 @@ async fn render_entry_response_with_cache(
     };
     let site = settings::get_general_for_locale(&db, Some(&entry_locale)).await?;
     let pub_settings = settings::get_public(&db).await?;
-    let theme_opts =
-        settings::get_active_public_theme_options_for_locale(&db, Some(&entry_locale)).await?;
+    let mut richtext_nonces = crate::template_sec::RichTextNonceTable::default();
+    let (site_opts, theme_opts) = settings::get_active_public_theme_options_for_locale_with_nonces(
+        &db,
+        Some(&entry_locale),
+        Some(&mut richtext_nonces),
+    )
+    .await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
@@ -999,6 +1028,7 @@ async fn render_entry_response_with_cache(
     };
     entry_render_budget.locale = entry_locale.clone();
     let mut budget = overrides::PublicCompositionBudget::with_render_budget(entry_render_budget);
+    budget.render_budget.richtext_nonces.extend(richtext_nonces);
     let locale_ctx = seo::build_theme_locale_context(
         &db,
         Some(&entry_locale),
@@ -1018,6 +1048,7 @@ async fn render_entry_response_with_cache(
         resolution,
         active_v3.as_ref(),
         &site_ctx,
+        &site_opts,
         &theme_opts,
         Some(&entry_locale),
         &fallback_html,
@@ -1106,7 +1137,10 @@ async fn render_entry_response_with_cache(
     )
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+        content_render::finalize_document_richtext(
+            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            &budget.render_budget.richtext_nonces,
+        )?,
         body.has_active_contact_form || entry_has_form || shell_has_form,
     ))
 }
@@ -1320,8 +1354,13 @@ pub(crate) async fn render_canonical_taxonomy(
     );
     let site = settings::get_general_for_locale(db, Some(&locale)).await?;
     let pub_settings = settings::get_public(db).await?;
-    let theme_opts =
-        settings::get_active_public_theme_options_for_locale(db, Some(&locale)).await?;
+    let mut richtext_nonces = crate::template_sec::RichTextNonceTable::default();
+    let (site_opts, theme_opts) = settings::get_active_public_theme_options_for_locale_with_nonces(
+        db,
+        Some(&locale),
+        Some(&mut richtext_nonces),
+    )
+    .await?;
     // Until S03 role composition, use the core archive template for mixed CPTs.
     // Site-owned content is resolved by its own actual schema above.
     let schema = ContentTypeDefinition {
@@ -1364,6 +1403,7 @@ pub(crate) async fn render_canonical_taxonomy(
         slug: term.slug.clone(),
     })?;
     let mut budget = overrides::PublicCompositionBudget::default();
+    budget.render_budget.richtext_nonces.extend(richtext_nonces);
     let locale_ctx = seo::build_theme_locale_context(
         db,
         Some(&locale),
@@ -1378,6 +1418,7 @@ pub(crate) async fn render_canonical_taxonomy(
         &candidates,
         active_v3.as_ref(),
         &site_ctx,
+        &site_opts,
         &theme_opts,
         Some(&locale),
         &fallback_html,
@@ -1451,7 +1492,10 @@ pub(crate) async fn render_canonical_taxonomy(
     )
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+        content_render::finalize_document_richtext(
+            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            &budget.render_budget.richtext_nonces,
+        )?,
         body.has_active_contact_form || shell_has_form,
     ))
 }

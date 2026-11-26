@@ -25,21 +25,21 @@
     {
       "key": "studio_eyebrow",
       "label": "Nhãn đầu trang",
-      "type": "string",
+      "type": "text",
       "default": "KIẾN TRÚC & NỘI THẤT THỦ CÔNG",
       "public": true
     },
     {
       "key": "studio_address",
       "label": "Địa chỉ xưởng thiết kế",
-      "type": "string",
+      "type": "text",
       "default": "42 Xuân Thủy, Thảo Điền, TP. Thủ Đức, TP. Hồ Chí Minh",
       "public": true
     },
     {
       "key": "studio_hotline",
       "label": "Hotline tư vấn",
-      "type": "string",
+      "type": "text",
       "default": "028 3898 2046",
       "public": true
     },
@@ -49,7 +49,7 @@
       "type": "select",
       "default": "terracotta",
       "public": true,
-      "choices": [
+      "options": [
         { "value": "terracotta", "label": "Đất nung ấm" },
         { "value": "moss", "label": "Rêu trầm" }
       ]

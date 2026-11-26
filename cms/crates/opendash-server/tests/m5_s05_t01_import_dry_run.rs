@@ -155,7 +155,7 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
         "assets": ["assets/hero.png", "assets/logo.png"],
         "templates": [{ "kind": "home", "file": "home.html" }],
         "options": [
-            { "key": "brand_title", "label": "Brand", "type": "string", "default": "OpenDash", "public": true }
+            { "key": "brand_title", "label": "Brand", "type": "text", "default": "OpenDash", "public": true }
         ],
         "sample": {
             "sample_key": "starter",

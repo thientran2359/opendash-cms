@@ -589,55 +589,37 @@ async fn unpublished_id_specific_override_is_pinned_but_not_publicly_readable() 
 }
 
 #[test]
-fn builtin_starter_frozen_snapshots_preserve_canonical_digests_and_v111_canvas_chrome() {
-    use crate::builtin_themes::{
-        STARTER_THEME_VERSION, builtin_starter_theme_files, builtin_starter_theme_v100_files,
-        builtin_starter_theme_v101_files, builtin_starter_theme_v110_files,
-    };
+fn builtin_starter_v1_validates_with_canvas_chrome_and_v1_options() {
+    use crate::builtin_themes::{STARTER_THEME_VERSION, builtin_starter_theme_files};
     use crate::storage::theme::compute_canonical_file_map_digest;
 
-    let (d100, _) = compute_canonical_file_map_digest(&builtin_starter_theme_v100_files());
-    let (d101, _) = compute_canonical_file_map_digest(&builtin_starter_theme_v101_files());
-    let (d110, _) = compute_canonical_file_map_digest(&builtin_starter_theme_v110_files());
+    let files = builtin_starter_theme_files();
+    let (digest, _) = compute_canonical_file_map_digest(&files);
+    assert_eq!(STARTER_THEME_VERSION, "1.0.0");
+    assert_eq!(digest.len(), 64);
 
-    assert_eq!(
-        d100, "bd639fd557f271048e66c1482f9f26306b3070b96f8e879f29e6e2800b2796e5",
-        "frozen Starter v1.0.0 canonical digest must never drift"
-    );
-    assert_eq!(
-        d101, "7834914ed29130280048a2fdf1935f05d5a2c39855c2ee2b875ca6f7405eddc9",
-        "frozen Starter v1.0.1 canonical digest must never drift"
-    );
-    assert_eq!(
-        d110, "edc31fe40a6ccedfbf3eaa8343fcdcc3c5ed739947a74987ada5009bde0cf60e",
-        "frozen Starter v1.1.0 canonical digest must never drift"
-    );
-
-    let v111_files = builtin_starter_theme_files();
-    let (d111, _) = compute_canonical_file_map_digest(&v111_files);
-    assert_eq!(STARTER_THEME_VERSION, "1.1.1");
-    assert_ne!(d111, d110);
-
-    let validated = crate::theme::validate_theme_v3_files(v111_files)
-        .expect("Starter v1.1.1 must pass v3 validation");
-    assert_eq!(validated.manifest.version, "1.1.1");
+    let validated = crate::theme::validate_theme_v3_files(files)
+        .expect("Starter V1 1.0.0 must pass v3 validation");
+    assert_eq!(validated.manifest.version, "1.0.0");
     let canvas = validated
         .manifest
         .page_layouts
         .iter()
         .find(|layout| layout.key == "canvas")
-        .expect("Starter v1.1.1 must define canvas layout");
+        .expect("Starter V1 must define canvas layout");
     assert_eq!(
         serde_json::to_value(canvas).unwrap()["chrome"],
         json!("none")
     );
+    let specs = crate::storage::settings::parse_theme_options_schema(&validated.manifest_json)
+        .expect("Starter V1 options must validate under Unified Field Engine");
+    assert!(!specs.is_empty());
 }
 
 #[tokio::test]
-async fn starter_v111_upgrades_existing_v110_and_transient_v110_sites_without_conflict() {
+async fn starter_v1_cleanly_replaces_pre_v1_starter_without_conflict_or_fk_error() {
     use crate::builtin_themes::{
-        STARTER_THEME_ID, STARTER_THEME_NAME, builtin_starter_theme_v100_files,
-        builtin_starter_theme_v101_files, builtin_starter_theme_v110_files,
+        STARTER_THEME_ID, STARTER_THEME_NAME, builtin_starter_theme_files,
     };
     use crate::storage::theme::{
         RevisionActivationOutcome, RevisionInstallOutcome, activate_revision,
@@ -645,144 +627,135 @@ async fn starter_v111_upgrades_existing_v110_and_transient_v110_sites_without_co
         list_revisions, stage_and_commit_v3_revision,
     };
 
-    // Part A: pre-60720582 site with frozen 1.0.0, 1.0.1 and active 1.1.0 (plus missing .complete).
-    let tmp = TempDirGuard::new("starter-v110-upgrade");
+    // Part A: pre-V1 active starter with same version "1.0.0" (different digest) -> clean replace & activate V1
+    let tmp = TempDirGuard::new("starter-v1-replace-active");
     let db_path = tmp.path().join("database").join("opendash.sqlite");
     fs::create_dir_all(db_path.parent().unwrap()).unwrap();
     let themes_root = tmp.path().join("themes");
     let db = init_db(&db_path).await.unwrap();
 
-    let mut v110_rev_id = String::new();
-    let mut v110_digest = String::new();
-    for (version, label, files) in [
-        ("1.0.0", "seed-100", builtin_starter_theme_v100_files()),
-        ("1.0.1", "seed-101", builtin_starter_theme_v101_files()),
-        ("1.1.0", "seed-110", builtin_starter_theme_v110_files()),
-    ] {
-        let pkg = crate::theme::validate_theme_v3_files(files.clone()).unwrap();
-        let outcome = stage_and_commit_v3_revision(
-            &db,
-            &themes_root,
-            label,
-            STARTER_THEME_ID,
-            STARTER_THEME_NAME,
-            version,
-            &pkg.manifest_json,
-            r#"{"source":"builtin_starter"}"#,
-            &files,
-        )
-        .await
-        .unwrap();
-        if version == "1.1.0" {
-            let (RevisionInstallOutcome::Installed(rec)
-            | RevisionInstallOutcome::AlreadyExists(rec)) = outcome;
-            v110_rev_id = rec.revision_id;
-            v110_digest = rec.revision_digest;
-        }
-    }
-    let activated = activate_revision(&db, &themes_root, &v110_rev_id, Some(1))
-        .await
-        .unwrap();
-    let RevisionActivationOutcome::Activated(before_selection) = activated else {
-        panic!("expected activation of frozen 1.1.0");
-    };
-    let v110_marker = themes_root
-        .join("revisions")
-        .join(&v110_digest)
-        .join(".complete");
-    fs::remove_file(&v110_marker).unwrap();
-
-    let installed = ensure_default_starter_theme(&db, &themes_root)
-        .await
-        .expect("upgrading pre-60720582 site to Starter 1.1.1 must not return 409 Conflict");
-    assert_eq!(installed.version, "1.1.1");
-    assert_eq!(
-        fs::read_to_string(&v110_marker).unwrap().trim(),
-        v110_digest,
-        "frozen 1.1.0 revision marker must be repaired on startup"
-    );
-    let after_selection = get_active_selection(&db).await.unwrap();
-    assert_eq!(
-        after_selection.revision_id.as_deref(),
-        Some(v110_rev_id.as_str())
-    );
-    assert_eq!(after_selection.version, before_selection.version);
-    let mut versions: Vec<String> = list_revisions(&db, STARTER_THEME_ID)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|r| r.version)
-        .collect();
-    versions.sort();
-    assert_eq!(versions, vec!["1.0.0", "1.0.1", "1.1.0", "1.1.1"]);
-    db.close().await;
-
-    // Part B: transient post-60720582 site whose stored 1.1.0 digest differs from frozen 1.1.0.
-    let tmp_transient = TempDirGuard::new("starter-v110-transient");
-    let db_path_t = tmp_transient
-        .path()
-        .join("database")
-        .join("opendash.sqlite");
-    fs::create_dir_all(db_path_t.parent().unwrap()).unwrap();
-    let themes_root_t = tmp_transient.path().join("themes");
-    let db_t = init_db(&db_path_t).await.unwrap();
-
-    let mut transient_files = builtin_starter_theme_v110_files();
+    let mut pre_v1_files = builtin_starter_theme_files();
     let mut manifest_val: serde_json::Value =
-        serde_json::from_slice(transient_files.get("theme.json").unwrap()).unwrap();
-    for layout in manifest_val["page_layouts"].as_array_mut().unwrap() {
-        if layout["key"] == "canvas" {
-            layout["chrome"] = json!("none");
-        }
-    }
-    transient_files.insert(
+        serde_json::from_slice(pre_v1_files.get("theme.json").unwrap()).unwrap();
+    manifest_val["name"] = json!("OpenDash Starter Pre-V1");
+    pre_v1_files.insert(
         "theme.json".to_owned(),
         serde_json::to_vec_pretty(&manifest_val).unwrap(),
     );
-    let (transient_digest, _) = compute_canonical_file_map_digest(&transient_files);
-    assert_ne!(transient_digest, v110_digest);
-    let transient_pkg = crate::theme::validate_theme_v3_files(transient_files.clone()).unwrap();
-    let transient_rev = match stage_and_commit_v3_revision(
-        &db_t,
-        &themes_root_t,
-        "seed-transient-110",
+    let (pre_digest, _) = compute_canonical_file_map_digest(&pre_v1_files);
+    let pre_pkg = crate::theme::validate_theme_v3_files(pre_v1_files.clone()).unwrap();
+    let pre_rev = match stage_and_commit_v3_revision(
+        &db,
+        &themes_root,
+        "seed-pre-v1",
         STARTER_THEME_ID,
-        STARTER_THEME_NAME,
-        "1.1.0",
-        &transient_pkg.manifest_json,
+        "OpenDash Starter Pre-V1",
+        "1.0.0",
+        &pre_pkg.manifest_json,
         r#"{"source":"builtin_starter"}"#,
-        &transient_files,
+        &pre_v1_files,
     )
     .await
     .unwrap()
     {
         RevisionInstallOutcome::Installed(rec) | RevisionInstallOutcome::AlreadyExists(rec) => rec,
     };
-    let RevisionActivationOutcome::Activated(transient_sel_before) =
-        activate_revision(&db_t, &themes_root_t, &transient_rev.revision_id, Some(1))
+    let RevisionActivationOutcome::Activated(_) =
+        activate_revision(&db, &themes_root, &pre_rev.revision_id, Some(1))
             .await
             .unwrap()
     else {
-        panic!("expected activation of transient 1.1.0");
+        panic!("expected activation of pre-V1 starter");
     };
 
-    let installed_t = ensure_default_starter_theme(&db_t, &themes_root_t)
+    let installed = ensure_default_starter_theme(&db, &themes_root)
         .await
-        .expect("upgrading transient post-60720582 site to Starter 1.1.1 must succeed");
-    assert_eq!(installed_t.version, "1.1.1");
-    let transient_sel_after = get_active_selection(&db_t).await.unwrap();
+        .expect("replacing pre-V1 active starter must not return 409 Conflict or FK error");
+    assert_eq!(installed.version, "1.0.0");
+    assert_ne!(installed.revision_digest, pre_digest);
+    let after_selection = get_active_selection(&db).await.unwrap();
     assert_eq!(
-        transient_sel_after.revision_id.as_deref(),
-        Some(transient_rev.revision_id.as_str())
+        after_selection.revision_id.as_deref(),
+        Some(installed.revision_id.as_str())
     );
-    assert_eq!(transient_sel_after.version, transient_sel_before.version);
-    let mut versions_t: Vec<String> = list_revisions(&db_t, STARTER_THEME_ID)
+    let versions: Vec<String> = list_revisions(&db, STARTER_THEME_ID)
         .await
         .unwrap()
         .into_iter()
         .map(|r| r.version)
         .collect();
-    versions_t.sort();
-    assert_eq!(versions_t, vec!["1.1.0", "1.1.1"]);
-    db_t.close().await;
+    assert_eq!(versions, vec!["1.0.0"]);
+    db.close().await;
+
+    // Part B: pre-V1 inactive starter "1.1.1" when another custom theme is active -> preserves custom active selection
+    let tmp_custom = TempDirGuard::new("starter-v1-preserve-custom");
+    let db_path_c = tmp_custom.path().join("database").join("opendash.sqlite");
+    fs::create_dir_all(db_path_c.parent().unwrap()).unwrap();
+    let themes_root_c = tmp_custom.path().join("themes");
+    let db_c = init_db(&db_path_c).await.unwrap();
+
+    manifest_val["version"] = json!("1.1.1");
+    pre_v1_files.insert(
+        "theme.json".to_owned(),
+        serde_json::to_vec_pretty(&manifest_val).unwrap(),
+    );
+    let pre_111_pkg = crate::theme::validate_theme_v3_files(pre_v1_files.clone()).unwrap();
+    stage_and_commit_v3_revision(
+        &db_c,
+        &themes_root_c,
+        "seed-pre-111",
+        STARTER_THEME_ID,
+        "OpenDash Starter Pre-V1",
+        "1.1.1",
+        &pre_111_pkg.manifest_json,
+        r#"{"source":"builtin_starter"}"#,
+        &pre_v1_files,
+    )
+    .await
+    .unwrap();
+
+    let custom_files = BTreeMap::from([
+        (
+            "theme.json".to_owned(),
+            br#"{"manifest_version":3,"theme_id":"custom-active","name":"Custom","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}]}"#.to_vec(),
+        ),
+        ("index.html".to_owned(), b"<main>Custom</main>".to_vec()),
+    ]);
+    let custom_pkg = crate::theme::validate_theme_v3_files(custom_files.clone()).unwrap();
+    let RevisionInstallOutcome::Installed(custom_rev) = stage_and_commit_v3_revision(
+        &db_c,
+        &themes_root_c,
+        "seed-custom",
+        "custom-active",
+        "Custom",
+        "1.0.0",
+        &custom_pkg.manifest_json,
+        "{}",
+        &custom_files,
+    )
+    .await
+    .unwrap() else {
+        panic!("expected custom install");
+    };
+    activate_revision(&db_c, &themes_root_c, &custom_rev.revision_id, Some(1))
+        .await
+        .unwrap();
+
+    let installed_c = ensure_default_starter_theme(&db_c, &themes_root_c)
+        .await
+        .unwrap();
+    assert_eq!(installed_c.version, "1.0.0");
+    let sel_c = get_active_selection(&db_c).await.unwrap();
+    assert_eq!(
+        sel_c.revision_id.as_deref(),
+        Some(custom_rev.revision_id.as_str())
+    );
+    let versions_c: Vec<String> = list_revisions(&db_c, STARTER_THEME_ID)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.version)
+        .collect();
+    assert_eq!(versions_c, vec!["1.0.0"]);
+    db_c.close().await;
 }

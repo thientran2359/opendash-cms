@@ -213,7 +213,7 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
             ]
         },
         "options": [
-            { "key": "brand", "label": "Brand", "type": "string", "default": "OpenDash", "public": true }
+            { "key": "brand", "label": "Brand", "type": "text", "default": "OpenDash", "public": true }
         ],
         "sample": {
             "sample_key": "release_pack",

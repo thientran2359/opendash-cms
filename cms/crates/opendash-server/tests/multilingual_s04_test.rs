@@ -163,7 +163,7 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         .json()
         .await
         .unwrap();
-    assert_eq!(themes["revisions"][0]["version"], "1.1.1");
+    assert_eq!(themes["revisions"][0]["version"], "1.0.0");
 
     let home_single = client.get(format!("{}/", srv.origin)).send().await.unwrap();
     assert_eq!(home_single.status(), StatusCode::OK);

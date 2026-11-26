@@ -199,8 +199,8 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
         "version": "1.0.0",
         "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
         "options": [
-            { "key": "public_title", "label": "Title", "type": "string", "default": "SafeSite", "public": true },
-            { "key": "secret_key", "label": "Secret", "type": "string", "default": "TOP_SECRET_VALUE_999", "public": false }
+            { "key": "public_title", "label": "Title", "type": "text", "default": "SafeSite", "public": true },
+            { "key": "secret_key", "label": "Secret", "type": "text", "default": "TOP_SECRET_VALUE_999", "public": false }
         ]
     }))
     .unwrap();

@@ -1,3 +1,5 @@
+import type { FieldSpec } from './fields/types.ts';
+
 export type Role = 'admin' | 'editor';
 
 export interface AuthUser {
@@ -196,32 +198,6 @@ export interface PluginRunResult {
   confirmation?: PluginLifecycleConfirmation;
 }
 
-export type PluginSettingFieldType =
-  | 'text'
-  | 'textarea'
-  | 'number'
-  | 'boolean'
-  | 'select'
-  | 'url'
-  | 'media'
-  | 'secret';
-
-export interface PluginSettingChoice {
-  value: string;
-  label: string;
-}
-
-export interface PluginSettingField {
-  key: string;
-  label: string;
-  type: PluginSettingFieldType;
-  required?: boolean;
-  default?: unknown;
-  min?: number | null;
-  max?: number | null;
-  choices?: PluginSettingChoice[];
-}
-
 export type PluginSecretValue =
   | { configured: boolean }
   | string
@@ -231,7 +207,7 @@ export type PluginSecretValue =
 export interface PluginSettingsSnapshot {
   plugin_id: string;
   version: number;
-  schema: PluginSettingField[];
+  fields: FieldSpec[];
   values: Record<string, unknown>;
   updated_at: string;
 }

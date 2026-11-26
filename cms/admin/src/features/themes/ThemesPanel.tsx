@@ -116,7 +116,7 @@ export const ThemesPanel: React.FC<Props> = ({
     setFnError('');
     setFnNotice('');
     try {
-      const payload = buildOwnerOptionsSubmitPayload(fnSettings.schema, fnDraft);
+      const payload = buildOwnerOptionsSubmitPayload(fnSettings.fields, fnDraft);
       const saved = await saveActiveThemeFunctionsSettings(payload, fnSettings.version, csrfToken);
       if (mounted.current) {
         setFnSettings(saved);
@@ -391,12 +391,12 @@ export const ThemesPanel: React.FC<Props> = ({
                   {translate('feature.themes.themespanel.theme_functions_reload_logs')}
                 </AdminButton>
               </div>
-              {fnSettings.schema.length > 0 && (
+              {fnSettings.fields.length > 0 && (
                 <OwnerOptionsForm
                   ownerKind="theme_functions"
                   ownerId={fnSettings.theme_id ?? 'active'}
                   title={translate('feature.themes.themespanel.theme_functions_settings_title')}
-                  schema={fnSettings.schema}
+                  fields={fnSettings.fields}
                   values={fnDraft}
                   savedValues={fnSettings.values}
                   version={fnSettings.version}
@@ -410,7 +410,7 @@ export const ThemesPanel: React.FC<Props> = ({
                   onApiError={onApiError}
                 />
               )}
-              {fnSettings.schema.length === 0 && fnError && (
+              {fnSettings.fields.length === 0 && fnError && (
                 <AdminAlert tone="error">{fnError}</AdminAlert>
               )}
               {fnSettings.actions.length > 0 && (

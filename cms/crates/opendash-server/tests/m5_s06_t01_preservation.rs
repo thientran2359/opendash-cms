@@ -163,7 +163,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
             ]
         },
         "options": [
-            { "key": "accent_color", "label": "Accent", "type": "string", "default": "#112233", "public": true }
+            { "key": "accent_color", "label": "Accent", "type": "text", "default": "#112233", "public": true }
         ]
     }))
     .unwrap();
@@ -575,7 +575,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
             ]
         },
         "options": [
-            { "key": "accent_color", "label": "Accent", "type": "string", "default": "#112233", "public": true }
+            { "key": "accent_color", "label": "Accent", "type": "text", "default": "#112233", "public": true }
         ]
     }))
     .unwrap();

@@ -174,7 +174,7 @@ fn build_theme_v3_zip() -> Vec<u8> {
                 {
                     "key": "banner_text",
                     "label": "Banner",
-                    "type": "string",
+                    "type": "text",
                     "default": "Safe Default Banner",
                     "public": true
                 }

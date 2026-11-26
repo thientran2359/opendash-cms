@@ -4,23 +4,20 @@ use std::sync::LazyLock;
 use std::collections::{BTreeMap, BTreeSet};
 
 use opendash_core::{
-    block_schema::{
-        BlockFieldSpec, MediaFieldKind, SelectOption, flattened_field_specs, validate_field_specs,
-        validate_field_values, validate_single_field_value,
+    field_schema::{
+        CollectedMediaIds, FieldContext, FieldSpec, FieldType, collect_media_ids,
+        default_value_for_field_spec, global_site_option_defaults, global_site_option_fields,
+        valid_sha256_media_id, validate_field_values,
     },
     i18n::{
         CMS_CATALOG_VERSION, CMS_LANGUAGE_CATALOG, CmsLocaleOption, find_cms_locale,
         resolve_effective_ui_locale,
     },
-    id::valid_snake_key_with_limit,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 
-use crate::{
-    error::{ApiError, ApiResult},
-    storage::media::valid_media_id,
-};
+use crate::error::{ApiError, ApiResult};
 
 pub const TZDB_VERSION: &str = "2026f";
 pub const MAX_SITE_TITLE_SCALARS: usize = 120;
@@ -73,6 +70,7 @@ pub struct UpdateLocaleInput {
     pub position: i64,
 }
 
+#[derive(Debug)]
 pub enum LocaleMutationError {
     Api(ApiError),
     Conflicts(crate::storage::permalinks::PermalinkConflictError),
@@ -459,7 +457,8 @@ async fn count_locale_data_in_conn(
               + (SELECT COUNT(*) FROM site_reading_settings WHERE locale = ?1)
               + (SELECT COUNT(*) FROM site_home_seo WHERE locale = ?1)
               + (SELECT COUNT(*) FROM theme_option_locale_values WHERE locale = ?1)
-              + (SELECT COUNT(*) FROM theme_option_locale_versions WHERE locale = ?1),
+              + (SELECT COUNT(*) FROM theme_option_locale_versions WHERE locale = ?1)
+              + (SELECT COUNT(*) FROM theme_option_media_refs WHERE locale = ?1),
             (SELECT COUNT(*) FROM site_menu_slot_assignments WHERE locale = ?1)
               + (SELECT COUNT(*) FROM site_menu_slot_versions WHERE locale = ?1),
             (SELECT COUNT(*) FROM entry_public_paths WHERE locale = ?1)
@@ -701,6 +700,7 @@ pub async fn purge_orphan_locale(
             "DELETE FROM site_home_seo WHERE locale = ?",
             "DELETE FROM theme_option_locale_values WHERE locale = ?",
             "DELETE FROM theme_option_locale_versions WHERE locale = ?",
+            "DELETE FROM theme_option_media_refs WHERE locale = ?",
         ],
     )
     .await?;
@@ -1534,70 +1534,11 @@ pub async fn save_general(
     save_general_for_locale(db, None, input, expected_version).await
 }
 
-pub const MAX_THEME_OPTIONS: usize = 64;
-pub const MAX_THEME_OPTION_STRING_CHARS: usize = 4096;
-pub const MAX_THEME_OPTION_CHOICES: usize = 64;
-
-pub use opendash_core::block_schema::{
-    GLOBAL_PUBLIC_MEDIA_OPTION_KEYS, GLOBAL_PUBLIC_URL_OPTION_KEYS, default_value_for_field_spec,
-    global_site_option_defaults, global_site_option_fields,
-};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ThemeOptionType {
-    String,
-    Url,
-    Number,
-    Boolean,
-    Select,
-    ImageRef,
-    Text,
-    Textarea,
-    Richtext,
-    Range,
-    RadioButtons,
-    Color,
-    Spacing,
-    Media,
-    Link,
-    Repeater,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ThemeOptionChoice {
-    pub value: String,
-    pub label: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ThemeOptionDef {
-    pub key: String,
-    pub label: String,
-    #[serde(rename = "type")]
-    pub option_type: ThemeOptionType,
-    pub default: serde_json::Value,
-    #[serde(default)]
-    pub public: bool,
-    #[serde(default)]
-    pub translatable: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max: Option<f64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub choices: Vec<ThemeOptionChoice>,
-    #[serde(skip)]
-    pub spec: Option<BlockFieldSpec>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct ThemeOptionsSnapshot {
     pub theme_id: String,
     pub version: i64,
-    pub schema: Vec<ThemeOptionDef>,
-    pub fields: Vec<BlockFieldSpec>,
+    pub fields: Vec<FieldSpec>,
     pub values: BTreeMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
@@ -1612,7 +1553,7 @@ pub enum ThemeOptionsOutcome {
 #[derive(Debug, Clone, Serialize)]
 pub struct GlobalSiteOptionsSnapshot {
     pub version: i64,
-    pub fields: Vec<BlockFieldSpec>,
+    pub fields: Vec<FieldSpec>,
     pub values: BTreeMap<String, serde_json::Value>,
 }
 
@@ -1621,33 +1562,19 @@ pub enum GlobalSiteOptionsOutcome {
     Stale,
 }
 
-fn is_media_option_type(option_type: ThemeOptionType) -> bool {
-    matches!(
-        option_type,
-        ThemeOptionType::ImageRef | ThemeOptionType::Media
-    )
-}
-
-fn valid_plain_string(s: &str, max_chars: usize) -> bool {
-    s.chars().count() <= max_chars
-        && !s
-            .chars()
-            .any(|c| c == '\0' || (c.is_control() && c != '\n' && c != '\t'))
-}
-
-fn validate_url_or_link_spec_strict(
-    spec: &BlockFieldSpec,
+pub(crate) fn validate_url_or_link_spec_strict(
+    spec: &FieldSpec,
     value: &serde_json::Value,
 ) -> Result<(), &'static str> {
-    match spec {
-        BlockFieldSpec::Url { .. } => {
+    match spec.field_type {
+        FieldType::Url => {
             if let Some(s) = value.as_str()
                 && !s.is_empty()
             {
                 crate::template_sec::validate_theme_option_url(s)?;
             }
         }
-        BlockFieldSpec::Link { .. } => {
+        FieldType::Link => {
             let url_str = match value {
                 serde_json::Value::String(s) => Some(s.as_str()),
                 serde_json::Value::Object(obj) => {
@@ -1661,12 +1588,21 @@ fn validate_url_or_link_spec_strict(
                 crate::template_sec::validate_theme_option_url(s)?;
             }
         }
-        BlockFieldSpec::Repeater { fields, .. } => {
+        FieldType::Group => {
+            if let Some(obj) = value.as_object() {
+                for sub in &spec.fields {
+                    if let Some(v) = obj.get(&sub.key) {
+                        validate_url_or_link_spec_strict(sub, v)?;
+                    }
+                }
+            }
+        }
+        FieldType::Repeater => {
             if let Some(arr) = value.as_array() {
                 for item in arr {
                     if let Some(obj) = item.as_object() {
-                        for sub in fields {
-                            if let Some(v) = obj.get(sub.key()) {
+                        for sub in &spec.fields {
+                            if let Some(v) = obj.get(&sub.key) {
                                 validate_url_or_link_spec_strict(sub, v)?;
                             }
                         }
@@ -1679,22 +1615,46 @@ fn validate_url_or_link_spec_strict(
     Ok(())
 }
 
+fn validate_url_or_link_defaults_strict(spec: &FieldSpec) -> Result<(), &'static str> {
+    if spec.is_ui_only() {
+        return Ok(());
+    }
+    match spec.field_type {
+        FieldType::Url | FieldType::Link => {
+            validate_url_or_link_spec_strict(spec, &default_value_for_field_spec(spec))?;
+        }
+        FieldType::Group | FieldType::Repeater => {
+            if let Some(def) = spec.default.as_ref() {
+                validate_url_or_link_spec_strict(spec, def)?;
+            }
+            for child in &spec.fields {
+                validate_url_or_link_defaults_strict(child)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 pub fn validate_global_site_options_map(
     submitted: &BTreeMap<String, serde_json::Value>,
 ) -> Result<BTreeMap<String, serde_json::Value>, &'static str> {
     let fields = global_site_option_fields();
-    let leaves = flattened_field_specs(&fields);
-    let leaf_map: BTreeMap<&str, &BlockFieldSpec> = leaves.iter().map(|f| (f.key(), *f)).collect();
+    let data_map: BTreeMap<&str, &FieldSpec> = fields
+        .iter()
+        .filter(|s| !s.is_ui_only())
+        .map(|s| (s.key.as_str(), s))
+        .collect();
 
     let mut normalized = BTreeMap::new();
     for (k, v) in submitted {
-        let Some(spec) = leaf_map.get(k.as_str()) else {
+        let Some(spec) = data_map.get(k.as_str()) else {
             return Err("Option toàn trang không tồn tại trong schema.");
         };
-        let clean_val = match spec {
-            BlockFieldSpec::Media { .. } => match v {
+        let clean_val = match spec.field_type {
+            FieldType::Media => match v {
                 serde_json::Value::Null => serde_json::Value::String(String::new()),
-                serde_json::Value::String(id) if id.is_empty() || valid_media_id(id) => {
+                serde_json::Value::String(id) if id.is_empty() || valid_sha256_media_id(id) => {
                     serde_json::Value::String(id.clone())
                 }
                 _ => return Err("Option media phải là media_id SHA-256 hợp lệ hoặc rỗng."),
@@ -1705,446 +1665,30 @@ pub fn validate_global_site_options_map(
         normalized.insert(k.clone(), clean_val);
     }
 
-    validate_field_values(&fields, &normalized, None)?;
+    let mut merged = global_site_option_defaults();
+    for (k, v) in &normalized {
+        merged.insert(k.clone(), v.clone());
+    }
+    validate_field_values(&fields, FieldContext::Options, &merged, None)?;
     Ok(normalized)
 }
 
-pub fn validate_option_value(
-    def: &ThemeOptionDef,
-    value: &serde_json::Value,
-) -> Result<(), &'static str> {
-    if let Some(spec) = &def.spec {
-        return match spec {
-            BlockFieldSpec::Media { required, .. } => match value {
-                serde_json::Value::Null => {
-                    if *required {
-                        Err("Option media bắt buộc không được để trống.")
-                    } else {
-                        Ok(())
-                    }
-                }
-                serde_json::Value::String(id) => {
-                    if id.is_empty() {
-                        if *required {
-                            Err("Option media bắt buộc không được để trống.")
-                        } else {
-                            Ok(())
-                        }
-                    } else if valid_media_id(id) {
-                        Ok(())
-                    } else {
-                        Err("Option media phải là media_id SHA-256 hợp lệ hoặc rỗng.")
-                    }
-                }
-                _ => Err("Option media phải là chuỗi media_id hoặc null."),
-            },
-            BlockFieldSpec::Repeater { .. } => {
-                let map = BTreeMap::from([(def.key.clone(), value.clone())]);
-                validate_field_values(std::slice::from_ref(spec), &map, None)?;
-                validate_url_or_link_spec_strict(spec, value)
-            }
-            _ => {
-                validate_single_field_value(spec, Some(value), false)?;
-                validate_url_or_link_spec_strict(spec, value)
-            }
-        };
-    }
-
-    match def.option_type {
-        ThemeOptionType::String => {
-            let s = value
-                .as_str()
-                .ok_or("Giá trị option kiểu string phải là chuỗi.")?;
-            if !valid_plain_string(s, MAX_THEME_OPTION_STRING_CHARS) {
-                return Err("Option string vượt quá 4,096 ký tự hoặc chứa ký tự điều khiển.");
-            }
-            Ok(())
-        }
-        ThemeOptionType::Url => {
-            let s = value
-                .as_str()
-                .ok_or("Giá trị option kiểu url phải là chuỗi.")?;
-            crate::template_sec::validate_theme_option_url(s)
-        }
-        ThemeOptionType::Number => {
-            let n = value
-                .as_f64()
-                .ok_or("Giá trị option kiểu number phải là số hữu hạn.")?;
-            if !n.is_finite() {
-                return Err("Option number phải là số hữu hạn.");
-            }
-            if let Some(min) = def.min
-                && n < min
-            {
-                return Err("Option number nhỏ hơn giá trị min.");
-            }
-            if let Some(max) = def.max
-                && n > max
-            {
-                return Err("Option number lớn hơn giá trị max.");
-            }
-            Ok(())
-        }
-        ThemeOptionType::Boolean => {
-            if !value.is_boolean() {
-                return Err("Option kiểu boolean phải là true hoặc false.");
-            }
-            Ok(())
-        }
-        ThemeOptionType::Select => {
-            let s = value
-                .as_str()
-                .ok_or("Option kiểu select phải là chuỗi lựa chọn.")?;
-            if !def.choices.iter().any(|c| c.value == s) {
-                return Err("Giá trị select không nằm trong danh sách choices.");
-            }
-            Ok(())
-        }
-        ThemeOptionType::ImageRef => match value {
-            serde_json::Value::Null => Ok(()),
-            serde_json::Value::String(id) if valid_media_id(id) => Ok(()),
-            _ => Err("Option image_ref phải là media_id hợp lệ hoặc null."),
-        },
-        _ => Err("Option thiếu schema spec hiện đại."),
-    }
-}
-
-fn upcast_legacy_def_to_field(def: &ThemeOptionDef) -> BlockFieldSpec {
-    match def.option_type {
-        ThemeOptionType::String => BlockFieldSpec::Text {
-            key: def.key.clone(),
-            label: def.label.clone(),
-            max_chars: Some(MAX_THEME_OPTION_STRING_CHARS),
-            required: false,
-            default: def.default.as_str().map(ToOwned::to_owned),
-            placeholder: None,
-            show_if: None,
-        },
-        ThemeOptionType::Url => BlockFieldSpec::Url {
-            key: def.key.clone(),
-            label: def.label.clone(),
-            required: false,
-            default: def.default.as_str().map(ToOwned::to_owned),
-            placeholder: None,
-            show_if: None,
-        },
-        ThemeOptionType::Number => BlockFieldSpec::Number {
-            key: def.key.clone(),
-            label: def.label.clone(),
-            min: def.min,
-            max: def.max,
-            step: None,
-            required: false,
-            default: def.default.as_f64(),
-            unit: None,
-            css_var: None,
-            responsive: false,
-            show_if: None,
-        },
-        ThemeOptionType::Boolean => BlockFieldSpec::Boolean {
-            key: def.key.clone(),
-            label: def.label.clone(),
-            default: def.default.as_bool(),
-            show_if: None,
-        },
-        ThemeOptionType::Select => BlockFieldSpec::Select {
-            key: def.key.clone(),
-            label: def.label.clone(),
-            options: def
-                .choices
-                .iter()
-                .map(|c| SelectOption {
-                    value: c.value.clone(),
-                    label: c.label.clone(),
-                    icon: None,
-                })
-                .collect(),
-            required: false,
-            default: def.default.as_str().map(ToOwned::to_owned),
-            display: None,
-            css_var: None,
-            responsive: false,
-            show_if: None,
-        },
-        ThemeOptionType::ImageRef | ThemeOptionType::Media => BlockFieldSpec::Media {
-            key: def.key.clone(),
-            label: def.label.clone(),
-            media_kind: MediaFieldKind::Image,
-            required: false,
-            default: def.default.as_str().map(ToOwned::to_owned),
-            css_var: None,
-            show_if: None,
-        },
-        _ => def.spec.clone().unwrap_or_else(|| BlockFieldSpec::Text {
-            key: def.key.clone(),
-            label: def.label.clone(),
-            max_chars: Some(MAX_THEME_OPTION_STRING_CHARS),
-            required: false,
-            default: def.default.as_str().map(ToOwned::to_owned),
-            placeholder: None,
-            show_if: None,
-        }),
-    }
-}
-
-fn extract_public_flags_and_strip(
-    val: &mut serde_json::Value,
-    out_public: &mut BTreeMap<String, bool>,
-    out_translatable: &mut BTreeMap<String, bool>,
-) -> Result<(), &'static str> {
-    let Some(obj) = val.as_object_mut() else {
-        return Err("Khai báo options trong theme.json không đúng cấu trúc.");
-    };
-    let key = obj
-        .get("key")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
-        .unwrap_or_default();
-    if let Some(raw_pub) = obj.remove("public") {
-        let Some(b) = raw_pub.as_bool() else {
-            return Err("Thuộc tính public của option phải là boolean.");
-        };
-        if !key.is_empty() {
-            out_public.insert(key.clone(), b);
-        }
-    }
-    if let Some(raw_tr) = obj.remove("translatable") {
-        let Some(b) = raw_tr.as_bool() else {
-            return Err("Thuộc tính translatable của option phải là boolean.");
-        };
-        if !key.is_empty() {
-            out_translatable.insert(key, b);
-        }
-    }
-    if obj.get("type").and_then(serde_json::Value::as_str) == Some("group")
-        && let Some(children) = obj
-            .get_mut("fields")
-            .and_then(serde_json::Value::as_array_mut)
-    {
-        for child in children {
-            extract_public_flags_and_strip(child, out_public, out_translatable)?;
-        }
-    }
-    Ok(())
-}
-
-fn option_type_for_spec(spec: &BlockFieldSpec) -> ThemeOptionType {
-    match spec {
-        BlockFieldSpec::Text { .. } => ThemeOptionType::Text,
-        BlockFieldSpec::Textarea { .. } => ThemeOptionType::Textarea,
-        BlockFieldSpec::Richtext { .. } => ThemeOptionType::Richtext,
-        BlockFieldSpec::Number { .. } => ThemeOptionType::Number,
-        BlockFieldSpec::Range { .. } => ThemeOptionType::Range,
-        BlockFieldSpec::Boolean { .. } => ThemeOptionType::Boolean,
-        BlockFieldSpec::Select { .. } => ThemeOptionType::Select,
-        BlockFieldSpec::RadioButtons { .. } => ThemeOptionType::RadioButtons,
-        BlockFieldSpec::Spacing { .. } => ThemeOptionType::Spacing,
-        BlockFieldSpec::Color { .. } => ThemeOptionType::Color,
-        BlockFieldSpec::Media { .. } => ThemeOptionType::Media,
-        BlockFieldSpec::Url { .. } => ThemeOptionType::Url,
-        BlockFieldSpec::Link { .. } => ThemeOptionType::Link,
-        BlockFieldSpec::Repeater { .. } => ThemeOptionType::Repeater,
-        BlockFieldSpec::Group { .. } => ThemeOptionType::Text,
-    }
-}
-
-fn def_from_modern_leaf_spec(
-    spec: &BlockFieldSpec,
-    public: bool,
-    translatable: bool,
-) -> ThemeOptionDef {
-    let default = default_value_for_field_spec(spec);
-    let (min, max, choices) = match spec {
-        BlockFieldSpec::Number { min, max, .. } => (*min, *max, Vec::new()),
-        BlockFieldSpec::Range { min, max, .. } => (Some(*min), Some(*max), Vec::new()),
-        BlockFieldSpec::Select { options, .. } | BlockFieldSpec::RadioButtons { options, .. } => (
-            None,
-            None,
-            options
-                .iter()
-                .map(|o| ThemeOptionChoice {
-                    value: o.value.clone(),
-                    label: o.label.clone(),
-                })
-                .collect(),
-        ),
-        _ => (None, None, Vec::new()),
-    };
-    ThemeOptionDef {
-        key: spec.key().to_owned(),
-        label: spec.label().to_owned(),
-        option_type: option_type_for_spec(spec),
-        default,
-        public,
-        translatable,
-        min,
-        max,
-        choices,
-        spec: Some(spec.clone()),
-    }
-}
-
-pub fn parse_theme_options_with_fields(
-    manifest_json: &str,
-) -> Result<(Vec<ThemeOptionDef>, Vec<BlockFieldSpec>), &'static str> {
+pub fn parse_theme_options_schema(manifest_json: &str) -> Result<Vec<FieldSpec>, &'static str> {
     let manifest: serde_json::Value =
         serde_json::from_str(manifest_json).map_err(|_| "theme.json không hợp lệ.")?;
     let Some(raw_opts) = manifest.get("options") else {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok(Vec::new());
     };
     if raw_opts.is_null() {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok(Vec::new());
     }
-    let Some(arr) = raw_opts.as_array() else {
-        return Err("Khai báo options trong theme.json không đúng cấu trúc.");
-    };
-
-    const MODERN_ONLY_KEYS: &[&str] = &[
-        "options",
-        "display",
-        "responsive",
-        "show_if",
-        "unit",
-        "step",
-        "max_chars",
-        "max_bytes",
-        "css_var",
-        "required",
-        "placeholder",
-        "fields",
-        "min_items",
-        "max_items",
-        "item_label_field",
-        "media_kind",
-    ];
-
-    let mut defs = Vec::new();
-    let mut fields = Vec::new();
-    let mut modern_specs_to_validate = Vec::new();
-    let mut seen_keys = BTreeSet::new();
-
-    for raw_item in arr {
-        let Some(obj) = raw_item.as_object() else {
-            return Err("Khai báo options trong theme.json không đúng cấu trúc.");
-        };
-        let ty = obj.get("type").and_then(serde_json::Value::as_str);
-        let has_modern_only = MODERN_ONLY_KEYS.iter().any(|k| obj.contains_key(*k));
-        let is_legacy = matches!(ty, Some("string" | "image_ref"))
-            || (!has_modern_only && matches!(ty, Some("number" | "boolean" | "select")))
-            || (!has_modern_only
-                && ty == Some("url")
-                && obj
-                    .get("default")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|s| !s.is_empty()));
-
-        if is_legacy {
-            let def: ThemeOptionDef = serde_json::from_value(raw_item.clone())
-                .map_err(|_| "Khai báo options trong theme.json không đúng cấu trúc.")?;
-            if !valid_snake_key_with_limit(&def.key, 64) {
-                return Err("option_key phải là snake_case (1–64 ký tự).");
-            }
-            if !seen_keys.insert(def.key.clone()) {
-                return Err("Trùng lặp option_key trong theme.json.");
-            }
-            if def.label.trim().is_empty() || !valid_plain_string(&def.label, 128) {
-                return Err("Nhãn option không hợp lệ.");
-            }
-            if let Some(min) = def.min
-                && !min.is_finite()
-            {
-                return Err("Giá trị min của option không hợp lệ.");
-            }
-            if let Some(max) = def.max
-                && !max.is_finite()
-            {
-                return Err("Giá trị max của option không hợp lệ.");
-            }
-            if let (Some(min), Some(max)) = (def.min, def.max)
-                && min > max
-            {
-                return Err("min không được lớn hơn max.");
-            }
-            if def.option_type == ThemeOptionType::Select {
-                if def.choices.is_empty() || def.choices.len() > MAX_THEME_OPTION_CHOICES {
-                    return Err("Option select phải có 1–64 choices.");
-                }
-                let mut choice_vals = BTreeSet::new();
-                for c in &def.choices {
-                    if c.value.trim().is_empty()
-                        || !valid_plain_string(&c.value, 128)
-                        || c.label.trim().is_empty()
-                        || !valid_plain_string(&c.label, 128)
-                        || !choice_vals.insert(c.value.as_str())
-                    {
-                        return Err("Choice trong option select không hợp lệ hoặc bị trùng.");
-                    }
-                }
-            }
-            if def.translatable
-                && !matches!(
-                    def.option_type,
-                    ThemeOptionType::String | ThemeOptionType::Url
-                )
-            {
-                return Err(
-                    "Chỉ option kiểu string hoặc url mới được khai báo translatable: true.",
-                );
-            }
-            validate_option_value(&def, &def.default)?;
-            fields.push(upcast_legacy_def_to_field(&def));
-            defs.push(def);
-        } else {
-            let mut stripped = raw_item.clone();
-            let mut public_flags = BTreeMap::new();
-            let mut translatable_flags = BTreeMap::new();
-            extract_public_flags_and_strip(
-                &mut stripped,
-                &mut public_flags,
-                &mut translatable_flags,
-            )?;
-            let spec: BlockFieldSpec = serde_json::from_value(stripped)
-                .map_err(|_| "Khai báo options trong theme.json không đúng cấu trúc.")?;
-            for leaf in flattened_field_specs(std::slice::from_ref(&spec)) {
-                if !seen_keys.insert(leaf.key().to_owned()) {
-                    return Err("Trùng lặp option_key trong theme.json.");
-                }
-                let is_public = public_flags.get(leaf.key()).copied().unwrap_or(false);
-                let is_translatable = translatable_flags.get(leaf.key()).copied().unwrap_or(false);
-                let leaf_def = def_from_modern_leaf_spec(leaf, is_public, is_translatable);
-                if leaf_def.translatable
-                    && !matches!(
-                        leaf_def.option_type,
-                        ThemeOptionType::String | ThemeOptionType::Url
-                    )
-                {
-                    return Err(
-                        "Chỉ option kiểu string hoặc url mới được khai báo translatable: true.",
-                    );
-                }
-                validate_option_value(&leaf_def, &leaf_def.default)?;
-                defs.push(leaf_def);
-            }
-            modern_specs_to_validate.push(spec.clone());
-            fields.push(spec);
-        }
+    let specs: Vec<FieldSpec> = serde_json::from_value(raw_opts.clone())
+        .map_err(|_| "Khai báo options trong theme.json không đúng cấu trúc.")?;
+    opendash_core::theme::validate_theme_options_fields(&specs)?;
+    for spec in &specs {
+        validate_url_or_link_defaults_strict(spec)?;
     }
-
-    if !modern_specs_to_validate.is_empty() {
-        validate_field_specs(&modern_specs_to_validate)?;
-    }
-
-    if defs.len() > MAX_THEME_OPTIONS {
-        return Err("Theme vượt quá giới hạn 64 options.");
-    }
-
-    Ok((defs, fields))
-}
-
-pub fn parse_theme_options_schema(
-    manifest_json: &str,
-) -> Result<Vec<ThemeOptionDef>, &'static str> {
-    parse_theme_options_with_fields(manifest_json).map(|(defs, _)| defs)
+    Ok(specs)
 }
 
 /// Derive anchor-only permissions from the selected revision's validated
@@ -2153,7 +1697,7 @@ pub fn parse_theme_options_schema(
 pub fn theme_url_policy(
     manifest_json: &str,
 ) -> Result<crate::template_sec::ThemeUrlPolicy, &'static str> {
-    let schema = parse_theme_options_schema(manifest_json)?;
+    let specs = parse_theme_options_schema(manifest_json)?;
     let raw: serde_json::Value =
         serde_json::from_str(manifest_json).map_err(|_| "theme.json không đúng JSON.")?;
     let declared_assets: BTreeSet<String> = raw
@@ -2163,49 +1707,14 @@ pub fn theme_url_policy(
         .flatten()
         .filter_map(|v| v.as_str().map(ToOwned::to_owned))
         .collect();
-    let href_exprs: BTreeSet<String> = GLOBAL_PUBLIC_URL_OPTION_KEYS
-        .iter()
-        .copied()
-        .map(ToOwned::to_owned)
-        .chain(
-            schema
-                .iter()
-                .filter(|def| def.public && def.option_type == ThemeOptionType::Url)
-                .map(|def| def.key.clone()),
-        )
-        .map(|k| format!("options.{k}"))
-        .collect();
-    let src_exprs: BTreeSet<String> = GLOBAL_PUBLIC_MEDIA_OPTION_KEYS
-        .iter()
-        .copied()
-        .map(ToOwned::to_owned)
-        .chain(
-            schema
-                .iter()
-                .filter(|def| def.public && is_media_option_type(def.option_type))
-                .map(|def| def.key.clone()),
-        )
-        .map(|k| format!("options.{k}"))
-        .collect();
-    Ok(crate::template_sec::ThemeUrlPolicy::new(
-        href_exprs,
-        src_exprs,
+    Ok(crate::template_sec::ThemeUrlPolicy::from_option_specs(
+        &specs,
         declared_assets,
     ))
 }
 
 pub fn global_theme_url_policy() -> crate::template_sec::ThemeUrlPolicy {
-    let href_exprs = GLOBAL_PUBLIC_URL_OPTION_KEYS
-        .iter()
-        .copied()
-        .map(|k| format!("options.{k}"))
-        .collect();
-    let src_exprs = GLOBAL_PUBLIC_MEDIA_OPTION_KEYS
-        .iter()
-        .copied()
-        .map(|k| format!("options.{k}"))
-        .collect();
-    crate::template_sec::ThemeUrlPolicy::new(href_exprs, src_exprs, BTreeSet::new())
+    crate::template_sec::ThemeUrlPolicy::from_option_specs(&[], BTreeSet::new())
 }
 
 async fn latest_revision_manifest_in_conn(
@@ -2290,29 +1799,13 @@ pub async fn put_global_site_options_in_conn(
 ) -> ApiResult<GlobalSiteOptionsOutcome> {
     let normalized = validate_global_site_options_map(&submitted).map_err(ApiError::bad_request)?;
     let fields = global_site_option_fields();
-    let leaf_map: BTreeMap<&str, &BlockFieldSpec> = flattened_field_specs(&fields)
-        .into_iter()
-        .map(|f| (f.key(), f))
+    let collected = collect_media_ids(&fields, &normalized);
+    crate::storage::fields::verify_collected_media_ids_in_conn(conn, &collected).await?;
+    let data_map: BTreeMap<&str, &FieldSpec> = fields
+        .iter()
+        .filter(|s| !s.is_ui_only())
+        .map(|s| (s.key.as_str(), s))
         .collect();
-
-    for (k, v) in &normalized {
-        if let Some(BlockFieldSpec::Media { .. }) = leaf_map.get(k.as_str())
-            && let Some(media_id) = v.as_str()
-            && !media_id.is_empty()
-        {
-            let exists: Option<i64> = sqlx::query_scalar(
-                "SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active'",
-            )
-            .bind(media_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-            if exists.is_none() {
-                return Err(ApiError::bad_request(
-                    "media_id của site_logo không tồn tại.",
-                ));
-            }
-        }
-    }
 
     let current_ver: Option<i64> =
         sqlx::query_scalar("SELECT version FROM site_global_option_version WHERE id = 1")
@@ -2360,7 +1853,10 @@ pub async fn put_global_site_options_in_conn(
         .execute(&mut *conn)
         .await?;
 
-        if let Some(BlockFieldSpec::Media { .. }) = leaf_map.get(k.as_str()) {
+        if data_map
+            .get(k.as_str())
+            .is_some_and(|spec| spec.field_type == FieldType::Media)
+        {
             sqlx::query("DELETE FROM site_global_option_media_refs WHERE option_key = ?")
                 .bind(k)
                 .execute(&mut *conn)
@@ -2397,18 +1893,15 @@ pub async fn put_global_site_options(
     Ok(outcome)
 }
 
-pub async fn get_theme_options_in_conn_for_locale(
+async fn load_theme_option_maps_in_conn(
     conn: &mut SqliteConnection,
     theme_id: &str,
-    requested_locale: Option<&str>,
-) -> ApiResult<Option<ThemeOptionsSnapshot>> {
-    let default_locale = get_default_locale_code_in_conn(conn).await?;
-    let target_locale = resolve_requested_locale_in_conn(conn, requested_locale).await?;
-    let Some(manifest_json) = latest_revision_manifest_in_conn(conn, theme_id).await? else {
-        return Ok(None);
-    };
-    let (schema, fields) =
-        parse_theme_options_with_fields(&manifest_json).map_err(ApiError::bad_request)?;
+    default_locale: &str,
+    target_locale: &str,
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
     let global_rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = 'theme' AND owner_id = ?",
     )
@@ -2422,63 +1915,120 @@ pub async fn get_theme_options_in_conn_for_locale(
         }
     }
 
-    let (version, locale_map) = if target_locale == default_locale {
-        let ver: i64 = sqlx::query_scalar(
-            "SELECT version FROM theme_option_versions WHERE owner_kind = 'theme' AND owner_id = ?",
-        )
-        .bind(theme_id)
-        .fetch_optional(&mut *conn)
-        .await?
-        .unwrap_or(1);
-        (ver, BTreeMap::new())
-    } else {
-        let ver: i64 = sqlx::query_scalar(
-            "SELECT version FROM theme_option_locale_versions WHERE theme_id = ? AND locale = ?",
-        )
-        .bind(theme_id)
-        .bind(&target_locale)
-        .fetch_optional(&mut *conn)
-        .await?
-        .unwrap_or(1);
+    let mut locale_map = BTreeMap::new();
+    if target_locale != default_locale {
         let loc_rows: Vec<(String, String)> = sqlx::query_as(
             "SELECT option_key, value_json
                FROM theme_option_locale_values
               WHERE theme_id = ? AND locale = ?",
         )
         .bind(theme_id)
-        .bind(&target_locale)
+        .bind(target_locale)
         .fetch_all(&mut *conn)
         .await?;
-        let mut map = BTreeMap::new();
         for (k, v_json) in loc_rows {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
-                map.insert(k, v);
+                locale_map.insert(k, v);
             }
         }
-        (ver, map)
+    }
+
+    Ok((global_map, locale_map))
+}
+
+async fn sync_theme_option_media_refs_in_conn(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+    owner_kind: &str,
+    owner_id: &str,
+    locale: &str,
+    option_key: &str,
+    media_ids: &BTreeSet<String>,
+) -> ApiResult<()> {
+    sqlx::query(
+        "DELETE FROM theme_option_media_refs
+          WHERE owner_kind = ? AND owner_id = ? AND locale = ? AND option_key = ?",
+    )
+    .bind(owner_kind)
+    .bind(owner_id)
+    .bind(locale)
+    .bind(option_key)
+    .execute(&mut *conn)
+    .await?;
+    for media_id in media_ids {
+        sqlx::query(
+            "INSERT OR IGNORE INTO theme_option_media_refs
+                (theme_id, owner_kind, owner_id, locale, option_key, media_id)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(theme_id)
+        .bind(owner_kind)
+        .bind(owner_id)
+        .bind(locale)
+        .bind(option_key)
+        .bind(media_id)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
+pub async fn get_theme_options_in_conn_for_locale(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+    requested_locale: Option<&str>,
+) -> ApiResult<Option<ThemeOptionsSnapshot>> {
+    let default_locale = get_default_locale_code_in_conn(conn).await?;
+    let target_locale = resolve_requested_locale_in_conn(conn, requested_locale).await?;
+    let Some(manifest_json) = latest_revision_manifest_in_conn(conn, theme_id).await? else {
+        return Ok(None);
+    };
+    let fields = parse_theme_options_schema(&manifest_json).map_err(ApiError::bad_request)?;
+    let (global_map, locale_map) =
+        load_theme_option_maps_in_conn(conn, theme_id, &default_locale, &target_locale).await?;
+
+    let version: i64 = if target_locale == default_locale {
+        sqlx::query_scalar(
+            "SELECT version FROM theme_option_versions WHERE owner_kind = 'theme' AND owner_id = ?",
+        )
+        .bind(theme_id)
+        .fetch_optional(&mut *conn)
+        .await?
+        .unwrap_or(1)
+    } else {
+        sqlx::query_scalar(
+            "SELECT version FROM theme_option_locale_versions WHERE theme_id = ? AND locale = ?",
+        )
+        .bind(theme_id)
+        .bind(&target_locale)
+        .fetch_optional(&mut *conn)
+        .await?
+        .unwrap_or(1)
     };
 
     let mut values = BTreeMap::new();
-    for def in &schema {
-        let v = if target_locale != default_locale && def.translatable {
+    for spec in &fields {
+        if spec.is_ui_only() {
+            continue;
+        }
+        let v = if target_locale != default_locale && spec.translatable {
             locale_map
-                .get(&def.key)
-                .or_else(|| global_map.get(&def.key))
+                .get(&spec.key)
+                .or_else(|| global_map.get(&spec.key))
                 .cloned()
-                .unwrap_or_else(|| def.default.clone())
+                .unwrap_or_else(|| default_value_for_field_spec(spec))
         } else {
             global_map
-                .get(&def.key)
+                .get(&spec.key)
                 .cloned()
-                .unwrap_or_else(|| def.default.clone())
+                .unwrap_or_else(|| default_value_for_field_spec(spec))
         };
-        values.insert(def.key.clone(), v);
+        values.insert(spec.key.clone(), v);
     }
 
     Ok(Some(ThemeOptionsSnapshot {
         theme_id: theme_id.to_owned(),
         version,
-        schema,
         fields,
         values,
         locale: requested_locale.map(|_| target_locale),
@@ -2508,40 +2058,78 @@ pub async fn put_theme_options_in_conn_for_locale(
     let Some(manifest_json) = latest_revision_manifest_in_conn(conn, theme_id).await? else {
         return Ok(ThemeOptionsOutcome::NotFound);
     };
-    let schema = parse_theme_options_schema(&manifest_json).map_err(ApiError::bad_request)?;
-    let schema_map: BTreeMap<&str, &ThemeOptionDef> =
-        schema.iter().map(|d| (d.key.as_str(), d)).collect();
+    let specs = parse_theme_options_schema(&manifest_json).map_err(ApiError::bad_request)?;
+    let spec_map: BTreeMap<&str, &FieldSpec> = specs
+        .iter()
+        .filter(|s| !s.is_ui_only())
+        .map(|s| (s.key.as_str(), s))
+        .collect();
 
     let is_secondary = target_locale != default_locale;
-    for (k, v) in &submitted {
-        let Some(def) = schema_map.get(k.as_str()) else {
+    for k in submitted.keys() {
+        let Some(spec) = spec_map.get(k.as_str()) else {
             return Err(ApiError::bad_request(
                 "Option key không tồn tại trong schema của theme.",
             ));
         };
-        if is_secondary && !def.translatable {
+        if is_secondary && !spec.translatable {
             return Err(ApiError::bad_request(
                 "Không thể lưu option không hỗ trợ dịch ở ngôn ngữ phụ.",
             ));
         }
-        validate_option_value(def, v).map_err(ApiError::bad_request)?;
-        if is_media_option_type(def.option_type)
-            && let Some(media_id) = v.as_str()
-            && !media_id.is_empty()
-        {
-            let exists: Option<i64> = sqlx::query_scalar(
-                "SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active'",
-            )
-            .bind(media_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-            if exists.is_none() {
-                return Err(ApiError::bad_request(
-                    "media_id của image_ref không tồn tại.",
-                ));
-            }
-        }
     }
+
+    let (global_map, locale_map) =
+        load_theme_option_maps_in_conn(conn, theme_id, &default_locale, &target_locale).await?;
+    let mut saved_effective = BTreeMap::new();
+    let mut merged_for_validation = BTreeMap::new();
+    for spec in &specs {
+        if spec.is_ui_only() {
+            continue;
+        }
+        let saved_val = if is_secondary && spec.translatable {
+            locale_map
+                .get(&spec.key)
+                .or_else(|| global_map.get(&spec.key))
+        } else {
+            global_map.get(&spec.key)
+        };
+        if let Some(sv) = saved_val {
+            saved_effective.insert(spec.key.clone(), sv.clone());
+        }
+        let effective = submitted
+            .get(&spec.key)
+            .cloned()
+            .or_else(|| saved_val.cloned())
+            .unwrap_or_else(|| default_value_for_field_spec(spec));
+        merged_for_validation.insert(spec.key.clone(), effective);
+    }
+
+    validate_field_values(
+        &specs,
+        FieldContext::Options,
+        &merged_for_validation,
+        Some(&saved_effective),
+    )
+    .map_err(ApiError::bad_request)?;
+
+    let mut submitted_specs = Vec::new();
+    for (k, v) in &submitted {
+        let spec = spec_map[k.as_str()];
+        validate_url_or_link_spec_strict(spec, v).map_err(ApiError::bad_request)?;
+        submitted_specs.push(spec.clone());
+    }
+
+    let collected_media = collect_media_ids(&submitted_specs, &submitted);
+    crate::storage::fields::verify_collected_media_ids_in_conn(conn, &collected_media).await?;
+    crate::storage::fields::validate_relational_refs_in_conn(
+        conn,
+        &specs,
+        &merged_for_validation,
+        Some(&saved_effective),
+        is_secondary.then_some(target_locale.as_str()),
+    )
+    .await?;
 
     if is_secondary {
         let current_ver: Option<i64> = sqlx::query_scalar(
@@ -2600,6 +2188,26 @@ pub async fn put_theme_options_in_conn_for_locale(
             .bind(v_json)
             .execute(&mut *conn)
             .await?;
+
+            let spec = spec_map[k.as_str()];
+            if matches!(
+                spec.field_type,
+                FieldType::Media | FieldType::Gallery | FieldType::Group | FieldType::Repeater
+            ) {
+                let single_map = BTreeMap::from([(k.clone(), v.clone())]);
+                let media_ids =
+                    collect_media_ids(std::slice::from_ref(spec), &single_map).all_ids();
+                sync_theme_option_media_refs_in_conn(
+                    conn,
+                    theme_id,
+                    "theme",
+                    theme_id,
+                    &target_locale,
+                    k,
+                    &media_ids,
+                )
+                .await?;
+            }
         }
     } else {
         let current_ver: Option<i64> = sqlx::query_scalar(
@@ -2659,29 +2267,18 @@ pub async fn put_theme_options_in_conn_for_locale(
             .execute(&mut *conn)
             .await?;
 
-            if let Some(def) = schema_map.get(k.as_str())
-                && is_media_option_type(def.option_type)
-            {
-                sqlx::query(
-                    "DELETE FROM theme_option_media_refs
-                      WHERE owner_kind = 'theme' AND owner_id = ? AND option_key = ?",
+            let spec = spec_map[k.as_str()];
+            if matches!(
+                spec.field_type,
+                FieldType::Media | FieldType::Gallery | FieldType::Group | FieldType::Repeater
+            ) {
+                let single_map = BTreeMap::from([(k.clone(), v.clone())]);
+                let media_ids =
+                    collect_media_ids(std::slice::from_ref(spec), &single_map).all_ids();
+                sync_theme_option_media_refs_in_conn(
+                    conn, theme_id, "theme", theme_id, "", k, &media_ids,
                 )
-                .bind(theme_id)
-                .bind(k)
-                .execute(&mut *conn)
                 .await?;
-                if let Some(media_id) = v.as_str().filter(|id| !id.is_empty()) {
-                    sqlx::query(
-                        "INSERT INTO theme_option_media_refs (theme_id, owner_kind, owner_id, option_key, media_id)
-                         VALUES (?, 'theme', ?, ?, ?)",
-                    )
-                    .bind(theme_id)
-                    .bind(theme_id)
-                    .bind(k)
-                    .bind(media_id)
-                    .execute(&mut *conn)
-                    .await?;
-                }
             }
         }
     }
@@ -2731,10 +2328,12 @@ pub async fn check_theme_options_compatibility(
     theme_id: &str,
     new_manifest_json: &str,
 ) -> ApiResult<()> {
-    let new_schema =
-        parse_theme_options_schema(new_manifest_json).map_err(ApiError::bad_request)?;
-    let new_map: BTreeMap<&str, &ThemeOptionDef> =
-        new_schema.iter().map(|d| (d.key.as_str(), d)).collect();
+    let new_specs = parse_theme_options_schema(new_manifest_json).map_err(ApiError::bad_request)?;
+    let new_map: BTreeMap<&str, &FieldSpec> = new_specs
+        .iter()
+        .filter(|s| !s.is_ui_only())
+        .map(|s| (s.key.as_str(), s))
+        .collect();
 
     let saved_rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = 'theme' AND owner_id = ?",
@@ -2751,7 +2350,7 @@ pub async fn check_theme_options_compatibility(
     .await?;
 
     for (key, value_json) in saved_rows.into_iter().chain(locale_rows) {
-        let Some(new_def) = new_map.get(key.as_str()) else {
+        let Some(&spec) = new_map.get(key.as_str()) else {
             // Option removed in new revision: retained as dormant data.
             continue;
         };
@@ -2760,7 +2359,16 @@ pub async fn check_theme_options_compatibility(
                 "Dữ liệu theme option đã lưu không tương thích với revision mới.",
             ));
         };
-        if validate_option_value(new_def, &saved_val).is_err() {
+        let single_map = BTreeMap::from([(key, saved_val.clone())]);
+        if validate_field_values(
+            std::slice::from_ref(spec),
+            FieldContext::Options,
+            &single_map,
+            None,
+        )
+        .is_err()
+            || validate_url_or_link_spec_strict(spec, &saved_val).is_err()
+        {
             return Err(ApiError::conflict(
                 "Schema option của revision mới không tương thích với giá trị đã lưu (409).",
             ));
@@ -2769,248 +2377,133 @@ pub async fn check_theme_options_compatibility(
     Ok(())
 }
 
-fn project_public_option_value(
-    def: &ThemeOptionDef,
-    raw: Option<&serde_json::Value>,
-    is_preview: bool,
-) -> serde_json::Value {
-    let media_prefix = if is_preview {
-        "/api/admin/media"
-    } else {
-        "/media"
-    };
-    match def.option_type {
-        ThemeOptionType::ImageRef | ThemeOptionType::Media => {
-            // Unsaved default image_ref/media never auto-publicizes media.
-            match raw.and_then(|v| v.as_str()) {
-                Some(media_id) if valid_media_id(media_id) => {
-                    serde_json::Value::String(format!("{media_prefix}/{media_id}/file"))
-                }
-                _ => serde_json::Value::Null,
-            }
-        }
-        ThemeOptionType::Url => match raw {
-            Some(saved) if validate_option_value(def, saved).is_ok() => saved.clone(),
-            _ => def.default.clone(),
-        },
-        _ => match raw {
-            Some(saved) if validate_option_value(def, saved).is_ok() => saved.clone(),
-            _ => def.default.clone(),
-        },
-    }
+fn api_error_to_unprocessable(err: ApiError) -> ApiError {
+    ApiError(axum::http::StatusCode::UNPROCESSABLE_ENTITY, err.1)
 }
 
-pub async fn get_public_global_options_in_conn(
-    conn: &mut SqliteConnection,
-    is_preview: bool,
-) -> ApiResult<BTreeMap<String, serde_json::Value>> {
-    let fields = global_site_option_fields();
-    let rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT option_key, value_json FROM site_global_option_values")
-            .fetch_all(&mut *conn)
-            .await?;
-    let mut saved_map = BTreeMap::new();
-    for (k, v_json) in rows {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
-            saved_map.insert(k, v);
-        }
-    }
-    let media_prefix = if is_preview {
-        "/api/admin/media"
-    } else {
-        "/media"
-    };
-    let mut out = BTreeMap::new();
-    for leaf in flattened_field_specs(&fields) {
-        let key = leaf.key();
-        let raw = saved_map.get(key);
-        let val = match leaf {
-            BlockFieldSpec::Media { .. } => match raw.and_then(serde_json::Value::as_str) {
-                Some(id) if valid_media_id(id) => {
-                    serde_json::Value::String(format!("{media_prefix}/{id}/file"))
-                }
-                _ => serde_json::Value::String(String::new()),
-            },
-            BlockFieldSpec::Url { .. } => match raw {
-                Some(v)
-                    if v.as_str().is_some_and(|s| {
-                        s.is_empty() || crate::template_sec::validate_theme_option_url(s).is_ok()
-                    }) =>
-                {
-                    v.clone()
-                }
-                _ => default_value_for_field_spec(leaf),
-            },
-            _ => match raw {
-                Some(v) if validate_single_field_value(leaf, Some(v), false).is_ok() => v.clone(),
-                _ => default_value_for_field_spec(leaf),
-            },
-        };
-        out.insert(key.to_owned(), val);
-    }
-    Ok(out)
-}
-
-pub(super) async fn get_public_theme_options_only_for_mode_in_conn(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-    manifest_json: &str,
-    transient_override: Option<&BTreeMap<String, serde_json::Value>>,
-    is_preview: bool,
-    requested_locale: Option<&str>,
-) -> ApiResult<BTreeMap<String, serde_json::Value>> {
-    let Ok(schema) = parse_theme_options_schema(manifest_json) else {
-        return Ok(BTreeMap::new());
-    };
-    let default_locale = get_default_locale_code_in_conn(conn).await?;
-    let target_locale = resolve_requested_locale_in_conn(conn, requested_locale).await?;
-    let saved_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = 'theme' AND owner_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_all(&mut *conn)
-    .await?;
-    let mut saved_map = BTreeMap::new();
-    for (k, v_json) in saved_rows {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
-            saved_map.insert(k, v);
-        }
-    }
-    let mut locale_map = BTreeMap::new();
-    if target_locale != default_locale {
-        let loc_rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT option_key, value_json
-               FROM theme_option_locale_values
-              WHERE theme_id = ? AND locale = ?",
-        )
-        .bind(theme_id)
-        .bind(&target_locale)
-        .fetch_all(&mut *conn)
-        .await?;
-        for (k, v_json) in loc_rows {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
-                locale_map.insert(k, v);
-            }
-        }
-    }
-
-    let mut effective_raw = BTreeMap::new();
-    for def in &schema {
-        let maybe_val = if target_locale != default_locale
-            && def.translatable
-            && !is_media_option_type(def.option_type)
-        {
-            locale_map
-                .get(&def.key)
-                .or_else(|| saved_map.get(&def.key))
-                .cloned()
-        } else {
-            saved_map.get(&def.key).cloned()
-        };
-        if let Some(v) = maybe_val {
-            effective_raw.insert(def.key.clone(), v);
-        }
-    }
-
-    if let Some(ov) = transient_override {
-        let schema_map: BTreeMap<&str, &ThemeOptionDef> =
-            schema.iter().map(|d| (d.key.as_str(), d)).collect();
-        for (k, v) in ov {
-            let Some(def) = schema_map.get(k.as_str()) else {
-                return Err(ApiError::unprocessable(
-                    "Option key không tồn tại trong schema của theme.",
-                ));
-            };
-            validate_option_value(def, v).map_err(ApiError::unprocessable)?;
-            if is_media_option_type(def.option_type)
-                && let Some(media_id) = v.as_str()
-                && !media_id.is_empty()
-            {
-                let exists: Option<i64> = sqlx::query_scalar(
-                    "SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active'",
-                )
-                .bind(media_id)
-                .fetch_optional(&mut *conn)
-                .await?;
-                if exists.is_none() {
-                    return Err(ApiError::unprocessable(
-                        "media_id của image_ref không tồn tại.",
-                    ));
-                }
-            }
-            effective_raw.insert(k.clone(), v.clone());
-        }
-    }
-    let mut out = BTreeMap::new();
-    for def in schema {
-        if !def.public {
-            continue;
-        }
-        let val = project_public_option_value(&def, effective_raw.get(&def.key), is_preview);
-        out.insert(def.key, val);
-    }
-    Ok(out)
-}
-
-pub(super) async fn resolve_merged_public_options_with_overrides_in_conn(
+pub(super) async fn resolve_merged_public_options_with_overrides_in_conn_with_nonces(
     conn: &mut SqliteConnection,
     active_theme: Option<(&str, &str)>,
     transient_global: Option<&BTreeMap<String, serde_json::Value>>,
     transient_theme: Option<&BTreeMap<String, serde_json::Value>>,
     is_preview: bool,
     requested_locale: Option<&str>,
-) -> ApiResult<BTreeMap<String, serde_json::Value>> {
-    let mut merged = get_public_global_options_in_conn(conn, is_preview).await?;
-    if let Some(g_ov) = transient_global {
-        let normalized = validate_global_site_options_map(g_ov).map_err(ApiError::unprocessable)?;
-        let fields = global_site_option_fields();
-        let leaf_map: BTreeMap<&str, &BlockFieldSpec> = flattened_field_specs(&fields)
-            .into_iter()
-            .map(|f| (f.key(), f))
-            .collect();
-        let media_prefix = if is_preview {
-            "/api/admin/media"
-        } else {
-            "/media"
-        };
-        for (k, v) in normalized {
-            let val = match leaf_map.get(k.as_str()) {
-                Some(BlockFieldSpec::Media { .. }) => {
-                    if let Some(media_id) = v.as_str().filter(|id| !id.is_empty()) {
-                        let exists: Option<i64> = sqlx::query_scalar(
-                            "SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active'",
-                        )
-                        .bind(media_id)
-                        .fetch_optional(&mut *conn)
-                        .await?;
-                        if exists.is_none() {
-                            return Err(ApiError::unprocessable(
-                                "media_id của site_logo không tồn tại.",
-                            ));
-                        }
-                        serde_json::Value::String(format!("{media_prefix}/{media_id}/file"))
-                    } else {
-                        serde_json::Value::String(String::new())
-                    }
-                }
-                _ => v,
-            };
-            merged.insert(k, val);
+    mut richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
+    let default_locale = get_default_locale_code_in_conn(conn).await?;
+    let target_locale = resolve_requested_locale_in_conn(conn, requested_locale).await?;
+
+    let global_fields = global_site_option_fields();
+    let global_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT option_key, value_json FROM site_global_option_values")
+            .fetch_all(&mut *conn)
+            .await?;
+    let mut global_raw = global_site_option_defaults();
+    for (k, v_json) in global_rows {
+        if global_raw.contains_key(&k)
+            && let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json)
+        {
+            global_raw.insert(k, v);
         }
     }
 
+    if let Some(g_ov) = transient_global {
+        let normalized_g =
+            validate_global_site_options_map(g_ov).map_err(ApiError::unprocessable)?;
+        let g_media = collect_media_ids(&global_fields, &normalized_g);
+        crate::storage::fields::verify_collected_media_ids_in_conn(conn, &g_media)
+            .await
+            .map_err(api_error_to_unprocessable)?;
+        for (k, v) in normalized_g {
+            global_raw.insert(k, v);
+        }
+    }
+
+    let mut theme_specs = Vec::new();
+    let mut theme_raw = BTreeMap::new();
     if let Some((theme_id, manifest_json)) = active_theme {
-        let theme_opts = get_public_theme_options_only_for_mode_in_conn(
-            conn,
-            theme_id,
-            manifest_json,
-            transient_theme,
-            is_preview,
-            requested_locale,
-        )
-        .await?;
-        for (k, v) in theme_opts {
-            merged.insert(k, v);
+        theme_specs = parse_theme_options_schema(manifest_json).unwrap_or_default();
+        if !theme_specs.is_empty() {
+            let (saved_global_map, locale_map) =
+                load_theme_option_maps_in_conn(conn, theme_id, &default_locale, &target_locale)
+                    .await?;
+            for spec in &theme_specs {
+                if spec.is_ui_only() {
+                    continue;
+                }
+                let maybe_val = if target_locale != default_locale && spec.translatable {
+                    locale_map
+                        .get(&spec.key)
+                        .or_else(|| saved_global_map.get(&spec.key))
+                        .cloned()
+                } else {
+                    saved_global_map.get(&spec.key).cloned()
+                };
+                if let Some(v) = maybe_val {
+                    theme_raw.insert(spec.key.clone(), v);
+                }
+            }
+        }
+
+        if let Some(ov) = transient_theme {
+            let spec_map: BTreeMap<&str, &FieldSpec> = theme_specs
+                .iter()
+                .filter(|s| !s.is_ui_only())
+                .map(|s| (s.key.as_str(), s))
+                .collect();
+            let mut merged_for_validation = BTreeMap::new();
+            for spec in &theme_specs {
+                if spec.is_ui_only() {
+                    continue;
+                }
+                let val = ov
+                    .get(&spec.key)
+                    .cloned()
+                    .or_else(|| theme_raw.get(&spec.key).cloned())
+                    .unwrap_or_else(|| default_value_for_field_spec(spec));
+                merged_for_validation.insert(spec.key.clone(), val);
+            }
+            for (k, v) in ov {
+                let Some(&spec) = spec_map.get(k.as_str()) else {
+                    return Err(ApiError::unprocessable(
+                        "Option key không tồn tại trong schema của theme.",
+                    ));
+                };
+                validate_url_or_link_spec_strict(spec, v).map_err(ApiError::unprocessable)?;
+            }
+            validate_field_values(
+                &theme_specs,
+                FieldContext::Options,
+                &merged_for_validation,
+                Some(&theme_raw),
+            )
+            .map_err(ApiError::unprocessable)?;
+
+            let ov_specs: Vec<FieldSpec> = ov
+                .keys()
+                .filter_map(|k| spec_map.get(k.as_str()).map(|s| (*s).clone()))
+                .collect();
+            let ov_media = collect_media_ids(&ov_specs, ov);
+            crate::storage::fields::verify_collected_media_ids_in_conn(conn, &ov_media)
+                .await
+                .map_err(api_error_to_unprocessable)?;
+            let req_loc = (target_locale != default_locale).then_some(target_locale.as_str());
+            crate::storage::fields::validate_relational_refs_in_conn(
+                conn,
+                &theme_specs,
+                &merged_for_validation,
+                Some(&theme_raw),
+                req_loc,
+            )
+            .await
+            .map_err(api_error_to_unprocessable)?;
+
+            for (k, v) in ov {
+                theme_raw.insert(k.clone(), v.clone());
+            }
         }
     } else if transient_theme.is_some_and(|m| !m.is_empty()) {
         return Err(ApiError::unprocessable(
@@ -3018,14 +2511,87 @@ pub(super) async fn resolve_merged_public_options_with_overrides_in_conn(
         ));
     }
 
-    Ok(merged)
+    let mut media_ids = BTreeSet::new();
+    let mut entry_ids = BTreeSet::new();
+    let mut term_ids = BTreeSet::new();
+    crate::field_hydrate::collect_hydration_ids(
+        &global_fields,
+        &global_raw,
+        true,
+        &mut media_ids,
+        &mut entry_ids,
+        &mut term_ids,
+    );
+    crate::field_hydrate::collect_hydration_ids(
+        &theme_specs,
+        &theme_raw,
+        true,
+        &mut media_ids,
+        &mut entry_ids,
+        &mut term_ids,
+    );
+
+    let entries = crate::storage::fields::load_entry_ref_hydration_map_in_conn(
+        conn,
+        &entry_ids,
+        is_preview,
+        Some(&target_locale),
+    )
+    .await?;
+    let terms = crate::storage::fields::load_term_ref_hydration_map_in_conn(
+        conn,
+        &term_ids,
+        is_preview,
+        Some(&target_locale),
+    )
+    .await?;
+    for term in terms.values() {
+        if let Some(ref mid) = term.featured_image_media_id {
+            media_ids.insert(mid.clone());
+        }
+    }
+    let media = crate::storage::fields::load_media_hydration_map_in_conn(conn, &media_ids).await?;
+
+    let ctx = crate::field_hydrate::HydrationContext {
+        media: &media,
+        entries: &entries,
+        terms: &terms,
+        is_preview,
+    };
+    let site_options = crate::field_hydrate::hydrate_field_values(
+        &global_fields,
+        &global_raw,
+        &ctx,
+        richtext_nonces.as_deref_mut(),
+        true,
+    )
+    .map_err(ApiError::internal)?;
+
+    let mut merged = site_options.clone();
+    if !theme_specs.is_empty() {
+        let theme_hydrated = crate::field_hydrate::hydrate_field_values(
+            &theme_specs,
+            &theme_raw,
+            &ctx,
+            richtext_nonces,
+            true,
+        )
+        .map_err(ApiError::internal)?;
+        merged.extend(theme_hydrated);
+    }
+
+    Ok((site_options, merged))
 }
 
-pub async fn get_active_merged_public_options_in_conn_for_locale(
+pub async fn get_active_merged_public_options_in_conn_for_locale_with_nonces(
     conn: &mut SqliteConnection,
     is_preview: bool,
     requested_locale: Option<&str>,
-) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
     let active: Option<(String, String)> = if let Some(dev) =
         crate::dev_mode::DevOverlayConfig::global()
         && let Ok(Some(snap)) = dev.load_dev_theme()
@@ -3042,13 +2608,31 @@ pub async fn get_active_merged_public_options_in_conn_for_locale(
         .await?
     };
     let active_ref = active.as_ref().map(|(id, m)| (id.as_str(), m.as_str()));
-    resolve_merged_public_options_with_overrides_in_conn(
+    resolve_merged_public_options_with_overrides_in_conn_with_nonces(
         conn,
         active_ref,
         None,
         None,
         is_preview,
         requested_locale,
+        richtext_nonces,
+    )
+    .await
+}
+
+pub async fn get_active_merged_public_options_in_conn_for_locale(
+    conn: &mut SqliteConnection,
+    is_preview: bool,
+    requested_locale: Option<&str>,
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
+    get_active_merged_public_options_in_conn_for_locale_with_nonces(
+        conn,
+        is_preview,
+        requested_locale,
+        None,
     )
     .await
 }
@@ -3056,39 +2640,90 @@ pub async fn get_active_merged_public_options_in_conn_for_locale(
 pub async fn get_active_merged_public_options_in_conn(
     conn: &mut SqliteConnection,
     is_preview: bool,
-) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
     get_active_merged_public_options_in_conn_for_locale(conn, is_preview, None).await
 }
 
-/// Returns merged durable Global public options + `public: true` options for the active v3 theme.
+/// Returns `(site_options, merged_options)` where `merged_options` overlays
+/// active theme `public: true` options on top of durable Global public options.
+pub async fn get_active_public_theme_options_for_locale_with_nonces(
+    db: &SqlitePool,
+    requested_locale: Option<&str>,
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
+    let mut conn = db.acquire().await?;
+    get_active_merged_public_options_in_conn_for_locale_with_nonces(
+        &mut conn,
+        false,
+        requested_locale,
+        richtext_nonces,
+    )
+    .await
+}
+
 pub async fn get_active_public_theme_options_for_locale(
     db: &SqlitePool,
     requested_locale: Option<&str>,
-) -> ApiResult<BTreeMap<String, serde_json::Value>> {
-    let mut conn = db.acquire().await?;
-    get_active_merged_public_options_in_conn_for_locale(&mut conn, false, requested_locale).await
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
+    get_active_public_theme_options_for_locale_with_nonces(db, requested_locale, None).await
 }
 
 pub async fn get_active_public_theme_options(
     db: &SqlitePool,
-) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
     get_active_public_theme_options_for_locale(db, None).await
 }
 
 /// Resolve merged global + public theme values against the revision already captured by the caller.
-pub(super) async fn get_public_theme_options_in_conn_for_locale(
+pub(super) async fn get_public_theme_options_in_conn_for_locale_with_nonces(
     conn: &mut SqliteConnection,
     theme_id: &str,
     manifest_json: &str,
     requested_locale: Option<&str>,
-) -> ApiResult<BTreeMap<String, serde_json::Value>> {
-    resolve_merged_public_options_with_overrides_in_conn(
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
+    resolve_merged_public_options_with_overrides_in_conn_with_nonces(
         conn,
         Some((theme_id, manifest_json)),
         None,
         None,
         false,
         requested_locale,
+        richtext_nonces,
+    )
+    .await
+}
+
+pub(super) async fn get_public_theme_options_in_conn_for_locale(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+    manifest_json: &str,
+    requested_locale: Option<&str>,
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
+    get_public_theme_options_in_conn_for_locale_with_nonces(
+        conn,
+        theme_id,
+        manifest_json,
+        requested_locale,
+        None,
     )
     .await
 }
@@ -3102,7 +2737,7 @@ mod tests {
         let schema = serde_json::json!({"options": [
             {"key":"cta_url","label":"CTA","type":"url","default":"/lien-he","public":true},
             {"key":"private_url","label":"Private","type":"url","default":"#secret","public":false},
-            {"key":"legacy_string","label":"Legacy","type":"string","default":"/old","public":true}
+            {"key":"non_url_text","label":"Text","type":"text","default":"/old","public":true}
         ]});
         let raw = schema.to_string();
         let policy = theme_url_policy(&raw).unwrap();
@@ -3110,7 +2745,7 @@ mod tests {
         assert!(
             crate::template_sec::validate_template_csec_with_theme_urls("x", src, &policy).is_ok()
         );
-        for key in ["private_url", "legacy_string", "unknown_url"] {
+        for key in ["private_url", "non_url_text", "unknown_url"] {
             assert!(
                 crate::template_sec::validate_template_csec_with_theme_urls(
                     "x",
@@ -3124,13 +2759,13 @@ mod tests {
             "key":"cta_url", "label":"CTA", "type":"url", "default":"javascript:alert(1)", "public":true
         }]});
         assert!(parse_theme_options_schema(&invalid.to_string()).is_err());
-        assert!(
-            validate_option_value(
-                &parse_theme_options_schema(&raw).unwrap()[0],
-                &serde_json::json!("/changed?from=header#form"),
-            )
-            .is_ok()
-        );
+        let parsed = parse_theme_options_schema(&raw).unwrap();
+        let vals = BTreeMap::from([(
+            "cta_url".to_owned(),
+            serde_json::json!("/changed?from=header#form"),
+        )]);
+        assert!(validate_field_values(&parsed, FieldContext::Options, &vals, None).is_ok());
+        assert!(validate_url_or_link_spec_strict(&parsed[0], &vals["cta_url"]).is_ok());
     }
 
     #[test]
@@ -3262,7 +2897,7 @@ mod tests {
 
         let snap = get_global_site_options(&db).await.unwrap();
         assert_eq!(snap.version, 1);
-        assert_eq!(snap.fields.len(), 2);
+        assert_eq!(snap.fields.len(), 14);
         assert_eq!(snap.values.get("social_facebook").unwrap(), "");
         assert_eq!(snap.values.get("brand_primary_color").unwrap(), "#2563eb");
 
@@ -3327,17 +2962,21 @@ mod tests {
         assert_eq!(saved.values.get("contact_phone").unwrap(), "0901234567");
 
         // Public merged options expose saved global options even without an active theme.
-        let public_opts = get_active_public_theme_options(&db).await.unwrap();
+        let (site_opts, public_opts) = get_active_public_theme_options(&db).await.unwrap();
+        assert_eq!(
+            site_opts.get("social_facebook").unwrap(),
+            "https://fb.com/opendash"
+        );
         assert_eq!(
             public_opts.get("social_facebook").unwrap(),
             "https://fb.com/opendash"
         );
         assert_eq!(public_opts.get("social_youtube").unwrap(), "");
 
-        // Mixed legacy + modern BlockFieldSpec theme.json options parse and upcast cleanly.
+        // Unified FieldSpec theme.json options parse and validate nested groups cleanly.
         let manifest = serde_json::json!({
             "options": [
-                {"key": "legacy_str", "label": "Legacy", "type": "string", "default": "ok", "public": true},
+                {"key": "headline", "label": "Headline", "type": "text", "default": "ok", "public": true},
                 {"key": "accent", "label": "Màu nhấn", "type": "color", "default": "#2563eb", "public": true},
                 {
                     "key": "layout_group",
@@ -3358,14 +2997,18 @@ mod tests {
             ]
         })
         .to_string();
-        let (defs, fields) = parse_theme_options_with_fields(&manifest).unwrap();
-        assert_eq!(defs.len(), 4);
+        let fields = parse_theme_options_schema(&manifest).unwrap();
         assert_eq!(fields.len(), 3);
-        let optional_cta_def = defs.iter().find(|d| d.key == "optional_cta").unwrap();
-        assert!(validate_option_value(optional_cta_def, &serde_json::json!("")).is_ok());
+        let optional_cta_spec = &fields[2].fields[1];
         assert!(
-            validate_option_value(optional_cta_def, &serde_json::json!("javascript:alert(1)"))
-                .is_err()
+            validate_url_or_link_spec_strict(optional_cta_spec, &serde_json::json!("")).is_ok()
+        );
+        assert!(
+            validate_url_or_link_spec_strict(
+                optional_cta_spec,
+                &serde_json::json!("javascript:alert(1)")
+            )
+            .is_err()
         );
     }
 
@@ -3391,9 +3034,9 @@ mod tests {
             "version": "1.0.0",
             "templates": [{ "kind": "index", "file": "index.html" }],
             "options": [
-                { "key": "hero_title", "label": "Hero", "type": "string", "default": "Mac dinh", "public": true, "translatable": true },
+                { "key": "hero_title", "label": "Hero", "type": "text", "default": "Mac dinh", "public": true, "translatable": true },
                 { "key": "cta_url", "label": "CTA", "type": "url", "default": "/vi", "public": true, "translatable": true },
-                { "key": "accent", "label": "Accent", "type": "string", "default": "#111", "public": true, "translatable": false }
+                { "key": "accent", "label": "Accent", "type": "color", "default": "#111111", "public": true, "translatable": false }
             ]
         })
         .to_string();
@@ -3420,7 +3063,7 @@ mod tests {
             1,
             BTreeMap::from([
                 ("hero_title".into(), serde_json::json!("Trang chu")),
-                ("accent".into(), serde_json::json!("#222")),
+                ("accent".into(), serde_json::json!("#222222")),
             ]),
             None,
         )
@@ -3435,11 +3078,11 @@ mod tests {
         )
         .await
         .unwrap();
-        let vi_pub =
+        let (_, vi_pub) =
             get_public_theme_options_in_conn_for_locale(&mut tx, "t-l10n", &manifest, None)
                 .await
                 .unwrap();
-        let en_pub =
+        let (_, en_pub) =
             get_public_theme_options_in_conn_for_locale(&mut tx, "t-l10n", &manifest, Some("en"))
                 .await
                 .unwrap();
@@ -3447,19 +3090,219 @@ mod tests {
 
         assert_eq!(vi_pub["hero_title"], serde_json::json!("Trang chu"));
         assert_eq!(vi_pub["cta_url"], serde_json::json!("/vi"));
-        assert_eq!(vi_pub["accent"], serde_json::json!("#222"));
+        assert_eq!(vi_pub["accent"], serde_json::json!("#222222"));
 
         assert_eq!(en_pub["hero_title"], serde_json::json!("Trang chu"));
         assert_eq!(en_pub["cta_url"], serde_json::json!("/en/contact"));
-        assert_eq!(en_pub["accent"], serde_json::json!("#222"));
+        assert_eq!(en_pub["accent"], serde_json::json!("#222222"));
     }
+
+    #[tokio::test]
+    async fn translatable_media_gallery_group_repeater_and_orphan_locale_cleanup_work() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO site_locales (code, bcp47_tag, label, direction, is_default, enabled, position)
+             VALUES ('en', 'en', 'English', 'ltr', 0, 1, 1)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE site_locales_state SET multilingual_enabled = 1 WHERE id = 1")
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let img_vi = "1".repeat(64);
+        let img_en = "2".repeat(64);
+        let img_gal = "3".repeat(64);
+        let img_rep = "4".repeat(64);
+        for (idx, mid) in [&img_vi, &img_en, &img_gal, &img_rep]
+            .into_iter()
+            .enumerate()
+        {
+            sqlx::query(
+                "INSERT INTO media_assets (id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height, lifecycle_state)
+                 VALUES (?, 'image', ?, 'image/png', 'png', 100, 10, 10, 10, 10, 'active')",
+            )
+            .bind(mid)
+            .bind(format!("loc-{idx}.png"))
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+
+        let manifest = serde_json::json!({
+            "manifest_version": 3,
+            "theme_id": "t-media-l10n",
+            "name": "TM",
+            "version": "1.0.0",
+            "templates": [{ "kind": "index", "file": "index.html" }],
+            "options": [
+                { "key": "hero_img", "label": "HeroImg", "type": "media", "public": true, "translatable": true },
+                { "key": "gallery_imgs", "label": "Gallery", "type": "gallery", "public": true, "translatable": true },
+                {
+                    "key": "promo_box",
+                    "label": "Promo",
+                    "type": "group",
+                    "public": true,
+                    "translatable": true,
+                    "fields": [
+                        { "key": "bg", "label": "BG", "type": "media" },
+                        { "key": "cta", "label": "CTA", "type": "link" }
+                    ]
+                },
+                {
+                    "key": "slides",
+                    "label": "Slides",
+                    "type": "repeater",
+                    "public": true,
+                    "translatable": true,
+                    "fields": [
+                        { "key": "photo", "label": "Photo", "type": "media" }
+                    ]
+                }
+            ]
+        })
+        .to_string();
+        sqlx::query(
+            "INSERT INTO theme_packages (theme_id, display_name, source_format)
+             VALUES ('t-media-l10n', 'TM', 'v3')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO theme_revisions (revision_id, theme_id, version, revision_digest, source_format, manifest_json, file_digests_json, provenance_json)
+             VALUES ('rev-tm', 't-media-l10n', '1.0.0', 'dig-tm', 'v3', ?, '{}', '{}')",
+        )
+        .bind(&manifest)
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE theme_active_selection SET revision_id = 'rev-tm' WHERE id = 1")
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let mut tx = db.begin().await.unwrap();
+        put_theme_options_in_conn_for_locale(
+            &mut tx,
+            "t-media-l10n",
+            1,
+            BTreeMap::from([("hero_img".into(), serde_json::json!(img_vi))]),
+            None,
+        )
+        .await
+        .unwrap();
+        put_theme_options_in_conn_for_locale(
+            &mut tx,
+            "t-media-l10n",
+            1,
+            BTreeMap::from([
+                ("hero_img".into(), serde_json::json!(img_en)),
+                ("gallery_imgs".into(), serde_json::json!([img_gal])),
+                (
+                    "promo_box".into(),
+                    serde_json::json!({ "bg": img_en, "cta": { "url": "/en", "label": "Go", "new_tab": false, "nofollow": false } }),
+                ),
+                ("slides".into(), serde_json::json!([{ "photo": img_rep }])),
+            ]),
+            Some("en"),
+        )
+        .await
+        .unwrap();
+
+        let (_, vi_pub) =
+            get_public_theme_options_in_conn_for_locale(&mut tx, "t-media-l10n", &manifest, None)
+                .await
+                .unwrap();
+        let (_, en_pub) = get_public_theme_options_in_conn_for_locale(
+            &mut tx,
+            "t-media-l10n",
+            &manifest,
+            Some("en"),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(vi_pub["hero_img"]["id"], serde_json::json!(img_vi));
+        assert_eq!(en_pub["hero_img"]["id"], serde_json::json!(img_en));
+        assert_eq!(en_pub["gallery_imgs"][0]["id"], serde_json::json!(img_gal));
+        assert_eq!(en_pub["promo_box"]["bg"]["id"], serde_json::json!(img_en));
+        assert_eq!(
+            en_pub["slides"][0]["photo"]["id"],
+            serde_json::json!(img_rep)
+        );
+
+        let ref_rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT option_key, locale FROM theme_option_media_refs WHERE owner_id = 't-media-l10n' AND media_id = ? ORDER BY option_key, locale",
+        )
+        .bind(&img_en)
+        .fetch_all(&db)
+        .await
+        .unwrap();
+        assert_eq!(
+            ref_rows,
+            vec![
+                ("hero_img".to_owned(), "en".to_owned()),
+                ("promo_box".to_owned(), "en".to_owned()),
+            ]
+        );
+
+        // Soft-delete 'en' and verify count_locale_data_in_conn + purge_orphan_locale mirror each other cleanly
+        sqlx::query("UPDATE site_locales SET enabled = 0, deleted_at = '2026-01-01T00:00:00Z' WHERE code = 'en'")
+            .execute(&db)
+            .await
+            .unwrap();
+        let mut ctx = db.acquire().await.unwrap();
+        let before_counts = count_locale_data_in_conn(&mut ctx, "en").await.unwrap();
+        drop(ctx);
+        assert!(before_counts.settings > 0);
+        let orphans = list_orphaned_locales(&db).await.unwrap();
+        let purged = purge_orphan_locale(
+            &db,
+            "en",
+            orphans.version,
+            PurgeOrphanLocaleInput {
+                confirm_code: "en".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(purged.deleted.settings, before_counts.settings);
+
+        let default_refs_left: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM theme_option_media_refs WHERE owner_id = 't-media-l10n' AND locale = '' AND media_id = ?",
+        )
+        .bind(&img_vi)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(default_refs_left, 1);
+    }
+}
+
+pub(crate) fn is_secret_sentinel(val: &serde_json::Value) -> Option<&str> {
+    let obj = val.as_object()?;
+    if obj.len() != 2 || obj.get("configured") != Some(&serde_json::Value::Bool(true)) {
+        return None;
+    }
+    let raw = obj.get("secret_ref")?.as_str()?;
+    crate::secrets::SecretRef::parse(raw).ok()?;
+    Some(raw)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginSettingsSnapshot {
     pub plugin_id: String,
     pub version: i64,
-    pub schema: Vec<opendash_core::plugin::PluginSettingField>,
+    pub fields: Vec<FieldSpec>,
     pub values: serde_json::Map<String, serde_json::Value>,
     pub updated_at: String,
 }
@@ -3469,87 +3312,6 @@ pub struct PluginSettingsOutcome {
     pub snapshot: PluginSettingsSnapshot,
     pub changed: bool,
     pub has_projection_filters: bool,
-}
-
-pub fn plugin_setting_to_block_field(
-    field: &opendash_core::plugin::PluginSettingField,
-) -> Option<BlockFieldSpec> {
-    use opendash_core::plugin::PluginSettingFieldType;
-    match field.field_type {
-        PluginSettingFieldType::Text => Some(BlockFieldSpec::Text {
-            key: field.key.clone(),
-            label: field.label.clone(),
-            max_chars: Some(MAX_THEME_OPTION_STRING_CHARS),
-            required: field.required,
-            default: field.default.as_str().map(ToOwned::to_owned),
-            placeholder: None,
-            show_if: None,
-        }),
-        PluginSettingFieldType::Textarea => Some(BlockFieldSpec::Textarea {
-            key: field.key.clone(),
-            label: field.label.clone(),
-            max_chars: Some(MAX_THEME_OPTION_STRING_CHARS),
-            required: field.required,
-            default: field.default.as_str().map(ToOwned::to_owned),
-            show_if: None,
-        }),
-        PluginSettingFieldType::Number => Some(BlockFieldSpec::Number {
-            key: field.key.clone(),
-            label: field.label.clone(),
-            min: field.min,
-            max: field.max,
-            step: None,
-            required: field.required,
-            default: field.default.as_f64(),
-            unit: None,
-            css_var: None,
-            responsive: false,
-            show_if: None,
-        }),
-        PluginSettingFieldType::Boolean => Some(BlockFieldSpec::Boolean {
-            key: field.key.clone(),
-            label: field.label.clone(),
-            default: field.default.as_bool(),
-            show_if: None,
-        }),
-        PluginSettingFieldType::Select => Some(BlockFieldSpec::Select {
-            key: field.key.clone(),
-            label: field.label.clone(),
-            options: field
-                .choices
-                .iter()
-                .map(|c| SelectOption {
-                    value: c.value.clone(),
-                    label: c.label.clone(),
-                    icon: None,
-                })
-                .collect(),
-            required: field.required,
-            default: field.default.as_str().map(ToOwned::to_owned),
-            display: None,
-            css_var: None,
-            responsive: false,
-            show_if: None,
-        }),
-        PluginSettingFieldType::Url => Some(BlockFieldSpec::Url {
-            key: field.key.clone(),
-            label: field.label.clone(),
-            required: field.required,
-            default: field.default.as_str().map(ToOwned::to_owned),
-            placeholder: None,
-            show_if: None,
-        }),
-        PluginSettingFieldType::Media => Some(BlockFieldSpec::Media {
-            key: field.key.clone(),
-            label: field.label.clone(),
-            media_kind: MediaFieldKind::Image,
-            required: field.required,
-            default: field.default.as_str().map(ToOwned::to_owned),
-            css_var: None,
-            show_if: None,
-        }),
-        PluginSettingFieldType::Secret => None,
-    }
 }
 
 pub async fn get_plugin_manifest_for_settings(
@@ -3573,10 +3335,8 @@ async fn get_owner_settings_redacted_in_conn(
     conn: &mut SqliteConnection,
     owner_kind_db: &str,
     owner_id: &str,
-    schema: &[opendash_core::plugin::PluginSettingField],
+    fields: &[FieldSpec],
 ) -> ApiResult<PluginSettingsSnapshot> {
-    use opendash_core::plugin::PluginSettingFieldType;
-
     let ver_row: Option<(i64, String)> = sqlx::query_as(
         "SELECT version, updated_at
            FROM theme_option_versions
@@ -3619,13 +3379,15 @@ async fn get_owner_settings_redacted_in_conn(
     }
 
     let mut values = serde_json::Map::new();
-    for field in schema {
-        if field.field_type == PluginSettingFieldType::Secret {
+    for field in fields {
+        if field.is_ui_only() {
+            continue;
+        }
+        if field.field_type == FieldType::Secret {
             let configured = saved_map
                 .get(&field.key)
-                .and_then(|v| v.get("secret_ref"))
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|raw| crate::secrets::SecretRef::parse(raw).is_ok());
+                .and_then(is_secret_sentinel)
+                .is_some();
             values.insert(
                 field.key.clone(),
                 serde_json::json!({ "configured": configured }),
@@ -3634,12 +3396,12 @@ async fn get_owner_settings_redacted_in_conn(
             let v = saved_map
                 .get(&field.key)
                 .filter(|val| {
-                    // Never leak a mismatched stored secret_ref on a non-secret schema field.
+                    // Never leak a stored secret_ref on a non-secret schema field.
                     !val.as_object()
                         .is_some_and(|obj| obj.contains_key("secret_ref"))
                 })
                 .cloned()
-                .unwrap_or_else(|| field.default.clone());
+                .unwrap_or_else(|| default_value_for_field_spec(field));
             values.insert(field.key.clone(), v);
         }
     }
@@ -3647,7 +3409,7 @@ async fn get_owner_settings_redacted_in_conn(
     Ok(PluginSettingsSnapshot {
         plugin_id: owner_id.to_owned(),
         version,
-        schema: schema.to_vec(),
+        fields: fields.to_vec(),
         values,
         updated_at,
     })
@@ -3656,19 +3418,19 @@ async fn get_owner_settings_redacted_in_conn(
 pub async fn get_plugin_settings_redacted(
     db: &SqlitePool,
     plugin_id: &str,
-    schema: &[opendash_core::plugin::PluginSettingField],
+    fields: &[FieldSpec],
 ) -> ApiResult<PluginSettingsSnapshot> {
     let mut conn = db.acquire().await?;
-    get_owner_settings_redacted_in_conn(&mut conn, "plugin", plugin_id, schema).await
+    get_owner_settings_redacted_in_conn(&mut conn, "plugin", plugin_id, fields).await
 }
 
 pub async fn get_theme_functions_settings_redacted(
     db: &SqlitePool,
     theme_id: &str,
-    schema: &[opendash_core::plugin::PluginSettingField],
+    fields: &[FieldSpec],
 ) -> ApiResult<PluginSettingsSnapshot> {
     let mut conn = db.acquire().await?;
-    get_owner_settings_redacted_in_conn(&mut conn, "theme_functions", theme_id, schema).await
+    get_owner_settings_redacted_in_conn(&mut conn, "theme_functions", theme_id, fields).await
 }
 
 pub async fn put_plugin_settings(
@@ -3676,7 +3438,7 @@ pub async fn put_plugin_settings(
     secrets_dir: &std::path::Path,
     plugin_id: &str,
     expected_version: i64,
-    schema: &[opendash_core::plugin::PluginSettingField],
+    fields: &[FieldSpec],
     submitted: &serde_json::Map<String, serde_json::Value>,
 ) -> ApiResult<PluginSettingsOutcome> {
     use opendash_core::hooks::HookEvent;
@@ -3701,7 +3463,7 @@ pub async fn put_plugin_settings(
         "plugins",
         plugin_id,
         expected_version,
-        schema,
+        fields,
         submitted,
         has_projection_filters,
     )
@@ -3713,7 +3475,7 @@ pub async fn put_theme_functions_settings(
     secrets_dir: &std::path::Path,
     theme_id: &str,
     expected_version: i64,
-    schema: &[opendash_core::plugin::PluginSettingField],
+    fields: &[FieldSpec],
     submitted: &serde_json::Map<String, serde_json::Value>,
     has_projection_filters: bool,
 ) -> ApiResult<PluginSettingsOutcome> {
@@ -3724,7 +3486,7 @@ pub async fn put_theme_functions_settings(
         "themes",
         theme_id,
         expected_version,
-        schema,
+        fields,
         submitted,
         has_projection_filters,
     )
@@ -3739,16 +3501,17 @@ async fn put_owner_settings(
     secrets_subdir: &str,
     owner_id: &str,
     expected_version: i64,
-    schema: &[opendash_core::plugin::PluginSettingField],
+    fields: &[FieldSpec],
     submitted: &serde_json::Map<String, serde_json::Value>,
     has_projection_filters: bool,
 ) -> ApiResult<PluginSettingsOutcome> {
-    use opendash_core::plugin::PluginSettingFieldType;
-
-    let schema_map: BTreeMap<&str, &opendash_core::plugin::PluginSettingField> =
-        schema.iter().map(|f| (f.key.as_str(), f)).collect();
+    let field_map: BTreeMap<&str, &FieldSpec> = fields
+        .iter()
+        .filter(|s| !s.is_ui_only())
+        .map(|f| (f.key.as_str(), f))
+        .collect();
     for key in submitted.keys() {
-        if !schema_map.contains_key(key.as_str()) {
+        if !field_map.contains_key(key.as_str()) {
             return Err(ApiError::bad_request(
                 "Khóa cài đặt không tồn tại trong schema của plugin.",
             ));
@@ -3791,8 +3554,8 @@ async fn put_owner_settings(
         Upsert {
             key: String,
             value: serde_json::Value,
-            media_id: Option<String>,
-            sync_media_ref: bool,
+            media_ids: BTreeSet<String>,
+            sync_media_refs: bool,
         },
         Delete {
             key: String,
@@ -3805,24 +3568,46 @@ async fn put_owner_settings(
     let mut newly_created_refs: Vec<crate::secrets::SecretRef> = Vec::new();
     let mut old_refs_to_remove: Vec<String> = Vec::new();
     let mut planned: Vec<PlannedPluginWrite> = Vec::new();
-    let mut media_ids_to_verify: BTreeSet<String> = BTreeSet::new();
     let mut changed = false;
 
-    for field in schema {
-        if field.field_type == PluginSettingFieldType::Secret {
+    let cleanup_new_refs = |refs: &[crate::secrets::SecretRef]| {
+        for r in refs {
+            store.remove_plugin_secret(r.as_str());
+        }
+    };
+
+    let non_secret_specs: Vec<FieldSpec> = fields
+        .iter()
+        .filter(|s| !s.is_ui_only() && s.field_type != FieldType::Secret)
+        .cloned()
+        .collect();
+    let mut existing_non_secret = BTreeMap::new();
+    for spec in &non_secret_specs {
+        if let Some(prev) = existing_map
+            .get(&spec.key)
+            .filter(|v| !v.as_object().is_some_and(|o| o.contains_key("secret_ref")))
+        {
+            existing_non_secret.insert(spec.key.clone(), prev.clone());
+        }
+    }
+
+    let mut submitted_non_secret = BTreeMap::new();
+    let mut submitted_media_specs = Vec::new();
+
+    for field in fields {
+        if field.is_ui_only() {
+            continue;
+        }
+        if field.field_type == FieldType::Secret {
             let old_ref = existing_map
                 .get(&field.key)
-                .and_then(|v| v.get("secret_ref"))
-                .and_then(serde_json::Value::as_str)
-                .filter(|raw| crate::secrets::SecretRef::parse(raw).is_ok())
+                .and_then(is_secret_sentinel)
                 .map(str::to_owned);
 
             match submitted.get(&field.key) {
                 None | Some(serde_json::Value::Null) => {
                     if field.required && old_ref.is_none() {
-                        for r in &newly_created_refs {
-                            store.remove_plugin_secret(r.as_str());
-                        }
+                        cleanup_new_refs(&newly_created_refs);
                         return Err(ApiError::bad_request(format!(
                             "Bí mật bắt buộc '{}' chưa được cấu hình.",
                             field.key
@@ -3834,9 +3619,7 @@ async fn put_owner_settings(
                         && obj.get("clear") == Some(&serde_json::Value::Bool(true)) =>
                 {
                     if field.required {
-                        for r in &newly_created_refs {
-                            store.remove_plugin_secret(r.as_str());
-                        }
+                        cleanup_new_refs(&newly_created_refs);
                         return Err(ApiError::bad_request(format!(
                             "Không thể xóa bí mật bắt buộc '{}'.",
                             field.key
@@ -3854,9 +3637,7 @@ async fn put_owner_settings(
                 }
                 Some(serde_json::Value::String(plaintext)) => {
                     if plaintext.is_empty() {
-                        for r in &newly_created_refs {
-                            store.remove_plugin_secret(r.as_str());
-                        }
+                        cleanup_new_refs(&newly_created_refs);
                         return Err(ApiError::bad_request(format!(
                             "Giá trị secret '{}' rỗng không hợp lệ; dùng null để giữ nguyên hoặc {{\"clear\": true}} để xóa.",
                             field.key
@@ -3865,9 +3646,7 @@ async fn put_owner_settings(
                     let new_ref = match store.write_plugin_secret(plaintext) {
                         Ok(r) => r,
                         Err(err) => {
-                            for r in &newly_created_refs {
-                                store.remove_plugin_secret(r.as_str());
-                            }
+                            cleanup_new_refs(&newly_created_refs);
                             return Err(err);
                         }
                     };
@@ -3884,15 +3663,13 @@ async fn put_owner_settings(
                     planned.push(PlannedPluginWrite::Upsert {
                         key: field.key.clone(),
                         value: stored_val,
-                        media_id: None,
-                        sync_media_ref: false,
+                        media_ids: BTreeSet::new(),
+                        sync_media_refs: false,
                     });
                     changed = true;
                 }
                 Some(_) => {
-                    for r in &newly_created_refs {
-                        store.remove_plugin_secret(r.as_str());
-                    }
+                    cleanup_new_refs(&newly_created_refs);
                     return Err(ApiError::bad_request(format!(
                         "Giá trị secret '{}' phải là chuỗi, null hoặc {{\"clear\": true}}.",
                         field.key
@@ -3902,23 +3679,16 @@ async fn put_owner_settings(
             continue;
         }
 
-        let Some(spec) = plugin_setting_to_block_field(field) else {
-            continue;
-        };
-
         if let Some(raw_val) = submitted.get(&field.key) {
-            let clean_val = if field.field_type == PluginSettingFieldType::Media {
+            let clean_val = if field.field_type == FieldType::Media {
                 match raw_val {
                     serde_json::Value::Null => serde_json::Value::Null,
                     serde_json::Value::String(id) if id.is_empty() => serde_json::Value::Null,
-                    serde_json::Value::String(id) if valid_media_id(id) => {
-                        media_ids_to_verify.insert(id.clone());
+                    serde_json::Value::String(id) if valid_sha256_media_id(id) => {
                         serde_json::Value::String(id.clone())
                     }
                     _ => {
-                        for r in &newly_created_refs {
-                            store.remove_plugin_secret(r.as_str());
-                        }
+                        cleanup_new_refs(&newly_created_refs);
                         return Err(ApiError::bad_request(
                             "Cài đặt media phải là media_id SHA-256 hợp lệ hoặc rỗng.",
                         ));
@@ -3928,51 +3698,61 @@ async fn put_owner_settings(
                 raw_val.clone()
             };
 
-            if let Err(msg) = validate_single_field_value(&spec, Some(&clean_val), field.required)
-                .and_then(|()| validate_url_or_link_spec_strict(&spec, &clean_val))
-            {
-                for r in &newly_created_refs {
-                    store.remove_plugin_secret(r.as_str());
-                }
+            if let Err(msg) = validate_url_or_link_spec_strict(field, &clean_val) {
+                cleanup_new_refs(&newly_created_refs);
                 return Err(ApiError::bad_request(msg));
             }
 
             let prev = existing_map.get(&field.key);
-            if prev != Some(&clean_val) && !(prev.is_none() && clean_val == field.default) {
+            let default_v = default_value_for_field_spec(field);
+            if prev != Some(&clean_val) && !(prev.is_none() && clean_val == default_v) {
                 changed = true;
             }
-            let media_id = if field.field_type == PluginSettingFieldType::Media {
-                clean_val
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_owned)
+            let sync_media_refs = matches!(
+                field.field_type,
+                FieldType::Media | FieldType::Gallery | FieldType::Group | FieldType::Repeater
+            );
+            let field_media_ids = if sync_media_refs {
+                let single_map = BTreeMap::from([(field.key.clone(), clean_val.clone())]);
+                collect_media_ids(std::slice::from_ref(field), &single_map).all_ids()
             } else {
-                None
+                BTreeSet::new()
             };
+            if sync_media_refs {
+                submitted_media_specs.push(field.clone());
+            }
+            submitted_non_secret.insert(field.key.clone(), clean_val.clone());
             planned.push(PlannedPluginWrite::Upsert {
                 key: field.key.clone(),
                 value: clean_val,
-                media_id,
-                sync_media_ref: field.field_type == PluginSettingFieldType::Media,
+                media_ids: field_media_ids,
+                sync_media_refs,
             });
-        } else if field.required {
-            let effective = existing_map
-                .get(&field.key)
-                .or_else(|| (!field.default.is_null()).then_some(&field.default));
-            if let Err(msg) = validate_single_field_value(&spec, effective, true) {
-                for r in &newly_created_refs {
-                    store.remove_plugin_secret(r.as_str());
-                }
-                return Err(ApiError::bad_request(msg));
-            }
         }
     }
 
-    let cleanup_new_refs = |refs: &[crate::secrets::SecretRef]| {
-        for r in refs {
-            store.remove_plugin_secret(r.as_str());
-        }
-    };
+    let mut merged_non_secret = BTreeMap::new();
+    for spec in &non_secret_specs {
+        let effective = submitted_non_secret
+            .get(&spec.key)
+            .cloned()
+            .or_else(|| existing_non_secret.get(&spec.key).cloned())
+            .unwrap_or_else(|| default_value_for_field_spec(spec));
+        merged_non_secret.insert(spec.key.clone(), effective);
+    }
+
+    if let Err(msg) = validate_field_values(
+        &non_secret_specs,
+        FieldContext::OwnerSettings,
+        &merged_non_secret,
+        Some(&existing_non_secret),
+    ) {
+        cleanup_new_refs(&newly_created_refs);
+        return Err(ApiError::bad_request(msg));
+    }
+
+    let media_refs: CollectedMediaIds =
+        collect_media_ids(&submitted_media_specs, &submitted_non_secret);
 
     let mut tx = match db.begin().await {
         Ok(tx) => tx,
@@ -3989,26 +3769,11 @@ async fn put_owner_settings(
         return Err(err.into());
     }
 
-    for media_id in &media_ids_to_verify {
-        let exists: Result<Option<i64>, sqlx::Error> = sqlx::query_scalar(
-            "SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active'",
-        )
-        .bind(media_id)
-        .fetch_optional(&mut *tx)
-        .await;
-        match exists {
-            Ok(Some(_)) => {}
-            Ok(None) => {
-                cleanup_new_refs(&newly_created_refs);
-                return Err(ApiError::bad_request(
-                    "media_id của cài đặt plugin không tồn tại hoặc không phải ảnh active.",
-                ));
-            }
-            Err(err) => {
-                cleanup_new_refs(&newly_created_refs);
-                return Err(err.into());
-            }
-        }
+    if let Err(err) =
+        crate::storage::fields::verify_collected_media_ids_in_conn(&mut tx, &media_refs).await
+    {
+        cleanup_new_refs(&newly_created_refs);
+        return Err(err);
     }
 
     let tx_ver: Option<i64> = match sqlx::query_scalar(
@@ -4102,8 +3867,8 @@ async fn put_owner_settings(
             PlannedPluginWrite::Upsert {
                 key,
                 value,
-                media_id,
-                sync_media_ref,
+                media_ids,
+                sync_media_refs,
             } => {
                 let v_json = match serde_json::to_string(&value) {
                     Ok(s) => s,
@@ -4130,43 +3895,27 @@ async fn put_owner_settings(
                     cleanup_new_refs(&newly_created_refs);
                     return Err(err.into());
                 }
-                if sync_media_ref {
-                    if let Err(err) = sqlx::query(
-                        "DELETE FROM theme_option_media_refs
-                          WHERE owner_kind = ? AND owner_id = ? AND option_key = ?",
+                if sync_media_refs
+                    && let Err(err) = sync_theme_option_media_refs_in_conn(
+                        &mut tx,
+                        owner_id,
+                        owner_kind_db,
+                        owner_id,
+                        "",
+                        &key,
+                        &media_ids,
                     )
-                    .bind(owner_kind_db)
-                    .bind(owner_id)
-                    .bind(&key)
-                    .execute(&mut *tx)
                     .await
-                    {
-                        cleanup_new_refs(&newly_created_refs);
-                        return Err(err.into());
-                    }
-                    if let Some(ref mid) = media_id
-                        && let Err(err) = sqlx::query(
-                            "INSERT INTO theme_option_media_refs (theme_id, owner_kind, owner_id, option_key, media_id)
-                             VALUES (?, ?, ?, ?, ?)",
-                        )
-                        .bind(owner_id)
-                        .bind(owner_kind_db)
-                        .bind(owner_id)
-                        .bind(&key)
-                        .bind(mid)
-                        .execute(&mut *tx)
-                        .await
-                    {
-                        cleanup_new_refs(&newly_created_refs);
-                        return Err(err.into());
-                    }
+                {
+                    cleanup_new_refs(&newly_created_refs);
+                    return Err(err);
                 }
             }
         }
     }
 
     let snapshot =
-        match get_owner_settings_redacted_in_conn(&mut tx, owner_kind_db, owner_id, schema).await {
+        match get_owner_settings_redacted_in_conn(&mut tx, owner_kind_db, owner_id, fields).await {
             Ok(s) => s,
             Err(err) => {
                 cleanup_new_refs(&newly_created_refs);
@@ -4432,71 +4181,96 @@ mod plugin_settings_s02_tests {
             .count()
     }
 
-    fn sample_plugin_schema() -> Vec<opendash_core::plugin::PluginSettingField> {
-        use opendash_core::plugin::{
-            PluginSettingChoice, PluginSettingField, PluginSettingFieldType,
-        };
-        vec![
-            PluginSettingField {
-                key: "api_key".into(),
-                label: "API Key".into(),
-                field_type: PluginSettingFieldType::Secret,
-                required: true,
-                default: serde_json::Value::Null,
-                min: None,
-                max: None,
-                choices: vec![],
+    fn sample_plugin_schema() -> Vec<FieldSpec> {
+        use opendash_core::field_schema::SelectOption;
+
+        let mut api_key = FieldSpec::new(FieldType::Secret, "api_key", "API Key");
+        api_key.required = true;
+
+        let optional_token = FieldSpec::new(FieldType::Secret, "optional_token", "Optional Token");
+
+        let mut endpoint = FieldSpec::new(FieldType::Url, "endpoint", "Endpoint");
+        endpoint.required = true;
+        endpoint.default = Some(serde_json::json!("https://api.example.com"));
+
+        let mut mode = FieldSpec::new(FieldType::Select, "mode", "Mode");
+        mode.default = Some(serde_json::json!("safe"));
+        mode.options = vec![
+            SelectOption {
+                value: "safe".into(),
+                label: "Safe".into(),
+                icon: None,
             },
-            PluginSettingField {
-                key: "optional_token".into(),
-                label: "Optional Token".into(),
-                field_type: PluginSettingFieldType::Secret,
-                required: false,
-                default: serde_json::Value::Null,
-                min: None,
-                max: None,
-                choices: vec![],
+            SelectOption {
+                value: "fast".into(),
+                label: "Fast".into(),
+                icon: None,
             },
-            PluginSettingField {
-                key: "endpoint".into(),
-                label: "Endpoint".into(),
-                field_type: PluginSettingFieldType::Url,
-                required: true,
-                default: serde_json::json!("https://api.example.com"),
-                min: None,
-                max: None,
-                choices: vec![],
-            },
-            PluginSettingField {
-                key: "mode".into(),
-                label: "Mode".into(),
-                field_type: PluginSettingFieldType::Select,
-                required: false,
-                default: serde_json::json!("safe"),
-                min: None,
-                max: None,
-                choices: vec![
-                    PluginSettingChoice {
-                        value: "safe".into(),
-                        label: "Safe".into(),
-                    },
-                    PluginSettingChoice {
-                        value: "fast".into(),
-                        label: "Fast".into(),
-                    },
-                ],
-            },
-            PluginSettingField {
-                key: "badge_logo".into(),
-                label: "Badge Logo".into(),
-                field_type: PluginSettingFieldType::Media,
-                required: false,
-                default: serde_json::Value::Null,
-                min: None,
-                max: None,
-                choices: vec![],
-            },
-        ]
+        ];
+
+        let badge_logo = FieldSpec::new(FieldType::Media, "badge_logo", "Badge Logo");
+
+        vec![api_key, optional_token, endpoint, mode, badge_logo]
+    }
+
+    #[tokio::test]
+    async fn migration_0055_schema_delta_is_zero() {
+        let temp = TempDirGuard::new("s02_m55_delta");
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        let migrations_dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        let pre_dir = temp.0.join("pre_0055");
+        let with_55_dir = temp.0.join("with_0055");
+        fs::create_dir_all(&pre_dir).unwrap();
+        fs::create_dir_all(&with_55_dir).unwrap();
+        for entry in fs::read_dir(&migrations_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+        {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".sql") && name.as_str() < "0055_" {
+                fs::copy(entry.path(), pre_dir.join(entry.file_name())).unwrap();
+                fs::copy(entry.path(), with_55_dir.join(entry.file_name())).unwrap();
+            } else if name.ends_with(".sql") && name.starts_with("0055_") {
+                fs::copy(entry.path(), with_55_dir.join(entry.file_name())).unwrap();
+            }
+        }
+
+        let pre_migrator = sqlx::migrate::Migrator::new(pre_dir.as_path())
+            .await
+            .unwrap();
+        pre_migrator.run(&db).await.unwrap();
+
+        let before_user_objects: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+
+        let with_55_migrator = sqlx::migrate::Migrator::new(with_55_dir.as_path())
+            .await
+            .unwrap();
+        with_55_migrator.run(&db).await.unwrap();
+
+        let after_user_objects: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        let total_objects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(after_user_objects - before_user_objects, 0);
+        assert!(total_objects < 256, "sqlite_schema total={total_objects}");
     }
 
     #[tokio::test]
@@ -4650,8 +4424,8 @@ mod plugin_settings_s02_tests {
             "version": "1.0.0",
             "templates": [{ "kind": "index", "file": "index.html" }],
             "options": [
-                { "key": "hero_title", "label": "Hero", "type": "string", "default": "Init Theme", "public": true },
-                { "key": "badge_logo", "label": "Logo", "type": "media", "default": "", "public": true }
+                { "key": "hero_title", "label": "Hero", "type": "text", "default": "Init Theme", "public": true },
+                { "key": "badge_logo", "label": "Logo", "type": "media", "public": true }
             ]
         })
         .to_string();

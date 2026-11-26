@@ -175,12 +175,86 @@ impl Default for RenderFormattingConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FieldTemplateNode {
+    Scalar,
+    Url,
+    Link,
+    Media,
+    Gallery,
+    Icon,
+    Richtext,
+    EntryRef { multiple: bool },
+    TermRef { multiple: bool },
+    Group(BTreeMap<String, FieldTemplateNode>),
+    Repeater(BTreeMap<String, FieldTemplateNode>),
+}
+
+pub fn field_template_node_from_spec(
+    spec: &opendash_core::field_schema::FieldSpec,
+) -> Option<FieldTemplateNode> {
+    use opendash_core::field_schema::FieldType;
+
+    if spec.is_ui_only() || spec.field_type == FieldType::Secret {
+        return None;
+    }
+    match spec.field_type {
+        FieldType::Url => Some(FieldTemplateNode::Url),
+        FieldType::Link => Some(FieldTemplateNode::Link),
+        FieldType::Media => Some(FieldTemplateNode::Media),
+        FieldType::Gallery => Some(FieldTemplateNode::Gallery),
+        FieldType::Icon => Some(FieldTemplateNode::Icon),
+        FieldType::Richtext => Some(FieldTemplateNode::Richtext),
+        FieldType::EntryRef => Some(FieldTemplateNode::EntryRef {
+            multiple: spec.multiple,
+        }),
+        FieldType::TermRef => Some(FieldTemplateNode::TermRef {
+            multiple: spec.multiple,
+        }),
+        FieldType::Group => {
+            let mut children = BTreeMap::new();
+            for child in &spec.fields {
+                if let Some(node) = field_template_node_from_spec(child) {
+                    children.insert(child.key.clone(), node);
+                }
+            }
+            Some(FieldTemplateNode::Group(children))
+        }
+        FieldType::Repeater => {
+            let mut children = BTreeMap::new();
+            for child in &spec.fields {
+                if let Some(node) = field_template_node_from_spec(child) {
+                    children.insert(child.key.clone(), node);
+                }
+            }
+            Some(FieldTemplateNode::Repeater(children))
+        }
+        FieldType::Text
+        | FieldType::Textarea
+        | FieldType::Number
+        | FieldType::Range
+        | FieldType::Email
+        | FieldType::Select
+        | FieldType::Checkbox
+        | FieldType::RadioButtons
+        | FieldType::Boolean
+        | FieldType::Color
+        | FieldType::Date
+        | FieldType::Datetime
+        | FieldType::Time
+        | FieldType::Spacing => Some(FieldTemplateNode::Scalar),
+        FieldType::Secret | FieldType::Tab | FieldType::Accordion | FieldType::Message => None,
+    }
+}
+
 /// Explicit, manifest-derived theme URL and declared-asset permissions.
 #[derive(Debug, Clone, Default)]
 pub struct ThemeUrlPolicy {
     permitted_href_expressions: BTreeSet<String>,
     permitted_src_expressions: BTreeSet<String>,
     declared_assets: BTreeSet<String>,
+    site_options_tree: BTreeMap<String, FieldTemplateNode>,
+    options_tree: BTreeMap<String, FieldTemplateNode>,
 }
 
 impl ThemeUrlPolicy {
@@ -193,6 +267,8 @@ impl ThemeUrlPolicy {
             permitted_href_expressions,
             permitted_src_expressions,
             declared_assets,
+            site_options_tree: BTreeMap::new(),
+            options_tree: BTreeMap::new(),
         }
     }
 
@@ -204,6 +280,37 @@ impl ThemeUrlPolicy {
             BTreeSet::new(),
             BTreeSet::new(),
         )
+    }
+
+    pub(crate) fn from_option_specs(
+        theme_options: &[opendash_core::field_schema::FieldSpec],
+        declared_assets: BTreeSet<String>,
+    ) -> Self {
+        let mut site_options_tree = BTreeMap::new();
+        for spec in opendash_core::field_schema::global_site_option_fields() {
+            if spec.is_ui_only() || !spec.public {
+                continue;
+            }
+            if let Some(node) = field_template_node_from_spec(&spec) {
+                site_options_tree.insert(spec.key, node);
+            }
+        }
+        let mut options_tree = site_options_tree.clone();
+        for spec in theme_options {
+            if spec.is_ui_only() || !spec.public {
+                continue;
+            }
+            if let Some(node) = field_template_node_from_spec(spec) {
+                options_tree.insert(spec.key.clone(), node);
+            }
+        }
+        Self {
+            permitted_href_expressions: BTreeSet::new(),
+            permitted_src_expressions: BTreeSet::new(),
+            declared_assets,
+            site_options_tree,
+            options_tree,
+        }
     }
 
     fn allows_cite_href(&self, expr: &str) -> bool {
@@ -477,8 +584,129 @@ const CONTENT_SLOT_TOKEN: &str = "OD_CONTENT_SLOT_COMPILE_MARKER";
 // Reserved only by the preview compiler, never a template variable or helper.
 const PREVIEW_PART_NONCE_PREFIX: &str = "OD_PREVIEW_PART_";
 
-// Reserved only by the block RichText post-render nonce replacer.
+// Reserved only by the block/theme RichText post-render nonce replacer.
 pub const BLOCK_RICHTEXT_NONCE_PREFIX: &str = "OD_RICHTEXT_";
+pub const MAX_RICHTEXT_NONCES_PER_REQUEST: usize = 128;
+pub const MAX_RICHTEXT_NONCE_REPEATS: usize = 16;
+
+fn advance_body_scan_state(
+    before: &str,
+    state: &mut HtmlScanState,
+    in_diagnostic: &mut bool,
+    diagnostic_pre: &mut bool,
+) {
+    let bytes = before.as_bytes();
+    for (index, &byte) in bytes.iter().enumerate() {
+        // The normalizer's diagnostic markup is server-owned. A nonce
+        // printed as escaped diagnostic text must never become active HTML/SVG.
+        let suffix = &bytes[index..];
+        if *state == HtmlScanState::Body && suffix.starts_with(b"<main data-doc-diagnostic=") {
+            *in_diagnostic = true;
+        } else if *state == HtmlScanState::Body && suffix.starts_with(b"</main>") {
+            *in_diagnostic = false;
+            *diagnostic_pre = false;
+        } else if *state == HtmlScanState::Body && *in_diagnostic && suffix.starts_with(b"<pre") {
+            *diagnostic_pre = true;
+        } else if *state == HtmlScanState::Body && suffix.starts_with(b"</pre>") {
+            *diagnostic_pre = false;
+        }
+        *state = state.clone().consume(byte);
+    }
+}
+
+fn substitute_nonces_into_body(
+    entries: &[(String, String)],
+    html: String,
+    max_repeats: usize,
+    max_bytes: usize,
+    repeat_err: &'static str,
+    context_err: &'static str,
+    size_err: &'static str,
+) -> Result<String, &'static str> {
+    if entries.is_empty() {
+        return Ok(html);
+    }
+    let mut replacements = Vec::new();
+    for (nonce, payload) in entries {
+        let mut count = 0usize;
+        for (offset, _) in html.match_indices(nonce) {
+            count += 1;
+            if count > max_repeats {
+                return Err(repeat_err);
+            }
+            replacements.push((offset, nonce.as_str(), payload.as_str()));
+        }
+    }
+    if replacements.is_empty() {
+        return Ok(html);
+    }
+    replacements.sort_unstable_by_key(|(offset, _, _)| *offset);
+    let mut out = String::with_capacity(html.len());
+    let mut state = HtmlScanState::Body;
+    let mut cursor = 0usize;
+    let mut in_diagnostic = false;
+    let mut diagnostic_pre = false;
+    for (offset, nonce, payload) in replacements {
+        let before = html
+            .get(cursor..offset)
+            .ok_or("Vị trí nonce nội bộ không hợp lệ.")?;
+        advance_body_scan_state(before, &mut state, &mut in_diagnostic, &mut diagnostic_pre);
+        if state != HtmlScanState::Body || diagnostic_pre || in_diagnostic {
+            return Err(context_err);
+        }
+        out.push_str(before);
+        out.push_str(payload);
+        cursor = offset + nonce.len();
+        if out.len() > max_bytes {
+            return Err(size_err);
+        }
+    }
+    out.push_str(&html[cursor..]);
+    if out.len() > max_bytes {
+        return Err(size_err);
+    }
+    Ok(out)
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RichTextNonceTable {
+    entries: Vec<(String, String)>,
+}
+
+impl RichTextNonceTable {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn extend(&mut self, other: Self) {
+        for entry in other.entries {
+            if self.entries.len() < MAX_RICHTEXT_NONCES_PER_REQUEST {
+                self.entries.push(entry);
+            }
+        }
+    }
+
+    pub fn register_sanitized(&mut self, sanitized_html: String) -> Result<String, &'static str> {
+        if self.entries.len() >= MAX_RICHTEXT_NONCES_PER_REQUEST {
+            return Err("Số lượng khối RichText vượt giới hạn 128/request.");
+        }
+        let nonce = generate_richtext_nonce()?;
+        self.entries.push((nonce.clone(), sanitized_html));
+        Ok(nonce)
+    }
+
+    pub fn substitute_into_document(&self, html: String) -> Result<String, &'static str> {
+        substitute_nonces_into_body(
+            &self.entries,
+            html,
+            MAX_RICHTEXT_NONCE_REPEATS,
+            MAX_RENDERED_HTML_BYTES,
+            "Nonce RichText xuất hiện vượt quá số lần cho phép.",
+            "Nonce RichText không nằm trong thân HTML an toàn.",
+            "HTML sau khi chèn RichText vượt giới hạn 512 KiB.",
+        )
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct IconNonceTable {
@@ -497,64 +725,15 @@ impl IconNonceTable {
     /// Substitute server-generated SVG only after document normalization. Any
     /// nonce that disappeared during slot fallback is intentionally ignored.
     pub fn substitute_into_document(&self, html: String) -> Result<String, &'static str> {
-        if self.entries.is_empty() {
-            return Ok(html);
-        }
-        let mut replacements = Vec::new();
-        for (nonce, svg) in &self.entries {
-            let mut matches = html.match_indices(nonce);
-            if let Some((offset, _)) = matches.next() {
-                if matches.next().is_some() {
-                    return Err("Nonce icon xuất hiện nhiều hơn một lần.");
-                }
-                replacements.push((offset, nonce.as_str(), svg.as_str()));
-            }
-        }
-        replacements.sort_unstable_by_key(|(offset, _, _)| *offset);
-        let mut out = String::with_capacity(html.len());
-        let mut state = HtmlScanState::Body;
-        let mut cursor = 0;
-        let mut in_diagnostic = false;
-        let mut diagnostic_pre = false;
-        for (offset, nonce, svg) in replacements {
-            let before = html
-                .get(cursor..offset)
-                .ok_or("Vị trí nonce icon không hợp lệ.")?;
-            for (index, byte) in before.bytes().enumerate() {
-                // The normalizer's diagnostic markup is server-owned. A nonce
-                // printed as escaped diagnostic text must never become SVG.
-                let suffix = &before.as_bytes()[index..];
-                if state == HtmlScanState::Body && suffix.starts_with(b"<main data-doc-diagnostic=")
-                {
-                    in_diagnostic = true;
-                } else if state == HtmlScanState::Body && suffix.starts_with(b"</main>") {
-                    in_diagnostic = false;
-                    diagnostic_pre = false;
-                } else if state == HtmlScanState::Body
-                    && in_diagnostic
-                    && suffix.starts_with(b"<pre")
-                {
-                    diagnostic_pre = true;
-                } else if state == HtmlScanState::Body && suffix.starts_with(b"</pre>") {
-                    diagnostic_pre = false;
-                }
-                state = state.consume(byte);
-            }
-            if state != HtmlScanState::Body || diagnostic_pre || in_diagnostic {
-                return Err("Nonce icon không nằm trong thân HTML an toàn.");
-            }
-            out.push_str(before);
-            out.push_str(svg);
-            cursor = offset + nonce.len();
-            if out.len() > MAX_ICON_DOCUMENT_BYTES {
-                return Err("Document chứa icon vượt giới hạn HTML.");
-            }
-        }
-        out.push_str(&html[cursor..]);
-        if out.len() > MAX_ICON_DOCUMENT_BYTES {
-            return Err("Document chứa icon vượt giới hạn HTML.");
-        }
-        Ok(out)
+        substitute_nonces_into_body(
+            &self.entries,
+            html,
+            1,
+            MAX_ICON_DOCUMENT_BYTES,
+            "Nonce icon xuất hiện nhiều hơn một lần.",
+            "Nonce icon không nằm trong thân HTML an toàn.",
+            "Document chứa icon vượt giới hạn HTML.",
+        )
     }
 }
 
@@ -583,8 +762,17 @@ fn install_icon_function(
     let overflowed = overflowed.clone();
     env.add_function(
         "od_icon",
-        move |name: &str, class: Option<&str>| -> Result<String, minijinja::Error> {
-            let svg = opendash_core::icons::render_core_icon_svg(name, class)
+        move |name: Value, class: Option<&str>| -> Result<String, minijinja::Error> {
+            if name.is_none() || name.is_undefined() {
+                return Ok(String::new());
+            }
+            let Some(name_str) = name.as_str() else {
+                return Err(filter_invalid_op("od_icon: tên icon phải là chuỗi"));
+            };
+            if name_str.is_empty() {
+                return Ok(String::new());
+            }
+            let svg = opendash_core::icons::render_core_icon_svg(name_str, class)
                 .ok_or_else(|| filter_invalid_op("od_icon: tên icon hoặc class không hợp lệ"))?;
             let mut table = local.lock().unwrap_or_else(|e| e.into_inner());
             if existing_count.saturating_add(table.len()) >= MAX_ICONS_PER_REQUEST {
@@ -759,6 +947,7 @@ pub struct RenderBudget {
     pub html_bytes_used: usize,
     pub locale: String,
     pub icon_nonces: IconNonceTable,
+    pub richtext_nonces: RichTextNonceTable,
     pub hook_nonces: HookNonceTable,
 }
 
@@ -769,6 +958,7 @@ impl Default for RenderBudget {
             html_bytes_used: 0,
             locale: "vi".to_owned(),
             icon_nonces: IconNonceTable::default(),
+            richtext_nonces: RichTextNonceTable::default(),
             hook_nonces: HookNonceTable::default(),
         }
     }
@@ -798,6 +988,7 @@ pub(crate) struct PreviewCompositionBudget {
     pub expansions: usize,
     pub stack: Vec<String>,
     pub icon_nonces: IconNonceTable,
+    pub richtext_nonces: RichTextNonceTable,
     pub hook_nonces: HookNonceTable,
 }
 
@@ -809,6 +1000,7 @@ impl Default for PreviewCompositionBudget {
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: IconNonceTable::default(),
+            richtext_nonces: RichTextNonceTable::default(),
             hook_nonces: HookNonceTable::default(),
         }
     }
@@ -826,6 +1018,7 @@ impl PreviewCompositionBudget {
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: rb.icon_nonces,
+            richtext_nonces: rb.richtext_nonces,
             hook_nonces: rb.hook_nonces,
         }
     }
@@ -836,6 +1029,7 @@ impl PreviewCompositionBudget {
             html_bytes_used: self.html_bytes_used,
             locale: "vi".to_owned(),
             icon_nonces: self.icon_nonces.clone(),
+            richtext_nonces: self.richtext_nonces.clone(),
             hook_nonces: self.hook_nonces.clone(),
         }
     }
@@ -844,6 +1038,7 @@ impl PreviewCompositionBudget {
         self.fuel_remaining = rb.fuel_remaining;
         self.html_bytes_used = rb.html_bytes_used;
         self.icon_nonces = rb.icon_nonces.clone();
+        self.richtext_nonces = rb.richtext_nonces.clone();
         self.hook_nonces = rb.hook_nonces.clone();
     }
 }
@@ -880,6 +1075,7 @@ fn preview_composition_sites(
         return Err("Template hoặc part vượt giới hạn 512 KiB.");
     }
     if source.contains(PREVIEW_PART_NONCE_PREFIX)
+        || source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {
@@ -1904,13 +2100,16 @@ fn validate_template_csec_with_usage_flags(
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
-    if source.contains(ICON_NONCE_PREFIX) || source.contains(HOOK_NONCE_PREFIX) {
+    if source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
+        || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(HOOK_NONCE_PREFIX)
+    {
         return Err("Theme HTML chứa marker icon nội bộ bị cấm.");
     }
     let ast = parse(source, name, SyntaxConfig::default())
         .map_err(|_| "Cú pháp template MiniJinja không hợp lệ.")?;
 
-    validate_stmt_with_icons(&ast, allow_od_icon, false)?;
+    validate_stmt_with_icons_ext(&ast, allow_od_icon, allow_od_icon, false)?;
     reject_reserved_context_rebinding(&ast)?;
     let is_full_doctype_doc = source
         .trim_start()
@@ -2170,6 +2369,7 @@ fn composition_sites(
         return Err("Template không được để trống.");
     }
     if source.contains(CONTENT_SLOT_TOKEN)
+        || source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {
@@ -2213,7 +2413,9 @@ fn collect_composition_sites(
             }
         }
         Stmt::EmitExpr(e) => {
-            if parse_od_icon_call(&e.expr)?.is_some() || parse_od_hook_call(&e.expr)?.is_some() {
+            if parse_od_icon_call_ext(&e.expr, true)?.is_some()
+                || parse_od_hook_call(&e.expr)?.is_some()
+            {
                 return Ok(());
             }
             let Some(call) = parse_composition_call(&e.expr)? else {
@@ -2321,9 +2523,28 @@ fn parse_composition_call(expr: &Expr<'_>) -> Result<Option<CompositionCall>, &'
     }
 }
 
+#[derive(Debug, Clone)]
+enum OdIconNameArg<'a> {
+    Literal(&'a str),
+    FieldNamePath(&'a str, Vec<&'a str>),
+}
+
 fn parse_od_icon_call<'a>(
     expr: &'a Expr<'_>,
 ) -> Result<Option<(&'a str, Option<&'a str>)>, &'static str> {
+    match parse_od_icon_call_ext(expr, false)? {
+        Some((OdIconNameArg::Literal(name), class)) => Ok(Some((name, class))),
+        Some((OdIconNameArg::FieldNamePath(_, _), _)) => {
+            Err("od_icon() yêu cầu string literal name và class tùy chọn.")
+        }
+        None => Ok(None),
+    }
+}
+
+fn parse_od_icon_call_ext<'a>(
+    expr: &'a Expr<'_>,
+    allow_field_path: bool,
+) -> Result<Option<(OdIconNameArg<'a>, Option<&'a str>)>, &'static str> {
     let Expr::Call(call) = expr else {
         return Ok(None);
     };
@@ -2334,19 +2555,34 @@ fn parse_od_icon_call<'a>(
         return Ok(None);
     }
     let [
-        minijinja::machinery::ast::CallArg::Pos(Expr::Const(name)),
+        minijinja::machinery::ast::CallArg::Pos(first_arg),
         rest @ ..,
     ] = call.args.as_slice()
     else {
         return Err("od_icon() yêu cầu string literal name và class tùy chọn.");
     };
-    let name = name
-        .value
-        .as_str()
-        .ok_or("od_icon() name phải là string literal.")?;
-    if opendash_core::icons::lookup_core_icon_paths(name).is_none() {
-        return Err("od_icon() tên icon không tồn tại trong core registry.");
-    }
+    let arg = match first_arg {
+        Expr::Const(name) => {
+            let name = name
+                .value
+                .as_str()
+                .ok_or("od_icon() name phải là string literal.")?;
+            if opendash_core::icons::lookup_core_icon_paths(name).is_none() {
+                return Err("od_icon() tên icon không tồn tại trong core registry.");
+            }
+            OdIconNameArg::Literal(name)
+        }
+        other if allow_field_path => {
+            let Some((root, attrs)) = extract_attr_chain(other) else {
+                return Err("od_icon() yêu cầu string literal name và class tùy chọn.");
+            };
+            if attrs.last().copied() != Some("name") || attrs.len() < 2 {
+                return Err("od_icon() động phải truyền đường dẫn trường kết thúc bằng `.name`.");
+            }
+            OdIconNameArg::FieldNamePath(root, attrs)
+        }
+        _ => return Err("od_icon() yêu cầu string literal name và class tùy chọn."),
+    };
     let class = match rest {
         [] => None,
         [minijinja::machinery::ast::CallArg::Pos(Expr::Const(class))] => {
@@ -2361,7 +2597,7 @@ fn parse_od_icon_call<'a>(
         }
         _ => return Err("od_icon() chỉ nhận name và class string literal tùy chọn."),
     };
-    Ok(Some((name, class)))
+    Ok(Some((arg, class)))
 }
 
 fn parse_od_hook_call<'a>(
@@ -2405,7 +2641,7 @@ fn reject_icons_in_set_block(children: &[Stmt<'_>]) -> Result<(), &'static str> 
     fn contains_icon(stmt: &Stmt<'_>) -> bool {
         match stmt {
             Stmt::EmitExpr(e) => {
-                parse_od_icon_call(&e.expr).is_ok_and(|v| v.is_some())
+                parse_od_icon_call_ext(&e.expr, true).is_ok_and(|v| v.is_some())
                     || parse_od_hook_call(&e.expr).is_ok_and(|v| v.is_some())
             }
             Stmt::IfCond(c) => c.true_body.iter().chain(&c.false_body).any(contains_icon),
@@ -2835,10 +3071,24 @@ fn validate_stmt_with_icons(
     allow_od_icon: bool,
     in_set_block: bool,
 ) -> Result<(), &'static str> {
+    validate_stmt_with_icons_ext(stmt, allow_od_icon, false, in_set_block)
+}
+
+fn validate_stmt_with_icons_ext(
+    stmt: &Stmt<'_>,
+    allow_od_icon: bool,
+    allow_dynamic_icon: bool,
+    in_set_block: bool,
+) -> Result<(), &'static str> {
     match stmt {
         Stmt::Template(t) => {
             for child in &t.children {
-                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
+                validate_stmt_with_icons_ext(
+                    child,
+                    allow_od_icon,
+                    allow_dynamic_icon,
+                    in_set_block,
+                )?;
             }
             Ok(())
         }
@@ -2846,7 +3096,7 @@ fn validate_stmt_with_icons(
         Stmt::EmitExpr(e) => {
             if allow_od_icon
                 && !in_set_block
-                && (parse_od_icon_call(&e.expr)?.is_some()
+                && (parse_od_icon_call_ext(&e.expr, allow_dynamic_icon)?.is_some()
                     || parse_od_hook_call(&e.expr)?.is_some())
             {
                 Ok(())
@@ -2861,20 +3111,40 @@ fn validate_stmt_with_icons(
                 validate_expr(cond)?;
             }
             for child in &f.body {
-                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
+                validate_stmt_with_icons_ext(
+                    child,
+                    allow_od_icon,
+                    allow_dynamic_icon,
+                    in_set_block,
+                )?;
             }
             for child in &f.else_body {
-                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
+                validate_stmt_with_icons_ext(
+                    child,
+                    allow_od_icon,
+                    allow_dynamic_icon,
+                    in_set_block,
+                )?;
             }
             Ok(())
         }
         Stmt::IfCond(i) => {
             validate_expr(&i.expr)?;
             for child in &i.true_body {
-                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
+                validate_stmt_with_icons_ext(
+                    child,
+                    allow_od_icon,
+                    allow_dynamic_icon,
+                    in_set_block,
+                )?;
             }
             for child in &i.false_body {
-                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
+                validate_stmt_with_icons_ext(
+                    child,
+                    allow_od_icon,
+                    allow_dynamic_icon,
+                    in_set_block,
+                )?;
             }
             Ok(())
         }
@@ -2884,7 +3154,12 @@ fn validate_stmt_with_icons(
                 validate_expr(v)?;
             }
             for child in &w.body {
-                validate_stmt_with_icons(child, allow_od_icon, in_set_block)?;
+                validate_stmt_with_icons_ext(
+                    child,
+                    allow_od_icon,
+                    allow_dynamic_icon,
+                    in_set_block,
+                )?;
             }
             Ok(())
         }
@@ -2898,7 +3173,7 @@ fn validate_stmt_with_icons(
             }
             validate_expr(&sb.target)?;
             for child in &sb.body {
-                validate_stmt_with_icons(child, allow_od_icon, true)?;
+                validate_stmt_with_icons_ext(child, allow_od_icon, allow_dynamic_icon, true)?;
             }
             Ok(())
         }
@@ -2919,6 +3194,7 @@ const RESERVED_CONTEXT_VARS: &[&str] = &[
     "od_icon",
     "od_hook",
     "options",
+    "site_options",
     "theme_options",
     "theme_assets",
     "site",
@@ -3377,13 +3653,14 @@ fn record_usage_flags_in_expr(expr: &Expr<'_>, usage: &mut ThemeTemplateUsageFla
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum UrlSourceKind {
     TrustedEntry,
     TrustedEntryBatch,
     TrustedLink,
     TrustedField,
     TrustedRawUrl,
+    FieldNode(FieldTemplateNode),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3417,10 +3694,10 @@ impl UrlScopeStack {
         }
     }
 
-    fn lookup(&self, name: &str) -> Option<UrlSourceKind> {
+    fn lookup(&self, name: &str) -> Option<&UrlSourceKind> {
         for frame in self.frames.iter().rev() {
             if let Some(binding) = frame.get(name) {
-                return *binding;
+                return binding.as_ref();
             }
         }
         None
@@ -3435,7 +3712,7 @@ impl UrlScopeStack {
                 let mut merged = BTreeMap::new();
                 for key in fa.keys().chain(fb.keys()) {
                     let val = match (fa.get(key), fb.get(key)) {
-                        (Some(Some(ka)), Some(Some(kb))) if ka == kb => Some(*ka),
+                        (Some(Some(ka)), Some(Some(kb))) if ka == kb => Some(ka.clone()),
                         _ => None,
                     };
                     merged.insert(key.clone(), val);
@@ -4456,15 +4733,77 @@ fn extract_bound_idents(expr: &Expr<'_>) -> Result<Vec<String>, &'static str> {
     }
 }
 
-fn resolve_collection_source(expr: &Expr<'_>, scopes: &UrlScopeStack) -> Option<UrlSourceKind> {
+fn extract_attr_chain<'a>(expr: &'a Expr<'a>) -> Option<(&'a str, Vec<&'a str>)> {
+    let mut attrs = Vec::new();
+    let mut cur = expr;
+    while let Expr::GetAttr(g) = cur {
+        attrs.push(g.name);
+        cur = &g.expr;
+    }
+    let Expr::Var(v) = cur else {
+        return None;
+    };
+    attrs.reverse();
+    Some((v.id, attrs))
+}
+
+fn resolve_field_node_and_tail<'p, 'a, 's>(
+    root_id: &str,
+    attrs: &'a [&'s str],
+    scopes: &'p UrlScopeStack,
+    policy: &'p ThemeUrlPolicy,
+) -> Option<(&'p FieldTemplateNode, &'a [&'s str])> {
+    let (mut node, mut rest): (&FieldTemplateNode, &[&'s str]) = match root_id {
+        "options" => {
+            let first = *attrs.first()?;
+            (policy.options_tree.get(first)?, &attrs[1..])
+        }
+        "site_options" => {
+            let first = *attrs.first()?;
+            (policy.site_options_tree.get(first)?, &attrs[1..])
+        }
+        other => match scopes.lookup(other) {
+            Some(UrlSourceKind::FieldNode(node)) => (node, attrs),
+            _ => return None,
+        },
+    };
+    while let FieldTemplateNode::Group(children) = node
+        && !rest.is_empty()
+    {
+        let child = children.get(rest[0])?;
+        node = child;
+        rest = &rest[1..];
+    }
+    Some((node, rest))
+}
+
+fn is_richtext_field_expr(
+    expr: &Expr<'_>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> bool {
+    let Some((root, attrs)) = extract_attr_chain(expr) else {
+        return false;
+    };
+    matches!(
+        resolve_field_node_and_tail(root, &attrs, scopes, policy),
+        Some((FieldTemplateNode::Richtext, &[]))
+    )
+}
+
+fn resolve_collection_source(
+    expr: &Expr<'_>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> Option<UrlSourceKind> {
     match expr {
-        Expr::Slice(s) => resolve_collection_source(&s.expr, scopes),
+        Expr::Slice(s) => resolve_collection_source(&s.expr, scopes, policy),
         Expr::Filter(f) => {
             let inner = f.expr.as_ref()?;
             if matches!(f.name, "selectattr" | "rejectattr" | "sort" | "reverse") {
-                resolve_collection_source(inner, scopes)
+                resolve_collection_source(inner, scopes, policy)
             } else if f.name == "batch" {
-                match resolve_collection_source(inner, scopes) {
+                match resolve_collection_source(inner, scopes, policy) {
                     Some(UrlSourceKind::TrustedEntry) => Some(UrlSourceKind::TrustedEntryBatch),
                     _ => None,
                 }
@@ -4477,67 +4816,92 @@ fn resolve_collection_source(expr: &Expr<'_>, scopes: &UrlScopeStack) -> Option<
                 Some(UrlSourceKind::TrustedEntry)
             } else if v.id == "breadcrumbs" {
                 Some(UrlSourceKind::TrustedLink)
-            } else if scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntryBatch) {
+            } else if scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntryBatch) {
                 Some(UrlSourceKind::TrustedEntry)
             } else {
                 None
             }
         }
-        Expr::GetAttr(g) => match &g.expr {
-            Expr::Var(v) if v.id == "pagination" && g.name == "pages" => {
-                Some(UrlSourceKind::TrustedLink)
-            }
-            Expr::Var(v) if v.id == "locale" && g.name == "alternates" => {
-                Some(UrlSourceKind::TrustedLink)
-            }
-            Expr::GetAttr(menu_slot)
-                if g.name == "items"
-                    && matches!(&menu_slot.expr, Expr::Var(v) if v.id == "menus") =>
+        Expr::GetAttr(g) => {
+            if let Some((root, attrs)) = extract_attr_chain(expr)
+                && let Some((node, &[])) = resolve_field_node_and_tail(root, &attrs, scopes, policy)
             {
-                Some(UrlSourceKind::TrustedLink)
+                return match node {
+                    FieldTemplateNode::Repeater(fields) => Some(UrlSourceKind::FieldNode(
+                        FieldTemplateNode::Group(fields.clone()),
+                    )),
+                    FieldTemplateNode::Gallery => {
+                        Some(UrlSourceKind::FieldNode(FieldTemplateNode::Media))
+                    }
+                    FieldTemplateNode::EntryRef { .. } => {
+                        Some(UrlSourceKind::FieldNode(FieldTemplateNode::EntryRef {
+                            multiple: false,
+                        }))
+                    }
+                    FieldTemplateNode::TermRef { .. } => {
+                        Some(UrlSourceKind::FieldNode(FieldTemplateNode::TermRef {
+                            multiple: false,
+                        }))
+                    }
+                    _ => None,
+                };
             }
-            Expr::GetItem(menu_slot)
-                if g.name == "items"
-                    && matches!(&menu_slot.expr, Expr::Var(v) if v.id == "menus")
-                    && matches!(&menu_slot.subscript_expr, Expr::Const(c) if c.value.as_str().is_some()) =>
-            {
-                Some(UrlSourceKind::TrustedLink)
+            match &g.expr {
+                Expr::Var(v) if v.id == "pagination" && g.name == "pages" => {
+                    Some(UrlSourceKind::TrustedLink)
+                }
+                Expr::Var(v) if v.id == "locale" && g.name == "alternates" => {
+                    Some(UrlSourceKind::TrustedLink)
+                }
+                Expr::GetAttr(menu_slot)
+                    if g.name == "items"
+                        && matches!(&menu_slot.expr, Expr::Var(v) if v.id == "menus") =>
+                {
+                    Some(UrlSourceKind::TrustedLink)
+                }
+                Expr::GetItem(menu_slot)
+                    if g.name == "items"
+                        && matches!(&menu_slot.expr, Expr::Var(v) if v.id == "menus")
+                        && matches!(&menu_slot.subscript_expr, Expr::Const(c) if c.value.as_str().is_some()) =>
+                {
+                    Some(UrlSourceKind::TrustedLink)
+                }
+                Expr::Var(v)
+                    if g.name == "children"
+                        && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedLink) =>
+                {
+                    Some(UrlSourceKind::TrustedLink)
+                }
+                Expr::Var(v)
+                    if g.name == "all_terms"
+                        && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntry) =>
+                {
+                    Some(UrlSourceKind::TrustedLink)
+                }
+                Expr::GetAttr(terms_attr)
+                    if terms_attr.name == "terms"
+                        && matches!(
+                            &terms_attr.expr,
+                            Expr::Var(v) if scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntry)
+                        ) =>
+                {
+                    Some(UrlSourceKind::TrustedLink)
+                }
+                Expr::Var(v)
+                    if g.name == "fields"
+                        && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntry) =>
+                {
+                    Some(UrlSourceKind::TrustedField)
+                }
+                Expr::Var(v)
+                    if g.name == "gallery_urls"
+                        && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedField) =>
+                {
+                    Some(UrlSourceKind::TrustedRawUrl)
+                }
+                _ => None,
             }
-            Expr::Var(v)
-                if g.name == "children"
-                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedLink) =>
-            {
-                Some(UrlSourceKind::TrustedLink)
-            }
-            Expr::Var(v)
-                if g.name == "all_terms"
-                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry) =>
-            {
-                Some(UrlSourceKind::TrustedLink)
-            }
-            Expr::GetAttr(terms_attr)
-                if terms_attr.name == "terms"
-                    && matches!(
-                        &terms_attr.expr,
-                        Expr::Var(v) if scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry)
-                    ) =>
-            {
-                Some(UrlSourceKind::TrustedLink)
-            }
-            Expr::Var(v)
-                if g.name == "fields"
-                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry) =>
-            {
-                Some(UrlSourceKind::TrustedField)
-            }
-            Expr::Var(v)
-                if g.name == "gallery_urls"
-                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedField) =>
-            {
-                Some(UrlSourceKind::TrustedRawUrl)
-            }
-            _ => None,
-        },
+        }
         Expr::GetItem(g) => {
             let Expr::Const(c) = &g.subscript_expr else {
                 return None;
@@ -4548,7 +4912,7 @@ fn resolve_collection_source(expr: &Expr<'_>, scopes: &UrlScopeStack) -> Option<
                     if terms_attr.name == "terms"
                         && matches!(
                             &terms_attr.expr,
-                            Expr::Var(v) if scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry)
+                            Expr::Var(v) if scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntry)
                         ) =>
                 {
                     Some(UrlSourceKind::TrustedLink)
@@ -4561,6 +4925,19 @@ fn resolve_collection_source(expr: &Expr<'_>, scopes: &UrlScopeStack) -> Option<
 }
 
 fn is_href_only_expr(expr: &Expr<'_>, scopes: &UrlScopeStack, policy: &ThemeUrlPolicy) -> bool {
+    if let Some((root, attrs)) = extract_attr_chain(expr)
+        && let Some((node, tail)) = resolve_field_node_and_tail(root, &attrs, scopes, policy)
+    {
+        if match (node, tail) {
+            (FieldTemplateNode::Url, &[]) => true,
+            (FieldTemplateNode::Link, &["url"]) => true,
+            (FieldTemplateNode::EntryRef { multiple: false }, &["url"]) => true,
+            (FieldTemplateNode::TermRef { multiple: false }, &["url"]) => true,
+            _ => false,
+        } {
+            return true;
+        }
+    }
     match expr {
         Expr::Var(v) => matches!(v.id, "archive_url" | "previous_url" | "next_url"),
         Expr::GetAttr(g) => match &g.expr {
@@ -4585,7 +4962,7 @@ fn is_href_only_expr(expr: &Expr<'_>, scopes: &UrlScopeStack, policy: &ThemeUrlP
                     && cat_attr.name == "primary_category"
                     && matches!(
                         &cat_attr.expr,
-                        Expr::Var(v) if scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry)
+                        Expr::Var(v) if scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntry)
                     ) =>
             {
                 true
@@ -4597,9 +4974,24 @@ fn is_href_only_expr(expr: &Expr<'_>, scopes: &UrlScopeStack, policy: &ThemeUrlP
 }
 
 fn is_src_and_href_expr(expr: &Expr<'_>, scopes: &UrlScopeStack, policy: &ThemeUrlPolicy) -> bool {
+    if let Some((root, attrs)) = extract_attr_chain(expr)
+        && let Some((node, tail)) = resolve_field_node_and_tail(root, &attrs, scopes, policy)
+    {
+        if match (node, tail) {
+            (FieldTemplateNode::Media, &["url" | "thumbnail_url"]) => true,
+            (FieldTemplateNode::EntryRef { multiple: false }, &["cover_url"]) => true,
+            (
+                FieldTemplateNode::TermRef { multiple: false },
+                &["featured_image", "url" | "thumbnail_url"],
+            ) => true,
+            _ => false,
+        } {
+            return true;
+        }
+    }
     match expr {
         Expr::Var(v) => {
-            v.id == "theme_asset_url" || scopes.lookup(v.id) == Some(UrlSourceKind::TrustedRawUrl)
+            v.id == "theme_asset_url" || scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedRawUrl)
         }
         Expr::GetAttr(g) => match &g.expr {
             Expr::Var(v) if v.id == "options" => {
@@ -4607,13 +4999,13 @@ fn is_src_and_href_expr(expr: &Expr<'_>, scopes: &UrlScopeStack, policy: &ThemeU
             }
             Expr::Var(v)
                 if g.name == "cover_url"
-                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry) =>
+                    && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntry) =>
             {
                 true
             }
             Expr::Var(v)
                 if g.name == "image_url"
-                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedField) =>
+                    && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedField) =>
             {
                 true
             }
@@ -4794,9 +5186,20 @@ fn walk_theme_stmt_with_url_scopes(
         }
         Stmt::EmitExpr(expr) => {
             reject_style_control_flow(&states)?;
-            if parse_od_icon_call(&expr.expr)?.is_some() {
+            if let Some((icon_arg, _)) = parse_od_icon_call_ext(&expr.expr, true)? {
                 if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_icon() chỉ được xuất trong thân HTML.");
+                }
+                if let OdIconNameArg::FieldNamePath(root, attrs) = icon_arg {
+                    let resolved = resolve_field_node_and_tail(
+                        root,
+                        &attrs[..attrs.len() - 1],
+                        &scopes,
+                        policy,
+                    );
+                    if !matches!(resolved, Some((FieldTemplateNode::Icon, &[]))) {
+                        return Err("od_icon() động phải tham chiếu trường kiểu icon.");
+                    }
                 }
                 return Ok((states, scopes));
             }
@@ -4816,6 +5219,11 @@ fn walk_theme_stmt_with_url_scopes(
                 return Ok((states, scopes));
             }
             record_usage_flags_in_expr(&expr.expr, usage);
+            if is_richtext_field_expr(&expr.expr, &scopes, policy)
+                && states.iter().any(|s| s.inner() != &ThemeHtmlState::Body)
+            {
+                return Err("Trường richtext chỉ được xuất trực tiếp trong phần thân HTML.");
+            }
             if states.iter().any(|s| {
                 matches!(
                     s.inner(),
@@ -4983,8 +5391,8 @@ fn walk_theme_stmt_with_url_scopes(
                 validate_expr(v)?;
                 record_usage_flags_in_expr(v, usage);
                 for ident in extract_bound_idents(k)? {
-                    if ident == "entry" {
-                        return Err("C-SEC cấm gán lại biến ngữ cảnh `entry` trong with.");
+                    if matches!(ident.as_str(), "entry" | "term" | "field") {
+                        return Err("C-SEC cấm gán lại biến ngữ cảnh trong with.");
                     }
                     frame.insert(ident, None);
                 }
@@ -5009,8 +5417,8 @@ fn walk_theme_stmt_with_url_scopes(
             validate_expr(&s.expr)?;
             record_usage_flags_in_expr(&s.expr, usage);
             for ident in extract_bound_idents(&s.target)? {
-                if ident == "entry" {
-                    return Err("C-SEC cấm gán lại biến ngữ cảnh `entry` qua set.");
+                if matches!(ident.as_str(), "entry" | "term" | "field") {
+                    return Err("C-SEC cấm gán lại biến ngữ cảnh qua set.");
                 }
                 scopes.insert_top(ident, None);
             }
@@ -5024,8 +5432,11 @@ fn walk_theme_stmt_with_url_scopes(
             }
             validate_expr(&sb.target)?;
             let target_idents = extract_bound_idents(&sb.target)?;
-            if target_idents.iter().any(|id| id == "entry") {
-                return Err("C-SEC cấm gán lại biến ngữ cảnh `entry` qua set block.");
+            if target_idents
+                .iter()
+                .any(|id| matches!(id.as_str(), "entry" | "term" | "field"))
+            {
+                return Err("C-SEC cấm gán lại biến ngữ cảnh qua set block.");
             }
             let (sb_states, sb_scopes) = walk_theme_stmts_with_url_scopes(
                 &sb.body,
@@ -5075,12 +5486,38 @@ fn walk_theme_stmt_with_url_scopes(
             )?;
 
             let target_idents = extract_bound_idents(&f.target)?;
-            let iter_kind = resolve_collection_source(&f.iter, &scopes);
+            let iter_kind = resolve_collection_source(&f.iter, &scopes, policy);
             if target_idents.iter().any(|id| id == "entry") {
                 let valid_entry_loop = matches!(&f.target, Expr::Var(v) if v.id == "entry")
-                    && iter_kind == Some(UrlSourceKind::TrustedEntry);
+                    && matches!(
+                        iter_kind,
+                        Some(
+                            UrlSourceKind::TrustedEntry
+                                | UrlSourceKind::FieldNode(FieldTemplateNode::EntryRef { .. })
+                        )
+                    );
                 if !valid_entry_loop {
                     return Err("C-SEC cấm gán lại biến ngữ cảnh `entry` từ nguồn không tin cậy.");
+                }
+            }
+            if target_idents.iter().any(|id| id == "field") {
+                let valid_field_loop = matches!(&f.target, Expr::Var(v) if v.id == "field")
+                    && iter_kind == Some(UrlSourceKind::TrustedField);
+                if !valid_field_loop {
+                    return Err("C-SEC cấm gán lại biến ngữ cảnh `field` từ nguồn không tin cậy.");
+                }
+            }
+            if target_idents.iter().any(|id| id == "term") {
+                let valid_term_loop = matches!(&f.target, Expr::Var(v) if v.id == "term")
+                    && matches!(
+                        iter_kind,
+                        Some(
+                            UrlSourceKind::TrustedLink
+                                | UrlSourceKind::FieldNode(FieldTemplateNode::TermRef { .. })
+                        )
+                    );
+                if !valid_term_loop {
+                    return Err("C-SEC cấm gán lại biến ngữ cảnh `term` từ nguồn không tin cậy.");
                 }
             }
 
@@ -5118,7 +5555,7 @@ fn walk_theme_stmt_with_url_scopes(
                 let next_scopes = UrlScopeStack::intersect(&loop_scopes, &after_scopes);
                 let mut next_header_scopes = next_scopes.clone();
                 for (k, v) in &loop_targets {
-                    next_header_scopes.insert_top(k.clone(), *v);
+                    next_header_scopes.insert_top(k.clone(), v.clone());
                 }
                 if next_states == loop_states && next_header_scopes == loop_scopes {
                     final_loop_states = next_states;

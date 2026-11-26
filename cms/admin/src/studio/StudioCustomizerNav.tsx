@@ -10,15 +10,14 @@ import type {
   ReadingSettingsDraft,
 } from '../api/settings.ts';
 import type { StudioTargetGroup, StudioTargetItem } from '../api/studio.ts';
-import type { ThemeOptionDef } from '../api/themes.ts';
-import { BlockSchemaForm } from '../builder/BlockSchemaForm.tsx';
+import type { FieldSpec } from '../fields/types.ts';
+import { UnifiedFieldForm } from '../fields/UnifiedFieldForm.tsx';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
 import type { StudioMenuRequest } from './StudioBlockTree.tsx';
 import type { BuilderDocument, BuilderViewport, StudioBuilderClipboard } from '../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../components/AdminPrimitives.tsx';
 import { ThemeOptionsForm } from '../features/themes/ThemeOptionsForm.tsx';
 import type { StudioPanelId } from '../shell/router.ts';
-import type { BlockSchemaV1 } from '../types.ts';
 import { StudioMenuManager } from './StudioMenuManager.tsx';
 
 interface Props {
@@ -41,7 +40,7 @@ interface Props {
   themeOptionsReloadToken: number;
   onThemeOptionsChange: (
     values: Record<string, unknown>,
-    meta: { version: number; dirty: boolean; schema: ThemeOptionDef[] },
+    meta: { version: number; dirty: boolean; fields: FieldSpec[] },
   ) => void;
   menuSlots: MenuSlotsSnapshot | null;
   menuSlotsDraft: Record<string, number | null> | null;
@@ -315,17 +314,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   }
 
   if (panel === 'theme-options') {
-    const globalSchema: BlockSchemaV1 | null = globalOptionsSnapshot
-      ? {
-          schema_version: 1,
-          id: 'site/global-options',
-          title: t("studio.global_site_options"),
-          category: 'content',
-          render: 'render.html',
-          fields: globalOptionsSnapshot.fields,
-        }
-      : null;
-
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-theme-options">
         <div className="space-y-5 p-4">
@@ -343,14 +331,17 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 <AdminBadge tone="neutral">v{globalOptionsSnapshot.version}</AdminBadge>
               )}
             </div>
-            {globalSchema ? (
-              <BlockSchemaForm
-                schema={globalSchema}
-                values={globalOptionsDraft ?? globalOptionsSnapshot?.values ?? {}}
+            {globalOptionsSnapshot ? (
+              <UnifiedFieldForm
+                fields={globalOptionsSnapshot.fields}
+                context="options"
+                layoutMode="sidebar"
+                values={globalOptionsDraft ?? globalOptionsSnapshot.values ?? {}}
+                savedValues={globalOptionsSnapshot.values}
                 onChange={onGlobalOptionsChange}
                 viewport={viewport}
                 csrfToken={csrfToken}
-                onError={onApiError}
+                onApiError={onApiError}
                 disabled={disabled}
               />
             ) : (

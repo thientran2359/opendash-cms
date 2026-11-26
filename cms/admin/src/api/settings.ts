@@ -1,5 +1,5 @@
 import { tStatic } from '../i18n/index.tsx';
-import type { BlockFieldSpec } from '../types.ts';
+import type { FieldSpec } from '../fields/types.ts';
 import { requestJson } from './client.ts';
 
 /** SITE-01. All values originate from the server's typed singleton. */
@@ -166,7 +166,7 @@ export function saveReadingSettings(
 
 export interface GlobalSiteOptionsSnapshot {
   version: number;
-  fields: BlockFieldSpec[];
+  fields: FieldSpec[];
   values: Record<string, unknown>;
 }
 

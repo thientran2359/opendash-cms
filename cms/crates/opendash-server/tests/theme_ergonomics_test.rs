@@ -223,7 +223,7 @@ fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
             {
                 "key": "banner_text",
                 "label": "Banner Text",
-                "type": "string",
+                "type": "text",
                 "default": "Hello Ergonomics",
                 "public": true
             }
@@ -1058,7 +1058,7 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
         "templates": [{ "kind": "home", "file": "home.html" }],
         "assets": ["assets/theme.css"],
         "options": [
-            { "key": "banner_text", "label": "Banner", "type": "string", "default": "x", "public": true },
+            { "key": "banner_text", "label": "Banner", "type": "text", "default": "x", "public": true },
             { "key": "flag", "label": "Flag", "type": "boolean", "default": false, "public": true }
         ]
     })

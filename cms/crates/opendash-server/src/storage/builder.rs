@@ -223,7 +223,7 @@ pub(crate) async fn read_render_context_tx(
     tx: &mut Transaction<'_, Sqlite>,
 ) -> ApiResult<BuilderRenderContext> {
     let declared_blocks = crate::storage::page::load_declared_blocks_in_conn(&mut **tx).await?;
-    let site_options =
+    let (_, site_options) =
         crate::storage::settings::get_active_merged_public_options_in_conn(&mut **tx, false)
             .await?;
     let timezone = crate::storage::settings::get_general_in_conn(&mut **tx)
@@ -1483,6 +1483,10 @@ pub async fn preview_entry_builder_with_cache(
         rendered.html = crate::content_render::finalize_document_icons(
             rendered.html,
             &render_budget.icon_nonces,
+        )?;
+        rendered.html = crate::content_render::finalize_document_richtext(
+            rendered.html,
+            &render_budget.richtext_nonces,
         )?;
         rendered
     } else {

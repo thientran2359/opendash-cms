@@ -748,7 +748,7 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
             { "key": "dev_hero", "title": "Dev Hero Pattern", "category": "hero", "file": "patterns/dev-hero.json" }
         ],
         "options": [
-            { "key": "dev_tagline", "label": "Dev Tagline", "type": "string", "default": "DevOptDefault", "public": true }
+            { "key": "dev_tagline", "label": "Dev Tagline", "type": "text", "default": "DevOptDefault", "public": true }
         ],
         "assets": ["assets/style.css"],
         "styles": [

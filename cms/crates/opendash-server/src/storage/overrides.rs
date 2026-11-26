@@ -1335,6 +1335,7 @@ async fn build_entry_preview_context_in_tx(
     actor_role: FieldRole,
     active: Option<&ActiveThemeV3>,
     site: &SiteContext<'_>,
+    site_options: &BTreeMap<String, serde_json::Value>,
     options: &BTreeMap<String, serde_json::Value>,
     menus: &BTreeMap<String, menu::MenuViewModel>,
     route_kind: &str,
@@ -1382,6 +1383,7 @@ async fn build_entry_preview_context_in_tx(
     let pagination = PaginationView::empty();
     let theme_context = content_render::build_public_theme_context(PublicThemeContextInput {
         site,
+        site_options,
         options,
         theme_assets: &theme_assets,
         menus,
@@ -1411,6 +1413,7 @@ fn build_placeholder_preview_theme_context(
     target: &TemplateCandidate,
     active: Option<&ActiveThemeV3>,
     site: &SiteContext<'_>,
+    site_options: &BTreeMap<String, serde_json::Value>,
     options: &BTreeMap<String, serde_json::Value>,
     menus: &BTreeMap<String, menu::MenuViewModel>,
 ) -> ApiResult<serde_json::Value> {
@@ -1528,6 +1531,7 @@ fn build_placeholder_preview_theme_context(
 
     content_render::build_public_theme_context(PublicThemeContextInput {
         site,
+        site_options,
         options,
         theme_assets: &theme_assets,
         menus,
@@ -1700,15 +1704,17 @@ pub async fn preview_typed_override_with_cache_and_locale(
         .as_ref()
         .zip(manifest_json.as_deref())
         .map(|(a, m)| (a.manifest.theme_id.as_str(), m));
-    let options = settings::resolve_merged_public_options_with_overrides_in_conn(
-        &mut tx,
-        active_ref,
-        None,
-        None,
-        true,
-        Some(&effective_locale),
-    )
-    .await?;
+    let (site_options, options) =
+        settings::resolve_merged_public_options_with_overrides_in_conn_with_nonces(
+            &mut tx,
+            active_ref,
+            None,
+            None,
+            true,
+            Some(&effective_locale),
+            Some(&mut budget.richtext_nonces),
+        )
+        .await?;
     state.site_options = options.clone();
     let menus = if let Some(active) = &active {
         menu::resolve_slot_menus_for_locale_in_tx(
@@ -1731,6 +1737,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
             actor_role,
             active.as_ref(),
             &site,
+            &site_options,
             &options,
             &menus,
             route_kind_for_candidate(target.kind),
@@ -1790,6 +1797,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
             target,
             active.as_ref(),
             &site,
+            &site_options,
             &options,
             &menus,
         )?;
@@ -1844,6 +1852,8 @@ pub async fn preview_typed_override_with_cache_and_locale(
         )?;
     }
     rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
+    rendered.html =
+        content_render::finalize_document_richtext(rendered.html, &budget.richtext_nonces)?;
     tx.rollback().await?;
     Ok(rendered)
 }
@@ -2685,9 +2695,11 @@ async fn build_preview_context_in_tx(
     active: Option<&ActiveThemeV3>,
     transient: Option<&TransientStudioOverrides>,
     locale: &str,
+    richtext_nonces: Option<&mut template_sec::RichTextNonceTable>,
 ) -> ApiResult<(
     settings::GeneralSettings,
     settings::PublicSiteSettings,
+    BTreeMap<String, serde_json::Value>,
     BTreeMap<String, serde_json::Value>,
     BTreeMap<String, menu::MenuViewModel>,
 )> {
@@ -2721,15 +2733,17 @@ async fn build_preview_context_in_tx(
         .as_ref()
         .zip(manifest_json.as_deref())
         .map(|(a, m)| (a.manifest.theme_id.as_str(), m));
-    let options = settings::resolve_merged_public_options_with_overrides_in_conn(
-        &mut **tx,
-        active_ref,
-        transient.and_then(|t| t.global_options.as_ref()),
-        transient.and_then(|t| t.theme_options.as_ref()),
-        true,
-        Some(locale),
-    )
-    .await?;
+    let (site_options, options) =
+        settings::resolve_merged_public_options_with_overrides_in_conn_with_nonces(
+            &mut **tx,
+            active_ref,
+            transient.and_then(|t| t.global_options.as_ref()),
+            transient.and_then(|t| t.theme_options.as_ref()),
+            true,
+            Some(locale),
+            richtext_nonces,
+        )
+        .await?;
 
     let mut menus = BTreeMap::new();
     if let Some(active) = active {
@@ -2771,7 +2785,7 @@ async fn build_preview_context_in_tx(
             "Không có theme v3 đang kích hoạt để xem trước menu_slots.",
         ));
     }
-    Ok((general, pub_settings, options, menus))
+    Ok((general, pub_settings, site_options, options, menus))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2942,8 +2956,15 @@ pub async fn preview_studio_with_cache_and_locale(
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut state = builder::read_render_context_tx(&mut tx).await?;
-    let (general, pub_settings, options, menus) =
-        build_preview_context_in_tx(&mut tx, active.as_ref(), transient, &effective_locale).await?;
+    let mut options_richtext_nonces = template_sec::RichTextNonceTable::default();
+    let (general, pub_settings, site_options, options, menus) = build_preview_context_in_tx(
+        &mut tx,
+        active.as_ref(),
+        transient,
+        &effective_locale,
+        Some(&mut options_richtext_nonces),
+    )
+    .await?;
     state.site_options = options.clone();
     state.timezone = general.timezone.clone();
     let fmt_cfg = template_sec::RenderFormattingConfig {
@@ -2997,6 +3018,7 @@ pub async fn preview_studio_with_cache_and_locale(
     let mut has_active_contact_form = false;
     let mut route = None;
     let mut shared_rb = page::RenderBudget::new();
+    shared_rb.richtext_nonces.extend(options_richtext_nonces);
     let (mut theme_context, body) = if let Some((record, effective_schema)) = &entry {
         route = Some((record.content_type_key.as_str(), record.slug.as_str()));
         let built = build_entry_preview_context_in_tx(
@@ -3006,6 +3028,7 @@ pub async fn preview_studio_with_cache_and_locale(
             actor_role,
             active.as_ref(),
             &site,
+            &site_options,
             &options,
             &menus,
             route_kind_for_candidate(target.kind),
@@ -3064,6 +3087,7 @@ pub async fn preview_studio_with_cache_and_locale(
             target,
             active.as_ref(),
             &site,
+            &site_options,
             &options,
             &menus,
         )?;
@@ -3297,6 +3321,8 @@ pub async fn preview_studio_with_cache_and_locale(
     };
     let full_html =
         content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
+    let full_html =
+        content_render::finalize_document_richtext(full_html, &preview_budget.richtext_nonces)?;
     tx.rollback().await?;
     Ok(RenderedLayout {
         has_active_contact_form,
@@ -3315,7 +3341,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     page_layout_key: Option<&str>,
     custom_template_key: Option<&str>,
     entry_rendered: RenderedLayout,
-    entry_render_budget: page::RenderBudget,
+    mut entry_render_budget: page::RenderBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
     let mut record = entries::get_entry_in_tx(tx, &schema.base.descriptor.key, entry_id)
@@ -3325,8 +3351,18 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut state = builder::read_render_context_tx(tx).await?;
-    let (general, pub_settings, options, menus) =
-        build_preview_context_in_tx(tx, active.as_ref(), None, &record.locale).await?;
+    let mut options_richtext_nonces = template_sec::RichTextNonceTable::default();
+    let (general, pub_settings, site_options, options, menus) = build_preview_context_in_tx(
+        tx,
+        active.as_ref(),
+        None,
+        &record.locale,
+        Some(&mut options_richtext_nonces),
+    )
+    .await?;
+    entry_render_budget
+        .richtext_nonces
+        .extend(options_richtext_nonces);
     state.site_options = options.clone();
     state.timezone = general.timezone.clone();
     let fmt_cfg = template_sec::RenderFormattingConfig {
@@ -3351,6 +3387,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
         actor_role,
         active.as_ref(),
         &site,
+        &site_options,
         &options,
         &menus,
         shell_route_kind,
@@ -3528,6 +3565,8 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     };
     let full_html =
         content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
+    let full_html =
+        content_render::finalize_document_richtext(full_html, &preview_budget.richtext_nonces)?;
     Ok(RenderedLayout {
         has_active_contact_form,
         html: full_html,

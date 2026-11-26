@@ -1,5 +1,6 @@
 import { tStatic } from '../i18n/index.tsx';
-import type { BlockFieldSpec, PluginRunResult, PluginSettingField } from '../types.ts';
+import type { FieldSpec } from '../fields/types.ts';
+import type { PluginRunResult } from '../types.ts';
 import { requestJson } from './client.ts';
 
 export interface ThemeRevisionSummary {
@@ -38,47 +39,12 @@ export function isV3ThemeInstall(response: ThemeInstallResponse): response is Th
   return 'revision_id' in response;
 }
 
-export type ThemeOptionType =
-  | 'string'
-  | 'url'
-  | 'number'
-  | 'boolean'
-  | 'select'
-  | 'image_ref'
-  | 'text'
-  | 'textarea'
-  | 'richtext'
-  | 'range'
-  | 'radio_buttons'
-  | 'color'
-  | 'spacing'
-  | 'media'
-  | 'link'
-  | 'repeater';
-
-export interface ThemeOptionChoice {
-  value: string;
-  label: string;
-}
-
-export interface ThemeOptionDef {
-  key: string;
-  label: string;
-  type: ThemeOptionType;
-  default: unknown;
-  public: boolean;
-  translatable?: boolean;
-  min?: number;
-  max?: number;
-  choices?: ThemeOptionChoice[];
-}
-
 export interface ThemeOptionsSnapshot {
   theme_id: string;
   version: number;
-  schema: ThemeOptionDef[];
-  fields?: BlockFieldSpec[];
+  fields: FieldSpec[];
   values: Record<string, unknown>;
+  locale?: string;
 }
 
 export function getThemes(): Promise<ThemesSummary> {
@@ -243,7 +209,7 @@ export interface ThemeFunctionsSettingsSnapshot {
   revision_id: string | null;
   has_functions: boolean;
   version: number;
-  schema: PluginSettingField[];
+  fields: FieldSpec[];
   values: Record<string, unknown>;
   actions: ThemeFunctionActionDecl[];
 }

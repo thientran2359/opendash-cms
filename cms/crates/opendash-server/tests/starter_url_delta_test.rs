@@ -180,14 +180,14 @@ async fn typed_url_fresh_public_saved_and_unsaved_preview() {
     let (cookie, csrf) = login(&http, &srv).await;
     let themes = get_admin(&http, &srv, &cookie, "/api/admin/themes").await;
     assert_eq!(themes["revisions"].as_array().unwrap().len(), 1);
-    assert_eq!(themes["revisions"][0]["version"], "1.1.1");
+    assert_eq!(themes["revisions"][0]["version"], "1.0.0");
     assert_eq!(themes["selection"]["version"], 1);
 
     let options = get_admin(&http, &srv, &cookie, "/api/themes/opendash-starter/options").await;
     let version = options["version"].as_i64().unwrap();
     let original = options["values"]["header_cta_url"].clone();
     assert_eq!(
-        options["schema"]
+        options["fields"]
             .as_array()
             .unwrap()
             .iter()
@@ -478,7 +478,7 @@ async fn actual_old_new_old_binary_roundtrip_preserves_data_and_cas() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|rev| rev["version"] == "1.1.1")
+        .find(|rev| rev["version"] == "1.0.0" && rev["revision_id"] != v100_id)
         .unwrap();
     let v101_id = v111["revision_id"].as_str().unwrap().to_owned();
     let option_upgrade = get_admin(
