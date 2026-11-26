@@ -12,16 +12,13 @@ use serde_json::Value;
 use url::Url;
 
 use crate::{
-    block_schema::{
-        MAX_NODE_VALUES_BYTES, MAX_NODE_VALUES_KEYS, RegisteredBlockSchema, upcast_legacy_catalog,
-    },
+    block_schema::{MAX_NODE_VALUES_KEYS, RegisteredBlockSchema},
     content::valid_content_type_key,
     id::{
         valid_kebab_segment_with_limit, valid_namespaced_block_id, valid_package_id,
         valid_snake_key,
     },
     registry::{DeclarationState, ProviderStatus, RegistryCatalog},
-    theme::{Block, BlockDescriptor, Fields},
 };
 
 pub const BUILDER_SCHEMA_VERSION: u32 = 1;
@@ -823,13 +820,14 @@ impl KnownElement {
     }
 }
 
-/// Preserves the exact M3 block ID and field-value map, including after a
-/// theme switch. An active descriptor is required to add or change a block.
+/// Preserves the exact legacy M3 block ID and field-value map for pre-existing
+/// saved documents. Per Phase 2 Decision D3, new inserts or edits are rejected;
+/// existing nodes survive only when unchanged at their exact tree path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LegacyBlockProps {
     pub block_id: String,
-    pub values: Fields,
+    pub values: BTreeMap<String, String>,
 }
 
 #[derive(Debug)]
@@ -863,8 +861,9 @@ impl BuilderDocument {
         }
     }
 
-    /// Reject oversized input before JSON decoding; call validate_for_save
-    /// afterwards, as deserialization alone does not validate the tree.
+    /// Reject oversized input before JSON decoding; call
+    /// `validate_for_save_with_schemas` afterwards, as deserialization alone
+    /// does not validate the tree.
     pub fn from_json(bytes: &[u8]) -> Result<Self, BuilderError> {
         if bytes.len() > MAX_BUILDER_JSON_BYTES {
             return Err(BuilderError::Invalid("Builder JSON exceeds 256 KiB"));
@@ -880,20 +879,10 @@ impl BuilderDocument {
         Ok(bytes)
     }
 
+    /// Validates this document against rich `RegisteredBlockSchema` declarations (`block.json` v1).
     /// `previous` MUST come from trusted persisted state, never the client.
-    /// Unsupported payloads may survive only at their original position under
+    /// Unsupported or legacy payloads may survive only at their original position under
     /// the same ancestor IDs and with identical content, including the node ID.
-    pub fn validate_for_save(
-        &self,
-        catalog: &RegistryCatalog<BlockDescriptor>,
-        previous: Option<&BuilderDocument>,
-    ) -> Result<(), BuilderError> {
-        let schemas = upcast_legacy_catalog(catalog);
-        self.validate_for_save_with_schemas(&schemas, previous)
-    }
-
-    /// Validates this document against rich `RegisteredBlockSchema` declarations (`block.json` v1
-    /// and upcast legacy `theme_blocks`).
     pub fn validate_for_save_with_schemas(
         &self,
         catalog: &RegistryCatalog<RegisteredBlockSchema>,
@@ -1111,31 +1100,8 @@ fn validate_known_with_schemas(
                 return Err("Invalid Button label or URL");
             }
         }
-        KnownElement::Legacy(props) => {
-            if !valid_namespaced_block_id(&props.block_id) {
-                return Err("Invalid legacy block ID");
-            }
-            let entry = catalog
-                .get(&props.block_id)
-                .filter(|entry| {
-                    entry.status == ProviderStatus::Active
-                        && entry.declaration_state == DeclarationState::Declared
-                })
-                .ok_or("Legacy block descriptor unavailable")?;
-            let legacy_fields: Fields = entry
-                .descriptor
-                .schema
-                .fields
-                .iter()
-                .map(|field| (field.key().to_owned(), field.label().to_owned()))
-                .collect();
-            let block = Block {
-                kind: props.block_id.clone(),
-                values: props.values.clone(),
-            };
-            block
-                .validate_against_fields(&legacy_fields)
-                .map_err(|_| "Legacy field map does not match descriptor")?;
+        KnownElement::Legacy(_) => {
+            return Err("Legacy block descriptor unavailable");
         }
         KnownElement::PluginBlock(props) => {
             if !valid_namespaced_block_id(&props.block_id) {
@@ -1152,21 +1118,13 @@ fn validate_known_with_schemas(
             {
                 return Err("Plugin block provider is not active");
             }
-            if entry.descriptor.legacy_mode {
-                let bytes = serde_json::to_vec(&props.values)
-                    .map_err(|_| "Plugin block props invalid JSON")?;
-                if bytes.len() > MAX_NODE_VALUES_BYTES {
-                    return Err("Plugin block props exceed 64 KiB");
-                }
-            } else {
-                let prev_values = prev_plugin_values
-                    .get(&(element_id, props.block_id.as_str()))
-                    .copied();
-                entry
-                    .descriptor
-                    .schema
-                    .validate_values(&props.values, prev_values)?;
-            }
+            let prev_values = prev_plugin_values
+                .get(&(element_id, props.block_id.as_str()))
+                .copied();
+            entry
+                .descriptor
+                .schema
+                .validate_values(&props.values, prev_values)?;
         }
         KnownElement::Video(props) => {
             if !valid_media_id(&props.media_id) {
@@ -1358,16 +1316,24 @@ mod tests {
     use crate::registry::ResourceOwner;
     use serde_json::json;
 
-    fn registry() -> RegistryCatalog<BlockDescriptor> {
+    fn registry() -> RegistryCatalog<RegisteredBlockSchema> {
+        let schema: crate::block_schema::BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "ocean/hero",
+            "title": "Hero",
+            "category": "content",
+            "render": "render.html",
+            "fields": [
+                { "type": "text", "key": "title", "label": "Tiêu đề", "required": true }
+            ]
+        }))
+        .unwrap();
         let mut catalog = RegistryCatalog::new();
         catalog
             .register(
                 "ocean/hero",
                 ResourceOwner::Theme("ocean".into()),
-                BlockDescriptor {
-                    id: "ocean/hero".into(),
-                    fields: Fields::from([("title".into(), "Tiêu đề".into())]),
-                },
+                RegisteredBlockSchema { schema },
             )
             .unwrap();
         catalog
@@ -1433,10 +1399,10 @@ mod tests {
                                 }),
                             ),
                             element(
-                                "legacy-1",
-                                KnownElement::Legacy(LegacyBlockProps {
+                                "hero-1",
+                                KnownElement::PluginBlock(PluginBlockProps {
                                     block_id: "ocean/hero".into(),
-                                    values: Fields::from([("title".into(), "Sea".into())]),
+                                    values: BTreeMap::from([("title".into(), json!("Sea"))]),
                                 }),
                             ),
                         ],
@@ -1460,7 +1426,9 @@ mod tests {
                 part_key: "post-card".into(),
             }),
         ));
-        document.validate_for_save(&registry(), None).unwrap();
+        document
+            .validate_for_save_with_schemas(&registry(), None)
+            .unwrap();
 
         let encoded = serde_json::to_value(&document).unwrap();
         assert_eq!(
@@ -1474,7 +1442,9 @@ mod tests {
         );
         let decoded = BuilderDocument::from_json(&document.to_json().unwrap()).unwrap();
         assert_eq!(decoded, document);
-        decoded.validate_for_save(&registry(), None).unwrap();
+        decoded
+            .validate_for_save_with_schemas(&registry(), None)
+            .unwrap();
     }
 
     #[test]
@@ -1505,7 +1475,9 @@ mod tests {
             };
             props.part_key = bad_key.into();
             assert!(
-                changed.validate_for_save(&registry(), None).is_err(),
+                changed
+                    .validate_for_save_with_schemas(&registry(), None)
+                    .is_err(),
                 "{bad_key}"
             );
         }
@@ -1513,19 +1485,29 @@ mod tests {
         bad["sections"][0]["children"][0]["children"][0]["children"][5]["props"]["extra"] =
             json!("forbidden");
         let decoded = BuilderDocument::from_json(bad.to_string().as_bytes()).unwrap();
-        assert!(decoded.validate_for_save(&registry(), None).is_err());
+        assert!(
+            decoded
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
 
         let mut content_slot = valid;
         content_slot["sections"][0]["children"][0]["children"][0]["children"][5] = json!({"id": "content-slot-1", "type": "core/content_slot",
                    "props": {"html": "<script>unsafe</script>"}});
         let decoded = BuilderDocument::from_json(content_slot.to_string().as_bytes()).unwrap();
-        assert!(decoded.validate_for_save(&registry(), None).is_err());
+        assert!(
+            decoded
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
     }
 
     #[test]
     fn round_trip_typed_elements_and_reorder_keep_node_ids() {
         let before = fixture();
-        before.validate_for_save(&registry(), None).unwrap();
+        before
+            .validate_for_save_with_schemas(&registry(), None)
+            .unwrap();
         let after = BuilderDocument::from_json(&before.to_json().unwrap()).unwrap();
         assert_eq!(after, before);
         let mut reordered = after;
@@ -1533,11 +1515,11 @@ mod tests {
             .children
             .swap(0, 4);
         reordered
-            .validate_for_save(&registry(), Some(&before))
+            .validate_for_save_with_schemas(&registry(), Some(&before))
             .unwrap();
         assert_eq!(
             reordered.sections[0].children[0].children[0].children[0].id,
-            "legacy-1"
+            "hero-1"
         );
     }
 
@@ -1545,15 +1527,27 @@ mod tests {
     fn rejects_unknown_schema_parent_shapes_duplicate_ids_and_limits() {
         let mut wrong_version = fixture();
         wrong_version.schema_version = 2;
-        assert!(wrong_version.validate_for_save(&registry(), None).is_err());
+        assert!(
+            wrong_version
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
 
         let mut duplicate = fixture();
         duplicate.sections[0].children[0].id = "section-1".into();
-        assert!(duplicate.validate_for_save(&registry(), None).is_err());
+        assert!(
+            duplicate
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
 
         let mut invalid_id = fixture();
         invalid_id.sections[0].id = "../../etc".into();
-        assert!(invalid_id.validate_for_save(&registry(), None).is_err());
+        assert!(
+            invalid_id
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
 
         let wrong_nesting = json!({
             "schema_version": 1,
@@ -1575,7 +1569,11 @@ mod tests {
                 )
             })
             .collect();
-        assert!(too_many.validate_for_save(&registry(), None).is_err());
+        assert!(
+            too_many
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
         assert!(BuilderDocument::from_json(&vec![b' '; MAX_BUILDER_JSON_BYTES + 1]).is_err());
 
         let mut oversized = fixture();
@@ -1604,7 +1602,11 @@ mod tests {
                 }],
             })
             .collect();
-        assert!(oversized.validate_for_save(&registry(), None).is_err());
+        assert!(
+            oversized
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1635,7 +1637,7 @@ mod tests {
             let mut doc = fixture();
             doc.sections[0].children[0].children[0].children[0].content =
                 ElementContent::Known(invalid);
-            assert!(doc.validate_for_save(&registry, None).is_err());
+            assert!(doc.validate_for_save_with_schemas(&registry, None).is_err());
         }
         for invalid in [
             "//evil.test",
@@ -1663,20 +1665,37 @@ mod tests {
             }]}]}]
         });
         let decoded = BuilderDocument::from_json(malformed.to_string().as_bytes()).unwrap();
-        assert!(decoded.validate_for_save(&registry, None).is_err());
+        assert!(
+            decoded
+                .validate_for_save_with_schemas(&registry, None)
+                .is_err()
+        );
     }
 
     #[test]
     fn unavailable_legacy_and_unknown_saved_payload_preserved_only_unchanged() {
-        let existing = fixture();
-        let mut unavailable = registry();
-        unavailable.deactivate_owner(&ResourceOwner::Theme("ocean".into()));
+        let mut existing = fixture();
+        existing.sections[0].children[0].children[0].children[4] = element(
+            "legacy-1",
+            KnownElement::Legacy(LegacyBlockProps {
+                block_id: "ocean/hero".into(),
+                values: BTreeMap::from([("title".into(), "Sea".into())]),
+            }),
+        );
+        // Per Phase 2 Decision D3, legacy/block cannot be newly inserted or edited
+        // even when a block schema of the same ID exists, and survives only when
+        // preserved verbatim from trusted persisted state.
+        let active = registry();
         assert!(
             existing
-                .validate_for_save(&unavailable, Some(&existing))
+                .validate_for_save_with_schemas(&active, Some(&existing))
                 .is_ok()
         );
-        assert!(existing.validate_for_save(&unavailable, None).is_err());
+        assert!(
+            existing
+                .validate_for_save_with_schemas(&active, None)
+                .is_err()
+        );
 
         let mut edited = existing.clone();
         let ElementContent::Known(KnownElement::Legacy(props)) =
@@ -1687,7 +1706,7 @@ mod tests {
         props.values.insert("title".into(), "Changed".into());
         assert!(
             edited
-                .validate_for_save(&unavailable, Some(&existing))
+                .validate_for_save_with_schemas(&active, Some(&existing))
                 .is_err()
         );
 
@@ -1697,7 +1716,7 @@ mod tests {
             .swap(3, 4);
         assert!(
             moved
-                .validate_for_save(&unavailable, Some(&existing))
+                .validate_for_save_with_schemas(&active, Some(&existing))
                 .is_err()
         );
 
@@ -1710,19 +1729,23 @@ mod tests {
                 meta: None,
                 content: ElementContent::Unresolved(serde_json::from_value(unknown).unwrap()),
             });
-        assert!(persisted.validate_for_save(&registry(), None).is_err());
+        assert!(
+            persisted
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
         let decoded = BuilderDocument::from_json(&persisted.to_json().unwrap()).unwrap();
         assert_eq!(decoded, persisted);
         assert!(
             decoded
-                .validate_for_save(&registry(), Some(&persisted))
+                .validate_for_save_with_schemas(&registry(), Some(&persisted))
                 .is_ok()
         );
         let mut updated = decoded;
         updated.sections[0].children[0].children[0].children[5].id = "unknown-2".into();
         assert!(
             updated
-                .validate_for_save(&registry(), Some(&persisted))
+                .validate_for_save_with_schemas(&registry(), Some(&persisted))
                 .is_err()
         );
     }
@@ -1748,7 +1771,8 @@ mod tests {
                 }),
             ));
         }
-        doc.validate_for_save(&registry(), None).unwrap();
+        doc.validate_for_save_with_schemas(&registry(), None)
+            .unwrap();
         assert_eq!(
             BuilderDocument::from_json(&doc.to_json().unwrap()).unwrap(),
             doc
@@ -1759,7 +1783,10 @@ mod tests {
         };
         let binding = props.binding.as_mut().unwrap();
         binding.target = BindingTarget::Url;
-        assert!(doc.validate_for_save(&registry(), None).is_err());
+        assert!(
+            doc.validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
         let ElementContent::Known(KnownElement::Text(props)) =
             &mut doc.sections[0].children[0].children[0].children[0].content
         else {
@@ -1767,7 +1794,10 @@ mod tests {
         };
         props.binding.as_mut().unwrap().target = BindingTarget::Text;
         props.binding.as_mut().unwrap().entry_slug = "../broken".into();
-        assert!(doc.validate_for_save(&registry(), None).is_err());
+        assert!(
+            doc.validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
         let ElementContent::Known(KnownElement::Text(props)) =
             &mut doc.sections[0].children[0].children[0].children[0].content
         else {
@@ -1790,19 +1820,26 @@ mod tests {
                     ..Default::default()
                 }),
             ));
-        assert!(doc.validate_for_save(&registry(), None).is_err());
+        assert!(
+            doc.validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
     }
 
     #[test]
-    fn legacy_descriptor_matches_m3_block_schema() {
-        let mut invalid = fixture();
-        let ElementContent::Known(KnownElement::Legacy(props)) =
-            &mut invalid.sections[0].children[0].children[0].children[4].content
-        else {
-            panic!()
-        };
-        props.values.insert("unknown".into(), "value".into());
-        assert!(invalid.validate_for_save(&registry(), None).is_err());
+    fn legacy_block_rejected_for_new_inserts_even_with_active_schema() {
+        let mut doc = fixture();
+        doc.sections[0].children[0].children[0].children[4] = element(
+            "legacy-1",
+            KnownElement::Legacy(LegacyBlockProps {
+                block_id: "ocean/hero".into(),
+                values: BTreeMap::from([("title".into(), "Sea".into())]),
+            }),
+        );
+        assert!(
+            doc.validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1811,7 +1848,11 @@ mod tests {
         doc["sections"][0]["children"][0]["children"][0]["children"][0]["extra"] =
             json!({"must_keep": 3});
         let restored = BuilderDocument::from_json(doc.to_string().as_bytes()).unwrap();
-        assert!(restored.validate_for_save(&registry(), None).is_err());
+        assert!(
+            restored
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
         // A historical node is losslessly preserved while the type is unavailable.
         let raw = restored.to_json().unwrap();
         assert!(String::from_utf8(raw).unwrap().contains("must_keep"));
@@ -1860,7 +1901,7 @@ mod tests {
             ..Default::default()
         });
         current
-            .validate_for_save(&registry(), Some(&before))
+            .validate_for_save_with_schemas(&registry(), Some(&before))
             .unwrap();
         assert!(
             current.sections[0].children[0]
@@ -1904,7 +1945,8 @@ mod tests {
             target["responsive"] = json!({"tablet": style});
             let doc = BuilderDocument::from_json(value.to_string().as_bytes()).unwrap();
             assert!(
-                doc.validate_for_save(&registry(), Some(&original)).is_err(),
+                doc.validate_for_save_with_schemas(&registry(), Some(&original))
+                    .is_err(),
                 "{node}: {style}"
             );
         }
@@ -1939,7 +1981,9 @@ mod tests {
             }]}]
         });
         let document = BuilderDocument::from_json(original.to_string().as_bytes()).unwrap();
-        document.validate_for_save(&registry(), None).unwrap();
+        document
+            .validate_for_save_with_schemas(&registry(), None)
+            .unwrap();
         let ElementContent::Known(KnownElement::List(props)) =
             &document.sections[0].children[0].children[0].children[0].content
         else {
@@ -1979,7 +2023,9 @@ mod tests {
             }
             let candidate = BuilderDocument::from_json(encoded.to_string().as_bytes()).unwrap();
             assert!(
-                candidate.validate_for_save(&registry(), None).is_err(),
+                candidate
+                    .validate_for_save_with_schemas(&registry(), None)
+                    .is_err(),
                 "{bad}"
             );
         }
@@ -1988,13 +2034,17 @@ mod tests {
         filtered["sections"][0]["children"][0]["children"][0]["children"][0]["props"] = json!({"type_key": "post", "category_id": 12, "tag_id": 22,
                    "include_descendants": true, "sort": "id_asc", "page_size": 20});
         let filtered = BuilderDocument::from_json(filtered.to_string().as_bytes()).unwrap();
-        filtered.validate_for_save(&registry(), None).unwrap();
+        filtered
+            .validate_for_save_with_schemas(&registry(), None)
+            .unwrap();
 
         let mut generic = original.clone();
         generic["sections"][0]["children"][0]["children"][0]["children"][0]["props"] = json!({"type_key": "post", "taxonomy_key": "genre", "term_id": 37,
                    "include_descendants": true});
         let generic = BuilderDocument::from_json(generic.to_string().as_bytes()).unwrap();
-        generic.validate_for_save(&registry(), None).unwrap();
+        generic
+            .validate_for_save_with_schemas(&registry(), None)
+            .unwrap();
         let roundtrip = BuilderDocument::from_json(&generic.to_json().unwrap()).unwrap();
         assert_eq!(roundtrip, generic);
 
@@ -2010,7 +2060,7 @@ mod tests {
         let _ = children;
         BuilderDocument::from_json(many.to_string().as_bytes())
             .unwrap()
-            .validate_for_save(&registry(), None)
+            .validate_for_save_with_schemas(&registry(), None)
             .unwrap();
         many["sections"][0]["children"][0]["children"][0]["children"]
             .as_array_mut()
@@ -2019,7 +2069,7 @@ mod tests {
         assert!(
             BuilderDocument::from_json(many.to_string().as_bytes())
                 .unwrap()
-                .validate_for_save(&registry(), None)
+                .validate_for_save_with_schemas(&registry(), None)
                 .is_err()
         );
     }
@@ -2051,7 +2101,8 @@ mod tests {
             }]
         });
         let doc = BuilderDocument::from_json(raw.to_string().as_bytes()).unwrap();
-        doc.validate_for_save(&registry(), None).unwrap();
+        doc.validate_for_save_with_schemas(&registry(), None)
+            .unwrap();
         assert!(
             doc.validate_route_context_for_role(Some("single"), None)
                 .is_ok()
@@ -2178,7 +2229,6 @@ mod tests {
                 ResourceOwner::Core,
                 RegisteredBlockSchema {
                     schema: schema_v1.clone(),
-                    legacy_mode: false,
                 },
             )
             .unwrap();
@@ -2204,10 +2254,7 @@ mod tests {
                 "core/faq",
                 ResourceOwner::Core,
                 ProviderStatus::Active,
-                RegisteredBlockSchema {
-                    schema: bad_schema,
-                    legacy_mode: false,
-                },
+                RegisteredBlockSchema { schema: bad_schema },
             )
             .unwrap();
         if let ElementContent::Known(KnownElement::PluginBlock(ref mut p)) =
@@ -2232,7 +2279,6 @@ mod tests {
                 declaration_state: DeclarationState::Declared,
                 descriptor: RegisteredBlockSchema {
                     schema: schema_v1.clone(),
-                    legacy_mode: false,
                 },
             },
         );
@@ -2252,10 +2298,7 @@ mod tests {
                 owner: ResourceOwner::Core,
                 status: ProviderStatus::Active,
                 declaration_state: DeclarationState::Withdrawn,
-                descriptor: RegisteredBlockSchema {
-                    schema: schema_v1,
-                    legacy_mode: false,
-                },
+                descriptor: RegisteredBlockSchema { schema: schema_v1 },
             },
         );
         doc_v1
@@ -2294,10 +2337,7 @@ mod tests {
             .register(
                 "core/faq",
                 ResourceOwner::Core,
-                RegisteredBlockSchema {
-                    schema: schema_v2,
-                    legacy_mode: false,
-                },
+                RegisteredBlockSchema { schema: schema_v2 },
             )
             .unwrap();
         let mut moved_doc = doc_v1.clone();
@@ -2365,7 +2405,8 @@ mod tests {
                 binding: None,
             }));
 
-        doc.validate_for_save(&registry(), None).unwrap();
+        doc.validate_for_save_with_schemas(&registry(), None)
+            .unwrap();
         let encoded = doc.to_json().unwrap();
         let decoded = BuilderDocument::from_json(&encoded).unwrap();
         assert_eq!(decoded, doc);
@@ -2376,7 +2417,10 @@ mod tests {
             synthetic: true,
             ..Default::default()
         });
-        assert!(syn.validate_for_save(&registry(), None).is_err());
+        assert!(
+            syn.validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
 
         // Bad section background color fails
         let mut bad_color = doc.clone();
@@ -2385,7 +2429,11 @@ mod tests {
             .as_mut()
             .unwrap()
             .background_color = Some("expression(alert(1))".into());
-        assert!(bad_color.validate_for_save(&registry(), None).is_err());
+        assert!(
+            bad_color
+                .validate_for_save_with_schemas(&registry(), None)
+                .is_err()
+        );
     }
 
     #[test]

@@ -892,59 +892,6 @@ pub fn authenticated_preview_view_with_context(
     rewrite_preview_media_urls(view, &effective_schema.base.descriptor.key)
 }
 
-/// Draft preview runs behind an authenticated Admin route. In contrast to
-/// public entry rendering, media must resolve through authenticated URLs.
-pub fn authenticated_preview_view(
-    record: ContentEntryRecord,
-    schema: &ContentTypeDefinition,
-) -> EntryView {
-    let view = entry_view(record, schema);
-    rewrite_preview_media_urls(view, &schema.key)
-}
-
-pub fn render_role_fragment_with_options(
-    template: &str,
-    site: &SiteContext<'_>,
-    options: &BTreeMap<String, Value>,
-) -> Option<String> {
-    render_role_fragment_with_context(template, site, options, &BTreeMap::new())
-}
-
-pub fn render_role_fragment_with_context(
-    template: &str,
-    site: &SiteContext<'_>,
-    options: &BTreeMap<String, Value>,
-    menus: &BTreeMap<String, crate::storage::menu::MenuViewModel>,
-) -> Option<String> {
-    render_role_fragment_with_context_and_config(
-        template,
-        site,
-        options,
-        menus,
-        &RenderFormattingConfig::default(),
-    )
-}
-
-pub fn render_role_fragment_with_context_and_config(
-    template: &str,
-    site: &SiteContext<'_>,
-    options: &BTreeMap<String, Value>,
-    menus: &BTreeMap<String, crate::storage::menu::MenuViewModel>,
-    fmt_cfg: &RenderFormattingConfig,
-) -> Option<String> {
-    theme::render_content_with_config(
-        template,
-        &serde_json::json!({
-            "site": site,
-            "options": options,
-            "theme_options": options,
-            "menus": menus,
-        }),
-        fmt_cfg,
-    )
-    .ok()
-}
-
 pub struct PublicThemeContextInput<'a> {
     pub site: &'a SiteContext<'a>,
     pub options: &'a BTreeMap<String, Value>,
@@ -1463,33 +1410,6 @@ pub fn render_archive_with_site_for_locale(
     )
 }
 
-pub fn render_archive_with_site_and_config(
-    schema: &ContentTypeDefinition,
-    entries: &[EntryView],
-    previous_url: Option<&str>,
-    next_url: Option<&str>,
-    pagination: &PaginationView,
-    breadcrumbs: &[BreadcrumbItem],
-    taxonomy: Option<&Value>,
-    selected_template: Option<&str>,
-    site: &SiteContext<'_>,
-    fmt_cfg: &RenderFormattingConfig,
-) -> ApiResult<String> {
-    render_archive_with_site_and_config_for_locale(
-        schema,
-        entries,
-        previous_url,
-        next_url,
-        pagination,
-        breadcrumbs,
-        taxonomy,
-        selected_template,
-        site,
-        fmt_cfg,
-        "vi",
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn render_archive_with_site_and_config_for_locale(
     schema: &ContentTypeDefinition,
@@ -1579,27 +1499,6 @@ pub fn render_single_with_site_and_archive_for_locale(
         &[],
         &RenderFormattingConfig::default(),
         locale_code,
-    )
-}
-
-pub fn render_single_with_context(
-    schema: &ContentTypeDefinition,
-    entry: &EntryView,
-    selected_template: Option<&str>,
-    site: &SiteContext<'_>,
-    archive_url: Option<&str>,
-    breadcrumbs: &[BreadcrumbItem],
-    fmt_cfg: &RenderFormattingConfig,
-) -> ApiResult<String> {
-    render_single_with_context_for_locale(
-        schema,
-        entry,
-        selected_template,
-        site,
-        archive_url,
-        breadcrumbs,
-        fmt_cfg,
-        "vi",
     )
 }
 

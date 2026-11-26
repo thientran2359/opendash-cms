@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use opendash_core::block_schema::{BlockSchemaV1, RegisteredBlockSchema};
 use opendash_core::builder::{
     BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps,
     RowNode, SectionNode,
 };
 use opendash_core::registry::{RegistryCatalog, ResourceOwner};
-use opendash_core::theme::BlockDescriptor;
 use sqlx::sqlite::SqlitePoolOptions;
 
 fn unique_db_path(name: &str) -> std::path::PathBuf {
@@ -113,23 +113,36 @@ async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtri
         .unwrap();
     assert_eq!(count, 0);
 
+    let hero_schema: BlockSchemaV1 = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "id": "acme-plugin/hero",
+        "title": "Hero",
+        "category": "plugin",
+        "render": "render.html",
+        "fields": [
+            { "type": "text", "key": "heading", "label": "Heading" }
+        ]
+    }))
+    .unwrap();
     let mut active_reg = RegistryCatalog::default();
     active_reg
         .register(
             "acme-plugin/hero",
             ResourceOwner::Plugin("acme-plugin".into()),
-            BlockDescriptor {
-                id: "acme-plugin/hero".into(),
-                fields: Default::default(),
+            RegisteredBlockSchema {
+                schema: hero_schema,
             },
         )
         .expect("register plugin block");
-    doc.validate_for_save(&active_reg, None)
+    doc.validate_for_save_with_schemas(&active_reg, None)
         .expect("active plugin block must validate");
 
     // When plugin is disabled/missing, newly introducing it fails, but round-tripping existing saved AST succeeds
     let empty_reg = RegistryCatalog::default();
-    assert!(doc.validate_for_save(&empty_reg, None).is_err());
-    doc.validate_for_save(&empty_reg, Some(&doc))
+    assert!(
+        doc.validate_for_save_with_schemas(&empty_reg, None)
+            .is_err()
+    );
+    doc.validate_for_save_with_schemas(&empty_reg, Some(&doc))
         .expect("saved AST with disabled plugin block must be preserved");
 }

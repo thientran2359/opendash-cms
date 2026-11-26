@@ -27,7 +27,7 @@
 - `admin/src/builder`: [`./admin/src/builder/README.md`](./admin/src/builder/README.md) — Custom 4-layer AST visual builder (`Section -> Row -> Column -> Element`), schema-driven forms, responsive controls, and sandboxed preview frame.
 - `admin/src/features`: [`./admin/src/features/README.md`](./admin/src/features/README.md) — Domain feature panels/workspaces across 17 `features/*` subdirectories (`editor/`, `content/`, `media/`, `themes/`, `plugins/`, `operations/`, etc.).
 - `admin/src/components`: [`./admin/src/components/README.md`](./admin/src/components/README.md) — Reusable Tailwind + React 18 UI, form, and locale-tab primitives.
-- `admin/src/i18n`: [`./admin/src/i18n/README.md`](./admin/src/i18n/README.md) — Site-wide i18n provider, `Intl` formatters, and `en`/`vi` translation catalogs (`2,150` keys).
+- `admin/src/i18n`: [`./admin/src/i18n/README.md`](./admin/src/i18n/README.md) — Site-wide i18n provider, `Intl` formatters, and `en`/`vi` translation catalogs (`2,144` keys).
 
 ### Database, SDK, Tooling & Deployment
 - `migrations/`: [`./migrations/README.md`](./migrations/README.md) — 51 embedded forward-only SQLite migrations (`0001`–`0052`, omitting `0016`).

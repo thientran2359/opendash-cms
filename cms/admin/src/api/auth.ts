@@ -1,5 +1,5 @@
 import { tStatic } from '../i18n/index.tsx';
-import { AdminI18nBootstrap, AuthResponse, AuthUser } from '../types.ts';
+import { AdminI18nBootstrap, AuthResponse } from '../types.ts';
 import { requestJson, requestText } from './client.ts';
 
 export type UserRole = 'admin' | 'editor';
@@ -44,20 +44,6 @@ export async function logout(csrfToken: string | null): Promise<void> {
     method: 'POST',
     csrfToken,
     defaultErrorMessage: tStatic("api.auth.logout_failed"),
-  });
-}
-
-export async function createEditor(
-  username: string,
-  password: string,
-  csrfToken: string,
-): Promise<AuthUser> {
-  return requestJson<AuthUser>('/api/admin/users', {
-    method: 'POST',
-    csrfToken,
-    contentType: 'application/json',
-    body: JSON.stringify({ username, password }),
-    defaultErrorMessage: tStatic("api.auth.create_editor_failed"),
   });
 }
 

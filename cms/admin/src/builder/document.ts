@@ -146,9 +146,6 @@ export function isElement(node: BuilderNode): node is BuilderElement {
 export const VIEWPORT_WIDTHS: Record<BuilderViewport, number> = {
   desktop: 1280, tablet: 834, mobile: 390,
 };
-export const VIEWPORT_LABELS: Record<BuilderViewport, string> = {
-  desktop: 'Desktop', tablet: 'Tablet', mobile: 'Mobile',
-};
 export const RESPONSIVE_FIELDS: Record<'section' | 'row' | 'column', ResponsiveField[]> = {
   section: ['padding_px'],
   row: ['padding_px', 'gap_px', 'columns_per_row'],
@@ -164,12 +161,6 @@ export function effectiveResponsive(
   if (viewport !== 'desktop') Object.assign(result, styles.tablet);
   if (viewport === 'mobile') Object.assign(result, styles.mobile);
   return result;
-}
-
-export function rowUsesGrid(row: BuilderRow): boolean {
-  return Object.values(row.responsive ?? {}).some(style =>
-    style?.gap_px !== undefined || style?.columns_per_row !== undefined
-  );
 }
 
 /** Remove an unset viewport and parent object to keep v1 JSON sparse. */

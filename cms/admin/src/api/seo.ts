@@ -31,50 +31,10 @@ export function getEntryRoute(typeKey: string, id: number): Promise<EntryRouteSn
   );
 }
 
-export function putEntryRoute(
-  typeKey: string,
-  id: number,
-  expectedVersion: number,
-  customPath: string | null,
-  csrfToken: string,
-): Promise<EntryRouteSnapshot> {
-  return requestJson<EntryRouteSnapshot>(
-    `/api/admin/content-types/${encodeURIComponent(typeKey)}/entries/${id}/route`,
-    {
-      method: 'PUT',
-      csrfToken,
-      contentType: 'application/json',
-      ifMatchVersion: expectedVersion,
-      body: JSON.stringify({ custom_path: customPath }),
-      defaultErrorMessage: tStatic('api.seo.save_the_custom_permalink'),
-    },
-  );
-}
-
 export function getEntrySeo(typeKey: string, id: number): Promise<EntrySeoSnapshot> {
   return requestJson<EntrySeoSnapshot>(
     `/api/admin/content-types/${encodeURIComponent(typeKey)}/entries/${id}/seo`,
     { defaultErrorMessage: tStatic('api.seo.load_entry_seo') },
-  );
-}
-
-export function putEntrySeo(
-  typeKey: string,
-  id: number,
-  expectedVersion: number,
-  input: SeoMetadataInput,
-  csrfToken: string,
-): Promise<EntrySeoSnapshot> {
-  return requestJson<EntrySeoSnapshot>(
-    `/api/admin/content-types/${encodeURIComponent(typeKey)}/entries/${id}/seo`,
-    {
-      method: 'PUT',
-      csrfToken,
-      contentType: 'application/json',
-      ifMatchVersion: expectedVersion,
-      body: JSON.stringify(input),
-      defaultErrorMessage: tStatic('api.seo.save_entry_seo'),
-    },
   );
 }
 

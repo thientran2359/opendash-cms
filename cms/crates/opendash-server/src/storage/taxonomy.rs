@@ -543,10 +543,6 @@ pub async fn delete_definition(
     Ok(())
 }
 
-pub fn valid_kind(kind: &str) -> bool {
-    matches!(kind, "category" | "tag")
-}
-
 fn normalized_name(value: &str) -> ApiResult<&str> {
     let trimmed = value.trim();
     if !(1..=120).contains(&trimmed.chars().count()) {

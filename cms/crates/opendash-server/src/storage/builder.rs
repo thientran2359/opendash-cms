@@ -95,24 +95,6 @@ pub async fn resolve_contact_forms_in_tx(
     Ok(results)
 }
 
-pub async fn resolve_contact_forms(
-    db: &SqlitePool,
-    document: &BuilderDocument,
-) -> ApiResult<crate::page::ContactFormResults> {
-    let mut tx = db.begin().await?;
-    let res = resolve_contact_forms_in_tx(&mut tx, document).await?;
-    tx.commit().await?;
-    Ok(res)
-}
-
-pub async fn resolve_lists_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
-    document: &BuilderDocument,
-    pages: &BTreeMap<String, i64>,
-) -> ApiResult<ListResults> {
-    resolve_lists_in_tx_for_locale(tx, document, pages, None).await
-}
-
 pub async fn resolve_lists_in_tx_for_locale(
     tx: &mut Transaction<'_, Sqlite>,
     document: &BuilderDocument,
@@ -353,7 +335,6 @@ pub(crate) fn extract_document_media_refs(
                     };
                     if entry.status != ProviderStatus::Active
                         || entry.declaration_state != DeclarationState::Declared
-                        || entry.descriptor.legacy_mode
                     {
                         continue;
                     }
@@ -523,24 +504,6 @@ async fn load_pattern_rows_in_tx(
 /// Resolve references once for the entire parent AST. Missing IDs (for
 /// example after an explicit force-delete) produce safe public omissions and
 /// preview diagnostics. A Pattern cannot pull a second Pattern or ContentList.
-pub async fn resolve_patterns_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
-    state: &BuilderRenderContext,
-    document: &BuilderDocument,
-    is_preview: bool,
-) -> ApiResult<page::PatternResults> {
-    let mut budget = page::RenderBudget::new();
-    resolve_patterns_in_tx_with_budget(
-        tx,
-        state,
-        document,
-        is_preview,
-        &mut budget,
-        page::BlockTemplateCache::global(),
-    )
-    .await
-}
-
 pub async fn resolve_patterns_in_tx_with_budget(
     tx: &mut Transaction<'_, Sqlite>,
     state: &BuilderRenderContext,
@@ -1385,38 +1348,6 @@ async fn render_entry_builder_preview_with_budget(
 
 /// Shared-template preview uses the selected CPT body inside the caller's
 /// read snapshot. A missing saved block document is handled by the text renderer.
-pub(super) async fn preview_saved_page_body_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
-    actor: &SessionContext,
-    type_key: &str,
-    id: i64,
-) -> ApiResult<Option<RenderedLayout>> {
-    let mut budget = page::RenderBudget::new();
-    preview_saved_page_body_in_tx_with_budget(
-        tx,
-        actor,
-        type_key,
-        id,
-        &mut budget,
-        page::BlockTemplateCache::global(),
-    )
-    .await
-}
-
-pub(super) async fn preview_saved_page_body_in_tx_with_budget(
-    tx: &mut Transaction<'_, Sqlite>,
-    actor: &SessionContext,
-    type_key: &str,
-    id: i64,
-    budget: &mut page::RenderBudget,
-    cache: &page::BlockTemplateCache,
-) -> ApiResult<Option<RenderedLayout>> {
-    preview_saved_page_body_in_tx_with_options_and_budget(
-        tx, actor, type_key, id, None, None, budget, cache,
-    )
-    .await
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn preview_saved_page_body_in_tx_with_options_and_budget(
     tx: &mut Transaction<'_, Sqlite>,
@@ -1456,27 +1387,6 @@ pub(super) async fn preview_saved_page_body_in_tx_with_options_and_budget(
         )
         .await?,
     ))
-}
-
-pub async fn preview_saved_entry_body(
-    db: &SqlitePool,
-    actor: &SessionContext,
-    type_key: &str,
-    id: i64,
-) -> ApiResult<Option<(RenderedLayout, crate::template_sec::IconNonceTable)>> {
-    let mut tx = db.begin().await?;
-    let mut budget = page::RenderBudget::new();
-    let rendered = preview_saved_page_body_in_tx_with_budget(
-        &mut tx,
-        actor,
-        type_key,
-        id,
-        &mut budget,
-        page::BlockTemplateCache::global(),
-    )
-    .await?;
-    tx.rollback().await?;
-    Ok(rendered.map(|html| (html, budget.icon_nonces)))
 }
 
 pub async fn preview_entry_builder(

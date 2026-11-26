@@ -1076,10 +1076,6 @@ pub async fn get_reading_in_conn_for_locale(
     })
 }
 
-pub async fn get_reading_in_conn(conn: &mut SqliteConnection) -> ApiResult<ReadingSettings> {
-    get_reading_in_conn_for_locale(conn, None).await
-}
-
 pub async fn get_reading_for_locale(
     db: &SqlitePool,
     requested_locale: Option<&str>,
@@ -1891,10 +1887,6 @@ fn upcast_legacy_def_to_field(def: &ThemeOptionDef) -> BlockFieldSpec {
     }
 }
 
-fn defs_to_block_fields(defs: &[ThemeOptionDef]) -> Vec<BlockFieldSpec> {
-    defs.iter().map(upcast_legacy_def_to_field).collect()
-}
-
 fn extract_public_flags_and_strip(
     val: &mut serde_json::Value,
     out_public: &mut BTreeMap<String, bool>,
@@ -2487,13 +2479,6 @@ pub async fn get_theme_options_in_conn_for_locale(
     }))
 }
 
-pub async fn get_theme_options_in_conn(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-) -> ApiResult<Option<ThemeOptionsSnapshot>> {
-    get_theme_options_in_conn_for_locale(conn, theme_id, None).await
-}
-
 pub async fn get_theme_options_for_locale(
     db: &SqlitePool,
     theme_id: &str,
@@ -2503,13 +2488,6 @@ pub async fn get_theme_options_for_locale(
     let res = get_theme_options_in_conn_for_locale(&mut tx, theme_id, requested_locale).await?;
     tx.commit().await?;
     Ok(res)
-}
-
-pub async fn get_theme_options(
-    db: &SqlitePool,
-    theme_id: &str,
-) -> ApiResult<Option<ThemeOptionsSnapshot>> {
-    get_theme_options_for_locale(db, theme_id, None).await
 }
 
 pub async fn put_theme_options_in_conn_for_locale(
@@ -2708,15 +2686,6 @@ pub async fn put_theme_options_in_conn_for_locale(
     Ok(ThemeOptionsOutcome::Saved(snapshot))
 }
 
-pub async fn put_theme_options_in_conn(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-    expected_version: i64,
-    submitted: BTreeMap<String, serde_json::Value>,
-) -> ApiResult<ThemeOptionsOutcome> {
-    put_theme_options_in_conn_for_locale(conn, theme_id, expected_version, submitted, None).await
-}
-
 pub async fn put_theme_options_for_locale(
     db: &SqlitePool,
     theme_id: &str,
@@ -2749,15 +2718,6 @@ pub async fn put_theme_options_for_locale(
             Err(err)
         }
     }
-}
-
-pub async fn put_theme_options(
-    db: &SqlitePool,
-    theme_id: &str,
-    expected_version: i64,
-    submitted: BTreeMap<String, serde_json::Value>,
-) -> ApiResult<ThemeOptionsOutcome> {
-    put_theme_options_for_locale(db, theme_id, expected_version, submitted, None).await
 }
 
 pub async fn check_theme_options_compatibility(
@@ -3120,14 +3080,6 @@ pub(super) async fn get_public_theme_options_in_conn_for_locale(
     .await
 }
 
-pub(super) async fn get_public_theme_options_in_conn(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-    manifest_json: &str,
-) -> ApiResult<BTreeMap<String, serde_json::Value>> {
-    get_public_theme_options_in_conn_for_locale(conn, theme_id, manifest_json, None).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3488,155 +3440,6 @@ mod tests {
         assert_eq!(en_pub["cta_url"], serde_json::json!("/en/contact"));
         assert_eq!(en_pub["accent"], serde_json::json!("#222"));
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SettingsOwnerKind {
-    Theme,
-    Plugin,
-}
-
-impl SettingsOwnerKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Theme => "theme",
-            Self::Plugin => "plugin",
-        }
-    }
-}
-
-pub async fn get_owner_settings_in_conn(
-    conn: &mut SqliteConnection,
-    owner_kind: SettingsOwnerKind,
-    owner_id: &str,
-    schema: &[ThemeOptionDef],
-) -> ApiResult<ThemeOptionsSnapshot> {
-    let version: i64 = sqlx::query_scalar(
-        "SELECT version FROM theme_option_versions WHERE owner_kind = ? AND owner_id = ?",
-    )
-    .bind(owner_kind.as_str())
-    .bind(owner_id)
-    .fetch_optional(&mut *conn)
-    .await?
-    .unwrap_or(1);
-
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = ? AND owner_id = ?",
-    )
-    .bind(owner_kind.as_str())
-    .bind(owner_id)
-    .fetch_all(&mut *conn)
-    .await?;
-    let mut saved_map = BTreeMap::new();
-    for (k, v_json) in rows {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
-            saved_map.insert(k, v);
-        }
-    }
-
-    let mut values = BTreeMap::new();
-    for def in schema {
-        let v = saved_map
-            .get(&def.key)
-            .cloned()
-            .unwrap_or_else(|| def.default.clone());
-        values.insert(def.key.clone(), v);
-    }
-
-    Ok(ThemeOptionsSnapshot {
-        theme_id: owner_id.to_owned(),
-        version,
-        schema: schema.to_vec(),
-        fields: defs_to_block_fields(schema),
-        values,
-        locale: None,
-    })
-}
-
-pub async fn put_owner_settings_in_conn(
-    conn: &mut SqliteConnection,
-    owner_kind: SettingsOwnerKind,
-    owner_id: &str,
-    expected_version: i64,
-    schema: &[ThemeOptionDef],
-    submitted: BTreeMap<String, serde_json::Value>,
-) -> ApiResult<ThemeOptionsOutcome> {
-    let schema_map: BTreeMap<&str, &ThemeOptionDef> =
-        schema.iter().map(|d| (d.key.as_str(), d)).collect();
-
-    for (k, v) in &submitted {
-        let Some(def) = schema_map.get(k.as_str()) else {
-            return Err(ApiError::bad_request(
-                "Option key không tồn tại trong schema.",
-            ));
-        };
-        validate_option_value(def, v).map_err(ApiError::bad_request)?;
-    }
-
-    let current_ver: Option<i64> = sqlx::query_scalar(
-        "SELECT version FROM theme_option_versions WHERE owner_kind = ? AND owner_id = ?",
-    )
-    .bind(owner_kind.as_str())
-    .bind(owner_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-
-    match current_ver {
-        None => {
-            if expected_version != 1 {
-                return Ok(ThemeOptionsOutcome::Stale);
-            }
-            sqlx::query(
-                "INSERT INTO theme_option_versions (theme_id, owner_kind, owner_id, version) VALUES (?, ?, ?, 2)",
-            )
-            .bind(owner_id)
-            .bind(owner_kind.as_str())
-            .bind(owner_id)
-            .execute(&mut *conn)
-            .await?;
-        }
-        Some(ver) => {
-            if ver != expected_version {
-                return Ok(ThemeOptionsOutcome::Stale);
-            }
-            let res = sqlx::query(
-                "UPDATE theme_option_versions
-                 SET version = version + 1,
-                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                 WHERE owner_kind = ? AND owner_id = ? AND version = ?",
-            )
-            .bind(owner_kind.as_str())
-            .bind(owner_id)
-            .bind(expected_version)
-            .execute(&mut *conn)
-            .await?;
-            if res.rows_affected() != 1 {
-                return Ok(ThemeOptionsOutcome::Stale);
-            }
-        }
-    }
-
-    for (k, v) in &submitted {
-        let v_json = serde_json::to_string(v)?;
-        sqlx::query(
-            "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json, updated_at)
-             VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-             ON CONFLICT(owner_kind, owner_id, option_key) DO UPDATE SET
-                 value_json = excluded.value_json,
-                 updated_at = excluded.updated_at",
-        )
-        .bind(owner_id)
-        .bind(owner_kind.as_str())
-        .bind(owner_id)
-        .bind(k)
-        .bind(v_json)
-        .execute(&mut *conn)
-        .await?;
-    }
-
-    let snapshot = get_owner_settings_in_conn(conn, owner_kind, owner_id, schema).await?;
-    Ok(ThemeOptionsOutcome::Saved(snapshot))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4294,8 +4097,6 @@ pub async fn put_plugin_settings(
         has_projection_filters,
     })
 }
-
-pub const MAX_CONTENT_LANGUAGE_BYTES: usize = opendash_core::id::MAX_BCP47_TAG_BYTES;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 pub struct PublicSiteSettings {

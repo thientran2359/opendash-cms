@@ -9,10 +9,9 @@ use opendash_core::{
         EditorLayoutConfigV1, EditorRegion, EffectiveContentSchema,
         EffectiveEditorConfigProjection, EffectiveFieldStatus, FieldGroupRecord, FieldGroupStatus,
         FieldGroupTargetBinding, FieldRole, PanelDefinition, PanelKind, SchemaTransitionError,
-        UserFieldGroupInput, build_core_and_group_panels, check_base_fields_compatibility,
-        merge_package_redeclared_fields, project_effective_editor_config,
-        resolve_and_validate_editor_layout, valid_content_type_key,
-        verify_effective_schema_transition,
+        UserFieldGroupInput, build_core_and_group_panels, merge_package_redeclared_fields,
+        project_effective_editor_config, resolve_and_validate_editor_layout,
+        valid_content_type_key, verify_effective_schema_transition,
     },
     id::ScopedResourceId,
     plugin::PluginManifest,
@@ -1094,15 +1093,6 @@ pub async fn withdraw_user_field_group(
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(withdrawn)
-}
-
-/// Checks schema evolution compatibility for same-owner re-declaration.
-pub fn check_content_type_compatibility(
-    existing: &ContentTypeDefinition,
-    incoming: &ContentTypeDefinition,
-    has_existing_entries: bool,
-) -> Result<(), &'static str> {
-    check_base_fields_compatibility(&existing.fields, &incoming.fields, has_existing_entries)
 }
 
 async fn bump_provider_cpt_cas_in_tx(
