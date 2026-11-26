@@ -5,18 +5,30 @@ import {
   activateThemeRevision,
   dryRunSampleImport,
   executeSampleImport,
+  getActiveThemeFunctionsLogs,
+  getActiveThemeFunctionsSettings,
   getThemes,
   installTheme,
   isV3ThemeInstall,
+  runActiveThemeAction,
+  saveActiveThemeFunctionsSettings,
   type ImportExecutionOutcome,
   type ImportPlan,
   type SampleGroup,
+  type ThemeFunctionLogItem,
+  type ThemeFunctionsSettingsSnapshot,
   type ThemesSummary,
 } from '../../api/themes.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  buildOwnerOptionsSubmitPayload,
+  OwnerOptionsForm,
+} from '../shared/OwnerOptionsForm.tsx';
 
 interface Props {
   csrfToken: string | null;
+  devTheme?: string | null;
+  themeRevision?: number;
   onApiError: (error: unknown, fallback: string) => void;
   onInstalled: () => void;
   onActivated: () => void;
@@ -24,6 +36,8 @@ interface Props {
 
 export const ThemesPanel: React.FC<Props> = ({
   csrfToken,
+  devTheme = null,
+  themeRevision = 0,
   onApiError,
   onInstalled,
   onActivated,
@@ -41,9 +55,35 @@ export const ThemesPanel: React.FC<Props> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [fnSettings, setFnSettings] = useState<ThemeFunctionsSettingsSnapshot | null>(null);
+  const [fnDraft, setFnDraft] = useState<Record<string, unknown>>({});
+  const [fnSaving, setFnSaving] = useState(false);
+  const [fnNotice, setFnNotice] = useState('');
+  const [fnError, setFnError] = useState('');
+  const [fnLogs, setFnLogs] = useState<ThemeFunctionLogItem[]>([]);
+  const [runningActionId, setRunningActionId] = useState<string | null>(null);
+  const [actionOutput, setActionOutput] = useState<string>('');
   const onErrorRef = useRef(onApiError);
   onErrorRef.current = onApiError;
   const mounted = useRef(true);
+
+  const loadThemeFunctions = async () => {
+    try {
+      const [settings, logsResp] = await Promise.all([
+        getActiveThemeFunctionsSettings(),
+        getActiveThemeFunctionsLogs(50),
+      ]);
+      if (!mounted.current) return;
+      setFnSettings(settings);
+      setFnDraft(settings.values);
+      setFnLogs(logsResp.items);
+    } catch {
+      if (mounted.current) {
+        setFnSettings(null);
+        setFnLogs([]);
+      }
+    }
+  };
 
   const refresh = async (): Promise<boolean> => {
     setLoading(true);
@@ -51,6 +91,7 @@ export const ThemesPanel: React.FC<Props> = ({
     try {
       const result = await getThemes();
       if (mounted.current) setData(result);
+      await loadThemeFunctions();
       return mounted.current;
     } catch (cause) {
       if (mounted.current) {
@@ -67,7 +108,51 @@ export const ThemesPanel: React.FC<Props> = ({
     mounted.current = true;
     void refresh();
     return () => { mounted.current = false; };
-  }, []);
+  }, [themeRevision]);
+
+  const handleSaveThemeFunctions = async () => {
+    if (!fnSettings || !fnSettings.has_functions || !csrfToken || fnSaving) return;
+    setFnSaving(true);
+    setFnError('');
+    setFnNotice('');
+    try {
+      const payload = buildOwnerOptionsSubmitPayload(fnSettings.schema, fnDraft);
+      const saved = await saveActiveThemeFunctionsSettings(payload, fnSettings.version, csrfToken);
+      if (mounted.current) {
+        setFnSettings(saved);
+        setFnDraft(saved.values);
+        setFnNotice(tStatic('feature.themes.themespanel.theme_functions_saved'));
+      }
+    } catch (cause) {
+      if (mounted.current) {
+        setFnError(cause instanceof Error ? cause.message : tStatic('api.themes.save_theme_functions_settings'));
+      }
+      onErrorRef.current(cause, tStatic('api.themes.save_theme_functions_settings'));
+    } finally {
+      if (mounted.current) setFnSaving(false);
+    }
+  };
+
+  const handleRunThemeAction = async (actionId: string) => {
+    if (!csrfToken || runningActionId) return;
+    setRunningActionId(actionId);
+    setFnError('');
+    try {
+      const result = await runActiveThemeAction(actionId, {}, csrfToken);
+      if (mounted.current) {
+        setActionOutput(JSON.stringify(result, null, 2));
+      }
+      const logsResp = await getActiveThemeFunctionsLogs(50);
+      if (mounted.current) setFnLogs(logsResp.items);
+    } catch (cause) {
+      if (mounted.current) {
+        setFnError(cause instanceof Error ? cause.message : tStatic('api.themes.run_theme_action'));
+      }
+      onErrorRef.current(cause, tStatic('api.themes.run_theme_action'));
+    } finally {
+      if (mounted.current) setRunningActionId(null);
+    }
+  };
 
   const upload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -273,6 +358,119 @@ export const ThemesPanel: React.FC<Props> = ({
                 </AdminAlert>
               )}
             </div>
+          )}
+          {fnSettings?.has_functions && (
+            <section
+              className="space-y-4 rounded-xl border border-zinc-200 bg-white p-4"
+              aria-label={translate('feature.themes.themespanel.theme_functions_heading')}
+              data-testid="theme-functions-section"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-semibold text-zinc-950">
+                      {translate('feature.themes.themespanel.theme_functions_heading')}
+                    </h3>
+                    {fnSettings.theme_id && (
+                      <AdminBadge tone="neutral">{fnSettings.theme_id}</AdminBadge>
+                    )}
+                    {devTheme && devTheme === fnSettings.theme_id && (
+                      <AdminBadge tone="warning">{translate('shell.dev_mode_badge')}</AdminBadge>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-xs text-zinc-600">
+                    {translate('feature.themes.themespanel.theme_functions_description')}
+                  </p>
+                </div>
+                <AdminButton
+                  variant="secondary"
+                  size="sm"
+                  disabled={fnSaving || Boolean(runningActionId)}
+                  onClick={() => void loadThemeFunctions()}
+                >
+                  {translate('feature.themes.themespanel.theme_functions_reload_logs')}
+                </AdminButton>
+              </div>
+              {fnSettings.schema.length > 0 && (
+                <OwnerOptionsForm
+                  ownerKind="theme_functions"
+                  ownerId={fnSettings.theme_id ?? 'active'}
+                  title={translate('feature.themes.themespanel.theme_functions_settings_title')}
+                  schema={fnSettings.schema}
+                  values={fnDraft}
+                  savedValues={fnSettings.values}
+                  version={fnSettings.version}
+                  csrfToken={csrfToken}
+                  saving={fnSaving}
+                  notice={fnNotice}
+                  error={fnError}
+                  testId="theme-functions-settings-form"
+                  onChange={setFnDraft}
+                  onSubmit={() => { void handleSaveThemeFunctions(); }}
+                  onApiError={onApiError}
+                />
+              )}
+              {fnSettings.schema.length === 0 && fnError && (
+                <AdminAlert tone="error">{fnError}</AdminAlert>
+              )}
+              {fnSettings.actions.length > 0 && (
+                <div className="space-y-2 border-t border-zinc-100 pt-3" data-testid="theme-functions-actions">
+                  <h4 className="text-sm font-semibold text-zinc-900">
+                    {translate('feature.themes.themespanel.theme_functions_actions_heading')}
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {fnSettings.actions.map(action => (
+                      <AdminButton
+                        key={action.id}
+                        variant="secondary"
+                        size="sm"
+                        disabled={!csrfToken || Boolean(runningActionId)}
+                        onClick={() => void handleRunThemeAction(action.id)}
+                      >
+                        {runningActionId === action.id
+                          ? translate('feature.themes.themespanel.theme_functions_running')
+                          : `${action.title || action.id} (${action.required_role})`}
+                      </AdminButton>
+                    ))}
+                  </div>
+                  {actionOutput && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-zinc-700">
+                        {translate('feature.themes.themespanel.theme_functions_action_result')}
+                      </p>
+                      <pre className="max-h-48 overflow-auto rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 font-mono text-xs text-zinc-800">
+                        {actionOutput}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="space-y-2 border-t border-zinc-100 pt-3" data-testid="theme-functions-logs">
+                <h4 className="text-sm font-semibold text-zinc-900">
+                  {translate('feature.themes.themespanel.theme_functions_logs_heading')}
+                </h4>
+                {fnLogs.length === 0 ? (
+                  <p className="text-xs text-zinc-500">
+                    {translate('feature.themes.themespanel.theme_functions_logs_empty')}
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5 text-xs">
+                    {fnLogs.map(log => (
+                      <li
+                        key={log.id}
+                        className="flex flex-wrap items-baseline gap-2 rounded-md border border-zinc-100 bg-zinc-50/70 px-2.5 py-1.5"
+                      >
+                        <AdminBadge tone={log.level === 'error' ? 'danger' : log.level === 'warn' ? 'warning' : 'neutral'}>
+                          {log.level}
+                        </AdminBadge>
+                        <span className="font-mono text-[11px] text-zinc-500">{log.created_at}</span>
+                        <span className="break-words text-zinc-800">{log.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
           )}
         </>
       )}

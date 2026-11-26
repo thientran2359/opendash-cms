@@ -3556,9 +3556,10 @@ pub async fn get_plugin_manifest_for_settings(
     Ok(Some(manifest))
 }
 
-async fn get_plugin_settings_redacted_in_conn(
+async fn get_owner_settings_redacted_in_conn(
     conn: &mut SqliteConnection,
-    plugin_id: &str,
+    owner_kind_db: &str,
+    owner_id: &str,
     schema: &[opendash_core::plugin::PluginSettingField],
 ) -> ApiResult<PluginSettingsSnapshot> {
     use opendash_core::plugin::PluginSettingFieldType;
@@ -3566,20 +3567,24 @@ async fn get_plugin_settings_redacted_in_conn(
     let ver_row: Option<(i64, String)> = sqlx::query_as(
         "SELECT version, updated_at
            FROM theme_option_versions
-          WHERE owner_kind = 'plugin' AND owner_id = ?",
+          WHERE owner_kind = ? AND owner_id = ?",
     )
-    .bind(plugin_id)
+    .bind(owner_kind_db)
+    .bind(owner_id)
     .fetch_optional(&mut *conn)
     .await?;
 
     let (version, updated_at) = match ver_row {
         Some((v, ts)) => (v, ts),
         None => {
-            let fallback_ts: Option<String> =
+            let fallback_ts: Option<String> = if owner_kind_db == "plugin" {
                 sqlx::query_scalar("SELECT updated_at FROM plugins WHERE id = ?")
-                    .bind(plugin_id)
+                    .bind(owner_id)
                     .fetch_optional(&mut *conn)
-                    .await?;
+                    .await?
+            } else {
+                None
+            };
             (1, fallback_ts.unwrap_or_default())
         }
     };
@@ -3587,9 +3592,10 @@ async fn get_plugin_settings_redacted_in_conn(
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT option_key, value_json
            FROM theme_option_values
-          WHERE owner_kind = 'plugin' AND owner_id = ?",
+          WHERE owner_kind = ? AND owner_id = ?",
     )
-    .bind(plugin_id)
+    .bind(owner_kind_db)
+    .bind(owner_id)
     .fetch_all(&mut *conn)
     .await?;
     let mut saved_map = BTreeMap::new();
@@ -3614,6 +3620,11 @@ async fn get_plugin_settings_redacted_in_conn(
         } else {
             let v = saved_map
                 .get(&field.key)
+                .filter(|val| {
+                    // Never leak a mismatched stored secret_ref on a non-secret schema field.
+                    !val.as_object()
+                        .is_some_and(|obj| obj.contains_key("secret_ref"))
+                })
                 .cloned()
                 .unwrap_or_else(|| field.default.clone());
             values.insert(field.key.clone(), v);
@@ -3621,7 +3632,7 @@ async fn get_plugin_settings_redacted_in_conn(
     }
 
     Ok(PluginSettingsSnapshot {
-        plugin_id: plugin_id.to_owned(),
+        plugin_id: owner_id.to_owned(),
         version,
         schema: schema.to_vec(),
         values,
@@ -3635,7 +3646,16 @@ pub async fn get_plugin_settings_redacted(
     schema: &[opendash_core::plugin::PluginSettingField],
 ) -> ApiResult<PluginSettingsSnapshot> {
     let mut conn = db.acquire().await?;
-    get_plugin_settings_redacted_in_conn(&mut conn, plugin_id, schema).await
+    get_owner_settings_redacted_in_conn(&mut conn, "plugin", plugin_id, schema).await
+}
+
+pub async fn get_theme_functions_settings_redacted(
+    db: &SqlitePool,
+    theme_id: &str,
+    schema: &[opendash_core::plugin::PluginSettingField],
+) -> ApiResult<PluginSettingsSnapshot> {
+    let mut conn = db.acquire().await?;
+    get_owner_settings_redacted_in_conn(&mut conn, "theme_functions", theme_id, schema).await
 }
 
 pub async fn put_plugin_settings(
@@ -3646,7 +3666,71 @@ pub async fn put_plugin_settings(
     schema: &[opendash_core::plugin::PluginSettingField],
     submitted: &serde_json::Map<String, serde_json::Value>,
 ) -> ApiResult<PluginSettingsOutcome> {
-    use opendash_core::{hooks::HookEvent, plugin::PluginSettingFieldType};
+    use opendash_core::hooks::HookEvent;
+    let manifest_json: Option<String> =
+        sqlx::query_scalar("SELECT manifest_json FROM plugins WHERE id = ?")
+            .bind(plugin_id)
+            .fetch_optional(db)
+            .await?;
+    let has_projection_filters = manifest_json
+        .as_deref()
+        .and_then(|raw| opendash_core::plugin::PluginManifest::from_json_str(raw).ok())
+        .is_some_and(|manifest| {
+            manifest
+                .filters
+                .iter()
+                .any(|f| matches!(f, HookEvent::FilterSeoHead | HookEvent::FilterEntryView))
+        });
+    put_owner_settings(
+        db,
+        secrets_dir,
+        "plugin",
+        "plugins",
+        plugin_id,
+        expected_version,
+        schema,
+        submitted,
+        has_projection_filters,
+    )
+    .await
+}
+
+pub async fn put_theme_functions_settings(
+    db: &SqlitePool,
+    secrets_dir: &std::path::Path,
+    theme_id: &str,
+    expected_version: i64,
+    schema: &[opendash_core::plugin::PluginSettingField],
+    submitted: &serde_json::Map<String, serde_json::Value>,
+    has_projection_filters: bool,
+) -> ApiResult<PluginSettingsOutcome> {
+    put_owner_settings(
+        db,
+        secrets_dir,
+        "theme_functions",
+        "themes",
+        theme_id,
+        expected_version,
+        schema,
+        submitted,
+        has_projection_filters,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn put_owner_settings(
+    db: &SqlitePool,
+    secrets_dir: &std::path::Path,
+    owner_kind_db: &str,
+    secrets_subdir: &str,
+    owner_id: &str,
+    expected_version: i64,
+    schema: &[opendash_core::plugin::PluginSettingField],
+    submitted: &serde_json::Map<String, serde_json::Value>,
+    has_projection_filters: bool,
+) -> ApiResult<PluginSettingsOutcome> {
+    use opendash_core::plugin::PluginSettingFieldType;
 
     let schema_map: BTreeMap<&str, &opendash_core::plugin::PluginSettingField> =
         schema.iter().map(|f| (f.key.as_str(), f)).collect();
@@ -3659,25 +3743,11 @@ pub async fn put_plugin_settings(
     }
 
     let mut conn = db.acquire().await?;
-    let manifest_json: Option<String> =
-        sqlx::query_scalar("SELECT manifest_json FROM plugins WHERE id = ?")
-            .bind(plugin_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    let has_projection_filters = manifest_json
-        .as_deref()
-        .and_then(|raw| opendash_core::plugin::PluginManifest::from_json_str(raw).ok())
-        .is_some_and(|manifest| {
-            manifest
-                .filters
-                .iter()
-                .any(|f| matches!(f, HookEvent::FilterSeoHead | HookEvent::FilterEntryView))
-        });
-
     let current_ver: Option<i64> = sqlx::query_scalar(
-        "SELECT version FROM theme_option_versions WHERE owner_kind = 'plugin' AND owner_id = ?",
+        "SELECT version FROM theme_option_versions WHERE owner_kind = ? AND owner_id = ?",
     )
-    .bind(plugin_id)
+    .bind(owner_kind_db)
+    .bind(owner_id)
     .fetch_optional(&mut *conn)
     .await?;
     if current_ver.unwrap_or(1) != expected_version {
@@ -3689,9 +3759,10 @@ pub async fn put_plugin_settings(
     let existing_rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT option_key, value_json
            FROM theme_option_values
-          WHERE owner_kind = 'plugin' AND owner_id = ?",
+          WHERE owner_kind = ? AND owner_id = ?",
     )
-    .bind(plugin_id)
+    .bind(owner_kind_db)
+    .bind(owner_id)
     .fetch_all(&mut *conn)
     .await?;
     drop(conn);
@@ -3715,8 +3786,9 @@ pub async fn put_plugin_settings(
         },
     }
 
-    let store =
-        crate::secrets::SecretStore::for_plugin_dir(secrets_dir.join("plugins").join(plugin_id));
+    let store = crate::secrets::SecretStore::for_plugin_dir(
+        secrets_dir.join(secrets_subdir).join(owner_id),
+    );
     let mut newly_created_refs: Vec<crate::secrets::SecretRef> = Vec::new();
     let mut old_refs_to_remove: Vec<String> = Vec::new();
     let mut planned: Vec<PlannedPluginWrite> = Vec::new();
@@ -3927,9 +3999,10 @@ pub async fn put_plugin_settings(
     }
 
     let tx_ver: Option<i64> = match sqlx::query_scalar(
-        "SELECT version FROM theme_option_versions WHERE owner_kind = 'plugin' AND owner_id = ?",
+        "SELECT version FROM theme_option_versions WHERE owner_kind = ? AND owner_id = ?",
     )
-    .bind(plugin_id)
+    .bind(owner_kind_db)
+    .bind(owner_id)
     .fetch_optional(&mut *tx)
     .await
     {
@@ -3950,10 +4023,11 @@ pub async fn put_plugin_settings(
             }
             if let Err(err) = sqlx::query(
                 "INSERT INTO theme_option_versions (theme_id, owner_kind, owner_id, version)
-                 VALUES (?, 'plugin', ?, 2)",
+                 VALUES (?, ?, ?, 2)",
             )
-            .bind(plugin_id)
-            .bind(plugin_id)
+            .bind(owner_id)
+            .bind(owner_kind_db)
+            .bind(owner_id)
             .execute(&mut *tx)
             .await
             {
@@ -3972,9 +4046,10 @@ pub async fn put_plugin_settings(
                 "UPDATE theme_option_versions
                     SET version = version + 1,
                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                  WHERE owner_kind = 'plugin' AND owner_id = ? AND version = ?",
+                  WHERE owner_kind = ? AND owner_id = ? AND version = ?",
             )
-            .bind(plugin_id)
+            .bind(owner_kind_db)
+            .bind(owner_id)
             .bind(expected_version)
             .execute(&mut *tx)
             .await
@@ -3999,9 +4074,10 @@ pub async fn put_plugin_settings(
             PlannedPluginWrite::Delete { key } => {
                 if let Err(err) = sqlx::query(
                     "DELETE FROM theme_option_values
-                      WHERE owner_kind = 'plugin' AND owner_id = ? AND option_key = ?",
+                      WHERE owner_kind = ? AND owner_id = ? AND option_key = ?",
                 )
-                .bind(plugin_id)
+                .bind(owner_kind_db)
+                .bind(owner_id)
                 .bind(&key)
                 .execute(&mut *tx)
                 .await
@@ -4025,13 +4101,14 @@ pub async fn put_plugin_settings(
                 };
                 if let Err(err) = sqlx::query(
                     "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json, updated_at)
-                     VALUES (?, 'plugin', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                     VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
                      ON CONFLICT(owner_kind, owner_id, option_key) DO UPDATE SET
                          value_json = excluded.value_json,
                          updated_at = excluded.updated_at",
                 )
-                .bind(plugin_id)
-                .bind(plugin_id)
+                .bind(owner_id)
+                .bind(owner_kind_db)
+                .bind(owner_id)
                 .bind(&key)
                 .bind(v_json)
                 .execute(&mut *tx)
@@ -4043,9 +4120,10 @@ pub async fn put_plugin_settings(
                 if sync_media_ref {
                     if let Err(err) = sqlx::query(
                         "DELETE FROM theme_option_media_refs
-                          WHERE owner_kind = 'plugin' AND owner_id = ? AND option_key = ?",
+                          WHERE owner_kind = ? AND owner_id = ? AND option_key = ?",
                     )
-                    .bind(plugin_id)
+                    .bind(owner_kind_db)
+                    .bind(owner_id)
                     .bind(&key)
                     .execute(&mut *tx)
                     .await
@@ -4056,10 +4134,11 @@ pub async fn put_plugin_settings(
                     if let Some(ref mid) = media_id
                         && let Err(err) = sqlx::query(
                             "INSERT INTO theme_option_media_refs (theme_id, owner_kind, owner_id, option_key, media_id)
-                             VALUES (?, 'plugin', ?, ?, ?)",
+                             VALUES (?, ?, ?, ?, ?)",
                         )
-                        .bind(plugin_id)
-                        .bind(plugin_id)
+                        .bind(owner_id)
+                        .bind(owner_kind_db)
+                        .bind(owner_id)
                         .bind(&key)
                         .bind(mid)
                         .execute(&mut *tx)
@@ -4073,13 +4152,14 @@ pub async fn put_plugin_settings(
         }
     }
 
-    let snapshot = match get_plugin_settings_redacted_in_conn(&mut tx, plugin_id, schema).await {
-        Ok(s) => s,
-        Err(err) => {
-            cleanup_new_refs(&newly_created_refs);
-            return Err(err);
-        }
-    };
+    let snapshot =
+        match get_owner_settings_redacted_in_conn(&mut tx, owner_kind_db, owner_id, schema).await {
+            Ok(s) => s,
+            Err(err) => {
+                cleanup_new_refs(&newly_created_refs);
+                return Err(err);
+            }
+        };
 
     if let Err(err) = tx.commit().await {
         cleanup_new_refs(&newly_created_refs);

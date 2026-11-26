@@ -6,7 +6,7 @@ import type { BuilderViewport } from '../../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 import type { BlockFieldSpec, BlockSchemaV1, PluginSettingField } from '../../types.ts';
 
-export type OwnerKind = 'theme' | 'plugin';
+export type OwnerKind = 'theme' | 'plugin' | 'theme_functions';
 export type OwnerOptionDef = ThemeOptionDef | PluginSettingField;
 
 export function sameOwnerOptionValues(

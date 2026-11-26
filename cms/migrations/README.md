@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **51** `.sql` files numbered `0001` through `0052` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `sqlx::migrate!("../../migrations")` in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
+`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **52** `.sql` files numbered `0001` through `0053` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `sqlx::migrate!("../../migrations")` in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
 
 | Group / Milestone | Migrations | Primary Tables & Schema Objects |
 | --- | --- | --- |
@@ -24,6 +24,7 @@
 | **Plugin Extensibility & Projections** | [`0050_plugin_extensibility_and_projections.sql`](0050_plugin_extensibility_and_projections.sql) | Rebuilds PKs on `theme_option_values`, `theme_option_versions`, and `theme_option_media_refs` keyed by `(owner_kind, owner_id, ...)`, and adds `plugin_entry_projections` + `idx_plugin_entry_projections_plugin`. |
 | **Admin I18n & Multilingual Settings (Layer 3)** | [`0051_admin_i18n_and_multilingual_settings.sql`](0051_admin_i18n_and_multilingual_settings.sql) | Adds `site_general_settings.cms_locale` (default `en`), `site_locales_state.multilingual_enabled`, and `site_locales.deleted_at`. |
 | **Taxonomy Term Featured Image** | [`0052_taxonomy_term_featured_image.sql`](0052_taxonomy_term_featured_image.sql) | Adds `taxonomy_terms.featured_image_media_id` (`REFERENCES media_assets(id) ON DELETE RESTRICT`) and partial index `idx_taxonomy_terms_featured_image_media_id`. |
+| **Theme Functions & Unified JS Runtime** | [`0053_theme_functions_runtime.sql`](0053_theme_functions_runtime.sql) | Rebuilds `plugin_kv`, `plugin_entry_projections`, `plugin_logs` (`owner_kind` composite keys, dropping FK to `plugins(id)`) and `theme_option_{values,versions,media_refs}` (`owner_kind` including `theme_functions`), recreating `idx_theme_option_values_owner` (`+0` net schema objects). |
 
 ## Interface
 
@@ -35,7 +36,7 @@
 ## Invariants
 
 - **Immutable applied migrations:** Never edit SQL content or change line endings (LF) of existing migration files; SQLx verifies checksums in `_sqlx_migrations` against embedded bytes.
-- **Monotonic numbering:** Every new schema change must be added as the next sequential `NNNN_<snake_case>.sql` file (`0053_*` onward; `0016` remains permanently unused).
+- **Monotonic numbering:** Every new schema change must be added as the next sequential `NNNN_<snake_case>.sql` file (`0054_*` onward; `0016` remains permanently unused).
 - **Pre-existing ownership safety:** `preflight_builtin_key_collisions` must run before `0008` so user/theme/plugin-owned `post`/`page` descriptors are never overwritten during bootstrap.
 - **Database integrity enforcement:** Triggers (`content_entries_core_insert_draft`, `taxonomy_terms_parent_*`, `content_entries_pattern_private_*`, `content_entries_mark_has_been_published_*`, and `*_locale_*` triggers from `0047`) enforce domain invariants at the SQLite layer alongside `PRAGMA foreign_keys = ON`.
 - **Storage layering:** All runtime SQL queries (`sqlx::query*`) against these tables belong in `cms/crates/opendash-server/src/storage/`, per [CORE_FOUNDATION.md](../../docs/contracts/CORE_FOUNDATION.md).

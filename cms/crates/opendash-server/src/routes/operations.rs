@@ -274,6 +274,7 @@ pub async fn create_backup(
         schema_version: None,
         file_count: None,
         deleted: false,
+        dev_mode_active: crate::dev_mode::DevOverlayConfig::global().is_some(),
     };
     let running_job = crate::storage::operations::transition_job_cas(
         &state.db,

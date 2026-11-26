@@ -188,10 +188,10 @@ pub async fn collect_pins_in_tx(
         let owner_id: String = row.try_get("owner_id")?;
         let option_key: String = row.try_get("option_key")?;
         let value_json: String = row.try_get("value_json")?;
-        let pin_kind = if owner_kind == "plugin" {
-            "plugin_option"
-        } else {
-            "theme_option"
+        let pin_kind = match owner_kind.as_str() {
+            "plugin" => "plugin_option",
+            "theme_functions" => "theme_functions_option",
+            _ => "theme_option",
         };
         if parse_json_and_check_pin(&value_json, media_id, "theme_option_values")? {
             let entity = format!("{owner_id}:{option_key}");
@@ -209,10 +209,10 @@ pub async fn collect_pins_in_tx(
         let owner_kind: String = row.try_get("owner_kind")?;
         let owner_id: String = row.try_get("owner_id")?;
         let option_key: String = row.try_get("option_key")?;
-        let pin_kind = if owner_kind == "plugin" {
-            "plugin_option"
-        } else {
-            "theme_option"
+        let pin_kind = match owner_kind.as_str() {
+            "plugin" => "plugin_option",
+            "theme_functions" => "theme_functions_option",
+            _ => "theme_option",
         };
         let entity = format!("{owner_id}:{option_key}");
         if !seen_owner_opts.contains(&(owner_kind, entity.clone())) {
@@ -298,16 +298,22 @@ pub async fn collect_pins_in_tx(
         }
     }
 
-    // 8. Opaque plugin KV (even disabled/inactive plugins)
-    let kv_rows = sqlx::query("SELECT plugin_id, key, value_json FROM plugin_kv")
+    // 8. Opaque plugin/theme KV (even disabled/inactive extensions)
+    let kv_rows = sqlx::query("SELECT owner_kind, plugin_id, key, value_json FROM plugin_kv")
         .fetch_all(&mut *conn)
         .await?;
     for row in kv_rows {
+        let owner_kind: String = row.try_get("owner_kind")?;
         let plugin_id: String = row.try_get("plugin_id")?;
         let key: String = row.try_get("key")?;
         let value_json: String = row.try_get("value_json")?;
         if parse_json_and_check_pin(&value_json, media_id, "plugin_kv")? {
-            push_pin(&mut summary, "plugin_kv", format!("{plugin_id}:{key}"));
+            let pin_kind = if owner_kind == "theme" {
+                "theme_kv"
+            } else {
+                "plugin_kv"
+            };
+            push_pin(&mut summary, pin_kind, format!("{plugin_id}:{key}"));
         }
     }
 
@@ -452,6 +458,63 @@ pub async fn collect_referenced_secret_refs(db: &SqlitePool) -> ApiResult<HashSe
     }
 
     Ok(refs)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ExtensionSecretInventoryItem {
+    pub owner_subdir: String,
+    pub package_id: String,
+    pub secret_ref: String,
+}
+
+/// Collects extension secret files referenced in `theme_option_values` for plugins and
+/// theme functions by parsing strictly typed JSON objects `{"secret_ref": "<64-hex>", ...}`
+/// (never scanning raw text with `extract_64hex_tokens`, avoiding collisions with Media IDs).
+pub async fn collect_referenced_extension_secret_refs(
+    db: &SqlitePool,
+) -> ApiResult<Vec<ExtensionSecretInventoryItem>> {
+    let rows = sqlx::query(
+        "SELECT owner_kind, owner_id, value_json
+           FROM theme_option_values
+          WHERE owner_kind IN ('plugin', 'theme_functions')
+          ORDER BY owner_kind ASC, owner_id ASC, option_key ASC",
+    )
+    .fetch_all(db)
+    .await?;
+
+    let mut items = std::collections::BTreeSet::new();
+    for row in rows {
+        let owner_kind: String = row.try_get("owner_kind")?;
+        let owner_id: String = row.try_get("owner_id")?;
+        let value_json: String = row.try_get("value_json")?;
+        if opendash_core::id::validate_package_id(&owner_id).is_err() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(&value_json) else {
+            continue;
+        };
+        let Some(obj) = val.as_object() else {
+            continue;
+        };
+        let Some(secret_ref) = obj.get("secret_ref").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !opendash_core::backup::is_valid_sha256_hex(secret_ref) {
+            continue;
+        }
+        let owner_subdir = match owner_kind.as_str() {
+            "plugin" => "plugins",
+            "theme_functions" => "themes",
+            _ => continue,
+        };
+        items.insert(ExtensionSecretInventoryItem {
+            owner_subdir: owner_subdir.to_owned(),
+            package_id: owner_id,
+            secret_ref: secret_ref.to_owned(),
+        });
+    }
+
+    Ok(items.into_iter().collect())
 }
 
 pub async fn is_media_unreferenced(db: &SqlitePool, media_id: &str) -> ApiResult<bool> {

@@ -752,6 +752,29 @@ async fn execute_snapshot_worker(req: &SnapshotWorkerRequest) -> ApiResult<PathB
         }
     }
 
+    for ext in &inventory.extension_secret_refs {
+        let sec_path = paths
+            .secrets_dir()
+            .join(&ext.owner_subdir)
+            .join(&ext.package_id)
+            .join(format!("{}.json", ext.secret_ref));
+        if sec_path.exists() {
+            planned.push(PlannedCopy {
+                kind: BackupFileKind::ExtensionSecret,
+                logical_key: format!(
+                    "secrets/{}/{}/{}.json",
+                    ext.owner_subdir, ext.package_id, ext.secret_ref
+                ),
+                source_path: Some(sec_path),
+                inline_bytes: None,
+            });
+        } else {
+            return Err(ApiError::conflict(
+                "Thiếu tệp bí mật extension được tham chiếu; không thể tạo snapshot.",
+            ));
+        }
+    }
+
     // Portable config/site.json
     let cfg_bytes = if paths.site_config_path().exists() {
         ensure_no_reparse_or_symlink(&paths.site_config_path())?;

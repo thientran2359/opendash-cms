@@ -166,6 +166,8 @@ pub struct BackupSummaryMetadata {
     pub schema_version: Option<i64>,
     pub file_count: Option<usize>,
     pub deleted: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dev_mode_active: bool,
 }
 
 #[derive(Default)]

@@ -78,6 +78,11 @@ impl SitePaths {
     }
 
     #[allow(dead_code)]
+    pub fn theme_secrets_dir(&self, theme_id: &str) -> PathBuf {
+        self.secrets_dir().join("themes").join(theme_id)
+    }
+
+    #[allow(dead_code)]
     pub fn themes_dir(&self) -> PathBuf {
         self.site_root.join("themes")
     }

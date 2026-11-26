@@ -1,5 +1,5 @@
 import { tStatic } from '../i18n/index.tsx';
-import type { BlockFieldSpec } from '../types.ts';
+import type { BlockFieldSpec, PluginRunResult, PluginSettingField } from '../types.ts';
 import { requestJson } from './client.ts';
 
 export interface ThemeRevisionSummary {
@@ -227,5 +227,99 @@ export function executeSampleImport(
       acknowledge_public_changes: acknowledgePublicChanges,
     }),
     defaultErrorMessage: tStatic('api.themes.import_sample_data'),
+  });
+}
+
+export interface ThemeFunctionActionDecl {
+  id: string;
+  title: string;
+  description?: string;
+  required_role: string;
+  capabilities: string[];
+}
+
+export interface ThemeFunctionsSettingsSnapshot {
+  theme_id: string | null;
+  revision_id: string | null;
+  has_functions: boolean;
+  version: number;
+  schema: PluginSettingField[];
+  values: Record<string, unknown>;
+  actions: ThemeFunctionActionDecl[];
+}
+
+export interface ThemeFunctionLogItem {
+  id: number;
+  correlation_id: string;
+  level: string;
+  message: string;
+  created_at: string;
+}
+
+export interface ThemeFunctionsLogsResponse {
+  theme_id: string | null;
+  items: ThemeFunctionLogItem[];
+}
+
+export interface DevSyncResponse {
+  synced_theme: string | null;
+  synced_plugins: string[];
+}
+
+export function getActiveThemeFunctionsSettings(
+  signal?: AbortSignal,
+): Promise<ThemeFunctionsSettingsSnapshot> {
+  return requestJson('/api/admin/themes/active/functions/settings', {
+    signal,
+    defaultErrorMessage: tStatic('api.themes.load_theme_functions_settings'),
+  });
+}
+
+export function saveActiveThemeFunctionsSettings(
+  values: Record<string, unknown>,
+  version: number,
+  csrfToken: string,
+): Promise<ThemeFunctionsSettingsSnapshot> {
+  return requestJson('/api/admin/themes/active/functions/settings', {
+    method: 'PUT',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify({ values }),
+    defaultErrorMessage: tStatic('api.themes.save_theme_functions_settings'),
+  });
+}
+
+export function runActiveThemeAction(
+  actionId: string,
+  payload: Record<string, unknown>,
+  csrfToken: string,
+): Promise<PluginRunResult> {
+  return requestJson(`/api/admin/themes/active/actions/${encodeURIComponent(actionId)}`, {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify(payload),
+    defaultErrorMessage: tStatic('api.themes.run_theme_action'),
+  });
+}
+
+export function getActiveThemeFunctionsLogs(
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<ThemeFunctionsLogsResponse> {
+  return requestJson(`/api/admin/themes/active/functions/logs?limit=${encodeURIComponent(String(limit))}`, {
+    signal,
+    defaultErrorMessage: tStatic('api.themes.load_theme_functions_logs'),
+  });
+}
+
+export function syncDevManifest(csrfToken: string): Promise<DevSyncResponse> {
+  return requestJson('/api/admin/dev/sync', {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: '{}',
+    defaultErrorMessage: tStatic('api.themes.sync_dev_manifest'),
   });
 }

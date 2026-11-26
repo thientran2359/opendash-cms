@@ -1,7 +1,7 @@
 # Hợp đồng Plugin ABI v1 / v1.1 — OpenDash
 
-**Phiên bản ABI:** `1` & `1.1` (hỗ trợ `manifest_schema` `1`, `2`, `3` đã triển khai)\
-**Trạng thái:** `AGREED` · `Implemented` (M6 baseline + [Spec 2: Plugin Hooks, Host Ops v1.1, Owner Settings & Write-Time Projections](../designs/plugin-hooks-host-ops-and-projections.md))\
+**Phiên bản ABI:** `1` & `1.1` (hỗ trợ `manifest_schema` `1`, `2`, `3` đã triển khai; bổ sung Unified JS Runtime `plugin.js` / `functions.js` qua `boa_engine = "=0.22.0"`, Render Hooks, Scoped Custom Routes & Dev Live-Edit)\
+**Trạng thái:** `AGREED` · `Implemented` (M6 baseline + [Spec 2](../designs/plugin-hooks-host-ops-and-projections.md) + [Spec B: Unified JS Runtime, Render Hooks & Dev Mode](../designs/unified-js-runtime-render-hooks-and-dev-mode.md))\
 **Tài liệu tham chiếu:** [docs/product/PRODUCT_REQUIREMENTS.md](../product/PRODUCT_REQUIREMENTS.md), [CORE_FOUNDATION.md](CORE_FOUNDATION.md), [M6 Plugin Extensions](M6_PLUGIN_EXTENSIONS.md), [M8 Writer Inventory](M8_WRITER_INVENTORY.md), [Wasmi 2.0.0 Documentation](https://docs.rs/wasmi/2.0.0/wasmi/)
 
 ---
@@ -12,7 +12,7 @@ Gói plugin cài đặt vào OpenDash (dạng `.zip` qua Admin API hoặc thư m
 
 1. **Các file được hỗ trợ trong gói (`cms/crates/opendash-server/src/plugin/package.rs`):**
    - `manifest.json` (bắt buộc, tối đa `64 KiB` — `MAX_MANIFEST_BYTES`): Định danh, phiên bản, phạm vi quyền, hooks/filters, actions, declarations và `settings_schema`.
-   - `plugin.wasm` (bắt buộc, tối đa `2 MiB` — `MAX_WASM_BYTES`): Module WebAssembly `wasm32-unknown-unknown`.
+   - `plugin.wasm` **hoặc** `plugin.js` (bắt buộc đúng 1 entrypoint khớp `manifest.entrypoint`, tối đa `2 MiB` — `MAX_WASM_BYTES`): Module WebAssembly (`wasm32-unknown-unknown`) hoặc script JavaScript ES2024 chạy zero-build trên `boa_engine = "=0.22.0"` dùng API `globalThis.od.*` (`cms/sdk/js/opendash.d.ts`). Theme v3 có thể đặt tùy chọn `functions.js` ở root khớp trường `functions` trong `theme.json`.
    - `README.md` (tùy chọn).
    - `blocks/<slug>/block.json` + `blocks/<slug>/render.html` (tùy chọn, luôn đủ cặp, mỗi file text tối đa `256 KiB` — `V2_MAX_TEXT_BYTES`): Khai báo block Builder theo `BlockSchemaV1` (`cms/crates/opendash-core`) và template MiniJinja C-SEC; tối đa **32 blocks**, mỗi `slug` tối đa 32 ký tự kebab-case, `schema.id == "<plugin-id>/<slug>"`, cấm `plugin-id` là `core` hoặc `legacy`.
 2. **Quy tắc an toàn khi giải nén ZIP & quét thư mục:**

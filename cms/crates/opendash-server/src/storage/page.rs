@@ -218,6 +218,41 @@ pub async fn load_declared_blocks_in_conn(
             },
         );
     }
+    if let Some(dev) = crate::dev_mode::DevOverlayConfig::global() {
+        if let Ok(Some(theme_snap)) = dev.load_dev_theme() {
+            for (schema, template) in theme_snap.blocks {
+                out.insert(
+                    schema.id.clone(),
+                    RegisteredBlockDef {
+                        block_id: schema.id.clone(),
+                        owner: ResourceOwner::Theme(theme_snap.manifest.theme_id.clone()),
+                        status: ProviderStatus::Active,
+                        declaration_state: DeclarationState::Declared,
+                        schema: RegisteredBlockSchema { schema },
+                        template,
+                        revision_digest: theme_snap.revision_digest.clone(),
+                    },
+                );
+            }
+        }
+        let dev_engine = wasmi::Engine::default();
+        for plugin_snap in dev.load_all_dev_plugins_best_effort(&dev_engine) {
+            for (schema, template) in plugin_snap.blocks {
+                out.insert(
+                    schema.id.clone(),
+                    RegisteredBlockDef {
+                        block_id: schema.id.clone(),
+                        owner: ResourceOwner::Plugin(plugin_snap.manifest.id.clone()),
+                        status: ProviderStatus::Active,
+                        declaration_state: DeclarationState::Declared,
+                        schema: RegisteredBlockSchema { schema },
+                        template,
+                        revision_digest: plugin_snap.revision_digest.clone(),
+                    },
+                );
+            }
+        }
+    }
     Ok(out)
 }
 

@@ -1332,10 +1332,14 @@ pub(super) struct CapturedThemeV3 {
     pub manifest: ThemeV3Manifest,
     revision: ThemeRevisionRecord,
     rev_dir: std::path::PathBuf,
+    dev_overlay: Option<crate::dev_mode::DevThemeSnapshot>,
 }
 
 impl CapturedThemeV3 {
     pub(super) fn part(&self, key: &str) -> ApiResult<Option<String>> {
+        if let Some(ref snap) = self.dev_overlay {
+            return Ok(snap.parts.get(key).cloned());
+        }
         let Some(file) = self.manifest.parts.get(key) else {
             return Ok(None);
         };
@@ -1356,6 +1360,36 @@ pub(super) async fn capture_active_theme_v3_in_conn(
     conn: &mut sqlx::SqliteConnection,
     themes_root: &Path,
 ) -> ApiResult<Option<CapturedThemeV3>> {
+    if let Some(dev) = crate::dev_mode::DevOverlayConfig::global()
+        && let Some(dev_root) = dev.dev_theme_root()
+    {
+        match dev.load_dev_theme() {
+            Ok(Some(snap)) => {
+                let synthetic_rev = ThemeRevisionRecord {
+                    revision_id: format!("dev:{}", snap.manifest.theme_id),
+                    theme_id: snap.manifest.theme_id.clone(),
+                    version: snap.manifest.version.clone(),
+                    revision_digest: snap.revision_digest.clone(),
+                    source_format: ThemeSourceFormat::V3,
+                    manifest_json: snap.manifest_json.clone(),
+                    file_digests: BTreeMap::new(),
+                    provenance_json: "{}".to_owned(),
+                    created_at: String::new(),
+                };
+                return Ok(Some(CapturedThemeV3 {
+                    manifest: snap.manifest.clone(),
+                    revision: synthetic_rev,
+                    rev_dir: dev_root.to_path_buf(),
+                    dev_overlay: Some(snap),
+                }));
+            }
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!("Dev theme overlay load failed: {err}");
+                return Ok(None);
+            }
+        }
+    }
     // Snapshot the active revision in a single SQL query. Files may be loaded
     // afterwards because immutable digest/complete marker checks hold.
     let row: Option<RevisionRow> = sqlx::query_as(
@@ -1401,6 +1435,7 @@ pub(super) async fn capture_active_theme_v3_in_conn(
         manifest,
         revision,
         rev_dir,
+        dev_overlay: None,
     }))
 }
 
@@ -1412,10 +1447,22 @@ pub(super) async fn load_active_theme_v3_in_conn(
         manifest,
         revision,
         rev_dir,
+        dev_overlay,
     }) = capture_active_theme_v3_in_conn(conn, themes_root).await?
     else {
         return Ok(None);
     };
+    if let Some(snap) = dev_overlay {
+        return Ok(Some(ActiveThemeV3 {
+            revision_id: revision.revision_id,
+            revision_digest: snap.revision_digest,
+            manifest: snap.manifest,
+            templates: snap.templates,
+            parts: snap.parts,
+            page_layouts: snap.page_layouts,
+            locales: snap.locales,
+        }));
+    }
     let mut templates = BTreeMap::new();
     for declaration in &manifest.templates {
         let Ok(key) = declaration.canonical_key() else {
@@ -1463,6 +1510,78 @@ pub(super) async fn load_active_theme_v3_in_conn(
         page_layouts,
         locales,
     }))
+}
+
+/// Synchronizes a mounted `--dev-theme` manifest declarations, blocks, and admin extensions
+/// into SQLite without polluting immutable `theme_revisions`.
+pub async fn sync_dev_theme_in_db(
+    db: &SqlitePool,
+    snap: &crate::dev_mode::DevThemeSnapshot,
+) -> ApiResult<()> {
+    let declarations = crate::theme::parse_theme_declarations(&snap.manifest_json)
+        .map_err(|msg| ApiError(axum::http::StatusCode::UNPROCESSABLE_ENTITY, msg.into()))?;
+    let theme_action_ids: Vec<String> = snap
+        .manifest
+        .functions
+        .as_ref()
+        .map(|f| f.actions.iter().map(|a| a.id.clone()).collect())
+        .unwrap_or_default();
+
+    let mut conn = db.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+
+    let work: ApiResult<()> = async {
+        crate::storage::page::sync_owner_blocks_in_tx(
+            &mut conn,
+            "theme",
+            &snap.manifest.theme_id,
+            ProviderStatus::Active,
+            &snap.revision_digest,
+            &snap.blocks,
+        )
+        .await?;
+        crate::storage::content::sync_theme_declarations_in_tx(
+            &mut conn,
+            &snap.manifest.theme_id,
+            &declarations,
+        )
+        .await?;
+        crate::storage::admin_extensions::require_capacity_in_conn(
+            &mut conn,
+            "theme",
+            &snap.manifest.theme_id,
+            snap.admin_extensions.as_ref(),
+        )
+        .await?;
+        crate::storage::admin_extensions::sync_owner_in_conn(
+            &mut conn,
+            "theme",
+            &snap.manifest.theme_id,
+            snap.admin_extensions.as_ref(),
+            "active",
+            &theme_action_ids,
+        )
+        .await?;
+        crate::storage::admin_extensions::set_theme_active_in_conn(
+            &mut conn,
+            Some(&snap.manifest.theme_id),
+        )
+        .await?;
+        sqlx::query("DELETE FROM plugin_entry_projections WHERE owner_kind = 'theme'")
+            .execute(&mut *conn)
+            .await?;
+        crate::storage::page::resync_plugin_block_acls_in_tx(&mut conn).await?;
+        Ok(())
+    }
+    .await;
+
+    if let Err(err) = work {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+        return Err(err);
+    }
+    sqlx::query("COMMIT").execute(&mut *conn).await?;
+    crate::cache::SiteCacheEpoch::global().bump();
+    Ok(())
 }
 
 /// Source block ID is never overwritten or silently translated. NULL active
