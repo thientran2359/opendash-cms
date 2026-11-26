@@ -30,6 +30,7 @@ Khi khởi chạy `/egm-review` hoặc `/egm-review-loop` cho một Design Spec 
 - [`docs/architecture/CMS_ARCHITECTURE.md`](../../../docs/architecture/CMS_ARCHITECTURE.md)
 - [`docs/architecture/TECH_STACK.md`](../../../docs/architecture/TECH_STACK.md)
 - [`docs/contracts/CORE_FOUNDATION.md`](../../../docs/contracts/CORE_FOUNDATION.md)
+- [`docs/contracts/UNIFIED_FIELD_SCHEMA.md`](../../../docs/contracts/UNIFIED_FIELD_SCHEMA.md)
 - [`docs/contracts/PLUGIN_ABI.md`](../../../docs/contracts/PLUGIN_ABI.md)
 - [`docs/contracts/M8_WRITER_INVENTORY.md`](../../../docs/contracts/M8_WRITER_INVENTORY.md)
 - [`docs/designs/SITEMAP.md`](../../../docs/designs/SITEMAP.md)
