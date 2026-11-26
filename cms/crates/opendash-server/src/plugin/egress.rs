@@ -230,6 +230,22 @@ pub fn read_bounded_chunks<R: Read>(mut reader: R, max_bytes: usize) -> Result<V
     Ok(out)
 }
 
+pub fn is_forbidden_internal_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.starts_with("/api/admin")
+        || lower == "/save"
+        || lower.starts_with("/save/")
+        || lower == "/preview"
+        || lower.starts_with("/preview/")
+        || lower.starts_with("/theme")
+        || lower == "/api/p"
+        || lower.starts_with("/api/p/")
+        || lower == "/api/public/p"
+        || lower.starts_with("/api/public/p/")
+        || lower == "/p"
+        || lower.starts_with("/p/")
+}
+
 pub fn execute_scoped_http_request(
     manifest: &PluginManifest,
     method: &str,
@@ -273,15 +289,8 @@ pub fn execute_scoped_http_request(
         .port_or_known_default()
         .ok_or_else(|| "URL không có port hợp lệ.".to_string())?;
 
-    // Block internal CMS control plane even when loopback is enabled for tests.
-    let path_lower = parsed_url.path().to_ascii_lowercase();
-    if path_lower.starts_with("/api/admin")
-        || path_lower == "/save"
-        || path_lower.starts_with("/save/")
-        || path_lower == "/preview"
-        || path_lower.starts_with("/preview/")
-        || path_lower.starts_with("/theme")
-    {
+    // Block internal CMS control plane and extension route loops even when loopback is enabled.
+    if is_forbidden_internal_path(parsed_url.path()) {
         return Err(
             "permission_denied: Không được phép gọi control plane nội bộ qua egress.".into(),
         );

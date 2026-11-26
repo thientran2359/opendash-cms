@@ -175,6 +175,63 @@ pub struct PluginActionDeclaration {
     pub capabilities: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderCachePolicy {
+    #[default]
+    ByRoute,
+    Global,
+    None,
+}
+
+impl RenderCachePolicy {
+    pub fn is_default(&self) -> bool {
+        *self == Self::ByRoute
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum RouteMethod {
+    #[serde(alias = "get")]
+    Get,
+    #[serde(alias = "post")]
+    Post,
+}
+
+impl RouteMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteAccess {
+    #[default]
+    Public,
+    Session,
+    Admin,
+    Webhook,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionRouteDecl {
+    pub id: String,
+    pub method: RouteMethod,
+    pub path: String,
+    #[serde(default)]
+    pub access: RouteAccess,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "RenderCachePolicy::is_default")]
+    pub cache: RenderCachePolicy,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
@@ -201,6 +258,10 @@ pub struct PluginManifest {
     pub hook_priority: i32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<PluginActionDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<ExtensionRouteDecl>,
+    #[serde(default, skip_serializing_if = "RenderCachePolicy::is_default")]
+    pub render_cache: RenderCachePolicy,
     #[serde(
         default,
         skip_serializing_if = "crate::content::CntDeclarations::is_empty"
@@ -590,6 +651,152 @@ pub(crate) fn validate_actions(
     Ok(())
 }
 
+pub(crate) fn validate_routes(
+    routes: &[ExtensionRouteDecl],
+    permissions: &PluginPermissions,
+) -> Result<(), &'static str> {
+    if routes.len() > 32 {
+        return Err("Manifest không được khai báo quá 32 routes.");
+    }
+    let mut seen_ids = HashSet::new();
+    let mut seen_method_paths = HashSet::new();
+    for route in routes {
+        if !crate::id::valid_kebab_segment_with_limit(&route.id, 64) {
+            return Err("Route id trong manifest phải là kebab-case (1..=64 ký tự).");
+        }
+        if !seen_ids.insert(route.id.as_str()) {
+            return Err("Route id trong manifest bị trùng lặp.");
+        }
+        if route.method == RouteMethod::Get && route.access == RouteAccess::Webhook {
+            return Err("Route GET không hỗ trợ access='webhook' (chỉ POST).");
+        }
+        let path = route.path.as_str();
+        if path.is_empty()
+            || path.len() > 128
+            || !path.starts_with('/')
+            || !path
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b':' | b'-'))
+            || path.contains("..")
+            || (path.len() > 1 && path.ends_with('/'))
+        {
+            return Err("Route path trong manifest không hợp lệ.");
+        }
+        if path != "/" {
+            let segments: Vec<&str> = path[1..].split('/').collect();
+            if segments.len() > 8 {
+                return Err("Route path không được vượt quá 8 segments.");
+            }
+            let mut param_names = HashSet::new();
+            for seg in segments {
+                if seg.is_empty() {
+                    return Err("Route path không được chứa segment rỗng.");
+                }
+                if let Some(param) = seg.strip_prefix(':') {
+                    if param.is_empty()
+                        || param.len() > 32
+                        || !param
+                            .bytes()
+                            .next()
+                            .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                        || !param
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                    {
+                        return Err("Tên tham số route (:param) không hợp lệ.");
+                    }
+                    if !param_names.insert(param) {
+                        return Err("Tên tham số route (:param) bị trùng lặp trong cùng path.");
+                    }
+                } else if seg.contains(':') {
+                    return Err("Ký tự ':' chỉ được dùng ở đầu segment tham số (:param).");
+                }
+            }
+        }
+        if !seen_method_paths.insert((route.method, path)) {
+            return Err("Cặp (method, path) trong routes bị trùng lặp.");
+        }
+        let mut has_kv_write = false;
+        let mut has_content_write = false;
+        let mut has_content_delete = false;
+        let mut has_content_read = false;
+        let mut has_content_read_private = false;
+        let mut has_content_write_private = false;
+        for cap in &route.capabilities {
+            match cap.as_str() {
+                "kv_read"
+                | "kv_list"
+                | "http"
+                | "taxonomy_read"
+                | "media_read"
+                | "site_options_read"
+                | "plugin_settings_read"
+                | "plugin_secrets_read"
+                | "log" => {}
+                "content_read" => has_content_read = true,
+                "content_read_private" => has_content_read_private = true,
+                "kv_write" | "kv_delete" => has_kv_write = true,
+                "content_write" => has_content_write = true,
+                "content_write_private" => has_content_write_private = true,
+                "content_delete" => has_content_delete = true,
+                _ => return Err("Route capability không nằm trong allowlist."),
+            }
+        }
+        if (has_kv_write as u8) + (has_content_write as u8) + (has_content_delete as u8) > 1 {
+            return Err(
+                "Route không được kết hợp kv_write/kv_delete, content_write hoặc content_delete trong cùng một route.",
+            );
+        }
+        if has_content_read_private
+            && (!has_content_read || permissions.content_read_private.is_empty())
+        {
+            return Err(
+                "Route khai báo content_read_private phải kèm content_read và permissions.content_read_private.",
+            );
+        }
+        if has_content_write_private
+            && (!has_content_write || permissions.content_write_private.is_empty())
+        {
+            return Err(
+                "Route khai báo content_write_private phải kèm content_write và permissions.content_write_private.",
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Match a normalized request subpath (with or without leading `/`) against a declared route path.
+pub fn match_route_path(
+    pattern: &str,
+    subpath: &str,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    let trimmed = subpath.trim_matches('/');
+    let req_norm = if trimmed.is_empty() { "/" } else { trimmed };
+    if pattern == "/" {
+        return (req_norm == "/").then(std::collections::BTreeMap::new);
+    }
+    if req_norm == "/" {
+        return None;
+    }
+    let pat_segs: Vec<&str> = pattern.trim_matches('/').split('/').collect();
+    let req_segs: Vec<&str> = req_norm.split('/').collect();
+    if pat_segs.len() != req_segs.len() {
+        return None;
+    }
+    let mut params = std::collections::BTreeMap::new();
+    for (p, r) in pat_segs.into_iter().zip(req_segs.into_iter()) {
+        if let Some(name) = p.strip_prefix(':') {
+            if r.is_empty() || r == "." || r == ".." {
+                return None;
+            }
+            params.insert(name.to_owned(), r.to_owned());
+        } else if p != r {
+            return None;
+        }
+    }
+    Some(params)
+}
+
 impl PluginManifest {
     pub fn from_json_str(json_str: &str) -> Result<Self, &'static str> {
         let mut raw_val: serde_json::Value =
@@ -683,6 +890,8 @@ impl PluginManifest {
             });
         let uses_v3_features = uses_lifecycle_v011
             || self.entrypoint == "plugin.js"
+            || self.render_cache != RenderCachePolicy::ByRoute
+            || !self.routes.is_empty()
             || !self.filters.is_empty()
             || !self.settings_schema.is_empty()
             || self.permissions.content_read_all_public
@@ -733,6 +942,7 @@ impl PluginManifest {
         let secret_keys = validate_settings_schema(&self.settings_schema)?;
         validate_permissions(&self.permissions, &secret_keys)?;
         validate_actions(&self.actions, &self.permissions)?;
+        validate_routes(&self.routes, &self.permissions)?;
         let mut seen_panel_keys = HashSet::new();
         for fg in &self.declarations.field_groups {
             seen_panel_keys.insert(fg.local_key.as_str());

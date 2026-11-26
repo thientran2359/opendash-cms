@@ -92,22 +92,6 @@ export interface TemplatePreviewEntry {
   entry_id: number;
 }
 
-export function previewTemplateOverride(
-  target: TemplateTargetInput,
-  document: BuilderDocument,
-  csrfToken: string,
-  previewEntry?: TemplatePreviewEntry,
-  expectedVersion?: number,
-  signal?: AbortSignal,
-): Promise<HomepagePreview> {
-  return requestJson('/api/admin/template-overrides/preview', {
-    method: 'POST', csrfToken, contentType: 'application/json',
-    ifMatchVersion: expectedVersion, signal,
-    body: JSON.stringify({ target, document, preview_entry: previewEntry }),
-    defaultErrorMessage: tStatic('api.builder.preview_the_shared_template'),
-  });
-}
-
 export interface TypedTemplateResetResult {
   reset_id: number;
   canonical_target_key: string;
@@ -147,16 +131,6 @@ export function saveEntryBuilder(
     method: 'PUT', csrfToken, contentType: 'application/json', ifMatchVersion: version,
     body: JSON.stringify(document),
     defaultErrorMessage: tStatic('api.builder.save_the_entry_builder'),
-  });
-}
-
-export function resetEntryBuilder(
-  typeKey: string, id: number, version: number, csrfToken: string,
-): Promise<EntryBuilderOpen> {
-  return requestJson(entryBuilderPath(typeKey, id) + '/reset', {
-    method: 'POST', csrfToken, contentType: 'application/json', ifMatchVersion: version,
-    body: JSON.stringify({ confirm: true }),
-    defaultErrorMessage: tStatic('api.builder.reset_the_entry_builder'),
   });
 }
 

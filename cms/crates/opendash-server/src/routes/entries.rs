@@ -7,7 +7,7 @@ use axum::{
     body::Bytes,
     extract::{Path, Query, RawQuery, State},
     http::{HeaderMap, StatusCode, header},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
 };
 use opendash_core::content::{ContentEntryInput, valid_content_type_key};
 use serde::Deserialize;
@@ -1139,78 +1139,6 @@ pub(crate) async fn render_admin_single_fallback_html(
         &fmt_cfg,
         &record.locale,
     )
-}
-
-/// Persisted entry preview is private and never shares the public reader.
-pub async fn entry_preview(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-    Path((type_key, id)): Path<(String, i64)>,
-) -> ApiResult<Response> {
-    let actor = require_session(&headers, &db).await?;
-    valid_type_key(&type_key)?;
-    if matches!(type_key.as_str(), "pattern" | "section") {
-        return Err(ApiError::bad_request(
-            "Preview không hỗ trợ Pattern/Section.",
-        ));
-    }
-    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
-    let schema = &effective.base.descriptor;
-    let supports_builder = schema
-        .settings
-        .supports(opendash_core::content::ContentSupport::Builder);
-    if !is_builtin(&type_key) && !supports_builder {
-        return Err(ApiError::bad_request(
-            "Preview chỉ hỗ trợ Post/Page hoặc CPT bật Builder.",
-        ));
-    }
-    let mut entry = entry_storage::get_entry(&db, &type_key, id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
-    let actor_role = match actor.user.role {
-        crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
-        crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
-    };
-    entry_storage::filter_entry_values_for_role(&mut entry, &effective, actor_role);
-    let body_view_allowed = effective
-        .effective_fields
-        .get("body")
-        .is_none_or(|fe| actor_role >= fe.definition.min_view_role);
-    let has_blocks = entry
-        .values
-        .get("body")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(opendash_core::builder_blocks::contains_blocks);
-    let (_, bcp47_tag, dir) =
-        crate::storage::settings::get_locale_bcp47_and_dir(&db, Some(&entry.locale)).await?;
-    let seo_view = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &entry.title);
-    let mut icon_nonces = crate::template_sec::IconNonceTable::default();
-    let raw_html = if supports_builder && body_view_allowed && has_blocks {
-        if let Some((rendered, nonces)) =
-            crate::storage::builder::preview_saved_entry_body(&db, &actor, &type_key, id).await?
-        {
-            icon_nonces = nonces;
-            rendered.html
-        } else {
-            render_admin_single_fallback_html(&db, &entry, &effective, actor_role, None).await?
-        }
-    } else {
-        render_admin_single_fallback_html(&db, &entry, &effective, actor_role, None).await?
-    };
-    let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
-    let html = content_render::finalize_document_icons(html, &icon_nonces)?;
-    Ok((
-        [
-            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-            (header::REFERRER_POLICY, "no-referrer"),
-            (header::CACHE_CONTROL, "private, no-store"),
-        ],
-        Html(html),
-    )
-        .into_response())
 }
 
 #[cfg(test)]

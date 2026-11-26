@@ -2709,16 +2709,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "Only Post/Page support draft/published.",
     ),
     (
-        "entries.preview_does_not_support_pattern_section",
-        "Preview không hỗ trợ Pattern/Section.",
-        "Preview does not support Pattern/Section.",
-    ),
-    (
-        "entries.preview_only_supports_post_page_or_cpts_with_builder_enabled",
-        "Preview chỉ hỗ trợ Post/Page hoặc CPT bật Builder.",
-        "Preview only supports Post/Page or CPTs with Builder enabled.",
-    ),
-    (
         "import.invalid_theme_id",
         "theme_id không hợp lệ.",
         "Invalid theme_id.",
@@ -8289,21 +8279,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "ScopedResourceId is not in the standard format.",
     ),
     (
-        "theme.invalid_block_id",
-        "ID block không hợp lệ.",
-        "Invalid block ID.",
-    ),
-    (
-        "theme.invalid_field_declaration",
-        "Khai báo field không hợp lệ.",
-        "Invalid field declaration.",
-    ),
-    (
-        "theme.the_input_value_does_not_match_the_block_declaration",
-        "Giá trị nhập không khớp khai báo block.",
-        "The input value does not match the block declaration.",
-    ),
-    (
         "theme.invalid_template_candidate_identifier",
         "Định danh ứng viên template không hợp lệ.",
         "Invalid template candidate identifier",
@@ -9469,11 +9444,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "Invalid Button label or URL",
     ),
     (
-        "builder.invalid_legacy_block_id",
-        "ID block cũ không hợp lệ.",
-        "Invalid legacy block ID",
-    ),
-    (
         "builder.invalid_plugin_block_id",
         "ID block plugin không hợp lệ.",
         "Invalid plugin block id",
@@ -9487,11 +9457,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "builder.plugin_block_provider_is_not_active",
         "Provider block plugin không hoạt động.",
         "Plugin block provider is not active",
-    ),
-    (
-        "builder.plugin_block_props_exceed_64_kib",
-        "Props block plugin vượt quá 64 KiB.",
-        "Plugin block props exceed 64 KiB",
     ),
     (
         "builder.invalid_video_media_id",
@@ -10435,19 +10400,9 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "Legacy block descriptor unavailable",
     ),
     (
-        "builder.legacy_field_map_does_not_match_descriptor",
-        "Bản đồ trường cũ không khớp descriptor.",
-        "Legacy field map does not match descriptor",
-    ),
-    (
         "builder.unknown_plugin_block_descriptor",
         "Descriptor block plugin không xác định.",
         "Unknown plugin block descriptor",
-    ),
-    (
-        "builder.plugin_block_props_invalid_json",
-        "Props block plugin không phải JSON hợp lệ.",
-        "Plugin block props invalid JSON",
     ),
     (
         "builder_blocks.invalid_block_json_payload",

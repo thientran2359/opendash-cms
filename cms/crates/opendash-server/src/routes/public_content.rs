@@ -42,6 +42,77 @@ fn normalized_origin(public_origin: Option<&str>) -> &str {
         .unwrap_or("")
 }
 
+#[derive(Clone)]
+pub(crate) struct PublicRenderServices {
+    pub hooks: Arc<crate::hooks::HookDispatcher>,
+    pub render_cache: Arc<crate::cache::ExtensionRenderCache>,
+    pub origin_host: String,
+}
+
+pub(crate) fn extract_origin_host(headers: &HeaderMap) -> String {
+    headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn apply_public_render_hooks(
+    html: String,
+    services: Option<&PublicRenderServices>,
+    route_kind: &str,
+    route_path: &str,
+    canonical_query: &str,
+    is_not_found: bool,
+    locale: &str,
+    theme_context: &serde_json::Value,
+    budget: &overrides::PublicCompositionBudget,
+) -> ApiResult<String> {
+    let slots = budget.render_budget.hook_nonces.entries();
+    let Some(services) = services else {
+        if slots.is_empty() {
+            return Ok(html);
+        }
+        let cleared: Vec<(String, String)> = slots
+            .iter()
+            .map(|s| (s.nonce.clone(), String::new()))
+            .collect();
+        return content_render::apply_render_hooks_to_document(html, "", &[], &[], "", &cleared);
+    };
+    let ctx = crate::hooks::RenderHookContext {
+        route_kind,
+        route_path,
+        canonical_query,
+        is_not_found,
+        locale,
+        origin_host: &services.origin_host,
+        site: theme_context
+            .get("site")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        options: theme_context
+            .get("options")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        entry: theme_context.get("entry").cloned(),
+        entries: theme_context.get("entries").cloned(),
+        principal: opendash_core::hooks::ExecutionPrincipal::Public,
+    };
+    let output = services
+        .hooks
+        .dispatch_render_hooks(&ctx, slots, &services.render_cache)
+        .await;
+    content_render::apply_render_hooks_to_document(
+        html,
+        &output.head_html,
+        &output.head_styles,
+        &output.head_scripts,
+        &output.footer_html,
+        &output.slot_replacements,
+    )
+}
+
 fn enqueued_for_route(
     active: Option<&theme_storage::ActiveThemeV3>,
     condition: EnqueueCondition,
@@ -318,13 +389,14 @@ pub(crate) async fn render_not_found_response(
     db: &SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
 ) -> ApiResult<Response> {
-    render_not_found_response_for_locale(db, themes_root, None).await
+    render_not_found_response_for_locale(db, themes_root, None, None).await
 }
 
 pub(crate) async fn render_not_found_response_for_locale(
     db: &SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
     locale: Option<&str>,
+    services: Option<&PublicRenderServices>,
 ) -> ApiResult<Response> {
     let active = match themes_root {
         Some(Extension(root)) => theme_storage::load_active_theme_v3(db, &root.0).await?,
@@ -414,6 +486,18 @@ pub(crate) async fn render_not_found_response_for_locale(
         &enqueued,
         active.is_some(),
     )?;
+    let html = apply_public_render_hooks(
+        html,
+        services,
+        "not_found",
+        "/404",
+        "",
+        true,
+        &resolved_locale,
+        &body.theme_context,
+        &budget,
+    )
+    .await?;
     let html = content_render::finalize_document_icons(html, &budget.render_budget.icon_nonces)?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
         html,
@@ -435,6 +519,7 @@ pub(crate) async fn render_canonical_archive(
     locale: String,
     canonical_base: String,
     raw: Option<String>,
+    services: Option<PublicRenderServices>,
 ) -> ApiResult<Response> {
     if type_key == "post"
         && matches!(
@@ -442,7 +527,13 @@ pub(crate) async fn render_canonical_archive(
             ReadingPageState::Missing
         )
     {
-        return render_not_found_response_for_locale(&db, themes_root, Some(&locale)).await;
+        return render_not_found_response_for_locale(
+            &db,
+            themes_root,
+            Some(&locale),
+            services.as_ref(),
+        )
+        .await;
     }
     // Enforce the CPT's public/archive settings before loading or rendering
     // content. The storage archive query independently checks this policy.
@@ -660,19 +751,31 @@ pub(crate) async fn render_canonical_archive(
     .await?;
     let type_class = format!("od-type-{type_key}");
     let enqueued = enqueued_for_route(active_v3.as_ref(), EnqueueCondition::Archive);
+    let canonical_query =
+        crate::cache::canonicalize_public_query(raw.as_deref(), QueryScope::ContentArchive);
+    let composed = content_render::compose_document_with_seo_with_assets(
+        header.as_deref(),
+        &body.html,
+        footer.as_deref(),
+        &seo_view,
+        &["od-route-archive", &type_class],
+        &enqueued,
+        active_v3.is_some(),
+    )?;
+    let composed = apply_public_render_hooks(
+        composed,
+        services.as_ref(),
+        "archive",
+        &canonical_base,
+        &canonical_query,
+        false,
+        &locale,
+        &body.theme_context,
+        &budget,
+    )
+    .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_icons(
-            content_render::compose_document_with_seo_with_assets(
-                header.as_deref(),
-                &body.html,
-                footer.as_deref(),
-                &seo_view,
-                &["od-route-archive", &type_class],
-                &enqueued,
-                active_v3.is_some(),
-            )?,
-            &budget.render_budget.icon_nonces,
-        )?,
+        content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
         body.has_active_contact_form || shell_has_form,
     ))
 }
@@ -684,8 +787,15 @@ pub(crate) async fn render_single_entry_response(
     entry: crate::storage::entries::ContentEntryRecord,
     canonical_path_override: Option<String>,
 ) -> ApiResult<Response> {
-    render_single_entry_response_with_query(db, themes_root, entry, canonical_path_override, None)
-        .await
+    render_single_entry_response_with_query(
+        db,
+        themes_root,
+        entry,
+        canonical_path_override,
+        None,
+        None,
+    )
+    .await
 }
 
 pub(crate) async fn render_single_entry_response_with_query(
@@ -694,6 +804,7 @@ pub(crate) async fn render_single_entry_response_with_query(
     entry: crate::storage::entries::ContentEntryRecord,
     canonical_path_override: Option<String>,
     raw_query: Option<&str>,
+    services: Option<&PublicRenderServices>,
 ) -> ApiResult<Response> {
     render_entry_response_with_cache(
         db,
@@ -703,6 +814,7 @@ pub(crate) async fn render_single_entry_response_with_query(
         false,
         raw_query,
         crate::page::BlockTemplateCache::global(),
+        services,
     )
     .await
 }
@@ -713,9 +825,10 @@ pub(crate) async fn render_homepage_entry_response_for_locale(
     entry: crate::storage::entries::ContentEntryRecord,
     canonical_path: String,
     raw_query: Option<&str>,
+    services: Option<&PublicRenderServices>,
 ) -> ApiResult<Response> {
     if entry.content_type_key != "page" {
-        return render_not_found_response_for_locale(db, themes_root, None).await;
+        return render_not_found_response_for_locale(db, themes_root, None, services).await;
     }
     render_entry_response_with_cache(
         db,
@@ -725,10 +838,12 @@ pub(crate) async fn render_homepage_entry_response_for_locale(
         true,
         raw_query,
         crate::page::BlockTemplateCache::global(),
+        services,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn render_entry_response_with_cache(
     db: &SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
@@ -737,6 +852,7 @@ async fn render_entry_response_with_cache(
     is_home: bool,
     raw_query: Option<&str>,
     cache: &crate::page::BlockTemplateCache,
+    services: Option<&PublicRenderServices>,
 ) -> ApiResult<Response> {
     let db = db.clone();
     let list_pages = crate::public_context::parse_list_pages(raw_query);
@@ -751,7 +867,7 @@ async fn render_entry_response_with_cache(
     )
     .await?;
     let Some(snapshot) = snapshot else {
-        return render_not_found_response_for_locale(&db, themes_root, None).await;
+        return render_not_found_response_for_locale(&db, themes_root, None, services).await;
     };
     let public_content::PublicEntryRenderSnapshot {
         entry,
@@ -967,19 +1083,30 @@ async fn render_entry_response_with_cache(
         EnqueueCondition::Single
     };
     let enqueued = enqueued_for_route(active_v3.as_ref(), route_condition);
+    let canonical_query = crate::cache::canonicalize_public_query(raw_query, QueryScope::Single);
+    let composed = content_render::compose_document_with_seo_with_assets(
+        header.as_deref(),
+        &body.html,
+        footer.as_deref(),
+        &seo_view,
+        body_classes,
+        &enqueued,
+        active_v3.is_some(),
+    )?;
+    let composed = apply_public_render_hooks(
+        composed,
+        services,
+        if is_home { "home" } else { "single" },
+        &canonical_path_for_seo,
+        &canonical_query,
+        false,
+        &entry_locale,
+        &body.theme_context,
+        &budget,
+    )
+    .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_icons(
-            content_render::compose_document_with_seo_with_assets(
-                header.as_deref(),
-                &body.html,
-                footer.as_deref(),
-                &seo_view,
-                body_classes,
-                &enqueued,
-                active_v3.is_some(),
-            )?,
-            &budget.render_budget.icon_nonces,
-        )?,
+        content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
         body.has_active_contact_form || entry_has_form || shell_has_form,
     ))
 }
@@ -1032,6 +1159,7 @@ pub(crate) async fn redirect_canonical_taxonomy(
 /// The public fallback uses the same term-ID renderer as the legacy routes.
 /// The canonical path was already selected by storage; no slug-based routing
 /// is allowed to override it.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn render_canonical_taxonomy(
     db: &SqlitePool,
     themes_root: Option<ThemeStoreRoot>,
@@ -1040,6 +1168,7 @@ pub(crate) async fn render_canonical_taxonomy(
     canonical_base: String,
     raw_query: Option<&str>,
     expected_kind: Option<TaxonomyKind>,
+    services: Option<&PublicRenderServices>,
 ) -> ApiResult<Response> {
     let kind_key = require_term_kind(db, term_id, expected_kind).await?;
     let kind = match kind_key.as_str() {
@@ -1298,19 +1427,31 @@ pub(crate) async fn render_canonical_taxonomy(
     .await?;
     let tax_class = format!("od-tax-{}", schema.key);
     let enqueued = enqueued_for_route(active_v3.as_ref(), EnqueueCondition::Taxonomy);
+    let canonical_query =
+        crate::cache::canonicalize_public_query(raw_query, QueryScope::TaxonomyArchive(kind));
+    let composed = content_render::compose_document_with_seo_with_assets(
+        header.as_deref(),
+        &body.html,
+        footer.as_deref(),
+        &seo_view,
+        &["od-route-taxonomy", &tax_class],
+        &enqueued,
+        active_v3.is_some(),
+    )?;
+    let composed = apply_public_render_hooks(
+        composed,
+        services,
+        "taxonomy",
+        &canonical_base,
+        &canonical_query,
+        false,
+        &locale,
+        &body.theme_context,
+        &budget,
+    )
+    .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_icons(
-            content_render::compose_document_with_seo_with_assets(
-                header.as_deref(),
-                &body.html,
-                footer.as_deref(),
-                &seo_view,
-                &["od-route-taxonomy", &tax_class],
-                &enqueued,
-                active_v3.is_some(),
-            )?,
-            &budget.render_budget.icon_nonces,
-        )?,
+        content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
         body.has_active_contact_form || shell_has_form,
     ))
 }

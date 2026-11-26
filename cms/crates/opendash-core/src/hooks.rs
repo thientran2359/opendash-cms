@@ -104,6 +104,13 @@ pub enum HookEvent {
     FilterSeoHead,
     #[serde(rename = "filter:entry/view")]
     FilterEntryView,
+    // Spec B — Dynamic render filters
+    #[serde(rename = "filter:render/head")]
+    FilterRenderHead,
+    #[serde(rename = "filter:render/footer")]
+    FilterRenderFooter,
+    #[serde(rename = "filter:render/slot")]
+    FilterRenderSlot,
 }
 
 impl HookEvent {
@@ -125,6 +132,9 @@ impl HookEvent {
             HookEvent::FilterContactBeforeSubmit => "filter:contact/before_submit",
             HookEvent::FilterSeoHead => "filter:seo/head",
             HookEvent::FilterEntryView => "filter:entry/view",
+            HookEvent::FilterRenderHead => "filter:render/head",
+            HookEvent::FilterRenderFooter => "filter:render/footer",
+            HookEvent::FilterRenderSlot => "filter:render/slot",
         }
     }
 
@@ -135,6 +145,9 @@ impl HookEvent {
                 | Self::FilterContactBeforeSubmit
                 | Self::FilterSeoHead
                 | Self::FilterEntryView
+                | Self::FilterRenderHead
+                | Self::FilterRenderFooter
+                | Self::FilterRenderSlot
         )
     }
 
@@ -204,6 +217,9 @@ pub enum HookExecutionMode {
     FilterContentPrepareSave,
     FilterContactBeforeSubmit,
     FilterProjection,
+    FilterRender,
+    RouteGet,
+    RoutePost,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -398,6 +414,24 @@ mod tests {
             ),
             (HookEvent::FilterSeoHead, "filter:seo/head", true, false),
             (HookEvent::FilterEntryView, "filter:entry/view", true, false),
+            (
+                HookEvent::FilterRenderHead,
+                "filter:render/head",
+                true,
+                false,
+            ),
+            (
+                HookEvent::FilterRenderFooter,
+                "filter:render/footer",
+                true,
+                false,
+            ),
+            (
+                HookEvent::FilterRenderSlot,
+                "filter:render/slot",
+                true,
+                false,
+            ),
         ];
         for (ev, s, is_filter, is_async) in cases {
             assert_eq!(ev.as_str(), s);

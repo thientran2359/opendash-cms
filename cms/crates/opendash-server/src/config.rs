@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -160,14 +159,6 @@ pub fn persist_clear_safe_mode(paths: &SitePaths) -> ApiResult<PortableRuntimeCo
     fs::rename(&part_path, &cfg_path)
         .map_err(|_| ApiError::internal("Không cập nhật được config/site.json."))?;
     Ok(cfg)
-}
-
-pub fn build_recovery_state_for_root(site_root: &Path, db_path: &Path) -> RecoveryState {
-    let paths = SitePaths::from_parts(site_root.to_path_buf(), db_path.to_path_buf());
-    match RuntimeConfigV1::load(&paths) {
-        Ok(cfg) => RecoveryState::new(cfg.portable.recovery_safe_mode),
-        Err(_) => RecoveryState::new(false),
-    }
 }
 
 impl RuntimeConfigV1 {

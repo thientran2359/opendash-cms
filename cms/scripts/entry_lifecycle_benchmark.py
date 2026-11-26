@@ -162,8 +162,11 @@ class HttpClient:
                 data = resp.read()
                 resp_headers = {k.lower(): v for k, v in resp.getheaders()}
                 return resp.status, data, resp_headers
-            except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError):
-                self.conn.close()
+            except Exception:
+                try:
+                    self.conn.close()
+                except Exception:
+                    pass
                 self.conn = http.client.HTTPConnection(self.host, self.port, timeout=120)
                 if attempt == 1:
                     raise
@@ -226,8 +229,10 @@ class ServerHandle:
         self.stderr_fh = stderr_path.open("wb")
         env = dict(os.environ)
         env["OPENDASH_SITE_ROOT"] = str(site_root)
+        env["OPENDASH_DB_PATH"] = str(site_root / "database" / "opendash.sqlite")
         env["OPENDASH_HOST"] = "127.0.0.1"
         env["OPENDASH_PORT"] = str(self.port)
+        env.pop("OPENDASH_PUBLIC_ORIGIN", None)
         self.proc = subprocess.Popen(
             [str(binary)],
             env=env,
@@ -477,7 +482,6 @@ def build_canonical_seed(
         # Upload 20 deterministic PNGs via media_smoke.make_png(seed=1..20, 2x2).
         for seed in range(1, 21):
             png = make_png(seed=seed, width=2, height=2)
-            expected_sha = hashlib.sha256(png).hexdigest()
             st, data, _ = srv.client.raw(
                 "POST",
                 "/api/admin/media",
@@ -490,7 +494,13 @@ def build_canonical_seed(
             )
             assert st == 201, (st, data)
             asset = json.loads(data.decode("utf-8"))
-            assert asset["id"] == expected_sha, (asset["id"], expected_sha)
+            st_f, stored_png, _ = srv.client.raw(
+                "GET", f"/api/admin/media/{asset['id']}/file", headers=admin
+            )
+            assert st_f == 200 and hashlib.sha256(stored_png).hexdigest() == asset["id"], (
+                st_f,
+                asset["id"],
+            )
             media_ids[seed] = asset["id"]
 
         # Assert zero unrelated ordinary posts exist before fixture seed.

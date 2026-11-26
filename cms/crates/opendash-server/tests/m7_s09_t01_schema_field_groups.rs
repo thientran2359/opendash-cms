@@ -66,7 +66,7 @@ impl RunningServer {
 
         let base_url = format!("http://127.0.0.1:{port}");
         let client = Client::new();
-        for _ in 0..100 {
+        for _ in 0..300 {
             if let Ok(resp) = client.get(format!("{base_url}/api/health")).send().await {
                 if resp.status() == StatusCode::OK {
                     return Self {

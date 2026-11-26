@@ -555,45 +555,9 @@ pub async fn install_plugin_revision(
     tx.commit()
         .await
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi commit cài đặt plugin: {e}")))?;
+    crate::cache::SiteCacheEpoch::global().bump();
 
     Ok(revision_id)
-}
-
-pub async fn upsert_plugin(
-    db_pool: &SqlitePool,
-    manifest: &PluginManifest,
-    manifest_json: &str,
-    wasm_bytes: &[u8],
-) -> Result<(), String> {
-    let mut conn = db_pool
-        .acquire()
-        .await
-        .map_err(|e| format!("Lỗi kết nối cơ sở dữ liệu: {e}"))?;
-
-    sqlx::query(
-        "INSERT INTO plugins (id, version, name, description, manifest_json, wasm_blob, enabled, last_error, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 1, NULL, datetime('now'))
-         ON CONFLICT(id) DO UPDATE SET
-             version = excluded.version,
-             name = excluded.name,
-             description = excluded.description,
-             manifest_json = excluded.manifest_json,
-             wasm_blob = excluded.wasm_blob,
-             enabled = 1,
-             last_error = NULL,
-             updated_at = excluded.updated_at",
-    )
-    .bind(&manifest.id)
-    .bind(&manifest.version)
-    .bind(&manifest.name)
-    .bind(&manifest.description)
-    .bind(manifest_json)
-    .bind(wasm_bytes)
-    .execute(&mut *conn)
-    .await
-    .map_err(|e| format!("Lỗi lưu plugin vào database: {e}"))?;
-
-    Ok(())
 }
 
 pub async fn list_plugins(db_pool: &SqlitePool) -> Result<Vec<PluginSummary>, String> {
@@ -735,6 +699,7 @@ pub async fn set_plugin_enabled(
             .map_err(|e| format!("Lỗi xóa plugin projections: {e}"))?;
     }
     tx.commit().await.map_err(|e| e.to_string())?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(())
 }
 
@@ -826,6 +791,7 @@ pub async fn set_plugin_enabled_cas(
     tx.commit()
         .await
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi commit trạng thái plugin: {e}")))?;
+    crate::cache::SiteCacheEpoch::global().bump();
 
     Ok(next_cas)
 }

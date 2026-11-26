@@ -527,6 +527,7 @@ pub async fn put_settings(
     sync_claims_with_options(&mut tx, true).await?;
     let output = read_settings(&mut tx).await?;
     tx.commit().await.map_err(ApiError::from)?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(output)
 }
 

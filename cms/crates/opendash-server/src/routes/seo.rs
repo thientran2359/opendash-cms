@@ -1,4 +1,6 @@
 //! M7-S03-T01 admin entry route handlers and public custom-path / redirect fallback.
+use std::sync::Arc;
+
 use axum::{
     Json,
     extract::{Extension, OriginalUri, Path, Query, State},
@@ -13,14 +15,17 @@ use crate::{
     auth::{
         Role, require_admin, require_admin_with_csrf, require_session, require_session_with_csrf,
     },
+    cache::ExtensionRenderCache,
     error::{ApiError, ApiResult},
+    hooks::HookDispatcher,
     public_context::{
         CanonicalUrlBuilder, QueryScope, parse_query, validate_public_request_path,
         validate_single_query,
     },
     routes::{
         public_content::{
-            redirect_canonical_taxonomy, render_canonical_archive, render_canonical_taxonomy,
+            PublicRenderServices, extract_origin_host, redirect_canonical_taxonomy,
+            render_canonical_archive, render_canonical_taxonomy,
             render_single_entry_response_with_query,
         },
         settings::{no_store_headers, parse_if_match},
@@ -97,20 +102,28 @@ pub async fn put_entry_route(
 
 pub async fn public_fallback(
     State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    State(render_cache): State<Arc<ExtensionRenderCache>>,
     themes_root: Option<Extension<ThemeStoreRoot>>,
+    headers: HeaderMap,
     method: Method,
     OriginalUri(uri): OriginalUri,
 ) -> ApiResult<Response> {
     if method != Method::GET && method != Method::HEAD {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
+    let services = PublicRenderServices {
+        hooks,
+        render_cache,
+        origin_host: extract_origin_host(&headers),
+    };
     let path = uri.path();
     if !path.starts_with('/') || path.contains("//") || path.contains('\\') {
         return Err(ApiError::bad_request("Đường dẫn công khai không hợp lệ."));
     }
     let first_seg = path[1..].split('/').next().unwrap_or("");
     if !first_seg.is_empty() && crate::seo::is_reserved_system_root(first_seg) {
-        return missing_public_page(&db, themes_root, None).await;
+        return missing_public_page(&db, themes_root, None, Some(&services)).await;
     }
     let had_trailing_slash = path.len() > 1 && path.ends_with('/');
     let lookup_path = if had_trailing_slash {
@@ -123,7 +136,13 @@ pub async fn public_fallback(
     let Some(resolved) = resolved else {
         let inferred_locale =
             crate::storage::settings::enabled_secondary_locale_for_segment(&db, first_seg).await?;
-        return missing_public_page(&db, themes_root, inferred_locale.as_deref()).await;
+        return missing_public_page(
+            &db,
+            themes_root,
+            inferred_locale.as_deref(),
+            Some(&services),
+        )
+        .await;
     };
     let raw = uri.query();
     match resolved.target {
@@ -134,7 +153,7 @@ pub async fn public_fallback(
         } => {
             validate_single_query(raw).map_err(ApiError::bad_request)?;
             let Some(record) = public_content::get_published_by_id(&db, id).await? else {
-                return missing_public_page(&db, themes_root, Some(&locale)).await;
+                return missing_public_page(&db, themes_root, Some(&locale), Some(&services)).await;
             };
             if resolved.redirect || had_trailing_slash {
                 return Ok(permanent_public_redirect(resolved.canonical_path));
@@ -146,6 +165,7 @@ pub async fn public_fallback(
                     &locale,
                     resolved.canonical_path,
                     raw,
+                    Some(&services),
                 )
                 .await
             } else {
@@ -155,6 +175,7 @@ pub async fn public_fallback(
                     record,
                     Some(resolved.canonical_path),
                     raw,
+                    Some(&services),
                 )
                 .await
             }
@@ -168,7 +189,7 @@ pub async fn public_fallback(
                     ReadingPageState::Missing
                 )
             {
-                return missing_public_page(&db, themes_root, Some(&locale)).await;
+                return missing_public_page(&db, themes_root, Some(&locale), Some(&services)).await;
             }
             public_content::require_public_archive(&db, &type_key).await?;
             if resolved.redirect || had_trailing_slash {
@@ -185,6 +206,7 @@ pub async fn public_fallback(
                 locale,
                 resolved.canonical_path,
                 raw.map(str::to_owned),
+                Some(services),
             )
             .await
         }
@@ -204,6 +226,7 @@ pub async fn public_fallback(
                 resolved.canonical_path,
                 raw,
                 None,
+                Some(&services),
             )
             .await
         }
@@ -218,6 +241,7 @@ pub async fn public_fallback(
                 &locale,
                 resolved.canonical_path,
                 raw,
+                Some(&services),
             )
             .await
         }
@@ -237,9 +261,15 @@ async fn missing_public_page(
     db: &SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
     locale: Option<&str>,
+    services: Option<&PublicRenderServices>,
 ) -> ApiResult<Response> {
-    crate::routes::public_content::render_not_found_response_for_locale(db, themes_root, locale)
-        .await
+    crate::routes::public_content::render_not_found_response_for_locale(
+        db,
+        themes_root,
+        locale,
+        services,
+    )
+    .await
 }
 
 pub async fn get_entry_seo(

@@ -49,27 +49,6 @@ export interface MenuItemInput {
   external_url?: string | null;
 }
 
-export interface MenuDiagnostic {
-  item_id: number;
-  code: string;
-  message: string;
-}
-
-export interface MenuItemView {
-  id: number;
-  label: string;
-  url: string;
-  children: MenuItemView[];
-}
-
-export interface MenuViewModel {
-  menu_id: number;
-  menu_key: string;
-  title: string;
-  items: MenuItemView[];
-  diagnostics: MenuDiagnostic[];
-}
-
 export interface MenuSlotsSnapshot {
   theme_id: string;
   version: number;
@@ -129,21 +108,6 @@ export async function deleteMenu(id: number, version: number, csrfToken: string)
     csrfToken,
     ifMatchVersion: version,
     defaultErrorMessage: tStatic('api.menus.delete_the_menu'),
-  });
-}
-
-export function previewMenu(
-  id: number,
-  title: string | null,
-  items: MenuItemInput[],
-  csrfToken: string,
-): Promise<MenuViewModel> {
-  return requestJson<MenuViewModel>(`/api/admin/menus/${id}/preview`, {
-    method: 'POST',
-    csrfToken,
-    contentType: 'application/json',
-    body: JSON.stringify({ title, items }),
-    defaultErrorMessage: tStatic('api.menus.preview_the_menu'),
   });
 }
 

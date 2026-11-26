@@ -1451,7 +1451,6 @@ pub fn extract_visible_text_with_schemas(
                                 if let Some(entry) = schemas.get(&props.block_id)
                                     && entry.status == ProviderStatus::Active
                                     && entry.declaration_state == DeclarationState::Declared
-                                    && !entry.descriptor.legacy_mode
                                 {
                                     entry
                                         .descriptor
@@ -1477,7 +1476,7 @@ pub fn extract_block_refs_lenient(raw_body: &str) -> ExtractedBlockRefs {
 
 /// Scans `<!-- od:... -->` comments leniently to extract referenced media and
 /// pattern IDs, including `Media` fields from active, declared `od:plugin_block`
-/// schemas (`ProviderInactive`/`Withdrawn`/`legacy_mode` entries emit zero media).
+/// schemas (`ProviderInactive`/`Withdrawn` entries emit zero media).
 pub fn extract_block_refs_lenient_with_schemas(
     raw_body: &str,
     schemas: &RegistryCatalog<RegisteredBlockSchema>,
@@ -1546,7 +1545,6 @@ pub fn extract_block_refs_lenient_with_schemas(
                         && let Some(entry) = schemas.get(&props.block_id)
                         && entry.status == ProviderStatus::Active
                         && entry.declaration_state == DeclarationState::Declared
-                        && !entry.descriptor.legacy_mode
                     {
                         let collected = entry.descriptor.schema.collect_media_ids(&props.values);
                         refs.image_ids.extend(collected.image_ids);
@@ -1568,7 +1566,6 @@ mod tests {
     use crate::{
         builder::{BindingSource, ListSort, ResponsiveStyle, TextAlign},
         registry::ResourceOwner,
-        theme::{BlockDescriptor, Fields},
     };
     use serde_json::json;
 
@@ -1713,7 +1710,7 @@ mod tests {
                                 "el-legacy",
                                 KnownElement::Legacy(LegacyBlockProps {
                                     block_id: "ocean/hero".into(),
-                                    values: Fields::from([("title".into(), "Ocean".into())]),
+                                    values: BTreeMap::from([("title".into(), "Ocean".into())]),
                                 }),
                             ),
                             ElementNode {
@@ -1742,31 +1739,31 @@ mod tests {
         assert!(parsed.diagnostics.is_empty());
         assert_eq!(parsed.document, doc);
 
-        // Validate against RegistryCatalog (keeping unresolved preserved against `doc`)
+        // Validate against RegistryCatalog (keeping legacy and unresolved preserved against `doc`)
+        let pricing_schema: crate::block_schema::BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "demo-plugin/pricing",
+            "title": "Pricing",
+            "category": "plugin",
+            "render": "render.html",
+            "fields": [
+                { "type": "text", "key": "tier", "label": "Tier" }
+            ]
+        }))
+        .unwrap();
         let mut catalog = crate::registry::RegistryCatalog::new();
-        catalog
-            .register(
-                "ocean/hero",
-                ResourceOwner::Theme("ocean".into()),
-                BlockDescriptor {
-                    id: "ocean/hero".into(),
-                    fields: Fields::from([("title".into(), "Tiêu đề".into())]),
-                },
-            )
-            .unwrap();
         catalog
             .register(
                 "demo-plugin/pricing",
                 ResourceOwner::Plugin("demo-plugin".into()),
-                BlockDescriptor {
-                    id: "demo-plugin/pricing".into(),
-                    fields: Fields::new(),
+                RegisteredBlockSchema {
+                    schema: pricing_schema,
                 },
             )
             .unwrap();
         parsed
             .document
-            .validate_for_save(&catalog, Some(&doc))
+            .validate_for_save_with_schemas(&catalog, Some(&doc))
             .unwrap();
     }
 
@@ -1847,7 +1844,7 @@ mod tests {
         assert_eq!(combined, raw.replace("\r\n", "\n"));
         parsed
             .document
-            .validate_for_save(&crate::registry::RegistryCatalog::new(), None)
+            .validate_for_save_with_schemas(&crate::registry::RegistryCatalog::new(), None)
             .unwrap();
     }
 
@@ -2022,7 +2019,6 @@ mod tests {
                 ResourceOwner::Core,
                 RegisteredBlockSchema {
                     schema: schema.clone(),
-                    legacy_mode: false,
                 },
             )
             .unwrap();
@@ -2045,7 +2041,6 @@ mod tests {
                 declaration_state: DeclarationState::Declared,
                 descriptor: RegisteredBlockSchema {
                     schema: schema.clone(),
-                    legacy_mode: false,
                 },
             },
         );
@@ -2065,10 +2060,7 @@ mod tests {
                 owner: ResourceOwner::Core,
                 status: ProviderStatus::Active,
                 declaration_state: DeclarationState::Withdrawn,
-                descriptor: RegisteredBlockSchema {
-                    schema,
-                    legacy_mode: false,
-                },
+                descriptor: RegisteredBlockSchema { schema },
             },
         );
         assert_eq!(

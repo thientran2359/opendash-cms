@@ -280,20 +280,6 @@ pub async fn get_menu_in_tx(
     Ok(Some(MenuWithItems { menu, items }))
 }
 
-pub async fn get_menu_by_key_in_tx(
-    conn: &mut SqliteConnection,
-    menu_key: &str,
-) -> ApiResult<Option<MenuWithItems>> {
-    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM site_menus WHERE menu_key = ?")
-        .bind(menu_key)
-        .fetch_optional(&mut *conn)
-        .await?;
-    match id {
-        Some(id) => get_menu_in_tx(conn, id).await,
-        None => Ok(None),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum NodeKey {
     Existing(i64),
@@ -673,11 +659,6 @@ pub async fn get_slot_version_for_locale_in_tx(
     Ok(ver.unwrap_or(1))
 }
 
-pub async fn get_slot_version_in_tx(conn: &mut SqliteConnection, theme_id: &str) -> ApiResult<i64> {
-    let locale = crate::storage::settings::get_default_locale_code_in_conn(conn).await?;
-    get_slot_version_for_locale_in_tx(conn, theme_id, &locale).await
-}
-
 pub async fn bump_slot_version_for_locale_in_tx(
     conn: &mut SqliteConnection,
     theme_id: &str,
@@ -696,66 +677,6 @@ pub async fn bump_slot_version_for_locale_in_tx(
     Ok(ver)
 }
 
-pub async fn bump_slot_version_in_tx(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-) -> ApiResult<i64> {
-    let locale = crate::storage::settings::get_default_locale_code_in_conn(conn).await?;
-    bump_slot_version_for_locale_in_tx(conn, theme_id, &locale).await
-}
-
-pub async fn assign_menu_slot_for_locale_in_tx(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-    locale: &str,
-    slot_key: &str,
-    menu_id: Option<i64>,
-) -> ApiResult<()> {
-    validate_menu_key(slot_key)?;
-    if let Some(mid) = menu_id {
-        let exists: Option<i64> = sqlx::query_scalar("SELECT id FROM site_menus WHERE id = ?")
-            .bind(mid)
-            .fetch_optional(&mut *conn)
-            .await?;
-        if exists.is_none() {
-            return Err(ApiError::not_found("Không tìm thấy menu để gắn slot."));
-        }
-        sqlx::query(
-            "INSERT INTO site_menu_slot_assignments (theme_id, locale, slot_key, menu_id)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(theme_id, locale, slot_key) DO UPDATE SET menu_id = excluded.menu_id",
-        )
-        .bind(theme_id)
-        .bind(locale)
-        .bind(slot_key)
-        .bind(mid)
-        .execute(&mut *conn)
-        .await?;
-    } else {
-        sqlx::query(
-            "DELETE FROM site_menu_slot_assignments
-              WHERE theme_id = ? AND locale = ? AND slot_key = ?",
-        )
-        .bind(theme_id)
-        .bind(locale)
-        .bind(slot_key)
-        .execute(&mut *conn)
-        .await?;
-    }
-    bump_slot_version_for_locale_in_tx(conn, theme_id, locale).await?;
-    Ok(())
-}
-
-pub async fn assign_menu_slot_in_tx(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-    slot_key: &str,
-    menu_id: Option<i64>,
-) -> ApiResult<()> {
-    let locale = crate::storage::settings::get_default_locale_code_in_conn(conn).await?;
-    assign_menu_slot_for_locale_in_tx(conn, theme_id, &locale, slot_key, menu_id).await
-}
-
 pub async fn list_slot_assignments_for_locale_in_tx(
     conn: &mut SqliteConnection,
     theme_id: &str,
@@ -772,14 +693,6 @@ pub async fn list_slot_assignments_for_locale_in_tx(
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows.into_iter().collect())
-}
-
-pub async fn list_slot_assignments_in_tx(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-) -> ApiResult<BTreeMap<String, i64>> {
-    let locale = crate::storage::settings::get_default_locale_code_in_conn(conn).await?;
-    list_slot_assignments_for_locale_in_tx(conn, theme_id, &locale).await
 }
 
 pub(crate) fn normalize_menu_path(raw: &str) -> String {
@@ -982,13 +895,6 @@ async fn resolve_and_build_menu_view(
     })
 }
 
-pub async fn resolve_menu_view_in_tx(
-    conn: &mut SqliteConnection,
-    menu_id: i64,
-) -> ApiResult<Option<MenuViewModel>> {
-    resolve_menu_view_for_path_in_tx(conn, menu_id, None).await
-}
-
 pub async fn resolve_menu_view_for_path_in_tx(
     conn: &mut SqliteConnection,
     menu_id: i64,
@@ -1013,19 +919,6 @@ pub async fn resolve_menu_view_for_path_in_tx(
     let view = resolve_and_build_menu_view(conn, with_items.menu, None, items, current_path, false)
         .await?;
     Ok(Some(view))
-}
-
-pub async fn resolve_active_slot_menus(
-    db: &SqlitePool,
-) -> ApiResult<BTreeMap<String, MenuViewModel>> {
-    resolve_active_slot_menus_for_path(db, None, None).await
-}
-
-pub async fn resolve_active_slot_menus_for_locale(
-    db: &SqlitePool,
-    locale: Option<&str>,
-) -> ApiResult<BTreeMap<String, MenuViewModel>> {
-    resolve_active_slot_menus_for_path(db, None, locale).await
 }
 
 pub async fn resolve_active_slot_menus_for_path(
@@ -1061,14 +954,6 @@ pub async fn resolve_active_slot_menus_for_path_in_conn(
     };
     resolve_slot_menus_for_locale_and_path_in_tx(conn, &theme_id, &resolved_locale, current_path)
         .await
-}
-
-pub(super) async fn resolve_slot_menus_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    theme_id: &str,
-) -> ApiResult<BTreeMap<String, MenuViewModel>> {
-    let locale = crate::storage::settings::get_default_locale_code_in_conn(&mut **tx).await?;
-    resolve_slot_menus_for_locale_and_path_in_tx(&mut **tx, theme_id, &locale, None).await
 }
 
 pub(super) async fn resolve_slot_menus_for_locale_in_tx(
@@ -1186,6 +1071,7 @@ pub async fn create_menu_admin(
     match res {
         Ok(out) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(out)
         }
         Err(err) => {
@@ -1220,6 +1106,7 @@ pub async fn update_menu_with_title(
     match res {
         Ok(out) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(out)
         }
         Err(err) => {
@@ -1264,6 +1151,7 @@ pub async fn delete_menu(db: &SqlitePool, menu_id: i64, expected_version: i64) -
     match res {
         Ok(()) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(())
         }
         Err(err) => {
@@ -1438,13 +1326,6 @@ pub async fn get_menu_slots_for_locale(
     }))
 }
 
-pub async fn get_menu_slots(
-    db: &SqlitePool,
-    theme_id: &str,
-) -> ApiResult<Option<MenuSlotsSnapshot>> {
-    get_menu_slots_for_locale(db, theme_id, None).await
-}
-
 pub async fn put_menu_slots_for_locale(
     db: &SqlitePool,
     theme_id: &str,
@@ -1553,6 +1434,7 @@ pub async fn put_menu_slots_for_locale(
     match res {
         Ok(out) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(out)
         }
         Err(err) => {
@@ -1560,15 +1442,6 @@ pub async fn put_menu_slots_for_locale(
             Err(err)
         }
     }
-}
-
-pub async fn put_menu_slots(
-    db: &SqlitePool,
-    theme_id: &str,
-    expected_version: i64,
-    assignments: &BTreeMap<String, Option<i64>>,
-) -> ApiResult<MenuSlotsSnapshot> {
-    put_menu_slots_for_locale(db, theme_id, None, expected_version, assignments).await
 }
 
 #[cfg(test)]

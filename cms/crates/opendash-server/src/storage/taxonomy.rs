@@ -422,6 +422,7 @@ pub async fn create_definition(
         .ok_or_else(|| ApiError::internal("Không thể đọc taxonomy vừa tạo."))?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(created)
 }
 
@@ -491,6 +492,7 @@ pub async fn patch_definition(
         .ok_or_else(|| ApiError::internal("Không thể tải taxonomy vừa sửa."))?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(updated)
 }
 
@@ -537,11 +539,8 @@ pub async fn delete_definition(
         .map_err(mutation_error)?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(())
-}
-
-pub fn valid_kind(kind: &str) -> bool {
-    matches!(kind, "category" | "tag")
 }
 
 fn normalized_name(value: &str) -> ApiResult<&str> {
@@ -1092,6 +1091,7 @@ pub async fn create_term_with_locale(
         .ok_or_else(|| ApiError::internal("Không thể tải term vừa tạo."))?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(created)
 }
 
@@ -1196,6 +1196,7 @@ pub async fn patch_term(
         .ok_or_else(|| ApiError::internal("Không thể tải term vừa cập nhật."))?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(record)
 }
 
@@ -1254,6 +1255,7 @@ pub async fn delete_term(
     }
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(())
 }
 

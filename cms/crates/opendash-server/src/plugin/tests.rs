@@ -149,7 +149,13 @@ mod tests {
     #[test]
     fn test_worker_entry() {
         if std::env::var("OPENDASH_WORKER_CHILD").is_ok() {
-            crate::plugin::worker::run_worker_from_stdio();
+            if let Ok(handle) = std::thread::Builder::new()
+                .name("opendash-plugin-worker-test".into())
+                .stack_size(8 * 1024 * 1024)
+                .spawn(crate::plugin::worker::run_worker_from_stdio)
+            {
+                let _ = handle.join();
+            }
             std::process::exit(0);
         }
     }
@@ -298,6 +304,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         let start = std::time::Instant::now();
@@ -370,6 +377,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         let res = runtime
@@ -441,6 +449,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         let res = runtime
@@ -513,6 +522,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         let res = runtime
@@ -609,6 +619,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         let start = std::time::Instant::now();
@@ -959,6 +970,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         let res = runtime
@@ -1015,6 +1027,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         let res = runtime
@@ -1107,6 +1120,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         // Assert no lingering workers before execution
@@ -1208,6 +1222,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         let res = runtime
@@ -1288,6 +1303,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
         let res_next = runtime
             .run_plugin(
@@ -1385,6 +1401,7 @@ mod tests {
             filters: vec![],
             editor_panels: vec![],
             settings_schema: vec![],
+            ..Default::default()
         };
 
         let rt = runtime.clone();

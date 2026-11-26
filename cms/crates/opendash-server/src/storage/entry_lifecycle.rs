@@ -963,6 +963,7 @@ pub async fn execute_lifecycle_transition(
             .await?;
         let receipt = apply_lifecycle_in_tx(&mut tx, command, authority).await?;
         tx.commit().await?;
+        crate::cache::SiteCacheEpoch::global().bump();
         Ok(receipt)
     }
     .await;
@@ -2404,6 +2405,7 @@ async fn commit_metadata_patch_inner(
     };
 
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok((committed_row, effective.schema_token, receipt))
 }
 

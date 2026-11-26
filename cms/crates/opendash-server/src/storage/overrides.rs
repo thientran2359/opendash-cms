@@ -27,12 +27,8 @@ use crate::{
     error::{ApiError, ApiResult},
     page::{self, RenderAnnotationScope, RenderedLayout},
     storage::{
-        builder::{
-            self, BuilderRenderContext, ListResults, check_preview_images,
-            resolve_contact_forms_in_tx, resolve_lists_in_tx,
-        },
-        builder_binding::{self, BindingResults},
-        content, entries, menu, permalinks, public_content, settings, theme,
+        builder::{self, BuilderRenderContext, check_preview_images, resolve_contact_forms_in_tx},
+        builder_binding, content, entries, menu, permalinks, public_content, settings, theme,
         theme::ActiveThemeV3,
     },
     template_sec::{self, PreviewCompositionBudget},
@@ -347,8 +343,6 @@ pub struct TemplateOverrideRecord {
     pub updated_at: String,
 }
 
-pub type TemplateTargetInput = TemplateCandidate;
-
 #[derive(Debug, Clone)]
 pub enum TemplateResolution {
     DbOverride(TemplateOverrideRecord),
@@ -468,21 +462,6 @@ pub async fn get_typed_override(
     let key = target.canonical_key().map_err(ApiError::bad_request)?;
     let mut conn = db.acquire().await?;
     get_typed_override_on_connection(&mut conn, &key).await
-}
-
-pub async fn get_typed_override_by_id(
-    db: &SqlitePool,
-    override_id: i64,
-) -> ApiResult<Option<TemplateOverrideRecord>> {
-    let row: Option<OverrideRow> = sqlx::query_as(
-        "SELECT id, target_kind, canonical_target_key, target_json, ast_json, version,
-                base_theme_id, base_revision_digest, updated_at
-           FROM template_overrides WHERE id = ?",
-    )
-    .bind(override_id)
-    .fetch_optional(db)
-    .await?;
-    row.map(row_to_record).transpose()
 }
 
 fn theme_source_for_candidate<'a>(
@@ -911,6 +890,7 @@ pub async fn save_typed_override(
         .ok_or_else(|| ApiError::internal("Template override not readable after save."))?;
     refresh_override_media_refs_in_tx(&mut tx, saved.id, document).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(saved)
 }
 
@@ -968,6 +948,7 @@ pub async fn reset_typed_override(
         .await?
         .effective_source();
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(ResetTemplateOutcome {
         reset_id: existing.id,
         canonical_target_key: existing.canonical_target_key,
@@ -1656,53 +1637,6 @@ async fn resolve_preview_entry(
     Ok(Some((entry, schema)))
 }
 
-pub async fn preview_typed_override(
-    db: &SqlitePool,
-    themes_root: &Path,
-    actor: &SessionContext,
-    target: &TemplateCandidate,
-    document: &BuilderDocument,
-    preview_entry: Option<&TemplatePreviewEntry>,
-    expected_version: Option<i64>,
-) -> ApiResult<RenderedLayout> {
-    preview_typed_override_with_cache(
-        db,
-        themes_root,
-        actor,
-        target,
-        document,
-        preview_entry,
-        expected_version,
-        page::BlockTemplateCache::global(),
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn preview_typed_override_with_cache(
-    db: &SqlitePool,
-    themes_root: &Path,
-    actor: &SessionContext,
-    target: &TemplateCandidate,
-    document: &BuilderDocument,
-    preview_entry: Option<&TemplatePreviewEntry>,
-    expected_version: Option<i64>,
-    cache: &page::BlockTemplateCache,
-) -> ApiResult<RenderedLayout> {
-    preview_typed_override_with_cache_and_locale(
-        db,
-        themes_root,
-        actor,
-        target,
-        document,
-        preview_entry,
-        expected_version,
-        None,
-        cache,
-    )
-    .await
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn preview_typed_override_with_cache_and_locale(
     db: &SqlitePool,
@@ -1893,49 +1827,25 @@ pub async fn preview_typed_override_with_cache_and_locale(
     )
     .await?;
     rendered.diagnostics.append(&mut body_diagnostics);
+    if !budget.hook_nonces.is_empty() {
+        let clear: Vec<(String, String)> = budget
+            .hook_nonces
+            .entries()
+            .iter()
+            .map(|h| (h.nonce.clone(), String::new()))
+            .collect();
+        rendered.html = content_render::apply_render_hooks_to_document(
+            rendered.html,
+            "",
+            &[],
+            &[],
+            "",
+            &clear,
+        )?;
+    }
     rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
     tx.rollback().await?;
     Ok(rendered)
-}
-
-pub async fn render_override_for_public(
-    db: &SqlitePool,
-    record: &TemplateOverrideRecord,
-    route_entry: Option<(&str, &str)>,
-) -> ApiResult<RenderedLayout> {
-    render_override_for_public_with_context(db, record, route_entry, None, None).await
-}
-
-pub async fn render_override_for_public_with_context(
-    db: &SqlitePool,
-    record: &TemplateOverrideRecord,
-    route_entry: Option<(&str, &str)>,
-    content_html: Option<&str>,
-    parts: Option<&BTreeMap<String, String>>,
-) -> ApiResult<RenderedLayout> {
-    let mut tx = db.begin().await?;
-    let state: BuilderRenderContext = builder::read_render_context_tx(&mut tx).await?;
-    let bindings: BindingResults =
-        builder_binding::resolve_in_tx_with_route(&mut tx, &record.document, false, route_entry)
-            .await?;
-    let lists: ListResults =
-        resolve_lists_in_tx(&mut tx, &record.document, &BTreeMap::new()).await?;
-    let forms = resolve_contact_forms_in_tx(&mut tx, &record.document).await?;
-    tx.commit().await?;
-    let empty_parts = BTreeMap::new();
-    let context = page::BuilderTemplateContext {
-        content_html,
-        parts: parts.unwrap_or(&empty_parts),
-    };
-    page::render_builder_with_template_context(
-        &state,
-        &record.document,
-        false,
-        &bindings,
-        &lists,
-        &forms,
-        Some(&context),
-    )
 }
 
 /// The public S02 graph has one budget across Builder and C-SEC segments.
@@ -1993,20 +1903,6 @@ impl PublicCompositionBudget {
             .filter(|n| *n <= 32)
             .ok_or_else(|| ApiError::internal("Template parts exceed 32 expansions."))?;
         Ok(())
-    }
-
-    pub fn render_theme(
-        &mut self,
-        compiled: &template_sec::CompiledCsecComposition,
-        context: &serde_json::Value,
-        slot: Option<&str>,
-    ) -> ApiResult<String> {
-        self.render_theme_with_config(
-            compiled,
-            context,
-            slot,
-            &template_sec::RenderFormattingConfig::default(),
-        )
     }
 
     pub fn render_theme_with_config(
@@ -2175,79 +2071,6 @@ async fn render_public_builder(
     rendered.has_active_contact_form |= child_forms;
     rendered.diagnostics.append(&mut child_diagnostics);
     Ok(rendered)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn render_resolved_public_builder(
-    db: &SqlitePool,
-    record: &TemplateOverrideRecord,
-    active: Option<&ActiveThemeV3>,
-    theme_context: &serde_json::Value,
-    route_entry: Option<(&str, &str)>,
-    slot: Option<&str>,
-    budget: &mut PublicCompositionBudget,
-) -> ApiResult<RenderedLayout> {
-    render_resolved_public_builder_for_locale(
-        db,
-        record,
-        active,
-        theme_context,
-        route_entry,
-        None,
-        slot,
-        budget,
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn render_resolved_public_builder_for_locale(
-    db: &SqlitePool,
-    record: &TemplateOverrideRecord,
-    active: Option<&ActiveThemeV3>,
-    theme_context: &serde_json::Value,
-    route_entry: Option<(&str, &str)>,
-    locale: Option<&str>,
-    slot: Option<&str>,
-    budget: &mut PublicCompositionBudget,
-) -> ApiResult<RenderedLayout> {
-    render_resolved_public_builder_with_cache_for_locale(
-        db,
-        record,
-        active,
-        theme_context,
-        route_entry,
-        locale,
-        slot,
-        budget,
-        page::BlockTemplateCache::global(),
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn render_resolved_public_builder_with_cache(
-    db: &SqlitePool,
-    record: &TemplateOverrideRecord,
-    active: Option<&ActiveThemeV3>,
-    theme_context: &serde_json::Value,
-    route_entry: Option<(&str, &str)>,
-    slot: Option<&str>,
-    budget: &mut PublicCompositionBudget,
-    cache: &page::BlockTemplateCache,
-) -> ApiResult<RenderedLayout> {
-    render_resolved_public_builder_with_cache_for_locale(
-        db,
-        record,
-        active,
-        theme_context,
-        route_entry,
-        None,
-        slot,
-        budget,
-        cache,
-    )
-    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2511,28 +2334,6 @@ pub async fn inspect_public_surfaces_and_precompile(
     })
 }
 
-pub async fn resolve_and_render_header_footer_with_context(
-    db: &SqlitePool,
-    active_v3: Option<&ActiveThemeV3>,
-    theme_context: &serde_json::Value,
-    precompiled_shell: &PrecompiledPublicShell,
-    fmt_cfg: &template_sec::RenderFormattingConfig,
-    budget: &mut PublicCompositionBudget,
-    cache: &page::BlockTemplateCache,
-) -> ApiResult<(Option<String>, Option<String>, bool)> {
-    resolve_and_render_header_footer_with_context_for_locale(
-        db,
-        active_v3,
-        theme_context,
-        precompiled_shell,
-        None,
-        fmt_cfg,
-        budget,
-        cache,
-    )
-    .await
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn resolve_and_render_header_footer_with_context_for_locale(
     db: &SqlitePool,
@@ -2625,102 +2426,6 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         || footer.as_ref().is_some_and(|r| r.has_active_contact_form);
     tx.commit().await?;
     Ok((header.map(|r| r.html), footer.map(|r| r.html), has_form))
-}
-
-pub async fn resolve_and_render_header_footer(
-    db: &SqlitePool,
-    active_v3: Option<&ActiveThemeV3>,
-    site_ctx: &SiteContext<'_>,
-    theme_opts: &BTreeMap<String, serde_json::Value>,
-    budget: &mut PublicCompositionBudget,
-) -> ApiResult<(Option<String>, Option<String>, bool)> {
-    resolve_and_render_header_footer_for_locale(db, active_v3, site_ctx, theme_opts, None, budget)
-        .await
-}
-
-pub async fn resolve_and_render_header_footer_for_locale(
-    db: &SqlitePool,
-    active_v3: Option<&ActiveThemeV3>,
-    site_ctx: &SiteContext<'_>,
-    theme_opts: &BTreeMap<String, serde_json::Value>,
-    locale: Option<&str>,
-    budget: &mut PublicCompositionBudget,
-) -> ApiResult<(Option<String>, Option<String>, bool)> {
-    resolve_and_render_header_footer_with_cache_for_locale(
-        db,
-        active_v3,
-        site_ctx,
-        theme_opts,
-        locale,
-        budget,
-        page::BlockTemplateCache::global(),
-    )
-    .await
-}
-
-pub async fn resolve_and_render_header_footer_with_cache(
-    db: &SqlitePool,
-    active_v3: Option<&ActiveThemeV3>,
-    site_ctx: &SiteContext<'_>,
-    theme_opts: &BTreeMap<String, serde_json::Value>,
-    budget: &mut PublicCompositionBudget,
-    cache: &page::BlockTemplateCache,
-) -> ApiResult<(Option<String>, Option<String>, bool)> {
-    resolve_and_render_header_footer_with_cache_for_locale(
-        db, active_v3, site_ctx, theme_opts, None, budget, cache,
-    )
-    .await
-}
-
-pub async fn resolve_and_render_header_footer_with_cache_for_locale(
-    db: &SqlitePool,
-    active_v3: Option<&ActiveThemeV3>,
-    site_ctx: &SiteContext<'_>,
-    theme_opts: &BTreeMap<String, serde_json::Value>,
-    locale: Option<&str>,
-    budget: &mut PublicCompositionBudget,
-    cache: &page::BlockTemplateCache,
-) -> ApiResult<(Option<String>, Option<String>, bool)> {
-    let menus = crate::storage::menu::resolve_active_slot_menus_for_path(db, None, locale).await?;
-    let theme_assets = active_v3
-        .map(ActiveThemeV3::asset_url_map)
-        .unwrap_or_default();
-    let pagination = PaginationView::empty();
-    let empty_entries = Vec::new();
-    let part_context = content_render::build_public_theme_context(PublicThemeContextInput {
-        site: site_ctx,
-        options: theme_opts,
-        theme_assets: &theme_assets,
-        menus: &menus,
-        route_kind: "part",
-        route_path: None,
-        breadcrumbs: &[],
-        pagination: &pagination,
-        archive_url: None,
-        previous_url: None,
-        next_url: None,
-        entries: &empty_entries,
-        related_entries: &empty_entries,
-        recent_posts: &empty_entries,
-        taxonomy: None,
-        content_type: None,
-        entry: None,
-    })?;
-    let fmt_cfg = template_sec::RenderFormattingConfig {
-        timezone: site_ctx.timezone.to_owned(),
-    };
-    let empty_shell = PrecompiledPublicShell::default();
-    resolve_and_render_header_footer_with_context_for_locale(
-        db,
-        active_v3,
-        &part_context,
-        &empty_shell,
-        locale,
-        &fmt_cfg,
-        budget,
-        cache,
-    )
-    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -3189,31 +2894,6 @@ fn escape_preview_text(value: &str) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn preview_studio(
-    db: &SqlitePool,
-    themes_root: &Path,
-    actor: &SessionContext,
-    target: &TemplateCandidate,
-    document: Option<&BuilderDocument>,
-    preview_entry: Option<&TemplatePreviewEntry>,
-    preview_annotations: bool,
-    transient: Option<&TransientStudioOverrides>,
-) -> ApiResult<RenderedLayout> {
-    preview_studio_with_cache(
-        db,
-        themes_root,
-        actor,
-        target,
-        document,
-        preview_entry,
-        preview_annotations,
-        transient,
-        page::BlockTemplateCache::global(),
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
 pub async fn preview_studio_with_cache(
     db: &SqlitePool,
     themes_root: &Path,
@@ -3604,6 +3284,17 @@ pub async fn preview_studio_with_cache_and_locale(
         &enqueued,
         true,
     )?;
+    let full_html = if !preview_budget.hook_nonces.is_empty() {
+        let clear: Vec<(String, String)> = preview_budget
+            .hook_nonces
+            .entries()
+            .iter()
+            .map(|h| (h.nonce.clone(), String::new()))
+            .collect();
+        content_render::apply_render_hooks_to_document(full_html, "", &[], &[], "", &clear)?
+    } else {
+        full_html
+    };
     let full_html =
         content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
     tx.rollback().await?;
@@ -3824,6 +3515,17 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
         &enqueued,
         true,
     )?;
+    let full_html = if !preview_budget.hook_nonces.is_empty() {
+        let clear: Vec<(String, String)> = preview_budget
+            .hook_nonces
+            .entries()
+            .iter()
+            .map(|h| (h.nonce.clone(), String::new()))
+            .collect();
+        content_render::apply_render_hooks_to_document(full_html, "", &[], &[], "", &clear)?
+    } else {
+        full_html
+    };
     let full_html =
         content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
     Ok(RenderedLayout {

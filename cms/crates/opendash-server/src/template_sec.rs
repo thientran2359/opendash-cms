@@ -405,6 +405,7 @@ impl CompiledCsecComposition {
         };
         let mut env = restricted_environment_with_config(fmt_cfg);
         let local = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         install_icon_function(
             &mut env,
@@ -413,6 +414,7 @@ impl CompiledCsecComposition {
             budget.html_bytes_used,
             &overflowed,
         );
+        install_hook_function(&mut env, &budget.hook_nonces, &local_hooks);
         env.set_fuel(Some(budget.fuel_remaining));
         env.add_template(&self.name, &source)
             .map_err(|_| "Không thể biên dịch theme composition.")?;
@@ -459,6 +461,11 @@ impl CompiledCsecComposition {
             .sum();
         budget.charge_html_bytes(icon_growth)?;
         budget.icon_nonces.extend(additions);
+        let hook_additions = local_hooks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        budget.hook_nonces.extend(hook_additions);
         Ok(out)
     }
 }
@@ -602,6 +609,147 @@ fn install_icon_function(
     );
 }
 
+pub const HOOK_NONCE_PREFIX: &str = "OD_HOOK_";
+pub const MAX_HOOKS_PER_REQUEST: usize = 32;
+pub const MAX_HOOK_ARGS_JSON_BYTES: usize = 16 * 1024;
+
+pub fn valid_hook_slot_name(slot: &str) -> bool {
+    !slot.is_empty()
+        && slot.len() <= 64
+        && slot
+            .bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-'))
+}
+
+#[derive(Debug, Clone)]
+pub struct HookSlotInvocation {
+    pub nonce: String,
+    pub slot: String,
+    pub args: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HookNonceTable {
+    entries: Vec<HookSlotInvocation>,
+}
+
+impl HookNonceTable {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn entries(&self) -> &[HookSlotInvocation] {
+        &self.entries
+    }
+
+    pub fn extend(&mut self, additions: Vec<HookSlotInvocation>) {
+        self.entries.extend(additions);
+    }
+}
+
+fn new_hook_nonce() -> Result<String, &'static str> {
+    let mut bytes = [0_u8; 16];
+    OsRng
+        .try_fill_bytes(&mut bytes)
+        .map_err(|_| "Không tạo được nonce hook.")?;
+    let mut nonce = HOOK_NONCE_PREFIX.to_owned();
+    for byte in bytes {
+        use std::fmt::Write;
+        write!(&mut nonce, "{byte:02x}").map_err(|_| "Không tạo được nonce hook.")?;
+    }
+    Ok(nonce)
+}
+
+fn minijinja_value_to_json(
+    val: &Value,
+    depth: usize,
+) -> Result<serde_json::Value, minijinja::Error> {
+    use minijinja::value::ValueKind;
+    if depth > 12 {
+        return Err(filter_invalid_op("od_hook: tham số lồng quá sâu"));
+    }
+    match val.kind() {
+        ValueKind::Undefined | ValueKind::None => Ok(serde_json::Value::Null),
+        ValueKind::Bool => Ok(serde_json::Value::Bool(val.is_true())),
+        ValueKind::Number => {
+            if let Ok(i) = i64::try_from(val.clone()) {
+                Ok(serde_json::Value::Number(i.into()))
+            } else if let Ok(u) = u64::try_from(val.clone()) {
+                Ok(serde_json::Value::Number(u.into()))
+            } else if let Ok(f) = f64::try_from(val.clone()) {
+                serde_json::Number::from_f64(f)
+                    .map(serde_json::Value::Number)
+                    .ok_or_else(|| filter_invalid_op("od_hook: số không hợp lệ trong tham số"))
+            } else {
+                Err(filter_invalid_op("od_hook: số không hợp lệ trong tham số"))
+            }
+        }
+        ValueKind::String => Ok(serde_json::Value::String(
+            val.as_str().unwrap_or_default().to_owned(),
+        )),
+        ValueKind::Seq | ValueKind::Iterable => {
+            let mut items = Vec::new();
+            for item in val.try_iter()? {
+                items.push(minijinja_value_to_json(&item, depth + 1)?);
+            }
+            Ok(serde_json::Value::Array(items))
+        }
+        ValueKind::Map => {
+            let mut map = serde_json::Map::new();
+            for key in val.try_iter()? {
+                let k = key
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| key.to_string());
+                let v = val.get_item(&key)?;
+                map.insert(k, minijinja_value_to_json(&v, depth + 1)?);
+            }
+            Ok(serde_json::Value::Object(map))
+        }
+        _ => Ok(serde_json::Value::String(val.to_string())),
+    }
+}
+
+fn install_hook_function(
+    env: &mut Environment<'_>,
+    existing: &HookNonceTable,
+    local: &std::sync::Arc<std::sync::Mutex<Vec<HookSlotInvocation>>>,
+) {
+    let existing_count = existing.entries.len();
+    let local = local.clone();
+    env.add_function(
+        "od_hook",
+        move |slot: &str, args: Option<Value>| -> Result<String, minijinja::Error> {
+            if !valid_hook_slot_name(slot) {
+                return Err(filter_invalid_op("od_hook: tên slot không hợp lệ"));
+            }
+            let args_json = match args {
+                None => serde_json::Value::Null,
+                Some(v) if v.is_undefined() || v.is_none() => serde_json::Value::Null,
+                Some(v) => minijinja_value_to_json(&v, 0)?,
+            };
+            if serde_json::to_vec(&args_json)
+                .map(|b| b.len())
+                .unwrap_or(usize::MAX)
+                > MAX_HOOK_ARGS_JSON_BYTES
+            {
+                return Err(filter_invalid_op("od_hook: tham số vượt quá 16 KiB"));
+            }
+            let mut table = local.lock().unwrap_or_else(|e| e.into_inner());
+            if existing_count.saturating_add(table.len()) >= MAX_HOOKS_PER_REQUEST {
+                return Err(filter_invalid_op("od_hook vượt quá 32 slot/request"));
+            }
+            let nonce = new_hook_nonce().map_err(filter_invalid_op)?;
+            table.push(HookSlotInvocation {
+                nonce: nonce.clone(),
+                slot: slot.to_owned(),
+                args: args_json,
+            });
+            Ok(nonce)
+        },
+    );
+}
+
 // Per-node fuel cap within the shared 10,000 request RenderBudget.
 pub const MAX_BLOCK_FUEL_PER_NODE: u64 = 2_000;
 
@@ -611,6 +759,7 @@ pub struct RenderBudget {
     pub html_bytes_used: usize,
     pub locale: String,
     pub icon_nonces: IconNonceTable,
+    pub hook_nonces: HookNonceTable,
 }
 
 impl Default for RenderBudget {
@@ -620,6 +769,7 @@ impl Default for RenderBudget {
             html_bytes_used: 0,
             locale: "vi".to_owned(),
             icon_nonces: IconNonceTable::default(),
+            hook_nonces: HookNonceTable::default(),
         }
     }
 }
@@ -648,6 +798,7 @@ pub(crate) struct PreviewCompositionBudget {
     pub expansions: usize,
     pub stack: Vec<String>,
     pub icon_nonces: IconNonceTable,
+    pub hook_nonces: HookNonceTable,
 }
 
 impl Default for PreviewCompositionBudget {
@@ -658,6 +809,7 @@ impl Default for PreviewCompositionBudget {
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: IconNonceTable::default(),
+            hook_nonces: HookNonceTable::default(),
         }
     }
 }
@@ -674,6 +826,7 @@ impl PreviewCompositionBudget {
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: rb.icon_nonces,
+            hook_nonces: rb.hook_nonces,
         }
     }
 
@@ -683,6 +836,7 @@ impl PreviewCompositionBudget {
             html_bytes_used: self.html_bytes_used,
             locale: "vi".to_owned(),
             icon_nonces: self.icon_nonces.clone(),
+            hook_nonces: self.hook_nonces.clone(),
         }
     }
 
@@ -690,6 +844,7 @@ impl PreviewCompositionBudget {
         self.fuel_remaining = rb.fuel_remaining;
         self.html_bytes_used = rb.html_bytes_used;
         self.icon_nonces = rb.icon_nonces.clone();
+        self.hook_nonces = rb.hook_nonces.clone();
     }
 }
 
@@ -716,26 +871,6 @@ pub(crate) fn preview_csec_part_keys_with_theme_urls(
         .collect()
 }
 
-/// Literal part edges of a validated public Theme part. Unlike the preview
-/// compiler this does not change the accepted source format or marker rules.
-pub(crate) fn csec_part_keys(name: &str, source: &str) -> Result<Vec<String>, &'static str> {
-    csec_part_keys_with_theme_urls(name, source, &ThemeUrlPolicy::default())
-}
-
-pub(crate) fn csec_part_keys_with_theme_urls(
-    name: &str,
-    source: &str,
-    policy: &ThemeUrlPolicy,
-) -> Result<Vec<String>, &'static str> {
-    composition_sites(name, source, true, policy)?
-        .into_iter()
-        .map(|site| match site.call {
-            CompositionCall::Part(key) => Ok(key),
-            CompositionCall::Content => Err("Template part không được chứa od_content()."),
-        })
-        .collect()
-}
-
 fn preview_composition_sites(
     name: &str,
     source: &str,
@@ -744,7 +879,10 @@ fn preview_composition_sites(
     if source.len() > MAX_RENDERED_HTML_BYTES {
         return Err("Template hoặc part vượt giới hạn 512 KiB.");
     }
-    if source.contains(PREVIEW_PART_NONCE_PREFIX) || source.contains(ICON_NONCE_PREFIX) {
+    if source.contains(PREVIEW_PART_NONCE_PREFIX)
+        || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(HOOK_NONCE_PREFIX)
+    {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
     composition_sites(name, source, true, policy)
@@ -823,6 +961,7 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
     validate_template_csec_with_usage_flags(name, &program, policy, true, true)?;
     let mut env = restricted_environment_with_config(fmt_cfg);
     let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     install_icon_function(
         &mut env,
@@ -831,6 +970,7 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
         budget.html_bytes_used,
         &overflowed,
     );
+    install_hook_function(&mut env, &budget.hook_nonces, &local_hooks);
     env.set_fuel(Some(budget.fuel_remaining));
     env.add_template(name, &program)
         .map_err(|_| "Không thể biên dịch theme preview.")?;
@@ -875,6 +1015,11 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
         return Err("HTML preview chứa icon vượt giới hạn 512 KiB.");
     }
     budget.icon_nonces.extend(additions);
+    let hook_additions = local_hooks
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    budget.hook_nonces.extend(hook_additions);
     Ok(out)
 }
 
@@ -1759,7 +1904,7 @@ fn validate_template_csec_with_usage_flags(
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
-    if source.contains(ICON_NONCE_PREFIX) {
+    if source.contains(ICON_NONCE_PREFIX) || source.contains(HOOK_NONCE_PREFIX) {
         return Err("Theme HTML chứa marker icon nội bộ bị cấm.");
     }
     let ast = parse(source, name, SyntaxConfig::default())
@@ -2024,7 +2169,10 @@ fn composition_sites(
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
-    if source.contains(CONTENT_SLOT_TOKEN) || source.contains(ICON_NONCE_PREFIX) {
+    if source.contains(CONTENT_SLOT_TOKEN)
+        || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(HOOK_NONCE_PREFIX)
+    {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
     let ast = parse(source, name, SyntaxConfig::default())
@@ -2065,7 +2213,7 @@ fn collect_composition_sites(
             }
         }
         Stmt::EmitExpr(e) => {
-            if parse_od_icon_call(&e.expr)?.is_some() {
+            if parse_od_icon_call(&e.expr)?.is_some() || parse_od_hook_call(&e.expr)?.is_some() {
                 return Ok(());
             }
             let Some(call) = parse_composition_call(&e.expr)? else {
@@ -2216,10 +2364,50 @@ fn parse_od_icon_call<'a>(
     Ok(Some((name, class)))
 }
 
+fn parse_od_hook_call<'a>(
+    expr: &'a Expr<'_>,
+) -> Result<Option<(&'a str, Option<&'a Expr<'a>>)>, &'static str> {
+    let Expr::Call(call) = expr else {
+        return Ok(None);
+    };
+    let Expr::Var(var) = &call.expr else {
+        return Ok(None);
+    };
+    if var.id != "od_hook" {
+        return Ok(None);
+    }
+    let [
+        minijinja::machinery::ast::CallArg::Pos(Expr::Const(slot)),
+        rest @ ..,
+    ] = call.args.as_slice()
+    else {
+        return Err("od_hook() yêu cầu string literal slot và biểu thức tham số tùy chọn.");
+    };
+    let slot = slot
+        .value
+        .as_str()
+        .ok_or("od_hook() slot phải là string literal.")?;
+    if !valid_hook_slot_name(slot) {
+        return Err("od_hook() tên slot không hợp lệ.");
+    }
+    let arg_expr = match rest {
+        [] => None,
+        [minijinja::machinery::ast::CallArg::Pos(arg)] => {
+            validate_expr(arg)?;
+            Some(arg)
+        }
+        _ => return Err("od_hook() chỉ nhận slot string literal và tối đa một tham số tùy chọn."),
+    };
+    Ok(Some((slot, arg_expr)))
+}
+
 fn reject_icons_in_set_block(children: &[Stmt<'_>]) -> Result<(), &'static str> {
     fn contains_icon(stmt: &Stmt<'_>) -> bool {
         match stmt {
-            Stmt::EmitExpr(e) => parse_od_icon_call(&e.expr).is_ok_and(|v| v.is_some()),
+            Stmt::EmitExpr(e) => {
+                parse_od_icon_call(&e.expr).is_ok_and(|v| v.is_some())
+                    || parse_od_hook_call(&e.expr).is_ok_and(|v| v.is_some())
+            }
             Stmt::IfCond(c) => c.true_body.iter().chain(&c.false_body).any(contains_icon),
             Stmt::ForLoop(c) => c.body.iter().chain(&c.else_body).any(contains_icon),
             Stmt::WithBlock(c) => c.body.iter().any(contains_icon),
@@ -2656,7 +2844,11 @@ fn validate_stmt_with_icons(
         }
         Stmt::EmitRaw(_) => Ok(()),
         Stmt::EmitExpr(e) => {
-            if allow_od_icon && !in_set_block && parse_od_icon_call(&e.expr)?.is_some() {
+            if allow_od_icon
+                && !in_set_block
+                && (parse_od_icon_call(&e.expr)?.is_some()
+                    || parse_od_hook_call(&e.expr)?.is_some())
+            {
                 Ok(())
             } else {
                 validate_expr(&e.expr)
@@ -2725,6 +2917,7 @@ fn validate_stmt_with_icons(
 
 const RESERVED_CONTEXT_VARS: &[&str] = &[
     "od_icon",
+    "od_hook",
     "options",
     "theme_options",
     "theme_assets",
@@ -4607,6 +4800,15 @@ fn walk_theme_stmt_with_url_scopes(
                 }
                 return Ok((states, scopes));
             }
+            if let Some((_, arg_expr)) = parse_od_hook_call(&expr.expr)? {
+                if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
+                    return Err("od_hook() chỉ được xuất trong thân HTML.");
+                }
+                if let Some(arg) = arg_expr {
+                    record_usage_flags_in_expr(arg, usage);
+                }
+                return Ok((states, scopes));
+            }
             if parse_composition_call(&expr.expr)?.is_some() {
                 if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_part/od_content chỉ được xuất hiện trong thân HTML.");
@@ -4950,6 +5152,29 @@ fn validate_html_and_css_context(
     allow_trusted_theme_markup: bool,
 ) -> Result<(), &'static str> {
     validate_html_and_css_context_with_url_vars(src, post_render, None, allow_trusted_theme_markup)
+}
+
+/// Strict C-SEC HTML/URL/CSS validator for opt-out untrusted plugin fragments
+/// (`render_trusted_html == false`). Forbids `<script>`, `<svg>`, `<style>`, `<meta>`,
+/// `<link>`, `<!doctype>`, `<form>`, `on*`, `javascript:`/`data:` URLs, `formaction`/`action`,
+/// and unsafe `style="..."` CSS (`url()`, `expression()`, `@import`, etc.).
+pub(crate) fn validate_untrusted_extension_html_fragment(src: &str) -> Result<(), &'static str> {
+    let lower = src.to_ascii_lowercase();
+    for forbidden_prefix in ["<style", "</style", "<meta", "<link", "<!doctype"] {
+        let mut cursor = 0;
+        while let Some(rel) = lower[cursor..].find(forbidden_prefix) {
+            let end = cursor + rel + forbidden_prefix.len();
+            let boundary = lower
+                .as_bytes()
+                .get(end)
+                .is_none_or(|b| b.is_ascii_whitespace() || matches!(*b, b'>' | b'/'));
+            if boundary {
+                return Err("Fragment untrusted chứa thẻ HTML bị C-SEC cấm.");
+            }
+            cursor = end;
+        }
+    }
+    validate_html_and_css_context_with_url_vars(src, true, None, false)
 }
 
 fn find_rawtext_or_rcdata_end(
@@ -5502,7 +5727,7 @@ impl BlockSchemaTemplateContext {
     fn is_sensitive_name(&self, id: &str, active_loops: &BTreeMap<String, String>) -> bool {
         matches!(
             id,
-            "options" | "theme_options" | "od_is_preview" | "od_icon"
+            "options" | "theme_options" | "od_is_preview" | "od_icon" | "od_hook"
         ) || self.richtext_vars.contains(id)
             || self.href_vars.contains(id)
             || self.src_vars.contains(id)
@@ -5843,6 +6068,15 @@ fn walk_block_ast_stmt(
                 }
                 return Ok(states.clone());
             }
+            if let Some((_, arg_expr)) = parse_od_hook_call(&e.expr)? {
+                if states.iter().any(|s| *s != HtmlScanState::Body) {
+                    return Err("od_hook() chỉ được xuất trong thân HTML của block.");
+                }
+                if let Some(arg) = arg_expr {
+                    check_block_expr_restrictions(arg, ctx, active_loops)?;
+                }
+                return Ok(states.clone());
+            }
             check_block_expr_restrictions(&e.expr, ctx, active_loops)?;
             if let Some(kind) = classify_bare_sensitive_expr(&e.expr, ctx, active_loops) {
                 match kind {
@@ -6060,6 +6294,7 @@ pub fn validate_block_template_csec(
         || source.contains(CONTENT_SLOT_TOKEN)
         || source.contains(PREVIEW_PART_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(HOOK_NONCE_PREFIX)
     {
         return Err("Template block chứa chuỗi nonce nội bộ bị cấm.");
     }
@@ -6518,6 +6753,7 @@ pub fn render_block_csec_with_options_and_budget_and_config(
 
     let mut env = restricted_environment_with_config(fmt_cfg);
     let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     install_icon_function(
         &mut env,
@@ -6526,6 +6762,7 @@ pub fn render_block_csec_with_options_and_budget_and_config(
         budget.html_bytes_used,
         &overflowed,
     );
+    install_hook_function(&mut env, &budget.hook_nonces, &local_hooks);
     env.set_fuel(Some(node_fuel));
     env.add_template(block_id, template_source)
         .map_err(|_| "Không thể biên dịch template block.")?;
@@ -6573,6 +6810,11 @@ pub fn render_block_csec_with_options_and_budget_and_config(
         .sum();
     budget.charge_html_bytes(icon_growth)?;
     budget.icon_nonces.extend(additions);
+    let hook_additions = local_hooks
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    budget.hook_nonces.extend(hook_additions);
     Ok(out)
 }
 

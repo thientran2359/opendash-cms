@@ -97,10 +97,6 @@ export function installTheme(file: File, csrfToken: string): Promise<ThemeInstal
   });
 }
 
-export function activateTheme(revisionId: string, version: number, csrfToken: string): Promise<ThemeSelection> {
-  return activateThemeRevision(revisionId, version, csrfToken);
-}
-
 export interface ThemeLayoutCatalog {
   active_theme_id: string | null;
   page_layouts: Array<{ key: string; label: string }>;

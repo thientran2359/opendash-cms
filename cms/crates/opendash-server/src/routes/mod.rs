@@ -4,6 +4,7 @@ pub mod contact;
 pub mod content;
 pub mod dashboard;
 pub mod entries;
+pub mod extensions;
 pub mod health;
 pub mod import;
 pub mod media;

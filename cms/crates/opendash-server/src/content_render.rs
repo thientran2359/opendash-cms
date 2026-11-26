@@ -892,59 +892,6 @@ pub fn authenticated_preview_view_with_context(
     rewrite_preview_media_urls(view, &effective_schema.base.descriptor.key)
 }
 
-/// Draft preview runs behind an authenticated Admin route. In contrast to
-/// public entry rendering, media must resolve through authenticated URLs.
-pub fn authenticated_preview_view(
-    record: ContentEntryRecord,
-    schema: &ContentTypeDefinition,
-) -> EntryView {
-    let view = entry_view(record, schema);
-    rewrite_preview_media_urls(view, &schema.key)
-}
-
-pub fn render_role_fragment_with_options(
-    template: &str,
-    site: &SiteContext<'_>,
-    options: &BTreeMap<String, Value>,
-) -> Option<String> {
-    render_role_fragment_with_context(template, site, options, &BTreeMap::new())
-}
-
-pub fn render_role_fragment_with_context(
-    template: &str,
-    site: &SiteContext<'_>,
-    options: &BTreeMap<String, Value>,
-    menus: &BTreeMap<String, crate::storage::menu::MenuViewModel>,
-) -> Option<String> {
-    render_role_fragment_with_context_and_config(
-        template,
-        site,
-        options,
-        menus,
-        &RenderFormattingConfig::default(),
-    )
-}
-
-pub fn render_role_fragment_with_context_and_config(
-    template: &str,
-    site: &SiteContext<'_>,
-    options: &BTreeMap<String, Value>,
-    menus: &BTreeMap<String, crate::storage::menu::MenuViewModel>,
-    fmt_cfg: &RenderFormattingConfig,
-) -> Option<String> {
-    theme::render_content_with_config(
-        template,
-        &serde_json::json!({
-            "site": site,
-            "options": options,
-            "theme_options": options,
-            "menus": menus,
-        }),
-        fmt_cfg,
-    )
-    .ok()
-}
-
 pub struct PublicThemeContextInput<'a> {
     pub site: &'a SiteContext<'a>,
     pub options: &'a BTreeMap<String, Value>,
@@ -1055,6 +1002,82 @@ pub fn finalize_document_icons(
     icon_nonces
         .substitute_into_document(html)
         .map_err(ApiError::internal)
+}
+
+pub const MAX_RENDER_HOOK_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
+
+/// Applies already-sanitized per-subscriber render-hook outputs (`OD_HOOK_<32hex>` slots,
+/// `filter:render/head` fragments/styles/scripts, and `filter:render/footer` fragments)
+/// strictly AFTER `compose_document_with_seo_with_assets` and BEFORE `finalize_document_icons`.
+pub fn apply_render_hooks_to_document(
+    mut html: String,
+    head_html: &str,
+    head_styles: &[String],
+    head_scripts: &[String],
+    footer_html: &str,
+    slot_replacements: &[(String, String)],
+) -> ApiResult<String> {
+    let apply = || -> Result<String, &'static str> {
+        if !slot_replacements.is_empty() {
+            let mut matches: Vec<(usize, &str, &str)> = Vec::new();
+            for (nonce, replacement) in slot_replacements {
+                let mut search_from = 0;
+                while let Some(rel) = html[search_from..].find(nonce.as_str()) {
+                    let offset = search_from + rel;
+                    matches.push((offset, nonce.as_str(), replacement.as_str()));
+                    search_from = offset + nonce.len();
+                }
+            }
+            matches.sort_by_key(|(offset, _, _)| *offset);
+            let mut out = String::with_capacity(html.len());
+            let mut cursor = 0usize;
+            for (offset, nonce, replacement) in matches {
+                if offset < cursor {
+                    continue;
+                }
+                out.push_str(&html[cursor..offset]);
+                out.push_str(replacement);
+                cursor = offset + nonce.len();
+                if out.len() > MAX_RENDER_HOOK_DOCUMENT_BYTES {
+                    return Err("Document chứa render hooks vượt giới hạn HTML.");
+                }
+            }
+            out.push_str(&html[cursor..]);
+            html = out;
+        }
+
+        let has_head_additions =
+            !head_styles.is_empty() || !head_scripts.is_empty() || !head_html.is_empty();
+        if has_head_additions && let Some(pos) = html.find("</head>") {
+            let mut injected = String::new();
+            for style in head_styles {
+                injected.push_str(style);
+            }
+            for script in head_scripts {
+                injected.push_str(script);
+            }
+            injected.push_str(head_html);
+            if html.len().saturating_add(injected.len()) > MAX_RENDER_HOOK_DOCUMENT_BYTES {
+                return Err("Document chứa render hooks vượt giới hạn HTML.");
+            }
+            html.insert_str(pos, &injected);
+        }
+
+        if !footer_html.is_empty()
+            && let Some(pos) = html.rfind("</body>")
+        {
+            if html.len().saturating_add(footer_html.len()) > MAX_RENDER_HOOK_DOCUMENT_BYTES {
+                return Err("Document chứa render hooks vượt giới hạn HTML.");
+            }
+            html.insert_str(pos, footer_html);
+        }
+
+        if html.len() > MAX_RENDER_HOOK_DOCUMENT_BYTES {
+            return Err("Document chứa render hooks vượt giới hạn HTML.");
+        }
+        Ok(html)
+    };
+    apply().map_err(ApiError::internal)
 }
 
 pub fn compose_document_with_seo_with_body_classes(
@@ -1387,33 +1410,6 @@ pub fn render_archive_with_site_for_locale(
     )
 }
 
-pub fn render_archive_with_site_and_config(
-    schema: &ContentTypeDefinition,
-    entries: &[EntryView],
-    previous_url: Option<&str>,
-    next_url: Option<&str>,
-    pagination: &PaginationView,
-    breadcrumbs: &[BreadcrumbItem],
-    taxonomy: Option<&Value>,
-    selected_template: Option<&str>,
-    site: &SiteContext<'_>,
-    fmt_cfg: &RenderFormattingConfig,
-) -> ApiResult<String> {
-    render_archive_with_site_and_config_for_locale(
-        schema,
-        entries,
-        previous_url,
-        next_url,
-        pagination,
-        breadcrumbs,
-        taxonomy,
-        selected_template,
-        site,
-        fmt_cfg,
-        "vi",
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn render_archive_with_site_and_config_for_locale(
     schema: &ContentTypeDefinition,
@@ -1503,27 +1499,6 @@ pub fn render_single_with_site_and_archive_for_locale(
         &[],
         &RenderFormattingConfig::default(),
         locale_code,
-    )
-}
-
-pub fn render_single_with_context(
-    schema: &ContentTypeDefinition,
-    entry: &EntryView,
-    selected_template: Option<&str>,
-    site: &SiteContext<'_>,
-    archive_url: Option<&str>,
-    breadcrumbs: &[BreadcrumbItem],
-    fmt_cfg: &RenderFormattingConfig,
-) -> ApiResult<String> {
-    render_single_with_context_for_locale(
-        schema,
-        entry,
-        selected_template,
-        site,
-        archive_url,
-        breadcrumbs,
-        fmt_cfg,
-        "vi",
     )
 }
 

@@ -541,7 +541,6 @@ pub fn serialize_scoped_block_css(
                     };
                     if def.status != ProviderStatus::Active
                         || def.declaration_state != DeclarationState::Declared
-                        || def.schema.legacy_mode
                     {
                         continue;
                     }
@@ -820,18 +819,6 @@ pub fn serialize_scoped_block_css(
     crate::template_sec::validate_safe_scoped_block_css(&css_body, is_preview)
         .map_err(ApiError::bad_request)?;
     Ok(format!("<style data-od-block-styles>{css_body}</style>"))
-}
-
-/// Template selection comes from one storage snapshot. Unsupported legacy
-/// nodes are invisible in public markup but remain intact in Builder JSON.
-/// Only renderer-known core elements can add public media references.
-#[cfg(test)]
-pub fn render_builder(
-    state: &BuilderRenderContext,
-    document: &BuilderDocument,
-    is_preview: bool,
-) -> ApiResult<RenderedLayout> {
-    render_builder_resolved(state, document, is_preview, &BindingResults::new())
 }
 
 /// All bound values are obtained by the storage layer under Preview/public ACL.
@@ -1826,10 +1813,7 @@ mod m6_s05_tests {
                 owner: opendash_core::registry::ResourceOwner::Plugin("acme-plugin".into()),
                 status: opendash_core::registry::ProviderStatus::Active,
                 declaration_state: opendash_core::registry::DeclarationState::Declared,
-                schema: opendash_core::block_schema::RegisteredBlockSchema {
-                    schema,
-                    legacy_mode: false,
-                },
+                schema: opendash_core::block_schema::RegisteredBlockSchema { schema },
                 template: "<section class=\"hero\">{{ title }}</section>".to_owned(),
                 revision_digest: "rev-test-1".to_owned(),
             },
@@ -2519,7 +2503,6 @@ mod m6_s05_tests {
                 declaration_state: DeclarationState::Declared,
                 schema: opendash_core::block_schema::RegisteredBlockSchema {
                     schema: schema.clone(),
-                    legacy_mode: false,
                 },
                 template,
                 revision_digest: "rev-demo-1".into(),

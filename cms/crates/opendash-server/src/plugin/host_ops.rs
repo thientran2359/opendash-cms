@@ -37,6 +37,8 @@ impl RuntimeOwner {
 }
 
 pub const MAX_HOST_CALLS: usize = 100;
+pub const MAX_RENDER_HOST_CALLS: usize = 64;
+pub const MAX_RENDER_HTTP_CALLS: usize = 2;
 pub const MAX_KV_KEY_BYTES: usize = 256;
 pub const MAX_KV_VALUE_BYTES: usize = 512 * 1024;
 pub const MAX_IPC_FRAME_BYTES: usize = 2 * 1024 * 1024;
@@ -433,7 +435,11 @@ pub fn check_read_policy(
         HostReadRequest::KvList { .. } => {
             if !matches!(
                 execution_mode,
-                HookExecutionMode::Standard | HookExecutionMode::AsyncPostCommit
+                HookExecutionMode::Standard
+                    | HookExecutionMode::AsyncPostCommit
+                    | HookExecutionMode::FilterRender
+                    | HookExecutionMode::RouteGet
+                    | HookExecutionMode::RoutePost
             ) {
                 return Err("kv_list chỉ được phép trong action hoặc async post-commit hook.");
             }
@@ -521,6 +527,7 @@ pub fn check_read_policy(
                 HookExecutionMode::Standard
                     | HookExecutionMode::AsyncPostCommit
                     | HookExecutionMode::FilterContactBeforeSubmit
+                    | HookExecutionMode::RoutePost
             ) {
                 return Err("plugin_secret_get bị cấm trong hook/filter hiện tại.");
             }
@@ -549,8 +556,18 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
     }
 
     ctx.host_calls_count += 1;
-    if ctx.host_calls_count > MAX_HOST_CALLS {
-        return HostOperationResponse::err("Vượt quá số lần gọi host tối đa (100).");
+    let max_calls = if matches!(
+        ctx.execution_mode,
+        HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+    ) {
+        MAX_RENDER_HOST_CALLS
+    } else {
+        MAX_HOST_CALLS
+    };
+    if ctx.host_calls_count > max_calls {
+        return HostOperationResponse::err(format!(
+            "Vượt quá số lần gọi host tối đa ({max_calls})."
+        ));
     }
 
     let req: HostOperationRequest = match serde_json::from_str(req_json) {
@@ -570,11 +587,19 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             body,
             timeout_ms,
         } => {
-            if !matches!(
+            if ctx.execution_mode == HookExecutionMode::FilterRender {
+                if ctx.manifest.render_cache == opendash_core::plugin::RenderCachePolicy::None {
+                    return HostOperationResponse::err(
+                        "Gọi HTTP ngoài trong filter:render/* yêu cầu bật render_cache khác none.",
+                    );
+                }
+            } else if !matches!(
                 ctx.execution_mode,
                 HookExecutionMode::Standard
                     | HookExecutionMode::AsyncPostCommit
                     | HookExecutionMode::FilterContactBeforeSubmit
+                    | HookExecutionMode::RouteGet
+                    | HookExecutionMode::RoutePost
             ) {
                 return HostOperationResponse::err(
                     "Gọi HTTP ngoài bị cấm trong chế độ thực thi này.",
@@ -593,18 +618,12 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
                     return HostOperationResponse::err("permission_denied: action:http");
                 }
             }
-            if let Ok(parsed) = url::Url::parse(&url) {
-                let path = parsed.path().to_ascii_lowercase();
-                if path.starts_with("/api/admin")
-                    || path == "/save"
-                    || path == "/preview"
-                    || path == "/theme"
-                    || path.starts_with("/api/p/")
-                {
-                    return HostOperationResponse::err(
-                        "Cấm gọi HTTP loopback tới Admin/CMS nội bộ (/api/admin, /save, /preview, /theme, /api/p/).",
-                    );
-                }
+            if let Ok(parsed) = url::Url::parse(&url)
+                && super::egress::is_forbidden_internal_path(parsed.path())
+            {
+                return HostOperationResponse::err(
+                    "Cấm gọi HTTP loopback tới Admin/CMS nội bộ (/api/admin, /save, /preview, /theme, /p/, /api/p/, /api/public/p/).",
+                );
             }
             handle_http_request(ctx, &method, &url, headers, body, timeout_ms)
         }
@@ -619,8 +638,16 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             values,
             term_ids,
         } => {
-            if ctx.execution_mode != HookExecutionMode::Standard {
+            if !matches!(
+                ctx.execution_mode,
+                HookExecutionMode::Standard | HookExecutionMode::RoutePost
+            ) {
                 return HostOperationResponse::err("Ghi nội dung bị cấm ngoài action mode.");
+            }
+            if ctx.principal == ExecutionPrincipal::Public {
+                return HostOperationResponse::err(
+                    "permission_denied: content_save bị cấm ở public route.",
+                );
             }
             if let Some(ref caps) = ctx.action_capabilities
                 && !caps.iter().any(|c| c == "content_write")
@@ -797,7 +824,16 @@ fn stage_lifecycle_command(
     entry_id: i64,
     expected_version: i64,
 ) -> HostOperationResponse {
-    if ctx.execution_mode != HookExecutionMode::Standard {
+    let mode_allowed = match operation {
+        StagedLifecycleOperation::Trash => matches!(
+            ctx.execution_mode,
+            HookExecutionMode::Standard | HookExecutionMode::RoutePost
+        ),
+        StagedLifecycleOperation::Restore | StagedLifecycleOperation::Purge => {
+            ctx.execution_mode == HookExecutionMode::Standard
+        }
+    };
+    if !mode_allowed {
         return HostOperationResponse::err(match operation {
             StagedLifecycleOperation::Trash => "content_delete chỉ được phép trong action mode.",
             StagedLifecycleOperation::Restore => "content_restore chỉ được phép trong action mode.",
@@ -997,7 +1033,15 @@ fn handle_kv_list(
     prefix: Option<String>,
     limit: Option<usize>,
 ) -> HostOperationResponse {
-    let clamped = limit.unwrap_or(50).clamp(1, 100);
+    let max_limit = if matches!(
+        ctx.execution_mode,
+        HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+    ) {
+        50
+    } else {
+        100
+    };
+    let clamped = limit.unwrap_or(50).clamp(1, max_limit);
     let prefix_val = prefix.unwrap_or_default();
     if prefix_val.len() > MAX_KV_KEY_BYTES {
         return HostOperationResponse::err("Prefix quá dài.");
@@ -1061,7 +1105,9 @@ fn check_kv_write_preconditions(
     }
     if !matches!(
         ctx.execution_mode,
-        HookExecutionMode::Standard | HookExecutionMode::AsyncPostCommit
+        HookExecutionMode::Standard
+            | HookExecutionMode::AsyncPostCommit
+            | HookExecutionMode::RoutePost
     ) {
         return Err(HostOperationResponse::err(
             "Ghi/xóa KV bị cấm trong hook đồng bộ hiện tại.",
@@ -1165,10 +1211,10 @@ fn handle_http_request(
     if ctx.is_cancelled() {
         return HostOperationResponse::err("Quá thời gian thực thi (deadline exceeded).");
     }
-    let call_cap = if ctx.execution_mode == HookExecutionMode::FilterContactBeforeSubmit {
-        1
-    } else {
-        super::egress::MAX_HTTP_CALLS_PER_INVOCATION
+    let call_cap = match ctx.execution_mode {
+        HookExecutionMode::FilterContactBeforeSubmit => 1,
+        HookExecutionMode::FilterRender | HookExecutionMode::RouteGet => MAX_RENDER_HTTP_CALLS,
+        _ => super::egress::MAX_HTTP_CALLS_PER_INVOCATION,
     };
     if ctx.http_calls_count >= call_cap {
         return HostOperationResponse::err(format!(

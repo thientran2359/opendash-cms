@@ -6,9 +6,7 @@ use url::Url;
 
 use crate::{
     id::{valid_namespaced_block_id, valid_snake_key_with_limit},
-    registry::{OwnedDescriptor, RegistryCatalog},
     richtext::{MAX_RICHTEXT_OUTPUT_BYTES, sanitize_richtext, strip_richtext_to_plain},
-    theme::BlockDescriptor,
 };
 
 pub const MAX_TOP_REAL_FIELDS: usize = 32;
@@ -559,7 +557,6 @@ pub struct BlockSchemaV1 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RegisteredBlockSchema {
     pub schema: BlockSchemaV1,
-    pub legacy_mode: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1955,60 +1952,6 @@ fn validate_scalar_leaf(
         }
     }
     Ok(())
-}
-
-/// Converts a legacy `BlockDescriptor` (`theme_blocks`) into a `RegisteredBlockSchema`
-/// with `legacy_mode: true` without invoking strict `block.json` v1 field constraints
-/// (preserving legacy keys like `_url` and empty field maps in existing tests).
-pub fn upcast_legacy_descriptor(desc: &BlockDescriptor) -> RegisteredBlockSchema {
-    let fields = desc
-        .fields
-        .iter()
-        .map(|(key, label)| BlockFieldSpec::Text {
-            key: key.clone(),
-            label: label.clone(),
-            max_chars: Some(512),
-            required: true,
-            default: None,
-            placeholder: None,
-            show_if: None,
-        })
-        .collect();
-
-    RegisteredBlockSchema {
-        schema: BlockSchemaV1 {
-            schema_version: 1,
-            id: desc.id.clone(),
-            title: desc.id.clone(),
-            category: BlockCategory::Plugin,
-            icon: None,
-            render: "render.html".to_owned(),
-            allowed_parents: None,
-            allowed_children: None,
-            fields,
-        },
-        legacy_mode: true,
-    }
-}
-
-/// Converts a legacy `RegistryCatalog<BlockDescriptor>` to `RegistryCatalog<RegisteredBlockSchema>`
-/// while preserving `owner`, `status`, and `declaration_state` on every entry.
-pub fn upcast_legacy_catalog(
-    catalog: &RegistryCatalog<BlockDescriptor>,
-) -> RegistryCatalog<RegisteredBlockSchema> {
-    let mut out = RegistryCatalog::new();
-    for (key, entry) in catalog.iter() {
-        out.insert_loaded(
-            key.clone(),
-            OwnedDescriptor {
-                owner: entry.owner.clone(),
-                status: entry.status,
-                declaration_state: entry.declaration_state,
-                descriptor: upcast_legacy_descriptor(&entry.descriptor),
-            },
-        );
-    }
-    out
 }
 
 #[cfg(test)]

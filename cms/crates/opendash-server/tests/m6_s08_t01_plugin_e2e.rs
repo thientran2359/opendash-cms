@@ -8,12 +8,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use opendash_core::block_schema::{BlockSchemaV1, RegisteredBlockSchema};
 use opendash_core::builder::{
     BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps,
     RowNode, SectionNode,
 };
 use opendash_core::registry::{RegistryCatalog, ResourceOwner};
-use opendash_core::theme::BlockDescriptor;
 use reqwest::Client;
 use serde_json::{Value, json};
 use sqlx::sqlite::SqlitePoolOptions;
@@ -515,19 +515,29 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
             }],
         }],
     };
+    let jobs_schema: BlockSchemaV1 = serde_json::from_value(json!({
+        "schema_version": 1,
+        "id": "e2e-suite/jobs-card",
+        "title": "Jobs Card",
+        "category": "plugin",
+        "render": "render.html",
+        "fields": [
+            { "type": "text", "key": "headline", "label": "Headline" }
+        ]
+    }))
+    .unwrap();
     let mut reg = RegistryCatalog::default();
     reg.register(
         "e2e-suite/jobs-card",
         ResourceOwner::Plugin("e2e-suite".into()),
-        BlockDescriptor {
-            id: "e2e-suite/jobs-card".into(),
-            fields: Default::default(),
+        RegisteredBlockSchema {
+            schema: jobs_schema,
         },
     )
     .unwrap();
-    assert!(doc.validate_for_save(&reg, None).is_ok());
+    assert!(doc.validate_for_save_with_schemas(&reg, None).is_ok());
     assert!(
-        doc.validate_for_save(&RegistryCatalog::default(), Some(&doc))
+        doc.validate_for_save_with_schemas(&RegistryCatalog::default(), Some(&doc))
             .is_ok()
     );
 
