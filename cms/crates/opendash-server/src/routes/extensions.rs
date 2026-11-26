@@ -291,8 +291,19 @@ async fn format_route_output(
                 &ResolvedEnqueuedAssets::default(),
                 render_trusted_html,
             ) {
-                Ok(doc) if doc.len() <= MAX_EXTENSION_ROUTE_RESPONSE_BYTES => doc,
-                _ => {
+                Ok(doc) => {
+                    let doc = doc.replace(content_render::HEAD_END_MARKER, "");
+                    if doc.len() <= MAX_EXTENSION_ROUTE_RESPONSE_BYTES {
+                        doc
+                    } else {
+                        return json_error_response(
+                            StatusCode::BAD_GATEWAY,
+                            "invalid_html_output",
+                            "Không thể dựng tài liệu HTML cho route mở rộng.",
+                        );
+                    }
+                }
+                Err(_) => {
                     return json_error_response(
                         StatusCode::BAD_GATEWAY,
                         "invalid_html_output",

@@ -115,6 +115,8 @@ pub(crate) async fn render_home_for_locale(
                     &rendered.footer_html,
                     &rendered.slot_replacements,
                 )?;
+            } else {
+                html = html.replace(content_render::HEAD_END_MARKER, "");
             }
             Ok(rendered_layout(html))
         }

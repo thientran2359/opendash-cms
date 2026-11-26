@@ -49,7 +49,7 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
 
 ## Side Effects
 
-- Delegates SQLite reads/writes, filesystem media/theme/plugin/backup operations, SMTP dispatches, and Wasm plugin executions through `../storage/`, `../plugin/`, `../media.rs`, `../smtp.rs`, and `../operations.rs`.
+- Delegates SQLite reads/writes, filesystem media/theme/plugin/backup operations, SMTP dispatches, and JS/Wasm extension executions through `../storage/`, `../plugin/`, `../media.rs`, `../smtp.rs`, and `../operations.rs`.
 - Enqueues asynchronous post-commit plugin hooks (`ContentAfterSave`, etc.) and projection recomputation jobs after committed mutations (`[builder.rs:enqueue_entry_builder_after_save]`, `[plugin.rs:maybe_spawn_projection_recompute]`).
 - Sets/clears `opendash_session` HTTP cookies on login and logout (`[auth.rs:auth_login]`, `[auth.rs:auth_logout]`).
 
