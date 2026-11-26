@@ -246,7 +246,6 @@ pub fn render_plugin_block_csec(
     render_plugin_block_csec_with_budget(block_id, template_source, values, &mut budget)
 }
 
-#[cfg(test)]
 pub fn render_plugin_block_csec_with_budget(
     block_id: &str,
     template_source: &str,
