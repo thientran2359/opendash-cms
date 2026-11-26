@@ -287,17 +287,18 @@ pub async fn query(
     }
     validate_terms(&mut tx, type_key, filter).await?;
 
-    let active_locales: Vec<String> = if resolved_locale.is_some() {
-        Vec::new()
-    } else {
-        sqlx::query_scalar(
-            "SELECT code FROM site_locales
-              WHERE deleted_at IS NULL
-                AND (is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-              ORDER BY code ASC",
-        )
-        .fetch_all(&mut *tx)
-        .await?
+    let manageable_locales: Vec<String> = sqlx::query_scalar(
+        "SELECT code FROM site_locales
+          WHERE deleted_at IS NULL
+            AND (is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+          ORDER BY code ASC",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let (resolved_locale, active_locales): (Option<String>, Vec<String>) = match resolved_locale {
+        Some(loc) if manageable_locales.iter().any(|c| c == &loc) => (Some(loc), Vec::new()),
+        Some(_) => (None, Vec::new()),
+        None => (None, manageable_locales),
     };
 
     let mut count_qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new("");

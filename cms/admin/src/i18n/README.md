@@ -15,7 +15,7 @@ Site-wide UI localization, pluralization, and locale-aware date/number formattin
 - **Formatting Utilities (`format.ts`):**
   - `[format.ts:formatDateTime]`, `[format.ts:formatNumber]`: Thin `Intl.DateTimeFormat` and `Intl.NumberFormat` wrappers bound to `[index.tsx:getEffectiveBcp47]`.
 - **Static Locale Catalogs (`locales/en.ts`, `locales/vi.ts`):**
-  - `[locales/en.ts:en]`: Canonical `as const` flat object defining all `TranslationKey` entries (2,144 keys).
+  - `[locales/en.ts:en]`: Canonical `as const` flat object defining all `TranslationKey` entries (2,290 keys).
   - `[locales/vi.ts:vi]`: Type-checked `Record<TranslationKey, string>` Vietnamese translation catalog.
 
 ## Invariants

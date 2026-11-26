@@ -2,7 +2,7 @@
 
 ## Overview
 
-Single-binary Axum server (`[[bin]] name = "opendash"` in [`Cargo.toml`](Cargo.toml)) depending on [`opendash-core`](../opendash-core/README.md) and embedding the built React Admin bundle (`cms/admin/dist/`) via `rust-embed` (`[app.rs:AdminAssets]`). Orchestrates HTTP routing ([`src/routes/README.md`](src/routes/README.md)), SQLite persistence and migrations `0001_builder_slice.sql`–`0053_theme_functions_runtime.sql` ([`src/storage/README.md`](src/storage/README.md)), and the unified isolated Wasmi `=2.0.0` + Boa `=0.22.0` JS/Wasm runtime ([`src/plugin/README.md`](src/plugin/README.md)), alongside 28 top-level infrastructure modules (`src/*.rs` excluding `main.rs` and `app.rs`), `src/builtin_blocks/`, `src/builtin_themes/`, and crate-level `tests/`.
+Single-binary Axum server (`[[bin]] name = "opendash"` in [`Cargo.toml`](Cargo.toml)) depending on [`opendash-core`](../opendash-core/README.md) and embedding the built React Admin bundle (`cms/admin/dist/`) via `rust-embed` (`[app.rs:AdminAssets]`). Orchestrates HTTP routing ([`src/routes/README.md`](src/routes/README.md)), SQLite persistence and migrations `0001_builder_slice.sql`–`0054_entry_lifecycle.sql` ([`src/storage/README.md`](src/storage/README.md)), and the unified isolated Wasmi `=2.0.0` + Boa `=0.22.0` JS/Wasm runtime ([`src/plugin/README.md`](src/plugin/README.md)), alongside 28 top-level infrastructure modules (`src/*.rs` excluding `main.rs` and `app.rs`), `src/builtin_blocks/`, `src/builtin_themes/`, and crate-level `tests/`.
 
 See [Core Foundation](../../../docs/contracts/CORE_FOUNDATION.md), [CMS Architecture](../../../docs/architecture/CMS_ARCHITECTURE.md), and [M8 Writer Inventory](../../../docs/contracts/M8_WRITER_INVENTORY.md).
 
@@ -14,7 +14,7 @@ See [Core Foundation](../../../docs/contracts/CORE_FOUNDATION.md), [CMS Architec
   - `[app.rs:AppState]`, `[app.rs:AdminAssets]`, `[app.rs:build_router]`, and `[app.rs:build_router_with_themes_root]` (Host/Origin validation, i18n error localization, safe-mode `X-Robots-Tag`, fallback routing).
 - **Subsystems**:
   - [`src/routes/README.md`](src/routes/README.md): 23 Axum handler modules (`auth`, `builder`, `content`, `entries`, `extensions`, `operations`, `plugin`, `public`, `public_content`, `seo`, `settings`, `themes`, etc.).
-  - [`src/storage/README.md`](src/storage/README.md): 31 SQLite storage modules owning 100% of `sqlx::query*` calls and migrations `0001`–`0053`.
+  - [`src/storage/README.md`](src/storage/README.md): 32 SQLite storage domain modules (`33` files including `mod.rs`) owning 100% of `sqlx::query*` calls and migrations `0001`–`0054`.
   - [`src/plugin/README.md`](src/plugin/README.md): Unified Wasmi `=2.0.0` + Boa `=0.22.0` (`[plugin/js_runtime.rs]`) sandbox, `--plugin-worker` IPC (128 MiB OS memory limit), `StagedCommitGuard`, and DNS-pinned HTTP egress.
 - **Core Infrastructure Modules (`src/*.rs`)**:
   - **Config, Paths, Errors & Auth** ([`src/config.rs`](src/config.rs), [`src/paths.rs`](src/paths.rs), [`src/error.rs`](src/error.rs), [`src/auth.rs`](src/auth.rs), [`src/secrets.rs`](src/secrets.rs), [`src/i18n.rs`](src/i18n.rs)): `[config.rs:RuntimeConfigV1]`, `[config.rs:RecoveryState]`, `[paths.rs:SitePaths]`, `[error.rs:ApiError]`, `[error.rs:ApiResult]`, `[auth.rs:SessionContext]`, `[auth.rs:Role]`, `[secrets.rs:SecretStore]`, and `[i18n.rs:localize_error_response]`.

@@ -40,7 +40,7 @@ Gói plugin cài đặt vào OpenDash (dạng `.zip` qua Admin API hoặc thư m
   "version": "1.1.0",
   "api_version": 1,
   "manifest_schema": 3,
-  "min_host_version": "0.1.0",
+  "min_host_version": "0.1.1",
   "name": "Tên hiển thị của Plugin",
   "description": "Mô tả ngắn gọn về chức năng của plugin",
   "entrypoint": "plugin.wasm",

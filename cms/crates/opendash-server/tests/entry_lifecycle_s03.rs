@@ -1577,4 +1577,27 @@ async fn s03_draft_quick_edit_slug_collision_publish_and_parked_locale_guard() {
         "parked secondary-locale Trash rows must be excluded from ordinary entry-table"
     );
     assert_eq!(table_trash["status_counts"]["trash"].as_i64().unwrap(), 0);
+
+    // Explicit ?locale=<parked> on both trash and active views MUST also exclude parked rows.
+    for query in ["status=trash&locale=en", "status=all&locale=en"] {
+        let explicit_resp = client
+            .get(format!(
+                "{}/api/admin/content-types/post/entry-table?{query}",
+                site.base
+            ))
+            .header(header::COOKIE, &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(explicit_resp.status(), StatusCode::OK);
+        let body = explicit_resp.json::<Value>().await.unwrap();
+        assert_eq!(
+            body["total"].as_i64().unwrap(),
+            0,
+            "explicit parked {query} must return 0 total"
+        );
+        assert_eq!(body["items"].as_array().unwrap().len(), 0);
+        assert_eq!(body["status_counts"]["trash"].as_i64().unwrap(), 0);
+        assert_eq!(body["status_counts"]["all"].as_i64().unwrap(), 0);
+    }
 }
