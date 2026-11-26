@@ -1026,7 +1026,7 @@ async fn inspect_reading_page_in_conn(
                 e.locale
            FROM content_entries e
            JOIN content_types t ON t.key = e.content_type_key
-          WHERE e.id = ? AND t.provider_status = 'active'",
+          WHERE e.id = ? AND e.trashed_at IS NULL AND t.provider_status = 'active'",
     )
     .bind(id)
     .fetch_optional(&mut *conn)
@@ -4511,14 +4511,19 @@ mod plugin_settings_s02_tests {
         let migrations_dir =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
         let pre_dir = temp.0.join("pre_0050");
+        let with_50_dir = temp.0.join("with_0050");
         fs::create_dir_all(&pre_dir).unwrap();
+        fs::create_dir_all(&with_50_dir).unwrap();
         for entry in fs::read_dir(&migrations_dir)
             .unwrap()
             .filter_map(Result::ok)
         {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".sql") && !name.starts_with("0050_") && name.as_str() < "0053_" {
+            if name.ends_with(".sql") && name.as_str() < "0050_" {
                 fs::copy(entry.path(), pre_dir.join(entry.file_name())).unwrap();
+                fs::copy(entry.path(), with_50_dir.join(entry.file_name())).unwrap();
+            } else if name.ends_with(".sql") && name.starts_with("0050_") {
+                fs::copy(entry.path(), with_50_dir.join(entry.file_name())).unwrap();
             }
         }
 
@@ -4533,13 +4538,18 @@ mod plugin_settings_s02_tests {
                 .await
                 .unwrap();
 
-        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        let with_50_migrator = sqlx::migrate::Migrator::new(with_50_dir.as_path())
+            .await
+            .unwrap();
+        with_50_migrator.run(&db).await.unwrap();
 
         let after_user_objects: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
                 .fetch_one(&db)
                 .await
                 .unwrap();
+
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
         let total_objects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
             .fetch_one(&db)
             .await
@@ -4561,7 +4571,9 @@ mod plugin_settings_s02_tests {
         let migrations_dir =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
         let pre_dir = temp.0.join("pre_0053");
+        let with_53_dir = temp.0.join("with_0053");
         fs::create_dir_all(&pre_dir).unwrap();
+        fs::create_dir_all(&with_53_dir).unwrap();
         for entry in fs::read_dir(&migrations_dir)
             .unwrap()
             .filter_map(Result::ok)
@@ -4569,6 +4581,9 @@ mod plugin_settings_s02_tests {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.ends_with(".sql") && name.as_str() < "0053_" {
                 fs::copy(entry.path(), pre_dir.join(entry.file_name())).unwrap();
+                fs::copy(entry.path(), with_53_dir.join(entry.file_name())).unwrap();
+            } else if name.ends_with(".sql") && name.starts_with("0053_") {
+                fs::copy(entry.path(), with_53_dir.join(entry.file_name())).unwrap();
             }
         }
 
@@ -4583,13 +4598,18 @@ mod plugin_settings_s02_tests {
                 .await
                 .unwrap();
 
-        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        let with_53_migrator = sqlx::migrate::Migrator::new(with_53_dir.as_path())
+            .await
+            .unwrap();
+        with_53_migrator.run(&db).await.unwrap();
 
         let after_user_objects: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
                 .fetch_one(&db)
                 .await
                 .unwrap();
+
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
         let total_objects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
             .fetch_one(&db)
             .await

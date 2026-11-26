@@ -7,7 +7,7 @@ use crate::{
     abi::INITIAL_RESP_BUF_CAP,
     types::{
         ContentEntry, ContentSaveInput, Envelope, HttpResponse, LogLevel, MediaAsset, SdkError,
-        TaxonomyTerm,
+        TaxonomyTerm, TrashEntrySummary,
     },
 };
 
@@ -18,6 +18,7 @@ pub type MockHttpHandler = Box<
 pub struct MockHost {
     pub kv: BTreeMap<String, Value>,
     pub entries: BTreeMap<(String, i64), ContentEntry>,
+    pub trashed_entries: BTreeMap<(String, i64), TrashEntrySummary>,
     pub taxonomies: BTreeMap<String, Vec<TaxonomyTerm>>,
     pub media: BTreeMap<String, MediaAsset>,
     pub site_options: Map<String, Value>,
@@ -33,6 +34,7 @@ impl Default for MockHost {
         Self {
             kv: BTreeMap::new(),
             entries: BTreeMap::new(),
+            trashed_entries: BTreeMap::new(),
             taxonomies: BTreeMap::new(),
             media: BTreeMap::new(),
             site_options: Map::new(),
@@ -180,7 +182,8 @@ impl MockHost {
                 entry_id,
                 expected_version,
             } => {
-                let Some(existing) = self.entries.get(&(type_key.clone(), entry_id)) else {
+                let Some(existing) = self.entries.get(&(type_key.clone(), entry_id)).cloned()
+                else {
                     return Ok(serde_json::to_vec(&json!({
                         "ok": false,
                         "error": format!("entry ({type_key}, {entry_id}) not found")
@@ -195,12 +198,136 @@ impl MockHost {
                     .unwrap());
                 }
                 self.entries.remove(&(type_key.clone(), entry_id));
+                self.trashed_entries.insert(
+                    (type_key.clone(), entry_id),
+                    TrashEntrySummary {
+                        id: existing.id,
+                        type_key: existing.type_key,
+                        locale: existing.locale,
+                        title: existing.title,
+                        slug: existing.slug,
+                        publication_status: existing.status,
+                        version: existing.version + 1,
+                        trashed_at: "2026-01-01T00:00:00Z".to_owned(),
+                        published_at: None,
+                    },
+                );
                 return Ok(serde_json::to_vec(&json!({
                     "ok": true,
-                    "data": { "staged": true, "entry_id": entry_id },
+                    "data": { "staged": true, "operation": "trash", "entry_id": entry_id },
                     "_mock_delete": [type_key, entry_id, expected_version]
                 }))
                 .unwrap());
+            }
+            MockOpRequest::ContentRestore {
+                type_key,
+                entry_id,
+                expected_version,
+            } => {
+                let Some(existing) = self
+                    .trashed_entries
+                    .get(&(type_key.clone(), entry_id))
+                    .cloned()
+                else {
+                    return Ok(serde_json::to_vec(&json!({
+                        "ok": false,
+                        "error": format!("trashed entry ({type_key}, {entry_id}) not found")
+                    }))
+                    .unwrap());
+                };
+                if existing.version != expected_version {
+                    return Ok(serde_json::to_vec(&json!({
+                        "ok": false,
+                        "error": format!("version conflict: expected {expected_version}, actual {}", existing.version)
+                    }))
+                    .unwrap());
+                }
+                self.trashed_entries.remove(&(type_key.clone(), entry_id));
+                self.entries.insert(
+                    (type_key.clone(), entry_id),
+                    ContentEntry {
+                        id: existing.id,
+                        type_key: existing.type_key,
+                        slug: existing.slug,
+                        title: existing.title,
+                        status: existing.publication_status,
+                        version: existing.version + 1,
+                        locale: existing.locale,
+                        values: Map::new(),
+                        term_ids: Vec::new(),
+                    },
+                );
+                return Ok(serde_json::to_vec(&json!({
+                    "ok": true,
+                    "data": { "staged": true, "operation": "restore", "entry_id": entry_id }
+                }))
+                .unwrap());
+            }
+            MockOpRequest::ContentPurge {
+                type_key,
+                entry_id,
+                expected_version,
+            } => {
+                let Some(existing) = self.trashed_entries.get(&(type_key.clone(), entry_id)) else {
+                    return Ok(serde_json::to_vec(&json!({
+                        "ok": false,
+                        "error": format!("trashed entry ({type_key}, {entry_id}) not found")
+                    }))
+                    .unwrap());
+                };
+                if existing.version != expected_version {
+                    return Ok(serde_json::to_vec(&json!({
+                        "ok": false,
+                        "error": format!("version conflict: expected {expected_version}, actual {}", existing.version)
+                    }))
+                    .unwrap());
+                }
+                self.trashed_entries.remove(&(type_key.clone(), entry_id));
+                return Ok(serde_json::to_vec(&json!({
+                    "ok": true,
+                    "data": { "staged": true, "operation": "purge", "entry_id": entry_id }
+                }))
+                .unwrap());
+            }
+            MockOpRequest::ContentTrashGet {
+                type_key,
+                entry_id,
+                locale,
+            } => {
+                let found = self
+                    .trashed_entries
+                    .get(&(type_key, entry_id))
+                    .filter(|e| locale.as_deref().is_none_or(|loc| e.locale == loc));
+                json!({ "ok": true, "data": { "entry": found } })
+            }
+            MockOpRequest::ContentTrashList {
+                type_key,
+                locale,
+                limit,
+                offset,
+            } => {
+                let mut matching: Vec<&TrashEntrySummary> = self
+                    .trashed_entries
+                    .iter()
+                    .filter(|((tk, _), e)| {
+                        tk == &type_key && locale.as_deref().is_none_or(|loc| e.locale == loc)
+                    })
+                    .map(|(_, e)| e)
+                    .collect();
+                matching.sort_by(|a, b| {
+                    b.trashed_at
+                        .cmp(&a.trashed_at)
+                        .then_with(|| b.id.cmp(&a.id))
+                });
+                let total = matching.len() as u64;
+                let off = offset.unwrap_or(0).min(10_000);
+                let lim = limit.unwrap_or(20).clamp(1, 50);
+                let items: Vec<&TrashEntrySummary> =
+                    matching.into_iter().skip(off).take(lim).collect();
+                json!({
+                    "ok": true,
+                    "data": { "items": items, "total": total, "limit": lim, "offset": off }
+                })
             }
             MockOpRequest::ContentGet {
                 type_key,
@@ -277,8 +404,11 @@ pub struct MockHostOutcome<R> {
     pub output_bytes: Option<Vec<u8>>,
     pub kv: BTreeMap<String, Value>,
     pub entries: BTreeMap<(String, i64), ContentEntry>,
+    pub trashed_entries: BTreeMap<(String, i64), TrashEntrySummary>,
     pub staged_content_saves: Vec<ContentSaveInput>,
     pub staged_content_deletes: Vec<(String, i64, i64)>,
+    pub staged_content_restores: Vec<(String, i64, i64)>,
+    pub staged_content_purges: Vec<(String, i64, i64)>,
     pub logs: Vec<(LogLevel, String)>,
     pub host_calls: usize,
     pub oversized_readbacks: usize,
@@ -337,6 +467,31 @@ enum MockOpRequest {
         entry_id: i64,
         expected_version: i64,
     },
+    ContentRestore {
+        type_key: String,
+        entry_id: i64,
+        expected_version: i64,
+    },
+    ContentPurge {
+        type_key: String,
+        entry_id: i64,
+        expected_version: i64,
+    },
+    ContentTrashGet {
+        type_key: String,
+        entry_id: i64,
+        #[serde(default)]
+        locale: Option<String>,
+    },
+    ContentTrashList {
+        type_key: String,
+        #[serde(default)]
+        locale: Option<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+        #[serde(default)]
+        offset: Option<usize>,
+    },
     ContentGet {
         type_key: String,
         entry_id: i64,
@@ -385,6 +540,8 @@ struct ActiveMockState {
     last_resp_bytes: Option<Vec<u8>>,
     staged_content_saves: Vec<ContentSaveInput>,
     staged_content_deletes: Vec<(String, i64, i64)>,
+    staged_content_restores: Vec<(String, i64, i64)>,
+    staged_content_purges: Vec<(String, i64, i64)>,
     host_calls: usize,
     oversized_readbacks: usize,
 }
@@ -418,6 +575,8 @@ where
             last_resp_bytes: None,
             staged_content_saves: Vec::new(),
             staged_content_deletes: Vec::new(),
+            staged_content_restores: Vec::new(),
+            staged_content_purges: Vec::new(),
             host_calls: 0,
             oversized_readbacks: 0,
         })
@@ -439,8 +598,11 @@ where
         output_bytes: final_state.output_bytes,
         kv: final_state.host.kv,
         entries: final_state.host.entries,
+        trashed_entries: final_state.host.trashed_entries,
         staged_content_saves: final_state.staged_content_saves,
         staged_content_deletes: final_state.staged_content_deletes,
+        staged_content_restores: final_state.staged_content_restores,
+        staged_content_purges: final_state.staged_content_purges,
         logs: final_state.host.logs,
         host_calls: final_state.host_calls,
         oversized_readbacks: final_state.oversized_readbacks,
@@ -562,6 +724,42 @@ pub(crate) fn abi_host_call(req_json: &[u8], resp_buf: &mut [u8]) -> Result<i32,
                         resp_bytes
                     };
                     return write_mock_resp(state, clean_resp, resp_buf);
+                }
+                MockOpRequest::ContentRestore {
+                    type_key,
+                    entry_id,
+                    expected_version,
+                } => {
+                    let resp_bytes = state
+                        .host
+                        .dispatch_call(req_json)
+                        .map_err(SdkError::HostError)?;
+                    if let Ok(v) = serde_json::from_slice::<Value>(&resp_bytes)
+                        && v.get("ok").and_then(Value::as_bool) == Some(true)
+                    {
+                        state
+                            .staged_content_restores
+                            .push((type_key, entry_id, expected_version));
+                    }
+                    return write_mock_resp(state, resp_bytes, resp_buf);
+                }
+                MockOpRequest::ContentPurge {
+                    type_key,
+                    entry_id,
+                    expected_version,
+                } => {
+                    let resp_bytes = state
+                        .host
+                        .dispatch_call(req_json)
+                        .map_err(SdkError::HostError)?;
+                    if let Ok(v) = serde_json::from_slice::<Value>(&resp_bytes)
+                        && v.get("ok").and_then(Value::as_bool) == Some(true)
+                    {
+                        state
+                            .staged_content_purges
+                            .push((type_key, entry_id, expected_version));
+                    }
+                    return write_mock_resp(state, resp_bytes, resp_buf);
                 }
                 _ => {}
             }

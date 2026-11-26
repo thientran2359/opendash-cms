@@ -22,7 +22,7 @@ Package layout:
 - **Build & Bundle Entrypoints:**
   - `npm run asbuild`: compiles `assembly/index.ts` -> `build/plugin.wasm`.
   - `npm run build`: runs `asbuild` then `[cms/examples/plugins/sample-plugin/scripts/bundle.js:createZip]` to generate `sample-plugin.zip` containing `manifest.json` and `plugin.wasm`.
-- **v2/C4 Upgrade Path:** For declarative content types, taxonomies, `content/before_save` allow/veto hooks, `content/after_save`, and `content_save` actions, use `opendash.readEnvelope()` and the typed output helpers documented in [AssemblyScript SDK](../../../sdk/README.md) and [Content Foundation Contract](../../../../docs/contracts/CONTENT_FOUNDATION_2026_11.md).
+- **v2/C4 & Host `0.1.1` Lifecycle Upgrade Path:** For declarative content types, taxonomies, `content/before_save` allow/veto hooks, `content/after_save`, and `content_save` actions, use `opendash.readEnvelope()` and the typed output helpers documented in [AssemblyScript SDK](../../../sdk/README.md) and [Content Foundation Contract](../../../../docs/contracts/CONTENT_FOUNDATION_2026_11.md). On host `>= 0.1.1`, `content_delete` moves entries into recoverable Trash (never physical deletion); opt-in `content_trash_read`, `content_restore`, and Admin-only `content_purge` require `manifest_schema: 3`, `min_host_version: "0.1.1"`, explicit action capabilities, and cannot be combined with `http` in the same action (`sample-plugin.zip` itself intentionally retains its legacy v1 manifest without destructive grants).
 
 ## Invariants
 

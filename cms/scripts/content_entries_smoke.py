@@ -6,18 +6,61 @@ From repository root:
 
 import argparse
 import json
+import os
+import socket
 import sqlite3
+import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from content_types_smoke import login, request, running
+from content_types_smoke import login, request
 from media_smoke import upload_image
 
 MEDIA_IDS = ["asset_1", "asset_2"]  # Overwritten with real uploads before writes.
+
+
+@contextmanager
+def running(binary: Path, db: Path):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    env = dict(
+        os.environ,
+        OPENDASH_HOST="127.0.0.1",
+        OPENDASH_PORT=str(port),
+        OPENDASH_SITE_ROOT=str(db.parent.parent),
+        OPENDASH_DB_PATH=str(db),
+    )
+    base = f"http://127.0.0.1:{port}"
+    with subprocess.Popen(
+        [str(binary)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    ) as process:
+        try:
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                try:
+                    with urlopen(base + "/api/health", timeout=2) as resp:
+                        if resp.status == 200:
+                            break
+                except Exception:
+                    pass
+                if process.poll() is not None:
+                    raise RuntimeError(f"opendash exited early with code {process.returncode}")
+                time.sleep(0.05)
+            else:
+                raise RuntimeError("opendash did not become healthy within 30s")
+            yield base
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
 
 
 def api(base, method, path, body=None, headers=None):
@@ -161,9 +204,14 @@ def check_crud(binary):
 
             other = next(record for record in first if record["slug"] == "editor-project")
             other_url = f"{list_path}/{other['id']}"
-            assert_status(api(base, "DELETE", other_url, headers={**editor, "If-Match": '"v1"'}), 204, "Editor delete")
-            assert_status(api(base, "GET", other_url, headers=editor), 404, "Deleted entry missing")
-            assert_status(api(base, "DELETE", other_url, headers={**admin, "If-Match": '"v1"'}), 404, "Deleting nonexistent")
+            assert_status(api(base, "DELETE", other_url, headers={**editor, "If-Match": '"v1"'}), 204, "Editor delete moves to Trash")
+            assert_status(api(base, "GET", other_url, headers=editor), 404, "Trashed entry hidden from active GET")
+            assert_status(api(base, "DELETE", other_url, headers={**admin, "If-Match": '"v1"'}), 412, "Repeat delete with stale version returns 412")
+            assert_status(api(base, "DELETE", other_url, headers={**admin, "If-Match": '"v2"'}), 409, "Repeat delete on already-trashed returns 409")
+            assert_status(api(base, "DELETE", other_url + "/purge", headers={**editor, "If-Match": '"v2"', "X-Confirm-Purge": "true"}), 403, "Editor cannot purge")
+            assert_status(api(base, "DELETE", other_url + "/purge", headers={**admin, "If-Match": '"v2"'}), 409, "Admin purge without header returns 409 confirmation_required")
+            assert_status(api(base, "DELETE", other_url + "/purge", headers={**admin, "If-Match": '"v2"', "X-Confirm-Purge": "true"}), 204, "Admin explicit purge removes row")
+            assert_status(api(base, "DELETE", other_url, headers={**admin, "If-Match": '"v2"'}), 404, "Deleting purged nonexistent returns 404")
 
             assert_status(api(base, "GET", "/api/admin/content-types/news/entries", headers=admin), 200, "Second CPT list")
             assert_status(api(base, "GET", list_path + "/999999", headers=admin), 404, "Missing entry")

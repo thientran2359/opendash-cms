@@ -201,7 +201,7 @@ pub fn run_worker_from_stdio() {
         execution_mode: req.execution_mode,
         principal: req.principal,
         staged_content_command: None,
-        staged_content_delete: None,
+        staged_lifecycle_command: None,
         action_capabilities: req.action_capabilities,
     };
 
@@ -310,7 +310,7 @@ fn run_wasm_worker(wasm_bytes: &[u8], host_ctx: HostContext) {
             staged_kv: Default::default(),
             staged_logs: vec![],
             staged_content_command: None,
-            staged_content_delete: None,
+            staged_lifecycle_command: None,
         });
         return;
     }
@@ -343,7 +343,7 @@ fn run_wasm_worker(wasm_bytes: &[u8], host_ctx: HostContext) {
         staged_kv: ctx.staged_kv,
         staged_logs: ctx.staged_logs,
         staged_content_command: ctx.staged_content_command,
-        staged_content_delete: ctx.staged_content_delete,
+        staged_lifecycle_command: ctx.staged_lifecycle_command,
     });
 }
 
@@ -370,6 +370,6 @@ fn emit_ipc_typed_error(error_type: &str, msg: &str) {
         staged_kv: Default::default(),
         staged_logs: vec![],
         staged_content_command: None,
-        staged_content_delete: None,
+        staged_lifecycle_command: None,
     });
 }

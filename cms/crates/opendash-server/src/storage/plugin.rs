@@ -1287,7 +1287,7 @@ pub(crate) async fn get_entry_for_host(
     let visible: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM content_entries e
           JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
-          WHERE e.id = ? AND e.content_type_key = ?
+          WHERE e.id = ? AND e.content_type_key = ? AND e.trashed_at IS NULL
             AND (? = 0 OR (sl.enabled = 1 AND e.publication_status = 'published'
               AND (sl.is_default = 1 OR
                   (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))))",
@@ -1332,6 +1332,8 @@ pub(crate) async fn list_entries_for_host(
     Ok(result)
 }
 
+/// Legacy plugin `content_delete` wrapper: at S02 activation routes to recoverable Trash
+/// through the shared lifecycle transaction while preserving role & plugin generation fences.
 pub async fn delete_entry_with_plugin_fence(
     db: &SqlitePool,
     actor: &crate::auth::SessionContext,
@@ -1339,77 +1341,20 @@ pub async fn delete_entry_with_plugin_fence(
     entry_id: i64,
     expected_version: i64,
     fence: &crate::storage::entries::PluginActionFence,
-) -> crate::error::ApiResult<()> {
-    use crate::error::ApiError;
-    if matches!(type_key, "pattern" | "section") {
-        return Err(ApiError::bad_request(
-            "Không thể xóa Pattern/Section qua action plugin.",
-        ));
-    }
-    if expected_version < 1 {
-        return Err(ApiError::bad_request("expected_version không hợp lệ."));
-    }
-    let mut tx = db.begin().await?;
-    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
-        .execute(&mut *tx)
-        .await?;
-    let fence_ok = match &fence.owner_fence {
-        crate::storage::entries::OwnerFence::Plugin {
-            plugin_id,
-            expected_generation,
-        } => is_plugin_generation_active(&mut *tx, plugin_id, *expected_generation).await?,
-        crate::storage::entries::OwnerFence::Theme {
-            revision_id,
-            selection_version,
-            ..
-        } => verify_active_theme_fence_in_tx(&mut *tx, revision_id, *selection_version).await?,
+) -> crate::error::ApiResult<super::entry_lifecycle::EntryCommitReceipt> {
+    let cmd = super::entry_lifecycle::LifecycleCommand {
+        operation: super::entry_lifecycle::LifecycleOperation::Trash,
+        type_key: type_key.to_owned(),
+        entry_id,
+        expected_version,
     };
-    if !fence_ok {
-        return Err(ApiError::conflict(
-            "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc thực thi.",
-        ));
-    }
-    if !is_actor_role_active(&mut *tx, actor.user.id, &fence.required_role).await? {
-        return Err(ApiError::forbidden("Quyền của tài khoản đã bị thu hồi."));
-    }
-    let result = sqlx::query(
-        "DELETE FROM content_entries WHERE content_type_key = ? AND id = ? AND version = ?",
-    )
-    .bind(type_key)
-    .bind(entry_id)
-    .bind(expected_version)
-    .execute(&mut *tx)
-    .await?;
-    if result.rows_affected() == 0 {
-        let current_ver: Option<i64> = sqlx::query_scalar(
-            "SELECT version FROM content_entries WHERE content_type_key = ? AND id = ?",
-        )
-        .bind(type_key)
-        .bind(entry_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        return match current_ver {
-            Some(_) => Err(ApiError::precondition_failed(
-                "Nội dung đã bị thay đổi trước đó (xung đột version).",
-            )),
-            None => Err(ApiError::not_found("Không tìm thấy nội dung cần xóa.")),
-        };
-    }
-    if type_key == "page" {
-        crate::storage::settings::bump_reading_version_on_deleted_entry_in_tx(&mut tx, entry_id)
-            .await?;
-    }
-    sqlx::query(
-        "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?",
-    )
-    .bind(entry_id)
-    .execute(&mut *tx)
-    .await?;
-    super::plugin_projections::delete_entry_projections_in_tx(&mut tx, entry_id).await?;
-    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
-    tx.commit().await?;
-    crate::cache::SiteCacheEpoch::global().bump();
-    Ok(())
+    let authority = super::entry_lifecycle::LifecycleAuthority {
+        session: actor,
+        plugin_fence: Some(fence),
+        confirmation: super::entry_lifecycle::LifecycleConfirmationEvidence::None,
+        scope: super::entry_lifecycle::LifecycleScope::Ordinary,
+    };
+    super::entry_lifecycle::execute_lifecycle_transition(db, &cmd, &authority).await
 }
 
 pub async fn is_actor_role_active(

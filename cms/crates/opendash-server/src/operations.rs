@@ -84,6 +84,7 @@ impl From<MutationAdmissionError> for ApiError {
 pub enum MaintenanceError {
     AlreadyActive,
     DrainTimeout { active_writers: usize },
+    EpochOverflow,
 }
 
 impl std::fmt::Display for MaintenanceError {
@@ -94,6 +95,7 @@ impl std::fmt::Display for MaintenanceError {
                 f,
                 "Hết thời gian chờ drain ({active_writers} tác vụ ghi vẫn đang chạy)."
             ),
+            Self::EpochOverflow => write!(f, "Tràn bộ đếm chu kỳ bảo trì trong tiến trình."),
         }
     }
 }
@@ -111,6 +113,7 @@ struct ActiveMaintenance {
 struct AdmissionState {
     active_writers: usize,
     maintenance: Option<ActiveMaintenance>,
+    maintenance_epoch: u64,
     shutting_down: bool,
 }
 
@@ -208,6 +211,14 @@ impl SiteCoordinator {
             .is_some()
     }
 
+    pub fn current_maintenance_epoch(&self) -> u64 {
+        self.inner
+            .state
+            .lock()
+            .expect("coordinator admission mutex poisoned")
+            .maintenance_epoch
+    }
+
     /// Admits a normal mutating request unless exclusive maintenance is draining or active.
     pub fn admit_mutation(&self) -> Result<MutationLease, MutationAdmissionError> {
         let mut guard = self
@@ -223,9 +234,11 @@ impl SiteCoordinator {
         if let Some(maint) = guard.maintenance {
             return Err(MutationAdmissionError::MaintenanceActive { kind: maint.kind });
         }
+        let maintenance_epoch = guard.maintenance_epoch;
         guard.active_writers += 1;
         Ok(MutationLease {
             inner: Arc::clone(&self.inner),
+            maintenance_epoch,
         })
     }
 
@@ -248,6 +261,11 @@ impl SiteCoordinator {
             if guard.maintenance.is_some() {
                 return Err(MaintenanceError::AlreadyActive);
             }
+            let next_epoch = guard
+                .maintenance_epoch
+                .checked_add(1)
+                .ok_or(MaintenanceError::EpochOverflow)?;
+            guard.maintenance_epoch = next_epoch;
             guard.maintenance = Some(ActiveMaintenance {
                 kind,
                 draining: true,
@@ -395,11 +413,20 @@ impl SiteCoordinator {
 /// Active writer lease; releasing it notifies any draining maintenance window.
 pub struct MutationLease {
     inner: Arc<CoordinatorInner>,
+    maintenance_epoch: u64,
+}
+
+impl MutationLease {
+    pub fn maintenance_epoch(&self) -> u64 {
+        self.maintenance_epoch
+    }
 }
 
 impl std::fmt::Debug for MutationLease {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MutationLease").finish_non_exhaustive()
+        f.debug_struct("MutationLease")
+            .field("maintenance_epoch", &self.maintenance_epoch)
+            .finish_non_exhaustive()
     }
 }
 
@@ -413,6 +440,7 @@ impl Clone for MutationLease {
         guard.active_writers += 1;
         Self {
             inner: Arc::clone(&self.inner),
+            maintenance_epoch: self.maintenance_epoch,
         }
     }
 }
@@ -690,6 +718,65 @@ mod tests {
             Ok(())
         );
         release_task.await.expect("join release");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn maintenance_epoch_advances_on_draining_completion_timeout_and_preserves_cloned_lease()
+    {
+        let (root, paths) = temp_site_paths("maint-epoch");
+        let coord = SiteCoordinator::acquire(paths).expect("acquire");
+        assert_eq!(coord.current_maintenance_epoch(), 0);
+
+        let lease0 = coord.admit_mutation().expect("lease 0");
+        assert_eq!(lease0.maintenance_epoch(), 0);
+        let cloned0 = lease0.clone();
+        assert_eq!(cloned0.maintenance_epoch(), 0);
+
+        // Drain timeout STILL advances maintenance_epoch because draining started.
+        let timeout_res = coord
+            .begin_maintenance(OperationKind::Reconcile, Duration::from_millis(30))
+            .await;
+        assert!(matches!(
+            timeout_res,
+            Err(MaintenanceError::DrainTimeout { active_writers: 2 })
+        ));
+        assert_eq!(coord.current_maintenance_epoch(), 1);
+        // Existing draining lease retains its original epoch 0, even when cloned afterwards.
+        assert_eq!(lease0.maintenance_epoch(), 0);
+        assert_eq!(lease0.clone().maintenance_epoch(), 0);
+        drop(cloned0);
+        drop(lease0);
+
+        let lease1 = coord.admit_mutation().expect("lease 1");
+        assert_eq!(lease1.maintenance_epoch(), 1);
+        drop(lease1);
+
+        // Successful maintenance also increments epoch monotonically.
+        let ctx = coord
+            .begin_maintenance(OperationKind::Backup, Duration::from_secs(2))
+            .await
+            .expect("maint ok");
+        assert_eq!(coord.current_maintenance_epoch(), 2);
+        drop(ctx);
+
+        let lease2 = coord.admit_mutation().expect("lease 2");
+        assert_eq!(lease2.maintenance_epoch(), 2);
+        drop(lease2);
+
+        // Overflow fails closed without mutating maintenance state.
+        {
+            let mut guard = coord.inner.state.lock().unwrap();
+            guard.maintenance_epoch = u64::MAX;
+        }
+        assert_eq!(
+            coord
+                .begin_maintenance(OperationKind::Backup, Duration::from_millis(20))
+                .await
+                .err(),
+            Some(MaintenanceError::EpochOverflow)
+        );
+        assert!(!coord.is_maintenance_active());
         let _ = std::fs::remove_dir_all(root);
     }
 }

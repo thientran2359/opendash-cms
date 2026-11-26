@@ -2183,6 +2183,14 @@ mod tests {
         .execute(&db)
         .await
         .unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (token_hash, user_id, csrf_token, expires_at)
+             VALUES ('t', 1, 'c', ?)",
+        )
+        .bind(crate::auth::current_time_secs() + 3600)
+        .execute(&db)
+        .await
+        .unwrap();
         let actor = crate::auth::SessionContext {
             user: crate::auth::AuthUser {
                 id: 1,
@@ -2253,6 +2261,8 @@ mod tests {
                 &content_reg,
                 &hooks,
                 "corr-stale".into(),
+                crate::plugin::lifecycle_confirmation::LifecycleActionOrigin::Generic,
+                0,
             )
             .await
             .expect_err("stale content_delete must return 412");
@@ -2266,7 +2276,7 @@ mod tests {
                 .unwrap();
         assert_eq!(still_exists, 1);
 
-        // Action execution with matching expected_version commits deletion cleanly
+        // Action execution with matching expected_version moves entry to recoverable Trash (S02)
         let ok_reqs = vec![
             json!({ "op": "content_delete", "type_key": "post", "entry_id": draft_id, "expected_version": draft_version }).to_string(),
         ];
@@ -2284,7 +2294,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ok_resp = manager
+        let ok_outcome = manager
             .execute_plugin_action(
                 "s01-del-ok",
                 "clean",
@@ -2293,18 +2303,31 @@ mod tests {
                 &content_reg,
                 &hooks,
                 "corr-del-ok".into(),
+                crate::plugin::lifecycle_confirmation::LifecycleActionOrigin::Generic,
+                0,
             )
             .await
             .expect("matching content_delete must succeed");
-        assert!(ok_resp.success);
+        assert!(ok_outcome.response.success);
+        assert_eq!(
+            ok_outcome.committed.as_ref().map(|r| r.operation),
+            Some(crate::storage::entry_lifecycle::EntryMutationKind::Trash)
+        );
 
-        let count_after: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM content_entries WHERE id = ?")
+        // S02 recoverable Trash: canonical DB row retained with trashed_at set, excluded from active read.
+        let retained_trashed: Option<String> =
+            sqlx::query_scalar("SELECT trashed_at FROM content_entries WHERE id = ?")
                 .bind(draft_id)
                 .fetch_one(&db)
                 .await
                 .unwrap();
-        assert_eq!(count_after, 0);
+        assert!(retained_trashed.is_some());
+        assert!(
+            crate::storage::entries::get_entry(&db, "post", draft_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2432,7 +2455,7 @@ mod tests {
             )
             .await;
 
-        let action_resp = manager
+        let action_outcome = manager
             .execute_plugin_action(
                 "s01-net",
                 "ping",
@@ -2441,11 +2464,13 @@ mod tests {
                 &content_reg,
                 &hook,
                 "corr-net".into(),
+                crate::plugin::lifecycle_confirmation::LifecycleActionOrigin::Generic,
+                0,
             )
             .await
             .expect("network http action must succeed");
-        assert!(action_resp.success);
-        let echoed_env = action_resp.data.expect("echoed envelope");
+        assert!(action_outcome.response.success);
+        let echoed_env = action_outcome.response.data.expect("echoed envelope");
         assert_eq!(echoed_env["envelope_version"], 2);
         assert_eq!(echoed_env["kind"], "action");
         assert_eq!(echoed_env["principal"], "editor");

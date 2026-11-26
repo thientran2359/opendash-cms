@@ -113,6 +113,7 @@ pub async fn resolve_in_tx_with_route_and_locale(
                                JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
                                JOIN content_types t ON t.key = e.content_type_key
                               WHERE e.content_type_key = ? AND e.slug = ? AND e.locale = ?
+                                AND e.trashed_at IS NULL
                                 AND t.provider_status = 'active'
                                 AND (? = 1 OR (
                                     sl.enabled = 1

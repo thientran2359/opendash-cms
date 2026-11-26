@@ -945,6 +945,7 @@ pub async fn theme_active_action(
             .unwrap_or_default()
             .as_nanos()
     );
+    let maint_epoch = lease.maintenance_epoch();
     match plugins
         .execute_owner_action(
             opendash_core::hooks::ExtensionOwnerKind::Theme,
@@ -955,16 +956,18 @@ pub async fn theme_active_action(
             &content_registry,
             &hooks,
             correlation_id,
+            crate::plugin::lifecycle_confirmation::LifecycleActionOrigin::Generic,
+            maint_epoch,
         )
         .await
     {
-        Ok(resp) => {
+        Ok(outcome) => {
             let principal = match actor.user.role {
                 Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
                 Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
             };
-            hooks.enqueue_plugin_action_hooks(principal, resp.data.as_ref(), lease);
-            Ok((StatusCode::OK, Json(resp)).into_response())
+            hooks.enqueue_plugin_action_hooks(principal, outcome.committed.as_ref(), lease);
+            Ok((StatusCode::OK, Json(outcome.response)).into_response())
         }
         Err((status, resp)) => Ok((status, Json(resp)).into_response()),
     }

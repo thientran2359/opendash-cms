@@ -61,7 +61,7 @@ pub struct ActionActorFence {
 pub struct ActionExecutionOutput {
     pub output: Value,
     pub staged_content_command: Option<host_ops::StagedContentCommand>,
-    pub staged_content_delete: Option<host_ops::StagedContentDeleteCommand>,
+    pub staged_lifecycle_command: Option<host_ops::StagedLifecycleCommand>,
 }
 
 #[cfg(test)]
@@ -506,7 +506,7 @@ impl PluginRuntime {
                         deadline_ms: remaining.as_millis() as u64,
                         execution_mode,
                         principal,
-                        action_capabilities: action_capabilities.clone(),
+                        action_capabilities: action_caps_for_host.clone(),
                         runtime_kind,
                         owner_kind,
                     };
@@ -639,11 +639,11 @@ impl PluginRuntime {
         let staged_kv = worker_res.staged_kv;
         let staged_logs = worker_res.staged_logs;
         let staged_content = worker_res.staged_content_command;
-        let staged_delete = worker_res.staged_content_delete;
+        let staged_lifecycle = worker_res.staged_lifecycle_command;
 
         let scope_count = (!staged_kv.is_empty() as u8)
             + (staged_content.is_some() as u8)
-            + (staged_delete.is_some() as u8);
+            + (staged_lifecycle.is_some() as u8);
         if scope_count > 1 {
             guard.cleanup();
             return Err(PluginError::InvalidOutput(
@@ -654,10 +654,23 @@ impl PluginRuntime {
         let content_write_allowed = execution_mode == HookExecutionMode::Standard
             || (execution_mode == HookExecutionMode::RoutePost
                 && principal != ExecutionPrincipal::Public);
-        if (staged_content.is_some() || staged_delete.is_some()) && !content_write_allowed {
+        if (staged_content.is_some() || staged_lifecycle.is_some()) && !content_write_allowed {
             guard.cleanup();
             return Err(PluginError::InvalidOutput(
                 "Ghi/xóa nội dung bị cấm ngoài action mode.".into(),
+            ));
+        }
+        if let Some(ref cmd) = staged_lifecycle
+            && matches!(
+                cmd.operation,
+                host_ops::StagedLifecycleOperation::Restore
+                    | host_ops::StagedLifecycleOperation::Purge
+            )
+            && action_capabilities.is_none()
+        {
+            guard.cleanup();
+            return Err(PluginError::InvalidOutput(
+                "content_restore và content_purge chỉ được phép qua action khai báo.".into(),
             ));
         }
 
@@ -955,7 +968,7 @@ impl PluginRuntime {
         Ok(ActionExecutionOutput {
             output: output_val,
             staged_content_command: staged_content,
-            staged_content_delete: staged_delete,
+            staged_lifecycle_command: staged_lifecycle,
         })
     }
 }
@@ -1021,7 +1034,9 @@ pub async fn execute_host_read_request_for_owner(
     secrets_root: Option<&Path>,
     req: HostReadRequest,
 ) -> HostOperationResponse {
-    if let Err(msg) = host_ops::check_read_policy(manifest, execution_mode, action_caps, &req) {
+    if let Err(msg) =
+        host_ops::check_read_policy(manifest, execution_mode, principal, action_caps, &req)
+    {
         return HostOperationResponse::err(msg);
     }
 
@@ -1210,6 +1225,55 @@ pub async fn execute_host_read_request_for_owner(
                 })
                 .collect();
             HostOperationResponse::ok_data(json!({ "items": items, "total": total }))
+        }
+        HostReadRequest::ContentTrashGet {
+            type_key,
+            entry_id,
+            locale,
+        } => {
+            if !opendash_core::content::valid_content_type_key(&type_key) {
+                return HostOperationResponse::err("Loại nội dung không hợp lệ.");
+            }
+            match crate::storage::entry_lifecycle::get_trashed_entry_metadata_for_host(
+                db,
+                &type_key,
+                entry_id,
+                locale.as_deref(),
+            )
+            .await
+            {
+                Ok(entry) => HostOperationResponse::ok_data(json!({ "entry": entry })),
+                Err(e) => HostOperationResponse::err(e.1.to_string()),
+            }
+        }
+        HostReadRequest::ContentTrashList {
+            type_key,
+            locale,
+            limit,
+            offset,
+        } => {
+            if !opendash_core::content::valid_content_type_key(&type_key) {
+                return HostOperationResponse::err("Loại nội dung không hợp lệ.");
+            }
+            let clamped_limit = limit.unwrap_or(20).clamp(1, 50) as i64;
+            let clamped_offset = offset.unwrap_or(0).min(10_000) as i64;
+            match crate::storage::entry_lifecycle::list_trashed_entries_metadata_for_host(
+                db,
+                &type_key,
+                locale.as_deref(),
+                clamped_limit,
+                clamped_offset,
+            )
+            .await
+            {
+                Ok((items, total)) => HostOperationResponse::ok_data(json!({
+                    "items": items,
+                    "total": total,
+                    "limit": clamped_limit,
+                    "offset": clamped_offset,
+                })),
+                Err(e) => HostOperationResponse::err(e.1.to_string()),
+            }
         }
         HostReadRequest::TaxonomyList {
             kind,
@@ -1468,7 +1532,7 @@ fn execute_wasm_sync(
         execution_mode: HookExecutionMode::Standard,
         principal: ExecutionPrincipal::Admin,
         staged_content_command: None,
-        staged_content_delete: None,
+        staged_lifecycle_command: None,
         action_capabilities: None,
     };
 

@@ -29,6 +29,7 @@ pub async fn get_counts(db: &SqlitePool) -> ApiResult<DashboardCounts> {
                 COUNT(CASE WHEN content_type_key = 'page' AND publication_status = 'published' THEN 1 END)
              FROM content_entries
              WHERE content_type_key IN ('post', 'page')
+               AND trashed_at IS NULL
                AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = content_entries.locale AND sl.deleted_at IS NULL)",
         )
         .fetch_one(db)

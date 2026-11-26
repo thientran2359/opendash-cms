@@ -16,8 +16,8 @@
 - `crates/opendash-core`: [`./crates/opendash-core/README.md`](./crates/opendash-core/README.md) — Pure-Rust domain types, validators, Builder AST/codec, declarative block schema, RichText sanitizer, icons, and backup contracts (15 modules in `src/lib.rs`).
 - `crates/opendash-plugin-sdk`: [`./crates/opendash-plugin-sdk/README.md`](./crates/opendash-plugin-sdk/README.md) — Guest-side Rust SDK targeting `opendash_v1` ABI v1/v1.1 with `export_plugin!`, typed host wrappers, and native `MockHost`.
 - `crates/opendash-server`: [`./crates/opendash-server/README.md`](./crates/opendash-server/README.md) — Single-binary Axum server (`opendash`) embedding `cms/admin/dist/` and orchestrating `SiteCoordinator`, `SitePaths`, C-SEC rendering, media/SMTP, and backup/restore.
-  - `src/routes/`: [`./crates/opendash-server/src/routes/README.md`](./crates/opendash-server/src/routes/README.md) — 22 Axum HTTP handler modules (auth/RBAC, CSRF, `If-Match`, `AdmittedMutation`; zero direct SQL).
-  - `src/storage/`: [`./crates/opendash-server/src/storage/README.md`](./crates/opendash-server/src/storage/README.md) — 31 SQLite/SQLx modules owning 100% of `sqlx::query*`/`sqlx::raw_sql` and migrations `0001`–`0052`.
+  - `src/routes/`: [`./crates/opendash-server/src/routes/README.md`](./crates/opendash-server/src/routes/README.md) — 23 Axum HTTP handler modules (auth/RBAC, CSRF, `If-Match`, `AdmittedMutation`; zero direct SQL).
+  - `src/storage/`: [`./crates/opendash-server/src/storage/README.md`](./crates/opendash-server/src/storage/README.md) — 32 SQLite/SQLx domain modules owning 100% of `sqlx::query*`/`sqlx::raw_sql` and migrations `0001`–`0054`.
   - `src/plugin/`: [`./crates/opendash-server/src/plugin/README.md`](./crates/opendash-server/src/plugin/README.md) — Isolated `--plugin-worker` Wasmi (`=2.0.0`) sandbox, `StagedCommitGuard`, and DNS-pinned SSRF-hardened egress.
 
 ### React Admin (`admin/src/`)
@@ -27,12 +27,12 @@
 - `admin/src/builder`: [`./admin/src/builder/README.md`](./admin/src/builder/README.md) — Custom 4-layer AST visual builder (`Section -> Row -> Column -> Element`), schema-driven forms, responsive controls, and sandboxed preview frame.
 - `admin/src/features`: [`./admin/src/features/README.md`](./admin/src/features/README.md) — Domain feature panels/workspaces across 17 `features/*` subdirectories (`editor/`, `content/`, `media/`, `themes/`, `plugins/`, `operations/`, etc.).
 - `admin/src/components`: [`./admin/src/components/README.md`](./admin/src/components/README.md) — Reusable Tailwind + React 18 UI, form, and locale-tab primitives.
-- `admin/src/i18n`: [`./admin/src/i18n/README.md`](./admin/src/i18n/README.md) — Site-wide i18n provider, `Intl` formatters, and `en`/`vi` translation catalogs (`2,144` keys).
+- `admin/src/i18n`: [`./admin/src/i18n/README.md`](./admin/src/i18n/README.md) — Site-wide i18n provider, `Intl` formatters, and `en`/`vi` translation catalogs (`2,290` keys).
 
 ### Database, SDK, Tooling & Deployment
-- `migrations/`: [`./migrations/README.md`](./migrations/README.md) — 51 embedded forward-only SQLite migrations (`0001`–`0052`, omitting `0016`).
-- `sdk/`: [`./sdk/README.md`](./sdk/README.md) — AssemblyScript guest SDK (`sdk/as/opendash.ts`) for `opendash_v1` ABI v1/v1.1 and Node test harness.
-- `scripts/`: [`./scripts/README.md`](./scripts/README.md) — 32 build, grouped fast test, health, architecture/plan/i18n gate, CodeGraph, smoke, and live-browser E2E scripts.
+- `migrations/`: [`./migrations/README.md`](./migrations/README.md) — 53 embedded forward-only SQLite migrations (`0001`–`0054`, omitting `0016`).
+- `sdk/`: [`./sdk/README.md`](./sdk/README.md) — AssemblyScript guest SDK (`sdk/as/opendash.ts`) & JS type contract (`sdk/js/opendash.d.ts`) for `opendash_v1` ABI v1/v1.1 (19 Host Ops) and Node test harness.
+- `scripts/`: [`./scripts/README.md`](./scripts/README.md) — 36 build, grouped fast test, health, architecture/plan/i18n gate, CodeGraph, smoke, benchmark, and live-browser E2E scripts.
 - `deploy/`: [`./deploy/README.md`](./deploy/README.md) — Linux installer, hardened `systemd` unit, and Nginx TLS reverse-proxy template.
 
 ### Examples & Fixtures

@@ -1250,6 +1250,10 @@ async fn s01_abi_v1_1_readback_ipc_newline_kv_tombstone_and_content_delete_cas()
         StatusCode::OK,
         "exact content_delete failed: {ok_body}"
     );
+    let ok_json: Value = serde_json::from_str(&ok_body).unwrap();
+    assert_eq!(ok_json["data"]["deleted_entry_id"], json!(entry_id));
+    assert_eq!(ok_json["data"]["deleted_type_key"], json!("post"));
+    assert_eq!(ok_json["data"]["lifecycle"]["operation"], json!("trash"));
 
     let gone = client
         .get(format!(
@@ -1260,6 +1264,19 @@ async fn s01_abi_v1_1_readback_ipc_newline_kv_tombstone_and_content_delete_cas()
         .await
         .unwrap();
     assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+
+    // S02: content_delete moves the entry into recoverable Trash rather than physically deleting it.
+    let (trashed_at, ver): (Option<String>, i64) =
+        sqlx::query_as("SELECT trashed_at, version FROM content_entries WHERE id = ?")
+            .bind(entry_id)
+            .fetch_one(&ro_db)
+            .await
+            .unwrap();
+    assert!(
+        trashed_at.is_some(),
+        "content_delete must retain row in Trash"
+    );
+    assert_eq!(ver, 2);
 }
 
 #[tokio::test]

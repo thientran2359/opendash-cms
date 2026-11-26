@@ -24,6 +24,8 @@ Lưu các ghi chú nghiên cứu đang mở, tài liệu vận hành CoS còn d�
 - [Theme Chrome, Cache & Safe Icons Drift Report (2026-11-25)](2026-11-25-theme-chrome-cache-icons-drift-report.md)
 - [Trusted Theme JS/SVG & Asset Enqueue Drift Report (2026-11-25)](2026-11-25-trusted-theme-js-svg-enqueue-drift-report.md)
 - [Phase 2 Legacy Retirement Drift Report (2026-11-26)](2026-11-26-phase2-legacy-retirement-drift-report.md)
+- [Unified JS Runtime, Render/Route Hooks & Dev Mode Drift Report (2026-11-26)](2026-11-26-unified-js-runtime-drift-report.md)
+- [Entry Lifecycle, Bulk Actions & Quick Edit Drift Report (2026-11-26)](2026-11-26-entry-lifecycle-drift-report.md)
 
 ## Ghi chú CoS Dispatch & EGM Pilot
 

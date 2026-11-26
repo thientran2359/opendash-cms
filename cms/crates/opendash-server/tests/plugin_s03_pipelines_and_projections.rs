@@ -458,10 +458,37 @@ async fn s03_async_hook_queue_runs_after_events_via_http() {
     wait_for_kv(&ro_db, "hk-after-save", "after_save", "\"1\"").await;
     wait_for_kv(&ro_db, "hk-after-pub", "after_pub", "\"1\"").await;
     wait_for_kv(&ro_db, "hk-after-unpub", "after_unpub", "\"1\"").await;
-    wait_for_kv(&ro_db, "hk-after-del", "after_del", "\"1\"").await;
     wait_for_kv(&ro_db, "hk-plugin-dis", "after_dis", "\"1\"").await;
     wait_for_kv(&ro_db, "hk-plugin-en", "after_en", "\"1\"").await;
     wait_for_kv(&ro_db, "hk-settings", "after_cfg", "\"1\"").await;
+
+    // S02: Trash must NOT fire content/after_delete; only explicit Purge fires it.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let del_before_purge: Option<String> = sqlx::query_scalar(
+        "SELECT value_json FROM plugin_kv WHERE plugin_id = 'hk-after-del' AND key = 'after_del'",
+    )
+    .fetch_optional(&ro_db)
+    .await
+    .unwrap();
+    assert!(
+        del_before_purge.is_none(),
+        "Trash must not trigger content/after_delete"
+    );
+
+    let purge_resp = client
+        .delete(format!(
+            "{base_url}/api/admin/content-types/post/entries/{entry_id}/purge"
+        ))
+        .header("Cookie", &cookie)
+        .header("Origin", &base_url)
+        .header("X-CSRF-Token", &csrf)
+        .header("If-Match", "\"v4\"")
+        .header("X-Confirm-Purge", "true")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(purge_resp.status(), StatusCode::NO_CONTENT);
+    wait_for_kv(&ro_db, "hk-after-del", "after_del", "\"1\"").await;
 }
 
 #[tokio::test]
@@ -1041,4 +1068,32 @@ async fn s03_projections_seo_jsonld_escape_noindex_entry_ext_and_lifecycle() {
         .await
         .unwrap();
     assert_eq!(put_cfg.status(), StatusCode::OK);
+
+    // S02: trashing a published entry invalidates its public projections and hides the public URL.
+    let trash_resp = client
+        .post(format!(
+            "{base_url}/api/admin/content-types/post/entries/{post_id}/trash"
+        ))
+        .header("Cookie", &cookie)
+        .header("Origin", &base_url)
+        .header("X-CSRF-Token", &csrf)
+        .header("If-Match", "\"v3\"")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(trash_resp.status(), StatusCode::OK);
+    let remaining_proj: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM plugin_entry_projections WHERE entry_id = ?")
+            .bind(post_id)
+            .fetch_one(&ro_db)
+            .await
+            .unwrap();
+    assert_eq!(remaining_proj, 0);
+    let trashed_public = client
+        .get(format!("{base_url}/proj-post"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(trashed_public.status(), StatusCode::NOT_FOUND);
 }

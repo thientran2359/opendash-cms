@@ -17,11 +17,11 @@ See [Plugin ABI](../../../docs/contracts/PLUGIN_ABI.md) and [M6 Plugin Extension
 - **Typed Host Operations** ([`src/host.rs`](src/host.rs)):
   - Envelope & output: `[host.rs:read_envelope]`, `[host.rs:write_output]`.
   - KV store: `[host.rs:kv_get]`, `[host.rs:kv_set]`, `[host.rs:kv_delete]`, `[host.rs:kv_list]`.
-  - Content & site reads/mutations: `[host.rs:content_get]`, `[host.rs:content_list]`, `[host.rs:content_save]`, `[host.rs:content_delete]`, `[host.rs:taxonomy_list]`, `[host.rs:media_get]`, `[host.rs:site_options_get]`, `[host.rs:plugin_settings_get]`, `[host.rs:plugin_secret_get]`.
+  - Content & site reads/mutations: `[host.rs:content_get]`, `[host.rs:content_list]`, `[host.rs:content_save]`, `[host.rs:content_delete]` (recoverable Trash), `[host.rs:content_trash_get]`, `[host.rs:content_trash_list]`, `[host.rs:content_restore]`, `[host.rs:content_purge]`, `[host.rs:taxonomy_list]`, `[host.rs:media_get]`, `[host.rs:site_options_get]`, `[host.rs:plugin_settings_get]`, `[host.rs:plugin_secret_get]`.
   - Egress & diagnostics: `[host.rs:http_request]`, `[host.rs:log]`.
 - **Wire Types & Filter Decisions** ([`src/types.rs`](src/types.rs)):
   - `[types.rs:SdkError]`, `[types.rs:Envelope]` (supports v1 defaults and v2 fields), `[types.rs:HostResponse]` (supports legacy v1 fields and Spec 2 `data`), `[types.rs:KvItem]`, `[types.rs:HttpRequestInput]`, `[types.rs:HttpResponse]`.
-  - `[types.rs:ContentSaveInput]`, `[types.rs:ContentEntry]`, `[types.rs:ContentListResult]`, `[types.rs:TaxonomyTerm]`, `[types.rs:MediaAsset]`, `[types.rs:LogLevel]`.
+  - `[types.rs:ContentSaveInput]`, `[types.rs:ContentEntry]`, `[types.rs:ContentListResult]`, `[types.rs:TrashEntrySummary]`, `[types.rs:ContentTrashListResult]`, `[types.rs:TaxonomyTerm]`, `[types.rs:MediaAsset]`, `[types.rs:LogLevel]`.
   - Filter/output types: `[types.rs:BeforeSaveDecision]`, `[types.rs:ContentPrepareSavePatch]`, `[types.rs:ContactBeforeSubmitDecision]`, `[types.rs:SeoHeadOutput]`, and `[types.rs:EntryViewOutput]`.
 - **Native Test Harness** ([`src/mock.rs`](src/mock.rs)):
   - `[mock.rs:MockHost]`, `[mock.rs:MockHttpHandler]`, `[mock.rs:MockHostOutcome]`, and `[mock.rs:run_in_mock_host]` (guarded by `#[cfg(not(target_arch = "wasm32"))]`).
@@ -40,7 +40,7 @@ See [Plugin ABI](../../../docs/contracts/PLUGIN_ABI.md) and [M6 Plugin Extension
 
 ## Verification
 
-Run the SDK unit tests (covers all 15 host operations, `-2` readback, v1/v2 envelopes, CAS conflicts, and panic cleanup) from the repository root:
+Run the SDK unit tests (covers all 19 host operations, `-2` readback, v1/v2 envelopes, CAS conflicts, and panic cleanup) from the repository root:
 
 ```powershell
 cargo test --manifest-path cms/Cargo.toml -p opendash-plugin-sdk --locked

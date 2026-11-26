@@ -1,9 +1,10 @@
 import { formatNumber } from '../../i18n/format.ts';
 import { tStatic, useI18n } from '../../i18n/index.tsx';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  changeContentEntryPublication, deleteContentEntry, getEffectiveContentTypeTaxonomies,
-  queryContentEntryTable, getEffectiveEntryListConfig, runEntryProviderAction, contentEntryPreviewPath,
+  getEffectiveContentTypeTaxonomies,
+  purgeContentEntry, queryContentEntryTable, getEffectiveEntryListConfig,
+  restoreContentEntry, runEntryProviderAction, contentEntryPreviewPath, trashContentEntry,
 } from '../../api/content.ts';
 import {
   AdminColumnCell, type EffectiveListConfig, type ProviderColumn,
@@ -18,9 +19,21 @@ import {
   listAllTaxonomyTerms, listTaxonomyDefinitions, resolveTaxonomyTermLabels,
   type TaxonomyDefinition, type TaxonomyTerm, type TaxonomyTermLabel,
 } from '../../api/taxonomy.ts';
-import type { AuthUser } from '../../types.ts';
+import type { AuthUser, PluginLifecycleConfirmation as PluginLifecycleConfirmationDto } from '../../types.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
-import type { EntryTableQuery, EntryTableResult, EntryTableRow } from './types.ts';
+import { editorDraftStore } from '../editor/EditorDraftStore.ts';
+import { PluginLifecycleConfirmation } from '../plugins/PluginLifecycleConfirmation.tsx';
+import {
+  buildBulkConfirmationPrompt,
+  captureBulkRows,
+  reconcileBulkResults,
+  runSequentialBulk,
+  validateBulkSelection,
+  type BulkActionSpec,
+  type BulkResultItem,
+} from './bulkEntryActions.ts';
+import { QuickEditForm } from './QuickEditForm.tsx';
+import type { EntryTableQuery, EntryTableResult, EntryTableRow, TaxonomyDeltaOp } from './types.ts';
 
 interface Props {
   typeKey: string;
@@ -40,10 +53,9 @@ const control =
 const sortButton =
   'inline-flex min-h-6 w-full items-center gap-1 text-left text-xs font-semibold uppercase tracking-wider text-zinc-600 ' +
   'hover:text-zinc-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-od-accent';
-const statuses = ['all', 'draft', 'published'] as const;
+const statuses = ['all', 'draft', 'published', 'trash'] as const;
 const TERM_RESOLVE_BATCH = 100;
 const TERM_RESOLVE_CONCURRENCY = 2;
-type BulkAction = 'published' | 'draft' | 'delete';
 type TaxonomyTableQuery = EntryTableQuery & { taxonomy_key?: string; term_id?: number };
 
 function rootHash(typeKey: string): string {
@@ -62,7 +74,7 @@ export function parseEntryTableHash(hash: string): TaxonomyTableQuery {
   const q = p.get('q')?.trim();
   if (q && [...q].length <= 200 && !/[\u0000-\u001f\u007f]/.test(q)) query.q = q;
   const status = p.get('status');
-  if (status === 'draft' || status === 'published') query.status = status;
+  if (status === 'draft' || status === 'published' || status === 'trash') query.status = status;
   const locale = p.get('locale')?.trim();
   if (locale && locale !== 'all') query.locale = locale;
   const category = boundedInt(p.get('category_id'), 0, 1, Number.MAX_SAFE_INTEGER);
@@ -77,7 +89,15 @@ export function parseEntryTableHash(hash: string): TaxonomyTableQuery {
     query.updated_month = month;
   }
   const sort = p.get('sort');
-  if (sort === 'title' || sort === 'id' || sort === 'created_at' || sort === 'updated_at') query.sort = sort;
+  if (
+    sort === 'title' ||
+    sort === 'id' ||
+    sort === 'created_at' ||
+    sort === 'updated_at' ||
+    sort === 'trashed_at'
+  ) {
+    query.sort = sort;
+  }
   if (p.get('order') === 'asc') query.order = 'asc';
   const limit = boundedInt(p.get('limit'), 20, 1, 100);
   if (limit !== 20) query.limit = limit;
@@ -91,13 +111,16 @@ export function entryTableHash(base: string, filter: TaxonomyTableQuery): string
   if (filter.q) p.set('q', filter.q);
   if (filter.status && filter.status !== 'all') p.set('status', filter.status);
   if (filter.locale && filter.locale !== 'all') p.set('locale', filter.locale);
-  if (filter.category_id) p.set('category_id', String(filter.category_id));
-  if (filter.tag_id) p.set('tag_id', String(filter.tag_id));
-  if (filter.taxonomy_key !== undefined) p.set('taxonomy_key', filter.taxonomy_key);
-  if (filter.term_id !== undefined) p.set('term_id', String(filter.term_id));
-  if (filter.include_descendants) p.set('include_descendants', 'true');
-  if (filter.updated_month) p.set('updated_month', filter.updated_month);
-  if (filter.sort && filter.sort !== 'updated_at') p.set('sort', filter.sort);
+  if (filter.status !== 'trash') {
+    if (filter.category_id) p.set('category_id', String(filter.category_id));
+    if (filter.tag_id) p.set('tag_id', String(filter.tag_id));
+    if (filter.taxonomy_key !== undefined) p.set('taxonomy_key', filter.taxonomy_key);
+    if (filter.term_id !== undefined) p.set('term_id', String(filter.term_id));
+    if (filter.include_descendants) p.set('include_descendants', 'true');
+    if (filter.updated_month) p.set('updated_month', filter.updated_month);
+  }
+  const defaultSort = filter.status === 'trash' ? 'trashed_at' : 'updated_at';
+  if (filter.sort && filter.sort !== defaultSort) p.set('sort', filter.sort);
   if (filter.order && filter.order !== 'desc') p.set('order', filter.order);
   if (filter.limit && filter.limit !== 20) p.set('limit', String(filter.limit));
   if (filter.offset) p.set('offset', String(filter.offset));
@@ -158,24 +181,69 @@ export function EntryListPage({
   const [providerBusy, setProviderBusy] = useState(false);
   const providerBusyRef = useRef(false);
   const [providerNotice, setProviderNotice] = useState('');
+  const [pendingProviderConfirmation, setPendingProviderConfirmation] = useState<{
+    pluginId: string;
+    actionId: string;
+    rowId: number;
+    confirmation: PluginLifecycleConfirmationDto;
+  } | null>(null);
   const [searchInput, setSearchInput] = useState(filters.q ?? '');
   const [taxonomyChoice, setTaxonomyChoice] = useState(filters.taxonomy_key ?? '');
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkCancelling, setBulkCancelling] = useState(false);
   const bulkBusyRef = useRef(false);
-  const [bulkResults, setBulkResults] = useState<{ id: number; message: string; ok: boolean }[]>([]);
+  const bulkCancelRef = useRef(false);
+  const bulkAbortRef = useRef<AbortController | null>(null);
+  const [bulkResults, setBulkResults] = useState<BulkResultItem[]>([]);
+  const [bulkBlockMessage, setBulkBlockMessage] = useState('');
+  const [bulkBatchMeta, setBulkBatchMeta] = useState<{
+    spec: BulkActionSpec;
+    scope: string;
+    reconciledAfterRetry: number;
+  } | null>(null);
+  const [bulkTaxOpen, setBulkTaxOpen] = useState(false);
+  const [bulkTaxKey, setBulkTaxKey] = useState('');
+  const [bulkTaxOp, setBulkTaxOp] = useState<TaxonomyDeltaOp>('add');
+  const [bulkTaxTermIds, setBulkTaxTermIds] = useState<number[]>([]);
+  const [bulkTaxCatalog, setBulkTaxCatalog] = useState<Record<string, TaxonomyTerm[]>>({});
+  const [bulkTaxLoading, setBulkTaxLoading] = useState(false);
+  const [dataRevision, setDataRevision] = useState(0);
+  const [quickEditRowId, setQuickEditRowId] = useState<number | null>(null);
+  const quickEditDirtyRef = useRef(false);
+  const [quickEditNotice, setQuickEditNotice] = useState('');
   const isBuiltIn = typeKey === 'post' || typeKey === 'page';
+  const isTrashView = filters.status === 'trash';
   const data = dataState?.scope === scope ? dataState.value : null;
   const error = errorState?.scope === scope ? errorState.message : '';
   const loading = loadingScope === scope || (!data && !error);
   const terms = termsState?.accountScope === accountScope ? termsState : null;
   const resolved = resolvedState?.scope === scope ? resolvedState : null;
-  const providerColumns = providerState?.accountScope === accountScope
+  const providerColumns = !isTrashView && providerState?.accountScope === accountScope
     ? providerState.config.columns : [];
 
   const updateFilter = (patch: Partial<TaxonomyTableQuery>, resetPage = true) => {
     if (bulkBusyRef.current) return;
+    if (quickEditRowId !== null && quickEditDirtyRef.current) {
+      if (!window.confirm(tStatic('quick_edit.confirm_discard'))) return;
+      editorDraftStore.deleteQuickEdit(typeKey, quickEditRowId);
+      quickEditDirtyRef.current = false;
+      setQuickEditRowId(null);
+    }
     const next = { ...filters, ...patch };
+    if (patch.status === 'trash') {
+      delete next.category_id;
+      delete next.tag_id;
+      delete next.taxonomy_key;
+      delete next.term_id;
+      delete next.include_descendants;
+      delete next.updated_month;
+      if (!patch.sort && (!next.sort || next.sort === 'updated_at')) {
+        next.sort = 'trashed_at';
+      }
+    } else if (patch.status && next.sort === 'trashed_at') {
+      next.sort = 'updated_at';
+    }
     if (resetPage) delete next.offset;
     const nextHash = entryTableHash(base, next);
     if (nextHash !== routeHash) onNavigateHash(nextHash);
@@ -192,10 +260,31 @@ export function EntryListPage({
   }, [base, filters, localeState.allLocales, routeHash, onNavigateHash]);
 
   useEffect(() => {
+    bulkCancelRef.current = true;
+    bulkAbortRef.current?.abort();
     setSearchInput(filters.q ?? '');
     setSelected(new Set());
     setBulkResults([]);
+    setBulkBlockMessage('');
+    setBulkBatchMeta(null);
+    setBulkTaxOpen(false);
+    setBulkTaxKey('');
+    setBulkTaxOp('add');
+    setBulkTaxTermIds([]);
+    setPendingProviderConfirmation(null);
+    setQuickEditRowId(null);
+    quickEditDirtyRef.current = false;
+    setQuickEditNotice('');
   }, [scope]);
+
+  // Auto-reopen an authorized quarantined/active Quick Edit draft for this type after re-login.
+  useEffect(() => {
+    if (!data || isTrashView || quickEditRowId !== null) return;
+    const saved = editorDraftStore.findQuickEditForType(siteInstanceId, user.id, typeKey);
+    if (saved && data.items.some(item => item.id === saved.entry_id)) {
+      setQuickEditRowId(saved.entry_id);
+    }
+  }, [data, isTrashView, quickEditRowId, siteInstanceId, user.id, typeKey]);
 
   // A taxonomy choice alone is not a valid server filter. Keep it local until
   // a term is chosen, so the server never receives an incomplete pair.
@@ -211,6 +300,7 @@ export function EntryListPage({
       .then(value => {
         if (!active || scopeRef.current !== scope) return;
         setDataState({ scope, value });
+        setDataRevision(rev => rev + 1);
         setErrorState(null);
       })
       .catch(cause => {
@@ -372,47 +462,169 @@ export function EntryListPage({
   const allSelected = currentIds.length > 0 && currentIds.every(id => selected.has(id));
   const pageSize = filters.limit ?? 20;
   const offset = filters.offset ?? 0;
+  const supportsDraftPublish =
+    isBuiltIn ||
+    currentRows.some(row => Boolean(row.capabilities?.publish || row.capabilities?.unpublish));
 
-  const performBulk = async (kind: BulkAction) => {
-    if (!csrfToken || bulkBusyRef.current || !selectedRows.length) return;
-    if (kind !== 'delete' && !isBuiltIn) return;
-    const noun = kind === 'delete' ? tStatic("feature.content.entrylistpage.permanently_delete")
-      : kind === 'published' ? tStatic("feature.content.entrylistpage.publish") : tStatic("feature.content.entrylistpage.move_to_draft");
-    if (!window.confirm(tStatic("feature.content.entrylistpage.are_you_sure_you_want_to_value_value_selected", { value1: noun, value2: formatNumber(selectedRows.length) }))) return;
-    const startingScope = scope;
-    const captured = [...selectedRows];
-    bulkBusyRef.current = true;
-    setBulkBusy(true);
-    setBulkResults([]);
-    const reports: { id: number; message: string; ok: boolean }[] = [];
-    try {
-      for (const row of captured) {
-        // No subsequent mutation may start if an account or CPT changed.
-        if (!aliveRef.current || scopeRef.current !== startingScope) break;
-        try {
-          if (kind === 'delete') {
-            await deleteContentEntry(typeKey, row.id, row.version, csrfToken);
-          } else {
-            await changeContentEntryPublication(typeKey, row.id, row.version, kind, csrfToken);
-          }
-          reports.push({ id: row.id, message: tStatic("feature.content.entrylistpage.value_value_succeeded", { value1: row.id, value2: noun }), ok: true });
-        } catch (cause) {
-          reports.push({ id: row.id, message: `#${row.id}: ${readableError(cause)}`, ok: false });
-          if (cause instanceof ApiClientError && cause.status === 401) {
-            onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_during_the_bulk_update"));
-            break;
-          }
+  const selectedLocaleCheck = useMemo(() => validateBulkSelection(selectedRows), [selectedRows]);
+  const bulkTaxCatalogKey =
+    bulkTaxKey && selectedLocaleCheck.ok ? `${bulkTaxKey}:${selectedLocaleCheck.locale}` : '';
+
+  useEffect(() => {
+    if (!bulkTaxOpen || !bulkTaxKey || !selectedLocaleCheck.ok) return;
+    if (Object.prototype.hasOwnProperty.call(bulkTaxCatalog, bulkTaxCatalogKey)) return;
+    const controller = new AbortController();
+    setBulkTaxLoading(true);
+    void listAllTaxonomyTerms(bulkTaxKey, controller.signal, selectedLocaleCheck.locale || null)
+      .then(found => {
+        if (controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+        setBulkTaxCatalog(prev => ({ ...prev, [bulkTaxCatalogKey]: found }));
+      })
+      .catch(cause => {
+        if (controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+        setBulkBlockMessage(readableError(cause));
+        if (cause instanceof ApiClientError && cause.status === 401) {
+          onApiError(cause, tStatic('api.taxonomy.load_terms'));
         }
-      }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setBulkTaxLoading(false);
+      });
+    return () => controller.abort();
+  }, [bulkTaxOpen, bulkTaxKey, bulkTaxCatalogKey, selectedLocaleCheck, accountScope]);
+
+  const runSafeSelectedBatch = async (
+    spec: BulkActionSpec,
+    targetRows: EntryTableRow[],
+    skipConfirm = false,
+  ) => {
+    if (!csrfToken || bulkBusyRef.current || !targetRows.length) return;
+    if ((spec.kind === 'published' || spec.kind === 'draft') && !supportsDraftPublish) return;
+    if (spec.kind === 'purge' && user.role !== 'admin') return;
+    const check = validateBulkSelection(targetRows);
+    if (!check.ok) {
+      setBulkBlockMessage(check.message);
+      return;
+    }
+    const captured = captureBulkRows(targetRows);
+    const effectiveSpec: BulkActionSpec =
+      spec.kind === 'restore'
+        ? {
+            kind: 'restore',
+            confirmPublicRestore: captured.some(row => row.immediate_public_restore),
+          }
+        : spec;
+
+    if (!skipConfirm) {
+      const confirmPrompt = buildBulkConfirmationPrompt(
+        effectiveSpec,
+        captured.length,
+        check.locale,
+      );
+      if (!window.confirm(confirmPrompt)) return;
+    }
+
+    const startingScope = scope;
+    bulkBusyRef.current = true;
+    bulkCancelRef.current = false;
+    setBulkBusy(true);
+    setBulkCancelling(false);
+    setBulkBlockMessage('');
+    setBulkResults([]);
+    setBulkBatchMeta(null);
+    const beforeRefreshRevision = dataRevision;
+    try {
+      const outcome = await runSequentialBulk({
+        typeKey,
+        spec: effectiveSpec,
+        capturedRows: captured,
+        csrfToken,
+        startingScope,
+        getCurrentScope: () => scopeRef.current,
+        isAlive: () => aliveRef.current,
+        isCancelled: () => bulkCancelRef.current,
+        setActiveAbort: controller => {
+          bulkAbortRef.current = controller;
+        },
+        formatError: readableError,
+        onUnauthorized: cause =>
+          onApiError(
+            cause,
+            tStatic('feature.content.entrylistpage.your_session_expired_during_the_bulk_update'),
+          ),
+      });
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
-      const succeeded = new Set(reports.filter(report => report.ok).map(report => report.id));
+      const succeeded = new Set(
+        outcome.reports.filter(report => report.status === 'succeeded').map(report => report.id),
+      );
       setSelected(prev => new Set([...prev].filter(id => !succeeded.has(id))));
-      setBulkResults(reports);
-      setRetry(prev => prev + 1); // Always re-query real server counts, even on mixed results.
+      setBulkResults(outcome.reports);
+      setBulkBatchMeta({
+        spec: effectiveSpec,
+        scope: startingScope,
+        reconciledAfterRetry: beforeRefreshRevision,
+      });
+      if (effectiveSpec.kind === 'taxonomy') {
+        setBulkTaxOpen(false);
+        setBulkTaxTermIds([]);
+      }
+      setRetry(prev => prev + 1); // Always reconcile authoritative server state & versions.
     } finally {
       bulkBusyRef.current = false;
-      setBulkBusy(false);
+      bulkAbortRef.current = null;
+      if (aliveRef.current) {
+        setBulkBusy(false);
+        setBulkCancelling(false);
+      }
     }
+  };
+
+  const performBulk = async (spec: BulkActionSpec) =>
+    runSafeSelectedBatch(spec, selectedRows, false);
+
+  const performBulkTaxonomy = async () => {
+    if (!bulkTaxKey) return;
+    if ((bulkTaxOp === 'add' || bulkTaxOp === 'remove') && bulkTaxTermIds.length === 0) {
+      setBulkBlockMessage(tStatic('bulk.taxonomy_select_terms_required'));
+      return;
+    }
+    const defLabel = terms?.definitions.find(d => d.key === bulkTaxKey)?.label ?? bulkTaxKey;
+    await runSafeSelectedBatch(
+      {
+        kind: 'taxonomy',
+        taxonomyKey: bulkTaxKey,
+        taxonomyLabel: defLabel,
+        operation: bulkTaxOp,
+        termIds: [...bulkTaxTermIds],
+        schemaToken: data?.schema_token ?? '',
+      },
+      selectedRows,
+      false,
+    );
+  };
+
+  const reconciledBulk = useMemo(() => {
+    if (
+      !bulkBatchMeta ||
+      bulkBatchMeta.scope !== scope ||
+      dataRevision <= bulkBatchMeta.reconciledAfterRetry
+    ) {
+      return null;
+    }
+    return reconcileBulkResults(bulkBatchMeta.spec, bulkResults, currentRows);
+  }, [bulkBatchMeta, scope, dataRevision, bulkResults, currentRows]);
+
+  const retryRemainingBulk = () => {
+    if (!bulkBatchMeta || !reconciledBulk || bulkBusyRef.current) return;
+    if (!reconciledBulk.retryableRows.length) {
+      setBulkResults(reconciledBulk.annotatedResults);
+      return;
+    }
+    const nextSpec: BulkActionSpec =
+      bulkBatchMeta.spec.kind === 'taxonomy'
+        ? { ...bulkBatchMeta.spec, schemaToken: data?.schema_token ?? bulkBatchMeta.spec.schemaToken }
+        : bulkBatchMeta.spec;
+    void runSafeSelectedBatch(nextSpec, reconciledBulk.retryableRows, false);
   };
 
   const performProviderAction = async (column: ProviderColumn, row: EntryTableRow) => {
@@ -423,6 +635,7 @@ export function EntryListPage({
     providerBusyRef.current = true;
     setProviderBusy(true);
     setProviderNotice('');
+    setPendingProviderConfirmation(null);
     try {
       const response = await runEntryProviderAction(
         typeKey, row, column.owner_id, column.action_id, csrfToken,
@@ -432,9 +645,18 @@ export function EntryListPage({
       setRetry(old => old + 1);
     } catch (cause) {
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
-      setProviderNotice(`#${row.id}: ${readableError(cause)}`);
-      if (cause instanceof ApiClientError && cause.status === 401)
-        onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_running_the_action"));
+      if (cause instanceof ApiClientError && cause.confirmation) {
+        setPendingProviderConfirmation({
+          pluginId: column.owner_id,
+          actionId: column.action_id,
+          rowId: row.id,
+          confirmation: cause.confirmation,
+        });
+      } else {
+        setProviderNotice(`#${row.id}: ${readableError(cause)}`);
+        if (cause instanceof ApiClientError && cause.status === 401)
+          onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_running_the_action"));
+      }
     } finally {
       providerBusyRef.current = false;
       if (aliveRef.current) setProviderBusy(false);
@@ -443,6 +665,7 @@ export function EntryListPage({
 
   const toggleRow = (id: number, checked: boolean) => {
     if (bulkBusyRef.current) return;
+    setBulkBlockMessage('');
     setSelected(prev => {
       const next = new Set(prev);
       if (checked) next.add(id);
@@ -451,18 +674,19 @@ export function EntryListPage({
     });
   };
   const sortBy = (column: NonNullable<EntryTableQuery['sort']>) => {
-    const nextOrder = (filters.sort ?? 'updated_at') === column && (filters.order ?? 'desc') === 'desc'
+    const defaultSort = isTrashView ? 'trashed_at' : 'updated_at';
+    const nextOrder = (filters.sort ?? defaultSort) === column && (filters.order ?? 'desc') === 'desc'
       ? 'asc' : 'desc';
     updateFilter({ sort: column, order: nextOrder });
   };
-  const deleteSingleRow = async (row: EntryTableRow) => {
-    if (bulkBusyRef.current || !csrfToken) return;
-    if (!window.confirm(tStatic("feature.content.entrylistpage.permanently_delete_value_value_this_cannot_be_undone", { value1: row.title, value2: row.id }))) return;
+  const trashSingleRow = async (row: EntryTableRow) => {
+    if (bulkBusyRef.current || !csrfToken || row.capabilities?.trash === false) return;
+    if (!window.confirm(tStatic("entry_lifecycle.confirm_move_to_trash_row", { value1: row.title, value2: row.id }))) return;
     const startingScope = scope;
     bulkBusyRef.current = true;
     setBulkBusy(true);
     try {
-      await deleteContentEntry(typeKey, row.id, row.version, csrfToken);
+      await trashContentEntry(typeKey, row.id, row.version, csrfToken);
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
       setSelected(prev => {
         const next = new Set(prev);
@@ -475,7 +699,61 @@ export function EntryListPage({
       if (cause instanceof ApiClientError && cause.status === 401) {
         onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_deleting_the_item"));
       } else {
-        setBulkResults([{ id: row.id, message: `#${row.id}: ${readableError(cause)}`, ok: false }]);
+        setBulkResults([{ id: row.id, status: 'failed', beforeVersion: row.version, message: `#${row.id}: ${readableError(cause)}` }]);
+      }
+    } finally {
+      bulkBusyRef.current = false;
+      if (aliveRef.current) setBulkBusy(false);
+    }
+  };
+
+  const restoreSingleRow = async (row: EntryTableRow) => {
+    if (bulkBusyRef.current || !csrfToken || row.capabilities?.restore === false) return;
+    const needsPublicConfirm = Boolean(row.capabilities?.immediate_public_restore);
+    if (
+      needsPublicConfirm &&
+      !window.confirm(tStatic("entry_lifecycle.confirm_public_restore_row", { value1: row.title, value2: row.id }))
+    ) {
+      return;
+    }
+    const startingScope = scope;
+    bulkBusyRef.current = true;
+    setBulkBusy(true);
+    try {
+      await restoreContentEntry(typeKey, row.id, row.version, csrfToken, {
+        confirmPublicRestore: needsPublicConfirm,
+      });
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      setRetry(prev => prev + 1);
+    } catch (cause) {
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      if (cause instanceof ApiClientError && cause.status === 401) {
+        onApiError(cause, tStatic("api.content.restore_the_entry"));
+      } else {
+        setBulkResults([{ id: row.id, status: 'failed', beforeVersion: row.version, message: `#${row.id}: ${readableError(cause)}` }]);
+      }
+    } finally {
+      bulkBusyRef.current = false;
+      if (aliveRef.current) setBulkBusy(false);
+    }
+  };
+
+  const purgeSingleRow = async (row: EntryTableRow) => {
+    if (bulkBusyRef.current || !csrfToken || user.role !== 'admin' || row.capabilities?.purge === false) return;
+    if (!window.confirm(tStatic("entry_lifecycle.confirm_purge_row", { value1: row.title, value2: row.id }))) return;
+    const startingScope = scope;
+    bulkBusyRef.current = true;
+    setBulkBusy(true);
+    try {
+      await purgeContentEntry(typeKey, row.id, row.version, csrfToken);
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      setRetry(prev => prev + 1);
+    } catch (cause) {
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      if (cause instanceof ApiClientError && cause.status === 401) {
+        onApiError(cause, tStatic("api.content.purge_the_entry"));
+      } else {
+        setBulkResults([{ id: row.id, status: 'failed', beforeVersion: row.version, message: `#${row.id}: ${readableError(cause)}` }]);
       }
     } finally {
       bulkBusyRef.current = false;
@@ -549,18 +827,29 @@ export function EntryListPage({
   const chosenDefinition = terms?.definitions.find(def => def.key === selectedTaxonomy);
 
   const captionId = `entry-table-caption-${typeKey}`;
-  const activeSort = filters.sort ?? 'updated_at';
+  const activeSort = filters.sort ?? (isTrashView ? 'trashed_at' : 'updated_at');
   const activeOrder = filters.order ?? 'desc';
-  const ariaSortFor = (field: 'title' | 'updated_at'): 'ascending' | 'descending' | undefined =>
+  const ariaSortFor = (field: 'title' | 'updated_at' | 'trashed_at'): 'ascending' | 'descending' | undefined =>
     activeSort === field ? (activeOrder === 'asc' ? 'ascending' : 'descending') : undefined;
+  const bulkRemainingRetryCount = reconciledBulk?.retryableRows.length ?? 0;
+  const displayBulkResults = reconciledBulk?.annotatedResults ?? bulkResults;
+  const unresolvedUncertainCount = reconciledBulk?.unresolvedUncertainIds.length ?? 0;
 
   return (
     <section className="w-full min-w-0 space-y-3.5" data-testid={`entry-list-${typeKey}`} data-type-key={typeKey}>
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex flex-wrap items-center gap-1.5" aria-label={tStatic("feature.content.entrylistpage.filter_status")} role="group">
           {statuses.map(status => {
-            const count = data?.status_counts[status] ?? 0;
-            const label = status === 'all' ? tStatic("feature.media.mediapicker.all") : status === 'draft' ? tStatic("feature.content.entrylistpage.draft") : tStatic("reading.published");
+            const count = status === 'trash'
+              ? (data?.status_counts.trash ?? 0)
+              : (data?.status_counts[status] ?? 0);
+            const label = status === 'all'
+              ? tStatic("feature.media.mediapicker.all")
+              : status === 'draft'
+                ? tStatic("feature.content.entrylistpage.draft")
+                : status === 'published'
+                  ? tStatic("reading.published")
+                  : tStatic("entry_lifecycle.tab_trash");
             const active = (filters.status ?? 'all') === status;
             return (
               <AdminButton
@@ -568,6 +857,7 @@ export function EntryListPage({
                 variant={active ? 'primary' : 'secondary'}
                 size="sm"
                 aria-pressed={active}
+                data-testid={`entry-status-tab-${status}`}
                 disabled={bulkBusy}
                 onClick={() => updateFilter({ status })}
               >
@@ -639,7 +929,7 @@ export function EntryListPage({
             </label>
           )}
 
-          {terms?.categoryEnabled && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+          {!isTrashView && terms?.categoryEnabled && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
             <span>{tStatic("feature.content.entrylistpage.category")}</span>
             <select aria-label={tStatic("feature.content.entrylistpage.filter_category")} className={`${control} w-full`}
               value={filters.category_id ?? ''} disabled={bulkBusy}
@@ -657,7 +947,7 @@ export function EntryListPage({
             </select>
           </label>}
 
-          {terms?.tagEnabled && <label className="flex min-w-[130px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+          {!isTrashView && terms?.tagEnabled && <label className="flex min-w-[130px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
             <span>{tStatic("shell.tags")}</span>
             <select aria-label={tStatic("feature.content.entrylistpage.filter_tags")} className={`${control} w-full`}
               value={filters.tag_id ?? ''} disabled={bulkBusy}
@@ -675,7 +965,7 @@ export function EntryListPage({
             </select>
           </label>}
 
-          {customDefinitions.length > 0 && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+          {!isTrashView && customDefinitions.length > 0 && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
             <span>{tStatic("feature.common.ui_taxonomy")}</span>
             <select aria-label={tStatic("feature.content.entrylistpage.choose_taxonomy_to_filter")} className={`${control} w-full`}
               disabled={bulkBusy} value={selectedTaxonomy}
@@ -689,7 +979,7 @@ export function EntryListPage({
             </select>
           </label>}
 
-          {chosenDefinition && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+          {!isTrashView && chosenDefinition && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
             <span>{chosenDefinition.label}</span>
             <select aria-label={tStatic("feature.content.entrylistpage.filter_by_value", { value1: chosenDefinition.label })} className={`${control} w-full`}
               disabled={bulkBusy} value={filters.term_id ?? ''}
@@ -709,12 +999,12 @@ export function EntryListPage({
             </select>
           </label>}
 
-          <label className="flex min-w-[145px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+          {!isTrashView && <label className="flex min-w-[145px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
             <span>{tStatic("feature.content.entrylistpage.month_utc")}</span>
             <input type="month" aria-label={tStatic("feature.content.entrylistpage.filter_by_update_month")} className={`${control} w-full`}
               value={filters.updated_month ?? ''} disabled={bulkBusy}
               onChange={event => updateFilter({ updated_month: event.target.value || undefined })} />
-          </label>
+          </label>}
 
           <label className="flex w-[88px] flex-col gap-1 text-xs font-medium text-zinc-600">
             <span>{tStatic("feature.content.entrylistpage.per_page")}</span>
@@ -726,7 +1016,7 @@ export function EntryListPage({
           </label>
         </div>
 
-        {(filters.category_id && terms?.categoryEnabled) || (filters.term_id && chosenDefinition?.hierarchical) ? (
+        {!isTrashView && ((filters.category_id && terms?.categoryEnabled) || (filters.term_id && chosenDefinition?.hierarchical)) ? (
           <div className="flex flex-wrap items-center gap-4 border-t border-zinc-100 pt-2.5">
             {filters.category_id && terms?.categoryEnabled && <label className="flex items-center gap-2 text-xs text-zinc-700">
               <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
@@ -742,18 +1032,98 @@ export function EntryListPage({
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2.5 border-t border-zinc-100 pt-2.5">
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={tStatic("feature.content.entrylistpage.bulk_actions")}>
-            <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {tStatic("feature.content.entrylistpage.selected")}</span>
-            {isBuiltIn && <>
-              <AdminButton variant="secondary" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                onClick={() => void performBulk('published')}>{tStatic("feature.content.entrylistpage.publish_selected")}</AdminButton>
-              <AdminButton variant="secondary" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                onClick={() => void performBulk('draft')}>{tStatic("feature.content.entrylistpage.move_to_draft_2")}</AdminButton>
-            </>}
-            <AdminButton variant="danger" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-              onClick={() => void performBulk('delete')}>{tStatic("feature.content.entrylistpage.delete_selected")}</AdminButton>
-            {bulkBusy && <span role="status" className="text-xs text-zinc-600">{tStatic("feature.content.entrylistpage.processing_each_item_separately")}</span>}
-          </div>
+          {!isTrashView ? (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={tStatic("feature.content.entrylistpage.bulk_actions")}>
+              <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {tStatic("feature.content.entrylistpage.selected")}</span>
+              {supportsDraftPublish && <>
+                <AdminButton variant="secondary" size="sm" data-testid="bulk-publish-btn" disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                  onClick={() => void performBulk({ kind: 'published' })}>{tStatic("feature.content.entrylistpage.publish_selected")}</AdminButton>
+                <AdminButton variant="secondary" size="sm" data-testid="bulk-draft-btn" disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                  onClick={() => void performBulk({ kind: 'draft' })}>{tStatic("feature.content.entrylistpage.move_to_draft_2")}</AdminButton>
+              </>}
+              {(terms?.definitions.length ?? 0) > 0 && (
+                <AdminButton
+                  variant={bulkTaxOpen ? 'primary' : 'secondary'}
+                  size="sm"
+                  data-testid="bulk-taxonomy-toggle-btn"
+                  disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                  onClick={() => {
+                    if (!selectedLocaleCheck.ok) {
+                      setBulkBlockMessage(selectedLocaleCheck.message);
+                      return;
+                    }
+                    setBulkBlockMessage('');
+                    setBulkTaxOpen(prev => !prev);
+                  }}
+                >
+                  {tStatic("bulk.taxonomy_button")}
+                </AdminButton>
+              )}
+              <AdminButton variant="danger" size="sm" data-testid="bulk-move-to-trash-btn"
+                disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                onClick={() => void performBulk({ kind: 'trash' })}>{tStatic("entry_lifecycle.move_selected_to_trash")}</AdminButton>
+              {bulkBusy && (
+                <>
+                  <span role="status" className="text-xs text-zinc-600">{tStatic("feature.content.entrylistpage.processing_each_item_separately")}</span>
+                  <AdminButton
+                    variant="secondary"
+                    size="sm"
+                    data-testid="bulk-cancel-btn"
+                    disabled={bulkCancelling}
+                    onClick={() => {
+                      bulkCancelRef.current = true;
+                      setBulkCancelling(true);
+                      bulkAbortRef.current?.abort();
+                    }}
+                  >
+                    {bulkCancelling ? tStatic("entry_lifecycle.bulk_cancelling") : tStatic("entry_lifecycle.bulk_cancel")}
+                  </AdminButton>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={tStatic("feature.content.entrylistpage.bulk_actions")}>
+              <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {tStatic("feature.content.entrylistpage.selected")}</span>
+              <AdminButton
+                variant="secondary"
+                size="sm"
+                data-testid="bulk-restore-btn"
+                disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                onClick={() => void performBulk({ kind: 'restore', confirmPublicRestore: false })}
+              >
+                {tStatic("bulk.restore_selected")}
+              </AdminButton>
+              {user.role === 'admin' && (
+                <AdminButton
+                  variant="danger"
+                  size="sm"
+                  data-testid="bulk-purge-btn"
+                  disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                  onClick={() => void performBulk({ kind: 'purge' })}
+                >
+                  {tStatic("bulk.purge_selected")}
+                </AdminButton>
+              )}
+              {bulkBusy && (
+                <>
+                  <span role="status" className="text-xs text-zinc-600">{tStatic("feature.content.entrylistpage.processing_each_item_separately")}</span>
+                  <AdminButton
+                    variant="secondary"
+                    size="sm"
+                    data-testid="bulk-cancel-btn"
+                    disabled={bulkCancelling}
+                    onClick={() => {
+                      bulkCancelRef.current = true;
+                      setBulkCancelling(true);
+                      bulkAbortRef.current?.abort();
+                    }}
+                  >
+                    {bulkCancelling ? tStatic("entry_lifecycle.bulk_cancelling") : tStatic("entry_lifecycle.bulk_cancel")}
+                  </AdminButton>
+                </>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2.5 text-xs">
             <span className="text-zinc-500" role="status">{data ? tStatic("feature.content.entrylistpage.total_value_items", { value1: formatNumber(data.total) }) : tStatic("feature.content.entrylistpage.loading_counts")}</span>
             <AdminButton variant="ghost" size="sm" disabled={bulkBusy}
@@ -762,7 +1132,135 @@ export function EntryListPage({
             </AdminButton>
           </div>
         </div>
+
+        {!isTrashView && bulkTaxOpen && selectedRows.length > 0 && selectedLocaleCheck.ok && (
+          <div
+            data-testid="bulk-taxonomy-panel"
+            className="space-y-2.5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs"
+          >
+            <div className="flex flex-wrap items-end gap-2.5">
+              <label className="flex min-w-[150px] flex-col gap-1 font-medium text-zinc-700">
+                <span>{tStatic('quick_edit.taxonomy_select_label')}</span>
+                <select
+                  data-testid="bulk-taxonomy-key"
+                  className={control}
+                  value={bulkTaxKey}
+                  disabled={bulkBusy}
+                  onChange={e => {
+                    setBulkTaxKey(e.target.value);
+                    setBulkTaxTermIds([]);
+                  }}
+                >
+                  <option value="">{tStatic('quick_edit.taxonomy_none')}</option>
+                  {(terms?.definitions ?? []).map(def => (
+                    <option key={def.key} value={def.key}>{def.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              {bulkTaxKey && (
+                <label className="flex min-w-[160px] flex-col gap-1 font-medium text-zinc-700">
+                  <span>{tStatic('quick_edit.taxonomy_op_label')}</span>
+                  <select
+                    data-testid="bulk-taxonomy-op"
+                    className={control}
+                    value={bulkTaxOp}
+                    disabled={bulkBusy}
+                    onChange={e => setBulkTaxOp(e.target.value as TaxonomyDeltaOp)}
+                  >
+                    <option value="add">{tStatic('quick_edit.taxonomy_op_add')}</option>
+                    <option value="remove">{tStatic('quick_edit.taxonomy_op_remove')}</option>
+                    <option value="replace">{tStatic('quick_edit.taxonomy_op_replace')}</option>
+                  </select>
+                </label>
+              )}
+
+              {bulkTaxKey && (
+                <AdminButton
+                  variant="primary"
+                  size="sm"
+                  data-testid="bulk-taxonomy-apply-btn"
+                  disabled={bulkBusy || !csrfToken || bulkTaxLoading}
+                  onClick={() => void performBulkTaxonomy()}
+                >
+                  {tStatic('bulk.taxonomy_apply')}
+                </AdminButton>
+              )}
+            </div>
+
+            {bulkTaxKey && (
+              <div className="space-y-1.5">
+                <p className="font-medium text-zinc-600">
+                  {tStatic('quick_edit.taxonomy_terms_label', { value1: selectedLocaleCheck.locale || 'default' })}
+                </p>
+                {bulkTaxLoading ? (
+                  <p className="text-zinc-500">{tStatic('quick_edit.taxonomy_loading')}</p>
+                ) : (bulkTaxCatalog[bulkTaxCatalogKey]?.length ?? 0) === 0 ? (
+                  <p className="text-zinc-500">
+                    {tStatic('quick_edit.taxonomy_empty_catalog', { value1: selectedLocaleCheck.locale || 'default' })}
+                  </p>
+                ) : (
+                  <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded border border-zinc-200 bg-white p-2" data-testid="bulk-taxonomy-terms">
+                    {(bulkTaxCatalog[bulkTaxCatalogKey] ?? []).map(term => {
+                      const checked = bulkTaxTermIds.includes(term.id);
+                      return (
+                        <label
+                          key={term.id}
+                          className="inline-flex items-center gap-1.5 rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-800"
+                        >
+                          <input
+                            type="checkbox"
+                            data-testid={`bulk-taxonomy-term-${term.id}`}
+                            checked={checked}
+                            disabled={bulkBusy}
+                            onChange={e => {
+                              setBulkTaxTermIds(prev =>
+                                e.target.checked
+                                  ? [...prev, term.id]
+                                  : prev.filter(id => id !== term.id),
+                              );
+                            }}
+                          />
+                          <span>{term.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {bulkTaxOp === 'replace' && (
+                  <p className="text-[11px] text-zinc-500">{tStatic('quick_edit.taxonomy_clear_hint')}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {bulkBlockMessage && <AdminAlert tone="warning" role="alert" data-testid="bulk-block-alert">{bulkBlockMessage}</AdminAlert>}
+
+      {pendingProviderConfirmation && (
+        <PluginLifecycleConfirmation
+          pluginId={pendingProviderConfirmation.pluginId}
+          actionId={pendingProviderConfirmation.actionId}
+          confirmation={pendingProviderConfirmation.confirmation}
+          csrfToken={csrfToken}
+          onResolved={() => {
+            const rowId = pendingProviderConfirmation.rowId;
+            setPendingProviderConfirmation(null);
+            setProviderNotice(tStatic("feature.content.entrylistpage.action_completed_for_value", { value1: rowId }));
+            setRetry(old => old + 1);
+          }}
+          onCancelled={() => {
+            setPendingProviderConfirmation(null);
+            setProviderNotice(tStatic("plugin_lifecycle.cancelled_notice"));
+          }}
+          onFailed={message => {
+            const rowId = pendingProviderConfirmation.rowId;
+            setPendingProviderConfirmation(null);
+            setProviderNotice(`#${rowId}: ${message}`);
+          }}
+        />
+      )}
 
       {termLoadErrors.length > 0 && <AdminAlert tone="warning" role="alert">
         {tStatic("feature.content.entrylistpage.could_not_load_some_terms")}{' '}{termLoadErrors.join('; ')}{tStatic("feature.content.entrylistpage.other_filters_remain_available")}
@@ -771,18 +1269,129 @@ export function EntryListPage({
         {tStatic("feature.content.entrylistpage.could_not_load_some_term_names_on_this_page")}
       </AdminAlert>}
 
-      {bulkResults.length > 0 && (
-        <div className="rounded-lg border border-zinc-200 bg-white p-3" aria-label={tStatic("feature.content.entrylistpage.bulk_results")}>
-          <p className="mb-1.5 text-xs font-semibold text-zinc-900">{tStatic("feature.content.entrylistpage.results")}{' '}{bulkResults.filter(row => row.ok).length} {tStatic("feature.content.entrylistpage.successful")}{' '}{bulkResults.length} {tStatic("feature.content.entrylistpage.attempted")}</p>
-          <ul className="space-y-1 text-xs">
-            {bulkResults.map(result => <li key={result.id} data-bulk-id={result.id}
-              role={result.ok ? 'status' : 'alert'}
-              className={result.ok ? 'text-emerald-700' : 'text-rose-700'}>{result.message}</li>)}
-          </ul>
-        </div>
-      )}
+      {displayBulkResults.length > 0 && (() => {
+        const counts = {
+          succeeded: displayBulkResults.filter(r => r.status === 'succeeded').length,
+          stale: displayBulkResults.filter(r => r.status === 'stale').length,
+          failed: displayBulkResults.filter(r => r.status === 'failed').length,
+          uncertain: displayBulkResults.filter(r => r.status === 'uncertain').length,
+          unattempted: displayBulkResults.filter(r => r.status === 'unattempted').length,
+        };
+        return (
+          <div className="space-y-2 rounded-lg border border-zinc-200 bg-white p-3" aria-label={tStatic("feature.content.entrylistpage.bulk_results")} data-testid="bulk-results-panel">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-zinc-900">
+                {tStatic("entry_lifecycle.bulk_summary", {
+                  succeeded: formatNumber(counts.succeeded),
+                  stale: formatNumber(counts.stale),
+                  failed: formatNumber(counts.failed),
+                  uncertain: formatNumber(counts.uncertain),
+                  unattempted: formatNumber(counts.unattempted),
+                })}
+              </p>
+              {bulkRemainingRetryCount > 0 && (
+                <AdminButton
+                  variant="secondary"
+                  size="sm"
+                  data-testid="bulk-reconcile-retry-btn"
+                  disabled={bulkBusy || loading || !csrfToken}
+                  onClick={retryRemainingBulk}
+                >
+                  {tStatic("entry_lifecycle.bulk_reconcile_retry", { value1: formatNumber(bulkRemainingRetryCount) })}
+                </AdminButton>
+              )}
+            </div>
+            {unresolvedUncertainCount > 0 && (
+              <p className="text-xs font-medium text-amber-800" data-testid="bulk-unresolved-uncertain-notice">
+                {tStatic('bulk.unresolved_uncertain_banner', { value1: formatNumber(unresolvedUncertainCount) })}
+              </p>
+            )}
+            {bulkRemainingRetryCount > 0 && (
+              <p className="text-xs text-zinc-600">{tStatic("entry_lifecycle.bulk_reconciling_notice")}</p>
+            )}
+            <ul className="space-y-1 text-xs">
+              {displayBulkResults.map(result => (
+                <li
+                  key={result.id}
+                  data-bulk-id={result.id}
+                  data-bulk-status={result.status}
+                  role={result.status === 'succeeded' ? 'status' : 'alert'}
+                  className={
+                    result.status === 'succeeded'
+                      ? 'text-emerald-700'
+                      : result.status === 'uncertain' || result.status === 'stale'
+                        ? 'text-amber-800'
+                        : result.status === 'unattempted'
+                          ? 'text-zinc-600'
+                          : 'text-rose-700'
+                  }
+                >
+                  {result.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
 
       {providerNotice && <AdminAlert tone="info" data-testid="provider-action-result">{providerNotice}</AdminAlert>}
+      {quickEditNotice && <AdminAlert tone="success" data-testid="quick-edit-saved-notice">{quickEditNotice}</AdminAlert>}
+      {!isTrashView && quickEditRowId !== null && !currentRows.some(r => r.id === quickEditRowId) && (() => {
+        const detachedDraft = editorDraftStore.getQuickEdit(typeKey, quickEditRowId);
+        const recoverable = JSON.stringify(
+          detachedDraft?.patch ?? {},
+          null,
+          2,
+        );
+        return (
+          <div
+            role="alert"
+            data-testid="quick-edit-trashed-guard"
+            className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-950"
+          >
+            <p className="font-semibold">{tStatic('quick_edit.trashed_title')}</p>
+            <p>{tStatic('quick_edit.trashed_hint')}</p>
+            {detachedDraft && (
+              <label className="block space-y-1">
+                <span className="font-medium">{tStatic('quick_edit.recoverable_draft_label')}</span>
+                <textarea
+                  readOnly
+                  rows={5}
+                  data-testid="quick-edit-recoverable-text"
+                  value={recoverable}
+                  className="w-full rounded border border-amber-300 bg-white p-2 font-mono text-xs text-zinc-900"
+                />
+              </label>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <AdminButton
+                type="button"
+                size="sm"
+                variant="primary"
+                onClick={() => onNavigateHash(`${base}?status=trash`)}
+              >
+                {tStatic('entry_lifecycle.open_trash_view')}
+              </AdminButton>
+              <AdminButton
+                type="button"
+                size="sm"
+                variant="secondary"
+                data-testid="quick-edit-cancel-btn"
+                onClick={() => {
+                  if (quickEditDirtyRef.current && !window.confirm(tStatic('quick_edit.confirm_discard'))) {
+                    return;
+                  }
+                  editorDraftStore.deleteQuickEdit(typeKey, quickEditRowId);
+                  quickEditDirtyRef.current = false;
+                  setQuickEditRowId(null);
+                }}
+              >
+                {tStatic('quick_edit.cancel')}
+              </AdminButton>
+            </div>
+          </div>
+        );
+      })()}
       {providerError && <AdminAlert tone="error" className="flex flex-wrap items-center gap-2">
         <span>{tStatic("feature.content.entrylistpage.could_not_load_extension_columns")}{' '}{providerError}</span>
         <AdminButton variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>{tStatic("feature.dashboard.dashboardpage.retry")}</AdminButton>
@@ -815,7 +1424,7 @@ export function EntryListPage({
                     return next;
                   })} />
               </th>
-              <th scope="col" className="w-14 px-2 py-2.5 text-center">{tStatic("feature.media.mediapicker.images")}</th>
+              {!isTrashView && <th scope="col" className="w-14 px-2 py-2.5 text-center">{tStatic("feature.media.mediapicker.images")}</th>}
               <th scope="col" aria-sort={ariaSortFor('title')} className="min-w-[220px] px-3 py-2.5">
                 <button type="button" data-testid="sort-title" className={sortButton}
                   disabled={bulkBusy} onClick={() => sortBy('title')}>
@@ -824,142 +1433,310 @@ export function EntryListPage({
                 </button>
               </th>
               <th scope="col" className="whitespace-nowrap px-3 py-2.5">{tStatic("multilingual.status")}</th>
-              {terms?.categoryEnabled && <th scope="col" className="px-3 py-2.5">{tStatic("feature.content.entrylistpage.category")}</th>}
-              {terms?.tagEnabled && <th scope="col" className="px-3 py-2.5">{tStatic("shell.tags")}</th>}
-              {customDefinitions.map(def => <th key={def.key} scope="col" className="px-3 py-2.5">{def.label}</th>)}
-              {providerColumns.map(column => <th key={column.key} scope="col"
+              {!isTrashView && terms?.categoryEnabled && <th scope="col" className="px-3 py-2.5">{tStatic("feature.content.entrylistpage.category")}</th>}
+              {!isTrashView && terms?.tagEnabled && <th scope="col" className="px-3 py-2.5">{tStatic("shell.tags")}</th>}
+              {!isTrashView && customDefinitions.map(def => <th key={def.key} scope="col" className="px-3 py-2.5">{def.label}</th>)}
+              {!isTrashView && providerColumns.map(column => <th key={column.key} scope="col"
                 className="min-w-[120px] px-3 py-2.5">{column.label}</th>)}
-              <th scope="col" aria-sort={ariaSortFor('updated_at')} className="min-w-[140px] whitespace-nowrap px-3 py-2.5">
-                <button type="button" data-testid="sort-updated" className={sortButton}
-                  disabled={bulkBusy} onClick={() => sortBy('updated_at')}>
-                  <span>{tStatic("feature.content.entrylistpage.updated_date")}</span>
-                  {activeSort === 'updated_at' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
-                </button>
-              </th>
+              {isTrashView ? (
+                <th scope="col" aria-sort={ariaSortFor('trashed_at')} className="min-w-[140px] whitespace-nowrap px-3 py-2.5">
+                  <button type="button" data-testid="sort-trashed" className={sortButton}
+                    disabled={bulkBusy} onClick={() => sortBy('trashed_at')}>
+                    <span>{tStatic("entry_lifecycle.trashed_date")}</span>
+                    {activeSort === 'trashed_at' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
+                  </button>
+                </th>
+              ) : (
+                <th scope="col" aria-sort={ariaSortFor('updated_at')} className="min-w-[140px] whitespace-nowrap px-3 py-2.5">
+                  <button type="button" data-testid="sort-updated" className={sortButton}
+                    disabled={bulkBusy} onClick={() => sortBy('updated_at')}>
+                    <span>{tStatic("feature.content.entrylistpage.updated_date")}</span>
+                    {activeSort === 'updated_at' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
+                  </button>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {!loading && !error && currentRows.length === 0 && <tr>
-              <td colSpan={5 + (terms?.definitions.length ?? 0) + providerColumns.length}
+              <td colSpan={isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length}
                 className="px-4 py-8 text-center text-sm text-zinc-500">
                 {data?.total === 0 ? tStatic("feature.content.entrylistpage.no_matching_content_clear_filters_to_see_more") : tStatic("feature.content.entrylistpage.no_items_on_this_page")}
               </td>
             </tr>}
             {currentRows.map(row => {
-              const path = row.publication_status === 'published' ? safePublicPath(row.public_url) : null;
-              const thumbId = typeof row.fields?.featured_image === 'string' ? row.fields.featured_image.trim() : '';
-              return <tr key={row.id} data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
+              const path = !isTrashView && row.publication_status === 'published' ? safePublicPath(row.public_url) : null;
+              const thumbId = !isTrashView && typeof row.fields?.featured_image === 'string' ? row.fields.featured_image.trim() : '';
+              const readingBlocked = row.blocked_reasons?.trash === 'reading_page_assigned';
+              const restoreLocaleBlocked = row.blocked_reasons?.restore === 'locale_disabled';
+              const totalCols = isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length;
+              const isQuickEditing = !isTrashView && quickEditRowId === row.id;
+              return <Fragment key={row.id}><tr data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
                 <td className="px-3 py-2.5"><input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_item_value", { value1: row.id })}
                   checked={selected.has(row.id)} disabled={bulkBusy}
                   onChange={event => toggleRow(row.id, event.target.checked)} /></td>
-                <td className="w-14 px-2 py-2.5">
-                  {thumbId ? (
-                    <img
-                      src={mediaThumbnailUrl(thumbId)}
-                      alt={row.title}
-                      loading="lazy"
-                      className="mx-auto h-10 w-10 rounded-md border border-zinc-200 bg-zinc-50 object-cover"
-                    />
-                  ) : (
-                    <div
-                      className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-zinc-200 bg-zinc-50 text-zinc-300"
-                      aria-hidden="true"
-                    >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="3" y="4" width="18" height="16" rx="2" />
-                        <circle cx="8.5" cy="9.5" r="1.5" />
-                        <path d="m4 17 5-5 4 3 3-4 4 5" />
-                      </svg>
-                    </div>
-                  )}
-                </td>
+                {!isTrashView && (
+                  <td className="w-14 px-2 py-2.5">
+                    {thumbId ? (
+                      <img
+                        src={mediaThumbnailUrl(thumbId)}
+                        alt={row.title}
+                        loading="lazy"
+                        className="mx-auto h-10 w-10 rounded-md border border-zinc-200 bg-zinc-50 object-cover"
+                      />
+                    ) : (
+                      <div
+                        className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-zinc-200 bg-zinc-50 text-zinc-300"
+                        aria-hidden="true"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="4" width="18" height="16" rx="2" />
+                          <circle cx="8.5" cy="9.5" r="1.5" />
+                          <path d="m4 17 5-5 4 3 3-4 4 5" />
+                        </svg>
+                      </div>
+                    )}
+                  </td>
+                )}
                 <td className="break-words px-3 py-2.5">
                   <div className="leading-snug">
-                    <button
-                      type="button"
-                      disabled={bulkBusy}
-                      onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
-                      className="inline text-left text-sm font-semibold text-zinc-950 hover:text-od-accent"
-                    >
-                      {row.title}
-                    </button>
+                    {isTrashView ? (
+                      <span className="inline text-left text-sm font-semibold text-zinc-900">
+                        {row.title}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={bulkBusy}
+                        onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
+                        className="inline text-left text-sm font-semibold text-zinc-950 hover:text-od-accent"
+                      >
+                        {row.title}
+                      </button>
+                    )}
                     <span className="ml-1.5 inline-block align-middle rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-zinc-500">
                       #{row.id}
                     </span>
+                    {isTrashView && (
+                      <span className="ml-1.5 inline-block align-middle font-mono text-[11px] text-zinc-500">
+                        /{row.slug}
+                      </span>
+                    )}
                     {localeState.hasMultipleLocales && row.locale && (
                       <span className="ml-1.5 inline-block align-middle">
                         <AdminBadge tone="neutral">{row.locale}</AdminBadge>
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                    <button
-                      type="button"
-                      className="font-medium text-od-accent hover:underline"
-                      disabled={bulkBusy}
-                      aria-label={tStatic("feature.content.entrylistpage.edit_value_id_value", { value1: row.title, value2: row.id })}
-                      onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
-                    >
-                      {tStatic("shell.edit")}
-                    </button>
-                    {path && (
-                      <>
-                        <span className="text-zinc-300" aria-hidden="true">·</span>
-                        <a
-                          href={path}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
-                          aria-label={tStatic("feature.content.entrylistpage.view_public_value", { value1: row.title })}
-                        >
-                          {tStatic("feature.common.view")}
-                        </a>
-                      </>
-                    )}
-                    {row.publication_status === 'draft' && (
-                      <>
-                        <span className="text-zinc-300" aria-hidden="true">·</span>
-                        <a
-                          href={contentEntryPreviewPath(typeKey, row.id)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
-                          aria-label={tStatic("feature.content.entrylistpage.preview_saved_draft_value", { value1: row.title })}
-                        >
-                          {tStatic("feature.menus.menuspanel.preview")}
-                        </a>
-                      </>
-                    )}
-                    {csrfToken && (
-                      <>
-                        <span className="text-zinc-300" aria-hidden="true">·</span>
+                  {isTrashView ? (
+                    <div className="mt-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        {csrfToken && (
+                          <button
+                            type="button"
+                            data-testid={`entry-restore-btn-${row.id}`}
+                            className="font-medium text-od-accent hover:underline disabled:opacity-50"
+                            disabled={bulkBusy || row.capabilities?.restore === false}
+                            onClick={() => void restoreSingleRow(row)}
+                          >
+                            {tStatic("entry_lifecycle.restore")}
+                          </button>
+                        )}
+                        {csrfToken && user.role === 'admin' && row.capabilities?.purge !== false && (
+                          <>
+                            <span className="text-zinc-300" aria-hidden="true">·</span>
+                            <button
+                              type="button"
+                              data-testid={`entry-purge-btn-${row.id}`}
+                              className="font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50"
+                              disabled={bulkBusy}
+                              onClick={() => void purgeSingleRow(row)}
+                            >
+                              {tStatic("entry_lifecycle.purge_permanently")}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      {restoreLocaleBlocked && (
+                        <p className="text-[11px] text-amber-800">
+                          {tStatic("entry_lifecycle.locale_disabled_restore_blocked")}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                         <button
                           type="button"
-                          className="font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50"
+                          className="font-medium text-od-accent hover:underline"
                           disabled={bulkBusy}
-                          aria-label={tStatic("feature.content.entrylistpage.delete_value_id_value", { value1: row.title, value2: row.id })}
-                          onClick={() => void deleteSingleRow(row)}
+                          aria-label={tStatic("feature.content.entrylistpage.edit_value_id_value", { value1: row.title, value2: row.id })}
+                          onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
                         >
-                          {tStatic("multilingual.delete")}
+                          {tStatic("shell.edit")}
                         </button>
-                      </>
-                    )}
-                  </div>
+                        {csrfToken && row.capabilities?.quick_edit !== false && (
+                          <>
+                            <span className="text-zinc-300" aria-hidden="true">·</span>
+                            <button
+                              type="button"
+                              data-testid={`entry-quick-edit-btn-${row.id}`}
+                              className="font-medium text-zinc-700 hover:text-od-accent hover:underline disabled:opacity-50"
+                              disabled={bulkBusy}
+                              aria-expanded={isQuickEditing}
+                              onClick={() => {
+                                if (quickEditRowId === row.id) {
+                                  if (quickEditDirtyRef.current && !window.confirm(tStatic('quick_edit.confirm_discard'))) {
+                                    return;
+                                  }
+                                  editorDraftStore.deleteQuickEdit(typeKey, row.id);
+                                  quickEditDirtyRef.current = false;
+                                  setQuickEditRowId(null);
+                                  return;
+                                }
+                                if (quickEditRowId !== null && quickEditDirtyRef.current) {
+                                  if (!window.confirm(tStatic('quick_edit.confirm_discard'))) {
+                                    return;
+                                  }
+                                  editorDraftStore.deleteQuickEdit(typeKey, quickEditRowId);
+                                  quickEditDirtyRef.current = false;
+                                }
+                                setQuickEditNotice('');
+                                setQuickEditRowId(row.id);
+                              }}
+                            >
+                              {tStatic("quick_edit.button")}
+                            </button>
+                          </>
+                        )}
+                        {path && (
+                          <>
+                            <span className="text-zinc-300" aria-hidden="true">·</span>
+                            <a
+                              href={path}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
+                              aria-label={tStatic("feature.content.entrylistpage.view_public_value", { value1: row.title })}
+                            >
+                              {tStatic("feature.common.view")}
+                            </a>
+                          </>
+                        )}
+                        {row.publication_status === 'draft' && (
+                          <>
+                            <span className="text-zinc-300" aria-hidden="true">·</span>
+                            <a
+                              href={contentEntryPreviewPath(typeKey, row.id)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
+                              aria-label={tStatic("feature.content.entrylistpage.preview_saved_draft_value", { value1: row.title })}
+                            >
+                              {tStatic("feature.menus.menuspanel.preview")}
+                            </a>
+                          </>
+                        )}
+                        {csrfToken && (
+                          <>
+                            <span className="text-zinc-300" aria-hidden="true">·</span>
+                            <button
+                              type="button"
+                              data-testid={`entry-trash-btn-${row.id}`}
+                              className="font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={bulkBusy || row.capabilities?.trash === false}
+                              title={readingBlocked ? tStatic("entry_lifecycle.reading_page_blocked_hint") : undefined}
+                              aria-label={tStatic("feature.content.entrylistpage.delete_value_id_value", { value1: row.title, value2: row.id })}
+                              onClick={() => void trashSingleRow(row)}
+                            >
+                              {tStatic("entry_lifecycle.move_to_trash")}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      {readingBlocked && (
+                        <p className="text-[11px] text-amber-800" data-testid={`reading-blocked-hint-${row.id}`}>
+                          {tStatic("entry_lifecycle.reading_page_blocked_hint")}{' '}
+                          {user.role === 'admin' && (
+                            <button
+                              type="button"
+                              data-testid={`reading-settings-link-${row.id}`}
+                              onClick={() => onNavigateHash('#/settings/reading')}
+                              className="font-medium text-od-accent underline"
+                            >
+                              {tStatic("entry_lifecycle.open_reading_settings")}
+                            </button>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5">
                   <AdminBadge tone={row.publication_status === 'published' ? 'success' : 'neutral'}>
                     {row.publication_status === 'published' ? tStatic("reading.published") : tStatic("feature.content.entrylistpage.draft")}
                   </AdminBadge>
                 </td>
-                {terms?.categoryEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'category')}</td>}
-                {terms?.tagEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'tag')}</td>}
-                {customDefinitions.map(def => <td key={def.key} className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, def.key)}</td>)}
-                {providerColumns.map(column => <td key={column.key} className="break-words px-3 py-2.5">
+                {!isTrashView && terms?.categoryEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'category')}</td>}
+                {!isTrashView && terms?.tagEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'tag')}</td>}
+                {!isTrashView && customDefinitions.map(def => <td key={def.key} className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, def.key)}</td>)}
+                {!isTrashView && providerColumns.map(column => <td key={column.key} className="break-words px-3 py-2.5">
                   <AdminColumnCell column={column} row={row} busy={providerBusy || bulkBusy}
                     onRun={(col, entry) => void performProviderAction(col, entry)} />
                 </td>)}
-                <td className="whitespace-nowrap px-3 py-2.5 text-xs tabular-nums text-zinc-600">{row.updated_at.slice(0, 16)} UTC</td>
-              </tr>;
+                <td className="whitespace-nowrap px-3 py-2.5 text-xs tabular-nums text-zinc-600">
+                  {isTrashView
+                    ? (row.trashed_at ? `${row.trashed_at.slice(0, 16)} UTC` : '—')
+                    : `${row.updated_at.slice(0, 16)} UTC`}
+                </td>
+              </tr>
+              {isQuickEditing && (
+                <tr data-testid={`quick-edit-row-${row.id}`} className="bg-zinc-50/70">
+                  <td colSpan={totalCols} className="p-3">
+                    <QuickEditForm
+                      typeKey={typeKey}
+                      row={row}
+                      schemaToken={data?.schema_token ?? ''}
+                      taxonomies={terms?.definitions ?? []}
+                      user={user}
+                      siteInstanceId={siteInstanceId}
+                      authGeneration={authGeneration}
+                      csrfToken={csrfToken}
+                      editHref={`${base}/${row.id}/edit${editSuffix}`}
+                      trashHref={`${base}?status=trash`}
+                      onSaved={updated => {
+                        setQuickEditRowId(null);
+                        quickEditDirtyRef.current = false;
+                        setQuickEditNotice(
+                          tStatic('quick_edit.saved_notice', { value1: updated.id }),
+                        );
+                        setRetry(prev => prev + 1);
+                      }}
+                      onCancel={() => {
+                        setQuickEditRowId(null);
+                        quickEditDirtyRef.current = false;
+                      }}
+                      onRefreshServerRow={async () => {
+                        const fresh = await queryContentEntryTable(typeKey, filters);
+                        if (aliveRef.current && scopeRef.current === scope) {
+                          setDataState({ scope, value: fresh });
+                          setDataRevision(rev => rev + 1);
+                        }
+                        return {
+                          row: fresh.items.find(item => item.id === row.id) ?? null,
+                          schemaToken: fresh.schema_token ?? '',
+                        };
+                      }}
+                      onNavigateHash={onNavigateHash}
+                      onApiError={onApiError}
+                      onDirtyChange={dirty => {
+                        quickEditDirtyRef.current = dirty;
+                      }}
+                    />
+                  </td>
+                </tr>
+              )}
+              </Fragment>;
             })}
           </tbody>
         </table>

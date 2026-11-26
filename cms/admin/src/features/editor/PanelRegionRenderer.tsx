@@ -625,9 +625,10 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                     type="button"
                     disabled={saving}
                     onClick={onDelete}
+                    data-testid="single-edit-move-to-trash"
                     className="text-xs font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50"
                   >
-                    {tStatic("multilingual.delete")}{' '}{config.label.toLowerCase()}
+                    {tStatic("entry_lifecycle.move_to_trash")}
                   </button>
                 ) : <span />}
                 <button

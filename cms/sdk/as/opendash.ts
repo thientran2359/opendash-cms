@@ -393,11 +393,73 @@ export function contentSave(opObj: JSON.Obj): string {
 }
 
 /**
- * Xóa một entry từ action theo cơ chế CAS expected_version.
+ * Chuyển một entry vào Thùng rác (recoverable Trash) theo cơ chế CAS expected_version.
  */
 export function contentDelete(typeKey: string, entryId: i64, expectedVersion: i64): string {
   const reqObj = new JSON.Obj();
   reqObj.set("op", "content_delete");
+  reqObj.set("type_key", typeKey);
+  reqObj.set("entry_id", entryId);
+  reqObj.set("expected_version", expectedVersion);
+  return hostCall(stringifyValue(reqObj));
+}
+
+/**
+ * Đọc metadata-only của một entry đang nằm trong Thùng rác (cần capability content_trash_read).
+ */
+export function contentTrashGet(
+  typeKey: string,
+  entryId: i64,
+  locale: string | null = null
+): string {
+  const reqObj = new JSON.Obj();
+  reqObj.set("op", "content_trash_get");
+  reqObj.set("type_key", typeKey);
+  reqObj.set("entry_id", entryId);
+  if (locale !== null && locale.length > 0) {
+    reqObj.set("locale", locale);
+  }
+  return hostCall(stringifyValue(reqObj));
+}
+
+/**
+ * Liệt kê danh sách metadata-only của các entries trong Thùng rác theo type_key, locale, limit và offset.
+ */
+export function contentTrashList(
+  typeKey: string,
+  locale: string | null = null,
+  limit: i32 = 20,
+  offset: i32 = 0
+): string {
+  const reqObj = new JSON.Obj();
+  reqObj.set("op", "content_trash_list");
+  reqObj.set("type_key", typeKey);
+  if (locale !== null && locale.length > 0) {
+    reqObj.set("locale", locale);
+  }
+  reqObj.set("limit", limit);
+  reqObj.set("offset", offset);
+  return hostCall(stringifyValue(reqObj));
+}
+
+/**
+ * Khôi phục một entry từ Thùng rác theo cơ chế CAS expected_version (cần capability content_restore).
+ */
+export function contentRestore(typeKey: string, entryId: i64, expectedVersion: i64): string {
+  const reqObj = new JSON.Obj();
+  reqObj.set("op", "content_restore");
+  reqObj.set("type_key", typeKey);
+  reqObj.set("entry_id", entryId);
+  reqObj.set("expected_version", expectedVersion);
+  return hostCall(stringifyValue(reqObj));
+}
+
+/**
+ * Xóa vĩnh viễn một entry đang nằm trong Thùng rác theo cơ chế CAS expected_version (chỉ Admin, cần xác nhận Host).
+ */
+export function contentPurge(typeKey: string, entryId: i64, expectedVersion: i64): string {
+  const reqObj = new JSON.Obj();
+  reqObj.set("op", "content_purge");
   reqObj.set("type_key", typeKey);
   reqObj.set("entry_id", entryId);
   reqObj.set("expected_version", expectedVersion);

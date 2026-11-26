@@ -20,7 +20,7 @@ Fullscreen visual customization and page-building workspace (`#/studio` and `#/s
 
 ## Invariants
 
-- **Mode & Policy Separation:** Mode 1 edits site customizer settings and typed template overrides (`putTemplateOverride`); Mode 2 edits a single entry's Builder AST (`saveEntryBuilder`) and honors `immediate` vs `draft_publish` publication policies (`[StudioSidebarFooter.tsx:StudioSavePolicy]`).
+- **Mode & Policy Separation:** Mode 1 edits site customizer settings and typed template overrides (`putTemplateOverride`); Mode 2 edits a single entry's Builder AST (`saveEntryBuilder`), guards trashed non-Pattern entries on load/preview/save (`409 entry_trashed`, offering a direct Trash link without discarding drafts), and honors `immediate` vs `draft_publish` publication policies (`[StudioSidebarFooter.tsx:StudioSavePolicy]`).
 - **Template Slot & Part Guardrails:** Mode 1 save validates `requires_content_slot` (exactly one `core/content_slot`), `forbids_content_slot` (`0` slots), and `VALID_TEMPLATE_PART_KEY` before submitting.
 - **Transient Preview & Explicit Persistence:** `[StudioWorkspace.tsx:StudioWorkspace]` sends unsaved Mode 1 edits (`general`, `global_options`, `theme_options`, `menu_slots`) as transient preview overrides (`[../api/studio.ts:TransientStudioOverrides]`); nothing is written to the database until explicit Save.
 - **Locale & Optimistic Concurrency Safety:** `localeDraftBlocked` prevents Mode 1 saves when the selected preview locale is invalid, reloading, or out of sync with the hydrated baseline; HTTP `412` sets `conflict = true` while preserving all unsaved local drafts.

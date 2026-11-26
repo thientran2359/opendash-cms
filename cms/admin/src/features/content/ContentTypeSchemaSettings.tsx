@@ -4,6 +4,8 @@ import {
   createContentType,
   effectiveContentTypeSettings,
   listContentTypes,
+  purgeContentEntry,
+  queryRetainedTrashTable,
   updateContentType,
   type ContentPublicationPolicy,
   type ContentSupport,
@@ -11,6 +13,7 @@ import {
   type ContentTypeSettings,
   type OwnedContentTypeWithSettings,
 } from '../../api/content.ts';
+import type { EntryTableResult, EntryTableRow } from './types.ts';
 import { ApiClientError, requestJson } from '../../api/client.ts';
 import { listTaxonomyDefinitions, type TaxonomyDefinition } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
@@ -160,6 +163,13 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   const [taxonomyBusy, setTaxonomyBusy] = useState(false);
   const [taxonomyError, setTaxonomyError] = useState('');
   const [taxonomyNotice, setTaxonomyNotice] = useState('');
+  const [retainedTrash, setRetainedTrash] = useState<{ key: string; data: EntryTableResult } | null>(null);
+  const [retainedTrashOffset, setRetainedTrashOffset] = useState(0);
+  const [retainedTrashLoading, setRetainedTrashLoading] = useState(false);
+  const [retainedTrashError, setRetainedTrashError] = useState('');
+  const [retainedTrashProviderActive, setRetainedTrashProviderActive] = useState(false);
+  const [retainedTrashBusyId, setRetainedTrashBusyId] = useState<number | null>(null);
+  const [retainedTrashReloadTick, setRetainedTrashReloadTick] = useState(0);
   const latestScopeRef = useRef<string | null>(null);
   const latestTypeRef = useRef<string>('');
   const mountedRef = useRef(true);
@@ -231,6 +241,97 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   latestTypeRef.current = activeKey;
   const isBuiltin = activeKey === 'post' || activeKey === 'page';
   const isPattern = activeKey === 'pattern';
+  const isDormantOrdinaryCpt = Boolean(
+    activeType &&
+    user?.role === 'admin' &&
+    activeKey !== 'pattern' &&
+    activeKey !== 'section' &&
+    (activeType.status !== 'active' || activeType.declaration_state === 'withdrawn'),
+  );
+
+  useEffect(() => {
+    setRetainedTrashOffset(0);
+    setRetainedTrashProviderActive(false);
+    setRetainedTrashError('');
+  }, [activeKey]);
+
+  useEffect(() => {
+    if (!isDormantOrdinaryCpt || !activeKey) {
+      setRetainedTrash(null);
+      setRetainedTrashLoading(false);
+      setRetainedTrashError('');
+      setRetainedTrashProviderActive(false);
+      return;
+    }
+    let alive = true;
+    const controller = new AbortController();
+    setRetainedTrashLoading(true);
+    setRetainedTrashError('');
+    setRetainedTrashProviderActive(false);
+    void queryRetainedTrashTable(activeKey, { limit: 20, offset: retainedTrashOffset }, controller.signal)
+      .then(data => {
+        if (!alive || controller.signal.aborted) return;
+        setRetainedTrash({ key: activeKey, data });
+      })
+      .catch(cause => {
+        if (!alive || controller.signal.aborted) return;
+        if (cause instanceof ApiClientError && cause.status === 401) {
+          onApiError(cause, tStatic('api.content.load_retained_trash'));
+        }
+        if (
+          cause instanceof ApiClientError &&
+          cause.status === 409 &&
+          (cause.errorCode === 'entry.provider_active' || cause.message.includes('provider_active'))
+        ) {
+          setRetainedTrashProviderActive(true);
+          setRevision(r => r + 1);
+          onContentTypesChanged();
+        }
+        setRetainedTrashError(cause instanceof Error ? cause.message : tStatic('api.content.load_retained_trash'));
+      })
+      .finally(() => {
+        if (alive) setRetainedTrashLoading(false);
+      });
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [isDormantOrdinaryCpt, activeKey, retainedTrashOffset, retainedTrashReloadTick]);
+
+  const handlePurgeRetainedRow = async (row: EntryTableRow) => {
+    if (!csrfToken || !activeKey || retainedTrashBusyId !== null) return;
+    if (
+      !window.confirm(
+        tStatic('entry_lifecycle.confirm_purge_row', { value1: row.title, value2: row.id }),
+      )
+    ) {
+      return;
+    }
+    setRetainedTrashBusyId(row.id);
+    setRetainedTrashError('');
+    try {
+      await purgeContentEntry(activeKey, row.id, row.version, csrfToken, { retainedTrash: true });
+      if (!mountedRef.current) return;
+      setRetainedTrashReloadTick(n => n + 1);
+    } catch (cause) {
+      if (!mountedRef.current) return;
+      if (cause instanceof ApiClientError && cause.status === 401) {
+        onApiError(cause, tStatic('api.content.purge_the_entry'));
+      }
+      if (
+        cause instanceof ApiClientError &&
+        cause.status === 409 &&
+        (cause.errorCode === 'entry.provider_active' || cause.message.includes('provider_active'))
+      ) {
+        setRetainedTrashProviderActive(true);
+        setRevision(r => r + 1);
+        onContentTypesChanged();
+      }
+      setRetainedTrashError(cause instanceof Error ? cause.message : tStatic('api.content.purge_the_entry'));
+    } finally {
+      if (mountedRef.current) setRetainedTrashBusyId(null);
+    }
+  };
   const canEditSettings = Boolean(activeType && (
     activeType.owner.kind === 'user'
     || (activeType.owner.kind === 'core' && isBuiltin)
@@ -935,6 +1036,138 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                   </p>
                 )}
               </div>
+
+              {isDormantOrdinaryCpt && (
+                <section
+                  className="mt-4 rounded-xl border border-amber-200 bg-white p-5 space-y-3"
+                  data-testid="retained-trash-maintenance"
+                  aria-label={tStatic("entry_lifecycle.retained_trash_title")}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-semibold text-zinc-950">
+                        {tStatic("entry_lifecycle.retained_trash_title")}
+                        {retainedTrash?.key === activeKey ? ` (${retainedTrash.data.total})` : ''}
+                      </h4>
+                      <p className="mt-1 text-xs text-zinc-600">
+                        {tStatic("entry_lifecycle.retained_trash_description")}
+                      </p>
+                      <p className="mt-1 text-xs text-amber-800">
+                        {tStatic("entry_lifecycle.retained_trash_reactivation_hint")}
+                      </p>
+                    </div>
+                    <AdminButton
+                      variant="secondary"
+                      size="sm"
+                      disabled={retainedTrashLoading || retainedTrashBusyId !== null}
+                      onClick={() => setRetainedTrashReloadTick(n => n + 1)}
+                    >
+                      {tStatic("reading.reload")}
+                    </AdminButton>
+                  </div>
+
+                  {retainedTrashProviderActive && (
+                    <AdminAlert tone="info" className="flex flex-wrap items-center justify-between gap-2">
+                      <span>{tStatic("entry_lifecycle.retained_trash_provider_active_hint")}</span>
+                      <a
+                        href={activeKey === 'post' ? '#/posts?status=trash' : activeKey === 'page' ? '#/pages?status=trash' : `#/cpt/${encodeURIComponent(activeKey)}?status=trash`}
+                        className="font-medium text-od-accent underline"
+                      >
+                        {tStatic("entry_lifecycle.open_trash_view")}
+                      </a>
+                    </AdminAlert>
+                  )}
+
+                  {retainedTrashError && <AdminAlert tone="error">{retainedTrashError}</AdminAlert>}
+
+                  {retainedTrashLoading && (
+                    <p role="status" className="text-xs text-zinc-500">
+                      {tStatic("entry_lifecycle.retained_trash_loading")}
+                    </p>
+                  )}
+
+                  {!retainedTrashLoading && retainedTrash?.key === activeKey && retainedTrash.data.items.length === 0 && !retainedTrashError && (
+                    <p className="rounded-lg border border-dashed border-zinc-200 p-4 text-xs text-zinc-500">
+                      {tStatic("entry_lifecycle.retained_trash_empty")}
+                    </p>
+                  )}
+
+                  {retainedTrash?.key === activeKey && retainedTrash.data.items.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="overflow-x-auto rounded-lg border border-zinc-200">
+                        <table className="w-full table-auto text-left text-xs">
+                          <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
+                            <tr>
+                              <th className="px-3 py-2">{tStatic("feature.contact.contactpanel.title")}</th>
+                              <th className="px-3 py-2">{tStatic("feature.content.entrylistpage.language")}</th>
+                              <th className="px-3 py-2">{tStatic("multilingual.status")}</th>
+                              <th className="px-3 py-2">{tStatic("entry_lifecycle.trashed_date")}</th>
+                              <th className="px-3 py-2 text-right">{tStatic("multilingual.delete")}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100">
+                            {retainedTrash.data.items.map(row => (
+                              <tr key={row.id} data-retained-trash-id={row.id}>
+                                <td className="px-3 py-2">
+                                  <span className="font-medium text-zinc-900">{row.title}</span>{' '}
+                                  <span className="font-mono text-zinc-500">#{row.id} · /{row.slug}</span>
+                                </td>
+                                <td className="px-3 py-2 font-mono text-zinc-700">{row.locale ?? '—'}</td>
+                                <td className="px-3 py-2">
+                                  <AdminBadge tone="neutral">
+                                    {row.publication_status === 'published'
+                                      ? tStatic("reading.published")
+                                      : tStatic("feature.content.entrylistpage.draft")}
+                                  </AdminBadge>
+                                </td>
+                                <td className="px-3 py-2 font-mono text-zinc-600">
+                                  {row.trashed_at ? `${row.trashed_at.slice(0, 16)} UTC` : '—'}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <AdminButton
+                                    variant="danger"
+                                    size="sm"
+                                    disabled={!csrfToken || retainedTrashBusyId !== null}
+                                    data-testid={`retained-trash-purge-${row.id}`}
+                                    onClick={() => void handlePurgeRetainedRow(row)}
+                                  >
+                                    {tStatic("entry_lifecycle.purge_permanently")}
+                                  </AdminButton>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {retainedTrash.data.total > 20 && (
+                        <div className="flex items-center justify-between text-xs text-zinc-600">
+                          <span>
+                            {retainedTrashOffset + 1}–{Math.min(retainedTrashOffset + retainedTrash.data.items.length, retainedTrash.data.total)} / {retainedTrash.data.total}
+                          </span>
+                          <div className="flex gap-2">
+                            <AdminButton
+                              variant="secondary"
+                              size="sm"
+                              disabled={retainedTrashLoading || retainedTrashOffset === 0}
+                              onClick={() => setRetainedTrashOffset(o => Math.max(0, o - 20))}
+                            >
+                              {tStatic("feature.content.contentworkspace.previous_page")}
+                            </AdminButton>
+                            <AdminButton
+                              variant="secondary"
+                              size="sm"
+                              disabled={retainedTrashLoading || retainedTrashOffset + 20 >= retainedTrash.data.total}
+                              onClick={() => setRetainedTrashOffset(o => o + 20)}
+                            >
+                              {tStatic("feature.common.next_page")}
+                            </AdminButton>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
             </AdminTabPanel>
 
             <AdminTabPanel

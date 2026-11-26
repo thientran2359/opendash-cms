@@ -276,6 +276,17 @@ pub async fn require_existing_references_in_tx(
     Ok(())
 }
 
+pub async fn require_existing_effective_references_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    effective: &EffectiveContentSchema,
+    values: &BTreeMap<String, Value>,
+) -> ApiResult<()> {
+    for id in collect_effective_image_ids(effective, values) {
+        verify_active_image_in_tx(conn, id).await?;
+    }
+    Ok(())
+}
+
 async fn verify_active_image_in_tx(conn: &mut sqlx::SqliteConnection, id: &str) -> ApiResult<()> {
     if !valid_media_id(id) {
         return Err(ApiError::bad_request(

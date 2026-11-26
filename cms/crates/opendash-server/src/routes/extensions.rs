@@ -492,6 +492,7 @@ pub async fn extension_api_get(
     handle_api_get_inner(db, hooks, headers, pkg, Some(subpath), uri).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_api_post_after_auth(
     db: SqlitePool,
     hooks: Arc<HookDispatcher>,
@@ -500,6 +501,7 @@ async fn execute_api_post_after_auth(
     subpath: Option<String>,
     uri: axum::http::Uri,
     body: Bytes,
+    lease: crate::operations::MutationLease,
 ) -> ApiResult<Response> {
     let norm_sub = normalized_subpath(subpath.as_deref());
     let resolved = match hooks
@@ -556,18 +558,22 @@ async fn execute_api_post_after_auth(
         "query": parse_query_map(uri.query()),
         "body": parsed_body,
     });
+    let principal = principal_for_role(actor.user.role);
     match hooks
         .execute_resolved_route(
             resolved,
             payload,
             HookExecutionMode::RoutePost,
-            principal_for_role(actor.user.role),
+            principal,
             ROUTE_POST_TIMEOUT,
             Some(&actor),
         )
         .await
     {
         Ok(exec) => {
+            if exec.committed.is_some() {
+                hooks.enqueue_plugin_action_hooks(principal, exec.committed.as_ref(), lease);
+            }
             Ok(format_route_output(&db, exec.output, exec.render_trusted_html, false).await)
         }
         Err((st, err_resp)) => Ok((st, no_store_nosniff_headers(), Json(err_resp)).into_response()),
@@ -575,7 +581,7 @@ async fn execute_api_post_after_auth(
 }
 
 pub async fn extension_api_post_root(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -584,11 +590,11 @@ pub async fn extension_api_post_root(
     body: Bytes,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
-    execute_api_post_after_auth(db, hooks, actor, pkg, None, uri, body).await
+    execute_api_post_after_auth(db, hooks, actor, pkg, None, uri, body, lease).await
 }
 
 pub async fn extension_api_post(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -597,7 +603,7 @@ pub async fn extension_api_post(
     body: Bytes,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
-    execute_api_post_after_auth(db, hooks, actor, pkg, Some(subpath), uri, body).await
+    execute_api_post_after_auth(db, hooks, actor, pkg, Some(subpath), uri, body, lease).await
 }
 
 #[allow(clippy::too_many_arguments)]

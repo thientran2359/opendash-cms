@@ -95,6 +95,15 @@ export function opendash_run(): i32 {
     return opendash.outputEntryView(summary) < 0 ? 4 : 0;
   }
 
+  if (env.event == "test/lifecycle_ops") {
+    const summary = new JSON.Obj();
+    summary.set("trash_get", JSON.parse(opendash.contentTrashGet("post", 100, "vi")));
+    summary.set("trash_list", JSON.parse(opendash.contentTrashList("post", "vi", 15, 5)));
+    summary.set("restore", JSON.parse(opendash.contentRestore("post", 100, 4)));
+    summary.set("purge", JSON.parse(opendash.contentPurge("post", 101, 2)));
+    return opendash.outputEntryView(summary) < 0 ? 4 : 0;
+  }
+
   if (env.event == "test/outputs") {
     const which = env.payload.getString("which");
     const kind = which !== null ? which.valueOf() : "";

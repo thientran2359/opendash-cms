@@ -124,6 +124,12 @@ pub struct PluginPermissions {
     pub plugin_secrets_read: Vec<String>,
     #[serde(default)]
     pub content_delete: Vec<String>,
+    #[serde(default)]
+    pub content_trash_read: Vec<String>,
+    #[serde(default)]
+    pub content_restore: Vec<String>,
+    #[serde(default)]
+    pub content_purge: Vec<String>,
     #[serde(default = "default_true")]
     pub render_trusted_html: bool,
 }
@@ -145,6 +151,9 @@ impl Default for PluginPermissions {
             plugin_settings_read: false,
             plugin_secrets_read: Vec::new(),
             content_delete: Vec::new(),
+            content_trash_read: Vec::new(),
+            content_restore: Vec::new(),
+            content_purge: Vec::new(),
             render_trusted_html: true,
         }
     }
@@ -459,6 +468,21 @@ pub(crate) fn validate_permissions(
             return Err("Quyền content_delete không hợp lệ.");
         }
     }
+    for ct_perm in &permissions.content_trash_read {
+        if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+            return Err("Quyền content_trash_read không hợp lệ.");
+        }
+    }
+    for ct_perm in &permissions.content_restore {
+        if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+            return Err("Quyền content_restore không hợp lệ.");
+        }
+    }
+    for ct_perm in &permissions.content_purge {
+        if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+            return Err("Quyền content_purge không hợp lệ.");
+        }
+    }
     let mut seen_secrets_read = HashSet::new();
     for secret_key in &permissions.plugin_secrets_read {
         if secret_key == "*"
@@ -564,6 +588,9 @@ pub(crate) fn validate_actions(
         let mut has_kv_write = false;
         let mut has_content_write = false;
         let mut has_content_delete = false;
+        let mut has_content_restore = false;
+        let mut has_content_purge = false;
+        let mut has_http = false;
         let mut has_content_read = false;
         let mut has_content_read_private = false;
         let mut has_content_write_private = false;
@@ -571,25 +598,39 @@ pub(crate) fn validate_actions(
             match cap.as_str() {
                 "kv_read"
                 | "kv_list"
-                | "http"
                 | "taxonomy_read"
                 | "media_read"
                 | "site_options_read"
                 | "plugin_settings_read"
                 | "plugin_secrets_read"
+                | "content_trash_read"
                 | "log" => {}
+                "http" => has_http = true,
                 "content_read" => has_content_read = true,
                 "content_read_private" => has_content_read_private = true,
                 "kv_write" | "kv_delete" => has_kv_write = true,
                 "content_write" => has_content_write = true,
                 "content_write_private" => has_content_write_private = true,
                 "content_delete" => has_content_delete = true,
+                "content_restore" => has_content_restore = true,
+                "content_purge" => has_content_purge = true,
                 _ => return Err("Action capability không nằm trong allowlist."),
             }
         }
-        if (has_kv_write as u8) + (has_content_write as u8) + (has_content_delete as u8) > 1 {
+        if (has_kv_write as u8)
+            + (has_content_write as u8)
+            + (has_content_delete as u8)
+            + (has_content_restore as u8)
+            + (has_content_purge as u8)
+            > 1
+        {
             return Err(
-                "Action không được kết hợp kv_write/kv_delete, content_write hoặc content_delete trong cùng một action.",
+                "Action không được kết hợp kv_write/kv_delete, content_write, content_delete, content_restore hoặc content_purge trong cùng một action.",
+            );
+        }
+        if (has_content_restore || has_content_purge) && has_http {
+            return Err(
+                "Action khai báo content_restore hoặc content_purge không được kết hợp capability http.",
             );
         }
         if has_content_read_private
@@ -836,7 +877,19 @@ impl PluginManifest {
                 "content_read_private và content_write_private chỉ hợp lệ khi manifest_schema >= 2 và có khai báo min_host_version.",
             );
         }
-        let uses_v3_features = self.entrypoint == "plugin.js"
+        let uses_lifecycle_v011 = !self.permissions.content_trash_read.is_empty()
+            || !self.permissions.content_restore.is_empty()
+            || !self.permissions.content_purge.is_empty()
+            || self.actions.iter().any(|action| {
+                action.capabilities.iter().any(|cap| {
+                    matches!(
+                        cap.as_str(),
+                        "content_trash_read" | "content_restore" | "content_purge"
+                    )
+                })
+            });
+        let uses_v3_features = uses_lifecycle_v011
+            || self.entrypoint == "plugin.js"
             || self.render_cache != RenderCachePolicy::ByRoute
             || !self.routes.is_empty()
             || !self.filters.is_empty()
@@ -862,6 +915,16 @@ impl PluginManifest {
             );
         }
         validate_min_host_version(self.min_host_version.as_deref())?;
+        if uses_lifecycle_v011
+            && !self
+                .min_host_version
+                .as_deref()
+                .is_some_and(|min_ver| host_satisfies_min_version(min_ver, "0.1.1"))
+        {
+            return Err(
+                "Quyền vòng đời nâng cao (content_trash_read, content_restore, content_purge) yêu cầu min_host_version >= 0.1.1.",
+            );
+        }
         if !validate_semver(&self.version) {
             return Err("Phiên bản plugin không đúng định dạng SemVer 2.0.0.");
         }
@@ -937,6 +1000,27 @@ impl PluginManifest {
     pub fn can_delete_content_type(&self, type_key: &str) -> bool {
         self.permissions
             .content_delete
+            .iter()
+            .any(|k| k == "*" || k == type_key)
+    }
+
+    pub fn can_read_trash_content_type(&self, type_key: &str) -> bool {
+        self.permissions
+            .content_trash_read
+            .iter()
+            .any(|k| k == "*" || k == type_key)
+    }
+
+    pub fn can_restore_content_type(&self, type_key: &str) -> bool {
+        self.permissions
+            .content_restore
+            .iter()
+            .any(|k| k == "*" || k == type_key)
+    }
+
+    pub fn can_purge_content_type(&self, type_key: &str) -> bool {
+        self.permissions
+            .content_purge
             .iter()
             .any(|k| k == "*" || k == type_key)
     }
@@ -1474,5 +1558,76 @@ mod hook_tests {
         mixed_caps["actions"][0]["capabilities"] =
             serde_json::json!(["content_delete", "kv_delete"]);
         assert!(PluginManifest::from_json_str(&mixed_caps.to_string()).is_err());
+    }
+
+    #[test]
+    fn validates_s02_lifecycle_v011_manifest_gates_and_http_exclusion() {
+        assert_eq!(CURRENT_HOST_VERSION, "0.1.1");
+        assert!(!host_satisfies_min_version("0.1.0", "0.1.1"));
+        assert!(host_satisfies_min_version("0.1.1", "0.1.1"));
+        assert!(host_satisfies_min_version("0.1.1", "0.1.0"));
+
+        let valid_s02 = serde_json::json!({
+            "id": "lifecycle-tool",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 3,
+            "min_host_version": "0.1.1",
+            "name": "Lifecycle Tool",
+            "permissions": {
+                "content_trash_read": ["post"],
+                "content_restore": ["post"],
+                "content_purge": ["post"],
+                "http": ["https://example.com"]
+            },
+            "actions": [
+                { "id": "list_trash", "required_role": "editor", "capabilities": ["content_trash_read", "http"] },
+                { "id": "restore_post", "required_role": "editor", "capabilities": ["content_trash_read", "content_restore"] },
+                { "id": "purge_post", "required_role": "admin", "capabilities": ["content_trash_read", "content_purge"] }
+            ]
+        });
+        let parsed = PluginManifest::from_json_str(&valid_s02.to_string()).expect("valid s02");
+        assert!(parsed.can_read_trash_content_type("post"));
+        assert!(parsed.can_restore_content_type("post"));
+        assert!(parsed.can_purge_content_type("post"));
+        assert!(!parsed.can_purge_content_type("page"));
+
+        // Rejects min_host_version 0.1.0 when new lifecycle permissions/capabilities are declared.
+        let mut lower_host = valid_s02.clone();
+        lower_host["min_host_version"] = serde_json::json!("0.1.0");
+        assert!(PluginManifest::from_json_str(&lower_host.to_string()).is_err());
+
+        // Rejects missing min_host_version.
+        let mut missing_host = valid_s02.clone();
+        missing_host
+            .as_object_mut()
+            .unwrap()
+            .remove("min_host_version");
+        assert!(PluginManifest::from_json_str(&missing_host.to_string()).is_err());
+
+        // Rejects unsupported future min_host_version.
+        let mut future_host = valid_s02.clone();
+        future_host["min_host_version"] = serde_json::json!("0.2.0");
+        assert!(PluginManifest::from_json_str(&future_host.to_string()).is_err());
+
+        // Rejects schema 2 with new lifecycle grant.
+        let mut bad_schema = valid_s02.clone();
+        bad_schema["manifest_schema"] = serde_json::json!(2);
+        assert!(PluginManifest::from_json_str(&bad_schema.to_string()).is_err());
+
+        // Rejects http combined with content_restore or content_purge.
+        let mut http_restore = valid_s02.clone();
+        http_restore["actions"][1]["capabilities"] = serde_json::json!(["content_restore", "http"]);
+        assert!(PluginManifest::from_json_str(&http_restore.to_string()).is_err());
+
+        let mut http_purge = valid_s02.clone();
+        http_purge["actions"][2]["capabilities"] = serde_json::json!(["content_purge", "http"]);
+        assert!(PluginManifest::from_json_str(&http_purge.to_string()).is_err());
+
+        // Rejects mixing write scopes (content_restore + content_purge or content_delete + content_restore).
+        let mut mixed_write = valid_s02.clone();
+        mixed_write["actions"][1]["capabilities"] =
+            serde_json::json!(["content_restore", "content_purge"]);
+        assert!(PluginManifest::from_json_str(&mixed_write.to_string()).is_err());
     }
 }

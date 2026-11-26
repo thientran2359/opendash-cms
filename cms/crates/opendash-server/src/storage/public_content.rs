@@ -119,6 +119,7 @@ pub async fn get_by_slug_for_locale(
          JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
          JOIN content_types t ON t.key = e.content_type_key
          WHERE e.content_type_key = ? AND e.locale = ? AND e.slug = ?
+           AND e.trashed_at IS NULL
            AND e.publication_status = 'published'
            AND t.provider_status = 'active'
            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
@@ -156,7 +157,7 @@ async fn get_published_by_id_in_tx(
          FROM content_entries e
          JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
          JOIN content_types t ON t.key = e.content_type_key
-         WHERE e.id = ? AND e.publication_status = 'published'
+         WHERE e.id = ? AND e.trashed_at IS NULL AND e.publication_status = 'published'
            AND e.content_type_key != 'pattern' AND t.provider_status = 'active'
            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
@@ -714,7 +715,8 @@ async fn list_taxonomy_published_in_tx(
           JOIN content_types t ON t.key = e.content_type_key
           LEFT JOIN content_type_taxonomy_overrides override
             ON override.content_type_key=e.content_type_key
-         WHERE e.publication_status = 'published'
+         WHERE e.trashed_at IS NULL
+           AND e.publication_status = 'published'
            AND e.locale = ?
            AND e.content_type_key != 'pattern'
            AND t.provider_status = 'active'
@@ -924,6 +926,7 @@ pub async fn batch_load_public_entry_terms_in_conn(
                LEFT JOIN content_type_taxonomy_overrides override
                  ON override.content_type_key = e.content_type_key
               WHERE et.entry_id IN (SELECT value FROM json_each(?))
+                AND e.trashed_at IS NULL
                 AND t.locale = e.locale
                 AND d.public = 1
                 AND d.provider_status = 'active'
@@ -1102,11 +1105,12 @@ pub async fn query_related_entries(
         return Ok(Vec::new());
     }
     let mut tx = db.begin().await?;
-    let Some(source_locale): Option<String> =
-        sqlx::query_scalar("SELECT locale FROM content_entries WHERE id = ?")
-            .bind(entry_id)
-            .fetch_optional(&mut *tx)
-            .await?
+    let Some(source_locale): Option<String> = sqlx::query_scalar(
+        "SELECT locale FROM content_entries WHERE id = ? AND trashed_at IS NULL",
+    )
+    .bind(entry_id)
+    .fetch_optional(&mut *tx)
+    .await?
     else {
         tx.commit().await?;
         return Ok(Vec::new());
@@ -1123,6 +1127,7 @@ pub async fn query_related_entries(
           WHERE e.content_type_key = ?
             AND e.locale = ?
             AND e.id != ?
+            AND e.trashed_at IS NULL
             AND e.publication_status = 'published'
             AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
@@ -1197,6 +1202,7 @@ pub async fn query_recent_posts(
            JOIN content_types t ON t.key = e.content_type_key
           WHERE e.content_type_key = 'post'
             AND e.locale = ?
+            AND e.trashed_at IS NULL
             AND e.publication_status = 'published'
             AND (? IS NULL OR e.id != ?)
             AND t.provider_status = 'active'
@@ -1228,7 +1234,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN json_each(t.definition_json, '$.fields') AS f
-           WHERE e.publication_status = 'published' AND e.content_type_key != 'pattern'
+           WHERE e.trashed_at IS NULL AND e.publication_status = 'published' AND e.content_type_key != 'pattern'
              AND t.provider_status = 'active'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
              AND COALESCE(json_extract(f.value, '$.public_exposure'), 'public') = 'public'
@@ -1259,7 +1265,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              ON g.group_id = gt.group_id
             AND g.status IN ('active', 'provider_inactive', 'withdrawn')
            JOIN json_each(g.fields_json) AS f
-           WHERE e.publication_status = 'published' AND e.content_type_key != 'pattern'
+           WHERE e.trashed_at IS NULL AND e.publication_status = 'published' AND e.content_type_key != 'pattern'
              AND t.provider_status = 'active'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
              AND COALESCE(json_extract(f.value, '$.public_exposure'), 'private') = 'public'
@@ -1304,6 +1310,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types AS t ON t.key = e.content_type_key
            WHERE sm.media_id = ?
+             AND e.trashed_at IS NULL
              AND e.publication_status = 'published'
              AND t.provider_status = 'active'
              AND e.content_type_key != 'pattern'
@@ -1326,17 +1333,18 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                  JOIN content_entries AS e ON e.id = reading.homepage_page_id
                  WHERE e.content_type_key = 'page'
                    AND e.locale = reading.locale
+                   AND e.trashed_at IS NULL
                    AND e.publication_status = 'published'
                ))
                OR (ov.target_kind = 'page' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
                  JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-                 WHERE e.content_type_key = 'page' AND e.publication_status = 'published'
+                 WHERE e.content_type_key = 'page' AND e.trashed_at IS NULL AND e.publication_status = 'published'
                ))
                OR (ov.target_kind = 'page_layout' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
                  JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-                 WHERE e.content_type_key = 'page' AND e.publication_status = 'published'
+                 WHERE e.content_type_key = 'page' AND e.trashed_at IS NULL AND e.publication_status = 'published'
                    AND e.page_layout_key = json_extract(ov.target_json, '$.layout_key')
                ))
                OR (ov.target_kind = 'single_custom' AND EXISTS (
@@ -1344,6 +1352,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                  JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                  JOIN content_types AS t ON t.key = e.content_type_key
                  WHERE e.custom_template_key = json_extract(ov.target_json, '$.custom_key')
+                   AND e.trashed_at IS NULL
                    AND e.publication_status = 'published'
                    AND t.provider_status = 'active' AND t.key != 'pattern' AND t.key != 'page'
                    AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
@@ -1352,7 +1361,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                  SELECT 1 FROM content_entries AS e
                  JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                  JOIN content_types AS t ON t.key = e.content_type_key
-                 WHERE e.publication_status = 'published'
+                 WHERE e.trashed_at IS NULL
+                   AND e.publication_status = 'published'
                    AND t.provider_status = 'active' AND t.key NOT IN ('pattern', 'page')
                    AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
                    AND (json_extract(ov.target_json, '$.content_type') IS NULL
@@ -1419,7 +1429,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     let builder_type_keys: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT e.content_type_key FROM content_entries AS e
          JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-         WHERE e.publication_status = 'published'
+         WHERE e.trashed_at IS NULL
+           AND e.publication_status = 'published'
            AND e.content_type_key NOT IN ('pattern', 'section')
            AND (
              EXISTS (SELECT 1 FROM entry_builder_media_refs AS r

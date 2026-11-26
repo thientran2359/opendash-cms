@@ -90,6 +90,19 @@ pub struct ContentPrepareSavePatch {
     pub term_ids: Option<Vec<i64>>,
 }
 
+/// Server-owned mutation scope for `filter:content/prepare_save`.
+/// Deliberately does NOT implement `Deserialize`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrepareSaveMutationScope {
+    Full,
+    Metadata {
+        requested_title: bool,
+        requested_slug: bool,
+        taxonomy_key: Option<String>,
+        entry_locale: String,
+    },
+}
+
 impl ContentPrepareSavePatch {
     pub fn is_empty(&self) -> bool {
         self.title.is_none()
@@ -359,9 +372,9 @@ impl AsyncHookQueue {
         }
     }
 
-    pub fn enqueue(&self, job: AsyncHookJob) {
+    pub fn enqueue(&self, job: AsyncHookJob) -> bool {
         if job.dispatch_depth >= 2 || *self.maint_rx.borrow() || *self.shut_rx.borrow() {
-            return;
+            return false;
         }
         match self.tx.try_send(job) {
             Ok(()) => {
@@ -373,7 +386,9 @@ impl AsyncHookQueue {
                             while guard.try_recv().is_ok() {}
                         });
                     }
+                    return false;
                 }
+                true
             }
             Err(err) => {
                 let event_name = match &err {
@@ -381,89 +396,257 @@ impl AsyncHookQueue {
                     | tokio::sync::mpsc::error::TrySendError::Closed(j) => j.event.as_str(),
                 };
                 eprintln!("AsyncHookQueue drop {event_name}: queue full or closed");
+                false
             }
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HookEnqueueOutcome {
+    pub enqueued: u32,
+    pub dropped: u32,
+}
+
+impl HookEnqueueOutcome {
+    fn record(&mut self, accepted: bool) {
+        if accepted {
+            self.enqueued = self.enqueued.saturating_add(1);
+        } else {
+            self.dropped = self.dropped.saturating_add(1);
+        }
+    }
+}
+
 impl HookDispatcher {
+    /// Dispatches post-commit async hooks strictly from a trusted server-generated
+    /// `EntryCommitReceipt`. Never inspects untrusted guest JSON output.
     pub fn enqueue_plugin_action_hooks(
         &self,
         principal: ExecutionPrincipal,
-        data: Option<&Value>,
+        receipt: Option<&crate::storage::entry_lifecycle::EntryCommitReceipt>,
         lease: crate::operations::MutationLease,
-    ) {
-        let Some(data) = data else {
-            return;
+    ) -> HookEnqueueOutcome {
+        use crate::storage::entry_lifecycle::EntryMutationKind;
+
+        let mut outcome = HookEnqueueOutcome::default();
+        let Some(receipt) = receipt else {
+            return outcome;
         };
-        if let Some(entry) = data.get("entry").filter(|v| v.is_object()) {
-            let entry_id = entry.get("id").and_then(|v| v.as_i64());
-            let type_key = entry
-                .get("content_type_key")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            let locale = entry
-                .get("locale")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            let version = entry.get("version").and_then(|v| v.as_i64());
-            let publication_status = entry.get("publication_status").and_then(|v| v.as_str());
-            let translation_group_id = entry.get("translation_group_id").and_then(|v| v.as_str());
-            if publication_status == Some("published") {
-                self.enqueue_async(AsyncHookJob {
-                    event: HookEvent::ContentAfterPublish,
+        let type_key = Some(receipt.type_key.clone());
+        let locale = Some(receipt.locale.clone());
+        match receipt.operation {
+            EntryMutationKind::Save => {
+                if receipt.publication_after.as_deref() == Some("published") {
+                    let accepted = self.enqueue_async(AsyncHookJob {
+                        event: HookEvent::ContentAfterPublish,
+                        principal,
+                        locale: locale.clone(),
+                        type_key: type_key.clone(),
+                        payload: serde_json::json!({
+                            "type_key": &receipt.type_key,
+                            "id": receipt.id,
+                            "entry_id": receipt.id,
+                            "version": receipt.version_after,
+                            "locale": &receipt.locale,
+                            "publication_status": receipt.publication_after.as_deref(),
+                            "translation_group_id": &receipt.translation_group_id,
+                        }),
+                        dispatch_depth: 0,
+                        lease: lease.clone(),
+                    });
+                    outcome.record(accepted);
+                }
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterSave,
                     principal,
-                    locale: locale.clone(),
-                    type_key: type_key.clone(),
+                    locale,
+                    type_key,
                     payload: serde_json::json!({
-                        "type_key": &type_key,
-                        "id": entry_id,
-                        "entry_id": entry_id,
-                        "version": version,
-                        "locale": &locale,
-                        "publication_status": publication_status,
-                        "translation_group_id": translation_group_id,
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "operation": "plugin_action",
+                        "version": receipt.version_after,
+                        "locale": &receipt.locale,
+                        "translation_group_id": &receipt.translation_group_id,
                     }),
                     dispatch_depth: 0,
-                    lease: lease.clone(),
+                    lease,
                 });
+                outcome.record(accepted);
             }
-            self.enqueue_async(AsyncHookJob {
-                event: HookEvent::ContentAfterSave,
-                principal,
-                locale,
-                type_key,
-                payload: serde_json::json!({
-                    "type_key": entry.get("content_type_key").and_then(|v| v.as_str()),
-                    "id": entry_id,
-                    "entry_id": entry_id,
-                    "operation": "plugin_action",
-                    "version": version,
-                    "locale": entry.get("locale").and_then(|v| v.as_str()),
-                    "translation_group_id": translation_group_id,
-                }),
-                dispatch_depth: 0,
-                lease,
-            });
-        } else if let Some(deleted_id) = data.get("deleted_entry_id").and_then(|v| v.as_i64()) {
-            let type_key = data
-                .get("deleted_type_key")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            self.enqueue_async(AsyncHookJob {
-                event: HookEvent::ContentAfterDelete,
-                principal,
-                locale: None,
-                type_key: type_key.clone(),
-                payload: serde_json::json!({
-                    "type_key": &type_key,
-                    "id": deleted_id,
-                    "entry_id": deleted_id,
-                }),
-                dispatch_depth: 0,
-                lease,
-            });
+            EntryMutationKind::Metadata => {
+                if receipt.publication_before != receipt.publication_after {
+                    let event = if receipt.publication_after.as_deref() == Some("published") {
+                        HookEvent::ContentAfterPublish
+                    } else {
+                        HookEvent::ContentAfterUnpublish
+                    };
+                    let accepted = self.enqueue_async(AsyncHookJob {
+                        event,
+                        principal,
+                        locale: locale.clone(),
+                        type_key: type_key.clone(),
+                        payload: serde_json::json!({
+                            "type_key": &receipt.type_key,
+                            "id": receipt.id,
+                            "entry_id": receipt.id,
+                            "version": receipt.version_after,
+                            "locale": &receipt.locale,
+                            "publication_status": receipt.publication_after.as_deref(),
+                            "translation_group_id": &receipt.translation_group_id,
+                        }),
+                        dispatch_depth: 0,
+                        lease: lease.clone(),
+                    });
+                    outcome.record(accepted);
+                }
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterSave,
+                    principal,
+                    locale,
+                    type_key,
+                    payload: serde_json::json!({
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "operation": "metadata",
+                        "version": receipt.version_after,
+                        "locale": &receipt.locale,
+                        "translation_group_id": &receipt.translation_group_id,
+                    }),
+                    dispatch_depth: 0,
+                    lease,
+                });
+                outcome.record(accepted);
+            }
+            EntryMutationKind::Publish => {
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterPublish,
+                    principal,
+                    locale,
+                    type_key,
+                    payload: serde_json::json!({
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "version": receipt.version_after,
+                        "locale": &receipt.locale,
+                        "publication_status": "published",
+                        "translation_group_id": &receipt.translation_group_id,
+                    }),
+                    dispatch_depth: 0,
+                    lease,
+                });
+                outcome.record(accepted);
+            }
+            EntryMutationKind::Unpublish => {
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterUnpublish,
+                    principal,
+                    locale,
+                    type_key,
+                    payload: serde_json::json!({
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "version": receipt.version_after,
+                        "locale": &receipt.locale,
+                        "publication_status": "draft",
+                        "translation_group_id": &receipt.translation_group_id,
+                    }),
+                    dispatch_depth: 0,
+                    lease,
+                });
+                outcome.record(accepted);
+            }
+            EntryMutationKind::Trash => {
+                // Trash of a published entry emits ContentAfterUnpublish with lifecycle context;
+                // draft Trash emits no publication event. Trash NEVER emits ContentAfterDelete.
+                if receipt.publication_before.as_deref() == Some("published") {
+                    let accepted = self.enqueue_async(AsyncHookJob {
+                        event: HookEvent::ContentAfterUnpublish,
+                        principal,
+                        locale,
+                        type_key,
+                        payload: serde_json::json!({
+                            "type_key": &receipt.type_key,
+                            "id": receipt.id,
+                            "entry_id": receipt.id,
+                            "version": receipt.version_after,
+                            "locale": &receipt.locale,
+                            "publication_status": receipt.publication_after.as_deref(),
+                            "translation_group_id": &receipt.translation_group_id,
+                            "lifecycle_transition": "trash",
+                            "trashed_at": receipt.trashed_at.as_deref(),
+                        }),
+                        dispatch_depth: 0,
+                        lease,
+                    });
+                    outcome.record(accepted);
+                }
+            }
+            EntryMutationKind::Restore => {
+                // Only immediate-mode Restore transitioning to published emits ContentAfterPublish;
+                // draft Restore emits no publication event.
+                if receipt.publication_after.as_deref() == Some("published") {
+                    let accepted = self.enqueue_async(AsyncHookJob {
+                        event: HookEvent::ContentAfterPublish,
+                        principal,
+                        locale,
+                        type_key,
+                        payload: serde_json::json!({
+                            "type_key": &receipt.type_key,
+                            "id": receipt.id,
+                            "entry_id": receipt.id,
+                            "version": receipt.version_after,
+                            "locale": &receipt.locale,
+                            "publication_status": "published",
+                            "translation_group_id": &receipt.translation_group_id,
+                            "lifecycle_transition": "restore",
+                            "published_at": receipt.published_at.as_deref(),
+                        }),
+                        dispatch_depth: 0,
+                        lease,
+                    });
+                    outcome.record(accepted);
+                }
+            }
+            EntryMutationKind::Purge => {
+                // Actual Purge emits ContentAfterDelete exactly once with retained pre-delete metadata.
+                let accepted = self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterDelete,
+                    principal,
+                    locale,
+                    type_key,
+                    payload: serde_json::json!({
+                        "type_key": &receipt.type_key,
+                        "id": receipt.id,
+                        "entry_id": receipt.id,
+                        "version": receipt.version_before,
+                        "locale": &receipt.locale,
+                        "translation_group_id": &receipt.translation_group_id,
+                        "lifecycle_transition": "purge",
+                        "trashed_at": receipt.trashed_at.as_deref(),
+                        "published_at": receipt.published_at.as_deref(),
+                    }),
+                    dispatch_depth: 0,
+                    lease,
+                });
+                outcome.record(accepted);
+            }
         }
+        outcome
+    }
+
+    pub fn enqueue_entry_lifecycle_hooks(
+        &self,
+        principal: ExecutionPrincipal,
+        receipt: &crate::storage::entry_lifecycle::EntryCommitReceipt,
+        lease: crate::operations::MutationLease,
+    ) -> HookEnqueueOutcome {
+        self.enqueue_plugin_action_hooks(principal, Some(receipt), lease)
     }
 }
 
@@ -500,14 +683,17 @@ impl HookDispatcher {
         dispatcher
     }
 
-    pub fn enqueue_async(&self, job: AsyncHookJob) {
+    pub fn enqueue_async(&self, job: AsyncHookJob) -> bool {
         if let Some(ref queue) = self.async_queue {
-            queue.enqueue(job);
+            queue.enqueue(job)
         } else if job.dispatch_depth < 2 && tokio::runtime::Handle::try_current().is_ok() {
             let pm = Arc::clone(&self.plugin_manager);
             tokio::spawn(async move {
                 run_async_hook_job(&pm, job).await;
             });
+            true
+        } else {
+            false
         }
     }
 
@@ -990,6 +1176,26 @@ impl HookDispatcher {
         effective_schema: &opendash_core::content::EffectiveContentSchema,
         payload: Value,
     ) -> crate::error::ApiResult<ContentPrepareSavePatch> {
+        self.dispatch_content_prepare_save_with_scope(
+            type_key,
+            actor_role,
+            effective_schema,
+            payload,
+            PrepareSaveMutationScope::Full,
+            None,
+        )
+        .await
+    }
+
+    pub async fn dispatch_content_prepare_save_with_scope(
+        &self,
+        type_key: &str,
+        actor_role: opendash_core::content::FieldRole,
+        effective_schema: &opendash_core::content::EffectiveContentSchema,
+        mut payload: Value,
+        scope: PrepareSaveMutationScope,
+        db: Option<&sqlx::SqlitePool>,
+    ) -> crate::error::ApiResult<ContentPrepareSavePatch> {
         use crate::error::ApiError;
 
         let subs = match tokio::time::timeout(
@@ -1008,6 +1214,25 @@ impl HookDispatcher {
         };
         if subs.is_empty() {
             return Ok(ContentPrepareSavePatch::default());
+        }
+
+        if let PrepareSaveMutationScope::Metadata {
+            requested_title,
+            requested_slug,
+            ref taxonomy_key,
+            ..
+        } = scope
+            && let Some(obj) = payload.as_object_mut()
+        {
+            obj.insert(
+                "mutation_scope".into(),
+                serde_json::json!({
+                    "mode": "metadata",
+                    "requested_title": requested_title,
+                    "requested_slug": requested_slug,
+                    "taxonomy_key": taxonomy_key,
+                }),
+            );
         }
 
         let started = Instant::now();
@@ -1126,33 +1351,154 @@ impl HookDispatcher {
                 }
             }
 
-            if let Some(t) = patch.title {
-                merged.title = Some(t.clone());
-                if let Some(obj) = running_payload.as_object_mut() {
-                    obj.insert("title".into(), Value::String(t));
-                }
-            }
-            if let Some(s) = patch.slug {
-                merged.slug = Some(s.clone());
-                if let Some(obj) = running_payload.as_object_mut() {
-                    obj.insert("slug".into(), Value::String(s));
-                }
-            }
-            if let Some(term_ids) = patch.term_ids {
-                if let Some(obj) = running_payload.as_object_mut() {
-                    obj.insert("term_ids".into(), serde_json::json!(term_ids));
-                }
-                merged.term_ids = Some(term_ids);
-            }
-            for (k, v) in patch.values_patch {
-                if let Some(Value::Object(vals)) = running_payload.get_mut("candidate_values") {
-                    if v.is_null() {
-                        vals.remove(&k);
-                    } else {
-                        vals.insert(k.clone(), v.clone());
+            match &scope {
+                PrepareSaveMutationScope::Full => {
+                    if let Some(t) = patch.title {
+                        merged.title = Some(t.clone());
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("title".into(), Value::String(t));
+                        }
+                    }
+                    if let Some(s) = patch.slug {
+                        merged.slug = Some(s.clone());
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("slug".into(), Value::String(s));
+                        }
+                    }
+                    if let Some(term_ids) = patch.term_ids {
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("term_ids".into(), serde_json::json!(term_ids));
+                        }
+                        merged.term_ids = Some(term_ids);
+                    }
+                    for (k, v) in patch.values_patch {
+                        if let Some(Value::Object(vals)) =
+                            running_payload.get_mut("candidate_values")
+                        {
+                            if v.is_null() {
+                                vals.remove(&k);
+                            } else {
+                                vals.insert(k.clone(), v.clone());
+                            }
+                        }
+                        merged.values_patch.insert(k, v);
                     }
                 }
-                merged.values_patch.insert(k, v);
+                PrepareSaveMutationScope::Metadata {
+                    requested_title,
+                    requested_slug,
+                    taxonomy_key,
+                    entry_locale,
+                } => {
+                    let prior_title = running_payload
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned();
+                    let prior_slug = running_payload
+                        .get("slug")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned();
+                    let prior_values = running_payload
+                        .get("candidate_values")
+                        .and_then(Value::as_object);
+                    let prior_terms: std::collections::BTreeSet<i64> = running_payload
+                        .get("term_ids")
+                        .and_then(Value::as_array)
+                        .map(|arr| arr.iter().filter_map(Value::as_i64).collect())
+                        .unwrap_or_default();
+
+                    for (k, v) in &patch.values_patch {
+                        let prior_val = prior_values.and_then(|vals| vals.get(k));
+                        let is_noop = if v.is_null() {
+                            prior_val.is_none() || prior_val == Some(&Value::Null)
+                        } else {
+                            prior_val == Some(v)
+                        };
+                        if !is_noop {
+                            return Err(ApiError::unprocessable(
+                                "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi trường nội dung ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                            ));
+                        }
+                    }
+
+                    if let Some(ref t) = patch.title
+                        && t != &prior_title
+                    {
+                        if !requested_title {
+                            return Err(ApiError::unprocessable(
+                                "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi tiêu đề ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                            ));
+                        }
+                        merged.title = Some(t.clone());
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("title".into(), Value::String(t.clone()));
+                        }
+                    }
+
+                    if let Some(ref s) = patch.slug
+                        && s != &prior_slug
+                    {
+                        if !requested_slug {
+                            return Err(ApiError::unprocessable(
+                                "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi slug ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                            ));
+                        }
+                        merged.slug = Some(s.clone());
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("slug".into(), Value::String(s.clone()));
+                        }
+                    }
+
+                    if let Some(ref term_ids) = patch.term_ids {
+                        let mut new_set = std::collections::BTreeSet::new();
+                        for &tid in term_ids {
+                            if tid <= 0 || !new_set.insert(tid) {
+                                return Err(ApiError::unprocessable(
+                                    "metadata_hook_scope_conflict: Plugin filter trả về danh sách term_ids không hợp lệ trong phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                                ));
+                            }
+                        }
+                        if new_set != prior_terms {
+                            let Some(allowed_key) = taxonomy_key.as_deref() else {
+                                return Err(ApiError::unprocessable(
+                                    "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi phân loại ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                                ));
+                            };
+                            let Some(pool) = db else {
+                                return Err(ApiError::unprocessable(
+                                    "metadata_hook_scope_conflict: Không thể xác minh phạm vi phân loại của plugin filter; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                                ));
+                            };
+                            let changed: Vec<i64> = prior_terms
+                                .symmetric_difference(&new_set)
+                                .copied()
+                                .collect();
+                            let mut conn = pool.acquire().await?;
+                            for tid in changed {
+                                let info =
+                                    crate::storage::entry_lifecycle::lookup_term_scope_in_conn(
+                                        &mut conn, tid,
+                                    )
+                                    .await?;
+                                let valid = info.is_some_and(|(kind, loc, active)| {
+                                    active && kind == allowed_key && loc == *entry_locale
+                                });
+                                if !valid {
+                                    return Err(ApiError::unprocessable(
+                                        "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi phân loại ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                                    ));
+                                }
+                            }
+                            let canonical_ids: Vec<i64> = new_set.into_iter().collect();
+                            if let Some(obj) = running_payload.as_object_mut() {
+                                obj.insert("term_ids".into(), serde_json::json!(canonical_ids));
+                            }
+                            merged.term_ids = Some(canonical_ids);
+                        }
+                    }
+                }
             }
         }
 
