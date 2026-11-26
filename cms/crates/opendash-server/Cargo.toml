@@ -12,6 +12,7 @@ opendash-core = { path = "../opendash-core" }
 age = { workspace = true }
 argon2 = { workspace = true }
 axum = { workspace = true }
+boa_engine = { workspace = true }
 http-body = { workspace = true }
 image = { workspace = true }
 jiff = { workspace = true }

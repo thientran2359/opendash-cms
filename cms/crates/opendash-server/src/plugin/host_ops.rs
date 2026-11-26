@@ -5,13 +5,36 @@ use std::{
     time::{Duration, Instant},
 };
 
-use opendash_core::hooks::{ExecutionPrincipal, HookExecutionMode, sanitize_plain_text};
+use opendash_core::hooks::{
+    ExecutionPrincipal, ExtensionOwnerKind, HookExecutionMode, sanitize_plain_text,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
-use wasmi::StoreLimits;
 
 use super::manifest::PluginManifest;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct RuntimeOwner {
+    pub kind: ExtensionOwnerKind,
+    pub id: String,
+}
+
+impl RuntimeOwner {
+    pub fn plugin(id: impl Into<String>) -> Self {
+        Self {
+            kind: ExtensionOwnerKind::Plugin,
+            id: id.into(),
+        }
+    }
+
+    pub fn theme(id: impl Into<String>) -> Self {
+        Self {
+            kind: ExtensionOwnerKind::Theme,
+            id: id.into(),
+        }
+    }
+}
 
 pub const MAX_HOST_CALLS: usize = 100;
 pub const MAX_KV_KEY_BYTES: usize = 256;
@@ -25,6 +48,7 @@ pub const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
 pub const HTTP_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct HostContext {
+    pub owner: RuntimeOwner,
     pub plugin_id: String,
     pub manifest: PluginManifest,
     pub input_bytes: Vec<u8>,
@@ -38,7 +62,6 @@ pub struct HostContext {
         Option<Arc<dyn Fn(HostReadRequest) -> Result<HostOperationResponse, String> + Send + Sync>>,
     pub _correlation_id: String,
     pub allow_loopback: bool,
-    pub limits: StoreLimits,
     pub staged_kv: BTreeMap<String, Option<Value>>,
     pub staged_kv_bytes: usize,
     pub staged_logs: Vec<StagedPluginLog>,
@@ -700,6 +723,7 @@ fn dispatch_host_read(ctx: &HostContext, req: HostReadRequest) -> HostOperationR
     }
     let db_timeout = std::cmp::min(Duration::from_secs(2), remaining);
 
+    let owner_kind = ctx.owner.kind;
     let plugin_id = ctx.plugin_id.clone();
     let manifest = ctx.manifest.clone();
     let execution_mode = ctx.execution_mode;
@@ -711,8 +735,9 @@ fn dispatch_host_read(ctx: &HostContext, req: HostReadRequest) -> HostOperationR
     let query_res = tokio::runtime::Handle::current().block_on(async move {
         tokio::time::timeout(
             db_timeout,
-            super::runtime::execute_host_read_request(
+            super::runtime::execute_host_read_request_for_owner(
                 &db,
+                owner_kind,
                 &plugin_id,
                 &manifest,
                 execution_mode,
@@ -1005,7 +1030,9 @@ mod egress_quota_tests {
     use opendash_core::plugin::{NetworkScopeGrant, PluginPermissions};
 
     fn test_ctx(manifest: PluginManifest, caps: Option<Vec<String>>) -> HostContext {
+        let owner = RuntimeOwner::plugin(manifest.id.clone());
         HostContext {
+            owner,
             plugin_id: manifest.id.clone(),
             manifest,
             input_bytes: vec![],
@@ -1018,7 +1045,6 @@ mod egress_quota_tests {
             read_ipc: None,
             _correlation_id: "test".into(),
             allow_loopback: true,
-            limits: Default::default(),
             staged_kv: Default::default(),
             staged_kv_bytes: 0,
             staged_logs: vec![],
@@ -1044,8 +1070,6 @@ mod egress_quota_tests {
             description: "Quota test".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions {
-                sqlite: vec![],
-                http: vec![],
                 network: vec![NetworkScopeGrant {
                     scheme: "http".into(),
                     host: "127.0.0.1".into(),
@@ -1053,17 +1077,9 @@ mod egress_quota_tests {
                     methods: vec!["GET".into()],
                     path_prefix: Some("/".into()),
                 }],
-                content_read: vec![],
-                content_write: vec![],
                 ..Default::default()
             },
-            hooks: vec![],
-            filters: vec![],
-            hook_priority: 0,
-            actions: vec![],
-            declarations: Default::default(),
-            editor_panels: vec![],
-            settings_schema: vec![],
+            ..Default::default()
         };
         let mut ctx = test_ctx(manifest, None);
         ctx.http_calls_count = super::super::egress::MAX_HTTP_CALLS_PER_INVOCATION;
@@ -1098,20 +1114,10 @@ mod egress_quota_tests {
             description: "Locale test".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions {
-                sqlite: vec![],
-                http: vec![],
-                network: vec![],
-                content_read: vec![],
                 content_write: vec!["post".into()],
                 ..Default::default()
             },
-            hooks: vec![],
-            filters: vec![],
-            hook_priority: 0,
-            actions: vec![],
-            declarations: Default::default(),
-            editor_panels: vec![],
-            settings_schema: vec![],
+            ..Default::default()
         };
         let mut ctx = test_ctx(manifest, Some(vec!["content_write".into()]));
         let req_json = r#"{"op":"content_save","type_key":"post","locale":"en","slug":"en-post","title":"EN Post"}"#;
@@ -1153,13 +1159,7 @@ mod egress_quota_tests {
                 content_delete: vec!["post".into()],
                 ..Default::default()
             },
-            hooks: vec![],
-            filters: vec![],
-            hook_priority: 0,
-            actions: vec![],
-            declarations: Default::default(),
-            editor_panels: vec![],
-            settings_schema: vec![],
+            ..Default::default()
         };
 
         // 1. /api/p/ loopback blocked even when allow_loopback = true

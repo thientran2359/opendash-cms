@@ -154,6 +154,16 @@ pub fn ensure_plugins_layout_and_quarantine_stale(plugins_root: &Path) -> Result
     Ok(cleaned)
 }
 
+fn manifest_entrypoint_filename(manifest_json: &str) -> Result<&'static str, String> {
+    let parsed: serde_json::Value = serde_json::from_str(manifest_json)
+        .map_err(|_| "manifest.json của revision plugin không hợp lệ.".to_string())?;
+    match parsed.get("entrypoint").and_then(serde_json::Value::as_str) {
+        None | Some("plugin.wasm") => Ok("plugin.wasm"),
+        Some("plugin.js") => Ok("plugin.js"),
+        Some(_) => Err("Entrypoint revision plugin không được hỗ trợ.".to_string()),
+    }
+}
+
 pub fn verify_plugin_revision_durability(
     plugins_root: &Path,
     revision_digest: &str,
@@ -170,8 +180,9 @@ pub fn verify_plugin_revision_durability(
     }
     let manifest_json = fs::read_to_string(rev_dir.join("manifest.json"))
         .map_err(|_| "Revision plugin thiếu manifest.json trên đĩa.".to_string())?;
-    let wasm_bytes = fs::read(rev_dir.join("plugin.wasm"))
-        .map_err(|_| "Revision plugin thiếu plugin.wasm trên đĩa.".to_string())?;
+    let entrypoint = manifest_entrypoint_filename(&manifest_json)?;
+    let wasm_bytes = fs::read(rev_dir.join(entrypoint))
+        .map_err(|_| format!("Revision plugin thiếu {entrypoint} trên đĩa."))?;
     let ext_path = rev_dir.join("admin-extensions.json");
     let extension = if ext_path.exists() {
         let raw = fs::read(&ext_path)
@@ -297,11 +308,12 @@ fn stage_and_publish_plugin_revision_with_blocks(
     let staging_dir = plugins_root.join(".staging").join(run_uuid);
     let rev_dir = plugins_root.join("revisions").join(revision_digest);
 
+    let entrypoint = manifest_entrypoint_filename(manifest_json)?;
     fs::create_dir_all(&staging_dir)
         .map_err(|e| format!("Không thể tạo thư mục staging plugin: {e}"))?;
     if let Err(err) =
         write_durable_file(&staging_dir.join("manifest.json"), manifest_json.as_bytes())
-            .and_then(|_| write_durable_file(&staging_dir.join("plugin.wasm"), wasm_bytes))
+            .and_then(|_| write_durable_file(&staging_dir.join(entrypoint), wasm_bytes))
             .and_then(|_| match extensions {
                 Some(ext) => {
                     let raw = serde_json::to_vec(ext).map_err(|e| e.to_string())?;
@@ -863,6 +875,44 @@ pub async fn is_plugin_generation_active(
     Ok(matches!(row_opt, Some((1, rev_gen)) if rev_gen == expected_generation))
 }
 
+pub async fn verify_active_theme_fence_in_tx(
+    conn: &mut SqliteConnection,
+    expected_revision_id: &str,
+    expected_selection_version: i64,
+) -> Result<bool, sqlx::Error> {
+    let row_opt: Option<(Option<String>, i64)> =
+        sqlx::query_as("SELECT revision_id, version FROM theme_active_selection WHERE id = 1")
+            .fetch_optional(conn)
+            .await?;
+    Ok(matches!(
+        row_opt,
+        Some((Some(ref rev_id), ver))
+            if rev_id == expected_revision_id && ver == expected_selection_version
+    ))
+}
+
+#[allow(dead_code)]
+pub async fn delete_plugin_owned_rows_in_tx(
+    tx: &mut SqliteConnection,
+    plugin_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM plugin_kv WHERE owner_kind = 'plugin' AND plugin_id = ?")
+        .bind(plugin_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "DELETE FROM plugin_entry_projections WHERE owner_kind = 'plugin' AND plugin_id = ?",
+    )
+    .bind(plugin_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM plugin_logs WHERE owner_kind = 'plugin' AND plugin_id = ?")
+        .bind(plugin_id)
+        .execute(&mut *tx)
+        .await?;
+    Ok(())
+}
+
 pub async fn load_plugin_executable(
     db_pool: &SqlitePool,
     id: &str,
@@ -890,21 +940,58 @@ pub async fn record_plugin_execution_result(
     message: &str,
     last_error: Option<&str>,
 ) {
+    record_owner_execution_result(
+        db_pool,
+        opendash_core::hooks::ExtensionOwnerKind::Plugin,
+        id,
+        correlation_id,
+        level,
+        message,
+        last_error,
+    )
+    .await;
+}
+
+pub async fn record_owner_execution_result(
+    db_pool: &SqlitePool,
+    owner_kind: opendash_core::hooks::ExtensionOwnerKind,
+    id: &str,
+    correlation_id: &str,
+    level: &str,
+    message: &str,
+    last_error: Option<&str>,
+) {
     let write = async {
-        sqlx::query("INSERT INTO plugin_logs (plugin_id, correlation_id, level, message) VALUES (?, ?, ?, ?)")
-            .bind(id).bind(correlation_id).bind(level).bind(message).execute(db_pool).await?;
-        sqlx::query("UPDATE plugins SET last_error = ?, updated_at = datetime('now') WHERE id = ?")
+        sqlx::query(
+            "INSERT INTO plugin_logs (owner_kind, plugin_id, correlation_id, level, message)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(owner_kind.as_str())
+        .bind(id)
+        .bind(correlation_id)
+        .bind(level)
+        .bind(message)
+        .execute(db_pool)
+        .await?;
+        if owner_kind == opendash_core::hooks::ExtensionOwnerKind::Plugin {
+            sqlx::query(
+                "UPDATE plugins SET last_error = ?, updated_at = datetime('now') WHERE id = ?",
+            )
             .bind(last_error)
             .bind(id)
             .execute(db_pool)
             .await?;
+        }
         Ok::<_, sqlx::Error>(())
     };
     if !matches!(
         tokio::time::timeout(std::time::Duration::from_secs(1), write).await,
         Ok(Ok(()))
     ) {
-        eprintln!("Plugin log unavailable: {id} {correlation_id} {level}: {message}");
+        eprintln!(
+            "Extension log unavailable: {}:{id} {correlation_id} {level}: {message}",
+            owner_kind.as_str()
+        );
     }
 }
 
@@ -989,6 +1076,7 @@ pub async fn load_all_enabled_plugins_for_cache(
         .collect())
 }
 
+#[allow(dead_code)]
 pub async fn insert_plugin_log_in_conn(
     conn: &mut SqliteConnection,
     plugin_id: &str,
@@ -996,10 +1084,31 @@ pub async fn insert_plugin_log_in_conn(
     level: &str,
     message: &str,
 ) -> Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO plugin_logs (plugin_id, correlation_id, level, message) VALUES (?, ?, ?, ?)",
+    insert_owner_log_in_conn(
+        conn,
+        opendash_core::hooks::ExtensionOwnerKind::Plugin,
+        plugin_id,
+        correlation_id,
+        level,
+        message,
     )
-    .bind(plugin_id)
+    .await
+}
+
+pub async fn insert_owner_log_in_conn(
+    conn: &mut SqliteConnection,
+    owner_kind: opendash_core::hooks::ExtensionOwnerKind,
+    owner_id: &str,
+    correlation_id: &str,
+    level: &str,
+    message: &str,
+) -> Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO plugin_logs (owner_kind, plugin_id, correlation_id, level, message)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(owner_kind.as_str())
+    .bind(owner_id)
     .bind(correlation_id)
     .bind(level)
     .bind(message)
@@ -1007,14 +1116,29 @@ pub async fn insert_plugin_log_in_conn(
     .await
 }
 
+#[allow(dead_code)]
 pub async fn read_raw_plugin_option_map(
     db: &SqlitePool,
     plugin_id: &str,
 ) -> Result<BTreeMap<String, serde_json::Value>, sqlx::Error> {
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = 'plugin' AND owner_id = ?",
+    read_raw_owner_option_map(
+        db,
+        opendash_core::hooks::ExtensionOwnerKind::Plugin,
+        plugin_id,
     )
-    .bind(plugin_id)
+    .await
+}
+
+pub async fn read_raw_owner_option_map(
+    db: &SqlitePool,
+    owner_kind: opendash_core::hooks::ExtensionOwnerKind,
+    owner_id: &str,
+) -> Result<BTreeMap<String, serde_json::Value>, sqlx::Error> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = ? AND owner_id = ?",
+    )
+    .bind(owner_kind.options_owner_kind())
+    .bind(owner_id)
     .fetch_all(db)
     .await?;
     let mut map = BTreeMap::new();
@@ -1104,7 +1228,18 @@ pub async fn delete_entry_with_plugin_fence(
     sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
         .execute(&mut *tx)
         .await?;
-    if !is_plugin_generation_active(&mut *tx, &fence.plugin_id, fence.expected_generation).await? {
+    let fence_ok = match &fence.owner_fence {
+        crate::storage::entries::OwnerFence::Plugin {
+            plugin_id,
+            expected_generation,
+        } => is_plugin_generation_active(&mut *tx, plugin_id, *expected_generation).await?,
+        crate::storage::entries::OwnerFence::Theme {
+            revision_id,
+            selection_version,
+            ..
+        } => verify_active_theme_fence_in_tx(&mut *tx, revision_id, *selection_version).await?,
+    };
+    if !fence_ok {
         return Err(ApiError::conflict(
             "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc thực thi.",
         ));

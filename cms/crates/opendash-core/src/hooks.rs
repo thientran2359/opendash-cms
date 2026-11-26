@@ -6,6 +6,67 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Extension package owner kind sharing the unified worker runtime and storage.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtensionOwnerKind {
+    #[default]
+    Plugin,
+    Theme,
+}
+
+impl ExtensionOwnerKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Plugin => "plugin",
+            Self::Theme => "theme",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Option<Self> {
+        match raw {
+            "plugin" => Some(Self::Plugin),
+            "theme" => Some(Self::Theme),
+            _ => None,
+        }
+    }
+
+    pub fn options_owner_kind(self) -> &'static str {
+        match self {
+            Self::Plugin => "plugin",
+            Self::Theme => "theme_functions",
+        }
+    }
+
+    pub fn secrets_subdir(self) -> &'static str {
+        match self {
+            Self::Plugin => "plugins",
+            Self::Theme => "themes",
+        }
+    }
+}
+
+/// Execution engine selected inside `--plugin-worker`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtensionRuntimeKind {
+    #[default]
+    Wasm,
+    Js,
+}
+
+impl ExtensionRuntimeKind {
+    pub fn from_entrypoint(entrypoint: &str) -> Self {
+        if entrypoint.ends_with(".js") {
+            Self::Js
+        } else {
+            Self::Wasm
+        }
+    }
+}
+
 /// Canonical lifecycle events, filters, and actions emitted by OpenDash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum HookEvent {
@@ -32,6 +93,8 @@ pub enum HookEvent {
     PluginAfterDisable,
     #[serde(rename = "settings/after_save")]
     SettingsAfterSave,
+    #[serde(rename = "theme/after_activate")]
+    ThemeAfterActivate,
     // Spec 2 — Typed synchronous filters
     #[serde(rename = "filter:content/prepare_save")]
     FilterContentPrepareSave,
@@ -57,6 +120,7 @@ impl HookEvent {
             HookEvent::PluginAfterEnable => "plugin/after_enable",
             HookEvent::PluginAfterDisable => "plugin/after_disable",
             HookEvent::SettingsAfterSave => "settings/after_save",
+            HookEvent::ThemeAfterActivate => "theme/after_activate",
             HookEvent::FilterContentPrepareSave => "filter:content/prepare_save",
             HookEvent::FilterContactBeforeSubmit => "filter:contact/before_submit",
             HookEvent::FilterSeoHead => "filter:seo/head",
@@ -84,6 +148,7 @@ impl HookEvent {
                 | Self::PluginAfterEnable
                 | Self::PluginAfterDisable
                 | Self::SettingsAfterSave
+                | Self::ThemeAfterActivate
         )
     }
 }
@@ -310,6 +375,12 @@ mod tests {
             (
                 HookEvent::SettingsAfterSave,
                 "settings/after_save",
+                false,
+                true,
+            ),
+            (
+                HookEvent::ThemeAfterActivate,
+                "theme/after_activate",
                 false,
                 true,
             ),

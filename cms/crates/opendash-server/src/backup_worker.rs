@@ -45,81 +45,11 @@ pub struct SnapshotWorkerResponse {
     pub error: Option<String>,
 }
 
-#[cfg(windows)]
 pub fn enforce_native_memory_limit_512mib() -> Result<(), String> {
-    use std::ptr::null_mut;
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JobObjectExtendedLimitInformation, SetInformationJobObject,
-    };
-    use windows_sys::Win32::System::Threading::GetCurrentProcess;
-
-    unsafe {
-        let job = CreateJobObjectW(null_mut(), null_mut());
-        if job.is_null() || job == INVALID_HANDLE_VALUE {
-            return Err("CreateJobObjectW failed".to_string());
-        }
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags =
-            JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        info.ProcessMemoryLimit = WORKER_MEMORY_LIMIT_BYTES;
-
-        let ok = SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            &info as *const _ as *const _,
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        );
-        if ok == 0 {
-            CloseHandle(job);
-            return Err("SetInformationJobObject failed".to_string());
-        }
-        let assigned = AssignProcessToJobObject(job, GetCurrentProcess());
-        if assigned == 0 {
-            CloseHandle(job);
-            return Err("AssignProcessToJobObject failed".to_string());
-        }
-        // Keep job handle open for process lifetime so KILL_ON_JOB_CLOSE stays bound.
-        let _ = job;
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-pub fn enforce_native_memory_limit_512mib() -> Result<(), String> {
-    #[repr(C)]
-    struct RLimit {
-        rlim_cur: u64,
-        rlim_max: u64,
-    }
-    const RLIMIT_AS: i32 = 9;
-    unsafe extern "C" {
-        fn setrlimit(resource: i32, rlim: *const RLimit) -> i32;
-    }
-    let lim = RLimit {
-        rlim_cur: WORKER_MEMORY_LIMIT_BYTES as u64,
-        rlim_max: WORKER_MEMORY_LIMIT_BYTES as u64,
-    };
-    let rc = unsafe { setrlimit(RLIMIT_AS, &lim) };
-    if rc != 0 {
-        return Err(format!("setrlimit(RLIMIT_AS) failed with {rc}"));
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-pub fn enforce_native_memory_limit_512mib() -> Result<(), String> {
-    // Darwin rejects RLIMIT_AS=512 MiB (EINVAL); the parent must apply the
-    // kernel fatal Jetsam limit with posix_spawnattr_setjetsam_ext before exec.
-    // Reject unguarded direct worker entry before consuming any request.
-    crate::operations_worker_process::confirm_parent_spawn_limit()
-}
-
-#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-pub fn enforce_native_memory_limit_512mib() -> Result<(), String> {
-    Err("Không hỗ trợ giới hạn bộ nhớ native cho nền tảng này.".to_string())
+    crate::operations_worker_process::enforce_native_memory_limit_bytes(
+        WORKER_MEMORY_LIMIT_BYTES,
+        crate::operations_worker_process::OPERATIONS_BOOTSTRAP_PROOF,
+    )
 }
 
 pub fn run_operations_worker_from_stdio() -> i32 {
