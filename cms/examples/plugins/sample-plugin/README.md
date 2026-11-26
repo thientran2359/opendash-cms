@@ -18,7 +18,7 @@ Package layout:
   - Calls `opendash.getInput()`, extracts optional string field `"text"` (default `"Hello from OpenDash Plugin"`), increments KV key `"run_count"` via `opendash.kvGet` / `opendash.kvSet`, and writes `{"status":"ok","transformed":"<UPPERCASE>","run_count":<n>}` via `opendash.setOutput` (`0` on success, `1` if `setOutput` returns `< 0`).
 - **Manifest Permissions ([manifest.json](manifest.json)):**
   - `sqlite`: `["kv_read", "kv_write"]`.
-  - `http`: `["http://127.0.0.1:18766/page", "http://localhost:18766/page"]`.
+  - `http`: `["http://127.0.0.1:18766/api/health", "http://localhost:18766/api/health"]`.
 - **Build & Bundle Entrypoints:**
   - `npm run asbuild`: compiles `assembly/index.ts` -> `build/plugin.wasm`.
   - `npm run build`: runs `asbuild` then `[cms/examples/plugins/sample-plugin/scripts/bundle.js:createZip]` to generate `sample-plugin.zip` containing `manifest.json` and `plugin.wasm`.

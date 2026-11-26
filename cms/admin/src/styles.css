@@ -116,15 +116,13 @@
   border-color: #a1a1aa;
 }
 
-.od-legacy-scope button[type="submit"]:not([class]),
-.od-legacy-scope button.od-primary-action {
+.od-legacy-scope button[type="submit"]:not([class]) {
   background: var(--color-primary);
   color: #fff;
   border-color: var(--color-primary);
 }
 
-.od-legacy-scope button[type="submit"]:not([class]):hover:not(:disabled),
-.od-legacy-scope button.od-primary-action:hover:not(:disabled) {
+.od-legacy-scope button[type="submit"]:not([class]):hover:not(:disabled) {
   background: var(--color-primary-hover);
   border-color: var(--color-primary-hover);
 }

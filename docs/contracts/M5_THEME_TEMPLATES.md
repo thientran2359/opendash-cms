@@ -164,6 +164,8 @@ This docs-only change must pass planning checker, self-test, artifact guard and 
 
 ## Beta remediation delta — sanitized Admin revision discovery (2026-11-17)
 
+> **Superseded by [`docs/designs/phase2-legacy-builder-theme-v3-cleanup.md`](../designs/phase2-legacy-builder-theme-v3-cleanup.md) (Verified 2026-11-26):** `GET /api/admin/themes` đã gỡ bỏ hoàn toàn các trường legacy `items`, `active_id`, `homepage_compatible` và `selection.legacy_block_id` (`ThemeList { version, revisions, selection }`); cài đặt/kích hoạt bắt buộc Theme Format v3 (`source_format = "v3"`), giữ nhận diện read-only cho dòng `'v1_legacy'`/`'v2'` trên DB nâng cấp tiền-`0042`.
+
 Coordinator decision submitted for Forge review under #301/F02; effective after
 this contract/G3 PR is reviewed and merged. No migration or new route. Existing
 Admin-only GET `/api/admin/themes` preserves legacy `items`, `active_id`, `version`
