@@ -35,7 +35,7 @@ OpenDash Studio đã hoàn thiện nền tảng kỹ thuật hai chế độ (Mo
 3. **Thiếu thao tác nhanh theo ngữ cảnh trên cả Tree và Preview Canvas ([`BuilderPreviewFrame.tsx#L10-L80`](../../cms/admin/src/builder/BuilderPreviewFrame.tsx#L10-L80)):**
    - `BRIDGE_SCRIPT` hiện chỉ phát `od-studio-hover`, `od-studio-pick`, `od-studio-scroll` và nhận `od-highlight`. Chưa có nút icon bánh răng/cài đặt (`.od-canvas-gear`) trên node `section`/`element` và chưa có sự kiện nhấp đúp (`dblclick`) để mở menu thao tác (`Chỉnh sửa / Nhân bản / Copy options / Paste options / Xóa`).
 4. **Ràng buộc bảo toàn dữ liệu cần giữ tuyệt đối:**
-   - Trên Rust server ([`opendash-core/src/builder.rs#L522-L527,#L582-L599`](../../cms/crates/opendash-core/src/builder.rs#L522-L527)), các block bị khóa (`ProviderInactive` / `Withdrawn` / `Unresolved`) chỉ được giữ nguyên qua `is_preserved` theo đúng `(path, ancestor_ids, element.id)` đã lưu trước đó. Mọi thao tác **Nhân bản**, **Copy/Paste options** và **Di chuyển** phải tuyệt đối tôn trọng `isLockedElement`, `isProtectedNode`, `preservesAnchors`, `canDeleteElement` (`core/content_slot`), giới hạn `core/list <= 8`, `core/pattern_ref <= 16` distinct IDs, `nodes <= 512`, `JSON <= 256 KiB`, và `#[serde(deny_unknown_fields)]` trên `PluginBlockProps`.
+   - Trên Rust server ([`opendash-core/src/builder.rs#L522-L527,#L582-L599`](../../cms/crates/opendash-core/src/builder/mod.rs)), các block bị khóa (`ProviderInactive` / `Withdrawn` / `Unresolved`) chỉ được giữ nguyên qua `is_preserved` theo đúng `(path, ancestor_ids, element.id)` đã lưu trước đó. Mọi thao tác **Nhân bản**, **Copy/Paste options** và **Di chuyển** phải tuyệt đối tôn trọng `isLockedElement`, `isProtectedNode`, `preservesAnchors`, `canDeleteElement` (`core/content_slot`), giới hạn `core/list <= 8`, `core/pattern_ref <= 16` distinct IDs, `nodes <= 512`, `JSON <= 256 KiB`, và `#[serde(deny_unknown_fields)]` trên `PluginBlockProps`.
    - Giữ nguyên cơ chế bảo vệ dữ liệu chưa lưu khi rời Studio qua `App.tsx:mayLeave` (không gây double `window.confirm`), khôi phục qua lỗi `401`/`412`, cô lập clipboard theo phiên người dùng (`clearAllDrafts` / `resetToken`), và phân biệt rõ tất cả 4 nhánh `StudioSavePolicy`.
 
 ---
@@ -218,7 +218,7 @@ export interface StudioBuilderClipboard {
    - Nếu là container: clone `node.responsive` (nếu rỗng trả `responsive: undefined`).
    - Nếu là element (`isElement(loc.node)`):
      - Trả `null` nếu `isLockedElement(loc.node, registry, blockCatalog)` hoặc `loc.node.type === 'core/content_slot'`.
-     - Nếu `loc.node.type === 'plugin/block'`: lấy active `BlockSchemaV1` từ `blockCatalog`, chỉ giữ các key trong `props.values` được khai báo trong `schema.fields` (lọc bỏ unknown legacy keys chỉ được preserve cho `element.id` gốc trên server [`builder.rs#L709-L715`](../../cms/crates/opendash-core/src/builder.rs#L709-L715)).
+     - Nếu `loc.node.type === 'plugin/block'`: lấy active `BlockSchemaV1` từ `blockCatalog`, chỉ giữ các key trong `props.values` được khai báo trong `schema.fields` (lọc bỏ unknown legacy keys chỉ được preserve cho `element.id` gốc trên server [`builder.rs#L709-L715`](../../cms/crates/opendash-core/src/builder/mod.rs)).
      - Nếu `loc.node.type === 'legacy/block'`: copy `props.values` và `blockId`.
      - Các core elements khác: clone `props`, `delete cloned.binding`.
 4. **`canPasteOptions(clipboard: StudioBuilderClipboard | null, target: NodeLocation, locked: boolean): boolean`**

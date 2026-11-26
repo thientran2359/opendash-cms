@@ -14,21 +14,21 @@ See [Core Foundation](../../../docs/contracts/CORE_FOUNDATION.md) and [CMS Archi
   - `[registry.rs:ResourceOwner]`, `[registry.rs:ProviderStatus]`, `[registry.rs:DeclarationState]`, `[registry.rs:OwnedDescriptor]`, `[registry.rs:RegistryCatalog]`, and `[registry.rs:RegistryError]`.
 - **Hooks, Filters & Diagnostics** ([`src/hooks.rs`](src/hooks.rs)):
   - `[hooks.rs:HookEvent]` (15 lifecycle hooks and `filter:*` variants), `[hooks.rs:HookEnvelope]`, `[hooks.rs:PluginEnvelopeV2]`, `[hooks.rs:EnvelopeKind]`, `[hooks.rs:ExecutionPrincipal]`, `[hooks.rs:HookExecutionMode]`, `[hooks.rs:ContentBeforeSaveDecision]`, and `[hooks.rs:sanitize_plain_text]`.
-- **Content Types, Fields & Editor Layout** ([`src/content.rs`](src/content.rs)):
+- **Content Types, Fields & Editor Layout** ([`src/content.rs`](src/content/mod.rs)):
   - `[content.rs:ContentTypeDefinition]`, `[content.rs:ContentTypeDefinitionInput]`, `[content.rs:ContentTypeSettings]`, `[content.rs:ContentPublication]`, `[content.rs:ContentSupport]`, `[content.rs:ContentMode]`, `[content.rs:ContentFieldType]` (9 kinds), `[content.rs:ContentFieldDefinition]`, `[content.rs:FieldDefinitionInput]`, `[content.rs:FieldRole]`, `[content.rs:PublicExposure]`, `[content.rs:FieldScopeKind]`.
   - `[content.rs:ManifestFieldGroupInput]`, `[content.rs:UserFieldGroupInput]`, `[content.rs:FieldGroupRecord]`, `[content.rs:EffectiveContentSchema]`, `[content.rs:verify_effective_schema_transition]`, `[content.rs:CntDeclarations]`, `[content.rs:TaxonomyDefinition]`, `[content.rs:ContentEntryInput]`, `[content.rs:PatchField]`.
   - `[content.rs:EditorLayoutConfigV1]`, `[content.rs:EditorRegion]`, `[content.rs:PanelDefinition]`, `[content.rs:resolve_and_validate_editor_layout]`, and `[content.rs:project_effective_editor_config]`.
-- **Builder AST & Responsive Layout** ([`src/builder.rs`](src/builder.rs)):
+- **Builder AST & Responsive Layout** ([`src/builder.rs`](src/builder/mod.rs)):
   - `[builder.rs:BuilderDocument]` (`SectionNode -> RowNode -> ColumnNode -> ElementNode`), `[builder.rs:ElementContent]`, `[builder.rs:KnownElement]` (12 variants including `core/*`, `legacy/block`, `plugin/block`), `[builder.rs:Responsive]`, `[builder.rs:ResponsiveStyle]`, `[builder.rs:BoxSpacing]`, `[builder.rs:compile_box_spacing_tailwind]`, `[builder.rs:NodeMeta]`, `[builder.rs:SectionStyle]`, `[builder.rs:ElementBinding]`, `[builder.rs:BindingSource]`, and `[builder.rs:BuilderError]`.
-- **Comment-Block Codec** ([`src/builder_blocks.rs`](src/builder_blocks.rs)):
+- **Comment-Block Codec** ([`src/builder_blocks.rs`](src/builder_blocks/mod.rs)):
   - `[builder_blocks.rs:serialize_builder_document_to_blocks]`, `[builder_blocks.rs:parse_blocks_to_builder_document]`, `[builder_blocks.rs:parse_blocks_lenient_or_recover]`, `[builder_blocks.rs:extract_visible_text]`, `[builder_blocks.rs:extract_visible_text_with_schemas]`, `[builder_blocks.rs:extract_block_refs_lenient_with_schemas]`, `[builder_blocks.rs:encode_comment_json]`, `[builder_blocks.rs:ParsedBlockDocument]`, and `[builder_blocks.rs:ExtractedBlockRefs]`.
-- **Unified Field Schema** ([`src/field_schema.rs`](src/field_schema.rs)):
+- **Unified Field Schema** ([`src/field_schema.rs`](src/field_schema/mod.rs)):
   - `[field_schema.rs:FieldSpec]`, `[field_schema.rs:FieldType]`, `[field_schema.rs:FieldContext]`, `[field_schema.rs:validate_field_specs]`, `[field_schema.rs:validate_field_values]`, `[field_schema.rs:collect_media_ids]`, `[field_schema.rs:collect_public_media_ids]`, `[field_schema.rs:collect_relational_refs]`, `[field_schema.rs:collect_options_source_values]`, `[field_schema.rs:global_site_option_fields]`, `[field_schema.rs:global_site_option_defaults]`, `[field_schema.rs:valid_safe_url]`, and `[field_schema.rs:valid_color_value]`.
 - **Declarative Block Schemas** ([`src/block_schema.rs`](src/block_schema.rs)):
   - `[block_schema.rs:BlockCategory]`, `[block_schema.rs:BlockSchemaV1]`, `[block_schema.rs:RegisteredBlockSchema]`, `[block_schema.rs:MAX_NODE_VALUES_KEYS]`, and `[block_schema.rs:MAX_NODE_VALUES_BYTES]`.
-- **RichText Sanitizer** ([`src/richtext.rs`](src/richtext.rs)):
+- **RichText Sanitizer** ([`src/richtext.rs`](src/richtext/mod.rs)):
   - `[richtext.rs:sanitize_richtext]`, `[richtext.rs:strip_richtext_to_plain]`, and `[richtext.rs:decode_html5_entities]`.
-- **Theme & Plugin Manifests** ([`src/theme.rs`](src/theme.rs), [`src/plugin.rs`](src/plugin.rs)):
+- **Theme & Plugin Manifests** ([`src/theme.rs`](src/theme/mod.rs), [`src/plugin.rs`](src/plugin/mod.rs)):
   - `[theme.rs:ThemeV3Manifest]`, `[theme.rs:ThemeTemplateDecl]`, `[theme.rs:TemplateCandidate]`, `[theme.rs:TemplateCandidateKind]`, `[theme.rs:PageLayoutDecl]`, `[theme.rs:ThemePatternDecl]`, and `[theme.rs:valid_v3_asset_path]`.
   - `[plugin.rs:PluginManifest]`, `[plugin.rs:PluginPermissions]`, `[plugin.rs:ScopedFieldGrant]`, `[plugin.rs:NetworkScopeGrant]`, `[plugin.rs:PluginActionDeclaration]`, `[plugin.rs:PluginSettingField]`, `[plugin.rs:plugin_can_read_field]`, `[plugin.rs:plugin_can_write_field]`, and `[plugin.rs:PLUGIN_ABI_VERSION]`.
 - **Admin Extensions, Contact Forms, i18n & Backup** ([`src/admin_extensions.rs`](src/admin_extensions.rs), [`src/contact.rs`](src/contact.rs), [`src/i18n.rs`](src/i18n.rs), [`src/backup.rs`](src/backup.rs)):

@@ -211,7 +211,7 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>>;
      - `{ "key": "default", "label": "Mặc định (Khung chuẩn)", "file": "page-layouts/default.html" }`
      - `{ "key": "full_width", "label": "Tràn viền (Full Width Builder)", "file": "page-layouts/full-width.html" }`
      - `{ "key": "canvas", "label": "Landing Page (Ẩn Header & Footer)", "file": "page-layouts/canvas.html" }`
-   - `patterns` (6 starter patterns — lưu ý `key` dùng `snake_case`, `category` dùng `kebab-case` theo đúng `ThemeV3Manifest::validate` tại [`opendash-core/src/theme.rs#L421-L423`](../../cms/crates/opendash-core/src/theme.rs#L421-L423)):
+   - `patterns` (6 starter patterns — lưu ý `key` dùng `snake_case`, `category` dùng `kebab-case` theo đúng `ThemeV3Manifest::validate` tại [`opendash-core/src/theme.rs#L421-L423`](../../cms/crates/opendash-core/src/theme/mod.rs)):
      - `{ "key": "hero_launchpad", "title": "Hero SaaS & Thanh chỉ số", "category": "hero", "description": "Khối mở đầu nổi bật kèm nút CTA và 3 chỉ số thống kê.", "file": "patterns/hero-launchpad.json" }`
      - `{ "key": "features_bento_grid", "title": "Lưới 3 tính năng cốt lõi", "category": "features", "description": "Bố cục 3 cột trình bày điểm mạnh sản phẩm/dịch vụ.", "file": "patterns/features-bento-grid.json" }`
      - `{ "key": "about_story_split", "title": "Câu chuyện thương hiệu 2 cột", "category": "content", "description": "Giới thiệu tầm nhìn kết hợp khung trích dẫn khách hàng.", "file": "patterns/about-story-split.json" }`
