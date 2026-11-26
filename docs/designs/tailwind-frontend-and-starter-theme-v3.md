@@ -220,7 +220,7 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>>;
      - `{ "key": "cta_newsletter_banner", "title": "Banner kêu gọi hành động", "category": "cta", "description": "Khối CTA cuối trang thúc đẩy chuyển đổi.", "file": "patterns/cta-newsletter-banner.json" }`
    - `assets`: `["assets/style.css"]`
    - `menus`: `["primary", "footer"]`
-   - `options` (5 tùy chọn public tương thích `parse_theme_options_schema` tại [`storage/settings.rs`](../../cms/crates/opendash-server/src/storage/settings.rs)):
+   - `options` (5 tùy chọn public tương thích `parse_theme_options_schema` tại [`storage/settings.rs`](../../cms/crates/opendash-server/src/storage/settings/mod.rs)):
      - `header_badge` (`string`, default: `"OPENDASH STARTER"`, `public: true`)
      - `header_cta_label` (`string`, default: `"Khám phá ngay"`, `public: true`)
      - `header_cta_url` (`string`, default: `"/gioi-thieu"`, `public: true`)

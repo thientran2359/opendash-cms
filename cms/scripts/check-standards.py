@@ -3,6 +3,7 @@
 Uses only Python 3.11+ stdlib. --self-test proves violations fail in a temporary repo.
 """
 import argparse
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -598,6 +599,41 @@ def mutation_handlers(app, imports, functions, constructors=None):
     return errors
 
 
+MAX_SOURCE_LOC = 600
+
+
+def check_loc_limits(root):
+    errors = []
+    baseline_path = root / 'cms/scripts/loc-baseline.json'
+    if not baseline_path.is_file():
+        return []
+    baseline = json.loads(baseline_path.read_text(encoding='utf-8'))
+    if not isinstance(baseline, dict):
+        return ['cms/scripts/loc-baseline.json must be a JSON object']
+
+    scan_roots = [
+        (root / 'cms/crates/opendash-core/src', {'.rs'}),
+        (root / 'cms/crates/opendash-server/src', {'.rs'}),
+        (root / 'cms/admin/src', {'.ts', '.tsx'}),
+    ]
+    for base, exts in scan_roots:
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob('*')):
+            if not path.is_file() or path.suffix not in exts:
+                continue
+            rel = path.relative_to(root).as_posix()
+            text = path.read_text(encoding='utf-8', errors='ignore')
+            lines = text.count('\n') + (1 if text and not text.endswith('\n') else 0)
+            limit = baseline.get(rel, MAX_SOURCE_LOC)
+            if lines > limit:
+                if rel in baseline:
+                    errors.append(f'file exceeds LOC ratchet baseline ({lines} > {limit}): {rel}')
+                else:
+                    errors.append(f'file exceeds {MAX_SOURCE_LOC} LOC limit ({lines} > {MAX_SOURCE_LOC}): {rel}')
+    return errors
+
+
 def check(root):
     errors = []
     core = root / 'cms/crates/opendash-core'
@@ -650,6 +686,7 @@ def check(root):
     imports, constructors, import_errors = app_imports(app)
     errors.extend(import_errors)
     errors.extend(mutation_handlers(app, imports, route_functions(server / 'routes'), constructors))
+    errors.extend(check_loc_limits(root))
     return errors
 
 
@@ -1089,6 +1126,22 @@ pub async fn upload_restore_archive_with_timeout() -> ApiResult<Response> {
                 path.unlink()
             else:
                 path.write_text(old, encoding='utf-8')
+        run(0)
+
+        baseline_file = root / 'cms/scripts/loc-baseline.json'
+        baseline_file.parent.mkdir(parents=True, exist_ok=True)
+        baseline_file.write_text('{"cms/crates/opendash-core/src/legacy_big.rs": 650}\n', encoding='utf-8')
+        legacy_big = root / 'cms/crates/opendash-core/src/legacy_big.rs'
+        legacy_big.write_text('\n'.join(['// line'] * 650) + '\n', encoding='utf-8')
+        run(0)
+        legacy_big.write_text('\n'.join(['// line'] * 651) + '\n', encoding='utf-8')
+        run(1, 'exceeds LOC ratchet baseline')
+        legacy_big.unlink()
+        new_big = root / 'cms/admin/src/new_big.ts'
+        new_big.write_text('\n'.join(['// line'] * 601) + '\n', encoding='utf-8')
+        run(1, 'exceeds 600 LOC limit')
+        new_big.unlink()
+        baseline_file.unlink()
         run(0)
     print(
         f'PASS: standards check rejects SQL, I/O, dependency, fetch and '

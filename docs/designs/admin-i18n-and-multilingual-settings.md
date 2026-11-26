@@ -192,7 +192,7 @@ ALTER TABLE site_locales
       pub available_locales: &'static [opendash_core::i18n::CmsLocaleOption],
   }
   ```
-- **Contract `GeneralSettings` & `GeneralSettingsInput`** ([`storage/settings.rs#L781-L821`](../../cms/crates/opendash-server/src/storage/settings.rs#L781-L821)):
+- **Contract `GeneralSettings` & `GeneralSettingsInput`** ([`storage/settings.rs#L781-L821`](../../cms/crates/opendash-server/src/storage/settings/mod.rs)):
   - Thêm `pub cms_locale: String` vào `GeneralSettings` (trả trong cả `get_general_in_conn_for_locale` và `SaveOutcome::Saved`).
   - Derive `Default` trên `GeneralSettingsInput` và thêm `#[serde(default)] pub cms_locale: Option<String>` (cập nhật 2 vị trí khởi tạo struct trong Rust: [`storage/overrides.rs#L3155-L3159`](../../cms/crates/opendash-server/src/storage/overrides.rs#L3155-L3159) và unit test `settings.rs#L2667-L2671`).
   - Cập nhật `GeneralSettingsDraft` trong [`cms/admin/src/api/settings.ts`](../../cms/admin/src/api/settings.ts#L14) thêm `cms_locale?: string`.
@@ -208,7 +208,7 @@ Thiết kế giải quyết triệt để hiệu năng `0`-query khi lỗi, an t
 
 1. **Giữ nguyên signature `ApiError` & Bổ sung `AppState.ui_locale` Cache:**
    - Giữ nguyên [`pub struct ApiError(pub StatusCode, pub Cow<'static, str>);`](../../cms/crates/opendash-server/src/error.rs#L9) cho mọi call site trong codebase.
-   - Bổ sung `pub ui_locale: std::sync::Arc<std::sync::atomic::AtomicU8>` vào [`AppState`](../../cms/crates/opendash-server/src/app.rs#L78-L93) (`0 = UNSET`, `1 = EN`, `2 = VI`; cập nhật cả 3 chỗ khởi tạo `AppState`: `main.rs#L195`, `routes/plugin.rs#L766`, `routes/operations.rs#L1169`). Khi server boot (`main.rs`), nạp `site_general_settings.cms_locale` qua [`storage/settings.rs`](../../cms/crates/opendash-server/src/storage/settings.rs) helper; mỗi lần `general_put` lưu thành công sẽ cập nhật nguyên tử vào `state.ui_locale`.
+   - Bổ sung `pub ui_locale: std::sync::Arc<std::sync::atomic::AtomicU8>` vào [`AppState`](../../cms/crates/opendash-server/src/app.rs#L78-L93) (`0 = UNSET`, `1 = EN`, `2 = VI`; cập nhật cả 3 chỗ khởi tạo `AppState`: `main.rs#L195`, `routes/plugin.rs#L766`, `routes/operations.rs#L1169`). Khi server boot (`main.rs`), nạp `site_general_settings.cms_locale` qua [`storage/settings.rs`](../../cms/crates/opendash-server/src/storage/settings/mod.rs) helper; mỗi lần `general_put` lưu thành công sẽ cập nhật nguyên tử vào `state.ui_locale`.
    - Khắc phục trước toàn bộ **`18` chuỗi mojibake `?`** trong [`cms/crates/opendash-server/src/storage/entries.rs`](../../cms/crates/opendash-server/src/storage/entries.rs) (`L1405, L1410, L1459, L1528, L1533, L1806, L1813, L1818, L1825, L1831, L1838, L1856, L1861, L1953, L1956, L2513, L2579, L2584`) về UTF-8 tiếng Việt sạch để bảng khớp chuẩn không bị rớt.
 
 2. **Động cơ Ánh xạ & Dịch Hai Chiều (`cms/crates/opendash-server/src/i18n.rs`):**
@@ -362,7 +362,7 @@ Tất cả endpoint ghi dưới đây dùng `AdmittedMutation`, `require_admin_w
 
 #### 3.4. Danh mục Kiểm soát `site_locales` Đầy đủ (`12` Storage Modules + `plugin/runtime.rs`)
 
-1. **[`storage/settings.rs`](../../cms/crates/opendash-server/src/storage/settings.rs):**
+1. **[`storage/settings.rs`](../../cms/crates/opendash-server/src/storage/settings/mod.rs):**
    - `SiteLocalesSnapshot` (`L46-51`): thêm `pub multilingual_enabled: bool`.
    - `EnabledLocaleInfo` (`L200-205`) & `list_enabled_locales_in_conn` (`L207-227`): thêm **`pub label: String`** vào struct và select `label` cùng `code, bcp47_tag, direction, is_default`, lọc `enabled = 1 AND deleted_at IS NULL` và khi `multilingual_enabled == 0` chỉ trả `is_default = 1`.
    - `get_default_locale_code_in_conn` (`L135`), `get_locale_bcp47_and_dir_in_conn` (`L168`), `resolve_requested_locale_in_conn` (`L229`), `list_locales_in_conn` (`L255`), `update_locale` (`L408`), `set_default_locale` (`L471`): thêm `deleted_at IS NULL`.
