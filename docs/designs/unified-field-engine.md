@@ -3,12 +3,12 @@
 * **Author:** Orion (Elephant / Antigravity)
 * **Status:** Approved
 * **Date:** 2026-11-26
-* **Baseline:** `main@8d3c5e3`
+* **Baseline:** `main@f47af30`
 * **Approved By:** Owner
-* **Approval Evidence:** Owner phê duyệt tường minh ngày 2026-11-26 sau khi đồng bộ [UNIFIED_FIELD_SCHEMA.md v1.2](../contracts/UNIFIED_FIELD_SCHEMA.md) (quyết định D1=1B của Luồng A) và hoàn tất 3 vòng Goldfish review độc lập.
+* **Approval Evidence:** Owner phê duyệt tường minh ngày 2026-11-26 sau khi đồng bộ [UNIFIED_FIELD_SCHEMA.md V1](../contracts/UNIFIED_FIELD_SCHEMA.md) (quyết định D1=1B của Luồng A), hoàn tất 3 vòng Goldfish review độc lập, và khẳng định chuẩn đánh phiên bản duy nhất **V1 (`1.0.0`)** (loại bỏ hoàn toàn code/bản nháp tiền-V1 cũ, không đánh `1.1`/`1.2`).
 * **Goldfish Review:** 3 vòng fresh-context độc lập (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`); toàn bộ Blocker/Major từ vòng 1–2 đã xử lý triệt để, vòng 3 đạt `0 Blocker` và vá sạch 1 Major cuối cùng (`storage/builder.rs::pattern_ids_with_schemas` + `opendash-core/src/builder_blocks.rs::extract_block_refs_lenient_with_schemas`), 3 Minor và 2 Nit; 100% kiểm tra governance (`check-plans`, `check-standards`, `check-agent-artifacts`) PASS.
 * **Related Contracts & Specs:**
-  * [Hợp đồng Hệ kiểu Trường Thống nhất (`UNIFIED_FIELD_SCHEMA` v1.2)](../contracts/UNIFIED_FIELD_SCHEMA.md)
+  * [Hợp đồng Hệ kiểu Trường Thống nhất (`UNIFIED_FIELD_SCHEMA` V1)](../contracts/UNIFIED_FIELD_SCHEMA.md)
   * [Yêu cầu Sản phẩm V1](../product/PRODUCT_REQUIREMENTS.md)
   * [Core Foundation & Quy chuẩn Code](../contracts/CORE_FOUNDATION.md)
   * [Plugin ABI v1 / v1.1](../contracts/PLUGIN_ABI.md)
@@ -22,11 +22,11 @@
 
 ## Overview
 
-Đặc tả này (**Đợt 1 — Unified Field Engine**) hiện thực hóa trọn vẹn phần móng dùng chung của [UNIFIED_FIELD_SCHEMA.md v1.2](../contracts/UNIFIED_FIELD_SCHEMA.md) (§1–§4, §6, §7) theo nguyên tắc **Clean-Slate V1 (Zero Legacy Shim)** — thay thế đồng bộ 5 hệ thống khai báo/nhập liệu trường rời rạc hiện có trong `cms/` bằng **1 lõi domain thuần Rust (`opendash_core::field_schema`)**, **1 bộ hydrate template Zero-N+1 (`opendash-server/src/field_hydrate.rs`)**, **1 bộ kiểm tra tĩnh C-SEC dựa trên cây schema** (gồm cả `RichTextNonceTable` cho theme templates và `od_icon` động qua `IconNonceTable`), và **1 Form Engine React duy nhất (`cms/admin/src/fields/`)**.
+Đặc tả này (**Đợt 1 — Unified Field Engine**) hiện thực hóa trọn vẹn phần móng dùng chung của [UNIFIED_FIELD_SCHEMA.md V1](../contracts/UNIFIED_FIELD_SCHEMA.md) (§1–§4, §6, §7) theo nguyên tắc **Clean-Slate V1 (Zero Legacy Shim)** — thay thế đồng bộ 5 hệ thống khai báo/nhập liệu trường rời rạc hiện có trong `cms/` bằng **1 lõi domain thuần Rust (`opendash_core::field_schema`)**, **1 bộ hydrate template Zero-N+1 (`opendash-server/src/field_hydrate.rs`)**, **1 bộ kiểm tra tĩnh C-SEC dựa trên cây schema** (gồm cả `RichTextNonceTable` cho theme templates và `od_icon` động qua `IconNonceTable`), và **1 Form Engine React duy nhất (`cms/admin/src/fields/`)**.
 
 Mục tiêu chiến lược của Đợt 1 là **gỡ nút cổ chai chung cho cả hai luồng phát triển song song ngay sau khi merge**:
 - **Luồng A (55 Core & Template Studio Blocks):** có sẵn toàn bộ 25 kiểu dữ liệu + 3 layout UI-only (`tab`, `accordion`, `message`), `spacing.property` (`padding` | `margin` âm), `select.options_source` (8 nguồn động kèm `GET /api/admin/fields/options-source` và kiểm tra server khi lưu), `term_ref.taxonomy_from_field` & `entry_ref.target_types: ["*"]` (để `core/list` chạy 100% qua `<UnifiedFieldForm>`), `link.label`, `icon` + `od_icon(icon.name, "class")`, DNF `conditions`, context `site_options` + `menus` trong block, và hydration dạng object đồng nhất (`{{ image.url }}`, `{{ cta.url }}`, `{{ padding.classes }}`, `{{ margin.classes }}`).
-- **Luồng B (Đợt 2 & Đợt 3 — Content Structure ACF):** có sẵn `FieldSpec` thống nhất trong `opendash_core::content`, `storage/media.rs`, `storage/public_content.rs`, `content_render.rs` (`entry.fields.<key>` + `entry.field_list`), migration `0054` & `0055` (`+0` net schema objects), và `<UnifiedFieldForm>` sẵn sàng gắn vào ACF Field Group Builder UI, Taxonomy Term Meta và Custom Options Pages.
+- **Luồng B (Đợt 2 & Đợt 3 — Content Structure ACF):** có sẵn `FieldSpec` thống nhất trong `opendash_core::content`, `storage/media.rs`, `storage/public_content.rs`, `content_render.rs` (`entry.fields.<key>` + `entry.field_list`), migration `0055` & `0056` (`+0` net schema objects), và `<UnifiedFieldForm>` sẵn sàng gắn vào ACF Field Group Builder UI, Taxonomy Term Meta và Custom Options Pages.
 
 ---
 
@@ -53,7 +53,7 @@ Kiểm toán thực tế mã nguồn `cms/` tại baseline `main@cfe320b` ghi nh
 ## Goals
 
 1. **Một lõi domain thuần Rust duy nhất (`opendash_core::field_schema`):**
-   - Định nghĩa trọn vẹn **25 kiểu dữ liệu** (`text`, `textarea`, `number`, `range`, `email`, `url`, `secret`, `richtext`, `media`, `gallery`, `link`, `select`, `checkbox`, `radio_buttons`, `boolean`, `color`, `icon`, `date`, `datetime`, `time`, `spacing`, `entry_ref`, `term_ref`, `group`, `repeater`) và **3 layout UI-only** (`tab`, `accordion`, `message`) đúng bảng §2.1 & §3 của [UNIFIED_FIELD_SCHEMA.md v1.2](../contracts/UNIFIED_FIELD_SCHEMA.md).
+   - Định nghĩa trọn vẹn **25 kiểu dữ liệu** (`text`, `textarea`, `number`, `range`, `email`, `url`, `secret`, `richtext`, `media`, `gallery`, `link`, `select`, `checkbox`, `radio_buttons`, `boolean`, `color`, `icon`, `date`, `datetime`, `time`, `spacing`, `entry_ref`, `term_ref`, `group`, `repeater`) và **3 layout UI-only** (`tab`, `accordion`, `message`) đúng bảng §2.1 & §3 của [UNIFIED_FIELD_SCHEMA.md V1](../contracts/UNIFIED_FIELD_SCHEMA.md).
    - Thực thi ma trận năng lực theo 5 context (`FieldContext::{Content, Term, Options, OwnerSettings, StudioBlock}`), bất biến M7-S09, điều kiện ẩn/hiện DNF (`Vec<Vec<ConditionRule>>` với 8 toán tử, chống chu trình và chống oracle quyền đọc), `spacing.property: Padding | Margin` (`0..=256` vs `-256..=256`), `select.options_source` (8 nguồn động cho `StudioBlock`), `term_ref.taxonomy_from_field` & `entry_ref.target_types: ["*"]` (cho `StudioBlock`), giới hạn độ sâu/số lượng/bytes, và `check_schema_compatibility` (`COMPAT-1..4`).
    - **Xóa bỏ 100% kiểu field cũ:** `BlockFieldSpec`, `ShowIfRule`, `ShowIfScalar`, `ThemeOptionType`, `ThemeOptionDef`, `ThemeOptionChoice`, `PluginSettingFieldType`, `PluginSettingChoice`, `PluginSettingField`, `TermFieldType`, `TermFieldRole`, `TermPanelField`, `ContentFieldType`, `ContentFieldDefinition`, `FieldDefinitionInput`.
 2. **Một bộ Hydrator Zero-N+1 (`opendash-server/src/field_hydrate.rs`) & C-SEC Schema-Tree (`template_sec.rs`, `page.rs`):**
@@ -63,10 +63,10 @@ Kiểm toán thực tế mã nguồn `cms/` tại baseline `main@cfe320b` ghi nh
 3. **API nguồn động `options_source`, API resolve `entries-resolve` & Kiểm tra Server Khi Lưu:**
    - Cung cấp `GET /api/admin/fields/options-source` (8 nguồn, trần 200 mục) và `GET /api/admin/fields/entries-resolve` (tối đa 50 IDs cho `EntryRefControl`), đều `require_session` + `Cache-Control: no-store`.
    - Kiểm tra giá trị `options_source` và `entry_ref`/`term_ref` (gồm cả `target_types: ["*"]` và `taxonomy_from_field`) trên server khi lưu với bảo toàn `previous_values`; đưa `options_source: "template_parts"` vào bộ kiểm tra vòng lặp `overrides.rs::validate_part_graph_in_tx`, chặn `options_source: "patterns"` trong `template_overrides`, và ghi `entry_pattern_refs` trên entry.
-4. **2 Migration `+0` Schema Objects (`0054` & `0055`), `STARTER_THEME_VERSION = "1.2.0"` & Media ACL có Index:**
-   - **`0054_theme_option_locale_media_refs.sql` (S02, `+0` objects):** rebuild `theme_option_media_refs` bổ sung cột `locale` vào PK để hỗ trợ đầy đủ `translatable: true` trên `media`/`gallery`/`group`/`repeater`, kèm kiểm tra `site_locales` và pin media trong `theme_option_locale_values`.
-   - **`0055_unified_field_content_cutover.sql` (S04, `+0` objects):** chuẩn hóa JSON cho `content_types` (`post`/`page`), `content_field_groups`, `admin_extensions` (`min_role` → `acl`), dọn hàng non-core tiền-V1 trong `builder_block_definitions`, và rebuild `entry_builder_media_refs` bổ sung `source_kind IN ('builder', 'field')` + backfill để Public Media ACL và `media_refs.rs` chạy theo index `O(log N)` không bao giờ `LIKE '%...%'` full-table scan.
-   - Nâng built-in starter theme lên **`STARTER_THEME_VERSION = "1.2.0"`** (không sửa đè digest của `1.0.0..1.1.1` nên không bao giờ gây `409 Conflict` khi khởi động DB đã có trước) và cắt chuyển trọn bộ `builtin_blocks/`, `examples/`, `fixtures/`.
+4. **2 Migration `+0` Schema Objects (`0055` & `0056`), Starter Theme V1 (`1.0.0`) & Media ACL có Index:**
+   - **`0055_theme_option_locale_media_refs.sql` (S02, `+0` objects):** rebuild `theme_option_media_refs` bổ sung cột `locale` vào PK để hỗ trợ đầy đủ `translatable: true` trên `media`/`gallery`/`group`/`repeater`, kèm kiểm tra `site_locales` và pin media trong `theme_option_locale_values`.
+   - **`0056_unified_field_content_cutover.sql` (S04, `+0` objects):** chuẩn hóa JSON cho `content_types` (`post`/`page`), `content_field_groups`, `admin_extensions` (`min_role` → `acl`), dọn hàng non-core tiền-V1 trong `builder_block_definitions`, và rebuild `entry_builder_media_refs` bổ sung `source_kind IN ('builder', 'field')` + backfill để Public Media ACL và `media_refs.rs` chạy theo index `O(log N)` không bao giờ `LIKE '%...%'` full-table scan.
+   - Hợp nhất built-in starter theme về duy nhất **`STARTER_THEME_VERSION = "1.0.0"`** (xóa bỏ toàn bộ các bản nháp overlay tiền-V1 cũ, thay sạch bản nháp tiền-V1 trên DB dev mà không gây `409 Conflict` hay lỗi FK) và cắt chuyển trọn bộ `builtin_blocks/`, `examples/`, `fixtures/`.
 5. **Một React Form Engine duy nhất (`cms/admin/src/fields/`) với 0 dependency mới:**
    - Xây dựng `<UnifiedFieldForm>` hỗ trợ đủ 25 kiểu dữ liệu + 3 layout UI-only, DNF `conditions`, lưới `width`, `spacing` (`padding`/`margin` âm), `select` động `options_source`, `icon` picker 48 `CORE_ICONS`, `gallery`, `link` có `label`, `entry_ref`/`term_ref`, `group` nested, `repeater` 1 cấp, và `secret` write-only nội tuyến.
    - Kiểm thử unit logic thuần bằng `node:test` + `typescript` có sẵn (`cms/admin/scripts/test-field-engine.mjs`, 0 dependency mới), cắt chuyển cả 5 bề mặt Admin, xóa `BlockSchemaForm.tsx`, `FieldValueInput.tsx` và `upcastOwnerDefToBlockField`.
@@ -89,7 +89,7 @@ Những hạng mục sau thuộc **Luồng A (55 Studio Blocks)** hoặc **Luồ
 ## Critical User Journeys (CUJs)
 
 ### CUJ 1: Tác giả Studio Block dùng `spacing.property`, `select.options_source`, `icon`, `group` nested & DNF `conditions`
-* **Given:** Một block khai báo `block.json` chuẩn `UNIFIED_FIELD_SCHEMA` v1.2 gồm `tab` (`tab_content` / `tab_style`), `accordion` (`acc_advanced`), `message`, `group` nested `hero_card` (`media`, `link` có `label`, `icon`), `spacing` (`property: "margin"`, `min: -64`), `select` (`options_source: "menus"`), và trường phụ thuộc DNF `conditions`.
+* **Given:** Một block khai báo `block.json` chuẩn `UNIFIED_FIELD_SCHEMA` V1 gồm `tab` (`tab_content` / `tab_style`), `accordion` (`acc_advanced`), `message`, `group` nested `hero_card` (`media`, `link` có `label`, `icon`), `spacing` (`property: "margin"`, `min: -64`), `select` (`options_source: "menus"`), và trường phụ thuộc DNF `conditions`.
 * **When:** Admin mở OpenDash Studio, thêm block `core/showcase`, chọn menu tải động qua `GET /api/admin/fields/options-source?source=menus`, chọn icon từ 48 `CORE_ICONS`, chỉnh margin âm `-16px`, nhập link kèm nhãn, bật/tắt điều kiện ẩn/hiện rồi lưu và xem trang công khai.
 * **Then:**
   - Studio hiển thị form sạch từ `<UnifiedFieldForm>` (2 tab gọn, margin âm hiển thị `-m-4` / `-mt-4`, trường ẩn không chặn lưu và bảo toàn giá trị cũ khi bật lại).
@@ -97,10 +97,10 @@ Những hạng mục sau thuộc **Luồng A (55 Studio Blocks)** hoặc **Luồ
   - Trang công khai render đúng `{{ hero_card.image.url }}` (có `width`/`height` thật), `{{ hero_card.cta.url }}`/`{{ hero_card.cta.label }}`, `{{ od_icon(hero_card.badge_icon.name, "w-5 h-5") }}` (qua `IconNonceTable`), và `{{ outer_margin.classes }}` sinh `-m-4` (hoặc fallback CSS `margin:` khi không trùng thang Tailwind `±128px`).
 
 ### CUJ 2: Quản trị viên cấu hình Theme Options đa ngôn ngữ (gồm cả `media`/`gallery`), Global Site Options & Owner Secrets
-* **Given:** Active theme `opendash-starter` `1.2.0` khai báo `options` dùng kiểu chuẩn `text`, `url`, `media`, `richtext` với `translatable: true` và `public: true`; một plugin và `theme.json -> functions` khai báo `settings_schema` chứa `text`, `select` (`options`), `group`, `media` và `secret`.
+* **Given:** Active theme `opendash-starter` `1.0.0` (V1) khai báo `options` dùng kiểu chuẩn `text`, `url`, `media`, `richtext` với `translatable: true` và `public: true`; một plugin và `theme.json -> functions` khai báo `settings_schema` chứa `text`, `select` (`options`), `group`, `media` và `secret`.
 * **When:** Admin chỉnh Global Site Options (logo + social links), chỉnh Theme Options (bao gồm cả text và ảnh đa ngôn ngữ) ở cả locale mặc định lẫn locale phụ, và lưu Plugin/Theme Functions Settings kèm thay đổi 1 trường `secret`.
 * **Then:**
-  - `translatable: true` hoạt động đúng trên mọi kiểu dữ liệu nội dung (gồm cả `media`/`gallery`/`group`/`repeater`), đồng bộ `theme_option_media_refs` theo từng `locale` (`0054`) và kiểm tra `site_locales` khi phục vụ `/media/{id}/file`.
+  - `translatable: true` hoạt động đúng trên mọi kiểu dữ liệu nội dung (gồm cả `media`/`gallery`/`group`/`repeater`), đồng bộ `theme_option_media_refs` theo từng `locale` (`0055`) và kiểm tra `site_locales` khi phục vụ `/media/{id}/file`.
   - `OwnerOptionsForm` render trực tiếp `<UnifiedFieldForm>` (trường `secret` hiển thị nội tuyến đúng vị trí schema, luôn trả `{"configured": bool}` sau khi lưu, cấm trùng khóa `"secret_ref"` trong `group`).
   - Trang công khai truy cập đồng nhất `{{ options.site_logo.url }}`, `{{ site_options.site_logo.url }}`, `{{ options.header_cta_url }}`; ảnh trong `media`/`gallery` (kể cả trong `group`/`repeater` và ở locale phụ) của option `public: true` được cấp quyền tải công khai và bị chặn xóa bởi `media_refs`.
 
@@ -112,13 +112,13 @@ Những hạng mục sau thuộc **Luồng A (55 Studio Blocks)** hoặc **Luồ
   - Khi còn `draft` hoặc với trường `private`, `/media/{id}/file` trả `404` (kiểm tra `media::find` trước, rồi truy vấn index `idx_entry_builder_media_refs_media`, 0 full-table scan); khi xuất bản, ảnh ở trường `public` (kể cả trong `group`/`repeater`) tải được công khai và hiển thị qua `{{ entry.fields.<key>.url }}` cũng như `{% for f in entry.field_list %}`.
   - Trường `richtext` trong `entry.fields.*` được render an toàn qua `RichTextNonceTable` chỉ trong `HtmlScanState::Body`.
 
-### CUJ 4: Khởi tạo DB mới & Nâng cấp an toàn từ `baseline_0001.sqlite` qua `0054` + `0055` + Starter `1.2.0`
-* **Given:** Một database trống, một database nâng cấp từ fixture lịch sử `cms/fixtures/baseline_0001.sqlite`, và một database dev đang chạy `opendash-starter` `1.1.1`.
-* **When:** Chạy `init_db` (`preflight_builtin_key_collisions` → `sqlx::migrate!` (`0054` + `0055`) → `ensure_embedded_core_blocks`) và `ensure_default_starter_theme`.
+### CUJ 4: Khởi tạo DB mới & Nâng cấp an toàn từ `baseline_0001.sqlite` qua `0055` + `0056` + Starter V1 (`1.0.0`)
+* **Given:** Một database trống, một database nâng cấp từ fixture lịch sử `cms/fixtures/baseline_0001.sqlite`, và một database dev cũ đang lưu bản nháp `opendash-starter` tiền-V1.
+* **When:** Chạy `init_db` (`preflight_builtin_key_collisions` → `sqlx::migrate!` (`0055` + `0056`) → `ensure_embedded_core_blocks`) và `ensure_default_starter_theme`.
 * **Then:**
-  - `preflight_builtin_key_collisions` chấp nhận cả định nghĩa `post`/`page` tiền-`0055` (`rich_text`/`image`) lẫn hậu-`0055` (`richtext`/`media`) cho `owner_kind == 'core'`.
-  - Cả `0054` và `0055` đều đóng góp **`+0` net schema objects** (giữ tổng `sqlite_schema < 256` theo `schema_fingerprints.json`).
-  - `ensure_default_starter_theme` cài mới và tự động nâng cấp `opendash-starter` từ `< 1.2.0` lên **`1.2.0`** mà không gặp bất kỳ lỗi `409 Conflict` nào.
+  - `preflight_builtin_key_collisions` chấp nhận cả định nghĩa `post`/`page` tiền-`0056` (`rich_text`/`image`) lẫn hậu-`0056` (`richtext`/`media`) cho `owner_kind == 'core'`.
+  - Cả `0055` và `0056` đều đóng góp **`+0` net schema objects** (giữ tổng `sqlite_schema < 256` theo `schema_fingerprints.json`).
+  - `ensure_default_starter_theme` cài mới và tự động thay sạch các bản nháp `opendash-starter` tiền-V1 về duy nhất **`1.0.0`** mà không gặp lỗi `409 Conflict` hay vi phạm FK `ON DELETE RESTRICT`.
 
 ---
 
@@ -139,7 +139,7 @@ flowchart LR
     end
 
     subgraph Server["opendash-server (Storage · Hydration · C-SEC · Routes)"]
-        M54["Migrations 0054 &amp; 0055 (+0 objects)\nlocale media refs · V1 JSON &amp; field index"]
+        M54["Migrations 0055 &amp; 0056 (+0 objects)\nlocale media refs · V1 JSON &amp; field index"]
         OPTAPI["routes/fields.rs &amp; storage/fields.rs\noptions-source (8) · entries-resolve (50)"]
         ST["storage/{settings,builder,overrides,content,entries,media,media_refs,public_content,admin_extensions}.rs"]
         HYD["field_hydrate.rs\nZero-N+1 Chunked Batch Hydrator\n(media · gallery · link · icon · spacing · refs)"]
@@ -551,7 +551,7 @@ pub struct FieldSpec {
      - Response: `OptionsSourceResponse { source, items: Vec<DynamicSelectOption> }` (trần `200` mục, `ORDER BY` tất định).
    - **`GET /api/admin/fields/entries-resolve`** (`require_session`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`):
      - Query: `ids` (danh sách số nguyên dương phân cách dấu phẩy, tối đa `50` IDs; vượt quá trả `400`).
-     - Trả `Vec<ResolvedEntrySummary { id, content_type_key, title, slug, publication_status, locale }>` cho các entry đang tồn tại thuộc CPT `provider_status = 'active'` và `content_type_key != 'pattern'` (dùng để `EntryRefControl` hiển thị nhãn các ID đã chọn kể cả khi `target_types` gồm nhiều CPT!).
+     - Trả `Vec<ResolvedEntrySummary { id, content_type_key, title, slug, publication_status, locale }>` cho các entry đang tồn tại (`trashed_at IS NULL`) thuộc CPT `provider_status = 'active'` và `content_type_key != 'pattern'` (dùng để `EntryRefControl` hiển thị nhãn các ID đã chọn kể cả khi `target_types` gồm nhiều CPT!).
 2. **Hợp đồng 8 nguồn động (`storage/fields.rs`):**
 
 | `options_source` | Giá trị `value` | Nguồn SQL / Manifest | Kiểm tra Server khi lưu (`validate_block_dynamic_options_in_tx`) & Tích hợp liên-luồng |
@@ -563,11 +563,11 @@ pub struct FieldSpec {
 | `taxonomies` | `taxonomy_definitions.key` | `taxonomy_definitions` `provider_status = 'active' AND declaration_state = 'declared'` | Tồn tại active & declared (hoặc không đổi). |
 | `context_fields` | `field_key` | 4 khóa lõi (`title`, `slug`, `url`, `cover_url`) + nếu có `type_key`: chỉ tải khi CPT `provider_status = 'active' AND key != 'pattern' AND COALESCE(settings.public, 1) = 1`, lấy field `Active` + `Public` + `min_view_role <= actor_role` từ `EffectiveContentSchema` | Với template/entry gắn `scoped_type_key`: thuộc 4 khóa lõi hoặc field active `Public` (`min_view_role <= actor_role`) của CPT đó; với template tổng quát: thuộc 4 khóa lõi hoặc `valid_snake_key` (lúc render luôn lọc `Public`). |
 | `template_parts` | `part_key` | Khóa trong `active_theme.manifest.parts` | Có trong `active_theme.manifest.parts` (hoặc không đổi). **Chống vòng lặp bắt buộc:** `overrides.rs::document_parts_and_slot_count` phải quét cả `PluginBlock` có field `options_source == TemplateParts` đưa vào `validate_part_graph_in_tx`! |
-| `patterns` | `entry.id.to_string()` | `content_entries` JOIN `site_locales` (`deleted_at IS NULL`) WHERE `content_type_key = 'pattern' AND publication_status = 'draft'` (lọc `locale` nếu truyền) `ORDER BY id DESC LIMIT 200` | **Bị từ chối trong `template_overrides`** (`overrides.rs:742-746`) và **bị từ chối bên trong mọi bản ghi `type_key == 'pattern'`** (truyền `&schemas` vào `storage/builder.rs::has_nested_pattern_or_list` tại cả L524 & L1167 để giữ bất biến 1-hop Pattern chống chu trình `A → B → A` theo PRD §4); trên Entry Builder & comment-block: bổ sung `storage/builder.rs::pattern_ids_with_schemas(document, &schemas)` (nối vào đủ 4 điểm gọi `builder.rs:515, 1172, 1554` và `overrides.rs:742`) và mở rộng `opendash-core/src/builder_blocks.rs::extract_block_refs_lenient_with_schemas` thu thập cả `KnownElement::PatternRef` lẫn `PluginBlock` có `options_source == Patterns` vào `pattern_ids` (ép trần chung `MAX_PATTERN_REFS = 16` và đồng bộ `entry_pattern_refs`)! |
+| `patterns` | `entry.id.to_string()` | `content_entries` JOIN `site_locales` (`deleted_at IS NULL`) WHERE `content_type_key = 'pattern' AND publication_status = 'draft' AND trashed_at IS NULL` (lọc `locale` nếu truyền) `ORDER BY id DESC LIMIT 200` | **Bị từ chối trong `template_overrides`** (`overrides.rs:742-746`) và **bị từ chối bên trong mọi bản ghi `type_key == 'pattern'`** (truyền `&schemas` vào `storage/builder.rs::has_nested_pattern_or_list` tại cả L524 & L1167 để giữ bất biến 1-hop Pattern chống chu trình `A → B → A` theo PRD §4); trên Entry Builder & comment-block: bổ sung `storage/builder.rs::pattern_ids_with_schemas(document, &schemas)` (nối vào đủ 4 điểm gọi `builder.rs:515, 1172, 1554` và `overrides.rs:742`) và mở rộng `opendash-core/src/builder_blocks.rs::extract_block_refs_lenient_with_schemas` thu thập cả `KnownElement::PatternRef` lẫn `PluginBlock` có `options_source == Patterns` vào `pattern_ids` (ép trần chung `MAX_PATTERN_REFS = 16` và đồng bộ `entry_pattern_refs`)! |
 
 3. **Kiểm tra `entry_ref` & `term_ref` trên Server khi lưu (mọi write path):**
    - Khi lưu `Content` (`storage/entries.rs`), `Term` (`storage/admin_extensions.rs`), `Options` (`storage/settings.rs`), hoặc `StudioBlock` (`storage/builder.rs`, `storage/overrides.rs`, `storage/entries.rs`):
-     - `entry_ref`: mọi ID mới (không có trong tập `previous_values` của chính field đó) phải tồn tại trong `content_entries`, thuộc CPT `provider_status = 'active'` và `content_type_key != 'pattern'`, khớp `target_types` (khi `target_types == ["*"]` ở `StudioBlock` thì chấp nhận mọi CPT `active` khác `pattern`); về locale: với `Content`, `Term` (khớp `taxonomy_terms.locale`), và `ThemeOptions` theo locale phải khớp locale bản ghi/term/option đang lưu (tránh liên kết chéo ngôn ngữ hỏng), với `GlobalSiteOptions` và `StudioBlock` chấp nhận mọi locale chưa bị xóa (`deleted_at IS NULL`).
+     - `entry_ref`: mọi ID mới (không có trong tập `previous_values` của chính field đó) phải tồn tại trong `content_entries` (`trashed_at IS NULL`), thuộc CPT `provider_status = 'active'` và `content_type_key != 'pattern'`, khớp `target_types` (khi `target_types == ["*"]` ở `StudioBlock` thì chấp nhận mọi CPT `active` khác `pattern`); về locale: với `Content`, `Term` (khớp `taxonomy_terms.locale`), và `ThemeOptions` theo locale phải khớp locale bản ghi/term/option đang lưu (tránh liên kết chéo ngôn ngữ hỏng), với `GlobalSiteOptions` và `StudioBlock` chấp nhận mọi locale chưa bị xóa (`deleted_at IS NULL`).
      - `term_ref`: với `taxonomy` tĩnh, mọi ID mới phải tồn tại trong `taxonomy_terms` thuộc `taxonomy_definitions` `provider_status = 'active' AND declaration_state = 'declared'`, khớp `taxonomy`, và tuân cùng quy tắc locale như trên. Với `taxonomy_from_field` ở `StudioBlock`: đọc `resolved_taxonomy` từ giá trị đang lưu tại khóa `taxonomy_from_field` (fallback `default` của field đích); nếu `resolved_taxonomy` rỗng/`null`, chỉ chấp nhận giá trị rỗng (`null`/`[]`) hoặc `previous_values` không đổi (mọi ID mới đều trả `400`); nếu khác rỗng, xác minh mọi ID mới thuộc `taxonomy_terms.kind = resolved_taxonomy` của taxonomy active+declared (bảo toàn `previous_values` nếu taxonomy/term bị xóa).
      - Các ID đã có sẵn trong `previous_values` được bảo toàn nếu mục tiêu bị xóa về sau (khi render công khai sẽ tự ẩn/lọc sạch).
 
@@ -578,7 +578,7 @@ pub struct FieldSpec {
 1. **Batch Preload Zero-N+1 có Phân mảnh & Trần Bộ nhớ (`storage/fields.rs` + `field_hydrate.rs`):**
    - Trước khi render một trang (`public_content.rs`, `page.rs`, `routes/themes.rs`), gom toàn bộ `media_ids`, `entry_ids`, `term_ids` từ options, entry và blocks cần render, áp trần bảo vệ bộ nhớ (**`MAX_HYDRATE_MEDIA_IDS = 512`**, **`MAX_HYDRATE_ENTRY_IDS = 128`**, **`MAX_HYDRATE_TERM_IDS = 128`** — phần dư bỏ qua an toàn thay vì OOM), rồi thực thi tối đa **3 hàm batch SQL dùng phân mảnh `CHUNK = 500` với `IN (SELECT value FROM json_each(?))`**:
      1. `load_media_hydration_map_in_conn(conn, &media_ids)`: `SELECT id, kind, width, height FROM media_assets WHERE lifecycle_state = 'active' AND id IN (SELECT value FROM json_each(?))`.
-     2. `load_entry_ref_hydration_map_in_conn(conn, &entry_ids, is_preview, active_locale)`: lọc cứng `t.provider_status = 'active'`, `e.content_type_key != 'pattern'`, khi `!is_preview` lọc thêm `e.publication_status = 'published'`, `COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1`, `sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)`. Resolve `cover_url` bằng cách batch-load `EffectiveContentSchema` theo từng `distinct type_key` (chỉ 1 lần/type, không N+1) và lấy trường `media` (`media_kind == Image`, `Active`, `Public`) đầu tiên. **Chỉ hydrate 1 tầng** (không đệ quy `entry_ref` bên trong `entry_ref`).
+     2. `load_entry_ref_hydration_map_in_conn(conn, &entry_ids, is_preview, active_locale)`: lọc cứng `e.trashed_at IS NULL`, `t.provider_status = 'active'`, `e.content_type_key != 'pattern'`, khi `!is_preview` lọc thêm `e.publication_status = 'published'`, `COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1`, `sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)`. Resolve `cover_url` bằng cách batch-load `EffectiveContentSchema` theo từng `distinct type_key` (chỉ 1 lần/type, không N+1) và lấy trường `media` (`media_kind == Image`, `Active`, `Public`) đầu tiên. **Chỉ hydrate 1 tầng** (không đệ quy `entry_ref` bên trong `entry_ref`).
      3. `load_term_ref_hydration_map_in_conn(conn, &term_ids, is_preview, active_locale)`: lọc cứng `d.provider_status = 'active' AND d.declaration_state = 'declared'`, khi `!is_preview` lọc thêm `d.public = 1` và locale đang bật; preload `featured_image_media_id` gộp vào batch media. **Chỉ hydrate 1 tầng.**
    - `field_hydrate.rs` thuần biến đổi dữ liệu (0 SQL), trả đầy đủ object chuẩn §6 (`media` với `alt: ""`, `gallery`, `link`, `icon`, `spacing`, `entry_ref`, `term_ref`, `group`, `repeater`, `richtext` qua nonce).
    - **Tích hợp `spacing.property` (`Padding` vs `Margin`):**
@@ -614,15 +614,15 @@ pub struct FieldSpec {
 
 ---
 
-### D. Hợp nhất Storage, Migrations `0054` & `0055`, Starter `1.2.0` & Public Media ACL
+### D. Hợp nhất Storage, Migrations `0055` & `0056`, Starter V1 (`1.0.0`) & Public Media ACL
 
-#### D.1. Hai Migration `+0` Net Schema Objects (`0054` trong S02, `0055` trong S04)
+#### D.1. Hai Migration `+0` Net Schema Objects (`0055` trong S02, `0056` trong S04)
 
-1. **`cms/migrations/0054_theme_option_locale_media_refs.sql` (Slice S02 — `+0` net schema objects):**
+1. **`cms/migrations/0055_theme_option_locale_media_refs.sql` (Slice S02 — `+0` net schema objects):**
    - Rebuild `theme_option_media_refs` (bảng hiện có ở `0053:87-94`) bổ sung `locale TEXT NOT NULL DEFAULT ''` vào khóa chính để lưu riêng tham chiếu media theo từng ngôn ngữ (mặc định `''`, locale phụ như `'en'`, `'vi'`):
    ```sql
-   -- 0054: Them cot locale vao PK cua theme_option_media_refs (+0 net schema objects)
-   CREATE TABLE theme_option_media_refs_0054 (
+   -- 0055: Them cot locale vao PK cua theme_option_media_refs (+0 net schema objects)
+   CREATE TABLE theme_option_media_refs_0055 (
        theme_id TEXT NOT NULL,
        owner_kind TEXT NOT NULL DEFAULT 'theme' CHECK (owner_kind IN ('theme', 'plugin', 'theme_functions')),
        owner_id TEXT NOT NULL,
@@ -631,26 +631,26 @@ pub struct FieldSpec {
        media_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE RESTRICT,
        PRIMARY KEY (owner_kind, owner_id, locale, option_key, media_id)
    );
-   INSERT INTO theme_option_media_refs_0054 (theme_id, owner_kind, owner_id, locale, option_key, media_id)
+   INSERT INTO theme_option_media_refs_0055 (theme_id, owner_kind, owner_id, locale, option_key, media_id)
    SELECT theme_id, owner_kind, owner_id, '', option_key, media_id
      FROM theme_option_media_refs;
    DROP TABLE theme_option_media_refs;
-   ALTER TABLE theme_option_media_refs_0054 RENAME TO theme_option_media_refs;
+   ALTER TABLE theme_option_media_refs_0055 RENAME TO theme_option_media_refs;
    ```
-2. **`cms/migrations/0055_unified_field_content_cutover.sql` (Slice S04 — `+0` net schema objects):**
+2. **`cms/migrations/0056_unified_field_content_cutover.sql` (Slice S04 — `+0` net schema objects):**
    - **Bước 1 — Rebuild `entry_builder_media_refs` bổ sung `source_kind` (`+0` objects):**
      ```sql
-     CREATE TABLE entry_builder_media_refs_0055 (
+     CREATE TABLE entry_builder_media_refs_0056 (
          entry_id INTEGER NOT NULL REFERENCES content_entries(id) ON DELETE CASCADE,
          media_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE RESTRICT,
          ref_role TEXT NOT NULL CHECK (ref_role IN ('image', 'video', 'poster', 'file')),
          source_kind TEXT NOT NULL DEFAULT 'builder' CHECK (source_kind IN ('builder', 'field')),
          PRIMARY KEY (entry_id, media_id, ref_role, source_kind)
      );
-     INSERT INTO entry_builder_media_refs_0055 (entry_id, media_id, ref_role, source_kind)
+     INSERT INTO entry_builder_media_refs_0056 (entry_id, media_id, ref_role, source_kind)
      SELECT entry_id, media_id, ref_role, 'builder' FROM entry_builder_media_refs;
      DROP TABLE entry_builder_media_refs;
-     ALTER TABLE entry_builder_media_refs_0055 RENAME TO entry_builder_media_refs;
+     ALTER TABLE entry_builder_media_refs_0056 RENAME TO entry_builder_media_refs;
      CREATE INDEX idx_entry_builder_media_refs_media ON entry_builder_media_refs(media_id);
      ```
      *(Lưu ý tương thích `CHECK` trên cả `entry_builder_media_refs` trong S03 lẫn `template_override_media_refs` của `0042:87`: khi ghi media refs cho `CollectedMediaIds::{file_ids, any_ids}`, server **luôn suy `ref_role` từ `media_assets.kind` đã xác minh** (`'image'` | `'video'`, và `'file'` khi có loại file về sau), không bao giờ chèn literal `'any'` vi phạm ràng buộc `CHECK`! Trong S03/S04, cập nhật đồng bộ cả `storage/entries.rs:92-117, 204-215` lẫn `storage/builder.rs:305-408` (`DocumentMediaRefs` / `extract_document_media_refs` / `resolve_document_media_refs_in_conn`) để kiểm tra và bảo vệ `collected.file_ids` theo `media_assets.kind`.)*
@@ -668,16 +668,20 @@ pub struct FieldSpec {
        5. Với **`admin_extensions.declaration_json`**: mỗi hàng lưu tagged enum `{"kind": "term_panel", "config": {"local_key": "...", "fields": [...]}}` (`storage/admin_extensions.rs:16-21`, KHÔNG có mảng `$.term_panels`). Do đó áp điều kiện `WHERE json_extract(declaration_json, '$.kind') = 'term_panel' AND json_array_length(declaration_json, '$.config.fields') > 0`, viết lại `$.config.fields` theo `ORDER BY CAST(f.key AS INTEGER)`: chuyển `'min_role': 'admin'` → `'acl': {"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}`, `'min_role': 'editor'` → `'acl': {"min_view_role":"editor","min_edit_role":"editor","public_exposure":"private"}`, và xóa `'min_role'`.
        6. **Backfill `entry_builder_media_refs` (`source_kind = 'field'`) đầy đủ cả Base CPT lẫn Extension Field Groups:** UNION các định nghĩa field `type IN ('media', 'gallery')` (loại trừ `key = 'body'`) từ **CẢ HAI nguồn**: (i) `content_types.definition_json -> $.fields` VÀ (ii) `content_field_group_targets` JOIN `content_field_groups -> fields_json` (`association_state IN ('declared', 'withdrawn')` AND `status IN ('active', 'provider_inactive', 'withdrawn')`), kiểm tra `json_type(e.values_json, '$.' || field_key) IN ('text', 'array')`, JOIN `media_assets AS ma ON ma.id = media_id` để lấy `ref_role = ma.kind` (không hardcode `'image'`), rồi `INSERT OR IGNORE INTO entry_builder_media_refs (entry_id, media_id, ref_role, source_kind) VALUES (..., 'field')`.
        7. **Dọn `builder_block_definitions` tiền-V1 non-core:** xóa các bản ghi `owner_kind != 'core'` có `schema_json` chứa khóa bị loại bỏ (`show_if`, `image_ref`, `choices`) *(cơ chế fail-safe bỏ qua kèm cảnh báo tại `storage/page.rs:207` đã được đặt ngay từ **S03** nên không bao giờ gây 500 ở commit trung gian giữa S03 và S04!)*.
-   - **Cập nhật `storage/content.rs::preflight_builtin_key_collisions`:** hàm này chạy *trước* `sqlx::migrate!`, nên chấp nhận định nghĩa `post`/`page` có cặp `(rich_text, image)` tiền-`0055` lẫn `(richtext, media)` hậu-`0055` đối với `owner_kind == 'core'`, và vẫn fail-closed nếu `user`/`theme`/`plugin` chiếm khóa `post`/`page`/`pattern`/`section`.
+   - **Cập nhật `storage/content.rs::preflight_builtin_key_collisions`:** hàm này chạy *trước* `sqlx::migrate!`, nên chấp nhận định nghĩa `post`/`page` có cặp `(rich_text, image)` tiền-`0056` lẫn `(richtext, media)` hậu-`0056` đối với `owner_kind == 'core'`, và vẫn fail-closed nếu `user`/`theme`/`plugin` chiếm khóa `post`/`page`/`pattern`/`section`.
 
-#### D.2. Nâng cấp Built-in Starter Theme lên `STARTER_THEME_VERSION = "1.2.0"` (Không bao giờ gây 409 Conflict)
+#### D.2. Chuẩn hóa Built-in Starter Theme về `STARTER_THEME_VERSION = "1.0.0"` (Loại bỏ hoàn toàn bản nháp tiền-V1)
 
-- Tuyệt đối **không** sửa nội dung các bản đóng băng `1.0.0`, `1.0.1`, `1.1.0`, `1.1.1` dưới cùng SemVer (sẽ đổi `revision_digest` và gây `409 Conflict` tại `storage/theme.rs:463-476`).
+- OpenDash đang hướng tới phát hành **Version 1.0 đầu tiên** — các bản nháp starter tiền-V1 cũ (`opendash-starter-1.0.1/`, `opendash-starter-1.1.0/`, `opendash-starter-1.1.1/`) và các hàm repair frozen digest cũ **không** được coi là bản phát hành V1.0 cần giữ lại hay đẩy lên `1.2.0`, mà bị **loại bỏ hoàn toàn**.
 - Trong S02:
-  - Nâng `STARTER_THEME_VERSION = "1.2.0"` trong `builtin_themes/mod.rs`.
-  - Hợp nhất bộ file Clean-Slate V1 chuẩn (`"version": "1.2.0"`, `options` dùng `"text"`/`"url"`, `canvas` giữ `"chrome": "none"`, `locales/{vi,en}.json`, `language-switcher.html`) vào `cms/crates/opendash-server/src/builtin_themes/opendash-starter/`, xóa 3 thư mục overlay tiền-V1 đã nghỉ hưu (`opendash-starter-1.0.1/`, `opendash-starter-1.1.0/`, `opendash-starter-1.1.1/`) và gỡ vòng lặp repair `1.0.0..1.1.0` khỏi `storage/theme.rs:643-695`.
-  - Trong `ensure_default_starter_theme`: khi `selection.revision_id.is_none()` HOẶC active theme hiện tại là `opendash-starter` với `version` tiền-V1 (`1.0.0`, `1.0.1`, `1.1.0`, `1.1.1`), tự động kích hoạt bản `1.2.0` vừa stage (chỉ giữ `version = 1` cho fresh install). Vì `1.2.0` là SemVer mới hoàn toàn, mọi DB cũ đều nâng cấp sạch không bao giờ gặp `409 Conflict`!
-  - Ghi chú về cập nhật template của `opendash-starter` ở S04: trong S02–S04 thuộc cùng Đợt 1 chưa phát hành, S04 cập nhật `single.html`/`page.html`/`single-post.html`/`archive.html`/`archive-post.html` trong `opendash-starter/` sang `entry.fields.*` & `entry.field_list` và cập nhật digest kiểm chứng trong `storage/theme_tests.rs`.
+  - Giữ duy nhất **`STARTER_THEME_VERSION = "1.0.0"`** trong `builtin_themes/mod.rs`.
+  - Hợp nhất toàn bộ file chuẩn Clean-Slate V1 (`"version": "1.0.0"`, `options` dùng `"text"`/`"url"`, `canvas` giữ `"chrome": "none"`, `locales/{vi,en}.json`, `language-switcher.html`) vào thư mục duy nhất `cms/crates/opendash-server/src/builtin_themes/opendash-starter/`, **xóa bỏ** 3 thư mục nháp tiền-V1 (`opendash-starter-1.0.1/`, `opendash-starter-1.1.0/`, `opendash-starter-1.1.1/`), gỡ các hàm `builtin_starter_theme_v100/v101/v110_files()` và vòng lặp repair frozen digest khỏi `storage/theme.rs:643-695` (cập nhật `storage/theme_tests.rs` & `tests/starter_theme_v3_test.rs` xác minh bản duy nhất `1.0.0`).
+  - **Xử lý sạch & không bao giờ gây `409 Conflict` / lỗi FK trên DB dev cũ:** Trong `ensure_default_starter_theme`, trước khi gọi `stage_and_commit_v3_revision` với `STARTER_THEME_VERSION = "1.0.0"` và `new_digest`:
+    1. Nếu trong `theme_revisions` có hàng cũ với `theme_id = 'opendash-starter' AND version = '1.0.0' AND revision_digest != new_digest`: tạm đổi cột `version` của hàng nháp đó sang `'0.0.0-pre-' || substr(revision_digest, 1, 8)` để tránh xung đột `UNIQUE(theme_id, version)` tại `storage/theme.rs:463-476` mà không vi phạm FK `ON DELETE RESTRICT`.
+    2. Stage & commit bản `opendash-starter` **`1.0.0`** chuẩn V1.
+    3. Nếu `selection.revision_id.is_none()` HOẶC active theme hiện tại là một bản nháp `opendash-starter` tiền-V1 (`revision_digest != new_digest`), tự động `activate_revision` sang bản `1.0.0` mới (chỉ giữ `version = 1` cho fresh install).
+    4. Dọn sạch mọi hàng `theme_revisions` có `theme_id = 'opendash-starter' AND revision_digest != new_digest` không còn bị tham chiếu bởi `theme_active_selection` hoặc `theme_legacy_mappings`.
+  - Ghi chú về cập nhật template của `opendash-starter` ở S04: S04 cập nhật `single.html`/`page.html`/`single-post.html`/`archive.html`/`archive-post.html` trong `opendash-starter/` sang `entry.fields.*` & `entry.field_list` và cập nhật digest kiểm chứng `1.0.0` trong `storage/theme_tests.rs`.
 
 #### D.3. Hợp nhất `storage/settings.rs` (`Options` + `OwnerSettings`), `plugin/runtime.rs` & Translatable Media
 
@@ -707,7 +711,7 @@ pub struct FieldSpec {
 - **Trong `storage/public_content.rs::media_is_referenced(db, id)`:**
   - Nhánh `theme_option_media_refs AS tom`: lọc active theme AND (`tom.locale = ''` OR `EXISTS (SELECT 1 FROM site_locales AS sl WHERE sl.code = tom.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))`), rồi parse `Vec<FieldSpec>` qua `parse_theme_options_schema` trong Rust kiểm tra `tom.option_key` có `public == true` (hỗ trợ đệ quy `media`, `gallery`, `group`, `repeater`).
   - Nhánh `entry_builder_media_refs` (`source_kind = 'builder'`): giữ nguyên logic kiểm tra `body_can_grant_media(&schema)` (thêm điều kiện `r.source_kind = 'builder'` vào cả nhánh trực tiếp và nhánh `entry_pattern_refs`).
-  - Nhánh `entry_builder_media_refs` (`source_kind = 'field'`): truy vấn theo index `idx_entry_builder_media_refs_media` lấy ứng viên `(e.id, e.content_type_key, e.values_json)` đã xuất bản trên locale đang bật và `COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1`, rồi xác minh trong Rust bằng `load_effective_content_schema_in_tx` + `field_schema::collect_public_media_ids(..., include_withdrawn_public = true)` (**bảo toàn quy tắc M7-S09 & PRD**: trường `Withdrawn`/`ProviderInactive` có `public_exposure == Public` vẫn giữ quyền đọc media đã xuất bản, trong khi trường `Private` hoặc chuỗi 64-hex trong trường `text` không bao giờ lọt!). **Tuyệt đối 0 câu lệnh `LIKE '%...%'` full-table scan!**
+  - Nhánh `entry_builder_media_refs` (`source_kind = 'field'`): truy vấn theo index `idx_entry_builder_media_refs_media` lấy ứng viên `(e.id, e.content_type_key, e.values_json)` có `e.trashed_at IS NULL`, đã xuất bản trên locale đang bật và `COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1`, rồi xác minh trong Rust bằng `load_effective_content_schema_in_tx` + `field_schema::collect_public_media_ids(..., include_withdrawn_public = true)` (**bảo toàn quy tắc M7-S09 & PRD**: trường `Withdrawn`/`ProviderInactive` có `public_exposure == Public` vẫn giữ quyền đọc media đã xuất bản, trong khi trường `Private` hoặc chuỗi 64-hex trong trường `text` không bao giờ lọt!). **Tuyệt đối 0 câu lệnh `LIKE '%...%'` full-table scan!**
 - **Trong `storage/entries.rs`, `storage/import.rs`, `storage/builder.rs`, `storage/page.rs`:**
   - Mọi lệnh xóa builder media refs (`builder.rs:1549`, `page.rs:523`, `entries.rs:135`) phải giới hạn `WHERE entry_id = ? AND source_kind = 'builder'`.
   - Tạo helper `sync_entry_field_media_refs_in_conn(conn, entry_id, &effective_schema, &values)` duyệt **TOÀN BỘ `effective_schema.effective_fields` (bao gồm cả `Active`, `Withdrawn`, và `ProviderInactive`, loại trừ `body`)** để giữ nguyên nguyên tắc bảo toàn media ACL khi đổi theme / tắt plugin / thu hồi trường; xóa `WHERE entry_id = ? AND source_kind = 'field'` rồi `INSERT OR IGNORE` với `ref_role` lấy từ `media_assets.kind`. Gọi helper này trong cùng transaction tại **mọi** điểm ghi entry: `create_entry*`, `update_entry*`, `commit_composite_entry_save`, `commit_entry_translation` (`entries.rs:3260`), và `storage/import.rs:1295` (ngay cạnh `sync_entry_body_refs_in_conn`).
@@ -722,7 +726,7 @@ pub struct FieldSpec {
 ### E. Hệ thống Giao diện Nhập liệu Hợp nhất (`cms/admin/src/fields/`)
 
 1. **Cấu trúc module mới `cms/admin/src/fields/` (0 dependency mới):**
-   - `types.ts`: phản ánh 1:1 `opendash_core::field_schema` (đầy đủ 25 data types + 3 UI layouts + mọi thuộc tính v1.2).
+   - `types.ts`: phản ánh 1:1 `opendash_core::field_schema` (đầy đủ 25 data types + 3 UI layouts + mọi thuộc tính V1).
    - `conditions.ts`: hàm thuần `evaluateConditions(conditions, scopeValues, rootValues, defaults)` cài đúng 8 toán tử DNF, so sánh `datetime` UTC millis & `time` seconds-since-midnight, đồng nhất 100% với Rust.
    - `helpers.ts`: hàm thuần `canonicalEmptyValue`, `initialValuesFromFields`, `flattenDataFields`, `normalizeSpacingValue`, `formatDateTimeForSiteTz` / `parseSiteTzToUtcIso`.
    - `optionsSource.ts`: gọi `GET /api/admin/fields/options-source` và `GET /api/admin/fields/entries-resolve` qua `cms/admin/src/api/client.ts` (`requestJson`, tuân thủ `check-standards.py`), cache in-memory ngắn hạn theo `(source, type_key, locale)`.
@@ -753,7 +757,7 @@ pub struct FieldSpec {
 | Nhóm tài nguyên | Đường dẫn cụ thể | Thay đổi cắt chuyển Clean-Slate V1 |
 |---|---|---|
 | **7 Builtin Core Blocks** | `cms/crates/opendash-server/src/builtin_blocks/{accordion,banner,card,divider,showcase,social-follow,spacer}/{block.json,render.html}` | • `banner` & `social-follow`: đổi visual `group` → `accordion` (`open_by_default: true`, `multi_expand: true`) để giữ khóa props phẳng khớp 100% 6 patterns và `sample.pages`; đổi `show_if` → `conditions`; cập nhật `render.html` sang `{{ bg_media.url }}`, `{{ box_padding.classes }}`.<br>• `card`, `accordion`, `divider`, `spacer`: đổi `show_if` → `conditions`, `{{ image.url }}`, `{{ box_padding.classes }}`.<br>• `showcase`: nâng cấp rõ ràng theo E2E-1 gồm `tab` (`tab_content`, `tab_style`), `accordion` (`acc_advanced`), `message`, nested `group` `hero_card` (`cover_image: media`, `primary_link: link`, `badge_icon: icon`), `spacing` `box_padding` (`property: "padding"`) + `outer_margin` (`property: "margin"`, `min: -64`), `select` `linked_menu` (`options_source: "menus"`), `gallery` `photos`, `email` `contact_email`, `checkbox` `features`, `date` `launch_date`, DNF `conditions` (điều khiển bởi `show_cta`), và `repeater` `highlights` (có 1 `group` phẳng bên trong); `render.html` render đủ `hero_card.cover_image.url`, `hero_card.primary_link.label/url`, `od_icon(hero_card.badge_icon.name, "w-5 h-5")`, `box_padding.classes`, `outer_margin.classes`. |
-| **Builtin Starter Theme `1.2.0`** | `cms/crates/opendash-server/src/builtin_themes/{mod.rs,opendash-starter/**}` *(xóa 3 thư mục tiền-V1 `opendash-starter-{1.0.1,1.1.0,1.1.1}/`)* | • S02: hợp nhất thành `version: "1.2.0"` (`options[].type` `"string"` → `"text"`, giữ `locales/{vi,en}.json`, `language-switcher.html`, `canvas.chrome: "none"`).<br>• S03: kiểm định `blocks/{quote-box,stats-bar}/*` và 6 `patterns/*.json` pass validator v1.2.<br>• S04: cập nhật `single.html`, `page.html`, `single-post.html`, `archive.html`, `archive-post.html` sang `entry.fields.*` & `entry.field_list` (`field.media.url`, `field.gallery`, `field.link.url`). |
+| **Builtin Starter Theme V1 (`1.0.0`)** | `cms/crates/opendash-server/src/builtin_themes/{mod.rs,opendash-starter/**}` *(xóa 3 thư mục nháp tiền-V1 `opendash-starter-{1.0.1,1.1.0,1.1.1}/`)* | • S02: hợp nhất thành duy nhất `version: "1.0.0"` (`options[].type` `"string"` → `"text"`, giữ `locales/{vi,en}.json`, `language-switcher.html`, `canvas.chrome: "none"`).<br>• S03: kiểm định `blocks/{quote-box,stats-bar}/*` và 6 `patterns/*.json` pass validator V1.<br>• S04: cập nhật `single.html`, `page.html`, `single-post.html`, `archive.html`, `archive-post.html` sang `entry.fields.*` & `entry.field_list` (`field.media.url`, `field.gallery`, `field.link.url`). |
 | **Examples** | `cms/examples/themes/{sample-theme-v3,theme-js-starter}/theme.json`, `cms/examples/plugins/{plugin-js-example,rust-seo-plugin,sample-plugin}/manifest.json` | Đảm bảo `options` & `settings_schema` chuẩn `FieldSpec` (`text`/`secret`/`options`), pass `--check-theme` / `--check-plugin`. |
 | **Fixtures & Smoke Scripts** | `cms/fixtures/demo-website/theme-moc-studio/{theme.json,single.html,page.html,archive.html}`, `cms/fixtures/admin-review/{theme/theme.json,plugin/plugin.json}`, `cms/scripts/{demo-website-runner.py,content_types_smoke.py,content_entries_smoke.py}` | • S02: `theme-moc-studio/theme.json` đổi `"string"` → `"text"`, `"choices"` → `"options"`.<br>• S04: `theme-moc-studio/{single,page,archive}.html` đổi sang `entry.fields.*` & `entry.field_list`; `admin-review` đổi `min_role` → `acl`; 3 script Python smoke đổi `"short_text"`/`"long_text"`/`"rich_text"`/`"image"` → `"text"`/`"textarea"`/`"richtext"`/`"media"`. |
 
@@ -765,14 +769,14 @@ pub struct FieldSpec {
    - *Lý do bác bỏ:* Chủ dự án đã chốt **Clean-Slate V1** vì chưa phát hành bản CMS/Theme V1 công khai nào. Giữ dual parser nhân đôi bề mặt bảo mật C-SEC/validation và kéo nợ kỹ thuật sang cả Luồng A lẫn Luồng B.
 2. **Dùng `#[serde(tag = "type")]` với 28 enum variant riêng biệt:**
    - *Lý do bác bỏ:* 28 variant lặp ~15 trường chung tạo hàng nghìn dòng boilerplate và không kết hợp được `#[serde(flatten)]` với `#[serde(deny_unknown_fields)]`. Một struct phẳng `FieldSpec` kèm `#[serde(deny_unknown_fields)]` và ma trận kiểm biên `(field_type, ctx)` vừa chặt tuyệt đối lúc deserialize vừa gọn dễ kiểm toán.
-3. **Sửa trực tiếp các bản `opendash-starter` `1.0.0..1.1.1` dưới cùng phiên bản SemVer:**
-   - *Lý do bác bỏ:* Làm đổi `revision_digest` của SemVer đã lưu, gây `409 Conflict` khi boot DB cũ tại `storage/theme.rs:463-476`. Nâng lên `STARTER_THEME_VERSION = "1.2.0"` và tự động nâng cấp active starter `< 1.2.0` an toàn 100% cho cả DB mới lẫn DB nâng cấp.
+3. **Giữ chuỗi snapshot tiền-V1 (`1.0.1`/`1.1.0`/`1.1.1`) và đẩy Starter Theme lên `1.2.0`:**
+   - *Lý do bác bỏ:* OpenDash chưa phát hành bản V1.0 công khai nào — các bản nháp tiền-V1 cũ không phải phiên bản 1.0 cần duy trì tương thích. Hợp nhất về duy nhất `STARTER_THEME_VERSION = "1.0.0"` và để `ensure_default_starter_theme` thay sạch các hàng `opendash-starter` tiền-V1 cũ trên DB dev (tạm đổi version trùng `1.0.0` trước khi stage, rồi kích hoạt và xóa hàng không còn FK) vừa giữ đúng định hướng phát hành `1.0.0`, vừa không bao giờ gây `409 Conflict` hay lỗi `ON DELETE RESTRICT`.
 4. **Dùng `content_entries.values_json LIKE '%<id>%'` cho Public Media ACL:**
    - *Lý do bác bỏ:* Yêu cầu `GET /media/{id}/file` là endpoint công khai không xác thực — chạy `LIKE` full-table scan trên bảng lớn dễ bị lợi dụng làm DoS CPU/IO. Rebuild `entry_builder_media_refs` bổ sung `source_kind IN ('builder', 'field')` (`+0` net schema objects) tái sử dụng sẵn index `idx_entry_builder_media_refs_media`, cho phép lọc ứng viên trong `O(log N)` rồi xác minh `EffectiveContentSchema` trong Rust với độ chính xác 100%.
 5. **Cài thêm `vitest`/`jsdom` cho Frontend tests:**
    - *Lý do bác bỏ:* Phá nguyên tắc 0 dependency mới trong Đợt 1. Dùng `node:test` + `typescript` (`ts.transpileModule`) có sẵn chạy unit tests cho toàn bộ logic thuần (`conditions.ts`, `helpers.ts`), kết hợp Live Playwright E2E cho render DOM 25 controls.
-6. **Gộp `AdminTermPanel` vào S02 trước khi có migration `0055`:**
-   - *Lý do bác bỏ:* Sẽ khiến dữ liệu `admin_extensions` cũ (`min_role`) vỡ trên DB nâng cấp ở khoảng giữa S02–S04. Đặt `AdminTermPanel` vào S04 cùng `0055` bảo đảm cắt chuyển nguyên tử và mọi slice đều xanh độc lập.
+6. **Gộp `AdminTermPanel` vào S02 trước khi có migration `0056`:**
+   - *Lý do bác bỏ:* Sẽ khiến dữ liệu `admin_extensions` cũ (`min_role`) vỡ trên DB nâng cấp ở khoảng giữa S02–S04. Đặt `AdminTermPanel` vào S04 cùng `0056` bảo đảm cắt chuyển nguyên tử và mọi slice đều xanh độc lập.
 
 ---
 
@@ -789,9 +793,9 @@ pub struct FieldSpec {
    - Zero-N+1 hydration: tối đa 3 hàm SQL batch phân mảnh `CHUNK = 500` (`json_each`), trần bộ nhớ `512` media / `128` entries / `128` terms mỗi request, độ sâu hydrate `1` tầng.
    - Trần schema: `<= 64` data fields/schema (`<= 16` cho `AdminTermPanel`); `StudioBlock` `<= 32` top-level / `<= 48` leaf / `<= 64` khóa / `<= 64 KiB` JSON; `repeater` `<= 50` mục (`<= 32` trên block, tổng `<= 64`/block); `group` `<= 2` cấp; `conditions` `<= 8×8`; giữ nguyên ngân sách render (`10_000` fuel/request, `2_000` fuel/block, `512 KiB` HTML).
 3. **Bảo toàn Dữ liệu, Migration & Rollback:**
-   - Cả `0054` (S02) và `0055` (S04) đều đóng góp **`+0` net schema objects** (tổng `sqlite_schema < 256`), chạy nguyên tử trong transaction SQLx, được kiểm chứng cả DB mới lẫn nâng cấp từ `baseline_0001.sqlite`.
+   - Cả `0055` (S02) và `0056` (S04) đều đóng góp **`+0` net schema objects** (tổng `sqlite_schema < 256`), chạy nguyên tử trong transaction SQLx, được kiểm chứng cả DB mới lẫn nâng cấp từ `baseline_0001.sqlite`.
    - `COMPAT-1..4` ngăn đổi schema phá dữ liệu; trường ẩn theo `conditions` giữ nguyên dữ liệu cũ; Media ACL bảo toàn `Withdrawn`/`ProviderInactive` đối với trường `Public`.
-   - S01 và S03 hoàn nguyên trực tiếp bằng `git revert`; S02 (`0054`) và S04 (`0055`) là migration forward-only nên rollback trước khi phát hành cần khôi phục bản sao lưu SQLite tương ứng trước khi chạy binary cũ.
+   - S01 và S03 hoàn nguyên trực tiếp bằng `git revert`; S02 (`0055`) và S04 (`0056`) là migration forward-only nên rollback trước khi phát hành cần khôi phục bản sao lưu SQLite tương ứng trước khi chạy binary cũ.
 
 ---
 
@@ -804,7 +808,7 @@ Toàn bộ thay đổi mã nguồn, migration, tài nguyên nhúng và kiểm th
 | Lớp / Nhóm | Tạo mới (`Create`) | Sửa đổi (`Modify`) | Xóa bỏ (`Delete`) |
 |---|---|---|---|
 | **Core (`opendash-core`)** | `src/field_schema.rs` | `src/{lib,richtext,theme,plugin,block_schema,builder,builder_blocks,content,admin_extensions}.rs` | *(Xóa các kiểu cũ trong từng module)* |
-| **Migrations (`cms/migrations/`)** | `0054_theme_option_locale_media_refs.sql`, `0055_unified_field_content_cutover.sql` | `cms/migrations/README.md` | — |
+| **Migrations (`cms/migrations/`)** | `0055_theme_option_locale_media_refs.sql`, `0056_unified_field_content_cutover.sql` | `cms/migrations/README.md` | — |
 | **Server (`opendash-server`)** | `src/{field_hydrate.rs,storage/fields.rs,routes/fields.rs}`, `tests/unified_field_engine_test.rs` | `src/{main,app,theme,dev_mode,template_sec,page,content_render}.rs`, `src/plugin/{package,manager,runtime}.rs`, `src/storage/{mod,settings,import,media_refs,admin_extensions,builder,overrides,page,content,entries,entry_table,media,public_content,builder_binding,theme,theme_tests,plugin,s03_media_acl_tests}.rs`, `src/routes/{mod,fields,settings,themes,plugin,builder,content,entries,taxonomy,public_content}.rs`, `src/builtin_blocks/**`, `src/builtin_themes/{mod.rs,opendash-starter/**}`, `tests/*.rs` | `src/builtin_themes/opendash-starter-{1.0.1,1.1.0,1.1.1}/` |
 | **Admin UI (`cms/admin/`)** | `src/fields/**`, `scripts/test-field-engine.mjs` | `package.json`, `src/{types.ts,api/{themes,settings}.ts,builder/{document.ts,BuilderInspector.tsx,StudioFieldControls.tsx,BuilderBindingFields.tsx},studio/{StudioCustomizerNav.tsx,StudioWorkspace.tsx},features/{media/MediaPicker.tsx,shared/OwnerOptionsForm.tsx,themes/{ThemeOptionsForm.tsx,ThemesPanel.tsx},plugins/PluginsPanel.tsx,content/{types.ts,ContentTypeForm.tsx,ContentTypeSchemaSettings.tsx,FieldGroupsManager.tsx,EditorLayoutConfigurator.tsx},editor/{EditorDraftStore.ts,PanelRegionRenderer.tsx,SingleEditWorkspace.tsx},extensions/AdminContributionRenderer.tsx,taxonomy/TermEditPage.tsx},i18n/locales/{en,vi}.ts}` | `src/builder/BlockSchemaForm.tsx`, `src/features/content/FieldValueInput.tsx` |
 | **Scripts, SDK, Docs & Fixtures** | — | `cms/scripts/{run-tests.py,check-standards.py,demo-website-runner.py,content_types_smoke.py,content_entries_smoke.py}`, `cms/sdk/js/opendash.d.ts`, `cms/examples/**`, `cms/fixtures/**`, `docs/contracts/{CORE_FOUNDATION.md,PLUGIN_ABI.md}` | — |
@@ -813,7 +817,7 @@ Toàn bộ thay đổi mã nguồn, migration, tài nguyên nhúng và kiểm th
 
 ### Slice S01: Pure Core `field_schema`, Dynamic Field APIs & `<UnifiedFieldForm>` Engine
 
-**Dependencies:** Không (baseline `main@8d3c5e3`; 100% additive, không phá vỡ bất kỳ API/UI hiện hành nào).
+**Dependencies:** Không (baseline `main@f47af30`; 100% additive, không phá vỡ bất kỳ API/UI hiện hành nào).
 
 **File Ownership:**
 - **Create:**
@@ -834,7 +838,7 @@ Toàn bộ thay đổi mã nguồn, migration, tài nguyên nhúng và kiểm th
   - `docs/contracts/CORE_FOUNDATION.md` (đồng bộ ghi chú `field_key` `1..=64` ký tự ở §3.1)
 
 **Acceptance Criteria:**
-1. `opendash_core::field_schema` cài đặt đầy đủ 25 data types + 3 UI layouts + mọi thuộc tính v1.2 (không có `bindable`), `FieldAcl` + 4 bất biến M7-S09, ma trận 5 `FieldContext`, cấm sub-field key `"secret_ref"` trong `group`, từ chối `sync_entry_terms: true` ở Đợt 1, DNF `conditions` (8 toán tử + DFS cycle check + ACL oracle check + `datetime` UTC millis + `time` seconds), `spacing.property` (`padding` `0..=256` vs `margin` `-256..=256`), `select.options_source` (8 nguồn, cấm trong `repeater` / cùng `options` / `responsive` / `css_var`), `term_ref.taxonomy_from_field` (chỉ `StudioBlock`, loại trừ lẫn nhau với `taxonomy`, cấm trong `repeater`, đích `select` đơn không-responsive) và `entry_ref.target_types: ["*"]` (wildcard chỉ `StudioBlock`, cấm trộn), canonical `-0.0` → `0.0`, `collect_media_ids`/`collect_public_media_ids`/`collect_relational_refs`/`extract_visible_text`/`check_schema_compatibility` (`COMPAT-1..4`) với `>= 45` unit test pass (`cargo test --manifest-path cms/Cargo.toml -p opendash-core`).
+1. `opendash_core::field_schema` cài đặt đầy đủ 25 data types + 3 UI layouts + mọi thuộc tính V1 (không có `bindable`), `FieldAcl` + 4 bất biến M7-S09, ma trận 5 `FieldContext`, cấm sub-field key `"secret_ref"` trong `group`, từ chối `sync_entry_terms: true` ở Đợt 1, DNF `conditions` (8 toán tử + DFS cycle check + ACL oracle check + `datetime` UTC millis + `time` seconds), `spacing.property` (`padding` `0..=256` vs `margin` `-256..=256`), `select.options_source` (8 nguồn, cấm trong `repeater` / cùng `options` / `responsive` / `css_var`), `term_ref.taxonomy_from_field` (chỉ `StudioBlock`, loại trừ lẫn nhau với `taxonomy`, cấm trong `repeater`, đích `select` đơn không-responsive) và `entry_ref.target_types: ["*"]` (wildcard chỉ `StudioBlock`, cấm trộn), canonical `-0.0` → `0.0`, `collect_media_ids`/`collect_public_media_ids`/`collect_relational_refs`/`extract_visible_text`/`check_schema_compatibility` (`COMPAT-1..4`) với `>= 45` unit test pass (`cargo test --manifest-path cms/Cargo.toml -p opendash-core`).
 2. `GET /api/admin/fields/options-source` (8 nguồn, trần `200` mục, lọc `context_fields` active+public và `patterns` non-deleted locale) và `GET /api/admin/fields/entries-resolve` (tối đa `50` IDs, loại `pattern`) đều áp `require_session`, `Cache-Control: no-store`, có unit/integration tests kiểm đủ 8 nguồn + `401`/`400`.
 3. `cms/admin/src/fields/` biên dịch sạch (`npm run typecheck && npm run test:fields && npm run build`), `test-field-engine.mjs` pass 100% trên Node `22.16+` với 0 dependency mới, và `node cms/scripts/check-i18n.mjs --strict` PASS.
 4. `check-standards.py` (+ `--self-test`), `cargo fmt --check`, và `python3 cms/scripts/run-tests.py --changed` PASS (sau khi build `cms/admin/dist`).
@@ -843,19 +847,19 @@ Toàn bộ thay đổi mã nguồn, migration, tài nguyên nhúng và kiểm th
 
 ---
 
-### Slice S02: Cutover `Options` & `OwnerSettings`, Migration `0054` (Locale Media Refs), Hydrator, Theme C-SEC & Starter `1.2.0`
+### Slice S02: Cutover `Options` & `OwnerSettings`, Migration `0055` (Locale Media Refs), Hydrator, Theme C-SEC & Starter V1 (`1.0.0`)
 
 **Dependencies:** `Slice S01`.
 
 **File Ownership:**
 - **Create:**
-  - `cms/migrations/0054_theme_option_locale_media_refs.sql`
+  - `cms/migrations/0055_theme_option_locale_media_refs.sql`
   - `cms/crates/opendash-server/src/field_hydrate.rs`
 - **Modify:**
   - `cms/migrations/README.md`
   - `cms/crates/opendash-core/src/{theme.rs,plugin.rs}`
-  - `cms/crates/opendash-server/src/{main.rs,theme.rs,dev_mode.rs,content_render.rs (thêm site_options vào PublicThemeContextInput/SerializedThemeContext + finalize_document_richtext trong render_single_with_context_for_locale),template_sec.rs (ThemeUrlPolicy đệ quy + chỉ thêm site_options vào RESERVED_CONTEXT_VARS + mở rộng UrlScopeStack bảo vệ term/field + RichTextNonceTable cho theme templates có MAX_RENDERED_HTML_BYTES + dynamic od_icon IconNonceTable + giữ options.site_logo gộp dạng hydrated object options.site_logo.url),plugin/{package.rs (--check-plugin settings_count chỉ đếm data fields),runtime.rs (SiteOptionsGet & PluginSettingsGet + is_secret_sentinel + bỏ qua UI-only)},storage/{settings.rs (PlannedPluginWrite.media_refs + is_secret_sentinel),import.rs,media_refs.rs (thêm theme_option_locale_values + is_secret_sentinel),theme.rs (STARTER_THEME_VERSION 1.2.0 & auto-upgrade < 1.2.0 + is_secret_sentinel),theme_tests.rs,plugin.rs,builder.rs (unpack tuple, forward locale/is_preview & finalize_document_richtext),overrides.rs (unpack tuple, site_options & finalize_document_richtext trên preview_typed_override / preview_studio / wrap_entry_body_in_preview_shell_in_tx_with_budget L3529),public_content.rs (nhánh theme_option_media_refs có tom.locale JOIN site_locales + site_locales_state)},routes/{settings.rs,themes.rs (ThemeFunctionsSettingsResponse),plugin.rs,public_content.rs (unpack tuple & finalize_document_richtext)}}`
-  - `cms/crates/opendash-server/src/builtin_themes/{mod.rs,opendash-starter/**}` *(hợp nhất thành `1.2.0`)*
+  - `cms/crates/opendash-server/src/{main.rs,theme.rs,dev_mode.rs,content_render.rs (thêm site_options vào PublicThemeContextInput/SerializedThemeContext + finalize_document_richtext trong render_single_with_context_for_locale),template_sec.rs (ThemeUrlPolicy đệ quy + chỉ thêm site_options vào RESERVED_CONTEXT_VARS + mở rộng UrlScopeStack bảo vệ term/field + RichTextNonceTable cho theme templates có MAX_RENDERED_HTML_BYTES + dynamic od_icon IconNonceTable + giữ options.site_logo gộp dạng hydrated object options.site_logo.url),plugin/{package.rs (--check-plugin settings_count chỉ đếm data fields),runtime.rs (SiteOptionsGet & PluginSettingsGet + is_secret_sentinel + bỏ qua UI-only)},storage/{settings.rs (PlannedPluginWrite.media_refs + is_secret_sentinel),import.rs,media_refs.rs (thêm theme_option_locale_values + is_secret_sentinel),theme.rs (STARTER_THEME_VERSION = "1.0.0", bỏ repair tiền-V1 cũ, thay sạch bản nháp tiền-V1 khác digest không lỗi 409/FK + is_secret_sentinel),theme_tests.rs,plugin.rs,builder.rs (unpack tuple, forward locale/is_preview & finalize_document_richtext),overrides.rs (unpack tuple, site_options & finalize_document_richtext trên preview_typed_override / preview_studio / wrap_entry_body_in_preview_shell_in_tx_with_budget L3529),public_content.rs (nhánh theme_option_media_refs có tom.locale JOIN site_locales + site_locales_state)},routes/{settings.rs,themes.rs (ThemeFunctionsSettingsResponse),plugin.rs,public_content.rs (unpack tuple & finalize_document_richtext)}}`
+  - `cms/crates/opendash-server/src/builtin_themes/{mod.rs,opendash-starter/**}` *(hợp nhất thành duy nhất `1.0.0`)*
   - `cms/examples/{themes,plugins}/**/{theme.json,manifest.json}`
   - `cms/fixtures/demo-website/theme-moc-studio/theme.json`
   - `cms/sdk/js/opendash.d.ts` & `docs/contracts/PLUGIN_ABI.md` (cập nhật kiểu trả về của `od.site.getOptions()`)
@@ -869,12 +873,12 @@ Toàn bộ thay đổi mã nguồn, migration, tài nguyên nhúng và kiểm th
 
 **Acceptance Criteria:**
 1. Xóa sạch `ThemeOptionType`, `ThemeOptionDef`, `ThemeOptionChoice`, `upcast_legacy_def_to_field`, `extract_public_flags_and_strip`, `plugin_setting_to_block_field` (`settings.rs:3474`), và `upcastOwnerDefToBlockField`; `ThemeV3Manifest.options`, `PluginManifest.settings_schema`, `ThemeFunctionsSpec.settings_schema` đều dùng `Vec<FieldSpec>`; DTO giữ `ThemeOptionsSnapshot.locale: Option<String>` và `ThemeFunctionsSettingsResponse.fields`.
-2. `0054_theme_option_locale_media_refs.sql` chạy nguyên tử với `+0` net schema objects (có test delta = `0` và `< 256` kiểu `migration_0053_schema_delta_is_zero`); `translatable: true` hoạt động trên mọi kiểu nội dung gồm cả `media`/`gallery`/`group`/`repeater`, đồng bộ `theme_option_media_refs` theo `locale`, xóa khi `purge_orphan_locale`, kiểm tra `site_locales` trong `media_is_referenced`, và quét `theme_option_locale_values` trong `media_refs.rs`.
+2. `0055_theme_option_locale_media_refs.sql` chạy nguyên tử với `+0` net schema objects (có test delta = `0` và `< 256` kiểu `migration_0053_schema_delta_is_zero`); `translatable: true` hoạt động trên mọi kiểu nội dung gồm cả `media`/`gallery`/`group`/`repeater`, đồng bộ `theme_option_media_refs` theo `locale`, xóa khi `purge_orphan_locale`, kiểm tra `site_locales` trong `media_is_referenced`, và quét `theme_option_locale_values` trong `media_refs.rs`.
 3. `field_hydrate.rs` hoạt động với Zero-N+1 chunked batching (`CHUNK = 500`, trần `512`/`128`/`128`, depth-1); `ThemeUrlPolicy` kiểm tra đệ quy `options.*` và `site_options.*`, chặn shadowing `site_options` trong `RESERVED_CONTEXT_VARS` (và bảo vệ `term`/`field` qua `UrlScopeStack` không phá vòng lặp `{% for %}`), chặn theme option ghi đè sai kiểu lên global URL/media option; `RichTextNonceTable` hoạt động trên mọi điểm kết xuất theme & preview (chặn literal `OD_RICHTEXT_`, áp trần `MAX_RENDERED_HTML_BYTES`, fail-closed nếu nằm ngoài `HtmlScanState::Body`); `od_icon` động phát `OD_ICON_<32hex>` qua `IconNonceTable` và trả `""` khi rỗng.
-4. `STARTER_THEME_VERSION = "1.2.0"` nâng cấp không lỗi `409 Conflict` từ DB có sẵn `1.1.0`/`1.1.1`; `examples` và `theme-moc-studio` pass `--check-theme` / `--check-plugin`; toàn bộ Admin UI Options/Settings dùng `<UnifiedFieldForm>`.
+4. `STARTER_THEME_VERSION = "1.0.0"` là bản starter duy nhất (đã xóa 3 thư mục nháp tiền-V1 và vòng lặp repair cũ), cài mới và thay sạch DB dev cũ có bản nháp tiền-V1 không gặp `409 Conflict` hay lỗi FK; `examples` và `theme-moc-studio` pass `--check-theme` / `--check-plugin`; toàn bộ Admin UI Options/Settings dùng `<UnifiedFieldForm>`.
 5. Build `cms/admin` xong trước, sau đó `python3 cms/scripts/run-tests.py --changed` PASS toàn bộ các nhóm `theme`, `plugin`, `i18n`, `site-media-seo`, `ops`.
 
-**Rollback:** `git revert` commit của S02; vì `0054` là migration forward-only, môi trường đã chạy `0054` cần khôi phục bản sao lưu SQLite trước `0054`.
+**Rollback:** `git revert` commit của S02; vì `0055` là migration forward-only, môi trường đã chạy `0055` cần khôi phục bản sao lưu SQLite trước `0055`.
 
 ---
 
@@ -907,36 +911,36 @@ Toàn bộ thay đổi mã nguồn, migration, tài nguyên nhúng và kiểm th
 
 ---
 
-### Slice S04: Cutover `Content` & `AdminTermPanel`, Migration `0055`, Indexed Media ACL & Entry/Term UI
+### Slice S04: Cutover `Content` & `AdminTermPanel`, Migration `0056`, Indexed Media ACL & Entry/Term UI
 
 **Dependencies:** `Slice S03`.
 
 **File Ownership:**
 - **Create:**
-  - `cms/migrations/0055_unified_field_content_cutover.sql`
+  - `cms/migrations/0056_unified_field_content_cutover.sql`
 - **Modify:**
   - `cms/migrations/README.md`
   - `cms/crates/opendash-core/src/{content.rs,admin_extensions.rs,plugin.rs (L1086-1147 field group manifest validation)}`
-  - `cms/crates/opendash-server/src/{theme.rs (L851-953 & validate_theme_v3_files truyền CPT-scoped ThemeUrlPolicy riêng cho single-<cpt>/archive-<cpt>, cpt_key = None cho parts/page_layouts/generic),template_sec.rs (CPT-scoped entry.fields.* trong ThemeUrlPolicy & entry.field_list + L2006 gỡ CPT policy khi xác thực parts),content_render.rs (xóa EntryView.values + EntryView.fields + EntryView.field_list + DEFAULT_SINGLE),plugin/{manager.rs,runtime.rs (L1380)},storage/{content.rs (preflight_builtin_key_collisions + EffectiveContentSchema.ui_fields),entries.rs (sync_entry_field_media_refs_in_conn trên mọi effective_fields gồm Withdrawn/ProviderInactive tại create/update/composite/translation + entry_ref/term_ref validation),import.rs (L1295 gọi sync_entry_field_media_refs_in_conn),entry_table.rs,media.rs (collect_media_ids đa độ sâu + media_kind),media_refs.rs (tách builder vs field + quét term_extension_values),admin_extensions.rs (FieldSpec + validate media_assets/media_kind + entry_ref/term_ref same-locale + split min_view_role/min_edit_role),page.rs (source_kind='builder'),builder.rs (source_kind='builder'),overrides.rs (cô lập CPT ThemeUrlPolicy khỏi parts/page_layouts/ThemeCompositionCache),public_content.rs (indexed media_is_referenced + hydrate_entry_views_in_conn),builder_binding.rs (chỉ đổi tối thiểu tên enum ContentFieldType → FieldType giữ biên dịch xanh; Spec A1 xóa theo D1=1B)},routes/{content.rs,entries.rs,taxonomy.rs,public_content.rs (L338 truyền CPT-scoped ThemeUrlPolicy cho nhánh fallback chưa cache + đổi thứ tự media::find trước media_is_referenced + sửa thumbnail asset.kind != "image")}}`
+  - `cms/crates/opendash-server/src/{theme.rs (L851-953 & validate_theme_v3_files truyền CPT-scoped ThemeUrlPolicy riêng cho single-<cpt>/archive-<cpt>, cpt_key = None cho parts/page_layouts/generic),template_sec.rs (CPT-scoped entry.fields.* trong ThemeUrlPolicy & entry.field_list + L2006 gỡ CPT policy khi xác thực parts),content_render.rs (xóa EntryView.values + EntryView.fields + EntryView.field_list + DEFAULT_SINGLE),plugin/{manager.rs,runtime.rs (L1380)},storage/{content.rs (preflight_builtin_key_collisions + EffectiveContentSchema.ui_fields),entries.rs (sync_entry_field_media_refs_in_conn trên mọi effective_fields gồm Withdrawn/ProviderInactive tại create/update/composite/translation + entry_ref/term_ref validation lọc trashed_at IS NULL),import.rs (L1295 gọi sync_entry_field_media_refs_in_conn),entry_lifecycle.rs (cập nhật fixture unit test sang "text"),entry_table.rs,media.rs (collect_media_ids đa độ sâu + media_kind),media_refs.rs (tách builder vs field + quét term_extension_values),admin_extensions.rs (FieldSpec + validate media_assets/media_kind + entry_ref/term_ref same-locale + split min_view_role/min_edit_role),page.rs (source_kind='builder'),builder.rs (source_kind='builder'),overrides.rs (cô lập CPT ThemeUrlPolicy khỏi parts/page_layouts/ThemeCompositionCache),public_content.rs (indexed media_is_referenced lọc trashed_at IS NULL + hydrate_entry_views_in_conn),builder_binding.rs (chỉ đổi tối thiểu tên enum ContentFieldType → FieldType giữ biên dịch xanh; Spec A1 xóa theo D1=1B)},routes/{content.rs,entries.rs,taxonomy.rs,public_content.rs (L338 truyền CPT-scoped ThemeUrlPolicy cho nhánh fallback chưa cache + đổi thứ tự media::find trước media_is_referenced + sửa thumbnail asset.kind != "image")}}`
   - `cms/crates/opendash-server/src/storage/s03_media_acl_tests.rs`
-  - `cms/crates/opendash-server/src/builtin_themes/opendash-starter/{single.html,page.html,single-post.html,archive.html,archive-post.html}` + `storage/theme_tests.rs` (cập nhật digest `1.2.0` hoàn chỉnh)
+  - `cms/crates/opendash-server/src/builtin_themes/opendash-starter/{single.html,page.html,single-post.html,archive.html,archive-post.html}` + `storage/theme_tests.rs` (cập nhật digest `1.0.0` V1 hoàn chỉnh)
   - `cms/fixtures/demo-website/theme-moc-studio/{single.html,page.html,archive.html}`
   - `cms/fixtures/admin-review/{theme/theme.json,plugin/plugin.json}`
   - `cms/admin/src/builder/BuilderBindingFields.tsx` *(chỉ đổi tối thiểu `ContentFieldType` → `FieldType` giữ `tsc` xanh; Spec A1 xóa theo D1=1B)*
   - `cms/admin/src/features/{content/{types.ts,ContentTypeForm.tsx,ContentTypeSchemaSettings.tsx,FieldGroupsManager.tsx,EditorLayoutConfigurator.tsx},editor/{EditorDraftStore.ts,PanelRegionRenderer.tsx,SingleEditWorkspace.tsx},extensions/AdminContributionRenderer.tsx,taxonomy/TermEditPage.tsx}`
-  - `cms/scripts/{demo-website-runner.py,content_types_smoke.py,content_entries_smoke.py}`
-  - `cms/crates/opendash-server/tests/{egm_cpt_builder_s01.rs,m5_s06_t01_preservation.rs,m5_s08_t01_e2e_delivery.rs,m5_s10_t01_theme_cnt_declarations.rs,m6_s02_t01_plugin_cnt_bridge.rs,m6_s08_t01_plugin_e2e.rs,m6_s10_t01_admin_extensions.rs,m7_s03_t01_routes.rs,m7_s08_t01_e2e.rs,m7_s09_t01_schema_field_groups.rs,m7_s09_t02_exposure_and_plugin_grants.rs,m7_s10_t01_panel_registry_and_layout.rs,m7_s11_t01_composite_save_and_profile.rs,m7_s12_t02_single_edit_and_draft_recovery.rs,m7_s16_t05_entry_table.rs,m8_s08_t01_e2e.rs,multilingual_s01_test.rs,multilingual_s03_test.rs,theme_ergonomics_test.rs,unified_field_engine_test.rs}`
+  - `cms/scripts/{demo-website-runner.py,content_types_smoke.py,content_entries_smoke.py,entry_lifecycle_s04_e2e.py}`
+  - `cms/crates/opendash-server/tests/{egm_cpt_builder_s01.rs,entry_lifecycle_s02.rs,entry_lifecycle_s03.rs,entry_lifecycle_s04.rs,m5_s06_t01_preservation.rs,m5_s08_t01_e2e_delivery.rs,m5_s10_t01_theme_cnt_declarations.rs,m6_s02_t01_plugin_cnt_bridge.rs,m6_s08_t01_plugin_e2e.rs,m6_s10_t01_admin_extensions.rs,m7_s03_t01_routes.rs,m7_s08_t01_e2e.rs,m7_s09_t01_schema_field_groups.rs,m7_s09_t02_exposure_and_plugin_grants.rs,m7_s10_t01_panel_registry_and_layout.rs,m7_s11_t01_composite_save_and_profile.rs,m7_s12_t02_single_edit_and_draft_recovery.rs,m7_s16_t05_entry_table.rs,m8_s08_t01_e2e.rs,multilingual_s01_test.rs,multilingual_s03_test.rs,theme_ergonomics_test.rs,unified_field_engine_test.rs}`
 - **Delete:**
   - `cms/admin/src/features/content/FieldValueInput.tsx`
 
 **Acceptance Criteria:**
-1. Xóa sạch `ContentFieldType`, `ContentFieldDefinition`, `FieldDefinitionInput`, `TermFieldType`, `TermFieldRole`, `TermPanelField`, `FieldValueInput.tsx`, và `toInputString`/`parseInputString`; 0 kết quả tìm kiếm tên kiểu cũ (`short_text`, `long_text`, `rich_text`, `image_ref`) trong mã nguồn hoạt động `cms/crates/` và `cms/admin/src/` (ngoại trừ literal chuyển đổi lịch sử trong `0055` và `preflight_builtin_key_collisions`).
-2. `0055_unified_field_content_cutover.sql` (`+0` net schema objects, tổng `< 256`) chạy sạch trên DB mới và khi nâng cấp từ `cms/fixtures/baseline_0001.sqlite` (bảo toàn thứ tự `fields` với `ORDER BY CAST(f.key AS INTEGER)`, bảo toàn `$.settings` của `0038`, không làm hỏng `pattern` có `fields: []`, chuẩn hóa `admin_extensions` tại `$.config.fields`, backfill `entry_builder_media_refs` `source_kind = 'field'` từ cả `content_types` lẫn `content_field_groups`); tất cả 4 smoke scripts (`windows_auth_smoke.py`, `content_types_smoke.py`, `content_entries_smoke.py`, `demo-website-runner.py`) PASS.
+1. Xóa sạch `ContentFieldType`, `ContentFieldDefinition`, `FieldDefinitionInput`, `TermFieldType`, `TermFieldRole`, `TermPanelField`, `FieldValueInput.tsx`, và `toInputString`/`parseInputString`; 0 kết quả tìm kiếm tên kiểu cũ (`short_text`, `long_text`, `rich_text`, `image_ref`) trong mã nguồn hoạt động `cms/crates/` và `cms/admin/src/` (ngoại trừ literal chuyển đổi lịch sử trong `0056` và `preflight_builtin_key_collisions`).
+2. `0056_unified_field_content_cutover.sql` (`+0` net schema objects, tổng `< 256`) chạy sạch trên DB mới và khi nâng cấp từ `cms/fixtures/baseline_0001.sqlite` (bảo toàn thứ tự `fields` với `ORDER BY CAST(f.key AS INTEGER)`, bảo toàn `$.settings` của `0038`, không làm hỏng `pattern` có `fields: []`, chuẩn hóa `admin_extensions` tại `$.config.fields`, backfill `entry_builder_media_refs` `source_kind = 'field'` từ cả `content_types` lẫn `content_field_groups`); tất cả 4 smoke scripts (`windows_auth_smoke.py`, `content_types_smoke.py`, `content_entries_smoke.py`, `demo-website-runner.py`) PASS.
 3. `EntryView` xóa `values`, xuất `entry.fields.<key>` (hydrated qua `field_hydrate.rs`) và `entry.field_list`; `ThemeUrlPolicy` cô lập `entry.fields.*` theo CPT ở template đặc thù (`single:<cpt>`/`archive:<cpt>`) và luôn truyền `cpt_key = None` cho `parts`/`page_layouts`/template tổng quát để không nhiễm độc `ThemeCompositionCache`; `RichTextNonceTable` bảo vệ mọi trường `richtext` trong `entry.fields.*` chỉ ở `HtmlScanState::Body`.
 4. `routes/public_content.rs` gọi `media::find` trước `media_is_referenced` và chặn thumbnail khi `asset.kind != "image"`; `storage/public_content.rs::media_is_referenced` dùng index `entry_builder_media_refs` (`source_kind = 'field'`) kiểm tra đệ quy `media`/`gallery` ở mọi độ sâu, `sync_entry_field_media_refs_in_conn` bao phủ mọi write path (kể cả `storage/import.rs` và `commit_entry_translation`) trên mọi `effective_fields` (gồm `Withdrawn`/`ProviderInactive`), chặn `Private`/`draft`, và 0 câu lệnh `LIKE '%...%'`; `media_refs.rs` quét `term_extension_values`.
 5. Single Edit (`SingleEditWorkspace.tsx`, `PanelRegionRenderer.tsx`, `EditorDraftStore.ts`) và Term Edit (`TermEditPage.tsx`, `AdminContributionRenderer.tsx`) vận hành hoàn chỉnh trên `<UnifiedFieldForm>`, giữ nguyên bảo toàn nháp `401`/`412`, `readOnlyKeys` theo ACL, và DNF `conditions`.
 
-**Rollback:** `git revert` commit của S04; vì `0055_unified_field_content_cutover.sql` là migration forward-only, môi trường đã chạy `0055` cần khôi phục bản sao lưu SQLite trước `0055` trước khi chạy binary cũ.
+**Rollback:** `git revert` commit của S04; vì `0056_unified_field_content_cutover.sql` là migration forward-only, môi trường đã chạy `0056` cần khôi phục bản sao lưu SQLite trước `0056` trước khi chạy binary cũ.
 
 ---
 
@@ -968,7 +972,7 @@ Sau mỗi Slice và khi đóng toàn bộ Đợt 1, bắt buộc chạy **đúng
    # Tầng 2 (đóng S04 — đổi lõi dùng chung):
    python3 cms/scripts/run-tests.py --group all --release
    ```
-4. **Kiểm tra nâng cấp DB từ baseline lịch sử (`0001` → `0055`) & CLI kiểm tra gói:**
+4. **Kiểm tra nâng cấp DB từ baseline lịch sử (`0001` → `0056`) & CLI kiểm tra gói:**
    ```bash
    python3 cms/scripts/windows_auth_smoke.py --binary cms/target/release/opendash --baseline-db cms/fixtures/baseline_0001.sqlite
    python3 cms/scripts/content_types_smoke.py --binary cms/target/release/opendash --baseline-db cms/fixtures/baseline_0001.sqlite
