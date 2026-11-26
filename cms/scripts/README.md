@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/scripts/` contains **33** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
+`cms/scripts/` contains **35** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, canonical lifecycle benchmarks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
 
 ## Interface
 
@@ -28,7 +28,7 @@
 | [`codegraph-index-docs.mjs`](codegraph-index-docs.mjs) | Indexes canonical contracts, ADRs, and `docs/designs/*.md` into local CodeGraph (`[--list-sources]` works without the engine binary). |
 | [`codegraph-query.mjs`](codegraph-query.mjs) | CLI wrapper for CodeGraph queries: `symbol <query>`, `callgraph\|callers\|callees <file> <line>`, `docs <query>`, `entrypoints`. |
 
-### API, Auth, Media & Migration Smoke Tests (7)
+### API, Auth, Media, Benchmark & Migration Smoke Tests (8)
 
 All smoke scripts launch isolated server instances (ephemeral loopback ports and `TemporaryDirectory` DB/site roots) via `running(...)` or apply SQLite migrations in memory, accepting `--binary <path>` where a server executable is required:
 
@@ -39,8 +39,9 @@ All smoke scripts launch isolated server instances (ephemeral loopback ports and
 - [`content_entries_smoke.py`](content_entries_smoke.py) — Content entry CRUD, concurrency, and media wiring smoke (`api`).
 - [`media_smoke.py`](media_smoke.py) — Media library upload/PNG helper and lifecycle smoke (`make_png`, `upload_image`).
 - [`egm_pattern_s02_migration.py`](egm_pattern_s02_migration.py) — In-memory SQLite migration test applying `0001`–`0043` then `0044` (`apply_through`) to verify Section-to-Pattern upgrade integrity.
+- [`entry_lifecycle_benchmark.py`](entry_lifecycle_benchmark.py) — Canonical S04 baseline-vs-candidate performance benchmark (`--baseline-binary`, `--candidate-binary`, `--artifact-dir`, optional `--sizes`) verifying NFR gates P1–P3 across deterministic 1k/10k/50k fixtures.
 
-### Live Browser E2E Suites (14)
+### Live Browser E2E Suites (15)
 
 Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-specific `--artifact-dir` / `--browser` flags):
 
@@ -50,6 +51,7 @@ Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-sp
 - [`egm_pattern_library_s03_e2e.py`](egm_pattern_library_s03_e2e.py) — Pattern library, Studio Mode 2 Pattern (`#/studio/entry/pattern/:id`), and RBAC Chrome + API E2E suite.
 - [`entry_lifecycle_s02_e2e.py`](entry_lifecycle_s02_e2e.py) — Entry Trash/Restore/Purge, Reading guard, dormant retained-Trash maintenance, Editor vs Admin RBAC, Studio/Editor trashed guards, and plugin host confirmation Chrome E2E suite.
 - [`entry_lifecycle_s03_e2e.py`](entry_lifecycle_s03_e2e.py) — Inline Quick Edit, site-timezone `published_at`, single-taxonomy delta, 412 diff + explicit rebase, simultaneous Single Edit + Quick Edit 401/Cancel isolation, trashed-target 409 guard, and 390px mobile Chrome E2E suite.
+- [`entry_lifecycle_s04_e2e.py`](entry_lifecycle_s04_e2e.py) — Bounded current-page Bulk Actions (broadened `draft_publish` CPT publication, single-taxonomy add/remove/replace, mixed-locale block, Trash/Restore/Admin-only Purge, mixed 200/412 + uncertain reconciliation without replaying successes, EN/VI, 390px mobile) Chrome E2E suite.
 - [`general_settings_browser.py`](general_settings_browser.py) — General Settings (`SITE-01`) embedded Admin browser test.
 - [`m4_s11_t01_page_builder_e2e.py`](m4_s11_t01_page_builder_e2e.py) — Page builder Studio Mode 2 E2E acceptance (`ui_create_page`, `new_heading`, `change_heading`).
 - [`m5_s12_t01_library_e2e.py`](m5_s12_t01_library_e2e.py) — Local template library, Pattern CRUD (`create_ui_pattern`), and Studio override E2E test.

@@ -294,10 +294,10 @@ export function getEffectiveContentTypeTaxonomies(typeKey: string, signal?: Abor
 }
 
 export function changeContentEntryPublication(
-  typeKey: string, id: number, version: number, status: 'draft' | 'published', csrfToken: string,
+  typeKey: string, id: number, version: number, status: 'draft' | 'published', csrfToken: string, signal?: AbortSignal,
 ): Promise<ContentEntryRecord> {
   return requestJson(`${entryPath(typeKey, id)}/publication`, {
-    method: 'POST', csrfToken, ifMatchVersion: version,
+    method: 'POST', csrfToken, ifMatchVersion: version, signal,
     contentType: 'application/json', body: JSON.stringify({ status }),
     defaultErrorMessage: tStatic('api.content.change_the_publication_status'),
   });

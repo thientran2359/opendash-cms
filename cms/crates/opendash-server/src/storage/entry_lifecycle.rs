@@ -841,6 +841,20 @@ pub(super) async fn apply_lifecycle_in_tx(
 
             validate_restore_compatibility_in_tx(tx, &row, &effective).await?;
 
+            let was_ever_published: i64 = sqlx::query_scalar(
+                "SELECT has_been_published FROM content_entries WHERE content_type_key = ? AND id = ?",
+            )
+            .bind(&row.type_key)
+            .bind(row.id)
+            .fetch_one(&mut **tx)
+            .await?;
+            let has_retained_claim: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?)",
+            )
+            .bind(row.id.to_string())
+            .fetch_one(&mut **tx)
+            .await?;
+
             let next_status = if is_immediate { "published" } else { "draft" };
             let updated = sqlx::query(
                 "UPDATE content_entries
@@ -868,7 +882,12 @@ pub(super) async fn apply_lifecycle_in_tx(
             }
 
             crate::storage::seo::sync_entry_seo_media_ref_in_tx(tx, row.id).await?;
-            crate::storage::permalinks::sync_claims_in_tx(tx).await?;
+            let needs_claim_rebuild = (was_ever_published == 0 && next_status == "published")
+                || (has_retained_claim == 0
+                    && (was_ever_published != 0 || next_status == "published"));
+            if needs_claim_rebuild {
+                crate::storage::permalinks::sync_claims_in_tx(tx).await?;
+            }
 
             let (version_after, publication_after, trashed_at, published_at): (
                 i64,
@@ -929,18 +948,54 @@ pub(super) async fn apply_lifecycle_in_tx(
 
 /// Storage wrapper that reserves the SQLite writer, executes `apply_lifecycle_in_tx`,
 /// commits the transaction, and returns the trusted `EntryCommitReceipt`.
+/// Emits a privacy-safe structured diagnostic line (`entry_lifecycle_diag`) measuring
+/// monotonic storage elapsed time including SQLite writer wait.
 pub async fn execute_lifecycle_transition(
     db: &SqlitePool,
     command: &LifecycleCommand,
     authority: &LifecycleAuthority<'_>,
 ) -> ApiResult<EntryCommitReceipt> {
-    let mut tx = db.begin().await?;
-    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
-        .execute(&mut *tx)
-        .await?;
-    let receipt = apply_lifecycle_in_tx(&mut tx, command, authority).await?;
-    tx.commit().await?;
-    Ok(receipt)
+    let started = std::time::Instant::now();
+    let res: ApiResult<EntryCommitReceipt> = async {
+        let mut tx = db.begin().await?;
+        sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+            .execute(&mut *tx)
+            .await?;
+        let receipt = apply_lifecycle_in_tx(&mut tx, command, authority).await?;
+        tx.commit().await?;
+        Ok(receipt)
+    }
+    .await;
+    let storage_us = started.elapsed().as_micros();
+    let op = match command.operation {
+        LifecycleOperation::Trash => "trash",
+        LifecycleOperation::Restore => "restore",
+        LifecycleOperation::Purge => "purge",
+    };
+    let role = authority.session.user.role.as_str();
+    match &res {
+        Ok(receipt) => {
+            eprintln!(
+                "entry_lifecycle_diag op={op} type_key={} entry_id={} actor_id={} actor_role={role} expected_version={} version_after={} outcome=ok status=200 storage_us={storage_us}",
+                command.type_key,
+                command.entry_id,
+                authority.session.user.id,
+                command.expected_version,
+                receipt.version_after.unwrap_or(0),
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "entry_lifecycle_diag op={op} type_key={} entry_id={} actor_id={} actor_role={role} expected_version={} version_after=0 outcome=err status={} storage_us={storage_us}",
+                command.type_key,
+                command.entry_id,
+                authority.session.user.id,
+                command.expected_version,
+                err.0.as_u16(),
+            );
+        }
+    }
+    res
 }
 
 /// Recomputes post-commit projections without ever turning a durable DB commit into a failure.
@@ -1737,6 +1792,37 @@ async fn validate_hook_adjusted_terms_in_conn(
 /// Holds no SQLite writer across plugin `prepare_save` / `before_save` hook execution.
 pub async fn prepare_metadata_patch(
     db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    entry_id: i64,
+    expected_version: i64,
+    patch: &MetadataPatch,
+) -> ApiResult<MetadataPreflightPlan> {
+    let started = std::time::Instant::now();
+    let res =
+        prepare_metadata_patch_inner(db, actor, type_key, entry_id, expected_version, patch).await;
+    let storage_us = started.elapsed().as_micros();
+    let role = actor.user.role.as_str();
+    match &res {
+        Ok(_) => {
+            eprintln!(
+                "entry_lifecycle_diag op=metadata_prepare type_key={type_key} entry_id={entry_id} actor_id={} actor_role={role} expected_version={expected_version} version_after=0 outcome=ok status=200 storage_us={storage_us}",
+                actor.user.id,
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "entry_lifecycle_diag op=metadata_prepare type_key={type_key} entry_id={entry_id} actor_id={} actor_role={role} expected_version={expected_version} version_after=0 outcome=err status={} storage_us={storage_us}",
+                actor.user.id,
+                err.0.as_u16(),
+            );
+        }
+    }
+    res
+}
+
+async fn prepare_metadata_patch_inner(
+    db: &SqlitePool,
     _actor: &SessionContext,
     type_key: &str,
     entry_id: i64,
@@ -1948,7 +2034,47 @@ pub fn apply_prepare_save_to_metadata_plan(
 /// re-verifying live session/role, active CPT, schema token (412), entry version (412)
 /// before lifecycle (409), timezone (409), date <= now, taxonomy bounds, and route claims.
 /// Rejects completely unchanged final patches with `422 metadata_no_change` (no version bump or hooks).
+/// Emits a privacy-safe structured diagnostic line (`entry_lifecycle_diag`) measuring
+/// monotonic storage elapsed time including SQLite writer wait.
 pub async fn commit_metadata_patch(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    entry_id: i64,
+    expected_version: i64,
+    patch: &MetadataPatch,
+    plan: &MetadataPreflightPlan,
+) -> ApiResult<(
+    crate::storage::entry_table::EntryTableRow,
+    String,
+    EntryCommitReceipt,
+)> {
+    let started = std::time::Instant::now();
+    let res =
+        commit_metadata_patch_inner(db, actor, type_key, entry_id, expected_version, patch, plan)
+            .await;
+    let storage_us = started.elapsed().as_micros();
+    let role = actor.user.role.as_str();
+    match &res {
+        Ok((_, _, receipt)) => {
+            eprintln!(
+                "entry_lifecycle_diag op=metadata_commit type_key={type_key} entry_id={entry_id} actor_id={} actor_role={role} expected_version={expected_version} version_after={} outcome=ok status=200 storage_us={storage_us}",
+                actor.user.id,
+                receipt.version_after.unwrap_or(0),
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "entry_lifecycle_diag op=metadata_commit type_key={type_key} entry_id={entry_id} actor_id={} actor_role={role} expected_version={expected_version} version_after=0 outcome=err status={} storage_us={storage_us}",
+                actor.user.id,
+                err.0.as_u16(),
+            );
+        }
+    }
+    res
+}
+
+async fn commit_metadata_patch_inner(
     db: &SqlitePool,
     actor: &SessionContext,
     type_key: &str,

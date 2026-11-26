@@ -2,7 +2,7 @@ import { formatNumber } from '../../i18n/format.ts';
 import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  changeContentEntryPublication, getEffectiveContentTypeTaxonomies,
+  getEffectiveContentTypeTaxonomies,
   purgeContentEntry, queryContentEntryTable, getEffectiveEntryListConfig,
   restoreContentEntry, runEntryProviderAction, contentEntryPreviewPath, trashContentEntry,
 } from '../../api/content.ts';
@@ -23,8 +23,17 @@ import type { AuthUser, PluginLifecycleConfirmation as PluginLifecycleConfirmati
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 import { editorDraftStore } from '../editor/EditorDraftStore.ts';
 import { PluginLifecycleConfirmation } from '../plugins/PluginLifecycleConfirmation.tsx';
+import {
+  buildBulkConfirmationPrompt,
+  captureBulkRows,
+  reconcileBulkResults,
+  runSequentialBulk,
+  validateBulkSelection,
+  type BulkActionSpec,
+  type BulkResultItem,
+} from './bulkEntryActions.ts';
 import { QuickEditForm } from './QuickEditForm.tsx';
-import type { EntryTableQuery, EntryTableResult, EntryTableRow } from './types.ts';
+import type { EntryTableQuery, EntryTableResult, EntryTableRow, TaxonomyDeltaOp } from './types.ts';
 
 interface Props {
   typeKey: string;
@@ -47,14 +56,6 @@ const sortButton =
 const statuses = ['all', 'draft', 'published', 'trash'] as const;
 const TERM_RESOLVE_BATCH = 100;
 const TERM_RESOLVE_CONCURRENCY = 2;
-const MAX_BULK_ITEMS = 100;
-type BulkAction = 'published' | 'draft' | 'trash';
-type BulkItemStatus = 'succeeded' | 'stale' | 'failed' | 'uncertain' | 'unattempted';
-interface BulkResultItem {
-  id: number;
-  status: BulkItemStatus;
-  message: string;
-}
 type TaxonomyTableQuery = EntryTableQuery & { taxonomy_key?: string; term_id?: number };
 
 function rootHash(typeKey: string): string {
@@ -197,10 +198,16 @@ export function EntryListPage({
   const [bulkResults, setBulkResults] = useState<BulkResultItem[]>([]);
   const [bulkBlockMessage, setBulkBlockMessage] = useState('');
   const [bulkBatchMeta, setBulkBatchMeta] = useState<{
-    kind: BulkAction;
+    spec: BulkActionSpec;
     scope: string;
     reconciledAfterRetry: number;
   } | null>(null);
+  const [bulkTaxOpen, setBulkTaxOpen] = useState(false);
+  const [bulkTaxKey, setBulkTaxKey] = useState('');
+  const [bulkTaxOp, setBulkTaxOp] = useState<TaxonomyDeltaOp>('add');
+  const [bulkTaxTermIds, setBulkTaxTermIds] = useState<number[]>([]);
+  const [bulkTaxCatalog, setBulkTaxCatalog] = useState<Record<string, TaxonomyTerm[]>>({});
+  const [bulkTaxLoading, setBulkTaxLoading] = useState(false);
   const [dataRevision, setDataRevision] = useState(0);
   const [quickEditRowId, setQuickEditRowId] = useState<number | null>(null);
   const quickEditDirtyRef = useRef(false);
@@ -260,6 +267,10 @@ export function EntryListPage({
     setBulkResults([]);
     setBulkBlockMessage('');
     setBulkBatchMeta(null);
+    setBulkTaxOpen(false);
+    setBulkTaxKey('');
+    setBulkTaxOp('add');
+    setBulkTaxTermIds([]);
     setPendingProviderConfirmation(null);
     setQuickEditRowId(null);
     quickEditDirtyRef.current = false;
@@ -451,32 +462,69 @@ export function EntryListPage({
   const allSelected = currentIds.length > 0 && currentIds.every(id => selected.has(id));
   const pageSize = filters.limit ?? 20;
   const offset = filters.offset ?? 0;
+  const supportsDraftPublish =
+    isBuiltIn ||
+    currentRows.some(row => Boolean(row.capabilities?.publish || row.capabilities?.unpublish));
 
-  const runSafeSelectedBatch = async (kind: BulkAction, targetRows: EntryTableRow[], skipConfirm = false) => {
-    if (!csrfToken || bulkBusyRef.current || !targetRows.length || isTrashView) return;
-    if (kind !== 'trash' && !isBuiltIn) return;
-    const bounded = targetRows.slice(0, MAX_BULK_ITEMS);
-    const locales = new Set(bounded.map(row => row.locale ?? ''));
-    if (locales.size > 1) {
-      setBulkBlockMessage(tStatic("entry_lifecycle.bulk_mixed_locale_blocked"));
+  const selectedLocaleCheck = useMemo(() => validateBulkSelection(selectedRows), [selectedRows]);
+  const bulkTaxCatalogKey =
+    bulkTaxKey && selectedLocaleCheck.ok ? `${bulkTaxKey}:${selectedLocaleCheck.locale}` : '';
+
+  useEffect(() => {
+    if (!bulkTaxOpen || !bulkTaxKey || !selectedLocaleCheck.ok) return;
+    if (Object.prototype.hasOwnProperty.call(bulkTaxCatalog, bulkTaxCatalogKey)) return;
+    const controller = new AbortController();
+    setBulkTaxLoading(true);
+    void listAllTaxonomyTerms(bulkTaxKey, controller.signal, selectedLocaleCheck.locale || null)
+      .then(found => {
+        if (controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+        setBulkTaxCatalog(prev => ({ ...prev, [bulkTaxCatalogKey]: found }));
+      })
+      .catch(cause => {
+        if (controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+        setBulkBlockMessage(readableError(cause));
+        if (cause instanceof ApiClientError && cause.status === 401) {
+          onApiError(cause, tStatic('api.taxonomy.load_terms'));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setBulkTaxLoading(false);
+      });
+    return () => controller.abort();
+  }, [bulkTaxOpen, bulkTaxKey, bulkTaxCatalogKey, selectedLocaleCheck, accountScope]);
+
+  const runSafeSelectedBatch = async (
+    spec: BulkActionSpec,
+    targetRows: EntryTableRow[],
+    skipConfirm = false,
+  ) => {
+    if (!csrfToken || bulkBusyRef.current || !targetRows.length) return;
+    if ((spec.kind === 'published' || spec.kind === 'draft') && !supportsDraftPublish) return;
+    if (spec.kind === 'purge' && user.role !== 'admin') return;
+    const check = validateBulkSelection(targetRows);
+    if (!check.ok) {
+      setBulkBlockMessage(check.message);
       return;
     }
-    const noun = kind === 'trash'
-      ? tStatic("entry_lifecycle.move_to_trash")
-      : kind === 'published'
-        ? tStatic("feature.content.entrylistpage.publish")
-        : tStatic("feature.content.entrylistpage.move_to_draft");
+    const captured = captureBulkRows(targetRows);
+    const effectiveSpec: BulkActionSpec =
+      spec.kind === 'restore'
+        ? {
+            kind: 'restore',
+            confirmPublicRestore: captured.some(row => row.immediate_public_restore),
+          }
+        : spec;
+
     if (!skipConfirm) {
-      const confirmPrompt = kind === 'trash'
-        ? tStatic("entry_lifecycle.bulk_confirm_move_to_trash", { value1: formatNumber(bounded.length) })
-        : tStatic("feature.content.entrylistpage.are_you_sure_you_want_to_value_value_selected", {
-            value1: noun,
-            value2: formatNumber(bounded.length),
-          });
+      const confirmPrompt = buildBulkConfirmationPrompt(
+        effectiveSpec,
+        captured.length,
+        check.locale,
+      );
       if (!window.confirm(confirmPrompt)) return;
     }
+
     const startingScope = scope;
-    const captured = [...bounded];
     bulkBusyRef.current = true;
     bulkCancelRef.current = false;
     setBulkBusy(true);
@@ -484,93 +532,42 @@ export function EntryListPage({
     setBulkBlockMessage('');
     setBulkResults([]);
     setBulkBatchMeta(null);
-    const reports: BulkResultItem[] = [];
     const beforeRefreshRevision = dataRevision;
     try {
-      for (let idx = 0; idx < captured.length; idx += 1) {
-        const row = captured[idx];
-        if (!aliveRef.current || scopeRef.current !== startingScope || bulkCancelRef.current) {
-          for (let rem = idx; rem < captured.length; rem += 1) {
-            reports.push({
-              id: captured[rem].id,
-              status: 'unattempted',
-              message: `#${captured[rem].id}: ${tStatic("entry_lifecycle.bulk_unattempted_message")}`,
-            });
-          }
-          break;
-        }
-        const controller = new AbortController();
-        bulkAbortRef.current = controller;
-        try {
-          if (kind === 'trash') {
-            await trashContentEntry(typeKey, row.id, row.version, csrfToken, controller.signal);
-          } else {
-            await changeContentEntryPublication(typeKey, row.id, row.version, kind, csrfToken);
-          }
-          reports.push({
-            id: row.id,
-            status: 'succeeded',
-            message: tStatic("feature.content.entrylistpage.value_value_succeeded", { value1: row.id, value2: noun }),
-          });
-        } catch (cause) {
-          if (cause instanceof ApiClientError) {
-            if (cause.status === 412) {
-              reports.push({ id: row.id, status: 'stale', message: `#${row.id}: ${readableError(cause)}` });
-            } else if (cause.status === 401) {
-              reports.push({ id: row.id, status: 'failed', message: `#${row.id}: ${readableError(cause)}` });
-              onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_during_the_bulk_update"));
-              for (let rem = idx + 1; rem < captured.length; rem += 1) {
-                reports.push({
-                  id: captured[rem].id,
-                  status: 'unattempted',
-                  message: `#${captured[rem].id}: ${tStatic("entry_lifecycle.bulk_unattempted_message")}`,
-                });
-              }
-              break;
-            } else if (cause.status === 503) {
-              reports.push({
-                id: row.id,
-                status: 'failed',
-                message: `#${row.id}: ${tStatic("entry_lifecycle.bulk_maintenance_stopped")}`,
-              });
-              for (let rem = idx + 1; rem < captured.length; rem += 1) {
-                reports.push({
-                  id: captured[rem].id,
-                  status: 'unattempted',
-                  message: `#${captured[rem].id}: ${tStatic("entry_lifecycle.bulk_unattempted_message")}`,
-                });
-              }
-              break;
-            } else {
-              reports.push({ id: row.id, status: 'failed', message: `#${row.id}: ${readableError(cause)}` });
-            }
-          } else {
-            // Network drop or in-flight cancellation: server commit state is uncertain.
-            reports.push({
-              id: row.id,
-              status: 'uncertain',
-              message: `#${row.id}: ${tStatic("entry_lifecycle.bulk_uncertain_message")}`,
-            });
-            if (bulkCancelRef.current || !aliveRef.current || scopeRef.current !== startingScope) {
-              for (let rem = idx + 1; rem < captured.length; rem += 1) {
-                reports.push({
-                  id: captured[rem].id,
-                  status: 'unattempted',
-                  message: `#${captured[rem].id}: ${tStatic("entry_lifecycle.bulk_unattempted_message")}`,
-                });
-              }
-              break;
-            }
-          }
-        } finally {
-          if (bulkAbortRef.current === controller) bulkAbortRef.current = null;
-        }
-      }
+      const outcome = await runSequentialBulk({
+        typeKey,
+        spec: effectiveSpec,
+        capturedRows: captured,
+        csrfToken,
+        startingScope,
+        getCurrentScope: () => scopeRef.current,
+        isAlive: () => aliveRef.current,
+        isCancelled: () => bulkCancelRef.current,
+        setActiveAbort: controller => {
+          bulkAbortRef.current = controller;
+        },
+        formatError: readableError,
+        onUnauthorized: cause =>
+          onApiError(
+            cause,
+            tStatic('feature.content.entrylistpage.your_session_expired_during_the_bulk_update'),
+          ),
+      });
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
-      const succeeded = new Set(reports.filter(report => report.status === 'succeeded').map(report => report.id));
+      const succeeded = new Set(
+        outcome.reports.filter(report => report.status === 'succeeded').map(report => report.id),
+      );
       setSelected(prev => new Set([...prev].filter(id => !succeeded.has(id))));
-      setBulkResults(reports);
-      setBulkBatchMeta({ kind, scope: startingScope, reconciledAfterRetry: beforeRefreshRevision });
+      setBulkResults(outcome.reports);
+      setBulkBatchMeta({
+        spec: effectiveSpec,
+        scope: startingScope,
+        reconciledAfterRetry: beforeRefreshRevision,
+      });
+      if (effectiveSpec.kind === 'taxonomy') {
+        setBulkTaxOpen(false);
+        setBulkTaxTermIds([]);
+      }
       setRetry(prev => prev + 1); // Always reconcile authoritative server state & versions.
     } finally {
       bulkBusyRef.current = false;
@@ -582,30 +579,52 @@ export function EntryListPage({
     }
   };
 
-  const performBulk = async (kind: BulkAction) => runSafeSelectedBatch(kind, selectedRows, false);
+  const performBulk = async (spec: BulkActionSpec) =>
+    runSafeSelectedBatch(spec, selectedRows, false);
 
-  const retryRemainingBulk = () => {
-    if (!bulkBatchMeta || bulkBatchMeta.scope !== scope || bulkBusyRef.current) return;
-    if (dataRevision <= bulkBatchMeta.reconciledAfterRetry) return;
-    const retryIds = new Set(
-      bulkResults
-        .filter(item => item.status !== 'succeeded')
-        .map(item => item.id),
-    );
-    // Reconcile against freshly loaded authoritative rows (never replay succeeded rows
-    // or rows already transitioned/absent on the server).
-    const freshRows = currentRows.filter(row => {
-      if (!retryIds.has(row.id)) return false;
-      if (bulkBatchMeta.kind === 'published' && row.publication_status === 'published') return false;
-      if (bulkBatchMeta.kind === 'draft' && row.publication_status === 'draft') return false;
-      return true;
-    });
-    if (!freshRows.length) {
-      setBulkResults([]);
-      setBulkBatchMeta(null);
+  const performBulkTaxonomy = async () => {
+    if (!bulkTaxKey) return;
+    if ((bulkTaxOp === 'add' || bulkTaxOp === 'remove') && bulkTaxTermIds.length === 0) {
+      setBulkBlockMessage(tStatic('bulk.taxonomy_select_terms_required'));
       return;
     }
-    void runSafeSelectedBatch(bulkBatchMeta.kind, freshRows, false);
+    const defLabel = terms?.definitions.find(d => d.key === bulkTaxKey)?.label ?? bulkTaxKey;
+    await runSafeSelectedBatch(
+      {
+        kind: 'taxonomy',
+        taxonomyKey: bulkTaxKey,
+        taxonomyLabel: defLabel,
+        operation: bulkTaxOp,
+        termIds: [...bulkTaxTermIds],
+        schemaToken: data?.schema_token ?? '',
+      },
+      selectedRows,
+      false,
+    );
+  };
+
+  const reconciledBulk = useMemo(() => {
+    if (
+      !bulkBatchMeta ||
+      bulkBatchMeta.scope !== scope ||
+      dataRevision <= bulkBatchMeta.reconciledAfterRetry
+    ) {
+      return null;
+    }
+    return reconcileBulkResults(bulkBatchMeta.spec, bulkResults, currentRows);
+  }, [bulkBatchMeta, scope, dataRevision, bulkResults, currentRows]);
+
+  const retryRemainingBulk = () => {
+    if (!bulkBatchMeta || !reconciledBulk || bulkBusyRef.current) return;
+    if (!reconciledBulk.retryableRows.length) {
+      setBulkResults(reconciledBulk.annotatedResults);
+      return;
+    }
+    const nextSpec: BulkActionSpec =
+      bulkBatchMeta.spec.kind === 'taxonomy'
+        ? { ...bulkBatchMeta.spec, schemaToken: data?.schema_token ?? bulkBatchMeta.spec.schemaToken }
+        : bulkBatchMeta.spec;
+    void runSafeSelectedBatch(nextSpec, reconciledBulk.retryableRows, false);
   };
 
   const performProviderAction = async (column: ProviderColumn, row: EntryTableRow) => {
@@ -680,7 +699,7 @@ export function EntryListPage({
       if (cause instanceof ApiClientError && cause.status === 401) {
         onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_deleting_the_item"));
       } else {
-        setBulkResults([{ id: row.id, status: 'failed', message: `#${row.id}: ${readableError(cause)}` }]);
+        setBulkResults([{ id: row.id, status: 'failed', beforeVersion: row.version, message: `#${row.id}: ${readableError(cause)}` }]);
       }
     } finally {
       bulkBusyRef.current = false;
@@ -711,7 +730,7 @@ export function EntryListPage({
       if (cause instanceof ApiClientError && cause.status === 401) {
         onApiError(cause, tStatic("api.content.restore_the_entry"));
       } else {
-        setBulkResults([{ id: row.id, status: 'failed', message: `#${row.id}: ${readableError(cause)}` }]);
+        setBulkResults([{ id: row.id, status: 'failed', beforeVersion: row.version, message: `#${row.id}: ${readableError(cause)}` }]);
       }
     } finally {
       bulkBusyRef.current = false;
@@ -734,7 +753,7 @@ export function EntryListPage({
       if (cause instanceof ApiClientError && cause.status === 401) {
         onApiError(cause, tStatic("api.content.purge_the_entry"));
       } else {
-        setBulkResults([{ id: row.id, status: 'failed', message: `#${row.id}: ${readableError(cause)}` }]);
+        setBulkResults([{ id: row.id, status: 'failed', beforeVersion: row.version, message: `#${row.id}: ${readableError(cause)}` }]);
       }
     } finally {
       bulkBusyRef.current = false;
@@ -812,18 +831,9 @@ export function EntryListPage({
   const activeOrder = filters.order ?? 'desc';
   const ariaSortFor = (field: 'title' | 'updated_at' | 'trashed_at'): 'ascending' | 'descending' | undefined =>
     activeSort === field ? (activeOrder === 'asc' ? 'ascending' : 'descending') : undefined;
-  const bulkRemainingRetryCount = useMemo(() => {
-    if (!bulkBatchMeta || bulkBatchMeta.scope !== scope || dataRevision <= bulkBatchMeta.reconciledAfterRetry) {
-      return 0;
-    }
-    const retryIds = new Set(bulkResults.filter(item => item.status !== 'succeeded').map(item => item.id));
-    return currentRows.filter(row => {
-      if (!retryIds.has(row.id)) return false;
-      if (bulkBatchMeta.kind === 'published' && row.publication_status === 'published') return false;
-      if (bulkBatchMeta.kind === 'draft' && row.publication_status === 'draft') return false;
-      return true;
-    }).length;
-  }, [bulkBatchMeta, scope, dataRevision, bulkResults, currentRows]);
+  const bulkRemainingRetryCount = reconciledBulk?.retryableRows.length ?? 0;
+  const displayBulkResults = reconciledBulk?.annotatedResults ?? bulkResults;
+  const unresolvedUncertainCount = reconciledBulk?.unresolvedUncertainIds.length ?? 0;
 
   return (
     <section className="w-full min-w-0 space-y-3.5" data-testid={`entry-list-${typeKey}`} data-type-key={typeKey}>
@@ -1025,15 +1035,33 @@ export function EntryListPage({
           {!isTrashView ? (
             <div className="flex flex-wrap items-center gap-2" role="group" aria-label={tStatic("feature.content.entrylistpage.bulk_actions")}>
               <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {tStatic("feature.content.entrylistpage.selected")}</span>
-              {isBuiltIn && <>
-                <AdminButton variant="secondary" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                  onClick={() => void performBulk('published')}>{tStatic("feature.content.entrylistpage.publish_selected")}</AdminButton>
-                <AdminButton variant="secondary" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                  onClick={() => void performBulk('draft')}>{tStatic("feature.content.entrylistpage.move_to_draft_2")}</AdminButton>
+              {supportsDraftPublish && <>
+                <AdminButton variant="secondary" size="sm" data-testid="bulk-publish-btn" disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                  onClick={() => void performBulk({ kind: 'published' })}>{tStatic("feature.content.entrylistpage.publish_selected")}</AdminButton>
+                <AdminButton variant="secondary" size="sm" data-testid="bulk-draft-btn" disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                  onClick={() => void performBulk({ kind: 'draft' })}>{tStatic("feature.content.entrylistpage.move_to_draft_2")}</AdminButton>
               </>}
+              {(terms?.definitions.length ?? 0) > 0 && (
+                <AdminButton
+                  variant={bulkTaxOpen ? 'primary' : 'secondary'}
+                  size="sm"
+                  data-testid="bulk-taxonomy-toggle-btn"
+                  disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                  onClick={() => {
+                    if (!selectedLocaleCheck.ok) {
+                      setBulkBlockMessage(selectedLocaleCheck.message);
+                      return;
+                    }
+                    setBulkBlockMessage('');
+                    setBulkTaxOpen(prev => !prev);
+                  }}
+                >
+                  {tStatic("bulk.taxonomy_button")}
+                </AdminButton>
+              )}
               <AdminButton variant="danger" size="sm" data-testid="bulk-move-to-trash-btn"
                 disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                onClick={() => void performBulk('trash')}>{tStatic("entry_lifecycle.move_selected_to_trash")}</AdminButton>
+                onClick={() => void performBulk({ kind: 'trash' })}>{tStatic("entry_lifecycle.move_selected_to_trash")}</AdminButton>
               {bulkBusy && (
                 <>
                   <span role="status" className="text-xs text-zinc-600">{tStatic("feature.content.entrylistpage.processing_each_item_separately")}</span>
@@ -1053,7 +1081,49 @@ export function EntryListPage({
                 </>
               )}
             </div>
-          ) : <div />}
+          ) : (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={tStatic("feature.content.entrylistpage.bulk_actions")}>
+              <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {tStatic("feature.content.entrylistpage.selected")}</span>
+              <AdminButton
+                variant="secondary"
+                size="sm"
+                data-testid="bulk-restore-btn"
+                disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                onClick={() => void performBulk({ kind: 'restore', confirmPublicRestore: false })}
+              >
+                {tStatic("bulk.restore_selected")}
+              </AdminButton>
+              {user.role === 'admin' && (
+                <AdminButton
+                  variant="danger"
+                  size="sm"
+                  data-testid="bulk-purge-btn"
+                  disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                  onClick={() => void performBulk({ kind: 'purge' })}
+                >
+                  {tStatic("bulk.purge_selected")}
+                </AdminButton>
+              )}
+              {bulkBusy && (
+                <>
+                  <span role="status" className="text-xs text-zinc-600">{tStatic("feature.content.entrylistpage.processing_each_item_separately")}</span>
+                  <AdminButton
+                    variant="secondary"
+                    size="sm"
+                    data-testid="bulk-cancel-btn"
+                    disabled={bulkCancelling}
+                    onClick={() => {
+                      bulkCancelRef.current = true;
+                      setBulkCancelling(true);
+                      bulkAbortRef.current?.abort();
+                    }}
+                  >
+                    {bulkCancelling ? tStatic("entry_lifecycle.bulk_cancelling") : tStatic("entry_lifecycle.bulk_cancel")}
+                  </AdminButton>
+                </>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2.5 text-xs">
             <span className="text-zinc-500" role="status">{data ? tStatic("feature.content.entrylistpage.total_value_items", { value1: formatNumber(data.total) }) : tStatic("feature.content.entrylistpage.loading_counts")}</span>
             <AdminButton variant="ghost" size="sm" disabled={bulkBusy}
@@ -1062,6 +1132,108 @@ export function EntryListPage({
             </AdminButton>
           </div>
         </div>
+
+        {!isTrashView && bulkTaxOpen && selectedRows.length > 0 && selectedLocaleCheck.ok && (
+          <div
+            data-testid="bulk-taxonomy-panel"
+            className="space-y-2.5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs"
+          >
+            <div className="flex flex-wrap items-end gap-2.5">
+              <label className="flex min-w-[150px] flex-col gap-1 font-medium text-zinc-700">
+                <span>{tStatic('quick_edit.taxonomy_select_label')}</span>
+                <select
+                  data-testid="bulk-taxonomy-key"
+                  className={control}
+                  value={bulkTaxKey}
+                  disabled={bulkBusy}
+                  onChange={e => {
+                    setBulkTaxKey(e.target.value);
+                    setBulkTaxTermIds([]);
+                  }}
+                >
+                  <option value="">{tStatic('quick_edit.taxonomy_none')}</option>
+                  {(terms?.definitions ?? []).map(def => (
+                    <option key={def.key} value={def.key}>{def.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              {bulkTaxKey && (
+                <label className="flex min-w-[160px] flex-col gap-1 font-medium text-zinc-700">
+                  <span>{tStatic('quick_edit.taxonomy_op_label')}</span>
+                  <select
+                    data-testid="bulk-taxonomy-op"
+                    className={control}
+                    value={bulkTaxOp}
+                    disabled={bulkBusy}
+                    onChange={e => setBulkTaxOp(e.target.value as TaxonomyDeltaOp)}
+                  >
+                    <option value="add">{tStatic('quick_edit.taxonomy_op_add')}</option>
+                    <option value="remove">{tStatic('quick_edit.taxonomy_op_remove')}</option>
+                    <option value="replace">{tStatic('quick_edit.taxonomy_op_replace')}</option>
+                  </select>
+                </label>
+              )}
+
+              {bulkTaxKey && (
+                <AdminButton
+                  variant="primary"
+                  size="sm"
+                  data-testid="bulk-taxonomy-apply-btn"
+                  disabled={bulkBusy || !csrfToken || bulkTaxLoading}
+                  onClick={() => void performBulkTaxonomy()}
+                >
+                  {tStatic('bulk.taxonomy_apply')}
+                </AdminButton>
+              )}
+            </div>
+
+            {bulkTaxKey && (
+              <div className="space-y-1.5">
+                <p className="font-medium text-zinc-600">
+                  {tStatic('quick_edit.taxonomy_terms_label', { value1: selectedLocaleCheck.locale || 'default' })}
+                </p>
+                {bulkTaxLoading ? (
+                  <p className="text-zinc-500">{tStatic('quick_edit.taxonomy_loading')}</p>
+                ) : (bulkTaxCatalog[bulkTaxCatalogKey]?.length ?? 0) === 0 ? (
+                  <p className="text-zinc-500">
+                    {tStatic('quick_edit.taxonomy_empty_catalog', { value1: selectedLocaleCheck.locale || 'default' })}
+                  </p>
+                ) : (
+                  <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded border border-zinc-200 bg-white p-2" data-testid="bulk-taxonomy-terms">
+                    {(bulkTaxCatalog[bulkTaxCatalogKey] ?? []).map(term => {
+                      const checked = bulkTaxTermIds.includes(term.id);
+                      return (
+                        <label
+                          key={term.id}
+                          className="inline-flex items-center gap-1.5 rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-800"
+                        >
+                          <input
+                            type="checkbox"
+                            data-testid={`bulk-taxonomy-term-${term.id}`}
+                            checked={checked}
+                            disabled={bulkBusy}
+                            onChange={e => {
+                              setBulkTaxTermIds(prev =>
+                                e.target.checked
+                                  ? [...prev, term.id]
+                                  : prev.filter(id => id !== term.id),
+                              );
+                            }}
+                          />
+                          <span>{term.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {bulkTaxOp === 'replace' && (
+                  <p className="text-[11px] text-zinc-500">{tStatic('quick_edit.taxonomy_clear_hint')}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {bulkBlockMessage && <AdminAlert tone="warning" role="alert" data-testid="bulk-block-alert">{bulkBlockMessage}</AdminAlert>}
@@ -1097,13 +1269,13 @@ export function EntryListPage({
         {tStatic("feature.content.entrylistpage.could_not_load_some_term_names_on_this_page")}
       </AdminAlert>}
 
-      {bulkResults.length > 0 && (() => {
+      {displayBulkResults.length > 0 && (() => {
         const counts = {
-          succeeded: bulkResults.filter(r => r.status === 'succeeded').length,
-          stale: bulkResults.filter(r => r.status === 'stale').length,
-          failed: bulkResults.filter(r => r.status === 'failed').length,
-          uncertain: bulkResults.filter(r => r.status === 'uncertain').length,
-          unattempted: bulkResults.filter(r => r.status === 'unattempted').length,
+          succeeded: displayBulkResults.filter(r => r.status === 'succeeded').length,
+          stale: displayBulkResults.filter(r => r.status === 'stale').length,
+          failed: displayBulkResults.filter(r => r.status === 'failed').length,
+          uncertain: displayBulkResults.filter(r => r.status === 'uncertain').length,
+          unattempted: displayBulkResults.filter(r => r.status === 'unattempted').length,
         };
         return (
           <div className="space-y-2 rounded-lg border border-zinc-200 bg-white p-3" aria-label={tStatic("feature.content.entrylistpage.bulk_results")} data-testid="bulk-results-panel">
@@ -1129,11 +1301,16 @@ export function EntryListPage({
                 </AdminButton>
               )}
             </div>
+            {unresolvedUncertainCount > 0 && (
+              <p className="text-xs font-medium text-amber-800" data-testid="bulk-unresolved-uncertain-notice">
+                {tStatic('bulk.unresolved_uncertain_banner', { value1: formatNumber(unresolvedUncertainCount) })}
+              </p>
+            )}
             {bulkRemainingRetryCount > 0 && (
               <p className="text-xs text-zinc-600">{tStatic("entry_lifecycle.bulk_reconciling_notice")}</p>
             )}
             <ul className="space-y-1 text-xs">
-              {bulkResults.map(result => (
+              {displayBulkResults.map(result => (
                 <li
                   key={result.id}
                   data-bulk-id={result.id}
@@ -1238,17 +1415,15 @@ export function EntryListPage({
           <caption id={captionId} className="sr-only">{tStatic("feature.content.entrylistpage.content_table")}{' '}{typeKey}{tStatic("feature.content.entrylistpage.server_side_search_status_and_pagination")}</caption>
           <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wider text-zinc-600">
             <tr>
-              {!isTrashView && (
-                <th scope="col" className="w-10 px-3 py-2.5">
-                  <input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_all_on_page")} checked={allSelected}
-                    disabled={!currentRows.length || bulkBusy || loading}
-                    onChange={event => setSelected(prev => {
-                      const next = new Set(prev);
-                      currentIds.forEach(id => { if (event.target.checked) next.add(id); else next.delete(id); });
-                      return next;
-                    })} />
-                </th>
-              )}
+              <th scope="col" className="w-10 px-3 py-2.5">
+                <input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_all_on_page")} checked={allSelected}
+                  disabled={!currentRows.length || bulkBusy || loading}
+                  onChange={event => setSelected(prev => {
+                    const next = new Set(prev);
+                    currentIds.forEach(id => { if (event.target.checked) next.add(id); else next.delete(id); });
+                    return next;
+                  })} />
+              </th>
               {!isTrashView && <th scope="col" className="w-14 px-2 py-2.5 text-center">{tStatic("feature.media.mediapicker.images")}</th>}
               <th scope="col" aria-sort={ariaSortFor('title')} className="min-w-[220px] px-3 py-2.5">
                 <button type="button" data-testid="sort-title" className={sortButton}
@@ -1284,7 +1459,7 @@ export function EntryListPage({
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {!loading && !error && currentRows.length === 0 && <tr>
-              <td colSpan={isTrashView ? 3 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length}
+              <td colSpan={isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length}
                 className="px-4 py-8 text-center text-sm text-zinc-500">
                 {data?.total === 0 ? tStatic("feature.content.entrylistpage.no_matching_content_clear_filters_to_see_more") : tStatic("feature.content.entrylistpage.no_items_on_this_page")}
               </td>
@@ -1294,14 +1469,12 @@ export function EntryListPage({
               const thumbId = !isTrashView && typeof row.fields?.featured_image === 'string' ? row.fields.featured_image.trim() : '';
               const readingBlocked = row.blocked_reasons?.trash === 'reading_page_assigned';
               const restoreLocaleBlocked = row.blocked_reasons?.restore === 'locale_disabled';
-              const totalCols = isTrashView ? 3 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length;
+              const totalCols = isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length;
               const isQuickEditing = !isTrashView && quickEditRowId === row.id;
               return <Fragment key={row.id}><tr data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
-                {!isTrashView && (
-                  <td className="px-3 py-2.5"><input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_item_value", { value1: row.id })}
-                    checked={selected.has(row.id)} disabled={bulkBusy}
-                    onChange={event => toggleRow(row.id, event.target.checked)} /></td>
-                )}
+                <td className="px-3 py-2.5"><input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_item_value", { value1: row.id })}
+                  checked={selected.has(row.id)} disabled={bulkBusy}
+                  onChange={event => toggleRow(row.id, event.target.checked)} /></td>
                 {!isTrashView && (
                   <td className="w-14 px-2 py-2.5">
                     {thumbId ? (

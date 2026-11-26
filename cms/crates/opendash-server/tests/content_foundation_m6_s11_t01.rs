@@ -1956,9 +1956,10 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     // Plugin Extensibility S02 adds 0050 (owner PK fix + `plugin_entry_projections`);
     // Admin i18n S01 adds 0051 (CMS locale and multilingual settings columns),
     // Taxonomy Featured Image adds 0052 (`taxonomy_terms.featured_image_media_id`),
-    // and Spec B S01 adds 0053 (owner_kind isolation for Theme Functions runtime);
+    // and Spec B S01 adds 0053 (owner_kind isolation for Theme Functions runtime),
+    // and Entry Lifecycle S01 adds 0054 (`content_entries.trashed_at` + lifecycle indexes);
     // the 0040→0041 permalink preservation assertions above must still hold.
-    assert_eq!(migration_version, 53);
+    assert_eq!(migration_version, 54);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await
