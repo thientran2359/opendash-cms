@@ -1,8 +1,6 @@
 {
   "cms/admin/src/App.tsx": 879,
   "cms/admin/src/builder/BuilderInspector.tsx": 820,
-  "cms/admin/src/builder/StudioFieldControls.tsx": 1017,
-  "cms/admin/src/builder/document.ts": 1233,
   "cms/admin/src/features/content/ContentTypeSchemaSettings.tsx": 1299,
   "cms/admin/src/features/content/EntryListPage.tsx": 1757,
   "cms/admin/src/features/content/QuickEditForm.tsx": 876,
