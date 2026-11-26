@@ -2,7 +2,7 @@
 
 > [!NOTE]
 > **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0032`–`0033`, danh mục writer cập nhật tại [`M8_WRITER_INVENTORY.md`](M8_WRITER_INVENTORY.md); xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `NOT_STARTED / NOT_RUN` bên dưới là snapshot lịch sử lúc chốt G2.
-> **Điểm lưu ý đối chiếu codebase:** Bảng `operation_jobs` (`0032`) dùng các cột `actor_user_id`, `summary_json`, `error_code`, `requested_at`. Các sai khác kỹ thuật cần xử lý qua Design Spec EGM mới (như `storage/backup.rs` chưa gom `plugin_revisions`, đường dẫn `secrets/smtp` & `themes/revisions` trong `storage/restore.rs`, và `AdmittedMutation` cho 3 route operations) được theo dõi riêng.
+> **Điểm lưu ý đối chiếu codebase:** Bảng `operation_jobs` (`0032`) dùng các cột `actor_user_id`, `summary_json`, `error_code`, `requested_at`. Đường dẫn kiểm tra `.complete` cho `themes/revisions/<digest>/` (`source_format == "v3"`) trong `storage/restore.rs` đã được hoàn thiện tại [`phase2-legacy-builder-theme-v3-cleanup.md`](../designs/phase2-legacy-builder-theme-v3-cleanup.md) (`Verified 2026-11-26`); các sai khác còn lại (như `storage/backup.rs` chưa gom `plugin_revisions`, đường dẫn `secrets/smtp` trong `storage/restore.rs`, và `AdmittedMutation` cho 3 route operations) tiếp tục được theo dõi riêng.
 
 > **Staging addendum 16/11/2026:** [ADR-0017](../decisions/ADR-0017-usable-beta-staging.md)
 > ưu tiên Beta nội bộ Windows trước common RC/V1 public. Không đổi bất kỳ acceptance

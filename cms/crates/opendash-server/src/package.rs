@@ -114,17 +114,17 @@ pub fn validate_theme_relative_path(raw: &str) -> Result<String, &'static str> {
         || raw.contains(':')
         || raw.bytes().any(|b| b < 0x20 || b == 0x7f)
     {
-        return Err("Đường dẫn trong ZIP v2 không hợp lệ.");
+        return Err("Đường dẫn trong gói theme ZIP không hợp lệ.");
     }
     for segment in raw.split('/') {
         if segment.is_empty() || segment == "." || segment == ".." {
-            return Err("Đường dẫn trong ZIP v2 chứa segment không an toàn.");
+            return Err("Đường dẫn trong gói theme ZIP chứa segment không an toàn.");
         }
     }
     Ok(raw.to_string())
 }
 
-/// Reads and validates all entries of a v2 theme ZIP archive enforcing size,
+/// Reads and validates all entries of a theme ZIP archive enforcing size,
 /// file count, expansion ratio, zero-compressed-size bomb, symlink, and case-collision limits.
 pub fn read_v2_zip_entries<F>(
     bytes: &[u8],
@@ -136,7 +136,7 @@ where
     let mut archive = open_bounded_zip(
         bytes,
         V2_MAX_ZIP_BYTES,
-        "Gói theme ZIP v2 vượt quá giới hạn 8 MiB.",
+        "Gói theme ZIP vượt quá giới hạn 8 MiB.",
         "Gói theme ZIP không hợp lệ.",
     )
     .map_err(|msg| {
@@ -183,14 +183,14 @@ where
         let rel_path = validate_theme_relative_path(&name).map_err(V2ZipError::BadRequest)?;
         if files.len() >= V2_MAX_FILES {
             return Err(V2ZipError::PayloadTooLarge(
-                "Gói theme ZIP v2 vượt quá giới hạn 256 file.",
+                "Gói theme ZIP vượt quá giới hạn 256 file.",
             ));
         }
 
         let lower = rel_path.to_ascii_lowercase();
         if !seen_lower.insert(lower) {
             return Err(V2ZipError::BadRequest(
-                "ZIP v2 chứa đường dẫn trùng lặp hoặc xung đột chữ hoa/thường.",
+                "Gói theme ZIP chứa đường dẫn trùng lặp hoặc xung đột chữ hoa/thường.",
             ));
         }
 
@@ -200,12 +200,12 @@ where
 
         if entry.size() > max_for_entry as u64 {
             return Err(V2ZipError::PayloadTooLarge(
-                "File trong ZIP v2 vượt quá giới hạn kích thước cho phép.",
+                "File trong gói theme ZIP vượt quá giới hạn kích thước cho phép.",
             ));
         }
         if entry.size() > remaining_total as u64 {
             return Err(V2ZipError::PayloadTooLarge(
-                "Tổng dung lượng giải nén ZIP v2 vượt quá 32 MiB.",
+                "Tổng dung lượng giải nén gói theme ZIP vượt quá 32 MiB.",
             ));
         }
 
@@ -213,18 +213,18 @@ where
         let data = read_bounded_entry(
             &mut entry,
             read_cap,
-            "Không thể đọc nội dung file trong ZIP v2.",
+            "Không thể đọc nội dung file trong gói theme ZIP.",
         )
         .map_err(V2ZipError::BadRequest)?;
 
         if data.len() > max_for_entry {
             return Err(V2ZipError::PayloadTooLarge(
-                "File giải nén trong ZIP v2 vượt quá giới hạn kích thước.",
+                "File giải nén trong gói theme ZIP vượt quá giới hạn kích thước.",
             ));
         }
         if data.len() > remaining_total {
             return Err(V2ZipError::PayloadTooLarge(
-                "Tổng dung lượng giải nén ZIP v2 vượt quá 32 MiB.",
+                "Tổng dung lượng giải nén gói theme ZIP vượt quá 32 MiB.",
             ));
         }
 
@@ -234,7 +234,7 @@ where
                 && actual_len > compressed_size.saturating_mul(V2_MAX_EXPANSION_RATIO))
         {
             return Err(V2ZipError::BadRequest(
-                "ZIP v2 bị từ chối do tỷ lệ giải nén bất thường (zip bomb).",
+                "Gói theme ZIP bị từ chối do tỷ lệ giải nén bất thường (zip bomb).",
             ));
         }
 
@@ -242,7 +242,7 @@ where
             total_decoded
                 .checked_add(data.len())
                 .ok_or(V2ZipError::PayloadTooLarge(
-                    "Tổng dung lượng giải nén ZIP v2 vượt quá 32 MiB.",
+                    "Tổng dung lượng giải nén gói theme ZIP vượt quá 32 MiB.",
                 ))?;
         files.insert(rel_path, data);
     }
