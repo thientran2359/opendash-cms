@@ -503,10 +503,10 @@ pub(crate) async fn render_canonical_archive(
                 &eligible_taxonomies,
                 FieldRole::Editor,
             );
-            view.ext = proj_map
-                .remove(&record.id)
-                .map(|p| p.ext)
-                .unwrap_or_default();
+            if let Some(proj) = proj_map.remove(&record.id) {
+                view.ext = proj.ext;
+                view.theme_ext = proj.theme_ext;
+            }
             view
         })
         .collect();
@@ -843,10 +843,10 @@ async fn render_entry_response_with_cache(
         &eligible_public_taxonomies,
         FieldRole::Editor,
     );
-    view.ext = proj_map
-        .remove(&entry.id)
-        .map(|p| p.ext)
-        .unwrap_or_default();
+    if let Some(proj) = proj_map.remove(&entry.id) {
+        view.ext = proj.ext;
+        view.theme_ext = proj.theme_ext;
+    }
     let breadcrumbs = if is_home {
         content_render::home_breadcrumbs(
             content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
@@ -1130,10 +1130,10 @@ pub(crate) async fn render_canonical_taxonomy(
                 eligible,
                 FieldRole::Editor,
             );
-            view.ext = proj_map
-                .remove(&record.id)
-                .map(|p| p.ext)
-                .unwrap_or_default();
+            if let Some(proj) = proj_map.remove(&record.id) {
+                view.ext = proj.ext;
+                view.theme_ext = proj.theme_ext;
+            }
             entries.push(view);
         }
     }

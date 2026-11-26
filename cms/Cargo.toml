@@ -10,6 +10,7 @@ members = [
 age = "=0.11.2"
 argon2 = { version = "=0.5.3", features = ["std"] }
 axum = "=0.8.9"
+boa_engine = "=0.22.0"
 http-body = "=1.1.0"
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 jiff = { version = "=1.0.2", default-features = false, features = ["std", "tzdb-bundle-always", "perf-inline"] }

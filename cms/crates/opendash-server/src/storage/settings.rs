@@ -4611,7 +4611,7 @@ mod plugin_settings_s02_tests {
             .filter_map(Result::ok)
         {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".sql") && !name.starts_with("0050_") {
+            if name.ends_with(".sql") && !name.starts_with("0050_") && name.as_str() < "0053_" {
                 fs::copy(entry.path(), pre_dir.join(entry.file_name())).unwrap();
             }
         }
@@ -4640,6 +4640,56 @@ mod plugin_settings_s02_tests {
             .unwrap();
 
         assert_eq!(after_user_objects - before_user_objects, 2);
+        assert!(total_objects < 256, "sqlite_schema total={total_objects}");
+    }
+
+    #[tokio::test]
+    async fn migration_0053_schema_delta_is_zero() {
+        let temp = TempDirGuard::new("s01_m53_delta");
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        let migrations_dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        let pre_dir = temp.0.join("pre_0053");
+        fs::create_dir_all(&pre_dir).unwrap();
+        for entry in fs::read_dir(&migrations_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+        {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".sql") && name.as_str() < "0053_" {
+                fs::copy(entry.path(), pre_dir.join(entry.file_name())).unwrap();
+            }
+        }
+
+        let pre_migrator = sqlx::migrate::Migrator::new(pre_dir.as_path())
+            .await
+            .unwrap();
+        pre_migrator.run(&db).await.unwrap();
+
+        let before_user_objects: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+
+        let after_user_objects: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        let total_objects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(after_user_objects - before_user_objects, 0);
         assert!(total_objects < 256, "sqlite_schema total={total_objects}");
     }
 

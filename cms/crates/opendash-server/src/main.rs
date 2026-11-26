@@ -181,6 +181,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             paths.plugins_dir(),
             paths.secrets_dir(),
         )
+        .with_themes_root(paths.themes_dir())
         .with_recovery_state(recovery.clone()),
     );
     let hooks = Arc::new(HookDispatcher::with_async_queue(

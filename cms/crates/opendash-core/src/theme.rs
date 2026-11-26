@@ -416,6 +416,75 @@ pub struct ThemeScriptEnqueueDecl {
     pub conditions: Vec<EnqueueCondition>,
 }
 
+fn default_theme_functions_api_version() -> u32 {
+    crate::plugin::PLUGIN_ABI_VERSION
+}
+
+fn default_theme_hook_priority() -> i32 {
+    100
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeFunctionsSpec {
+    #[serde(default = "default_theme_functions_api_version")]
+    pub api_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_host_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hooks: Vec<crate::hooks::HookEvent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filters: Vec<crate::hooks::HookEvent>,
+    #[serde(default = "default_theme_hook_priority")]
+    pub hook_priority: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<crate::plugin::PluginPermissions>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<crate::plugin::PluginActionDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings_schema: Vec<crate::plugin::PluginSettingField>,
+}
+
+impl ThemeFunctionsSpec {
+    /// Active Theme `functions.js` automatically receives basic public read and
+    /// theme-scoped KV permissions while sensitive permissions remain explicit.
+    pub fn effective_permissions(&self) -> crate::plugin::PluginPermissions {
+        let mut perms = self.permissions.clone().unwrap_or_default();
+        if !perms.sqlite.iter().any(|p| p == "kv_read") {
+            perms.sqlite.push("kv_read".into());
+        }
+        if !perms.sqlite.iter().any(|p| p == "kv_write") {
+            perms.sqlite.push("kv_write".into());
+        }
+        perms.content_read_all_public = true;
+        perms.taxonomy_read = true;
+        perms.media_read = true;
+        perms.site_options_read = true;
+        perms.plugin_settings_read = true;
+        perms
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.api_version != crate::plugin::PLUGIN_ABI_VERSION {
+            return Err("Chỉ hỗ trợ functions.api_version 1.");
+        }
+        crate::plugin::validate_min_host_version(self.min_host_version.as_deref())?;
+        crate::plugin::validate_hooks_and_filters(&self.hooks, &self.filters, true)?;
+        let secret_keys = crate::plugin::validate_settings_schema(&self.settings_schema)?;
+        if let Some(raw) = &self.permissions {
+            // Validate declared entries (including invalid sqlite/http/network tokens)
+            // before merging defaults, allowing content_read_private against effective reads.
+            let mut merged = raw.clone();
+            merged.content_read_all_public = true;
+            crate::plugin::validate_permissions(&merged, &secret_keys)?;
+        }
+        let effective = self.effective_permissions();
+        crate::plugin::validate_permissions(&effective, &secret_keys)?;
+        crate::plugin::validate_actions(&self.actions, &effective)?;
+        Ok(())
+    }
+}
+
 /// v3 is additive in S01: v2 manifests are still readable by existing callers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -453,6 +522,8 @@ pub struct ThemeV3Manifest {
     pub field_groups: Option<serde_json::Value>,
     #[serde(default)]
     pub admin_extensions: Option<crate::admin_extensions::AdminExtensions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub functions: Option<ThemeFunctionsSpec>,
 }
 
 impl ThemeV3Manifest {
@@ -526,7 +597,34 @@ impl ThemeV3Manifest {
             }
         }
         self.enqueue_graphs(&asset_paths)?;
+        if let Some(functions) = &self.functions {
+            functions.validate()?;
+        }
         Ok(())
+    }
+
+    /// Converts the optional `functions` block into a runtime `PluginManifest`
+    /// with fixed entrypoint `"functions.js"` and active-theme default permissions.
+    pub fn to_runtime_manifest(&self) -> Option<crate::plugin::PluginManifest> {
+        let func = self.functions.as_ref()?;
+        Some(crate::plugin::PluginManifest {
+            id: self.theme_id.clone(),
+            version: self.version.clone(),
+            api_version: func.api_version,
+            manifest_schema: 3,
+            min_host_version: func.min_host_version.clone(),
+            name: self.name.clone(),
+            description: String::new(),
+            entrypoint: "functions.js".into(),
+            permissions: func.effective_permissions(),
+            hooks: func.hooks.clone(),
+            filters: func.filters.clone(),
+            hook_priority: func.hook_priority,
+            actions: func.actions.clone(),
+            declarations: Default::default(),
+            editor_panels: Vec::new(),
+            settings_schema: func.settings_schema.clone(),
+        })
     }
 
     fn enqueue_graphs(
@@ -923,6 +1021,7 @@ mod tests {
             declarations: None,
             field_groups: None,
             admin_extensions: None,
+            functions: None,
         }
     }
 

@@ -516,9 +516,13 @@ pub async fn theme_install(
 }
 
 pub async fn theme_activate(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
+    State(plugins): State<Arc<crate::plugin::PluginManager>>,
+    State(hooks): State<Arc<crate::hooks::HookDispatcher>>,
+    State(coordinator): State<Arc<crate::operations::SiteCoordinator>>,
     Extension(themes_root): Extension<ThemeStoreRoot>,
+    Extension(recovery): Extension<crate::config::RecoveryState>,
     request_headers: HeaderMap,
     State(content_registry): State<
         Arc<
@@ -552,6 +556,50 @@ pub async fn theme_activate(
                 RevisionActivationOutcome::Activated(selection) => {
                     *content_registry.write().await =
                         crate::storage::content::load_content_type_catalog(&db).await?;
+                    plugins.invalidate_active_theme_cache().await;
+                    if !recovery.is_safe_mode() {
+                        if let Some((theme_id, rev_id, sel_ver, runtime_manifest)) =
+                            plugins.active_theme_manifest().await
+                        {
+                            if runtime_manifest
+                                .hooks
+                                .contains(&opendash_core::hooks::HookEvent::ThemeAfterActivate)
+                            {
+                                hooks.enqueue_async(crate::hooks::AsyncHookJob {
+                                    event: opendash_core::hooks::HookEvent::ThemeAfterActivate,
+                                    principal: opendash_core::hooks::ExecutionPrincipal::Admin,
+                                    locale: None,
+                                    type_key: None,
+                                    payload: serde_json::json!({
+                                        "theme_id": &theme_id,
+                                        "revision_id": &rev_id,
+                                        "selection_version": sel_ver,
+                                    }),
+                                    dispatch_depth: 0,
+                                    lease: lease.clone(),
+                                });
+                            }
+                            if runtime_manifest.filters.iter().any(|f| {
+                                matches!(
+                                    f,
+                                    opendash_core::hooks::HookEvent::FilterSeoHead
+                                        | opendash_core::hooks::HookEvent::FilterEntryView
+                                )
+                            }) {
+                                let _handle = crate::storage::plugin_projections::spawn_recompute_owner_projections_batched(
+                                    db.clone(),
+                                    Arc::clone(&hooks),
+                                    Arc::clone(&coordinator),
+                                    opendash_core::hooks::ExtensionOwnerKind::Theme,
+                                    theme_id,
+                                    Some((rev_id, sel_ver)),
+                                    coordinator.maintenance_cancel_rx(),
+                                    coordinator.shutdown_rx(),
+                                )
+                                .await;
+                            }
+                        }
+                    }
                     Ok((headers(Some(selection.version)), Json(selection)).into_response())
                 }
                 RevisionActivationOutcome::NotFound => {

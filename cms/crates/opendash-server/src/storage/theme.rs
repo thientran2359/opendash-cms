@@ -397,8 +397,14 @@ pub async fn stage_and_commit_v3_revision(
         ));
     }
     crate::theme::parse_theme_declarations(manifest_json).map_err(ApiError::bad_request)?;
+    let theme_action_ids: Vec<String> = manifest
+        .functions
+        .as_ref()
+        .map(|f| f.actions.iter().map(|a| a.id.clone()).collect())
+        .unwrap_or_default();
     if let Some(ext) = &manifest.admin_extensions {
-        ext.validate("theme", &[]).map_err(ApiError::bad_request)?;
+        ext.validate("theme", &theme_action_ids)
+            .map_err(ApiError::bad_request)?;
     }
     crate::storage::admin_extensions::require_capacity(
         db,
@@ -881,6 +887,43 @@ pub async fn activate_revision(
     let blocks = crate::theme::collect_package_blocks(&block_files, &revision.theme_id)
         .map_err(ApiError::bad_request)?;
 
+    // Validate functions.settings_schema compatibility (forbid switching secret <-> non-secret).
+    if let Some(func) = &manifest.functions {
+        let saved_rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT option_key, value_json FROM theme_option_values
+              WHERE owner_kind = 'theme_functions' AND owner_id = ?",
+        )
+        .bind(&revision.theme_id)
+        .fetch_all(db)
+        .await?;
+        for (key, value_json) in saved_rows {
+            let Some(field) = func.settings_schema.iter().find(|f| f.key == key) else {
+                continue;
+            };
+            let is_stored_secret = serde_json::from_str::<serde_json::Value>(&value_json)
+                .ok()
+                .and_then(|v| {
+                    v.as_object()
+                        .and_then(|m| m.get("secret_ref"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(|_| true)
+                })
+                .unwrap_or(false);
+            let wants_secret =
+                field.field_type == opendash_core::plugin::PluginSettingFieldType::Secret;
+            if is_stored_secret != wants_secret {
+                return Err(ApiError::conflict(
+                    "Schema option của revision mới không tương thích với giá trị đã lưu (409).",
+                ));
+            }
+        }
+    }
+    let theme_action_ids: Vec<String> = manifest
+        .functions
+        .as_ref()
+        .map(|f| f.actions.iter().map(|a| a.id.clone()).collect())
+        .unwrap_or_default();
+
     let mut conn = db.acquire().await?;
     sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
     let block_update = crate::storage::page::sync_owner_blocks_in_tx(
@@ -920,7 +963,7 @@ pub async fn activate_revision(
             &revision.theme_id,
             extension_decls.as_ref(),
             "active",
-            &[],
+            &theme_action_ids,
         )
         .await?;
         crate::storage::admin_extensions::set_theme_active_in_conn(
@@ -946,6 +989,14 @@ pub async fn activate_revision(
 
     match res {
         Ok(done) if done.rows_affected() == 1 => {
+            if let Err(err) =
+                sqlx::query("DELETE FROM plugin_entry_projections WHERE owner_kind = 'theme'")
+                    .execute(&mut *conn)
+                    .await
+            {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                return Err(err.into());
+            }
             // The effective CPT body visibility and active theme selection must
             // already reflect the new revision when projecting public media.
             // Rebuild after every declaration update, still before COMMIT.
@@ -1215,6 +1266,54 @@ pub async fn list_local_theme_templates(
         theme_state: "active",
         theme_templates,
     })
+}
+
+#[derive(Debug, Clone)]
+pub struct ActiveThemeFunctionsSnapshot {
+    pub theme_id: String,
+    pub revision_id: String,
+    pub revision_digest: String,
+    pub selection_version: i64,
+    pub manifest_json: String,
+    pub file_digests: BTreeMap<String, String>,
+}
+
+pub async fn load_active_theme_functions_snapshot(
+    db: &SqlitePool,
+) -> ApiResult<Option<ActiveThemeFunctionsSnapshot>> {
+    let row: Option<(String, String, String, i64, String, String, String)> = sqlx::query_as(
+        "SELECT r.theme_id, r.revision_id, r.revision_digest, a.version,
+                r.source_format, r.manifest_json, r.file_digests_json
+           FROM theme_active_selection a
+           JOIN theme_revisions r ON r.revision_id = a.revision_id
+          WHERE a.id = 1",
+    )
+    .fetch_optional(db)
+    .await?;
+    let Some((
+        theme_id,
+        revision_id,
+        revision_digest,
+        selection_version,
+        source_format,
+        manifest_json,
+        file_digests_json,
+    )) = row
+    else {
+        return Ok(None);
+    };
+    if ThemeSourceFormat::from_db(&source_format)? != ThemeSourceFormat::V3 {
+        return Ok(None);
+    }
+    let file_digests: BTreeMap<String, String> = serde_json::from_str(&file_digests_json)?;
+    Ok(Some(ActiveThemeFunctionsSnapshot {
+        theme_id,
+        revision_id,
+        revision_digest,
+        selection_version,
+        manifest_json,
+        file_digests,
+    }))
 }
 
 pub async fn load_active_theme_v3(
