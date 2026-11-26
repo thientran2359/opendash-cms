@@ -1,0 +1,302 @@
+use super::*;
+use opendash_core::field_schema::FieldContext;
+
+fn sample_hash(fill: char) -> String {
+    std::iter::repeat_n(fill, 64).collect()
+}
+
+#[test]
+fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
+    let img_id = sample_hash('a');
+    let vid_id = sample_hash('b');
+    let term_img_id = sample_hash('c');
+
+    let specs: Vec<FieldSpec> = serde_json::from_value(json!([
+        { "type": "tab", "key": "tab_main", "label": "Main" },
+        { "type": "text", "key": "headline", "label": "Headline", "default": "Default", "public": true },
+        { "type": "text", "key": "internal_note", "label": "Secret Note", "public": false },
+        { "type": "media", "key": "hero_img", "label": "Hero", "public": true },
+        { "type": "gallery", "key": "slides", "label": "Slides", "media_kind": "any", "public": true },
+        { "type": "link", "key": "cta", "label": "CTA", "public": true },
+        { "type": "icon", "key": "badge_icon", "label": "Icon", "public": true },
+        { "type": "spacing", "key": "outer_margin", "label": "Margin", "property": "margin", "min": -128, "public": true },
+        { "type": "richtext", "key": "bio", "label": "Bio", "public": true },
+        { "type": "entry_ref", "key": "featured", "label": "Featured", "target_types": ["post"], "public": true },
+        { "type": "term_ref", "key": "topic", "label": "Topic", "taxonomy": "category", "public": true },
+        {
+            "type": "group",
+            "key": "banner",
+            "label": "Banner",
+            "public": true,
+            "fields": [
+                { "type": "media", "key": "bg", "label": "BG" },
+                { "type": "link", "key": "btn", "label": "Btn" }
+            ]
+        },
+        {
+            "type": "repeater",
+            "key": "cards",
+            "label": "Cards",
+            "public": true,
+            "fields": [
+                { "type": "text", "key": "title", "label": "Title" },
+                { "type": "richtext", "key": "body", "label": "Body" }
+            ]
+        }
+    ]))
+    .unwrap();
+    opendash_core::field_schema::validate_field_specs(&specs, FieldContext::Options).unwrap();
+
+    let raw = BTreeMap::from([
+        ("headline".into(), json!("OpenDash V1")),
+        ("internal_note".into(), json!("do not leak")),
+        ("hero_img".into(), json!(img_id)),
+        ("slides".into(), json!([img_id, vid_id, sample_hash('f')])),
+        (
+            "cta".into(),
+            json!({ "url": "/contact", "label": "Contact", "new_tab": true, "nofollow": true }),
+        ),
+        ("badge_icon".into(), json!("star")),
+        ("outer_margin".into(), json!({ "top": -16, "bottom": 24 })),
+        (
+            "bio".into(),
+            json!("<p>Hello <script>alert(1)</script><strong>world</strong></p>"),
+        ),
+        ("featured".into(), json!(10)),
+        ("topic".into(), json!(5)),
+        (
+            "banner".into(),
+            json!({ "bg": img_id, "btn": { "url": "", "label": "Empty" } }),
+        ),
+        (
+            "cards".into(),
+            json!([{ "title": "One", "body": "<p>Safe card</p>" }]),
+        ),
+    ]);
+
+    let media = BTreeMap::from([
+        (
+            img_id.clone(),
+            HydratedMediaRow {
+                id: img_id.clone(),
+                kind: "image".into(),
+                width: Some(1200),
+                height: Some(630),
+            },
+        ),
+        (
+            vid_id.clone(),
+            HydratedMediaRow {
+                id: vid_id.clone(),
+                kind: "video".into(),
+                width: Some(1920),
+                height: Some(1080),
+            },
+        ),
+        (
+            term_img_id.clone(),
+            HydratedMediaRow {
+                id: term_img_id.clone(),
+                kind: "image".into(),
+                width: Some(400),
+                height: Some(400),
+            },
+        ),
+    ]);
+    let entries = BTreeMap::from([(
+        10,
+        HydratedEntryRefRow {
+            id: 10,
+            type_key: "post".into(),
+            title: "Post Ten".into(),
+            slug: "post-ten".into(),
+            url: "/post-ten".into(),
+            cover_url: Some(format!("/media/{img_id}/file")),
+            excerpt: "Summary".into(),
+            published_at: None,
+        },
+    )]);
+    let terms = BTreeMap::from([(
+        5,
+        HydratedTermRefRow {
+            id: 5,
+            taxonomy_key: "category".into(),
+            name: "News".into(),
+            slug: "news".into(),
+            url: "/category/news".into(),
+            featured_image_media_id: Some(term_img_id.clone()),
+        },
+    )]);
+    let ctx = HydrationContext {
+        media: &media,
+        entries: &entries,
+        terms: &terms,
+        is_preview: false,
+    };
+
+    let mut nonces = RichTextNonceTable::default();
+    let hydrated = hydrate_field_values(&specs, &raw, &ctx, Some(&mut nonces), true).unwrap();
+
+    assert!(!hydrated.contains_key("tab_main"));
+    assert!(!hydrated.contains_key("internal_note"));
+    assert_eq!(hydrated["headline"], json!("OpenDash V1"));
+    assert_eq!(
+        hydrated["hero_img"]["url"],
+        json!(format!("/media/{img_id}/file"))
+    );
+    assert_eq!(
+        hydrated["hero_img"]["thumbnail_url"],
+        json!(format!("/media/{img_id}/thumbnail"))
+    );
+    assert_eq!(hydrated["hero_img"]["width"], json!(1200));
+    assert_eq!(hydrated["slides"].as_array().unwrap().len(), 2);
+    assert_eq!(hydrated["slides"][1]["thumbnail_url"], json!(""));
+    assert_eq!(hydrated["cta"]["target"], json!("_blank"));
+    assert_eq!(
+        hydrated["cta"]["rel"],
+        json!("noopener noreferrer nofollow")
+    );
+    assert_eq!(hydrated["badge_icon"], json!({ "name": "star" }));
+    assert!(
+        hydrated["outer_margin"]["classes"]
+            .as_str()
+            .unwrap()
+            .contains("-mt-4")
+    );
+    assert!(
+        hydrated["outer_margin"]["classes"]
+            .as_str()
+            .unwrap()
+            .contains("mb-6")
+    );
+    assert!(
+        hydrated["bio"]
+            .as_str()
+            .unwrap()
+            .starts_with("OD_RICHTEXT_")
+    );
+    assert_eq!(hydrated["featured"]["title"], json!("Post Ten"));
+    assert_eq!(hydrated["topic"]["kind"], json!("category"));
+    assert_eq!(
+        hydrated["topic"]["featured_image"]["url"],
+        json!(format!("/media/{term_img_id}/file"))
+    );
+    assert_eq!(hydrated["banner"]["bg"]["id"], json!(img_id));
+    assert_eq!(hydrated["banner"]["btn"], Value::Null);
+    let card_nonce = hydrated["cards"][0]["body"].as_str().unwrap();
+    assert!(card_nonce.starts_with("OD_RICHTEXT_"));
+
+    // Nonce substitution works inside <body> and fails closed inside attributes
+    let html = format!(
+        "<!doctype html><html><body><div>{}</div><article>{}</article></body></html>",
+        hydrated["bio"].as_str().unwrap(),
+        card_nonce
+    );
+    let substituted = nonces.substitute_into_document(html).unwrap();
+    assert!(substituted.contains("<strong>world</strong>"));
+    assert!(!substituted.contains("<script>"));
+    assert!(substituted.contains("<p>Safe card</p>"));
+
+    let bad_attr = format!("<div title=\"{}\"></div>", card_nonce);
+    assert!(nonces.substitute_into_document(bad_attr).is_err());
+
+    // Plain sanitized mode (for plugin host SiteOptionsGet) returns HTML without nonces
+    let plain = hydrate_field_values(&specs, &raw, &ctx, None, true).unwrap();
+    assert!(
+        plain["bio"]
+            .as_str()
+            .unwrap()
+            .contains("<strong>world</strong>")
+    );
+    assert!(!plain["bio"].as_str().unwrap().starts_with("OD_RICHTEXT_"));
+}
+
+#[test]
+fn hydrates_responsive_studio_block_scalars_and_nested_repeater_groups() {
+    let specs: Vec<FieldSpec> = serde_json::from_value(json!([
+        {
+            "type": "radio_buttons",
+            "key": "align",
+            "label": "Align",
+            "responsive": true,
+            "default": "center",
+            "options": [
+                { "value": "left", "label": "Left" },
+                { "value": "center", "label": "Center" }
+            ]
+        },
+        {
+            "type": "range",
+            "key": "radius",
+            "label": "Radius",
+            "min": 0,
+            "max": 32,
+            "responsive": true,
+            "default": 8
+        },
+        {
+            "type": "select",
+            "key": "layout",
+            "label": "Layout",
+            "responsive": true,
+            "default": "grid",
+            "options": [
+                { "value": "grid", "label": "Grid" },
+                { "value": "stack", "label": "Stack" }
+            ]
+        },
+        {
+            "type": "repeater",
+            "key": "items",
+            "label": "Items",
+            "max_items": 1,
+            "fields": [
+                { "type": "text", "key": "title", "label": "Title" },
+                {
+                    "type": "group",
+                    "key": "meta",
+                    "label": "Meta",
+                    "fields": [
+                        { "type": "icon", "key": "badge", "label": "Badge" }
+                    ]
+                }
+            ]
+        }
+    ]))
+    .unwrap();
+    opendash_core::field_schema::validate_field_specs(&specs, FieldContext::StudioBlock).unwrap();
+
+    let raw = BTreeMap::from([
+        (
+            "align".into(),
+            json!({ "desktop": "left", "mobile": "center" }),
+        ),
+        ("radius".into(), json!({ "tablet": 12 })),
+        ("layout".into(), json!({ "desktop": "stack" })),
+        (
+            "items".into(),
+            json!([
+                { "title": "First", "meta": { "badge": "star" } },
+                { "title": "Truncated", "meta": { "badge": "check" } }
+            ]),
+        ),
+    ]);
+    let media = BTreeMap::new();
+    let entries = BTreeMap::new();
+    let terms = BTreeMap::new();
+    let ctx = HydrationContext {
+        media: &media,
+        entries: &entries,
+        terms: &terms,
+        is_preview: false,
+    };
+    let hydrated = hydrate_field_values(&specs, &raw, &ctx, None, false).unwrap();
+    assert_eq!(hydrated["align"], json!("left"));
+    assert_eq!(hydrated["radius"], json!(8));
+    assert_eq!(hydrated["layout"], json!("stack"));
+    assert_eq!(hydrated["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        hydrated["items"][0]["meta"]["badge"],
+        json!({ "name": "star" })
+    );
+}

@@ -648,12 +648,17 @@ def check(root):
         code = production_source(path.read_text(encoding='utf-8'))
         if re.search(r'\b(?:axum|sqlx|wasmi|tokio|reqwest)\s*::|\bstd\s*::\s*(?:fs|io|net|process|thread)\b|\bstd\s*::\s*\{[^}]*\b(?:fs|io|net|process|thread)\b', code):
             errors.append(f'core must not use framework/I/O: {path.relative_to(root)}')
-    test_files = {'plugin/tests.rs': 'tests', 'plugin/review_regressions.rs': 'review_regressions'}
-    module = (server / 'plugin/mod.rs').read_text(encoding='utf-8')
+    test_files = {
+        'plugin/tests.rs': ('plugin/mod.rs', r'#\[cfg\(test\)\]\s*mod\s+tests\s*;'),
+        'plugin/review_regressions.rs': ('plugin/mod.rs', r'#\[cfg\(test\)\]\s*mod\s+review_regressions\s*;'),
+        'hooks/tests/tests.rs': ('hooks/mod.rs', r'#\[cfg\(test\)\]\s*#\[path\s*=\s*"tests/tests\.rs"\]\s*mod\s+tests\s*;'),
+    }
     for path in server.rglob('*.rs'):
         relative = path.relative_to(server).as_posix()
         if relative in test_files:
-            if not re.search(r'#\[cfg\(test\)\]\s*mod\s+' + test_files[relative] + r'\s*;', module):
+            mod_file, pattern = test_files[relative]
+            mod_source = (server / mod_file).read_text(encoding='utf-8')
+            if not re.search(pattern, mod_source):
                 errors.append(f'test SQL exemption requires cfg(test): {relative}')
             continue
         code = production_source(path.read_text(encoding='utf-8'))

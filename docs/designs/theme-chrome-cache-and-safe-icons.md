@@ -32,7 +32,7 @@
 2. **Biên dịch C-SEC lặp lại trên mỗi request public:**
    - Dù `themes/revisions/<digest>/` là bất biến, [`storage/overrides.rs`](../../cms/crates/opendash-server/src/storage/overrides.rs) (`inspect_part_slot_in_tx`, `inspect_public_surfaces_and_precompile`, `render_public_part`, `render_csec_template_for_preview`) và [`routes/public_content.rs`](../../cms/crates/opendash-server/src/routes/public_content.rs) vẫn gọi `check_theme_part_depth()` và `validate_and_compile_csec_composition_with_theme_urls()` lại từ đầu trên mỗi HTTP `GET`, gây tốn CPU không cần thiết.
 3. **Theme & Declarative Block không thể hiển thị vector UI icon:**
-   - [`template_sec.rs`](../../cms/crates/opendash-server/src/template_sec.rs) và [`document.rs`](../../cms/crates/opendash-server/src/document.rs) cấm hoàn toàn thẻ `<svg>` để ngăn XSS (`onload`, `<script>`, `<foreignObject>`, `xlink:href`). Tác giả theme/block hiện buộc phải dùng ký tự Unicode hoặc ảnh raster cho các icon UI cơ bản (mũi tên, menu, lịch, đồng hồ, check, tìm kiếm...).
+   - [`template_sec.rs`](../../cms/crates/opendash-server/src/template_sec/mod.rs) và [`document.rs`](../../cms/crates/opendash-server/src/document/mod.rs) cấm hoàn toàn thẻ `<svg>` để ngăn XSS (`onload`, `<script>`, `<foreignObject>`, `xlink:href`). Tác giả theme/block hiện buộc phải dùng ký tự Unicode hoặc ảnh raster cho các icon UI cơ bản (mũi tên, menu, lịch, đồng hồ, check, tìm kiếm...).
 
 ---
 
@@ -125,7 +125,7 @@
 
 ### B. `ThemeCompositionCache` (In-Memory Revision Cache)
 
-- Đặt trong [`cms/crates/opendash-server/src/template_sec.rs`](../../cms/crates/opendash-server/src/template_sec.rs) theo đúng pattern `BlockTemplateCache::global()` trong `page.rs`:
+- Đặt trong [`cms/crates/opendash-server/src/template_sec.rs`](../../cms/crates/opendash-server/src/template_sec/mod.rs) theo đúng pattern `BlockTemplateCache::global()` trong `page.rs`:
   ```rust
   #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
   pub struct ThemeCompositionCacheKey {

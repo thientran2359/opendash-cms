@@ -239,7 +239,7 @@ Thiết kế giải quyết triệt để hiệu năng `0`-query khi lỗi, an t
         - **Content-Type `text/plain` (hoặc không rõ nhưng không HTML/JSON):** `translate_api_message` -> gắn `X-OpenDash-Error-Code`.
         - **Content-Type `application/json`:** parse `serde_json::Value`:
           - Nếu có `"error": String` (`PermalinkConflictError`, `{"error": "..."}`, [`PluginRunResponse`](../../cms/crates/opendash-server/src/plugin/manager.rs#L55-L62)): dịch `"error"` khi khớp bảng hệ thống/runtime, giữ nguyên `"conflicts"`, `"code"`, `"correlation_id"`.
-          - Nếu có `"message": String` ([`ContentBeforeSaveVeto`](../../cms/crates/opendash-server/src/hooks.rs#L120-L125) `422` tại tất cả `5` điểm trả ở `routes/entries.rs#L547, L683, L1020, L1141, L1231`, và `PluginRunResponse.data` chứa veto lồng nhau): dịch `"message"` + chuỗi giá trị trong `"field_errors"` nếu khớp bảng hệ thống, giữ nguyên `"code"`.
+          - Nếu có `"message": String` ([`ContentBeforeSaveVeto`](../../cms/crates/opendash-server/src/hooks/mod.rs) `422` tại tất cả `5` điểm trả ở `routes/entries.rs#L547, L683, L1020, L1141, L1231`, và `PluginRunResponse.data` chứa veto lồng nhau): dịch `"message"` + chuỗi giá trị trong `"field_errors"` nếu khớp bảng hệ thống, giữ nguyên `"code"`.
           - Gắn `X-OpenDash-Error-Code`.
         - **Bắt buộc khi thay đổi bytes body:** gọi **`resp.headers_mut().remove(header::CONTENT_LENGTH)`**, **`resp.headers_mut().remove(header::TRANSFER_ENCODING)`**, rồi ghi lại exact `HeaderValue::from(new_bytes.len())` vào `header::CONTENT_LENGTH`!
 
