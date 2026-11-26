@@ -349,7 +349,7 @@ def egm_issue_payload(
             "## Bàn giao và kiểm chứng",
             "",
             "Triển khai đúng `## Detailed Implementation Plan` trên nhánh `agent/<name>`, "
-            "chạy đủ `### Verification Plan`, `check-standards.py`, `check-plans.py` và `cargo test --workspace --release --locked`. "
+            "chạy đủ `### Verification Plan`, `check-standards.py`, `check-plans.py` và `python cms/scripts/run-tests.py --changed` (hoặc `--group <miền>` tương ứng; `--group all --release` trước release). "
             "Sau khi merge và kiểm chứng thực tế PASS, cập nhật trạng thái trong `docs/designs/SITEMAP.md`.",
         ]
     )

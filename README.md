@@ -60,8 +60,9 @@ python cms/scripts/check-plans.py
 python cms/scripts/check-plans.py --self-test
 python .agents/scripts/check-agent-artifacts.py
 cargo fmt --manifest-path cms/Cargo.toml --all --check
-cargo build --manifest-path cms/Cargo.toml --locked
-cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
+python cms/scripts/run-tests.py --changed
+# Hoặc chỉ định nhóm (--group theme,builder) · trước release chạy:
+# python cms/scripts/run-tests.py --group all --release
 git diff --check
 ```
 

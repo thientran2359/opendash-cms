@@ -26,7 +26,7 @@ description: "Dùng khi Atlas, Aster, Nova hoặc Orion được yêu cầu revi
 1. Đọc metadata + **toàn bộ diff** của head SHA `H` và base SHA `B`, Issue liên kết, Design Spec gốc (`docs/designs/<feature>.md`) và các review threads hiện có. Không tin lời "đã test" nếu thiếu bằng chứng hoặc CI fail.
 2. **Đối chiếu theo loại PR:**
    - **Với PR Design Spec (EGM):** xác minh đã qua review Goldfish (`/egm-review` + `/egm-resolve`), đăng ký trong `docs/designs/SITEMAP.md`, có đủ `## Detailed Implementation Plan` + `### Verification Plan`, tuân thủ `CORE_FOUNDATION.md`, `PLUGIN_ABI.md`, `M8_WRITER_INVENTORY.md`, và `check-plans.py` PASS.
-   - **Với PR Triển khai (Implementation):** đối chiếu code thật trong `cms/` với từng mục trong `## Detailed Implementation Plan` và `### Verification Plan`; dùng CodeGraph kiểm tra callers/impact nếu cần; xác minh ranh giới kiến trúc (`check-standards.py`), `cargo test --workspace --release --locked` và E2E/native tests phù hợp OS.
+   - **Với PR Triển khai (Implementation):** đối chiếu code thật trong `cms/` với từng mục trong `## Detailed Implementation Plan` và `### Verification Plan`; dùng CodeGraph kiểm tra callers/impact nếu cần; xác minh ranh giới kiến trúc (`check-standards.py`), nhóm test liên quan qua `python cms/scripts/run-tests.py --changed` (hoặc `--group all --release` với thay đổi lõi/trước release) và E2E/native tests phù hợp OS.
 3. Kiểm tra CI/check-runs **tại đúng head SHA `H`**: mọi required check phải `SUCCESS`; empty/pending/failed ⇒ chưa eligible.
 4. Phân loại findings `P0/P1/P2` (file, dòng, bằng chứng, tác động, hướng sửa):
    - Nếu còn lỗi bắt buộc ⇒ `CHANGES_REQUESTED`, để tác giả sửa và push trên branch của họ (reviewer không tự sửa branch của tác giả). Dừng PR đó ở `AWAITING_AUTHOR`.

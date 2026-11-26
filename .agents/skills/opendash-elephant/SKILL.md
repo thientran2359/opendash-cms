@@ -44,5 +44,7 @@ python cms/scripts/check-standards.py --self-test
 python cms/scripts/check-plans.py
 python cms/scripts/check-plans.py --self-test
 cargo fmt --manifest-path cms/Cargo.toml --all --check
-cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
+python cms/scripts/run-tests.py --changed
+# Trước release hoặc khi đổi lõi dùng chung:
+# python cms/scripts/run-tests.py --group all --release
 ```

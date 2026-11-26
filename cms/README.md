@@ -56,4 +56,4 @@
 
 - Run: `python cms/scripts/check-standards.py && python cms/scripts/check-plans.py && python .agents/scripts/check-agent-artifacts.py`
 - Run: `node cms/scripts/check-i18n.mjs --strict && npm --prefix cms/admin run typecheck && npm --prefix cms/admin run build`
-- Run: `cargo fmt --manifest-path cms/Cargo.toml --all --check && cargo test --manifest-path cms/Cargo.toml --workspace --release --locked`
+- Run: `cargo fmt --manifest-path cms/Cargo.toml --all --check && python cms/scripts/run-tests.py --changed` (pre-release full suite: `python cms/scripts/run-tests.py --group all --release`)
