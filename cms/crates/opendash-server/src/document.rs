@@ -550,11 +550,15 @@ fn is_json_ld_script_block(raw_script: &str) -> bool {
         return false;
     };
     attrs.iter().any(|(k, v)| {
-        k == "type"
-            && v.split(';')
-                .next()
-                .map(str::trim)
-                .is_some_and(|mime| mime.eq_ignore_ascii_case("application/ld+json"))
+        if k != "type" {
+            return false;
+        }
+        let decoded = opendash_core::richtext::decode_html5_entities(v);
+        decoded
+            .split(';')
+            .next()
+            .map(str::trim)
+            .is_some_and(|mime| mime.eq_ignore_ascii_case("application/ld+json"))
     })
 }
 
@@ -603,9 +607,12 @@ pub fn sanitize_render_head_fragment(
                 }
                 let attrs = parse_attributes(attrs_raw, allow_trusted_html)?;
                 if name == "meta" {
-                    let is_robots = attrs
-                        .iter()
-                        .any(|(k, v)| k == "name" && v.trim().eq_ignore_ascii_case("robots"));
+                    let is_robots = attrs.iter().any(|(k, v)| {
+                        k == "name"
+                            && opendash_core::richtext::decode_html5_entities(v)
+                                .trim()
+                                .eq_ignore_ascii_case("robots")
+                    });
                     let is_http_equiv = attrs.iter().any(|(k, _)| k == "http-equiv");
                     if is_robots || is_http_equiv || !allow_trusted_html {
                         continue;
@@ -614,16 +621,17 @@ pub fn sanitize_render_head_fragment(
                     continue;
                 }
                 if name == "link" {
-                    let rel_val = attrs
-                        .iter()
-                        .find(|(k, _)| k == "rel")
-                        .map(|(_, v)| v.to_ascii_lowercase())
-                        .unwrap_or_default();
-                    let rel_tokens: Vec<&str> = rel_val.split_whitespace().collect();
-                    if rel_tokens
-                        .iter()
-                        .any(|t| matches!(*t, "canonical" | "alternate"))
-                    {
+                    let is_forbidden_rel = attrs.iter().any(|(k, v)| {
+                        if k != "rel" {
+                            return false;
+                        }
+                        let decoded =
+                            opendash_core::richtext::decode_html5_entities(v).to_ascii_lowercase();
+                        decoded
+                            .split_whitespace()
+                            .any(|t| matches!(t, "canonical" | "alternate"))
+                    });
+                    if is_forbidden_rel {
                         continue;
                     }
                     if !allow_trusted_html {
@@ -1295,5 +1303,41 @@ mod tests {
                 "expected reject on {rejected}"
             );
         }
+    }
+
+    #[test]
+    fn sanitize_render_head_fragment_strips_entity_encoded_seo_tags() {
+        let raw = concat!(
+            r#"<meta name="&#114;obots" content="index,follow">"#,
+            r#"<meta name="&#x52;OBOTS" content="all">"#,
+            r#"<link rel="&#99;anonical" href="https://evil.example/">"#,
+            r#"<link rel="&#x61;lternate" hreflang="en" href="https://evil.example/en">"#,
+            r#"<script type="&#97;pplication/ld+json">{"@type":"Fake"}</script>"#,
+            r#"<script type="application&#x2f;ld&#43;json">{"@type":"Fake2"}</script>"#,
+            r#"<meta name="author" content="OpenDash">"#,
+        );
+        let parts = sanitize_render_head_fragment(raw, true).expect("head fragment sanitizes");
+        assert!(
+            !parts.body_fragment.contains("evil.example"),
+            "canonical/alternate escaped: {}",
+            parts.body_fragment
+        );
+        assert!(
+            !parts.body_fragment.contains("index,follow") && !parts.body_fragment.contains("OBOTS"),
+            "robots meta escaped: {}",
+            parts.body_fragment
+        );
+        assert!(
+            parts.authorized_head_scripts.is_empty(),
+            "json-ld script escaped: {:?}",
+            parts.authorized_head_scripts
+        );
+        assert!(
+            parts
+                .body_fragment
+                .contains(r#"<meta name="author" content="OpenDash">"#),
+            "safe meta should be preserved: {}",
+            parts.body_fragment
+        );
     }
 }

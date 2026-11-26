@@ -708,6 +708,7 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
     fs::create_dir_all(&site_root).unwrap();
     fs::create_dir_all(dev_theme_dir.join("assets")).unwrap();
     fs::create_dir_all(dev_theme_dir.join("blocks/promo")).unwrap();
+    fs::create_dir_all(dev_theme_dir.join("patterns")).unwrap();
     fs::create_dir_all(dev_theme_dir.join(".git")).unwrap();
     fs::create_dir_all(&dev_plugin_dir).unwrap();
 
@@ -715,6 +716,24 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
     fs::write(dev_theme_dir.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
     fs::write(dev_theme_dir.join(".DS_Store"), b"junk").unwrap();
     fs::write(dev_theme_dir.join(".env"), "DB_PASS=never-expose\n").unwrap();
+    fs::write(
+        dev_theme_dir.join("patterns/dev-hero.json"),
+        json!({
+            "schema_version": 1,
+            "sections": [{
+                "id": "sec-pat-1",
+                "children": [{
+                    "id": "row-pat-1",
+                    "children": [{
+                        "id": "col-pat-1",
+                        "children": []
+                    }]
+                }]
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
 
     let dev_theme_manifest = json!({
         "manifest_version": 3,
@@ -724,6 +743,12 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
         "templates": [
             { "kind": "index", "file": "index.html" },
             { "kind": "page", "file": "page.html" }
+        ],
+        "patterns": [
+            { "key": "dev_hero", "title": "Dev Hero Pattern", "category": "hero", "file": "patterns/dev-hero.json" }
+        ],
+        "options": [
+            { "key": "dev_tagline", "label": "Dev Tagline", "type": "string", "default": "DevOptDefault", "public": true }
         ],
         "assets": ["assets/style.css"],
         "styles": [
@@ -747,7 +772,7 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
     .unwrap();
     fs::write(
         dev_theme_dir.join("page.html"),
-        "<article><h1>PAGE-V1 {{ entry.title }}</h1>{{ od_hook(\"hero_banner\") }}<div>{{ od_content() }}</div></article>",
+        "<article><h1>PAGE-V1 {{ entry.title }}</h1><p class=\"opt\">{{ options.dev_tagline }}</p>{{ od_hook(\"hero_banner\") }}<div>{{ od_content() }}</div></article>",
     )
     .unwrap();
     fs::write(
@@ -900,6 +925,50 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
     let sync_json: Value = sync_resp.json().await.unwrap();
     assert_eq!(sync_json["synced_theme"], json!("dev-live-theme"));
     assert_eq!(sync_json["synced_plugins"], json!(["dev-live-plugin"]));
+
+    // Verify Dev Theme Pattern & Dev Theme Options APIs work in Dev Mode (F-09)
+    let dev_pat_resp = client
+        .get(format!(
+            "{base_url}/api/admin/patterns/library/theme/dev_hero"
+        ))
+        .header(header::COOKIE, &admin_cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(dev_pat_resp.status(), StatusCode::OK);
+    let dev_pat_json: Value = dev_pat_resp.json().await.unwrap();
+    assert_eq!(dev_pat_json["key"], json!("dev_hero"));
+
+    let dev_opts_resp = client
+        .get(format!("{base_url}/api/themes/dev-live-theme/options"))
+        .header(header::COOKIE, &admin_cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(dev_opts_resp.status(), StatusCode::OK);
+    let dev_opts_json: Value = dev_opts_resp.json().await.unwrap();
+    assert_eq!(
+        dev_opts_json["values"]["dev_tagline"],
+        json!("DevOptDefault")
+    );
+
+    // Verify sync_dev_plugin_in_db did NOT persist raw dev code bytes into SQLite plugins.wasm_blob (F-10)
+    let db_opts = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(site_root.join("database/opendash.sqlite"))
+        .read_only(true);
+    let db_pool = sqlx::SqlitePool::connect_with(db_opts).await.unwrap();
+    let (blob_len, active_rev): (i64, Option<i64>) = sqlx::query_as(
+        "SELECT length(wasm_blob), active_revision_id FROM plugins WHERE id = 'dev-live-plugin'",
+    )
+    .fetch_one(&db_pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        blob_len, 0,
+        "dev-only plugin must not persist code bytes in SQLite"
+    );
+    assert_eq!(active_rev, None);
+    db_pool.close().await;
 
     // Create & publish a page with a Builder document containing the dev block `dev-live-theme/promo`
     let create_page = client

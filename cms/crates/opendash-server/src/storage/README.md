@@ -2,7 +2,7 @@
 
 ## Overview
 
-Owns **100% of SQLite queries (`sqlx::query*`, `sqlx::raw_sql`)** in OpenDash across 31 domain storage modules (`admin_extensions`–`theme` and `contact`) wired through [`mod.rs`](mod.rs) (plus `s03_media_acl_tests.rs`, `theme_tests.rs`, and `settings_timezones_2026f.txt`). Configures SQLite WAL mode, `foreign_keys = ON`, and `5s` `busy_timeout`, runs `preflight_builtin_key_collisions`, applies migrations `0001_builder_slice.sql` through `0052_taxonomy_term_featured_image.sql` (51 SQL files; `0016` omitted) from `cms/migrations/`, and seeds embedded core blocks in `[mod.rs:init_db]`.
+Owns **100% of SQLite queries (`sqlx::query*`, `sqlx::raw_sql`)** in OpenDash across 31 domain storage modules (`admin_extensions`–`theme` and `contact`) wired through [`mod.rs`](mod.rs) (plus `s03_media_acl_tests.rs`, `theme_tests.rs`, and `settings_timezones_2026f.txt`). Configures SQLite WAL mode, `foreign_keys = ON`, and `5s` `busy_timeout`, runs `preflight_builtin_key_collisions`, applies migrations `0001_builder_slice.sql` through `0053_theme_functions_runtime.sql` (52 SQL files; `0016` omitted) from `cms/migrations/`, and seeds embedded core blocks in `[mod.rs:init_db]`.
 
 See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 Writer Inventory](../../../../../docs/contracts/M8_WRITER_INVENTORY.md) for persistence and admission rules.
 
@@ -21,13 +21,13 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
   - `[builder.rs:BuilderRenderContext]`, `[builder.rs:read_render_context_tx]`, `[builder.rs:resolve_patterns_in_tx_with_budget]`, `[builder.rs:validate_media_refs_in_tx]` (plus entry-builder storage helpers).
   - `[builder_binding.rs:resolve]`, `[builder_binding.rs:resolve_in_tx_with_route_and_locale]`.
   - `[overrides.rs:resolve_template_2axis]`, `[overrides.rs:save_typed_override]`, `[overrides.rs:reset_typed_override]`, `[overrides.rs:preview_typed_override_with_cache_and_locale]`, `[overrides.rs:render_resolved_public_builder_with_cache_for_locale]`, `[overrides.rs:list_studio_targets]`, `[overrides.rs:preview_studio_with_cache_and_locale]`.
-  - `[theme.rs:stage_and_commit_v3_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[theme.rs:activate_revision]`, `[theme.rs:load_active_theme_v3]`, `[theme.rs:list]`, `[theme.rs:verify_revision_durability]`.
+  - `[theme.rs:stage_and_commit_v3_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[theme.rs:activate_revision]`, `[theme.rs:load_active_theme_v3]`, `[theme.rs:sync_dev_theme_in_db]`, `[theme.rs:list]`, `[theme.rs:verify_revision_durability]`.
   - `[import.rs:ImportPlan]`, `[import.rs:DryRunImportInput]`, `[import.rs:ThemeSampleManifest]` (dry-run, execution, and orphan import recovery).
   - `[menu.rs:create_menu_in_tx]`, `[menu.rs:replace_menu_items_in_tx]`, `[menu.rs:get_slot_version_for_locale_in_tx]`, `[menu.rs:MAX_MENU_ITEMS]`, `[menu.rs:MAX_MENU_DEPTH]`.
-- **Plugins, KV, Projections & Admin Extensions** ([`plugin.rs`](plugin.rs), [`plugin_kv.rs`](plugin_kv.rs), [`plugin_projections.rs`](plugin_projections.rs), [`admin_extensions.rs`](admin_extensions.rs)):
-  - `[plugin.rs:install_plugin_revision]`, `[plugin.rs:set_plugin_enabled_cas]`, `[plugin.rs:load_plugin_executable_with_generation]`, `[plugin.rs:is_plugin_generation_active]`, `[plugin.rs:is_actor_role_active]`, `[plugin.rs:delete_entry_with_plugin_fence]`, `[plugin.rs:record_plugin_execution_result]`.
+- **Plugins, Theme Functions, KV, Projections & Admin Extensions** ([`plugin.rs`](plugin.rs), [`plugin_kv.rs`](plugin_kv.rs), [`plugin_projections.rs`](plugin_projections.rs), [`admin_extensions.rs`](admin_extensions.rs)):
+  - `[plugin.rs:install_plugin_revision]`, `[plugin.rs:set_plugin_enabled_cas]`, `[plugin.rs:load_plugin_executable_with_generation]`, `[plugin.rs:is_plugin_generation_active]`, `[plugin.rs:verify_active_theme_fence_in_tx]`, `[plugin.rs:is_actor_role_active]`, `[plugin.rs:delete_entry_with_plugin_fence]`, `[plugin.rs:record_owner_execution_result]`, `[plugin.rs:list_owner_logs]`, `[plugin.rs:sync_dev_plugin_in_db]` (`owner_kind` isolation per `0053`).
   - `[plugin_kv.rs:get]`, `[plugin_kv.rs:set]`, `[plugin_kv.rs:delete]`, `[plugin_kv.rs:list]`, `[plugin_kv.rs:begin_immediate]`, `[plugin_kv.rs:commit]`, `[plugin_kv.rs:rollback]`.
-  - `[plugin_projections.rs:recompute_entry_projections]`, `[plugin_projections.rs:spawn_recompute_plugin_projections_batched]`, `[plugin_projections.rs:batch_load_entry_projections]`, `[plugin_projections.rs:delete_entry_projections_in_tx]`.
+  - `[plugin_projections.rs:recompute_entry_projections]`, `[plugin_projections.rs:spawn_recompute_owner_projections_batched]`, `[plugin_projections.rs:batch_load_entry_projections]`, `[plugin_projections.rs:delete_entry_projections_in_tx]` (`Admin > Plugin > Theme` precedence + `SiteCacheEpoch` invalidation).
   - `[admin_extensions.rs:sync_owner_in_conn]`, `[admin_extensions.rs:effective_list]`, `[admin_extensions.rs:effective_term]`, `[admin_extensions.rs:update_term_values_in_conn]`.
 - **Public Content, Permalinks, SEO, Sitemap & Settings** ([`public_content.rs`](public_content.rs), [`permalinks.rs`](permalinks.rs), [`seo.rs`](seo.rs), [`sitemap.rs`](sitemap.rs), [`settings.rs`](settings.rs)):
   - `[public_content.rs:get_by_slug_for_locale]`, `[public_content.rs:get_published_by_id]`, `[public_content.rs:load_entry_render_snapshot_with_options]`, `[public_content.rs:list_published_with_total]`, `[public_content.rs:taxonomy_public_page_for_locale]`, `[public_content.rs:media_is_referenced]`.
@@ -55,7 +55,7 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
 
 ## Side Effects
 
-- Creates/opens the site SQLite database in WAL mode, executes migrations `0001`–`0052`, and reads/writes all CMS tables (`[mod.rs:init_db]`).
+- Creates/opens the site SQLite database in WAL mode, executes migrations `0001`–`0053`, and reads/writes all CMS tables (`[mod.rs:init_db]`).
 - Stages and verifies immutable theme and plugin revision directories and `.complete` markers on disk under `themes_root` and `plugins_root` (`[theme.rs:stage_and_commit_v3_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[plugin.rs:stage_and_publish_plugin_revision_with_extensions]`).
 - Creates consistent SQLite snapshot files via `VACUUM INTO` during backup jobs (`[backup.rs:vacuum_into_snapshot]`).
 

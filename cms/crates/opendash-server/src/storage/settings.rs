@@ -2212,6 +2212,12 @@ async fn latest_revision_manifest_in_conn(
     conn: &mut SqliteConnection,
     theme_id: &str,
 ) -> ApiResult<Option<String>> {
+    if let Some(dev) = crate::dev_mode::DevOverlayConfig::global()
+        && let Ok(Some(snap)) = dev.load_dev_theme()
+        && snap.manifest.theme_id == theme_id
+    {
+        return Ok(Some(snap.manifest_json));
+    }
     // Prefer currently active revision if it belongs to this theme_id, else latest installed revision.
     let active: Option<String> = sqlx::query_scalar(
         "SELECT r.manifest_json
@@ -3020,14 +3026,21 @@ pub async fn get_active_merged_public_options_in_conn_for_locale(
     is_preview: bool,
     requested_locale: Option<&str>,
 ) -> ApiResult<BTreeMap<String, serde_json::Value>> {
-    let active: Option<(String, String)> = sqlx::query_as(
-        "SELECT r.theme_id, r.manifest_json
-         FROM theme_active_selection AS a
-         JOIN theme_revisions AS r ON r.revision_id = a.revision_id
-         WHERE a.id = 1 AND r.source_format = 'v3'",
-    )
-    .fetch_optional(&mut *conn)
-    .await?;
+    let active: Option<(String, String)> = if let Some(dev) =
+        crate::dev_mode::DevOverlayConfig::global()
+        && let Ok(Some(snap)) = dev.load_dev_theme()
+    {
+        Some((snap.manifest.theme_id, snap.manifest_json))
+    } else {
+        sqlx::query_as(
+            "SELECT r.theme_id, r.manifest_json
+             FROM theme_active_selection AS a
+             JOIN theme_revisions AS r ON r.revision_id = a.revision_id
+             WHERE a.id = 1 AND r.source_format = 'v3'",
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+    };
     let active_ref = active.as_ref().map(|(id, m)| (id.as_str(), m.as_str()));
     resolve_merged_public_options_with_overrides_in_conn(
         conn,

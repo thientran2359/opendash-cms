@@ -346,6 +346,10 @@ impl PluginManager {
             .map_err(|e| e.to_string())?;
         let mut built = BTreeMap::new();
         for row in rows {
+            if row.wasm_blob.is_empty() && row.revision_digest.is_none() {
+                // Dev-only placeholder synced via /api/admin/dev/sync; only active when mounted via --dev-plugin.
+                continue;
+            }
             match PluginManifest::from_json_str(&row.manifest_json) {
                 Ok(manifest) if manifest.id == row.id => {
                     built.insert(
@@ -590,6 +594,13 @@ impl PluginManager {
                             StatusCode::BAD_REQUEST,
                             "disabled",
                             "Plugin chưa được bật hoặc đã bị vô hiệu hóa.".into(),
+                        ));
+                    }
+                    if wasm_blob.is_empty() && revision_digest_opt.is_none() {
+                        return Err(mk_err(
+                            StatusCode::NOT_FOUND,
+                            "dev_plugin_unmounted",
+                            "Plugin chỉ có ở chế độ dev; hãy khởi chạy kèm --dev-plugin hoặc cài bản ZIP chính thức.".into(),
                         ));
                     }
                     let manifest =
@@ -1935,6 +1946,21 @@ impl PluginManager {
                     },
                 ));
             }
+            if wasm_blob.is_empty() && revision_digest_opt.is_none() {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    PluginRunResponse {
+                        success: false,
+                        data: None,
+                        error: Some(
+                            "Plugin chỉ có ở chế độ dev; hãy khởi chạy kèm --dev-plugin hoặc cài bản ZIP chính thức."
+                                .into(),
+                        ),
+                        code: Some("dev_plugin_unmounted".into()),
+                        correlation_id,
+                    },
+                ));
+            }
 
             let manifest = serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
                 (
@@ -2121,6 +2147,7 @@ impl PluginManager {
         ))) =
             plugin_storage::load_plugin_executable_with_generation(&self.db_pool, pkg).await
             && enabled
+            && !(wasm_blob.is_empty() && revision_digest.is_none())
             && let Ok(manifest) = serde_json::from_str::<PluginManifest>(&manifest_json)
         {
             for route in &manifest.routes {
@@ -2310,8 +2337,7 @@ impl PluginManager {
             }
         };
 
-        let render_trusted_html =
-            owner_kind == ExtensionOwnerKind::Theme || manifest.permissions.render_trusted_html;
+        let render_trusted_html = manifest.permissions.render_trusted_html;
 
         if execution_mode == HookExecutionMode::RoutePost {
             if let Some(cmd) = exec_out.staged_content_command {

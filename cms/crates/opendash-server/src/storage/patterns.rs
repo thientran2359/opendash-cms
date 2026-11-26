@@ -354,13 +354,20 @@ pub async fn get_theme_pattern(
         .find(|pattern| pattern.key == key)
         .ok_or_else(|| ApiError::not_found("Theme Pattern không tồn tại."))?;
     // The manifest was validated and its revision files passed the durable
-    // digest check. Never read a caller-supplied filesystem path.
-    let file = themes_root
-        .join("revisions")
-        .join(&active.revision_digest)
-        .join(&pattern.file);
-    let bytes =
-        std::fs::read(file).map_err(|_| ApiError::not_found("Theme Pattern không khả dụng."))?;
+    // digest check (or are served from an explicit local Dev Live-Edit mount).
+    // Never read a caller-supplied filesystem path.
+    let bytes = if active.revision_digest.starts_with("dev-") {
+        crate::dev_mode::DevOverlayConfig::global()
+            .ok_or_else(|| ApiError::not_found("Theme Pattern không khả dụng."))?
+            .read_dev_theme_pattern(&pattern.file)
+            .map_err(|_| ApiError::not_found("Theme Pattern không khả dụng."))?
+    } else {
+        let file = themes_root
+            .join("revisions")
+            .join(&active.revision_digest)
+            .join(&pattern.file);
+        std::fs::read(file).map_err(|_| ApiError::not_found("Theme Pattern không khả dụng."))?
+    };
     let document = BuilderDocument::from_json(&bytes)
         .map_err(|_| ApiError::not_found("Theme Pattern không khả dụng."))?;
     Ok(ThemePatternDocument {
