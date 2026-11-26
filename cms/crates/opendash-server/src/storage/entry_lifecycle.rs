@@ -394,7 +394,23 @@ pub(super) async fn physical_delete_cleanup_in_tx(
     .execute(&mut **tx)
     .await?;
     super::plugin_projections::delete_entry_projections_in_tx(tx, row.id).await?;
-    crate::storage::permalinks::sync_claims_in_tx(tx).await?;
+    if row.type_key == "page" {
+        crate::storage::permalinks::sync_claims_in_tx(tx).await?;
+    } else {
+        let id_str = row.id.to_string();
+        sqlx::query(
+            "DELETE FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?",
+        )
+        .bind(&id_str)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM permalink_route_redirects WHERE target_kind = 'entry' AND target_id = ?",
+        )
+        .bind(&id_str)
+        .execute(&mut **tx)
+        .await?;
+    }
     Ok(EntryCommitReceipt {
         operation: EntryMutationKind::Purge,
         id: row.id,
@@ -2362,9 +2378,9 @@ async fn commit_metadata_patch_inner(
 
     let needs_claim_sync = (was_ever_published || final_status == "published")
         && (slug_changed
-            || status_changed
+            || (status_changed && (type_key == "page" || !was_ever_published))
             || primary_changed
-            || (type_key == "post" && (category_terms_changed || published_at_changed)));
+            || (type_key == "post" && category_terms_changed));
     if needs_claim_sync {
         if !was_ever_published {
             sqlx::query(

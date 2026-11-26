@@ -3361,7 +3361,32 @@ pub async fn set_publication_status(
         super::plugin_projections::delete_entry_projections_in_tx(&mut tx, id).await?;
     }
     crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
-    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    let needs_claim_sync = if type_key == "page" {
+        true
+    } else {
+        let id_str = id.to_string();
+        let has_claim: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?)",
+        )
+        .bind(&id_str)
+        .fetch_one(&mut *tx)
+        .await?;
+        let has_entry_redirects: i64 =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM entry_redirects WHERE entry_id = ?)")
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await?;
+        let has_permalink_redirects: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM permalink_route_redirects WHERE target_kind = 'entry' AND target_id = ?)",
+        )
+        .bind(&id_str)
+        .fetch_one(&mut *tx)
+        .await?;
+        has_claim == 0 || has_entry_redirects != 0 || has_permalink_redirects != 0
+    };
+    if needs_claim_sync {
+        crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    }
     let record = get_entry_in_tx(&mut tx, type_key, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải trạng thái xuất bản."))?;

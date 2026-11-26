@@ -111,66 +111,122 @@ pub struct EntryTableResult {
     pub schema_token: Option<String>,
 }
 
-// Identical filters for count and row queries. Status is deliberately absent:
-// status_counts represent the current filter selection before status selection.
-const CATEGORY_SCOPE: &str = "
- WITH RECURSIVE category_scope(id, depth) AS (
-   SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = 'category'
-   UNION ALL
-   SELECT c.id, category_scope.depth + 1 FROM taxonomy_terms c
-   JOIN category_scope ON c.parent_id = category_scope.id
-   WHERE category_scope.depth < 8 AND ? = 1
- ), generic_scope(id, depth) AS (
-   SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = ?
-   UNION ALL
-   SELECT c.id, generic_scope.depth + 1 FROM taxonomy_terms c
-   JOIN generic_scope ON c.parent_id = generic_scope.id
-   WHERE generic_scope.depth < 8 AND ? = 1
- )";
+fn push_entry_table_ctes(qb: &mut sqlx::QueryBuilder<Sqlite>, filter: &EntryTableFilter) {
+    let need_cat_cte = filter.category_id.is_some() && filter.include_descendants;
+    let need_gen_cte = filter.term_id.is_some() && filter.include_descendants;
+    if !need_cat_cte && !need_gen_cte {
+        return;
+    }
+    qb.push("WITH RECURSIVE ");
+    if let Some(cat_id) = filter.category_id.filter(|_| need_cat_cte) {
+        qb.push(
+            "category_scope(id, depth) AS (\
+             SELECT id, 1 FROM taxonomy_terms WHERE id = ",
+        );
+        qb.push_bind(cat_id);
+        qb.push(
+            " AND kind = 'category' \
+             UNION ALL \
+             SELECT c.id, category_scope.depth + 1 FROM taxonomy_terms c \
+             JOIN category_scope ON c.parent_id = category_scope.id \
+             WHERE category_scope.depth < 8)",
+        );
+        if need_gen_cte {
+            qb.push(", ");
+        }
+    }
+    if let Some(term_id) = filter.term_id.filter(|_| need_gen_cte) {
+        qb.push(
+            "generic_scope(id, depth) AS (\
+             SELECT id, 1 FROM taxonomy_terms WHERE id = ",
+        );
+        qb.push_bind(term_id);
+        qb.push(" AND kind = ");
+        qb.push_bind(filter.taxonomy_key.clone());
+        qb.push(
+            " UNION ALL \
+             SELECT c.id, generic_scope.depth + 1 FROM taxonomy_terms c \
+             JOIN generic_scope ON c.parent_id = generic_scope.id \
+             WHERE generic_scope.depth < 8)",
+        );
+    }
+    qb.push(" ");
+}
 
-// Identical filters for count and row queries. Status & lifecycle are applied
-// explicitly so one snapshot yields both active status counts and Trash count.
-const SCOPE: &str = "
- FROM content_entries e
- WHERE e.content_type_key = ?
-   AND (? IS NULL OR e.locale = ?)
-   AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)
-   AND (? = '' OR instr(lower(e.title), lower(?)) > 0
-                OR instr(lower(e.slug), lower(?)) > 0)
-   AND (? IS NULL OR substr(e.updated_at, 1, 7) = ?)
-   AND (? IS NULL OR EXISTS (
-     SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id
-       AND et.term_id IN (SELECT id FROM category_scope)
-   ))
-   AND (? IS NULL OR EXISTS (
-     SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id AND et.term_id = ?
-   ))
-   AND (? IS NULL OR EXISTS (
-     SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id
-       AND et.term_id IN (SELECT id FROM generic_scope)
-   ))";
-
-macro_rules! bind_scope {
-    ($query:expr, $key:expr, $filter:expr, $locale:expr) => {
-        $query
-            .bind($filter.category_id)
-            .bind(i64::from($filter.include_descendants))
-            .bind($filter.term_id)
-            .bind(&$filter.taxonomy_key)
-            .bind(i64::from($filter.include_descendants))
-            .bind($key)
-            .bind($locale)
-            .bind($locale)
-            .bind(&$filter.q)
-            .bind(&$filter.q)
-            .bind(&$filter.q)
-            .bind(&$filter.updated_month)
-            .bind(&$filter.updated_month)
-            .bind($filter.category_id)
-            .bind($filter.tag_id)
-            .bind($filter.tag_id)
-            .bind($filter.term_id)
-    };
+/// Appends identical static WHERE predicates for count and row queries, omitting
+/// unused clauses so SQLite can satisfy common list/count queries via covering
+/// index seeks on `idx_content_entries_lifecycle_list`.
+fn push_entry_table_scope(
+    qb: &mut sqlx::QueryBuilder<Sqlite>,
+    type_key: &str,
+    filter: &EntryTableFilter,
+    resolved_locale: Option<&str>,
+    active_locales: &[String],
+) {
+    qb.push(" FROM content_entries e WHERE e.content_type_key = ");
+    qb.push_bind(type_key.to_owned());
+    if let Some(loc) = resolved_locale {
+        qb.push(" AND e.locale = ");
+        qb.push_bind(loc.to_owned());
+    } else if !active_locales.is_empty() {
+        qb.push(" AND e.locale IN (");
+        let mut sep = qb.separated(", ");
+        for loc in active_locales {
+            sep.push_bind(loc.clone());
+        }
+        qb.push(")");
+    } else {
+        qb.push(" AND 1 = 0");
+    }
+    if !filter.q.is_empty() {
+        qb.push(" AND (instr(lower(e.title), lower(");
+        qb.push_bind(filter.q.clone());
+        qb.push(")) > 0 OR instr(lower(e.slug), lower(");
+        qb.push_bind(filter.q.clone());
+        qb.push(")) > 0)");
+    }
+    if let Some(month) = filter.updated_month.as_deref() {
+        qb.push(" AND substr(e.updated_at, 1, 7) = ");
+        qb.push_bind(month.to_owned());
+    }
+    if let Some(cat_id) = filter.category_id {
+        if filter.include_descendants {
+            qb.push(
+                " AND EXISTS (SELECT 1 FROM entry_terms et \
+                  WHERE et.entry_id = e.id AND et.term_id IN (SELECT id FROM category_scope))",
+            );
+        } else {
+            qb.push(
+                " AND EXISTS (SELECT 1 FROM entry_terms et \
+                  WHERE et.entry_id = e.id AND et.term_id = ",
+            );
+            qb.push_bind(cat_id);
+            qb.push(")");
+        }
+    }
+    if let Some(tag_id) = filter.tag_id {
+        qb.push(
+            " AND EXISTS (SELECT 1 FROM entry_terms et \
+              WHERE et.entry_id = e.id AND et.term_id = ",
+        );
+        qb.push_bind(tag_id);
+        qb.push(")");
+    }
+    if let Some(term_id) = filter.term_id {
+        if filter.include_descendants {
+            qb.push(
+                " AND EXISTS (SELECT 1 FROM entry_terms et \
+                  WHERE et.entry_id = e.id AND et.term_id IN (SELECT id FROM generic_scope))",
+            );
+        } else {
+            qb.push(
+                " AND EXISTS (SELECT 1 FROM entry_terms et \
+                  WHERE et.entry_id = e.id AND et.term_id = ",
+            );
+            qb.push_bind(term_id);
+            qb.push(")");
+        }
+    }
 }
 
 async fn validate_terms(
@@ -231,22 +287,34 @@ pub async fn query(
     }
     validate_terms(&mut tx, type_key, filter).await?;
 
-    let count_sql = format!(
-        "{CATEGORY_SCOPE} SELECT
-         COALESCE(SUM(CASE WHEN e.trashed_at IS NULL THEN 1 ELSE 0 END),0),
-         COALESCE(SUM(CASE WHEN e.trashed_at IS NULL AND e.publication_status='draft' THEN 1 ELSE 0 END),0),
-         COALESCE(SUM(CASE WHEN e.trashed_at IS NULL AND e.publication_status='published' THEN 1 ELSE 0 END),0),
-         COALESCE(SUM(CASE WHEN e.trashed_at IS NOT NULL THEN 1 ELSE 0 END),0)
-         {SCOPE}"
+    let active_locales: Vec<String> = if resolved_locale.is_some() {
+        Vec::new()
+    } else {
+        sqlx::query_scalar(
+            "SELECT code FROM site_locales WHERE deleted_at IS NULL ORDER BY code ASC",
+        )
+        .fetch_all(&mut *tx)
+        .await?
+    };
+
+    let mut count_qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new("");
+    push_entry_table_ctes(&mut count_qb, filter);
+    count_qb.push(
+        "SELECT \
+         COALESCE(SUM(CASE WHEN e.trashed_at IS NULL THEN 1 ELSE 0 END), 0), \
+         COALESCE(SUM(CASE WHEN e.trashed_at IS NULL AND e.publication_status = 'draft' THEN 1 ELSE 0 END), 0), \
+         COALESCE(SUM(CASE WHEN e.trashed_at IS NULL AND e.publication_status = 'published' THEN 1 ELSE 0 END), 0), \
+         COALESCE(SUM(CASE WHEN e.trashed_at IS NOT NULL THEN 1 ELSE 0 END), 0)",
     );
-    let (all, draft, published, trash): (i64, i64, i64, i64) = bind_scope!(
-        sqlx::query_as(sqlx::AssertSqlSafe(count_sql)),
+    push_entry_table_scope(
+        &mut count_qb,
         type_key,
         filter,
-        resolved_locale.as_deref()
-    )
-    .fetch_one(&mut *tx)
-    .await?;
+        resolved_locale.as_deref(),
+        &active_locales,
+    );
+    let (all, draft, published, trash): (i64, i64, i64, i64) =
+        count_qb.build_query_as().fetch_one(&mut *tx).await?;
     let status_counts = StatusCounts {
         all,
         draft,
@@ -262,10 +330,10 @@ pub async fn query(
 
     let is_trash_view = filter.status == "trash";
     let status_clause = match filter.status.as_str() {
-        "draft" => "AND e.trashed_at IS NULL AND e.publication_status = 'draft'",
-        "published" => "AND e.trashed_at IS NULL AND e.publication_status = 'published'",
-        "trash" => "AND e.trashed_at IS NOT NULL",
-        _ => "AND e.trashed_at IS NULL",
+        "draft" => " AND e.trashed_at IS NULL AND e.publication_status = 'draft'",
+        "published" => " AND e.trashed_at IS NULL AND e.publication_status = 'published'",
+        "trash" => " AND e.trashed_at IS NOT NULL",
+        _ => " AND e.trashed_at IS NULL",
     };
 
     // Closed allowlists only, never interpolated user data.
@@ -283,13 +351,25 @@ pub async fn query(
     } else {
         format!(", e.id {direction}")
     };
-    let rows_sql = format!(
-        "{CATEGORY_SCOPE} SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
-                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
-                e.locale, e.translation_group_id, e.trashed_at
-         {SCOPE} {status_clause}
-         ORDER BY {column} {direction}{tie} LIMIT ? OFFSET ?"
+    let mut rows_qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new("");
+    push_entry_table_ctes(&mut rows_qb, filter);
+    rows_qb.push(
+        "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json, \
+                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at, \
+                e.locale, e.translation_group_id, e.trashed_at",
     );
+    push_entry_table_scope(
+        &mut rows_qb,
+        type_key,
+        filter,
+        resolved_locale.as_deref(),
+        &active_locales,
+    );
+    rows_qb.push(status_clause);
+    rows_qb.push(format!(" ORDER BY {column} {direction}{tie} LIMIT "));
+    rows_qb.push_bind(filter.limit);
+    rows_qb.push(" OFFSET ");
+    rows_qb.push_bind(filter.offset);
     type SelectedRow = (
         i64,
         String,
@@ -305,16 +385,7 @@ pub async fn query(
         String,
         Option<String>,
     );
-    let selected: Vec<SelectedRow> = bind_scope!(
-        sqlx::query_as(sqlx::AssertSqlSafe(rows_sql)),
-        type_key,
-        filter,
-        resolved_locale.as_deref()
-    )
-    .bind(filter.limit)
-    .bind(filter.offset)
-    .fetch_all(&mut *tx)
-    .await?;
+    let selected: Vec<SelectedRow> = rows_qb.build_query_as().fetch_all(&mut *tx).await?;
 
     let is_draft_publish =
         effective.base.descriptor.settings.publication == ContentPublication::DraftPublish;

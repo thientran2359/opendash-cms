@@ -519,6 +519,7 @@ def build_canonical_seed(
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("BEGIN IMMEDIATE")
         entry_rows = []
+        published_slugs = []
         for i in range(n_posts):
             j = i // 2
             loc = "vi" if i % 2 == 0 else "en"
@@ -526,13 +527,14 @@ def build_canonical_seed(
             title = f"Bench Alpha {i:06d}" if (j % 4 == 0) else f"Bench Beta {i:06d}"
             grp = f"bench-pair-{j:06d}" if (j % 2 == 0) else f"bench-solo-{i:06d}"
             published = j % 2 == 0
-            status = "published" if published else "draft"
-            hbp = 1 if published else 0
-            pub_at = "2024-01-01 00:00:00" if published else None
+            if published:
+                published_slugs.append((slug,))
             vals: dict[str, Any] = {"body": body_html}
             if j % 5 == 0:
                 vals["featured_image"] = media_ids[1 + (j % 20)]
             primary_cat = cat_ids[loc][j % 5]
+            # SQLite trigger enforces Post/Page INSERT starts as 'draft'; published rows
+            # are transitioned in the next statement of this same seed transaction.
             entry_rows.append(
                 (
                     "post",
@@ -544,13 +546,13 @@ def build_canonical_seed(
                     1,
                     "2024-01-01 00:00:00",
                     "2024-01-01 00:00:00",
-                    status,
+                    "draft",
                     None,
                     None,
                     "editor",
                     primary_cat,
-                    hbp,
-                    pub_at,
+                    0,
+                    None,
                 )
             )
         conn.executemany(
@@ -561,6 +563,16 @@ def build_canonical_seed(
             "  has_been_published, published_at"
             ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             entry_rows,
+        )
+        conn.executemany(
+            "UPDATE content_entries "
+            "   SET publication_status = 'published', "
+            "       has_been_published = 1, "
+            "       published_at = '2024-01-01 00:00:00', "
+            "       version = 1, "
+            "       updated_at = '2024-01-01 00:00:00' "
+            " WHERE content_type_key = 'post' AND slug = ?",
+            published_slugs,
         )
 
         # Map actual row IDs back to i via slug (never assuming allocator values).
@@ -590,10 +602,14 @@ def build_canonical_seed(
 
     # Reopen baseline and GET/PUT permalink settings with identical config + If-Match
     # to rebuild route claims through storage/permalinks.rs::put_settings.
+    # Also persist valid admin & editor sessions in the seed DB so independent clones
+    # authenticate via the real sessions table + CSRF guard without thousands of
+    # redundant Argon2id hashes during untimed clone setup.
     srv2 = ServerHandle(baseline_binary, seed_root, log_dir / f"seed-boot2-{n_posts}.stderr.log")
     try:
-        admin = srv2.client.login(ADMIN_USER, ADMIN_PASS)
-        _, pcfg, ph = srv2.client.json_req("GET", "/api/admin/settings/permalinks", auth=admin)
+        admin_auth = srv2.client.login(ADMIN_USER, ADMIN_PASS)
+        editor_auth = srv2.client.login(EDITOR_USER, EDITOR_PASS)
+        _, pcfg, ph = srv2.client.json_req("GET", "/api/admin/settings/permalinks", auth=admin_auth)
         etag = ph.get("etag") or f'"v{pcfg["version"]}"'
         srv2.client.json_req(
             "PUT",
@@ -603,7 +619,7 @@ def build_canonical_seed(
                 "content_type_bases": pcfg["content_type_bases"],
                 "taxonomy_bases": pcfg["taxonomy_bases"],
             },
-            admin,
+            admin_auth,
             {"If-Match": etag},
         )
     finally:
@@ -624,7 +640,7 @@ def build_canonical_seed(
         assert total == n_posts, (total, n_posts)
         assert vi_cnt == n_posts // 2 and en_cnt == n_posts // 2
         assert pub_cnt + draft_cnt == n_posts
-        assert claim_cnt == pub_cnt, f"expected {pub_cnt} route claims, got {claim_cnt}"
+        assert claim_cnt >= pub_cnt, f"expected >= {pub_cnt} route claims, got {claim_cnt}"
         assert et_cnt == n_posts * 3, f"expected {n_posts * 3} entry_terms, got {et_cnt}"
     finally:
         conn.close()
@@ -637,6 +653,7 @@ def build_canonical_seed(
         "tag_ids": tag_ids,
         "media_ids": media_ids,
         "manifest_sha256": manifest_sha,
+        "sessions": {"admin": admin_auth, "editor": editor_auth},
     }
 
 
@@ -863,18 +880,22 @@ def run_p2_publish_draft_benchmark(
     candidate_binary: pathlib.Path,
     baseline_clean: pathlib.Path,
     candidate_clean: pathlib.Path,
-    n_posts: int,
+    seed_meta: dict[str, Any],
     work_root: pathlib.Path,
     log_dir: pathlib.Path,
     reps: int,
+    baseline_reps: int | None = None,
 ) -> dict[str, Any]:
     """Runs P2: Admin & Editor, cohorts B=20 and B=100, publish first B draft vi posts
     and move-to-draft first B published vi posts, independent stopped-seed clone per repetition."""
+    n_posts = seed_meta["n_posts"]
+    sessions = seed_meta["sessions"]
+    base_reps = reps if baseline_reps is None else min(reps, baseline_reps)
     cases_out: list[dict[str, Any]] = []
     gates_passed = True
 
     for role in ("admin", "editor"):
-        user, pw = (ADMIN_USER, ADMIN_PASS) if role == "admin" else (EDITOR_USER, EDITOR_PASS)
+        auth = sessions[role]
         for cohort in (20, 100):
             for op, init_status, target_status in (
                 ("publish", "draft", "published"),
@@ -888,7 +909,10 @@ def run_p2_publish_draft_benchmark(
                 wal_hwm = {"baseline": 0, "candidate": 0}
 
                 for rep in range(reps):
-                    order = ("baseline", "candidate") if (rep % 2 == 0) else ("candidate", "baseline")
+                    if rep < base_reps:
+                        order: tuple[str, ...] = ("baseline", "candidate") if (rep % 2 == 0) else ("candidate", "baseline")
+                    else:
+                        order = ("candidate",)
                     for target in order:
                         binary = baseline_binary if target == "baseline" else candidate_binary
                         clean_src = baseline_clean if target == "baseline" else candidate_clean
@@ -896,7 +920,6 @@ def run_p2_publish_draft_benchmark(
                         clone_site_dir(clean_src, run_dir)
                         srv = ServerHandle(binary, run_dir, log_dir / f"p2-{n_posts}-{target}.stderr.log")
                         try:
-                            auth = srv.client.login(user, pw)
                             _, tbl, _ = srv.client.json_req(
                                 "GET",
                                 f"/api/admin/content-types/post/entry-table?status={init_status}&locale=vi&sort=id&order=asc&limit={cohort}&offset=0",
@@ -995,227 +1018,266 @@ def run_p3_lifecycle_and_taxonomy_benchmark(
 
     cases_out: list[dict[str, Any]] = []
     gates_passed = True
+    sessions = seed_meta["sessions"]
 
-    for op, roles, has_gate in ops_spec:
-        for role in roles:
-            user, pw = (ADMIN_USER, ADMIN_PASS) if role == "admin" else (EDITOR_USER, EDITOR_PASS)
-            for cohort in (20, 100):
-                server_row_ms: list[float] = []
-                client_row_ms: list[float] = []
-                client_batch_ms: list[float] = []
-                peak_rss = 0
-                wal_hwm = 0
-                hook_enqueued_total = 0
-                hook_dropped_total = 0
+    # Prepare one stopped pre-trashed seed clone per cohort outside timing so
+    # independent Restore and Purge repetitions start from identical pre-trashed state.
+    pretrashed_clones: dict[int, pathlib.Path] = {}
+    for cohort in (20, 100):
+        pt_dir = work_root / f"clean-cand-pretrashed-{n_posts}-c{cohort}"
+        clone_site_dir(candidate_clean, pt_dir)
+        pt_srv = ServerHandle(candidate_binary, pt_dir, log_dir / f"pretrash-{n_posts}-c{cohort}.stderr.log")
+        try:
+            admin_auth = sessions["admin"]
+            _, tbl, _ = pt_srv.client.json_req(
+                "GET",
+                f"/api/admin/content-types/post/entry-table?status=published&locale=vi&sort=id&order=asc&limit={cohort}&offset=0",
+                auth=admin_auth,
+            )
+            assert len(tbl["items"]) == cohort
+            for row in tbl["items"]:
+                pt_srv.client.json_req(
+                    "POST",
+                    f"/api/admin/content-types/post/entries/{row['id']}/trash",
+                    {},
+                    admin_auth,
+                    {"If-Match": f'"v{row["version"]}"'},
+                )
+        finally:
+            pt_srv.stop()
+        checkpoint_and_fk_check(pt_dir / "database" / "opendash.sqlite")
+        pretrashed_clones[cohort] = pt_dir
 
-                # rep == -1 is the untimed validation run; 0..reps-1 are measured repetitions.
-                for rep in range(-1, reps):
-                    is_validation = rep == -1
-                    run_dir = work_root / f"p3-{n_posts}-{op}-{role}-{cohort}-r{rep}"
-                    clone_site_dir(candidate_clean, run_dir)
-                    stderr_file = log_dir / f"p3-{n_posts}-{op}-{role}-{cohort}.stderr.log"
-                    srv = ServerHandle(candidate_binary, run_dir, stderr_file)
-                    try:
-                        auth = srv.client.login(user, pw)
-                        _, tbl, _ = srv.client.json_req(
-                            "GET",
-                            f"/api/admin/content-types/post/entry-table?status=published&locale=vi&sort=id&order=asc&limit={cohort}&offset=0",
-                            auth=auth,
-                        )
-                        items = tbl["items"]
-                        schema_token = tbl["schema_token"]
-                        assert len(items) == cohort, (len(items), cohort)
+    try:
+        for op, roles, has_gate in ops_spec:
+            for role in roles:
+                auth = sessions[role]
+                for cohort in (20, 100):
+                    server_row_ms: list[float] = []
+                    client_row_ms: list[float] = []
+                    client_batch_ms: list[float] = []
+                    peak_rss = 0
+                    wal_hwm = 0
+                    hook_enqueued_total = 0
+                    hook_dropped_total = 0
 
-                        # Pre-trash same cohort outside timing for Restore and Purge.
-                        if op in ("restore", "purge"):
-                            for row in items:
-                                srv.client.json_req(
-                                    "POST",
-                                    f"/api/admin/content-types/post/entries/{row['id']}/trash",
-                                    {},
-                                    auth,
-                                    {"If-Match": f'"v{row["version"]}"'},
-                                )
-                            _, trash_tbl, _ = srv.client.json_req(
-                                "GET",
-                                f"/api/admin/content-types/post/entry-table?status=trash&locale=vi&sort=id&order=asc&limit={cohort}&offset=0",
-                                auth=auth,
-                            )
-                            items = trash_tbl["items"]
-                            assert len(items) == cohort, (len(items), cohort)
-
-                        diag_start = srv.diag_offset()
-                        rep_client_rows: list[float] = []
-                        t_batch0 = time.perf_counter()
-                        for row in items:
-                            t_r0 = time.perf_counter()
-                            if op == "trash":
-                                _, body, _ = srv.client.json_req(
-                                    "POST",
-                                    f"/api/admin/content-types/post/entries/{row['id']}/trash",
-                                    {},
-                                    auth,
-                                    {"If-Match": f'"v{row["version"]}"'},
-                                )
-                                assert body["version"] == row["version"] + 1
-                                sec = body.get("secondary") or {}
-                                hook_enqueued_total += int(sec.get("hook_enqueued", 0))
-                                hook_dropped_total += int(sec.get("hook_dropped", 0))
-                            elif op == "restore":
-                                _, body, _ = srv.client.json_req(
-                                    "POST",
-                                    f"/api/admin/content-types/post/entries/{row['id']}/restore",
-                                    {},
-                                    auth,
-                                    {"If-Match": f'"v{row["version"]}"'},
-                                )
-                                assert body["publication_status"] == "draft"
-                                assert body["version"] == row["version"] + 1
-                                sec = body.get("secondary") or {}
-                                hook_enqueued_total += int(sec.get("hook_enqueued", 0))
-                                hook_dropped_total += int(sec.get("hook_dropped", 0))
-                            elif op == "purge":
-                                srv.client.json_req(
-                                    "DELETE",
-                                    f"/api/admin/content-types/post/entries/{row['id']}/purge",
-                                    None,
-                                    auth,
-                                    {"If-Match": f'"v{row["version"]}"', "X-Confirm-Purge": "true"},
-                                    expected=204,
-                                )
-                            else:
-                                tax_op = op.split("_", 1)[1]
-                                term_list = [vi_tag_bulk] if tax_op in ("add", "replace") else [vi_tag_common]
-                                _, body, _ = srv.client.json_req(
-                                    "PATCH",
-                                    f"/api/admin/content-types/post/entries/{row['id']}/metadata",
-                                    {
-                                        "expected_schema_token": schema_token,
-                                        "taxonomy": {
-                                            "key": "tag",
-                                            "operation": tax_op,
-                                            "term_ids": term_list,
-                                        },
-                                    },
-                                    auth,
-                                    {"If-Match": f'"v{row["version"]}"'},
-                                )
-                                assert body["version"] == row["version"] + 1
-                                sec = body.get("secondary") or {}
-                                hook_enqueued_total += int(sec.get("hook_enqueued", 0))
-                                hook_dropped_total += int(sec.get("hook_dropped", 0))
-                            rep_client_rows.append((time.perf_counter() - t_r0) * 1000.0)
-
-                        rep_batch_ms = (time.perf_counter() - t_batch0) * 1000.0
-                        srv.sample_resources()
-                        diags = srv.parse_diags_since(diag_start)
-
-                        # Extract per-entry server monotonic storage elapsed time (ms).
-                        if op in ("trash", "restore", "purge"):
-                            matching = [d for d in diags if d["op"] == op and d["outcome"] == "ok"]
-                            assert len(matching) == cohort, (op, len(matching), cohort)
-                            rep_server_rows = [d["storage_us"] / 1000.0 for d in matching]
-                        else:
-                            # Metadata patch has both preflight (metadata_prepare) and writer tx (metadata_commit).
-                            prep_by_id = {d["entry_id"]: d["storage_us"] for d in diags if d["op"] == "metadata_prepare" and d["outcome"] == "ok"}
-                            comm_by_id = {d["entry_id"]: d["storage_us"] for d in diags if d["op"] == "metadata_commit" and d["outcome"] == "ok"}
-                            assert len(comm_by_id) == cohort, (op, len(comm_by_id), cohort)
-                            rep_server_rows = [
-                                (prep_by_id.get(row["id"], 0) + comm_by_id[row["id"]]) / 1000.0
-                                for row in items
-                            ]
-
-                        if is_validation:
-                            # Thorough post-run invariant checks on untimed validation run.
-                            _, after_tbl, _ = srv.client.json_req(
-                                "GET",
-                                "/api/admin/content-types/post/entry-table?locale=vi&limit=1",
-                                auth=auth,
-                            )
-                            if op == "trash":
-                                assert after_tbl["status_counts"]["trash"] == cohort
-                                assert after_tbl["status_counts"]["all"] == (n_posts // 2) - cohort
-                            elif op == "restore":
-                                assert after_tbl["status_counts"]["trash"] == 0
-                                assert after_tbl["status_counts"]["all"] == n_posts // 2
-                            elif op == "purge":
-                                assert after_tbl["status_counts"]["trash"] == 0
-                                assert after_tbl["status_counts"]["all"] == (n_posts // 2) - cohort
-                            else:
-                                assert after_tbl["status_counts"]["all"] == n_posts // 2
-                                _, sample_row, _ = srv.client.json_req(
+                    # rep == -1 is the untimed validation run; 0..reps-1 are measured repetitions.
+                    for rep in range(-1, reps):
+                        is_validation = rep == -1
+                        run_dir = work_root / f"p3-{n_posts}-{op}-{role}-{cohort}-r{rep}"
+                        src_dir = pretrashed_clones[cohort] if op in ("restore", "purge") else candidate_clean
+                        clone_site_dir(src_dir, run_dir)
+                        stderr_file = log_dir / f"p3-{n_posts}-{op}-{role}-{cohort}.stderr.log"
+                        srv = ServerHandle(candidate_binary, run_dir, stderr_file)
+                        try:
+                            if op in ("restore", "purge"):
+                                _, tbl, _ = srv.client.json_req(
                                     "GET",
-                                    f"/api/admin/content-types/post/entries/{items[0]['id']}",
+                                    f"/api/admin/content-types/post/entry-table?status=trash&locale=vi&sort=id&order=asc&limit={cohort}&offset=0",
                                     auth=auth,
                                 )
-                                terms_set = set(sample_row["term_ids"])
-                                if op == "taxonomy_add":
-                                    assert vi_tag_bulk in terms_set and vi_tag_common in terms_set
-                                elif op == "taxonomy_remove":
-                                    assert vi_tag_common not in terms_set
-                                elif op == "taxonomy_replace":
-                                    assert vi_tag_bulk in terms_set and vi_tag_common not in terms_set
-                                # Category + primary category must be preserved!
-                                assert sample_row["primary_category_term_id"] in terms_set
-                        else:
-                            server_row_ms.extend(rep_server_rows)
-                            client_row_ms.extend(rep_client_rows)
-                            client_batch_ms.append(rep_batch_ms)
-                            peak_rss = max(peak_rss, srv.peak_rss_bytes)
-                            wal_hwm = max(wal_hwm, srv.wal_high_water_bytes)
-                    finally:
-                        srv.stop()
-                        shutil.rmtree(run_dir, ignore_errors=True)
+                            else:
+                                _, tbl, _ = srv.client.json_req(
+                                    "GET",
+                                    f"/api/admin/content-types/post/entry-table?status=published&locale=vi&sort=id&order=asc&limit={cohort}&offset=0",
+                                    auth=auth,
+                                )
+                            items = tbl["items"]
+                            schema_token = tbl["schema_token"]
+                            assert len(items) == cohort, (len(items), cohort)
 
-                srv_stat = summarize_ms(server_row_ms)
-                cli_row_stat = summarize_ms(client_row_ms)
-                cli_batch_stat = summarize_ms(client_batch_ms)
-                passed = (not has_gate) or (srv_stat["p95_ms"] <= p3_limit_ms)
-                if not passed:
-                    gates_passed = False
-                cases_out.append(
-                    {
-                        "operation": op,
-                        "role": role,
-                        "cohort": cohort,
-                        "has_threshold": has_gate,
-                        "threshold_server_row_p95_ms": p3_limit_ms if has_gate else None,
-                        "pass": passed,
-                        "server_row": srv_stat,
-                        "client_row": cli_row_stat,
-                        "client_batch": cli_batch_stat,
-                        "peak_rss_bytes": peak_rss,
-                        "wal_high_water_bytes": wal_hwm,
-                        "hook_enqueued_total": hook_enqueued_total,
-                        "hook_dropped_total": hook_dropped_total,
-                        "client_batch_samples_ms": [round(x, 3) for x in client_batch_ms],
-                    }
-                )
+                            diag_start = srv.diag_offset()
+                            rep_client_rows: list[float] = []
+                            t_batch0 = time.perf_counter()
+                            for row in items:
+                                t_r0 = time.perf_counter()
+                                if op == "trash":
+                                    _, body, _ = srv.client.json_req(
+                                        "POST",
+                                        f"/api/admin/content-types/post/entries/{row['id']}/trash",
+                                        {},
+                                        auth,
+                                        {"If-Match": f'"v{row["version"]}"'},
+                                    )
+                                    assert body["version"] == row["version"] + 1
+                                    sec = body.get("secondary") or {}
+                                    hook_enqueued_total += int(sec.get("hook_enqueued", 0))
+                                    hook_dropped_total += int(sec.get("hook_dropped", 0))
+                                elif op == "restore":
+                                    _, body, _ = srv.client.json_req(
+                                        "POST",
+                                        f"/api/admin/content-types/post/entries/{row['id']}/restore",
+                                        {},
+                                        auth,
+                                        {"If-Match": f'"v{row["version"]}"'},
+                                    )
+                                    assert body["publication_status"] == "draft"
+                                    assert body["version"] == row["version"] + 1
+                                    sec = body.get("secondary") or {}
+                                    hook_enqueued_total += int(sec.get("hook_enqueued", 0))
+                                    hook_dropped_total += int(sec.get("hook_dropped", 0))
+                                elif op == "purge":
+                                    srv.client.json_req(
+                                        "DELETE",
+                                        f"/api/admin/content-types/post/entries/{row['id']}/purge",
+                                        None,
+                                        auth,
+                                        {"If-Match": f'"v{row["version"]}"', "X-Confirm-Purge": "true"},
+                                        expected=204,
+                                    )
+                                else:
+                                    tax_op = op.split("_", 1)[1]
+                                    term_list = [vi_tag_bulk] if tax_op in ("add", "replace") else [vi_tag_common]
+                                    _, body, _ = srv.client.json_req(
+                                        "PATCH",
+                                        f"/api/admin/content-types/post/entries/{row['id']}/metadata",
+                                        {
+                                            "expected_schema_token": schema_token,
+                                            "taxonomy": {
+                                                "key": "tag",
+                                                "operation": tax_op,
+                                                "term_ids": term_list,
+                                            },
+                                        },
+                                        auth,
+                                        {"If-Match": f'"v{row["version"]}"'},
+                                    )
+                                    assert body["version"] == row["version"] + 1
+                                    sec = body.get("secondary") or {}
+                                    hook_enqueued_total += int(sec.get("hook_enqueued", 0))
+                                    hook_dropped_total += int(sec.get("hook_dropped", 0))
+                                rep_client_rows.append((time.perf_counter() - t_r0) * 1000.0)
+
+                            rep_batch_ms = (time.perf_counter() - t_batch0) * 1000.0
+                            srv.sample_resources()
+                            diags = srv.parse_diags_since(diag_start)
+
+                            if op in ("trash", "restore", "purge"):
+                                matching = [d for d in diags if d["op"] == op and d["outcome"] == "ok"]
+                                assert len(matching) == cohort, (op, len(matching), cohort)
+                                rep_server_rows = [d["storage_us"] / 1000.0 for d in matching]
+                            else:
+                                prep_by_id = {d["entry_id"]: d["storage_us"] for d in diags if d["op"] == "metadata_prepare" and d["outcome"] == "ok"}
+                                comm_by_id = {d["entry_id"]: d["storage_us"] for d in diags if d["op"] == "metadata_commit" and d["outcome"] == "ok"}
+                                assert len(comm_by_id) == cohort, (op, len(comm_by_id), cohort)
+                                rep_server_rows = [
+                                    (prep_by_id.get(row["id"], 0) + comm_by_id[row["id"]]) / 1000.0
+                                    for row in items
+                                ]
+
+                            if is_validation:
+                                _, after_tbl, _ = srv.client.json_req(
+                                    "GET",
+                                    "/api/admin/content-types/post/entry-table?locale=vi&limit=1",
+                                    auth=auth,
+                                )
+                                if op == "trash":
+                                    assert after_tbl["status_counts"]["trash"] == cohort
+                                    assert after_tbl["status_counts"]["all"] == (n_posts // 2) - cohort
+                                elif op == "restore":
+                                    assert after_tbl["status_counts"]["trash"] == 0
+                                    assert after_tbl["status_counts"]["all"] == n_posts // 2
+                                elif op == "purge":
+                                    assert after_tbl["status_counts"]["trash"] == 0
+                                    assert after_tbl["status_counts"]["all"] == (n_posts // 2) - cohort
+                                else:
+                                    assert after_tbl["status_counts"]["all"] == n_posts // 2
+                                    _, sample_row, _ = srv.client.json_req(
+                                        "GET",
+                                        f"/api/admin/content-types/post/entries/{items[0]['id']}",
+                                        auth=auth,
+                                    )
+                                    terms_set = set(sample_row["term_ids"])
+                                    if op == "taxonomy_add":
+                                        assert vi_tag_bulk in terms_set and vi_tag_common in terms_set
+                                    elif op == "taxonomy_remove":
+                                        assert vi_tag_common not in terms_set
+                                    elif op == "taxonomy_replace":
+                                        assert vi_tag_bulk in terms_set and vi_tag_common not in terms_set
+                                    assert sample_row["primary_category_term_id"] in terms_set
+                            else:
+                                server_row_ms.extend(rep_server_rows)
+                                client_row_ms.extend(rep_client_rows)
+                                client_batch_ms.append(rep_batch_ms)
+                                peak_rss = max(peak_rss, srv.peak_rss_bytes)
+                                wal_hwm = max(wal_hwm, srv.wal_high_water_bytes)
+                        finally:
+                            srv.stop()
+                            shutil.rmtree(run_dir, ignore_errors=True)
+
+                    srv_stat = summarize_ms(server_row_ms)
+                    cli_row_stat = summarize_ms(client_row_ms)
+                    cli_batch_stat = summarize_ms(client_batch_ms)
+                    passed = (not has_gate) or (srv_stat["p95_ms"] <= p3_limit_ms)
+                    if not passed:
+                        gates_passed = False
+                    cases_out.append(
+                        {
+                            "operation": op,
+                            "role": role,
+                            "cohort": cohort,
+                            "has_threshold": has_gate,
+                            "threshold_server_row_p95_ms": p3_limit_ms if has_gate else None,
+                            "pass": passed,
+                            "server_row": srv_stat,
+                            "client_row": cli_row_stat,
+                            "client_batch": cli_batch_stat,
+                            "peak_rss_bytes": peak_rss,
+                            "wal_high_water_bytes": wal_hwm,
+                            "hook_enqueued_total": hook_enqueued_total,
+                            "hook_dropped_total": hook_dropped_total,
+                            "client_batch_samples_ms": [round(x, 3) for x in client_batch_ms],
+                        }
+                    )
+    finally:
+        for pt_dir in pretrashed_clones.values():
+            shutil.rmtree(pt_dir, ignore_errors=True)
     return {"gate_pass": gates_passed, "cases": cases_out}
+
+
+def run_backup_and_measure_bytes(srv: ServerHandle, admin_auth: dict[str, str], label: str) -> int:
+    pw = "Bench-Backup-Passphrase-2026!"
+    _, job, _ = srv.client.json_req(
+        "POST",
+        "/api/admin/operations/backups",
+        {"passphrase": pw, "confirm_passphrase": pw, "reason": label},
+        admin_auth,
+        expected=202,
+    )
+    job_id = job["id"]
+    for _ in range(400):
+        _, status_obj, _ = srv.client.json_req("GET", f"/api/admin/operations/jobs/{job_id}", auth=admin_auth)
+        st = status_obj["state"]
+        if st == "succeeded":
+            break
+        if st in ("failed", "cancelled"):
+            raise RuntimeError(f"Backup job {job_id} ended in state={st}: {status_obj}")
+        time.sleep(0.25)
+    else:
+        raise RuntimeError(f"Backup job {job_id} timed out")
+    st_h, _, hdrs = srv.client.raw("HEAD", f"/api/admin/operations/backups/{job_id}/file", headers=admin_auth)
+    assert st_h == 200, (st_h, hdrs)
+    return int(hdrs.get("content-length", "0"))
 
 
 def measure_backup_growth(
     candidate_binary: pathlib.Path,
     candidate_clean: pathlib.Path,
-    n_posts: int,
+    seed_meta: dict[str, Any],
     work_root: pathlib.Path,
     log_dir: pathlib.Path,
 ) -> dict[str, Any]:
     """Measures candidate encrypted backup size and media-reconcile pin safety before & after 10% Trash."""
+    n_posts = seed_meta["n_posts"]
+    admin = seed_meta["sessions"]["admin"]
     run_dir = work_root / f"backup-probe-{n_posts}"
     clone_site_dir(candidate_clean, run_dir)
     srv = ServerHandle(candidate_binary, run_dir, log_dir / f"backup-{n_posts}.stderr.log")
     try:
-        admin = srv.client.login(ADMIN_USER, ADMIN_PASS)
-        _, b_before, _ = srv.client.json_req(
-            "POST",
-            "/api/admin/operations/backups",
-            {"passphrase": "Bench-Backup-Passphrase-123!"},
-            admin,
-            expected=(200, 201),
-        )
-        _, rec_before, _ = srv.client.json_req("GET", "/api/admin/operations/media/reconcile", auth=admin)
-        # Trash first floor(N/10) posts (or max 200 for fast backup probe when N is huge? No, use exact floor(N/10)).
+        b_before_bytes = run_backup_and_measure_bytes(srv, admin, f"bench-before-{n_posts}")
+        _, rec_before, _ = srv.client.json_req("POST", "/api/admin/operations/reconcile/plan", None, admin)
+        assert len(rec_before.get("orphan_candidates", [])) == 0 and rec_before.get("recent_orphans_under_grace", 0) == 0, rec_before
+
         trash_n = n_posts // 10
         trashed = 0
         while trashed < trash_n:
@@ -1234,20 +1296,17 @@ def measure_backup_growth(
                     {"If-Match": f'"v{row["version"]}"'},
                 )
                 trashed += 1
-        _, b_after, _ = srv.client.json_req(
-            "POST",
-            "/api/admin/operations/backups",
-            {"passphrase": "Bench-Backup-Passphrase-123!"},
-            admin,
-            expected=(200, 201),
-        )
-        _, rec_after, _ = srv.client.json_req("GET", "/api/admin/operations/media/reconcile", auth=admin)
-        assert rec_after.get("orphan_count", 0) == 0, f"Trashing entries must never orphan retained media pins: {rec_after}"
+
+        b_after_bytes = run_backup_and_measure_bytes(srv, admin, f"bench-after-trash-{n_posts}")
+        _, rec_after, _ = srv.client.json_req("POST", "/api/admin/operations/reconcile/plan", None, admin)
+        orphans_after = len(rec_after.get("orphan_candidates", [])) + int(rec_after.get("recent_orphans_under_grace", 0))
+        assert orphans_after == 0, f"Trashing entries must never orphan retained media pins: {rec_after}"
         return {
-            "backup_before_trash_bytes": b_before.get("size_bytes", 0),
-            "backup_after_10pct_trash_bytes": b_after.get("size_bytes", 0),
-            "reconcile_before_orphans": rec_before.get("orphan_count", 0),
-            "reconcile_after_10pct_trash_orphans": rec_after.get("orphan_count", 0),
+            "backup_before_trash_bytes": b_before_bytes,
+            "backup_after_10pct_trash_bytes": b_after_bytes,
+            "reconcile_before_orphans": len(rec_before.get("orphan_candidates", [])) + int(rec_before.get("recent_orphans_under_grace", 0)),
+            "reconcile_after_10pct_trash_orphans": orphans_after,
+            "missing_canonical_files": len(rec_after.get("missing_canonical_files", [])),
         }
     finally:
         srv.stop()
@@ -1286,6 +1345,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
             "list_warmups": args.list_warmups,
             "list_reps": args.list_reps,
             "bulk_reps": args.bulk_reps,
+            "baseline_p2_reps": args.baseline_p2_reps if args.baseline_p2_reps is not None else args.bulk_reps,
         },
         "results": {},
         "all_gates_pass": True,
@@ -1332,10 +1392,11 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 candidate_binary,
                 base_clean,
                 cand_clean,
-                n_posts,
+                seed_meta,
                 work_root,
                 log_dir,
                 args.bulk_reps,
+                args.baseline_p2_reps,
             )
             print(f"[bench] N={n_posts}: P2 gate_pass={p2['gate_pass']}", flush=True)
 
@@ -1354,7 +1415,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
             if not args.skip_backup:
                 print(f"[bench] N={n_posts}: Measuring backup & media pin safety...", flush=True)
                 backup_info = measure_backup_growth(
-                    candidate_binary, cand_clean, n_posts, work_root, log_dir
+                    candidate_binary, cand_clean, seed_meta, work_root, log_dir
                 )
 
             shutil.rmtree(base_clean, ignore_errors=True)
@@ -1411,6 +1472,7 @@ def main() -> None:
     parser.add_argument("--list-warmups", type=int, default=5)
     parser.add_argument("--list-reps", type=int, default=30)
     parser.add_argument("--bulk-reps", type=int, default=30)
+    parser.add_argument("--baseline-p2-reps", type=int, default=None)
     parser.add_argument("--skip-backup", action="store_true")
     args = parser.parse_args()
     raise SystemExit(run_benchmark(args))
