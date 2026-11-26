@@ -599,6 +599,10 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
         item_html.contains(r#"data-cookie-leaked="no""#),
         "{item_html}"
     );
+    assert!(
+        !item_html.contains("opendash-head-end"),
+        "HEAD_END_MARKER leaked into /p/ HTML response: {item_html}"
+    );
 
     // Theme route works, and explicit render_trusted_html: false opt-out enforces strict C-SEC (including Jinja attribute smuggling)
     let theme_route = client

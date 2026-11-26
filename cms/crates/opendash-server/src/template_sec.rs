@@ -5354,24 +5354,29 @@ fn validate_html_and_css_context_with_url_vars(
             return Err("Template chứa thẻ HTML bị C-SEC cấm.");
         }
 
-        let mut k = j;
-        let mut quote: Option<u8> = None;
-        while k < bytes.len() {
-            let b = bytes[k];
-            if let Some(q) = quote {
-                if b == q {
-                    quote = None;
+        let k = if post_render {
+            find_post_render_tag_end(bytes, j)?
+        } else {
+            let mut k = j;
+            let mut quote: Option<u8> = None;
+            while k < bytes.len() {
+                let b = bytes[k];
+                if let Some(q) = quote {
+                    if b == q {
+                        quote = None;
+                    }
+                } else if b == b'"' || b == b'\'' {
+                    quote = Some(b);
+                } else if b == b'>' {
+                    break;
                 }
-            } else if b == b'"' || b == b'\'' {
-                quote = Some(b);
-            } else if b == b'>' {
-                break;
+                k += 1;
             }
-            k += 1;
-        }
-        if k >= bytes.len() {
-            return Err("Thẻ HTML không đóng đúng cú pháp.");
-        }
+            if k >= bytes.len() {
+                return Err("Thẻ HTML không đóng đúng cú pháp.");
+            }
+            k
+        };
 
         let attr_slice = &src[j..k];
         if is_close {
@@ -5569,6 +5574,100 @@ fn validate_tag_attributes(
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PostRenderTagScanState {
+    BeforeAttrName,
+    AttrName,
+    AfterAttrName,
+    BeforeAttrValue,
+    QuotedValue(u8),
+    UnquotedValue,
+}
+
+fn find_post_render_tag_end(bytes: &[u8], start: usize) -> Result<usize, &'static str> {
+    let mut i = start;
+    let mut state = PostRenderTagScanState::BeforeAttrName;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match state {
+            PostRenderTagScanState::BeforeAttrName => {
+                if b == b'>' {
+                    return Ok(i);
+                }
+                if b.is_ascii_whitespace() || b == b'/' {
+                    // stay
+                } else if matches!(b, b'"' | b'\'' | b'<' | b'=' | b'`') {
+                    return Err("Thẻ HTML chứa ký tự không hợp lệ ở vị trí tên thuộc tính.");
+                } else {
+                    state = PostRenderTagScanState::AttrName;
+                }
+            }
+            PostRenderTagScanState::AttrName => {
+                if b == b'>' {
+                    return Ok(i);
+                }
+                if b.is_ascii_whitespace() {
+                    state = PostRenderTagScanState::AfterAttrName;
+                } else if b == b'/' {
+                    state = PostRenderTagScanState::BeforeAttrName;
+                } else if b == b'=' {
+                    state = PostRenderTagScanState::BeforeAttrValue;
+                } else if matches!(b, b'"' | b'\'' | b'<' | b'`') {
+                    return Err("Tên thuộc tính HTML chứa ký tự không hợp lệ.");
+                }
+            }
+            PostRenderTagScanState::AfterAttrName => {
+                if b == b'>' {
+                    return Ok(i);
+                }
+                if b.is_ascii_whitespace() {
+                    // stay
+                } else if b == b'/' {
+                    state = PostRenderTagScanState::BeforeAttrName;
+                } else if b == b'=' {
+                    state = PostRenderTagScanState::BeforeAttrValue;
+                } else if matches!(b, b'"' | b'\'' | b'<' | b'`') {
+                    return Err("Cú pháp thẻ HTML chứa ký tự không hợp lệ sau tên thuộc tính.");
+                } else {
+                    state = PostRenderTagScanState::AttrName;
+                }
+            }
+            PostRenderTagScanState::BeforeAttrValue => {
+                if b.is_ascii_whitespace() {
+                    // stay
+                } else if b == b'>' {
+                    return Ok(i);
+                } else if b == b'"' || b == b'\'' {
+                    state = PostRenderTagScanState::QuotedValue(b);
+                } else if matches!(b, b'<' | b'=' | b'`') {
+                    return Err("Giá trị thuộc tính HTML bắt đầu bằng ký tự không hợp lệ.");
+                } else {
+                    state = PostRenderTagScanState::UnquotedValue;
+                }
+            }
+            PostRenderTagScanState::QuotedValue(q) => {
+                if b == q {
+                    state = PostRenderTagScanState::BeforeAttrName;
+                }
+            }
+            PostRenderTagScanState::UnquotedValue => {
+                if b == b'>' {
+                    return Ok(i);
+                }
+                if b.is_ascii_whitespace() {
+                    state = PostRenderTagScanState::BeforeAttrName;
+                } else if matches!(b, b'"' | b'\'' | b'<' | b'=' | b'`') {
+                    return Err(
+                        "Giá trị thuộc tính HTML không có dấu nháy chứa ký tự không hợp lệ.",
+                    );
+                }
+            }
+        }
+        i += 1;
+    }
+    Err("Thẻ HTML không đóng đúng cú pháp.")
+}
+
 fn parse_attributes(
     slice: &str,
     post_render: bool,
@@ -5604,9 +5703,15 @@ fn parse_attributes(
             && bytes[i] != b'='
             && bytes[i] != b'/'
         {
+            if post_render && matches!(bytes[i], b'"' | b'\'' | b'<' | b'>' | b'`') {
+                return Err("Tên thuộc tính HTML chứa ký tự không hợp lệ.");
+            }
             i += 1;
         }
         let name = slice[name_start..i].to_ascii_lowercase();
+        if post_render && name.is_empty() {
+            return Err("Cú pháp thuộc tính HTML không hợp lệ.");
+        }
         while i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
         }
@@ -5631,6 +5736,11 @@ fn parse_attributes(
             } else {
                 let v_start = i;
                 while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                    if post_render && matches!(bytes[i], b'"' | b'\'' | b'<' | b'>' | b'=' | b'`') {
+                        return Err(
+                            "Giá trị thuộc tính HTML không có dấu nháy chứa ký tự không hợp lệ.",
+                        );
+                    }
                     i += 1;
                 }
                 slice[v_start..i].to_string()
@@ -8315,6 +8425,10 @@ mod spec1_s01_tests {
             r#"<div {{ style="background:url(https://attacker.test/exfil)" }}>x</div>"#,
             r#"<div {% style="expression(alert(1))" %}>x</div>"#,
             r#"<a href="https://safe.example" href="javascript:alert(1)">dup</a>"#,
+            // WHATWG HTML5 unquoted-attribute / attribute-name quote differential payloads (F-01)
+            r#"<div data-x=a'><script>alert(1)</script>'></div>"#,
+            r#"<div data-x=a'><img/src="x"/onerror="alert(1)">'></div>"#,
+            r#"<div a"><script>alert(1)</script>"></div>"#,
         ] {
             assert!(
                 validate_untrusted_extension_html_fragment(bad).is_err(),
