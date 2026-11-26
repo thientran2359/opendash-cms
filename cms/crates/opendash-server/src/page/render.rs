@@ -261,7 +261,6 @@ pub fn render_plugin_block_csec_with_budget(
     )
 }
 
-#[cfg(test)]
 pub fn render_plugin_block_csec_with_budget_and_config(
     block_id: &str,
     template_source: &str,
