@@ -10,7 +10,7 @@ use opendash_core::{
 pub const ARCHIVE_SIZE: i64 = 20;
 pub const MAX_ARCHIVE_PAGE: i64 = 10_000;
 
-/// Single source of truth for the 25 reserved system path prefixes.
+/// Single source of truth for the 26 reserved system path prefixes.
 const RESERVED_SYSTEM_ROOTS: &[&str] = &[
     "admin",
     "api",
@@ -22,6 +22,7 @@ const RESERVED_SYSTEM_ROOTS: &[&str] = &[
     "forms",
     "health",
     "media",
+    "p",
     "page",
     "pattern",
     "preview",

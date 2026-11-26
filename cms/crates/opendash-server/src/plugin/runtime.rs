@@ -393,7 +393,10 @@ impl PluginRuntime {
         let cancellation_token = Arc::new(AtomicBool::new(false));
 
         // Respect global 10-worker ceiling: 4 admin + 2 background/public + 4 public_render
-        let permit = if execution_mode == HookExecutionMode::FilterRender {
+        let permit = if matches!(
+            execution_mode,
+            HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+        ) {
             match tokio::time::timeout(
                 PUBLIC_RENDER_SEMAPHORE_WAIT,
                 self.public_render_semaphore.clone().acquire_owned(),
@@ -407,6 +410,9 @@ impl PluginRuntime {
             let target_sem = match execution_mode {
                 HookExecutionMode::AsyncPostCommit
                 | HookExecutionMode::FilterContactBeforeSubmit => &self.background_public_semaphore,
+                HookExecutionMode::RoutePost if principal == ExecutionPrincipal::Public => {
+                    &self.background_public_semaphore
+                }
                 _ => &self.admin_semaphore,
             };
             match target_sem.clone().try_acquire_owned() {
@@ -645,9 +651,10 @@ impl PluginRuntime {
             ));
         }
 
-        if (staged_content.is_some() || staged_delete.is_some())
-            && execution_mode != HookExecutionMode::Standard
-        {
+        let content_write_allowed = execution_mode == HookExecutionMode::Standard
+            || (execution_mode == HookExecutionMode::RoutePost
+                && principal != ExecutionPrincipal::Public);
+        if (staged_content.is_some() || staged_delete.is_some()) && !content_write_allowed {
             guard.cleanup();
             return Err(PluginError::InvalidOutput(
                 "Ghi/xóa nội dung bị cấm ngoài action mode.".into(),
@@ -657,7 +664,9 @@ impl PluginRuntime {
         if !staged_kv.is_empty()
             && !matches!(
                 execution_mode,
-                HookExecutionMode::Standard | HookExecutionMode::AsyncPostCommit
+                HookExecutionMode::Standard
+                    | HookExecutionMode::AsyncPostCommit
+                    | HookExecutionMode::RoutePost
             )
         {
             guard.cleanup();
@@ -674,8 +683,10 @@ impl PluginRuntime {
             ));
         }
 
-        if execution_mode != HookExecutionMode::FilterRender
-            && (!staged_kv.is_empty() || !staged_logs.is_empty())
+        if !matches!(
+            execution_mode,
+            HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+        ) && (!staged_kv.is_empty() || !staged_logs.is_empty())
         {
             let had_kv_writes = !staged_kv.is_empty();
             if cancellation_token.load(Ordering::Relaxed) || Instant::now() >= deadline {

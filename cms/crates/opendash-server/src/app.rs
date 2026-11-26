@@ -203,6 +203,31 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(crate::routes::contact::MAX_PUBLIC_CONTACT_FORM_BYTES)),
         )
         .route(
+            "/p/{pkg}",
+            get(crate::routes::extensions::extension_public_get_root),
+        )
+        .route(
+            "/p/{pkg}/{*subpath}",
+            get(crate::routes::extensions::extension_public_get),
+        )
+        .route(
+            "/api/p/{pkg}",
+            get(crate::routes::extensions::extension_api_get_root)
+                .post(crate::routes::extensions::extension_api_post_root)
+                .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
+        )
+        .route(
+            "/api/p/{pkg}/{*subpath}",
+            get(crate::routes::extensions::extension_api_get)
+                .post(crate::routes::extensions::extension_api_post)
+                .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
+        )
+        .route(
+            "/api/public/p/{pkg}/{*subpath}",
+            post(crate::routes::extensions::extension_public_post)
+                .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/contact/forms",
             get(crate::routes::contact::admin_list_forms)
                 .post(crate::routes::contact::admin_create_form)
@@ -693,6 +718,9 @@ pub fn build_router_with_themes_root(
         .layer(axum::Extension(state.recovery.clone()))
         .layer(axum::Extension(state.runtime_config.clone()))
         .layer(axum::Extension(crate::contact::ContactAdmissionLimiter::new()))
+        .layer(axum::Extension(
+            crate::routes::extensions::ExtensionRouteRateLimiter::new(),
+        ))
         .layer(axum::Extension(crate::routes::contact::ExpectedListenerOrigin(format!(
             "http://{expected_host}"
         ))))
@@ -732,7 +760,8 @@ pub fn build_router_with_themes_root(
 
             let mut origin_valid = request.headers().get_all(header::ORIGIN).iter().count() <= 1;
             let is_public_contact_submit = *request.method() == axum::http::Method::POST
-                && request.uri().path().starts_with("/api/public/contact/");
+                && (request.uri().path().starts_with("/api/public/contact/")
+                    || request.uri().path().starts_with("/api/public/p/"));
             if origin_valid && is_mutation && !is_public_contact_submit {
                 let expected_origin = format!("http://{expected_host}");
                 let origin_present = request.headers().contains_key(header::ORIGIN);

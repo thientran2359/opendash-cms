@@ -190,7 +190,7 @@ fn check_urlencoded_content_type(headers: &HeaderMap) -> bool {
     mime.eq_ignore_ascii_case("application/x-www-form-urlencoded")
 }
 
-async fn check_strict_contact_origin(
+pub(crate) async fn check_strict_contact_origin(
     headers: &HeaderMap,
     db: &SqlitePool,
     listener_origin: &str,

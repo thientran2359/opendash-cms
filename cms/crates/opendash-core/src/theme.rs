@@ -386,6 +386,8 @@ pub struct ThemeFunctionsSpec {
     pub permissions: Option<crate::plugin::PluginPermissions>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<crate::plugin::PluginActionDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<crate::plugin::ExtensionRouteDecl>,
     #[serde(
         default,
         skip_serializing_if = "crate::plugin::RenderCachePolicy::is_default"
@@ -431,6 +433,7 @@ impl ThemeFunctionsSpec {
         let effective = self.effective_permissions();
         crate::plugin::validate_permissions(&effective, &secret_keys)?;
         crate::plugin::validate_actions(&self.actions, &effective)?;
+        crate::plugin::validate_routes(&self.routes, &effective)?;
         Ok(())
     }
 }
@@ -571,6 +574,7 @@ impl ThemeV3Manifest {
             filters: func.filters.clone(),
             hook_priority: func.hook_priority,
             actions: func.actions.clone(),
+            routes: func.routes.clone(),
             render_cache: func.render_cache,
             declarations: Default::default(),
             editor_panels: Vec::new(),

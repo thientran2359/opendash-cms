@@ -1539,13 +1539,13 @@ impl PluginManager {
         execution_mode: HookExecutionMode,
         timeout_override: Option<std::time::Duration>,
     ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
-        if matches!(kind, EnvelopeKind::Route | EnvelopeKind::Cron) {
+        if matches!(kind, EnvelopeKind::Cron) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 PluginRunResponse {
                     success: false,
                     data: None,
-                    error: Some("Envelope kind route/cron chưa mở ở V1.".into()),
+                    error: Some("Envelope kind cron chưa mở ở V1.".into()),
                     code: Some("unsupported_envelope_kind".into()),
                     correlation_id,
                 },
@@ -1670,7 +1670,10 @@ impl PluginManager {
 
         match run_res {
             Ok(val) => {
-                if execution_mode != HookExecutionMode::FilterRender {
+                if !matches!(
+                    execution_mode,
+                    HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+                ) {
                     plugin_storage::record_owner_execution_result(
                         &self.db_pool,
                         ExtensionOwnerKind::Theme,
@@ -1704,7 +1707,10 @@ impl PluginManager {
                     PluginError::ModuleCompilation(_) => ("module_compilation", err.to_string()),
                     PluginError::Internal(_) => ("internal_error", err.to_string()),
                 };
-                if execution_mode != HookExecutionMode::FilterRender {
+                if !matches!(
+                    execution_mode,
+                    HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+                ) {
                     plugin_storage::record_owner_execution_result(
                         &self.db_pool,
                         ExtensionOwnerKind::Theme,
@@ -1855,7 +1861,10 @@ impl PluginManager {
 
         match run_res {
             Ok(val) => {
-                if execution_mode != HookExecutionMode::FilterRender {
+                if !matches!(
+                    execution_mode,
+                    HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+                ) {
                     plugin_storage::record_plugin_execution_result(
                         &self.db_pool,
                         id,
@@ -1890,7 +1899,10 @@ impl PluginManager {
                     PluginError::Internal(_) => ("internal_error", err.to_string()),
                 };
 
-                if execution_mode != HookExecutionMode::FilterRender {
+                if !matches!(
+                    execution_mode,
+                    HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+                ) {
                     plugin_storage::record_plugin_execution_result(
                         &self.db_pool,
                         id,
@@ -1915,4 +1927,568 @@ impl PluginManager {
             }
         }
     }
+
+    pub async fn resolve_extension_route(
+        &self,
+        pkg: &str,
+        method: opendash_core::plugin::RouteMethod,
+        subpath: &str,
+    ) -> Result<Option<ResolvedExtensionRoute>, (StatusCode, String)> {
+        if self.recovery.is_safe_mode() {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Hệ thống đang ở safe mode sau khi khôi phục; route mở rộng tạm khóa.".into(),
+            ));
+        }
+        if opendash_core::id::validate_package_id(pkg).is_err() {
+            return Ok(None);
+        }
+
+        // 1. Check enabled plugin with matching package ID and route
+        if let Ok(Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest))) =
+            plugin_storage::load_plugin_executable_with_generation(&self.db_pool, pkg).await
+            && enabled
+            && let Ok(manifest) = serde_json::from_str::<PluginManifest>(&manifest_json)
+        {
+            for route in &manifest.routes {
+                if route.method == method
+                    && let Some(params) =
+                        opendash_core::plugin::match_route_path(&route.path, subpath)
+                {
+                    if let Some(digest) = &revision_digest
+                        && let Err(err) = plugin_storage::verify_plugin_revision_durability(
+                            &self.plugins_root,
+                            digest,
+                        )
+                    {
+                        return Err((StatusCode::CONFLICT, err));
+                    }
+                    let runtime_kind = ExtensionRuntimeKind::from_entrypoint(&manifest.entrypoint);
+                    return Ok(Some(ResolvedExtensionRoute {
+                        owner: RuntimeOwner::plugin(manifest.id.clone()),
+                        route: route.clone(),
+                        params,
+                        code_bytes: wasm_blob,
+                        runtime_kind,
+                        owner_fence: OwnerFence::Plugin {
+                            plugin_id: manifest.id.clone(),
+                            expected_generation: revision_generation,
+                        },
+                        manifest,
+                    }));
+                }
+            }
+        }
+
+        // 2. Check active theme functions with matching theme ID and route
+        if let Ok(Some(cached)) = self.ensure_active_theme_cache().await
+            && cached.theme_id == pkg
+        {
+            for route in &cached.manifest.routes {
+                if route.method == method
+                    && let Some(params) =
+                        opendash_core::plugin::match_route_path(&route.path, subpath)
+                {
+                    return Ok(Some(ResolvedExtensionRoute {
+                        owner: RuntimeOwner::theme(cached.theme_id.clone()),
+                        route: route.clone(),
+                        params,
+                        code_bytes: cached.js_bytes,
+                        runtime_kind: ExtensionRuntimeKind::Js,
+                        owner_fence: OwnerFence::Theme {
+                            theme_id: cached.theme_id,
+                            revision_id: cached.revision_id,
+                            selection_version: cached.selection_version,
+                        },
+                        manifest: cached.manifest,
+                    }));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_resolved_route(
+        &self,
+        resolved: ResolvedExtensionRoute,
+        payload: Value,
+        execution_mode: HookExecutionMode,
+        principal: ExecutionPrincipal,
+        timeout: std::time::Duration,
+        actor: Option<&crate::auth::SessionContext>,
+        hooks: &crate::hooks::HookDispatcher,
+    ) -> Result<ExtensionRouteExecOutput, (StatusCode, PluginRunResponse)> {
+        let correlation_id = format!("rte_{}", &crate::auth::generate_random_token()[..16]);
+        let mk_err = |status: StatusCode, code: &str, msg: String| {
+            (
+                status,
+                PluginRunResponse {
+                    success: false,
+                    data: None,
+                    error: Some(msg),
+                    code: Some(code.to_string()),
+                    correlation_id: correlation_id.clone(),
+                },
+            )
+        };
+
+        if self.recovery.is_safe_mode() {
+            return Err(mk_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "safe_mode",
+                "Hệ thống đang ở safe mode sau khi khôi phục; route mở rộng tạm khóa.".into(),
+            ));
+        }
+
+        let owner_kind = resolved.owner.kind;
+        let owner_id = resolved.owner.id.clone();
+        let manifest = resolved.manifest;
+        let route_decl = resolved.route;
+        let owner_fence = resolved.owner_fence;
+
+        let occurred_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let event_str = format!("route:{}", route_decl.id);
+        let runtime_input = serde_json::to_value(PluginEnvelopeV2::new(
+            EnvelopeKind::Route,
+            &event_str,
+            occurred_at_ms,
+            correlation_id.clone(),
+            None,
+            principal,
+            0,
+            payload,
+        ))
+        .unwrap_or(Value::Null);
+
+        let caps_opt = if route_decl.capabilities.is_empty() {
+            None
+        } else {
+            Some(route_decl.capabilities.clone())
+        };
+        let required_role = if route_decl.access == opendash_core::plugin::RouteAccess::Admin {
+            "admin".to_string()
+        } else {
+            "editor".to_string()
+        };
+        let actor_fence = actor.map(|a| crate::plugin::runtime::ActionActorFence {
+            user_id: a.user.id,
+            required_role: required_role.clone(),
+        });
+
+        let exec_res = self
+            .runtime
+            .run_owner_action_with_principal(
+                owner_kind,
+                resolved.runtime_kind,
+                resolved.code_bytes,
+                manifest.clone(),
+                runtime_input,
+                self.db_pool.clone(),
+                correlation_id.clone(),
+                self.allow_loopback,
+                Some(owner_fence.clone()),
+                execution_mode,
+                principal,
+                Some(timeout),
+                caps_opt.clone(),
+                actor_fence,
+            )
+            .await;
+
+        let exec_out = match exec_res {
+            Ok(out) => out,
+            Err(err) => {
+                let (status, code_str) = match &err {
+                    PluginError::Disabled => (StatusCode::CONFLICT, "generation_changed"),
+                    PluginError::Timeout => {
+                        if execution_mode == HookExecutionMode::RouteGet {
+                            (StatusCode::SERVICE_UNAVAILABLE, "timeout")
+                        } else {
+                            (StatusCode::GATEWAY_TIMEOUT, "timeout")
+                        }
+                    }
+                    PluginError::ConcurrencyLimit => {
+                        (StatusCode::SERVICE_UNAVAILABLE, "concurrency_limit")
+                    }
+                    PluginError::Internal(m) if m.starts_with("rbac_revoked:") => {
+                        (StatusCode::FORBIDDEN, "rbac_revoked")
+                    }
+                    _ => (StatusCode::BAD_REQUEST, "route_failed"),
+                };
+                let msg = err.to_string();
+                if execution_mode != HookExecutionMode::RouteGet {
+                    plugin_storage::record_owner_execution_result(
+                        &self.db_pool,
+                        owner_kind,
+                        &owner_id,
+                        &correlation_id,
+                        "error",
+                        &msg,
+                        Some(&msg),
+                    )
+                    .await;
+                }
+                return Err(mk_err(status, code_str, msg));
+            }
+        };
+
+        let render_trusted_html =
+            owner_kind == ExtensionOwnerKind::Theme || manifest.permissions.render_trusted_html;
+
+        if execution_mode == HookExecutionMode::RoutePost {
+            if let Some(cmd) = exec_out.staged_content_command {
+                let Some(actor) = actor else {
+                    return Err(mk_err(
+                        StatusCode::FORBIDDEN,
+                        "content_write_denied",
+                        "Ghi nội dung bị cấm trên public route.".into(),
+                    ));
+                };
+                if principal == ExecutionPrincipal::Public {
+                    return Err(mk_err(
+                        StatusCode::FORBIDDEN,
+                        "content_write_denied",
+                        "Ghi nội dung bị cấm trên public route.".into(),
+                    ));
+                }
+                self.commit_staged_content_with_actor(
+                    owner_kind,
+                    &owner_id,
+                    &manifest,
+                    caps_opt.as_deref(),
+                    owner_fence,
+                    &required_role,
+                    actor,
+                    cmd,
+                    hooks,
+                    &correlation_id,
+                )
+                .await?;
+            } else if let Some(del) = exec_out.staged_content_delete {
+                let Some(actor) = actor else {
+                    return Err(mk_err(
+                        StatusCode::FORBIDDEN,
+                        "content_delete_denied",
+                        "Xóa nội dung bị cấm trên public route.".into(),
+                    ));
+                };
+                if principal == ExecutionPrincipal::Public {
+                    return Err(mk_err(
+                        StatusCode::FORBIDDEN,
+                        "content_delete_denied",
+                        "Xóa nội dung bị cấm trên public route.".into(),
+                    ));
+                }
+                if !manifest.can_delete_content_type(&del.type_key) {
+                    return Err(mk_err(
+                        StatusCode::FORBIDDEN,
+                        "content_delete_denied",
+                        "Gói mở rộng không có quyền xóa loại nội dung này.".into(),
+                    ));
+                }
+                let fence = crate::storage::entries::PluginActionFence {
+                    owner_fence,
+                    required_role,
+                };
+                if let Err(err) = plugin_storage::delete_entry_with_plugin_fence(
+                    &self.db_pool,
+                    actor,
+                    &del.type_key,
+                    del.entry_id,
+                    del.expected_version,
+                    &fence,
+                )
+                .await
+                {
+                    return Err(mk_err(err.0, "content_delete_fenced", err.1.to_string()));
+                }
+            }
+            plugin_storage::record_owner_execution_result(
+                &self.db_pool,
+                owner_kind,
+                &owner_id,
+                &correlation_id,
+                "info",
+                "Thực thi route thành công",
+                None,
+            )
+            .await;
+        }
+
+        Ok(ExtensionRouteExecOutput {
+            output: exec_out.output,
+            render_trusted_html,
+            correlation_id,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn commit_staged_content_with_actor(
+        &self,
+        owner_kind: ExtensionOwnerKind,
+        _owner_id: &str,
+        manifest: &PluginManifest,
+        caps_opt: Option<&[String]>,
+        owner_fence: OwnerFence,
+        required_role: &str,
+        actor: &crate::auth::SessionContext,
+        cmd: crate::plugin::host_ops::StagedContentCommand,
+        hooks: &crate::hooks::HookDispatcher,
+        correlation_id: &str,
+    ) -> Result<crate::storage::entries::ContentEntryRecord, (StatusCode, PluginRunResponse)> {
+        let mk_err = |status: StatusCode, code: &str, msg: String| {
+            (
+                status,
+                PluginRunResponse {
+                    success: false,
+                    data: None,
+                    error: Some(msg),
+                    code: Some(code.to_string()),
+                    correlation_id: correlation_id.to_owned(),
+                },
+            )
+        };
+        if !manifest.can_write_content_type(&cmd.type_key) {
+            return Err(mk_err(
+                StatusCode::FORBIDDEN,
+                "content_write_denied",
+                "Gói mở rộng không có quyền ghi loại nội dung này.".into(),
+            ));
+        }
+        let actor_role = match actor.user.role {
+            crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+            crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+        };
+        let effective_schema =
+            crate::storage::content::load_effective_content_schema(&self.db_pool, &cmd.type_key)
+                .await
+                .map_err(|e| mk_err(e.0, "schema_load_failed", e.1.to_string()))?
+                .ok_or_else(|| {
+                    mk_err(
+                        StatusCode::NOT_FOUND,
+                        "content_type_not_found",
+                        "Không tìm thấy loại nội dung.".into(),
+                    )
+                })?;
+
+        for field_key in cmd.values.keys() {
+            let Some(field_entry) = effective_schema.effective_fields.get(field_key) else {
+                return Err(mk_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "unknown_field_key",
+                    format!(
+                        "Trường '{field_key}' không tồn tại trong schema của '{}'.",
+                        cmd.type_key
+                    ),
+                ));
+            };
+            if !opendash_core::plugin::plugin_can_write_field_for_owner(
+                owner_kind,
+                manifest,
+                caps_opt,
+                actor_role,
+                &cmd.type_key,
+                field_entry,
+            ) {
+                return Err(mk_err(
+                    StatusCode::FORBIDDEN,
+                    "field_edit_forbidden",
+                    format!("Gói mở rộng hoặc tài khoản không có quyền ghi trường '{field_key}'."),
+                ));
+            }
+        }
+
+        let schema = opendash_core::content::ContentTypeDefinition {
+            key: effective_schema.base.descriptor.key.clone(),
+            label: effective_schema.base.descriptor.label.clone(),
+            settings: effective_schema.base.descriptor.settings.clone(),
+            fields: effective_schema
+                .effective_fields
+                .values()
+                .map(|e| {
+                    let mut def = e.definition.clone();
+                    if !e.effective_required() {
+                        def.required = false;
+                    }
+                    def
+                })
+                .collect(),
+        };
+
+        let entry_input = opendash_core::content::ContentEntryInput {
+            slug: cmd.slug,
+            title: cmd.title,
+            locale: cmd.locale.clone(),
+            values: cmd.values,
+            term_ids: cmd.term_ids,
+        };
+        if let Err(msg) = entry_input.validate_against_effective(&effective_schema) {
+            return Err(mk_err(
+                StatusCode::BAD_REQUEST,
+                "invalid_entry_input",
+                msg.to_string(),
+            ));
+        }
+        if let Err(err) = crate::storage::media::require_existing_effective_references(
+            &self.db_pool,
+            &effective_schema,
+            &entry_input.values,
+        )
+        .await
+        {
+            return Err(mk_err(err.0, "media_reference_error", err.1.to_string()));
+        }
+
+        let (hook_locale, hook_group_id) = match cmd.entry_id {
+            Some(entry_id) => {
+                match crate::storage::entries::get_entry_locale_and_group(
+                    &self.db_pool,
+                    &cmd.type_key,
+                    entry_id,
+                )
+                .await
+                {
+                    Ok(Some((existing_locale, group_id))) => {
+                        if let Some(raw) = cmd.locale.as_deref()
+                            && raw.trim().to_ascii_lowercase() != existing_locale
+                        {
+                            return Err(mk_err(
+                                StatusCode::BAD_REQUEST,
+                                "locale_immutable",
+                                "Không thể đổi ngôn ngữ của nội dung đã tạo.".into(),
+                            ));
+                        }
+                        (Some(existing_locale), Some(group_id))
+                    }
+                    Ok(None) => (cmd.locale.clone(), None),
+                    Err(err) => {
+                        return Err(mk_err(err.0, "entry_lookup_failed", err.1.to_string()));
+                    }
+                }
+            }
+            None => {
+                let effective_locale = crate::storage::settings::resolve_requested_locale(
+                    &self.db_pool,
+                    cmd.locale.as_deref(),
+                )
+                .await
+                .map_err(|err| mk_err(err.0, "invalid_locale", err.1.to_string()))?;
+                (Some(effective_locale), None)
+            }
+        };
+
+        let operation = if cmd.entry_id.is_some() {
+            "update"
+        } else {
+            "create"
+        };
+        let candidate = serde_json::json!({
+            "operation": operation,
+            "type_key": &cmd.type_key,
+            "entry_id": cmd.entry_id,
+            "expected_version": cmd.expected_version,
+            "locale": hook_locale,
+            "translation_group_id": hook_group_id,
+            "title": &entry_input.title,
+            "slug": &entry_input.slug,
+            "candidate_values": &entry_input.values,
+            "term_ids": &entry_input.term_ids,
+        });
+        if let Err(veto) = hooks
+            .dispatch_content_before_save_for_actor(&cmd.type_key, actor_role, candidate)
+            .await
+        {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                PluginRunResponse {
+                    success: false,
+                    data: serde_json::to_value(&veto).ok(),
+                    error: Some(veto.message),
+                    code: Some(veto.code),
+                    correlation_id: correlation_id.to_owned(),
+                },
+            ));
+        }
+
+        let fence = crate::storage::entries::PluginActionFence {
+            owner_fence,
+            required_role: required_role.to_owned(),
+        };
+        let saved_res = match cmd.entry_id {
+            Some(entry_id) => {
+                let expected_ver = cmd.expected_version.ok_or_else(|| {
+                    mk_err(
+                        StatusCode::PRECONDITION_REQUIRED,
+                        "missing_expected_version",
+                        "Cập nhật nội dung yêu cầu expected_version.".into(),
+                    )
+                })?;
+                crate::storage::entries::update_entry_with_fence(
+                    &self.db_pool,
+                    actor,
+                    &cmd.type_key,
+                    &schema,
+                    entry_id,
+                    expected_ver,
+                    &entry_input,
+                    Some(&fence),
+                )
+                .await
+            }
+            None => {
+                crate::storage::entries::create_entry_with_fence(
+                    &self.db_pool,
+                    actor,
+                    &cmd.type_key,
+                    &schema,
+                    &entry_input,
+                    Some(&fence),
+                )
+                .await
+            }
+        };
+        let record = match saved_res {
+            Ok(r) => r,
+            Err(err) => {
+                return Err(mk_err(err.0, "content_commit_fenced", err.1.to_string()));
+            }
+        };
+        let _ = crate::storage::plugin_projections::recompute_entry_projections(
+            &self.db_pool,
+            hooks,
+            record.id,
+        )
+        .await;
+        hooks
+            .dispatch_content_after_save_for_actor(
+                &cmd.type_key,
+                actor_role,
+                serde_json::to_value(&record).unwrap_or_default(),
+            )
+            .await;
+        Ok(record)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedExtensionRoute {
+    pub owner: RuntimeOwner,
+    pub manifest: PluginManifest,
+    pub route: opendash_core::plugin::ExtensionRouteDecl,
+    pub params: std::collections::BTreeMap<String, String>,
+    pub code_bytes: Vec<u8>,
+    pub runtime_kind: ExtensionRuntimeKind,
+    pub owner_fence: OwnerFence,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtensionRouteExecOutput {
+    pub output: Value,
+    pub render_trusted_html: bool,
+    pub correlation_id: String,
 }

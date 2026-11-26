@@ -54,6 +54,7 @@ BOOTSTRAP = {'crate::routes::auth::auth_login', 'crate::routes::auth::auth_setup
 # source shape. They must never be granted by a name-only match.
 PUBLIC_ORIGIN = 'crate::routes::contact::public_submit'
 PUBLIC_ORIGIN_HELPER = 'crate::routes::contact::check_strict_contact_origin'
+PUBLIC_EXTENSION_POST = 'crate::routes::extensions::extension_public_post'
 DELEGATED_CSRF = 'crate::routes::operations::upload_restore_archive'
 DELEGATED_CSRF_HELPER = 'crate::routes::operations::upload_restore_archive_with_timeout'
 
@@ -324,6 +325,133 @@ def public_origin_guarded(functions, handler):
     return None
 
 
+def _check_public_origin_helper(functions):
+    helper = unique_body(functions, PUBLIC_ORIGIN_HELPER)
+    if helper is None:
+        return f'public Origin helper missing/ambiguous: {PUBLIC_ORIGIN_HELPER}'
+    helper_code, helper_raw = helper
+    missing = re.search(
+        r'\blet\s+Some\(origin\)\s*=\s*headers\s*\.get\(\s*'
+        r'header::ORIGIN\s*\)\s*\.and_then\(\s*\|v\|\s*v\.to_str\(\)\.ok\(\)'
+        r'\s*\)\s*else\s*\{',
+        helper_code,
+    )
+    if missing is None:
+        return 'public Origin helper must reject missing Origin header'
+    missing_end = block_end(helper_code, missing.end() - 1)
+    if not re.search(r'\breturn\s+Ok\s*\(\s*false\s*\)\s*;', helper_code[missing.end():missing_end]):
+        return 'public Origin helper missing-Header branch must return false'
+    null = re.search(
+        r'\bif\s+origin\.is_empty\(\)\s*\|\|\s*'
+        r'origin\.eq_ignore_ascii_case\s*\(\s*"null"\s*\)\s*\{',
+        helper_raw,
+    )
+    if null is None or null.start() < missing_end or not re.match(
+        r'\bif\s+origin\.is_empty\(\)\s*\|\|\s*'
+        r'origin\.eq_ignore_ascii_case\s*\(\s*',
+        helper_code[null.start():],
+    ):
+        return 'public Origin helper must reject empty/null Origin'
+    null_end = block_end(helper_code, null.end() - 1)
+    if not re.search(r'\breturn\s+Ok\s*\(\s*false\s*\)\s*;', helper_code[null.end():null_end]):
+        return 'public Origin helper empty/null branch must return false'
+    listener = re.search(
+        r'\bif\s+origin\s*==\s*listener_origin\s*\{\s*'
+        r'return\s+Ok\s*\(\s*true\s*\)\s*;\s*\}',
+        helper_code,
+    )
+    configured = re.search(
+        r'\blet\s+pub_settings\s*=\s*settings::get_public\s*\(\s*db\s*\)'
+        r'\s*\.await\s*\?\s*;\s*Ok\s*\(\s*pub_settings\s*'
+        r'\.public_origin\s*\.as_deref\(\)\s*'
+        r'\.is_some_and\s*\(\s*\|configured\|\s*origin\s*==\s*configured'
+        r'\s*\)\s*\)',
+        helper_code,
+    )
+    if not listener or not configured or not (null_end <= listener.start() < configured.start()):
+        return 'public Origin helper must compare listener/configured origins (reject foreign)'
+    if len(re.findall(r'\breturn\s+Ok\s*\(\s*true\s*\)', helper_code)) != 1:
+        return 'public Origin helper has unreviewed success path'
+    if len(re.findall(r'\breturn\s+Ok\s*\(\s*false\s*\)', helper_code)) != 2:
+        return 'public Origin helper has unreviewed failure path'
+    return None
+
+
+def public_extension_post_guarded(functions, handler):
+    """Verify /api/public/p/* rejects Session|Admin, rate-limits, checks Origin for Public, admits mutation, and forces Public principal."""
+    code, _raw = handler
+    helper_err = _check_public_origin_helper(functions)
+    if helper_err:
+        return helper_err
+
+    session_reject = re.search(
+        r'\bif\s+matches!\s*\(\s*resolved\.route\.access\s*,\s*'
+        r'RouteAccess::Session\s*\|\s*RouteAccess::Admin\s*,?\s*\)\s*\{',
+        code,
+    )
+    if session_reject is None:
+        return 'public extension POST must explicitly reject Session | Admin routes'
+    session_end = block_end(code, session_reject.end() - 1)
+    if not re.search(r'\breturn\s+Ok\s*\(\s*\(\s*StatusCode::FORBIDDEN\b', code[session_reject.end():session_end]):
+        return 'public extension POST Session | Admin branch must return FORBIDDEN'
+
+    rate_check = re.search(
+        r'\bif\s+let\s+Err\s*\(\s*\w+\s*\)\s*=\s*rate_limiter\.check_and_record\s*\(',
+        code,
+    )
+    if rate_check is None or rate_check.start() < session_end:
+        return 'public extension POST must enforce rate_limiter.check_and_record'
+    rate_brace = code.find('{', rate_check.end())
+    rate_end = block_end(code, rate_brace) if rate_brace >= 0 else len(code)
+    if not re.search(r'\bStatusCode::TOO_MANY_REQUESTS\b', code[rate_brace:rate_end]):
+        return 'public extension POST rate limit branch must return TOO_MANY_REQUESTS'
+
+    public_branch = re.search(
+        r'\bif\s+resolved\.route\.access\s*==\s*RouteAccess::Public\s*\{',
+        code,
+    )
+    if public_branch is None or public_branch.start() < rate_end:
+        return 'public extension POST must guard RouteAccess::Public branch with strict Origin'
+    public_end = block_end(code, public_branch.end() - 1)
+    public_body = code[public_branch.end():public_end]
+    trusted = re.search(
+        r'\blet\s+trusted_origin_match\s*=\s*runtime_cfg\s*'
+        r'\.as_ref\(\)\s*\.and_then\(\s*\|Extension\(cfg\)\|\s*'
+        r'cfg\.trusted_origin_normalized\(\)\s*\)\s*'
+        r'\.is_some_and\(\s*\|trusted\|\s*\{\s*'
+        r'headers\s*\.get\(\s*header::ORIGIN\s*\)\s*'
+        r'\.and_then\(\s*\|v\|\s*v\.to_str\(\)\.ok\(\)\s*\)\s*'
+        r'\.is_some_and\(\s*\|o\|\s*o\s*==\s*trusted\s*\)\s*\}\s*\)\s*;',
+        public_body,
+    )
+    if trusted is None:
+        return 'public extension POST trusted-origin comparison missing/changed'
+    admitted = re.search(
+        r'\bif\s*!\s*trusted_origin_match\s*&&\s*'
+        r'!\s*check_strict_contact_origin\s*\(\s*&headers\s*,\s*&db\s*,\s*'
+        r'&listener_origin\s*\)\s*\.await\s*\?\s*\{',
+        public_body,
+    )
+    if admitted is None or admitted.start() <= trusted.end():
+        return 'public extension POST Origin rejecting check/call/await/propagation missing'
+    rej_end = block_end(public_body, admitted.end() - 1)
+    if not re.match(r'\s*return\s+Ok\s*\(\s*\(\s*StatusCode::FORBIDDEN\b', public_body[admitted.end():rej_end]):
+        return 'public extension POST Origin failure must return FORBIDDEN'
+
+    admit_mut = re.search(r'\bcoordinator\.admit_mutation\s*\(\s*\)', code)
+    if admit_mut is None or admit_mut.start() < public_end:
+        return 'public extension POST must call coordinator.admit_mutation() after admission checks'
+
+    exec_call = re.search(
+        r'\bhooks\s*\.execute_resolved_route\s*\([\s\S]*?HookExecutionMode::RoutePost\s*,\s*'
+        r'ExecutionPrincipal::Public\s*,[\s\S]*?None\s*,?\s*\)',
+        code,
+    )
+    if exec_call is None or exec_call.start() < admit_mut.end():
+        return 'public extension POST must execute with HookExecutionMode::RoutePost, ExecutionPrincipal::Public, and actor=None after admit_mutation'
+    return None
+
+
 def delegated_csrf_guarded(functions, handler):
     """Only the exact restore wrapper/helper call chain is approved."""
     code, _raw = handler
@@ -417,6 +545,12 @@ def mutation_handlers(app, imports, functions, constructors=None):
             exemptions += 1
         elif canonical == PUBLIC_ORIGIN:
             violation = public_origin_guarded(functions, bodies[0])
+            if violation:
+                errors.append(f'{location}: {canonical}: {violation}')
+            else:
+                public += 1
+        elif canonical == PUBLIC_EXTENSION_POST:
+            violation = public_extension_post_guarded(functions, bodies[0])
             if violation:
                 errors.append(f'{location}: {canonical}: {violation}')
             else:
@@ -817,11 +951,74 @@ pub async fn upload_restore_archive_with_timeout() -> ApiResult<Response> {
             run(1, diagnostic)
         operations_path.write_text(delegated_fixture, encoding='utf-8')
         run(0, 'delegated_csrf_guarded=1 public_origin_guarded=1')
+
+        # Negative regressions for PUBLIC_EXTENSION_POST (/api/public/p/*)
+        ext_path = root / 'cms/crates/opendash-server/src/routes/extensions.rs'
+        ext_fixture = (
+            'pub async fn extension_public_post() {\n'
+            '    if matches!(resolved.route.access, RouteAccess::Session | RouteAccess::Admin) {\n'
+            '        return Ok((StatusCode::FORBIDDEN, "forbidden").into_response());\n'
+            '    }\n'
+            '    if let Err(retry_after) = rate_limiter.check_and_record(&rate_key) {\n'
+            '        return Ok((StatusCode::TOO_MANY_REQUESTS, retry_after).into_response());\n'
+            '    }\n'
+            '    if resolved.route.access == RouteAccess::Public {\n'
+            '        let trusted_origin_match = runtime_cfg\n'
+            '            .as_ref()\n'
+            '            .and_then(|Extension(cfg)| cfg.trusted_origin_normalized())\n'
+            '            .is_some_and(|trusted| {\n'
+            '                headers.get(header::ORIGIN)\n'
+            '                    .and_then(|v| v.to_str().ok())\n'
+            '                    .is_some_and(|o| o == trusted)\n'
+            '            });\n'
+            '        if !trusted_origin_match && !check_strict_contact_origin(&headers, &db, &listener_origin).await? {\n'
+            '            return Ok((StatusCode::FORBIDDEN, "bad origin").into_response());\n'
+            '        }\n'
+            '    }\n'
+            '    let _lease = coordinator.admit_mutation();\n'
+            '    hooks.execute_resolved_route(resolved, payload, HookExecutionMode::RoutePost, ExecutionPrincipal::Public, timeout, None).await\n'
+            '}\n'
+        )
+        route_mod.write_text(
+            route_mod.read_text(encoding='utf-8') + '\npub mod extensions;\n',
+            encoding='utf-8',
+        )
+        ext_path.write_text(ext_fixture, encoding='utf-8')
+        app_path.write_text(
+            app_path.read_text(encoding='utf-8')
+            + '\npost(crate::routes::extensions::extension_public_post)\n',
+            encoding='utf-8',
+        )
+        run(0, 'delegated_csrf_guarded=1 public_origin_guarded=2')
+        ext_failures = [
+            ('missing session/admin reject',
+             ext_fixture.replace('RouteAccess::Session | RouteAccess::Admin', 'RouteAccess::Webhook'),
+             'explicitly reject Session | Admin'),
+            ('missing rate limit',
+             ext_fixture.replace('rate_limiter.check_and_record(&rate_key)', 'Ok::<(), u64>(())'),
+             'must enforce rate_limiter.check_and_record'),
+            ('missing public origin check',
+             ext_fixture.replace('!check_strict_contact_origin', '!other_check'),
+             'Origin rejecting check/call/await/propagation missing'),
+            ('missing admit_mutation',
+             ext_fixture.replace('coordinator.admit_mutation()', '()'),
+             'must call coordinator.admit_mutation()'),
+            ('escalated principal',
+             ext_fixture.replace('ExecutionPrincipal::Public', 'ExecutionPrincipal::Admin'),
+             'ExecutionPrincipal::Public'),
+        ]
+        for _name, candidate, diagnostic in ext_failures:
+            ext_path.write_text(candidate, encoding='utf-8')
+            run(1, diagnostic)
+        ext_path.write_text(ext_fixture, encoding='utf-8')
+        run(0, 'delegated_csrf_guarded=1 public_origin_guarded=2')
+
         # Remove synthetic policy routes before checking legacy regressions.
         app_path.write_text(files['cms/crates/opendash-server/src/app.rs'], encoding='utf-8')
         route_mod.write_text(old_modules, encoding='utf-8')
         contact_path.unlink()
         operations_path.unlink()
+        ext_path.unlink()
         violations = {
             'cms/crates/opendash-server/src/routes/page.rs': 'pub async fn save() { sqlx::raw_sql("DELETE FROM users"); }',
             'cms/crates/opendash-server/src/plugin/mod.rs': 'sqlx::query_scalar("SELECT 1");',

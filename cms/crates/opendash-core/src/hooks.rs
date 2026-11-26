@@ -218,6 +218,8 @@ pub enum HookExecutionMode {
     FilterContactBeforeSubmit,
     FilterProjection,
     FilterRender,
+    RouteGet,
+    RoutePost,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
