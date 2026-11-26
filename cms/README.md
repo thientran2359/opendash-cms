@@ -32,7 +32,7 @@
 ### Database, SDK, Tooling & Deployment
 - `migrations/`: [`./migrations/README.md`](./migrations/README.md) — 51 embedded forward-only SQLite migrations (`0001`–`0052`, omitting `0016`).
 - `sdk/`: [`./sdk/README.md`](./sdk/README.md) — AssemblyScript guest SDK (`sdk/as/opendash.ts`) for `opendash_v1` ABI v1/v1.1 and Node test harness.
-- `scripts/`: [`./scripts/README.md`](./scripts/README.md) — 31 build, health, architecture/plan/i18n gate, CodeGraph, smoke, and live-browser E2E scripts.
+- `scripts/`: [`./scripts/README.md`](./scripts/README.md) — 32 build, grouped fast test, health, architecture/plan/i18n gate, CodeGraph, smoke, and live-browser E2E scripts.
 - `deploy/`: [`./deploy/README.md`](./deploy/README.md) — Linux installer, hardened `systemd` unit, and Nginx TLS reverse-proxy template.
 
 ### Examples & Fixtures
@@ -56,4 +56,4 @@
 
 - Run: `python cms/scripts/check-standards.py && python cms/scripts/check-plans.py && python .agents/scripts/check-agent-artifacts.py`
 - Run: `node cms/scripts/check-i18n.mjs --strict && npm --prefix cms/admin run typecheck && npm --prefix cms/admin run build`
-- Run: `cargo fmt --manifest-path cms/Cargo.toml --all --check && cargo test --manifest-path cms/Cargo.toml --workspace --release --locked`
+- Run: `cargo fmt --manifest-path cms/Cargo.toml --all --check && python cms/scripts/run-tests.py --changed` (pre-release full suite: `python cms/scripts/run-tests.py --group all --release`)

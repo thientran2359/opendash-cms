@@ -28,3 +28,9 @@ rust-embed = { version = "=8.6.0", features = ["mime-guess"] }
 wasmi = "=2.0.0"
 wat = "=1.263.0"
 zip = { version = "=9.3.0", default-features = false, features = ["deflate"] }
+
+# Keep workspace crates fast to compile in dev/test while optimizing heavy
+# dependencies (argon2, ring, sqlx, wasmi, image, minijinja) so grouped test
+# runs execute near release speed without waiting for full -O3 recompilation.
+[profile.dev.package."*"]
+opt-level = 2
