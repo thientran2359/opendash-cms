@@ -1,5 +1,5 @@
 <article class="od-block-card od-card-layout-{{ layout }} overflow-hidden rounded-xl border border-od-border bg-od-surface shadow-sm transition duration-200" style="background-color:var(--od-card-bg,#ffffff);border:1px solid #e4e4e7;border-radius:12px;overflow:hidden;">
-  {% if image_url %}<div class="od-card-media overflow-hidden"><img class="h-auto w-full object-cover" src="{{ image_url }}" alt="{{ image_alt }}" loading="lazy"></div>{% endif %}
+  {% if image and image.url %}<div class="od-card-media overflow-hidden"><img class="h-auto w-full object-cover" src="{{ image.url }}" alt="{{ image.alt }}" loading="lazy"></div>{% endif %}
   <div class="od-card-content p-5 md:p-6" style="padding:20px;">
     <h3 class="od-card-title font-od-heading text-xl font-semibold text-od-text">{{ title }}</h3>
     {% if body %}<div class="od-card-body od-prose mt-3 text-od-muted">{{ body }}</div>{% endif %}

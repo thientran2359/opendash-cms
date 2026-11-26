@@ -40,7 +40,7 @@
 
 ## 2. Xử lý Phát hiện Drift (`M-01`) & Tương thích Tiến hóa
 
-1. **Khôi phục control `'url'` trong [`cms/admin/src/builder/BlockSchemaForm.tsx`](../../cms/admin/src/builder/BlockSchemaForm.tsx):** Goldfish `dc838bf6` phát hiện `case 'url':` bị gộp chung với `case 'text':` (`maxLength={2048}`, mất `inputMode="url"`, mất bộ đếm Unicode scalar và hướng dẫn). Nhánh closure đã tách `case 'url':` riêng để khôi phục `inputMode="url"`, `maxLength={8192}`, `Array.from(stringValue).length`, `aria-invalid={scalarCount > 4096}`, dòng hướng dẫn và thông báo giữ nháp khi vượt `4096` scalar theo đúng [`starter-typed-url-and-conformance-delta.md`](../designs/starter-typed-url-and-conformance-delta.md).
+1. **Khôi phục control `'url'` trong `cms/admin/src/builder/BlockSchemaForm.tsx`:** Goldfish `dc838bf6` phát hiện `case 'url':` bị gộp chung với `case 'text':` (`maxLength={2048}`, mất `inputMode="url"`, mất bộ đếm Unicode scalar và hướng dẫn). Nhánh closure đã tách `case 'url':` riêng để khôi phục `inputMode="url"`, `maxLength={8192}`, `Array.from(stringValue).length`, `aria-invalid={scalarCount > 4096}`, dòng hướng dẫn và thông báo giữ nháp khi vượt `4096` scalar theo đúng [`starter-typed-url-and-conformance-delta.md`](../designs/starter-typed-url-and-conformance-delta.md).
 2. **Không hồi quy qua Multilingual (`1.1.0`) & Theme Ergonomics (`Spec 1`):** Goldfish kiểm tra xác nhận `opendash-starter` (`1.0.0`) giữ nguyên đóng băng; cả `1.0.1` và `1.1.0` đều dùng typed `header_cta_url` và `archive_url` có guard; Banner core block giữ `.od-prose` với quy tắc typography đầy đủ trong `opendash-tailwind.css`; `ThemeUrlPolicy` và `walk_theme_ast_with_url_scopes` bảo toàn nguyên vẹn cô lập URL.
 
 ---

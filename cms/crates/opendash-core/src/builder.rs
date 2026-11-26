@@ -460,7 +460,7 @@ fn validate_section_style(
     }
     if let Some(color) = style.background_color.as_deref()
         && !color.is_empty()
-        && !crate::block_schema::valid_block_color(color)
+        && !crate::field_schema::valid_color_value(color)
     {
         return Err(BuilderError::Invalid("Invalid Section background color"));
     }

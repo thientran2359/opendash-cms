@@ -4,18 +4,23 @@ use std::{
 };
 
 use opendash_core::{
+    block_schema::RegisteredBlockSchema,
+    builder::{BuilderDocument, ElementContent, KnownElement},
+    builder_blocks::parse_blocks_lenient_or_recover,
     content::{ContentFieldType, EffectiveFieldStatus, FieldRole, PublicExposure},
     field_schema::{
         CollectedMediaIds, FieldSpec, FieldType, SelectOptionsSource, valid_sha256_media_id,
     },
     id::valid_snake_key,
-    registry::ProviderStatus,
+    registry::{DeclarationState, ProviderStatus, RegistryCatalog},
+    theme::ThemeV3Manifest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::{
+    dev_mode::DevOverlayConfig,
     error::{ApiError, ApiResult},
     storage::{
         content::load_effective_content_schema_in_tx, menu::extract_declared_menu_slots,
@@ -1002,6 +1007,380 @@ pub async fn validate_relational_refs_in_conn(
         }
     }
     Ok(())
+}
+
+pub async fn load_active_v3_manifest_in_conn(
+    conn: &mut SqliteConnection,
+) -> ApiResult<Option<ThemeV3Manifest>> {
+    if let Some(dev) = DevOverlayConfig::global()
+        && dev.dev_theme_root().is_some()
+        && let Ok(Some(snap)) = dev.load_dev_theme()
+    {
+        return Ok(Some(snap.manifest));
+    }
+
+    let manifest_json: Option<String> = sqlx::query_scalar(
+        "SELECT r.manifest_json
+           FROM theme_active_selection a
+           JOIN theme_revisions r ON r.revision_id = a.revision_id
+          WHERE a.id = 1 AND r.source_format = 'v3'",
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(raw) = manifest_json else {
+        return Ok(None);
+    };
+    let Ok(manifest) = serde_json::from_str::<ThemeV3Manifest>(&raw) else {
+        return Ok(None);
+    };
+    Ok(Some(manifest))
+}
+
+fn collect_all_options_sources_with_paths(
+    specs: &[FieldSpec],
+    values: &BTreeMap<String, Value>,
+    prefix: Option<&str>,
+    out: &mut Vec<(String, SelectOptionsSource, Vec<String>)>,
+) {
+    for spec in specs {
+        if spec.is_ui_only() || spec.field_type == FieldType::Secret {
+            continue;
+        }
+        let path = match prefix {
+            Some(p) => format!("{p}.{}", spec.key),
+            None => spec.key.clone(),
+        };
+        match spec.field_type {
+            FieldType::Select => {
+                if let Some(src) = spec.options_source {
+                    let mut selected = Vec::new();
+                    match values.get(spec.key.as_str()).or(spec.default.as_ref()) {
+                        Some(Value::String(s)) => {
+                            let trimmed = s.trim();
+                            if !trimmed.is_empty() {
+                                selected.push(trimmed.to_owned());
+                            }
+                        }
+                        Some(Value::Array(arr)) if spec.multiple => {
+                            for item in arr {
+                                if let Some(s) = item.as_str() {
+                                    let trimmed = s.trim();
+                                    if !trimmed.is_empty() {
+                                        selected.push(trimmed.to_owned());
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    if !selected.is_empty() {
+                        out.push((path, src, selected));
+                    }
+                }
+            }
+            FieldType::Group => {
+                let child_map: BTreeMap<String, Value> = values
+                    .get(spec.key.as_str())
+                    .and_then(Value::as_object)
+                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                    .unwrap_or_default();
+                collect_all_options_sources_with_paths(&spec.fields, &child_map, Some(&path), out);
+            }
+            _ => {}
+        }
+    }
+}
+
+pub async fn validate_block_dynamic_options_in_tx(
+    conn: &mut SqliteConnection,
+    specs: &[FieldSpec],
+    values: &BTreeMap<String, Value>,
+    previous_values: Option<&BTreeMap<String, Value>>,
+    allowed_context_fields: Option<&[String]>,
+) -> ApiResult<()> {
+    let mut current = Vec::new();
+    collect_all_options_sources_with_paths(specs, values, None, &mut current);
+    if current.is_empty() {
+        return Ok(());
+    }
+
+    let mut prev_map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    if let Some(prev) = previous_values {
+        let mut prev_entries = Vec::new();
+        collect_all_options_sources_with_paths(specs, prev, None, &mut prev_entries);
+        for (path, _src, vals) in prev_entries {
+            prev_map.entry(path).or_default().extend(vals);
+        }
+    }
+
+    let mut manifest_loaded = false;
+    let mut active_manifest: Option<ThemeV3Manifest> = None;
+
+    for (field_path, source, selected_values) in current {
+        let prev_set = prev_map.get(&field_path);
+        let new_values: Vec<String> = selected_values
+            .into_iter()
+            .filter(|v| !prev_set.is_some_and(|s| s.contains(v)))
+            .collect();
+        if new_values.is_empty() {
+            continue;
+        }
+
+        if matches!(
+            source,
+            SelectOptionsSource::MenuSlots | SelectOptionsSource::TemplateParts
+        ) && !manifest_loaded
+        {
+            active_manifest = load_active_v3_manifest_in_conn(conn).await?;
+            manifest_loaded = true;
+        }
+
+        match source {
+            SelectOptionsSource::Menus => {
+                for val in new_values {
+                    let exists: i64 = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM site_menus WHERE menu_key = ?)",
+                    )
+                    .bind(&val)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if exists == 0 {
+                        return Err(ApiError::bad_request("Menu tham chiếu không tồn tại."));
+                    }
+                }
+            }
+            SelectOptionsSource::MenuSlots => {
+                let declared_slots: BTreeSet<String> = match active_manifest.as_ref() {
+                    Some(manifest) => serde_json::to_string(manifest)
+                        .ok()
+                        .map(|raw| extract_declared_menu_slots(&raw))
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect(),
+                    None => BTreeSet::new(),
+                };
+                for val in new_values {
+                    if !declared_slots.contains(&val) {
+                        return Err(ApiError::bad_request(
+                            "Vị trí menu không được khai báo trong theme đang kích hoạt.",
+                        ));
+                    }
+                }
+            }
+            SelectOptionsSource::ContactForms => {
+                for val in new_values {
+                    let Ok(form_id) = val.parse::<i64>() else {
+                        return Err(ApiError::bad_request(
+                            "ID form liên hệ tham chiếu không hợp lệ.",
+                        ));
+                    };
+                    if form_id <= 0 {
+                        return Err(ApiError::bad_request(
+                            "ID form liên hệ tham chiếu không hợp lệ.",
+                        ));
+                    }
+                    let exists: i64 = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM contact_forms WHERE id = ? AND status = 'active')",
+                    )
+                    .bind(form_id)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if exists == 0 {
+                        return Err(ApiError::bad_request(
+                            "Form liên hệ tham chiếu không tồn tại hoặc chưa kích hoạt.",
+                        ));
+                    }
+                }
+            }
+            SelectOptionsSource::ContentTypes => {
+                for val in new_values {
+                    if val == "pattern" {
+                        return Err(ApiError::bad_request(
+                            "Loại nội dung tham chiếu không hợp lệ.",
+                        ));
+                    }
+                    let exists: i64 = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active' AND key != 'pattern')",
+                    )
+                    .bind(&val)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if exists == 0 {
+                        return Err(ApiError::bad_request(
+                            "Loại nội dung tham chiếu không tồn tại hoặc không hoạt động.",
+                        ));
+                    }
+                }
+            }
+            SelectOptionsSource::Taxonomies => {
+                for val in new_values {
+                    let exists: i64 = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM taxonomy_definitions WHERE key = ? AND provider_status = 'active' AND declaration_state = 'declared')",
+                    )
+                    .bind(&val)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if exists == 0 {
+                        return Err(ApiError::bad_request(
+                            "Phân loại tham chiếu không tồn tại hoặc không hoạt động.",
+                        ));
+                    }
+                }
+            }
+            SelectOptionsSource::ContextFields => {
+                const CORE_CONTEXT_FIELDS: &[&str] = &["title", "slug", "url", "cover_url"];
+                for val in new_values {
+                    let is_core = CORE_CONTEXT_FIELDS.contains(&val.as_str());
+                    let is_custom =
+                        allowed_context_fields.is_some_and(|list| list.iter().any(|k| k == &val));
+                    if !is_core && !is_custom {
+                        return Err(ApiError::bad_request(
+                            "Trường ngữ cảnh (context field) tham chiếu không hợp lệ.",
+                        ));
+                    }
+                }
+            }
+            SelectOptionsSource::TemplateParts => {
+                for val in new_values {
+                    let in_manifest = active_manifest
+                        .as_ref()
+                        .is_some_and(|m| m.parts.contains_key(&val));
+                    let in_overrides = if in_manifest {
+                        true
+                    } else {
+                        let canonical = format!("part:{val}");
+                        let exists: i64 = sqlx::query_scalar(
+                            "SELECT EXISTS(SELECT 1 FROM template_overrides WHERE target_kind = 'part' AND canonical_target_key = ?)",
+                        )
+                        .bind(canonical)
+                        .fetch_one(&mut *conn)
+                        .await?;
+                        exists != 0
+                    };
+                    if !in_overrides {
+                        return Err(ApiError::bad_request(
+                            "Template part tham chiếu không tồn tại.",
+                        ));
+                    }
+                }
+            }
+            SelectOptionsSource::Patterns => {
+                for val in new_values {
+                    let Ok(pid) = val.parse::<i64>() else {
+                        return Err(ApiError::bad_request("ID Pattern tham chiếu không hợp lệ."));
+                    };
+                    if pid <= 0 {
+                        return Err(ApiError::bad_request("ID Pattern tham chiếu không hợp lệ."));
+                    }
+                    let exists: i64 = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM content_entries WHERE id = ? AND content_type_key = 'pattern' AND trashed_at IS NULL)",
+                    )
+                    .bind(pid)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if exists == 0 {
+                        return Err(ApiError::bad_request("Pattern tham chiếu không tồn tại."));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn validate_document_block_refs_in_conn(
+    conn: &mut SqliteConnection,
+    document: &BuilderDocument,
+    previous: Option<&BuilderDocument>,
+    catalog: &RegistryCatalog<RegisteredBlockSchema>,
+    required_locale: Option<&str>,
+    allowed_context_fields: Option<&[String]>,
+) -> ApiResult<()> {
+    let mut prev_nodes: BTreeMap<String, (&str, &BTreeMap<String, Value>)> = BTreeMap::new();
+    if let Some(prev_doc) = previous {
+        for section in &prev_doc.sections {
+            for row in &section.children {
+                for column in &row.children {
+                    for element in &column.children {
+                        if let ElementContent::Known(KnownElement::PluginBlock(props)) =
+                            &element.content
+                        {
+                            prev_nodes.insert(
+                                element.id.clone(),
+                                (props.block_id.as_str(), &props.values),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    let ElementContent::Known(KnownElement::PluginBlock(props)) = &element.content
+                    else {
+                        continue;
+                    };
+                    let Some(entry) = catalog.get(&props.block_id) else {
+                        continue;
+                    };
+                    if entry.status != ProviderStatus::Active
+                        || entry.declaration_state != DeclarationState::Declared
+                    {
+                        continue;
+                    }
+                    let prev_vals =
+                        prev_nodes
+                            .get(&element.id)
+                            .and_then(|(prev_block_id, vals)| {
+                                (*prev_block_id == props.block_id.as_str()).then_some(*vals)
+                            });
+                    validate_relational_refs_in_conn(
+                        conn,
+                        &entry.descriptor.schema.fields,
+                        &props.values,
+                        prev_vals,
+                        required_locale,
+                    )
+                    .await?;
+                    validate_block_dynamic_options_in_tx(
+                        conn,
+                        &entry.descriptor.schema.fields,
+                        &props.values,
+                        prev_vals,
+                        allowed_context_fields,
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn validate_comment_block_refs_in_conn(
+    conn: &mut SqliteConnection,
+    raw_body: &str,
+    previous_body: Option<&str>,
+    catalog: &RegistryCatalog<RegisteredBlockSchema>,
+    required_locale: Option<&str>,
+    allowed_context_fields: Option<&[String]>,
+) -> ApiResult<()> {
+    let doc = parse_blocks_lenient_or_recover(raw_body).document;
+    let prev_doc = previous_body.map(|b| parse_blocks_lenient_or_recover(b).document);
+    validate_document_block_refs_in_conn(
+        conn,
+        &doc,
+        prev_doc.as_ref(),
+        catalog,
+        required_locale,
+        allowed_context_fields,
+    )
+    .await
 }
 
 #[cfg(test)]

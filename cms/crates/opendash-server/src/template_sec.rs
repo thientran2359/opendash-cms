@@ -126,12 +126,20 @@ mod trusted_theme_markup_tests {
         let source = r#"<button onclick="this.dataset.ok='1'">{{ label }}</button><svg xmlns="http://www.w3.org/2000/svg"><title>OK</title></svg><script>if (1 < 2 && 3 > 2) { document.body.dataset.ok = '1'; }</script>"#;
         validate_block_template_csec("trusted/markup", source, &schema).unwrap();
         let mut budget = RenderBudget::new();
-        let rendered = render_block_csec_with_budget(
+        let props = BTreeMap::from([("label".to_owned(), serde_json::json!("<safe>"))]);
+        let fmt_cfg = RenderFormattingConfig::default();
+        let rendered = render_block_csec_with_inputs(
             "trusted/markup",
             source,
-            &schema,
-            &BTreeMap::from([("label".to_owned(), serde_json::json!("<safe>"))]),
-            false,
+            BlockRenderInputs {
+                hydrated_props: &props,
+                local_richtext_nonces: None,
+                merged_options: None,
+                site_options: None,
+                menus: None,
+                is_preview: false,
+                fmt_cfg: &fmt_cfg,
+            },
             &mut budget,
         )
         .unwrap();
@@ -671,23 +679,50 @@ fn substitute_nonces_into_body(
 #[derive(Debug, Clone, Default)]
 pub struct RichTextNonceTable {
     entries: Vec<(String, String)>,
+    reserved_count: usize,
 }
 
 impl RichTextNonceTable {
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.is_empty() && self.reserved_count == 0
+    }
+
+    pub fn total_count(&self) -> usize {
+        self.entries.len().saturating_add(self.reserved_count)
+    }
+
+    pub fn reserve_count(&mut self, count: usize) -> Result<(), &'static str> {
+        if self.total_count().saturating_add(count) > MAX_RICHTEXT_NONCES_PER_REQUEST {
+            return Err("Số lượng khối RichText vượt giới hạn 128/request.");
+        }
+        self.reserved_count = self.reserved_count.saturating_add(count);
+        Ok(())
+    }
+
+    pub fn try_extend(&mut self, other: Self) -> Result<(), &'static str> {
+        if self.total_count().saturating_add(other.total_count()) > MAX_RICHTEXT_NONCES_PER_REQUEST
+        {
+            return Err("Số lượng khối RichText vượt giới hạn 128/request.");
+        }
+        self.reserved_count = self.reserved_count.saturating_add(other.reserved_count);
+        self.entries.extend(other.entries);
+        Ok(())
     }
 
     pub fn extend(&mut self, other: Self) {
+        self.reserved_count = self
+            .reserved_count
+            .saturating_add(other.reserved_count)
+            .min(MAX_RICHTEXT_NONCES_PER_REQUEST);
         for entry in other.entries {
-            if self.entries.len() < MAX_RICHTEXT_NONCES_PER_REQUEST {
+            if self.total_count() < MAX_RICHTEXT_NONCES_PER_REQUEST {
                 self.entries.push(entry);
             }
         }
     }
 
     pub fn register_sanitized(&mut self, sanitized_html: String) -> Result<String, &'static str> {
-        if self.entries.len() >= MAX_RICHTEXT_NONCES_PER_REQUEST {
+        if self.total_count() >= MAX_RICHTEXT_NONCES_PER_REQUEST {
             return Err("Số lượng khối RichText vượt giới hạn 128/request.");
         }
         let nonce = generate_richtext_nonce()?;
@@ -2576,7 +2611,7 @@ fn parse_od_icon_call_ext<'a>(
             let Some((root, attrs)) = extract_attr_chain(other) else {
                 return Err("od_icon() yêu cầu string literal name và class tùy chọn.");
             };
-            if attrs.last().copied() != Some("name") || attrs.len() < 2 {
+            if attrs.last().copied() != Some("name") || attrs.is_empty() {
                 return Err("od_icon() động phải truyền đường dẫn trường kết thúc bằng `.name`.");
             }
             OdIconNameArg::FieldNamePath(root, attrs)
@@ -2836,15 +2871,6 @@ impl HtmlScanState {
     }
 }
 
-fn bounded_html_states(
-    states: BTreeSet<HtmlScanState>,
-) -> Result<BTreeSet<HtmlScanState>, &'static str> {
-    if states.len() > 64 {
-        return Err("Quá nhiều trạng thái HTML tại điểm composition.");
-    }
-    Ok(states)
-}
-
 /// Validates a CSS stylesheet (both `<style>` blocks and `/theme/*.css` files).
 pub fn validate_safe_css(css: &str) -> Result<(), &'static str> {
     let lower = css.to_ascii_lowercase();
@@ -2982,7 +3008,7 @@ pub fn validate_safe_href_url(raw: &str) -> Result<(), &'static str> {
         return Err("URL href chứa ký tự điều khiển bị cấm.");
     }
     let trimmed = raw.trim();
-    if validate_safe_url(raw).is_ok() || opendash_core::block_schema::valid_block_url(trimmed) {
+    if validate_safe_url(raw).is_ok() || opendash_core::field_schema::valid_safe_url(trimmed) {
         Ok(())
     } else {
         Err("URL trong <a href> không hợp lệ hoặc không an toàn.")
@@ -3678,6 +3704,10 @@ impl UrlScopeStack {
         }
     }
 
+    fn from_root_map(root: BTreeMap<String, Option<UrlSourceKind>>) -> Self {
+        Self { frames: vec![root] }
+    }
+
     fn push_frame(&mut self, frame: BTreeMap<String, Option<UrlSourceKind>>) {
         self.frames.push(frame);
     }
@@ -3928,26 +3958,36 @@ fn is_ascii_html_whitespace(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0c)
 }
 
-fn check_theme_tag_name(
-    tag_name: &str,
-    is_close: bool,
+#[derive(Clone, Copy)]
+struct HtmlStepOptions {
     is_part: bool,
     is_full_doctype_doc: bool,
     allow_trusted_theme_markup: bool,
+    forbid_style_tag: bool,
+}
+
+fn check_theme_tag_name(
+    tag_name: &str,
+    is_close: bool,
+    opts: HtmlStepOptions,
     svg_depth: usize,
 ) -> Result<(), &'static str> {
     if tag_name.is_empty() {
         return Err("Thẻ HTML không có tên hợp lệ.");
     }
+    if opts.forbid_style_tag && tag_name == "style" {
+        return Err("Template block không được chứa thẻ <style> trực tiếp (dùng css_var).");
+    }
     if is_close && matches!(tag_name, "link" | "meta" | "title" | "style" | "script") {
         return Err("Thẻ đóng HTML không hợp lệ ở vị trí này.");
     }
     if FORBIDDEN_TAGS.contains(&tag_name)
-        && !(allow_trusted_theme_markup
+        && !(opts.allow_trusted_theme_markup
             && matches!(tag_name, "script" | "svg" | "foreignobject" | "math"))
         && !(tag_name == "title"
             && !is_close
-            && ((!is_part && is_full_doctype_doc) || (allow_trusted_theme_markup && svg_depth > 0)))
+            && ((!opts.is_part && opts.is_full_doctype_doc)
+                || (opts.allow_trusted_theme_markup && svg_depth > 0)))
     {
         return Err("Template chứa thẻ HTML bị C-SEC cấm.");
     }
@@ -4062,19 +4102,10 @@ fn finalize_theme_tag(
     link_rel_stylesheet: bool,
     link_has_valid_href: bool,
     meta_ok: bool,
-    is_part: bool,
-    is_full_doctype_doc: bool,
-    allow_trusted_theme_markup: bool,
+    opts: HtmlStepOptions,
     svg_depth: usize,
 ) -> Result<ThemeHtmlState, &'static str> {
-    check_theme_tag_name(
-        tag_name,
-        is_close,
-        is_part,
-        is_full_doctype_doc,
-        allow_trusted_theme_markup,
-        svg_depth,
-    )?;
+    check_theme_tag_name(tag_name, is_close, opts, svg_depth)?;
     if is_close {
         return Ok(ThemeHtmlState::Body);
     }
@@ -4102,9 +4133,7 @@ fn finalize_theme_tag(
 fn step_theme_raw_char(
     state: ThemeHtmlState,
     ch: char,
-    is_part: bool,
-    is_full_doctype_doc: bool,
-    allow_trusted_theme_markup: bool,
+    opts: HtmlStepOptions,
     svg_depth: usize,
 ) -> Result<ThemeHtmlState, &'static str> {
     if let ThemeHtmlState::Trusted {
@@ -4124,7 +4153,15 @@ fn step_theme_raw_char(
             }
             _ => None,
         };
-        let next = step_theme_raw_char(*inner, ch, is_part, is_full_doctype_doc, true, depth)?;
+        let next = step_theme_raw_char(
+            *inner,
+            ch,
+            HtmlStepOptions {
+                allow_trusted_theme_markup: true,
+                ..opts
+            },
+            depth,
+        )?;
         let depth = if let Some((is_close, self_closing)) = completed_svg_tag {
             if is_close {
                 depth.checked_sub(1).ok_or("Thẻ </svg> không có thẻ mở.")?
@@ -4172,8 +4209,11 @@ fn step_theme_raw_char(
                 return Err("Template chỉ cho phép HTML comment <!-- hoặc <!DOCTYPE>.");
             };
             if len == 7 {
-                if is_part {
+                if opts.is_part {
                     return Err("Part không được chứa DOCTYPE.");
+                }
+                if opts.forbid_style_tag {
+                    return Err("Template block không được chứa <!DOCTYPE>.");
                 }
                 if b == b'>' {
                     return Ok(ThemeHtmlState::Body);
@@ -4340,14 +4380,7 @@ fn step_theme_raw_char(
                         tag_name.push(ch.to_ascii_lowercase());
                     }
                     Some(b) if is_ascii_html_whitespace(b) => {
-                        check_theme_tag_name(
-                            &tag_name,
-                            is_close,
-                            is_part,
-                            is_full_doctype_doc,
-                            allow_trusted_theme_markup,
-                            svg_depth,
-                        )?;
+                        check_theme_tag_name(&tag_name, is_close, opts, svg_depth)?;
                         phase = TagPhase::BeforeAttr;
                     }
                     Some(b'/') => {
@@ -4357,14 +4390,7 @@ fn step_theme_raw_char(
                         {
                             return Err("Dấu tự đóng `/` trên thẻ HTML không hợp lệ.");
                         }
-                        check_theme_tag_name(
-                            &tag_name,
-                            is_close,
-                            is_part,
-                            is_full_doctype_doc,
-                            allow_trusted_theme_markup,
-                            svg_depth,
-                        )?;
+                        check_theme_tag_name(&tag_name, is_close, opts, svg_depth)?;
                         phase = TagPhase::SelfClosingSlash;
                     }
                     Some(b'>') => {
@@ -4374,9 +4400,7 @@ fn step_theme_raw_char(
                             link_rel_stylesheet,
                             link_has_valid_href,
                             meta_ok,
-                            is_part,
-                            is_full_doctype_doc,
-                            allow_trusted_theme_markup,
+                            opts,
                             svg_depth,
                         );
                     }
@@ -4393,9 +4417,7 @@ fn step_theme_raw_char(
                                     link_rel_stylesheet,
                                     link_has_valid_href,
                                     meta_ok,
-                                    is_part,
-                                    is_full_doctype_doc,
-                                    allow_trusted_theme_markup,
+                                    opts,
                                     svg_depth,
                                 );
                             }
@@ -4426,9 +4448,7 @@ fn step_theme_raw_char(
                                     link_rel_stylesheet,
                                     link_has_valid_href,
                                     meta_ok,
-                                    is_part,
-                                    is_full_doctype_doc,
-                                    allow_trusted_theme_markup,
+                                    opts,
                                     svg_depth,
                                 );
                             }
@@ -4461,7 +4481,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
-                            allow_trusted_theme_markup,
+                            opts.allow_trusted_theme_markup,
                         )?;
                         if matches!(tag_name.as_str(), "style" | "title" | "script") {
                             return Err("Thẻ <style>/<title> không được tự đóng.");
@@ -4480,7 +4500,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
-                            allow_trusted_theme_markup,
+                            opts.allow_trusted_theme_markup,
                         )?;
                         return finalize_theme_tag(
                             &tag_name,
@@ -4488,9 +4508,7 @@ fn step_theme_raw_char(
                             link_rel_stylesheet,
                             link_has_valid_href,
                             meta_ok,
-                            is_part,
-                            is_full_doctype_doc,
-                            allow_trusted_theme_markup,
+                            opts,
                             svg_depth,
                         );
                     }
@@ -4513,7 +4531,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
-                            allow_trusted_theme_markup,
+                            opts.allow_trusted_theme_markup,
                         )?;
                         if matches!(tag_name.as_str(), "style" | "title" | "script") {
                             return Err("Thẻ <style>/<title> không được tự đóng.");
@@ -4532,7 +4550,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
-                            allow_trusted_theme_markup,
+                            opts.allow_trusted_theme_markup,
                         )?;
                         return finalize_theme_tag(
                             &tag_name,
@@ -4540,9 +4558,7 @@ fn step_theme_raw_char(
                             link_rel_stylesheet,
                             link_has_valid_href,
                             meta_ok,
-                            is_part,
-                            is_full_doctype_doc,
-                            allow_trusted_theme_markup,
+                            opts,
                             svg_depth,
                         );
                     }
@@ -4558,7 +4574,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
-                            allow_trusted_theme_markup,
+                            opts.allow_trusted_theme_markup,
                         )?;
                         attr_name.push(ch.to_ascii_lowercase());
                         phase = TagPhase::AttrName;
@@ -4600,7 +4616,7 @@ fn step_theme_raw_char(
                                 &mut link_has_valid_href,
                                 &mut meta_ok,
                                 &mut attr_static_buf,
-                                allow_trusted_theme_markup,
+                                opts.allow_trusted_theme_markup,
                             )?;
                             phase = TagPhase::BeforeAttr;
                         } else {
@@ -4631,7 +4647,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
-                            allow_trusted_theme_markup,
+                            opts.allow_trusted_theme_markup,
                         )?;
                         phase = TagPhase::BeforeAttr;
                     } else if ascii == Some(b'>') {
@@ -4646,7 +4662,7 @@ fn step_theme_raw_char(
                             &mut link_has_valid_href,
                             &mut meta_ok,
                             &mut attr_static_buf,
-                            allow_trusted_theme_markup,
+                            opts.allow_trusted_theme_markup,
                         )?;
                         return finalize_theme_tag(
                             &tag_name,
@@ -4654,9 +4670,7 @@ fn step_theme_raw_char(
                             link_rel_stylesheet,
                             link_has_valid_href,
                             meta_ok,
-                            is_part,
-                            is_full_doctype_doc,
-                            allow_trusted_theme_markup,
+                            opts,
                             svg_depth,
                         );
                     } else if matches!(
@@ -4684,9 +4698,7 @@ fn step_theme_raw_char(
                             link_rel_stylesheet,
                             link_has_valid_href,
                             meta_ok,
-                            is_part,
-                            is_full_doctype_doc,
-                            allow_trusted_theme_markup,
+                            opts,
                             svg_depth,
                         );
                     }
@@ -5171,9 +5183,12 @@ fn walk_theme_stmt_with_url_scopes(
                     cur = step_theme_raw_char(
                         cur,
                         ch,
-                        is_part,
-                        is_full_doctype_doc,
-                        allow_trusted_theme_markup,
+                        HtmlStepOptions {
+                            is_part,
+                            is_full_doctype_doc,
+                            allow_trusted_theme_markup,
+                            forbid_style_tag: false,
+                        },
                         depth,
                     )?;
                 }
@@ -5588,120 +5603,8 @@ fn validate_html_and_css_context(
     post_render: bool,
     allow_trusted_theme_markup: bool,
 ) -> Result<(), &'static str> {
-    validate_html_and_css_context_with_url_vars(src, post_render, None, allow_trusted_theme_markup)
-}
-
-/// Strict C-SEC HTML/URL/CSS validator for opt-out untrusted plugin fragments
-/// (`render_trusted_html == false`). Forbids `<script>`, `<svg>`, `<style>`, `<meta>`,
-/// `<link>`, `<!doctype>`, `<form>`, `on*`, `javascript:`/`data:` URLs, `formaction`/`action`,
-/// and unsafe `style="..."` CSS (`url()`, `expression()`, `@import`, etc.).
-pub(crate) fn validate_untrusted_extension_html_fragment(src: &str) -> Result<(), &'static str> {
     let lower = src.to_ascii_lowercase();
-    for forbidden_prefix in ["<style", "</style", "<meta", "<link", "<!doctype"] {
-        let mut cursor = 0;
-        while let Some(rel) = lower[cursor..].find(forbidden_prefix) {
-            let end = cursor + rel + forbidden_prefix.len();
-            let boundary = lower
-                .as_bytes()
-                .get(end)
-                .is_none_or(|b| b.is_ascii_whitespace() || matches!(*b, b'>' | b'/'));
-            if boundary {
-                return Err("Fragment untrusted chứa thẻ HTML bị C-SEC cấm.");
-            }
-            cursor = end;
-        }
-    }
-    validate_html_and_css_context_with_url_vars(src, true, None, false)
-}
-
-fn find_rawtext_or_rcdata_end(
-    src: &str,
-    body_start: usize,
-    tag_name: &str,
-) -> Result<(usize, usize), &'static str> {
-    let bytes = src.as_bytes();
-    let needle: &[u8] = match tag_name {
-        "style" => b"</style",
-        "script" => b"</script",
-        "title" => b"</title",
-        _ => return Err("Thẻ raw-text không hợp lệ."),
-    };
-    let mut pos = body_start;
-    while pos + needle.len() <= bytes.len() {
-        if bytes[pos..pos + needle.len()].eq_ignore_ascii_case(needle) {
-            match bytes.get(pos + needle.len()) {
-                Some(&b'>') => return Ok((pos, pos + needle.len() + 1)),
-                Some(&b) if is_ascii_html_whitespace(b) || b == b'/' => {
-                    return Err("Thẻ đóng raw-text không được chứa khoảng trắng hoặc /.");
-                }
-                None => return Err("Thẻ đóng raw-text không hoàn chỉnh."),
-                Some(_) => {}
-            }
-        }
-        pos += 1;
-    }
-    Err("Thẻ raw-text thiếu thẻ đóng hợp lệ.")
-}
-
-fn is_sensitive_global_option_key(key: &str) -> bool {
-    opendash_core::block_schema::GLOBAL_PUBLIC_URL_OPTION_KEYS.contains(&key)
-        || opendash_core::block_schema::GLOBAL_PUBLIC_MEDIA_OPTION_KEYS.contains(&key)
-}
-
-struct BlockUrlVarAllowlist {
-    href_vars: BTreeSet<String>,
-    src_vars: BTreeSet<String>,
-    rep_href_subkeys: BTreeMap<String, BTreeSet<String>>,
-    rep_src_subkeys: BTreeMap<String, BTreeSet<String>>,
-}
-
-impl BlockUrlVarAllowlist {
-    fn allows_href_expr(&self, expr: &str) -> bool {
-        if self.href_vars.contains(expr) || self.src_vars.contains(expr) {
-            return true;
-        }
-        if let Some(opt_key) = expr.strip_prefix("options.") {
-            return opendash_core::block_schema::GLOBAL_PUBLIC_URL_OPTION_KEYS.contains(&opt_key);
-        }
-        if let Some((_loop_var, sub_key)) = expr.split_once('.') {
-            return self
-                .rep_href_subkeys
-                .values()
-                .any(|set| set.contains(sub_key))
-                || self
-                    .rep_src_subkeys
-                    .values()
-                    .any(|set| set.contains(sub_key));
-        }
-        false
-    }
-
-    fn allows_src_expr(&self, expr: &str) -> bool {
-        if self.src_vars.contains(expr) {
-            return true;
-        }
-        if let Some(opt_key) = expr.strip_prefix("options.") {
-            return opendash_core::block_schema::GLOBAL_PUBLIC_MEDIA_OPTION_KEYS.contains(&opt_key);
-        }
-        if let Some((_loop_var, sub_key)) = expr.split_once('.') {
-            return self
-                .rep_src_subkeys
-                .values()
-                .any(|set| set.contains(sub_key));
-        }
-        false
-    }
-}
-
-fn validate_html_and_css_context_with_url_vars(
-    src: &str,
-    post_render: bool,
-    block_url_vars: Option<&BlockUrlVarAllowlist>,
-    allow_trusted_theme_markup: bool,
-) -> Result<(), &'static str> {
-    let lower = src.to_ascii_lowercase();
-    let is_full_doctype_doc =
-        block_url_vars.is_none() && lower.trim_start().starts_with("<!doctype");
+    let is_full_doctype_doc = lower.trim_start().starts_with("<!doctype");
 
     // Scan HTML plus RAWTEXT style/script and RCDATA title. SVG depth limits
     // the exceptional <title> permission to actual SVG foreign content.
@@ -5729,9 +5632,6 @@ fn validate_html_and_css_context_with_url_vars(
                     .get(i + 9)
                     .is_some_and(|b| *b == b'>' || is_ascii_html_whitespace(*b))
             {
-                if block_url_vars.is_some() {
-                    return Err("Template block không được chứa DOCTYPE.");
-                }
                 let mut d = i + 9;
                 while d < bytes.len() && bytes[d] != b'>' {
                     if matches!(bytes[d], b'<' | b'"' | b'\'' | 0x00..=0x1f | 0x7f) {
@@ -5833,7 +5733,6 @@ fn validate_html_and_css_context_with_url_vars(
             &tag_name,
             attr_slice,
             post_render,
-            block_url_vars,
             allow_trusted_theme_markup,
         )?;
         let self_closing = attr_slice.trim_end().ends_with('/');
@@ -5848,9 +5747,6 @@ fn validate_html_and_css_context_with_url_vars(
         }
 
         if tag_name == "style" {
-            if block_url_vars.is_some() {
-                return Err("Template block không được chứa thẻ <style> trực tiếp (dùng css_var).");
-            }
             let (close_start, next_i) = find_rawtext_or_rcdata_end(src, k + 1, "style")?;
             let css_body = &src[k + 1..close_start];
             if !post_render && (css_body.contains("{{") || css_body.contains("{%")) {
@@ -5888,11 +5784,62 @@ fn validate_html_and_css_context_with_url_vars(
     Ok(())
 }
 
+/// Strict C-SEC HTML/URL/CSS validator for opt-out untrusted plugin fragments
+/// (`render_trusted_html == false`). Forbids `<script>`, `<svg>`, `<style>`, `<meta>`,
+/// `<link>`, `<!doctype>`, `<form>`, `on*`, `javascript:`/`data:` URLs, `formaction`/`action`,
+/// and unsafe `style="..."` CSS (`url()`, `expression()`, `@import`, etc.).
+pub(crate) fn validate_untrusted_extension_html_fragment(src: &str) -> Result<(), &'static str> {
+    let lower = src.to_ascii_lowercase();
+    for forbidden_prefix in ["<style", "</style", "<meta", "<link", "<!doctype"] {
+        let mut cursor = 0;
+        while let Some(rel) = lower[cursor..].find(forbidden_prefix) {
+            let end = cursor + rel + forbidden_prefix.len();
+            let boundary = lower
+                .as_bytes()
+                .get(end)
+                .is_none_or(|b| b.is_ascii_whitespace() || matches!(*b, b'>' | b'/'));
+            if boundary {
+                return Err("Fragment untrusted chứa thẻ HTML bị C-SEC cấm.");
+            }
+            cursor = end;
+        }
+    }
+    validate_html_and_css_context(src, true, false)
+}
+
+fn find_rawtext_or_rcdata_end(
+    src: &str,
+    body_start: usize,
+    tag_name: &str,
+) -> Result<(usize, usize), &'static str> {
+    let bytes = src.as_bytes();
+    let needle: &[u8] = match tag_name {
+        "style" => b"</style",
+        "script" => b"</script",
+        "title" => b"</title",
+        _ => return Err("Thẻ raw-text không hợp lệ."),
+    };
+    let mut pos = body_start;
+    while pos + needle.len() <= bytes.len() {
+        if bytes[pos..pos + needle.len()].eq_ignore_ascii_case(needle) {
+            match bytes.get(pos + needle.len()) {
+                Some(&b'>') => return Ok((pos, pos + needle.len() + 1)),
+                Some(&b) if is_ascii_html_whitespace(b) || b == b'/' => {
+                    return Err("Thẻ đóng raw-text không được chứa khoảng trắng hoặc /.");
+                }
+                None => return Err("Thẻ đóng raw-text không hoàn chỉnh."),
+                Some(_) => {}
+            }
+        }
+        pos += 1;
+    }
+    Err("Thẻ raw-text thiếu thẻ đóng hợp lệ.")
+}
+
 fn validate_tag_attributes(
     tag_name: &str,
     attr_slice: &str,
     post_render: bool,
-    block_url_vars: Option<&BlockUrlVarAllowlist>,
     allow_trusted_theme_markup: bool,
 ) -> Result<(), &'static str> {
     let attrs = parse_attributes(attr_slice, post_render)?;
@@ -5947,32 +5894,7 @@ fn validate_tag_attributes(
             "href" | "src" | "poster" | "cite" | "srcset" | "ping" | "xlink:href"
         ) {
             if !post_render && (val.contains("{{") || val.contains("{%")) {
-                if matches!(name.as_str(), "srcset" | "ping") {
-                    return Err("C-SEC cấm nội suy {{ ... }} trong thuộc tính srcset/ping.");
-                }
-                let expr_inner = val
-                    .trim()
-                    .strip_prefix("{{")
-                    .and_then(|s| s.strip_suffix("}}"))
-                    .map(str::trim)
-                    .filter(|s| !s.contains("{{") && !s.contains("}}") && !s.contains("{%"))
-                    .ok_or("URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.")?;
-                if let Some(block_vars) = block_url_vars {
-                    let allowed = if tag_name == "a" && name == "href" {
-                        block_vars.allows_href_expr(expr_inner)
-                    } else if matches!(name.as_str(), "src" | "poster") {
-                        block_vars.allows_src_expr(expr_inner)
-                    } else {
-                        false
-                    };
-                    if !allowed {
-                        return Err(
-                            "URL động trong template block phải khớp đúng biến kiểu url (href) hoặc <media_key>_url (src/poster).",
-                        );
-                    }
-                } else {
-                    return Err("URL động trong thuộc tính không nằm trong whitelist typed URL.");
-                }
+                return Err("URL động trong thuộc tính không nằm trong whitelist typed URL.");
             } else {
                 let decoded = decode_html_entities_for_url(&val);
                 if name == "srcset" {
@@ -6192,368 +6114,415 @@ fn parse_attributes(
     Ok(map)
 }
 
-#[derive(Default)]
-struct RepeaterSubContext {
-    richtext_subkeys: BTreeSet<String>,
-    href_subkeys: BTreeSet<String>,
-    src_subkeys: BTreeSet<String>,
-    media_raw_subkeys: BTreeSet<String>,
-}
-
 struct BlockSchemaTemplateContext {
-    richtext_vars: BTreeSet<String>,
-    href_vars: BTreeSet<String>,
-    src_vars: BTreeSet<String>,
-    media_raw_vars: BTreeSet<String>,
-    repeaters: BTreeMap<String, RepeaterSubContext>,
+    policy: ThemeUrlPolicy,
+    root_scopes: UrlScopeStack,
 }
 
 impl BlockSchemaTemplateContext {
     fn from_schema(schema: &opendash_core::block_schema::BlockSchemaV1) -> Self {
-        use opendash_core::block_schema::BlockFieldSpec;
-        let mut ctx = Self {
-            richtext_vars: BTreeSet::new(),
-            href_vars: BTreeSet::new(),
-            src_vars: BTreeSet::new(),
-            media_raw_vars: BTreeSet::new(),
-            repeaters: BTreeMap::new(),
-        };
-        for field in schema.flattened_top_fields() {
-            match field {
-                BlockFieldSpec::Richtext { key, .. } => {
-                    ctx.richtext_vars.insert(key.clone());
-                }
-                BlockFieldSpec::Url { key, .. } | BlockFieldSpec::Link { key, .. } => {
-                    ctx.href_vars.insert(key.clone());
-                    if matches!(field, BlockFieldSpec::Link { .. }) {
-                        ctx.href_vars.insert(format!("{key}_url"));
-                    }
-                }
-                BlockFieldSpec::Media { key, .. } => {
-                    ctx.media_raw_vars.insert(key.clone());
-                    ctx.src_vars.insert(format!("{key}_url"));
-                }
-                BlockFieldSpec::Repeater { key, fields, .. } => {
-                    let mut sub_ctx = RepeaterSubContext::default();
-                    for sub in fields {
-                        match sub {
-                            BlockFieldSpec::Richtext { key: sk, .. } => {
-                                sub_ctx.richtext_subkeys.insert(sk.clone());
-                            }
-                            BlockFieldSpec::Url { key: sk, .. }
-                            | BlockFieldSpec::Link { key: sk, .. } => {
-                                sub_ctx.href_subkeys.insert(sk.clone());
-                                if matches!(sub, BlockFieldSpec::Link { .. }) {
-                                    sub_ctx.href_subkeys.insert(format!("{sk}_url"));
-                                }
-                            }
-                            BlockFieldSpec::Media { key: sk, .. } => {
-                                sub_ctx.media_raw_subkeys.insert(sk.clone());
-                                sub_ctx.src_subkeys.insert(format!("{sk}_url"));
-                            }
-                            _ => {}
-                        }
-                    }
-                    ctx.repeaters.insert(key.clone(), sub_ctx);
-                }
-                _ => {}
+        let policy = ThemeUrlPolicy::from_option_specs(&[], BTreeSet::new());
+        let mut root = BTreeMap::new();
+        for field in &schema.fields {
+            if let Some(node) = field_template_node_from_spec(field) {
+                root.insert(field.key.clone(), Some(UrlSourceKind::FieldNode(node)));
             }
         }
-        ctx
-    }
-
-    fn url_allowlist(&self) -> BlockUrlVarAllowlist {
-        BlockUrlVarAllowlist {
-            href_vars: self.href_vars.clone(),
-            src_vars: self.src_vars.clone(),
-            rep_href_subkeys: self
-                .repeaters
-                .iter()
-                .map(|(k, v)| (k.clone(), v.href_subkeys.clone()))
-                .collect(),
-            rep_src_subkeys: self
-                .repeaters
-                .iter()
-                .map(|(k, v)| (k.clone(), v.src_subkeys.clone()))
-                .collect(),
+        Self {
+            policy,
+            root_scopes: UrlScopeStack::from_root_map(root),
         }
-    }
-
-    fn is_sensitive_name(&self, id: &str, active_loops: &BTreeMap<String, String>) -> bool {
-        matches!(
-            id,
-            "options" | "theme_options" | "od_is_preview" | "od_icon" | "od_hook"
-        ) || self.richtext_vars.contains(id)
-            || self.href_vars.contains(id)
-            || self.src_vars.contains(id)
-            || self.media_raw_vars.contains(id)
-            || self.repeaters.contains_key(id)
-            || active_loops.contains_key(id)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SensitiveVarKind {
+enum BlockSensitiveKind {
     Richtext,
     HrefUrl,
     MediaUrl,
-    MediaRaw,
-    RepeaterOrLoopItem,
+    ObjectOrNonScalar,
 }
 
-fn classify_bare_sensitive_expr(
-    expr: &Expr<'_>,
-    ctx: &BlockSchemaTemplateContext,
-    active_loops: &BTreeMap<String, String>,
-) -> Option<SensitiveVarKind> {
-    match expr {
-        Expr::Var(v) => {
-            if ctx.richtext_vars.contains(v.id) {
-                Some(SensitiveVarKind::Richtext)
-            } else if ctx.href_vars.contains(v.id) {
-                Some(SensitiveVarKind::HrefUrl)
-            } else if ctx.src_vars.contains(v.id) {
-                Some(SensitiveVarKind::MediaUrl)
-            } else if ctx.media_raw_vars.contains(v.id) {
-                Some(SensitiveVarKind::MediaRaw)
-            } else if ctx.repeaters.contains_key(v.id) || active_loops.contains_key(v.id) {
-                Some(SensitiveVarKind::RepeaterOrLoopItem)
-            } else {
-                None
-            }
-        }
-        Expr::GetAttr(g) => {
-            if let Expr::Var(v) = &g.expr {
-                if v.id == "options" {
-                    if opendash_core::block_schema::GLOBAL_PUBLIC_URL_OPTION_KEYS.contains(&g.name)
-                    {
-                        return Some(SensitiveVarKind::HrefUrl);
-                    }
-                    if opendash_core::block_schema::GLOBAL_PUBLIC_MEDIA_OPTION_KEYS
-                        .contains(&g.name)
-                    {
-                        return Some(SensitiveVarKind::MediaUrl);
-                    }
-                }
-                if let Some(rep_key) = active_loops.get(v.id)
-                    && let Some(rep) = ctx.repeaters.get(rep_key)
-                {
-                    if rep.richtext_subkeys.contains(g.name) {
-                        return Some(SensitiveVarKind::Richtext);
-                    }
-                    if rep.href_subkeys.contains(g.name) {
-                        return Some(SensitiveVarKind::HrefUrl);
-                    }
-                    if rep.src_subkeys.contains(g.name) {
-                        return Some(SensitiveVarKind::MediaUrl);
-                    }
-                    if rep.media_raw_subkeys.contains(g.name) {
-                        return Some(SensitiveVarKind::MediaRaw);
-                    }
-                }
-            }
-            None
-        }
-        _ => None,
+fn is_forbidden_block_shadow_name(id: &str) -> bool {
+    matches!(
+        id,
+        "options"
+            | "site_options"
+            | "theme_options"
+            | "menus"
+            | "od_is_preview"
+            | "od_icon"
+            | "od_hook"
+    )
+}
+
+fn is_protected_block_binding(id: &str, scopes: &UrlScopeStack) -> bool {
+    if is_forbidden_block_shadow_name(id) {
+        return true;
+    }
+    match scopes.lookup(id) {
+        None => false,
+        Some(UrlSourceKind::FieldNode(FieldTemplateNode::Scalar)) => false,
+        Some(_) => true,
     }
 }
 
-fn expr_touches_any_sensitive(
+fn resolve_menu_get_item_subscript<'a>(expr: &'a Expr<'a>) -> Option<(&'a Expr<'a>, Vec<&'a str>)> {
+    let mut attrs = Vec::new();
+    let mut cur = expr;
+    while let Expr::GetAttr(g) = cur {
+        attrs.push(g.name);
+        cur = &g.expr;
+    }
+    let Expr::GetItem(gi) = cur else {
+        return None;
+    };
+    let Expr::Var(v) = &gi.expr else {
+        return None;
+    };
+    if v.id != "menus" {
+        return None;
+    }
+    attrs.reverse();
+    Some((&gi.subscript_expr, attrs))
+}
+
+fn resolve_menu_dot_chain<'a>(expr: &'a Expr<'a>) -> Option<Vec<&'a str>> {
+    let (root, attrs) = extract_attr_chain(expr)?;
+    if root != "menus" || attrs.is_empty() {
+        return None;
+    }
+    Some(attrs)
+}
+
+fn classify_node_and_tail(node: &FieldTemplateNode, tail: &[&str]) -> Option<BlockSensitiveKind> {
+    match (node, tail) {
+        (FieldTemplateNode::Scalar, &[]) => None,
+        (FieldTemplateNode::Scalar, &["classes" | "css" | "top" | "right" | "bottom" | "left"]) => {
+            None
+        }
+        (FieldTemplateNode::Scalar, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        (FieldTemplateNode::Icon, &["name"]) => None,
+        (FieldTemplateNode::Icon, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        (FieldTemplateNode::Richtext, &[]) => Some(BlockSensitiveKind::Richtext),
+        (FieldTemplateNode::Richtext, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        (FieldTemplateNode::Url, &[]) => Some(BlockSensitiveKind::HrefUrl),
+        (FieldTemplateNode::Url, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        (FieldTemplateNode::Link, &["url"]) => Some(BlockSensitiveKind::HrefUrl),
+        (FieldTemplateNode::Link, &["label" | "target" | "rel" | "new_tab" | "nofollow"]) => None,
+        (FieldTemplateNode::Link, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        (FieldTemplateNode::Media, &["url" | "thumbnail_url"]) => {
+            Some(BlockSensitiveKind::MediaUrl)
+        }
+        (FieldTemplateNode::Media, &["id" | "alt" | "width" | "height" | "kind"]) => None,
+        (FieldTemplateNode::Media, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        (FieldTemplateNode::Gallery, _)
+        | (FieldTemplateNode::Group(_), _)
+        | (FieldTemplateNode::Repeater(_), _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        (FieldTemplateNode::EntryRef { multiple: false }, &["url"]) => {
+            Some(BlockSensitiveKind::HrefUrl)
+        }
+        (FieldTemplateNode::EntryRef { multiple: false }, &["cover_url"]) => {
+            Some(BlockSensitiveKind::MediaUrl)
+        }
+        (
+            FieldTemplateNode::EntryRef { multiple: false },
+            &["id" | "type_key" | "title" | "slug" | "excerpt"],
+        ) => None,
+        (FieldTemplateNode::EntryRef { .. }, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        (FieldTemplateNode::TermRef { multiple: false }, &["url"]) => {
+            Some(BlockSensitiveKind::HrefUrl)
+        }
+        (
+            FieldTemplateNode::TermRef { multiple: false },
+            &["featured_image", "url" | "thumbnail_url"],
+        ) => Some(BlockSensitiveKind::MediaUrl),
+        (
+            FieldTemplateNode::TermRef { multiple: false },
+            &["featured_image", "id" | "alt" | "width" | "height" | "kind"],
+        ) => None,
+        (
+            FieldTemplateNode::TermRef { multiple: false },
+            &["id" | "taxonomy_key" | "name" | "slug" | "description"],
+        ) => None,
+        (FieldTemplateNode::TermRef { .. }, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+    }
+}
+
+fn classify_trusted_link_tail(tail: &[&str]) -> Option<BlockSensitiveKind> {
+    match tail {
+        ["url"] => Some(BlockSensitiveKind::HrefUrl),
+        ["label" | "id" | "is_active" | "is_ancestor" | "is_external" | "depth"] => None,
+        _ => Some(BlockSensitiveKind::ObjectOrNonScalar),
+    }
+}
+
+fn classify_block_sensitive_expr(
     expr: &Expr<'_>,
-    ctx: &BlockSchemaTemplateContext,
-    active_loops: &BTreeMap<String, String>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> Option<BlockSensitiveKind> {
+    if let Some((_sub, attrs)) = resolve_menu_get_item_subscript(expr) {
+        return match attrs.as_slice() {
+            ["title" | "menu_key" | "menu_id"] => None,
+            _ => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        };
+    }
+    if let Some(attrs) = resolve_menu_dot_chain(expr) {
+        return match attrs.as_slice() {
+            [_slot, "title" | "menu_key" | "menu_id"] => None,
+            _ => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        };
+    }
+    if let Some((root, attrs)) = extract_attr_chain(expr) {
+        if attrs.is_empty()
+            && matches!(root, "options" | "site_options" | "menus" | "theme_options")
+        {
+            return Some(BlockSensitiveKind::ObjectOrNonScalar);
+        }
+        if matches!(root, "options" | "site_options") {
+            return match resolve_field_node_and_tail(root, &attrs, scopes, policy) {
+                Some((node, tail)) => classify_node_and_tail(node, tail),
+                None => Some(BlockSensitiveKind::ObjectOrNonScalar),
+            };
+        }
+        if let Some(UrlSourceKind::TrustedLink) = scopes.lookup(root) {
+            return classify_trusted_link_tail(&attrs);
+        }
+        if let Some((node, tail)) = resolve_field_node_and_tail(root, &attrs, scopes, policy) {
+            return classify_node_and_tail(node, tail);
+        }
+        if scopes.lookup(root).is_some() {
+            return Some(BlockSensitiveKind::ObjectOrNonScalar);
+        }
+    }
+    None
+}
+
+fn block_expr_touches_sensitive(
+    expr: &Expr<'_>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
 ) -> bool {
-    if classify_bare_sensitive_expr(expr, ctx, active_loops).is_some() {
+    if let Some(attrs) = resolve_menu_dot_chain(expr) {
+        return !matches!(attrs.as_slice(), [_slot, "title" | "menu_key" | "menu_id"]);
+    }
+    if let Some((subscript, attrs)) = resolve_menu_get_item_subscript(expr) {
+        return block_expr_touches_sensitive(subscript, scopes, policy)
+            || !matches!(attrs.as_slice(), ["title" | "menu_key" | "menu_id"]);
+    }
+    if let Some((root, attrs)) = extract_attr_chain(expr) {
+        if matches!(root, "options" | "site_options") {
+            return match resolve_field_node_and_tail(root, &attrs, scopes, policy) {
+                Some((node, tail)) => classify_node_and_tail(node, tail).is_some(),
+                None => true,
+            };
+        }
+        if root == "theme_options" || root == "menus" {
+            return true;
+        }
+        if let Some(UrlSourceKind::TrustedLink) = scopes.lookup(root) {
+            return classify_trusted_link_tail(&attrs).is_some();
+        }
+        if let Some((node, tail)) = resolve_field_node_and_tail(root, &attrs, scopes, policy) {
+            return classify_node_and_tail(node, tail).is_some();
+        }
+        if scopes.lookup(root).is_some() {
+            return true;
+        }
+    }
+    if classify_block_sensitive_expr(expr, scopes, policy).is_some() {
         return true;
     }
     match expr {
-        Expr::Var(v) => ctx.is_sensitive_name(v.id, active_loops),
-        Expr::Const(_) => false,
+        Expr::Var(_) | Expr::Const(_) => false,
         Expr::Slice(s) => {
-            expr_touches_any_sensitive(&s.expr, ctx, active_loops)
+            block_expr_touches_sensitive(&s.expr, scopes, policy)
                 || s.start
                     .as_ref()
-                    .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                    .is_some_and(|e| block_expr_touches_sensitive(e, scopes, policy))
                 || s.stop
                     .as_ref()
-                    .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                    .is_some_and(|e| block_expr_touches_sensitive(e, scopes, policy))
                 || s.step
                     .as_ref()
-                    .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                    .is_some_and(|e| block_expr_touches_sensitive(e, scopes, policy))
         }
-        Expr::UnaryOp(u) => expr_touches_any_sensitive(&u.expr, ctx, active_loops),
+        Expr::UnaryOp(u) => block_expr_touches_sensitive(&u.expr, scopes, policy),
         Expr::BinOp(b) => {
-            expr_touches_any_sensitive(&b.left, ctx, active_loops)
-                || expr_touches_any_sensitive(&b.right, ctx, active_loops)
+            block_expr_touches_sensitive(&b.left, scopes, policy)
+                || block_expr_touches_sensitive(&b.right, scopes, policy)
         }
         Expr::Compare(c) => {
-            expr_touches_any_sensitive(&c.expr, ctx, active_loops)
+            block_expr_touches_sensitive(&c.expr, scopes, policy)
                 || c.ops
                     .iter()
-                    .any(|op| expr_touches_any_sensitive(&op.expr, ctx, active_loops))
+                    .any(|op| block_expr_touches_sensitive(&op.expr, scopes, policy))
         }
         Expr::IfExpr(i) => {
-            expr_touches_any_sensitive(&i.test_expr, ctx, active_loops)
-                || expr_touches_any_sensitive(&i.true_expr, ctx, active_loops)
+            block_expr_touches_sensitive(&i.test_expr, scopes, policy)
+                || block_expr_touches_sensitive(&i.true_expr, scopes, policy)
                 || i.false_expr
                     .as_ref()
-                    .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                    .is_some_and(|e| block_expr_touches_sensitive(e, scopes, policy))
         }
-        Expr::GetAttr(g) => {
-            if let Expr::Var(v) = &g.expr {
-                if v.id == "options" {
-                    return is_sensitive_global_option_key(g.name);
-                }
-                if let Some(rep_key) = active_loops.get(v.id)
-                    && let Some(rep) = ctx.repeaters.get(rep_key)
-                {
-                    return rep.richtext_subkeys.contains(g.name)
-                        || rep.href_subkeys.contains(g.name)
-                        || rep.src_subkeys.contains(g.name)
-                        || rep.media_raw_subkeys.contains(g.name);
-                }
-            }
-            expr_touches_any_sensitive(&g.expr, ctx, active_loops)
-        }
+        Expr::GetAttr(g) => block_expr_touches_sensitive(&g.expr, scopes, policy),
         Expr::GetItem(g) => {
-            expr_touches_any_sensitive(&g.expr, ctx, active_loops)
-                || expr_touches_any_sensitive(&g.subscript_expr, ctx, active_loops)
+            block_expr_touches_sensitive(&g.expr, scopes, policy)
+                || block_expr_touches_sensitive(&g.subscript_expr, scopes, policy)
         }
         Expr::List(l) => l
             .items
             .iter()
-            .any(|e| expr_touches_any_sensitive(e, ctx, active_loops)),
+            .any(|e| block_expr_touches_sensitive(e, scopes, policy)),
         Expr::Tuple(t) => t
             .items
             .iter()
-            .any(|e| expr_touches_any_sensitive(e, ctx, active_loops)),
+            .any(|e| block_expr_touches_sensitive(e, scopes, policy)),
         Expr::Map(m) => {
             m.keys
                 .iter()
-                .any(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                .any(|e| block_expr_touches_sensitive(e, scopes, policy))
                 || m.values
                     .iter()
-                    .any(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                    .any(|e| block_expr_touches_sensitive(e, scopes, policy))
         }
         Expr::Filter(f) => {
             f.expr
                 .as_ref()
-                .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                .is_some_and(|e| block_expr_touches_sensitive(e, scopes, policy))
                 || f.args
                     .iter()
-                    .any(|arg| call_arg_touches_sensitive(arg, ctx, active_loops))
+                    .any(|arg| block_call_arg_touches_sensitive(arg, scopes, policy))
         }
         Expr::Test(t) => {
-            expr_touches_any_sensitive(&t.expr, ctx, active_loops)
+            block_expr_touches_sensitive(&t.expr, scopes, policy)
                 || t.args
                     .iter()
-                    .any(|arg| call_arg_touches_sensitive(arg, ctx, active_loops))
+                    .any(|arg| block_call_arg_touches_sensitive(arg, scopes, policy))
         }
         Expr::Call(_) => true,
     }
 }
 
-fn call_arg_touches_sensitive(
+fn block_call_arg_touches_sensitive(
     arg: &minijinja::machinery::ast::CallArg<'_>,
-    ctx: &BlockSchemaTemplateContext,
-    active_loops: &BTreeMap<String, String>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
 ) -> bool {
     match arg {
         minijinja::machinery::ast::CallArg::Pos(e)
         | minijinja::machinery::ast::CallArg::Kwarg(_, e)
         | minijinja::machinery::ast::CallArg::PosSplat(e)
         | minijinja::machinery::ast::CallArg::KwargSplat(e) => {
-            expr_touches_any_sensitive(e, ctx, active_loops)
+            block_expr_touches_sensitive(e, scopes, policy)
         }
     }
 }
 
 fn check_block_expr_restrictions(
     expr: &Expr<'_>,
-    ctx: &BlockSchemaTemplateContext,
-    active_loops: &BTreeMap<String, String>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
 ) -> Result<(), &'static str> {
+    validate_expr(expr)?;
     match expr {
-        Expr::Var(_) | Expr::Const(_) => Ok(()),
-        Expr::GetItem(_) => Err("C-SEC cấm truy cập GetItem ([...]) trong template block."),
+        Expr::Var(v) => {
+            if v.id == "theme_options" {
+                return Err("Template block không được truy cập theme_options.");
+            }
+            Ok(())
+        }
+        Expr::Const(_) => Ok(()),
+        Expr::GetItem(g) => {
+            let is_menus_lookup = matches!(&g.expr, Expr::Var(v) if v.id == "menus");
+            if !is_menus_lookup {
+                return Err("C-SEC cấm truy cập GetItem ([...]) trong template block.");
+            }
+            check_block_expr_restrictions(&g.subscript_expr, scopes, policy)?;
+            if block_expr_touches_sensitive(&g.subscript_expr, scopes, policy) {
+                return Err("Khóa tra cứu menus[...] phải là biểu thức scalar an toàn.");
+            }
+            Ok(())
+        }
         Expr::Filter(f) => {
             if f.expr
                 .as_ref()
-                .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                .is_some_and(|e| block_expr_touches_sensitive(e, scopes, policy))
                 || f.args
                     .iter()
-                    .any(|arg| call_arg_touches_sensitive(arg, ctx, active_loops))
+                    .any(|arg| block_call_arg_touches_sensitive(arg, scopes, policy))
             {
                 return Err("C-SEC cấm áp dụng filter lên biến richtext/url/media/repeater.");
             }
             if let Some(e) = &f.expr {
-                check_block_expr_restrictions(e, ctx, active_loops)?;
+                check_block_expr_restrictions(e, scopes, policy)?;
             }
             for arg in &f.args {
-                check_block_call_arg_restrictions(arg, ctx, active_loops)?;
+                check_block_call_arg_restrictions(arg, scopes, policy)?;
             }
             Ok(())
         }
         Expr::Slice(s) => {
-            if expr_touches_any_sensitive(&s.expr, ctx, active_loops) {
+            if block_expr_touches_sensitive(&s.expr, scopes, policy) {
                 return Err("C-SEC cấm cắt lát (slice) trên biến nhạy cảm.");
             }
-            check_block_expr_restrictions(&s.expr, ctx, active_loops)?;
+            check_block_expr_restrictions(&s.expr, scopes, policy)?;
             if let Some(start) = &s.start {
-                check_block_expr_restrictions(start, ctx, active_loops)?;
+                check_block_expr_restrictions(start, scopes, policy)?;
             }
             if let Some(stop) = &s.stop {
-                check_block_expr_restrictions(stop, ctx, active_loops)?;
+                check_block_expr_restrictions(stop, scopes, policy)?;
             }
             if let Some(step) = &s.step {
-                check_block_expr_restrictions(step, ctx, active_loops)?;
+                check_block_expr_restrictions(step, scopes, policy)?;
             }
             Ok(())
         }
-        Expr::UnaryOp(u) => check_block_expr_restrictions(&u.expr, ctx, active_loops),
+        Expr::UnaryOp(u) => check_block_expr_restrictions(&u.expr, scopes, policy),
         Expr::BinOp(b) => {
-            check_block_expr_restrictions(&b.left, ctx, active_loops)?;
-            check_block_expr_restrictions(&b.right, ctx, active_loops)
+            check_block_expr_restrictions(&b.left, scopes, policy)?;
+            check_block_expr_restrictions(&b.right, scopes, policy)
         }
         Expr::Compare(c) => {
-            check_block_expr_restrictions(&c.expr, ctx, active_loops)?;
+            check_block_expr_restrictions(&c.expr, scopes, policy)?;
             for op in &c.ops {
-                check_block_expr_restrictions(&op.expr, ctx, active_loops)?;
+                check_block_expr_restrictions(&op.expr, scopes, policy)?;
             }
             Ok(())
         }
         Expr::IfExpr(i) => {
-            check_block_expr_restrictions(&i.test_expr, ctx, active_loops)?;
-            check_block_expr_restrictions(&i.true_expr, ctx, active_loops)?;
+            check_block_expr_restrictions(&i.test_expr, scopes, policy)?;
+            check_block_expr_restrictions(&i.true_expr, scopes, policy)?;
             if let Some(f) = &i.false_expr {
-                check_block_expr_restrictions(f, ctx, active_loops)?;
+                check_block_expr_restrictions(f, scopes, policy)?;
             }
             Ok(())
         }
-        Expr::GetAttr(g) => check_block_expr_restrictions(&g.expr, ctx, active_loops),
+        Expr::GetAttr(g) => check_block_expr_restrictions(&g.expr, scopes, policy),
         Expr::List(l) => {
             for item in &l.items {
-                check_block_expr_restrictions(item, ctx, active_loops)?;
+                check_block_expr_restrictions(item, scopes, policy)?;
             }
             Ok(())
         }
         Expr::Tuple(t) => {
             for item in &t.items {
-                check_block_expr_restrictions(item, ctx, active_loops)?;
+                check_block_expr_restrictions(item, scopes, policy)?;
             }
             Ok(())
         }
         Expr::Map(m) => {
             for (k, v) in m.keys.iter().zip(m.values.iter()) {
-                check_block_expr_restrictions(k, ctx, active_loops)?;
-                check_block_expr_restrictions(v, ctx, active_loops)?;
+                check_block_expr_restrictions(k, scopes, policy)?;
+                check_block_expr_restrictions(v, scopes, policy)?;
             }
             Ok(())
         }
         Expr::Test(t) => {
-            check_block_expr_restrictions(&t.expr, ctx, active_loops)?;
+            check_block_expr_restrictions(&t.expr, scopes, policy)?;
             for arg in &t.args {
-                check_block_call_arg_restrictions(arg, ctx, active_loops)?;
+                check_block_call_arg_restrictions(arg, scopes, policy)?;
             }
             Ok(())
         }
@@ -6563,277 +6532,565 @@ fn check_block_expr_restrictions(
 
 fn check_block_call_arg_restrictions(
     arg: &minijinja::machinery::ast::CallArg<'_>,
-    ctx: &BlockSchemaTemplateContext,
-    active_loops: &BTreeMap<String, String>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
 ) -> Result<(), &'static str> {
     match arg {
         minijinja::machinery::ast::CallArg::Pos(e)
         | minijinja::machinery::ast::CallArg::Kwarg(_, e)
         | minijinja::machinery::ast::CallArg::PosSplat(e)
         | minijinja::machinery::ast::CallArg::KwargSplat(e) => {
-            check_block_expr_restrictions(e, ctx, active_loops)
+            check_block_expr_restrictions(e, scopes, policy)
         }
     }
 }
 
+fn is_valid_block_url_expr(
+    expr: &Expr<'_>,
+    slot: UrlAttrSlot,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> bool {
+    match classify_block_sensitive_expr(expr, scopes, policy) {
+        Some(BlockSensitiveKind::HrefUrl) => {
+            matches!(slot, UrlAttrSlot::AnchorHref | UrlAttrSlot::Cite)
+        }
+        Some(BlockSensitiveKind::MediaUrl) => {
+            matches!(slot, UrlAttrSlot::AnchorHref | UrlAttrSlot::SrcAndHref)
+        }
+        _ => false,
+    }
+}
+
+fn resolve_block_collection_source(
+    expr: &Expr<'_>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> Option<UrlSourceKind> {
+    if let Some((root, attrs)) = extract_attr_chain(expr)
+        && let Some((node, &[])) = resolve_field_node_and_tail(root, &attrs, scopes, policy)
+    {
+        return match node {
+            FieldTemplateNode::Repeater(fields) => Some(UrlSourceKind::FieldNode(
+                FieldTemplateNode::Group(fields.clone()),
+            )),
+            FieldTemplateNode::Gallery => Some(UrlSourceKind::FieldNode(FieldTemplateNode::Media)),
+            FieldTemplateNode::EntryRef { .. } => {
+                Some(UrlSourceKind::FieldNode(FieldTemplateNode::EntryRef {
+                    multiple: false,
+                }))
+            }
+            FieldTemplateNode::TermRef { .. } => {
+                Some(UrlSourceKind::FieldNode(FieldTemplateNode::TermRef {
+                    multiple: false,
+                }))
+            }
+            _ => None,
+        };
+    }
+    if let Some((_sub, attrs)) = resolve_menu_get_item_subscript(expr)
+        && attrs.as_slice() == ["items"]
+    {
+        return Some(UrlSourceKind::TrustedLink);
+    }
+    if let Some(attrs) = resolve_menu_dot_chain(expr)
+        && matches!(attrs.as_slice(), [_slot, "items"])
+    {
+        return Some(UrlSourceKind::TrustedLink);
+    }
+    if let Expr::GetAttr(g) = expr
+        && g.name == "children"
+        && let Expr::Var(v) = &g.expr
+        && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedLink)
+    {
+        return Some(UrlSourceKind::TrustedLink);
+    }
+    None
+}
+
+const BLOCK_HTML_STEP_OPTIONS: HtmlStepOptions = HtmlStepOptions {
+    is_part: false,
+    is_full_doctype_doc: false,
+    allow_trusted_theme_markup: true,
+    forbid_style_tag: true,
+};
+
 fn walk_block_ast_sequence(
     children: &[Stmt<'_>],
-    states: &BTreeSet<HtmlScanState>,
-    ctx: &BlockSchemaTemplateContext,
-    active_loops: &BTreeMap<String, String>,
-) -> Result<BTreeSet<HtmlScanState>, &'static str> {
-    let mut current = states.clone();
+    mut states: BTreeSet<ThemeHtmlState>,
+    mut scopes: UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
     for child in children {
-        current = walk_block_ast_stmt(child, &current, ctx, active_loops)?;
-        bounded_html_states(current.clone())?;
+        let (next_states, next_scopes) = walk_block_ast_stmt(child, states, scopes, policy)?;
+        states = next_states;
+        scopes = next_scopes;
+        if states.len() > MAX_THEME_WALKER_STATES {
+            return Err("Quá nhiều trạng thái HTML trong template block.");
+        }
     }
-    Ok(current)
+    Ok((states, scopes))
 }
 
 fn walk_block_ast_stmt(
     stmt: &Stmt<'_>,
-    states: &BTreeSet<HtmlScanState>,
-    ctx: &BlockSchemaTemplateContext,
-    active_loops: &BTreeMap<String, String>,
-) -> Result<BTreeSet<HtmlScanState>, &'static str> {
-    if !matches!(stmt, Stmt::Template(_) | Stmt::EmitRaw(_))
-        && states
-            .iter()
-            .any(|state| matches!(state, HtmlScanState::Script { .. }))
-    {
-        return Err("C-SEC cấm nội suy và điều khiển Jinja trong <script> của block.");
-    }
+    states: BTreeSet<ThemeHtmlState>,
+    mut scopes: UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
     match stmt {
-        Stmt::Template(t) => walk_block_ast_sequence(&t.children, states, ctx, active_loops),
+        Stmt::Template(t) => walk_block_ast_sequence(&t.children, states, scopes, policy),
         Stmt::EmitRaw(raw) => {
-            let mut result = BTreeSet::new();
+            let mut next_states = BTreeSet::new();
             for initial in states {
-                let final_state = raw
-                    .raw
-                    .bytes()
-                    .fold(initial.clone(), HtmlScanState::consume);
-                result.insert(final_state);
+                let mut cur = initial;
+                for ch in raw.raw.chars() {
+                    let depth = cur.trusted_depth();
+                    cur = step_theme_raw_char(cur, ch, BLOCK_HTML_STEP_OPTIONS, depth)?;
+                }
+                next_states.insert(cur);
             }
-            Ok(result)
+            if next_states.len() > MAX_THEME_WALKER_STATES {
+                return Err("Quá nhiều trạng thái HTML trong template block.");
+            }
+            Ok((next_states, scopes))
         }
         Stmt::EmitExpr(e) => {
-            if parse_od_icon_call(&e.expr)?.is_some() {
-                if states.iter().any(|s| *s != HtmlScanState::Body) {
+            reject_style_control_flow(&states)?;
+            if let Some((icon_arg, _)) = parse_od_icon_call_ext(&e.expr, true)? {
+                if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_icon() chỉ được xuất trong thân HTML của block.");
                 }
-                return Ok(states.clone());
+                if let OdIconNameArg::FieldNamePath(root, attrs) = icon_arg {
+                    let resolved = resolve_field_node_and_tail(
+                        root,
+                        &attrs[..attrs.len() - 1],
+                        &scopes,
+                        policy,
+                    );
+                    if !matches!(resolved, Some((FieldTemplateNode::Icon, &[]))) {
+                        return Err("od_icon() động phải tham chiếu trường kiểu icon.");
+                    }
+                }
+                return Ok((states, scopes));
             }
             if let Some((_, arg_expr)) = parse_od_hook_call(&e.expr)? {
-                if states.iter().any(|s| *s != HtmlScanState::Body) {
+                if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_hook() chỉ được xuất trong thân HTML của block.");
                 }
                 if let Some(arg) = arg_expr {
-                    check_block_expr_restrictions(arg, ctx, active_loops)?;
+                    check_block_expr_restrictions(arg, &scopes, policy)?;
                 }
-                return Ok(states.clone());
+                return Ok((states, scopes));
             }
-            check_block_expr_restrictions(&e.expr, ctx, active_loops)?;
-            if let Some(kind) = classify_bare_sensitive_expr(&e.expr, ctx, active_loops) {
-                match kind {
-                    SensitiveVarKind::Richtext => {
-                        if states.iter().any(|s| *s != HtmlScanState::Body) {
-                            return Err(
-                                "Biến richtext chỉ được phép đặt trong phần thân HTML (HtmlScanState::Body).",
-                            );
+            check_block_expr_restrictions(&e.expr, &scopes, policy)?;
+            if states.iter().any(|s| {
+                matches!(
+                    s.inner(),
+                    ThemeHtmlState::Style { .. }
+                        | ThemeHtmlState::Script { .. }
+                        | ThemeHtmlState::Comment(_)
+                        | ThemeHtmlState::BodyLt
+                        | ThemeHtmlState::BodyLtSlash
+                        | ThemeHtmlState::BodyLtBang { .. }
+                        | ThemeHtmlState::Doctype
+                        | ThemeHtmlState::Title {
+                            closing_prefix: 1..
                         }
-                    }
-                    SensitiveVarKind::HrefUrl | SensitiveVarKind::MediaUrl => {
-                        if states
-                            .iter()
-                            .any(|s| !matches!(s, HtmlScanState::Tag { quote: Some(_), .. }))
-                        {
-                            return Err(
-                                "Biến url / <media_key>_url chỉ được xuất bên trong thuộc tính URL được trích dẫn.",
-                            );
-                        }
-                    }
-                    SensitiveVarKind::MediaRaw | SensitiveVarKind::RepeaterOrLoopItem => {
-                        return Err(
-                            "Không được xuất trực tiếp biến media ID thô hoặc đối tượng repeater.",
-                        );
-                    }
-                }
-            } else if expr_touches_any_sensitive(&e.expr, ctx, active_loops) {
+                )
+            }) {
                 return Err(
-                    "Biến richtext/url/media không được phép ghép chuỗi hoặc biến đổi trong biểu thức xuất.",
+                    "C-SEC cấm nội suy Jinja ở comment, <style>/<script> hoặc biên thẻ HTML.",
                 );
             }
-            Ok(states.clone())
-        }
-        Stmt::IfCond(cond) => {
-            check_block_expr_restrictions(&cond.expr, ctx, active_loops)?;
-            let mut result = walk_block_ast_sequence(&cond.true_body, states, ctx, active_loops)?;
-            result.extend(walk_block_ast_sequence(
-                &cond.false_body,
-                states,
-                ctx,
-                active_loops,
-            )?);
-            bounded_html_states(result)
-        }
-        Stmt::ForLoop(loop_stmt) => {
-            check_block_expr_restrictions(&loop_stmt.iter, ctx, active_loops)?;
-            if expr_touches_any_sensitive(&loop_stmt.target, ctx, active_loops) {
-                return Err("Biến vòng lặp for không được che khuất tên biến nhạy cảm.");
+
+            let has_non_tag = states
+                .iter()
+                .any(|s| !matches!(s.inner(), ThemeHtmlState::Tag { .. }));
+            let has_tag = states
+                .iter()
+                .any(|s| matches!(s.inner(), ThemeHtmlState::Tag { .. }));
+            if has_non_tag && has_tag {
+                return Err("C-SEC cấm trộn lẫn ngữ cảnh thẻ HTML và thân HTML tại điểm nội suy.");
             }
-            if let Some(cond) = &loop_stmt.filter_expr {
-                check_block_expr_restrictions(cond, ctx, active_loops)?;
-            }
-            let mut inner_loops = active_loops.clone();
-            match (&loop_stmt.target, &loop_stmt.iter) {
-                (Expr::Var(target_var), Expr::Var(iter_var)) => {
-                    if ctx.is_sensitive_name(target_var.id, active_loops) {
-                        return Err("Biến vòng lặp for không được che khuất tên biến nhạy cảm.");
+
+            if !has_tag {
+                match classify_block_sensitive_expr(&e.expr, &scopes, policy) {
+                    Some(BlockSensitiveKind::Richtext) => {
+                        if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
+                            return Err(
+                                "Biến richtext chỉ được phép đặt trong phần thân HTML (ThemeHtmlState::Body).",
+                            );
+                        }
                     }
-                    if let Some(kind) =
-                        classify_bare_sensitive_expr(&loop_stmt.iter, ctx, active_loops)
-                        && kind != SensitiveVarKind::RepeaterOrLoopItem
-                    {
-                        return Err("Không được lặp trực tiếp trên biến richtext/url/media.");
-                    }
-                    if ctx.repeaters.contains_key(iter_var.id) {
-                        inner_loops.insert(target_var.id.to_owned(), iter_var.id.to_owned());
-                    }
-                }
-                _ => {
-                    if expr_touches_any_sensitive(&loop_stmt.iter, ctx, active_loops) {
+                    Some(BlockSensitiveKind::HrefUrl | BlockSensitiveKind::MediaUrl) => {
                         return Err(
-                            "Vòng lặp for trên repeater bắt buộc dùng cú pháp `{% for item in items %}`.",
+                            "Biến url / media url chỉ được xuất bên trong thuộc tính URL được trích dẫn.",
                         );
                     }
+                    Some(BlockSensitiveKind::ObjectOrNonScalar) => {
+                        return Err(
+                            "Không được xuất trực tiếp đối tượng media/link/icon/group/repeater/options/menus.",
+                        );
+                    }
+                    None => {
+                        if block_expr_touches_sensitive(&e.expr, &scopes, policy) {
+                            return Err(
+                                "Biến richtext/url/media không được phép ghép chuỗi hoặc biến đổi trong biểu thức xuất.",
+                            );
+                        }
+                    }
+                }
+                return Ok((states, scopes));
+            }
+
+            if matches!(
+                classify_block_sensitive_expr(&e.expr, &scopes, policy),
+                Some(BlockSensitiveKind::Richtext | BlockSensitiveKind::ObjectOrNonScalar)
+            ) {
+                return Err(
+                    "C-SEC cấm xuất biến richtext hoặc đối tượng không phải chuỗi bên trong thuộc tính thẻ HTML.",
+                );
+            }
+
+            let mut expected_url_slot: Option<Option<UrlAttrSlot>> = None;
+            let mut updated_states = BTreeSet::new();
+            for state in states {
+                let svg_depth = state.trusted_depth();
+                let ThemeHtmlState::Tag {
+                    tag_name,
+                    is_close,
+                    phase,
+                    attr_name,
+                    quote,
+                    attr_has_static_bytes,
+                    mut attr_expr_count,
+                    seen_attrs,
+                    link_rel_stylesheet,
+                    mut link_has_valid_href,
+                    meta_ok,
+                    attr_static_buf,
+                } = state.into_inner()
+                else {
+                    unreachable!("non-tag state already filtered");
+                };
+                if is_close || phase != TagPhase::AttrValue || quote.is_none() {
+                    return Err(
+                        "C-SEC chỉ cho phép nội suy bên trong giá trị thuộc tính có dấu ngoặc kép.",
+                    );
+                }
+                if forbids_dynamic_interpolation(&attr_name)
+                    || matches!(attr_name.as_str(), "style" | "srcset" | "ping")
+                    || (tag_name == "link" && attr_name == "rel")
+                    || tag_name == "meta"
+                {
+                    return Err(
+                        "C-SEC cấm nội suy bên trong thuộc tính bảo mật hoặc sự kiện HTML.",
+                    );
+                }
+                if matches!(attr_name.as_str(), "href" | "src" | "poster" | "cite") {
+                    if attr_has_static_bytes || attr_expr_count != 0 {
+                        return Err(
+                            "URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.",
+                        );
+                    }
+                    let Some(slot) = classify_theme_url_slot(&tag_name, &attr_name) else {
+                        return Err("C-SEC cấm nội suy URL động trên thuộc tính hoặc thẻ này.");
+                    };
+                    if let Some(prev_slot) = expected_url_slot {
+                        if prev_slot != Some(slot) {
+                            return Err("Nhóm thuộc tính URL phải đồng nhất qua các nhánh rẽ.");
+                        }
+                    } else {
+                        expected_url_slot = Some(Some(slot));
+                    }
+                    if !is_valid_block_url_expr(&e.expr, slot, &scopes, policy) {
+                        return Err(
+                            "URL động trong thuộc tính không nằm trong whitelist typed URL của block.",
+                        );
+                    }
+                    attr_expr_count = 1;
+                    if slot == UrlAttrSlot::LinkCss {
+                        link_has_valid_href = true;
+                    }
+                } else {
+                    if block_expr_touches_sensitive(&e.expr, &scopes, policy) {
+                        return Err(
+                            "Biến richtext/url/media không được phép xuất bên trong thuộc tính HTML thường.",
+                        );
+                    }
+                    if let Some(prev_slot) = expected_url_slot {
+                        if prev_slot.is_some() {
+                            return Err(
+                                "Không thể trộn thuộc tính URL và thuộc tính thường qua các nhánh.",
+                            );
+                        }
+                    } else {
+                        expected_url_slot = Some(None);
+                    }
+                    attr_expr_count = attr_expr_count.saturating_add(1);
+                }
+                updated_states.insert(ThemeHtmlState::with_trust(
+                    ThemeHtmlState::Tag {
+                        tag_name,
+                        is_close,
+                        phase,
+                        attr_name,
+                        quote,
+                        attr_has_static_bytes,
+                        attr_expr_count,
+                        seen_attrs,
+                        link_rel_stylesheet,
+                        link_has_valid_href,
+                        meta_ok,
+                        attr_static_buf,
+                    },
+                    true,
+                    svg_depth,
+                ));
+            }
+            Ok((updated_states, scopes))
+        }
+        Stmt::IfCond(cond) => {
+            reject_style_control_flow(&states)?;
+            check_block_expr_restrictions(&cond.expr, &scopes, policy)?;
+            let (mut true_states, true_scopes) =
+                walk_block_ast_sequence(&cond.true_body, states.clone(), scopes.clone(), policy)?;
+            let (false_states, false_scopes) =
+                walk_block_ast_sequence(&cond.false_body, states, scopes, policy)?;
+            true_states.extend(false_states);
+            if true_states.len() > MAX_THEME_WALKER_STATES {
+                return Err("Quá nhiều trạng thái HTML tại nhánh điều kiện block.");
+            }
+            Ok((
+                true_states,
+                UrlScopeStack::intersect(&true_scopes, &false_scopes),
+            ))
+        }
+        Stmt::ForLoop(loop_stmt) => {
+            reject_style_control_flow(&states)?;
+            validate_expr(&loop_stmt.target)?;
+            check_block_expr_restrictions(&loop_stmt.iter, &scopes, policy)?;
+            if let Some(cond) = &loop_stmt.filter_expr {
+                check_block_expr_restrictions(cond, &scopes, policy)?;
+            }
+
+            let target_idents = extract_bound_idents(&loop_stmt.target)?;
+            for id in &target_idents {
+                if is_protected_block_binding(id, &scopes) {
+                    return Err("Biến vòng lặp for không được che khuất tên biến nhạy cảm.");
                 }
             }
 
-            let mut possible = states.clone();
-            let mut frontier = states.clone();
+            let iter_kind = resolve_block_collection_source(&loop_stmt.iter, &scopes, policy);
+            if block_expr_touches_sensitive(&loop_stmt.iter, &scopes, policy) {
+                let valid_iter = matches!(&loop_stmt.target, Expr::Var(_)) && iter_kind.is_some();
+                if !valid_iter {
+                    return Err(
+                        "Không được lặp trực tiếp trên biến richtext/url/media hoặc sai cú pháp vòng lặp block.",
+                    );
+                }
+            }
+
+            let (else_states, else_scopes) = walk_block_ast_sequence(
+                &loop_stmt.else_body,
+                states.clone(),
+                scopes.clone(),
+                policy,
+            )?;
+
+            let loop_targets: BTreeMap<String, Option<UrlSourceKind>> =
+                if let Expr::Var(v) = &loop_stmt.target {
+                    BTreeMap::from([(v.id.to_owned(), iter_kind)])
+                } else {
+                    target_idents.into_iter().map(|id| (id, None)).collect()
+                };
+
+            let mut loop_states = states;
+            let mut loop_scopes = scopes;
+            loop_scopes.push_frame(loop_targets.clone());
+
             let mut settled = false;
-            for _ in 0..64 {
-                let after = walk_block_ast_sequence(&loop_stmt.body, &frontier, ctx, &inner_loops)?;
-                let new_states: BTreeSet<_> = after.difference(&possible).cloned().collect();
-                if new_states.is_empty() {
+            let mut final_loop_states = BTreeSet::new();
+            let mut final_loop_scopes = loop_scopes.clone();
+
+            for _ in 0..MAX_THEME_WALKER_STATES {
+                let (after_states, after_scopes) = walk_block_ast_sequence(
+                    &loop_stmt.body,
+                    loop_states.clone(),
+                    loop_scopes.clone(),
+                    policy,
+                )?;
+                let mut next_states = loop_states.clone();
+                next_states.extend(after_states);
+                if next_states.len() > MAX_THEME_WALKER_STATES {
+                    return Err("Quá nhiều trạng thái HTML trong vòng lặp block.");
+                }
+                let next_scopes = UrlScopeStack::intersect(&loop_scopes, &after_scopes);
+                let mut next_header_scopes = next_scopes.clone();
+                for (k, v) in &loop_targets {
+                    next_header_scopes.insert_top(k.clone(), v.clone());
+                }
+                if next_states == loop_states && next_header_scopes == loop_scopes {
+                    final_loop_states = next_states;
+                    final_loop_scopes = next_scopes;
                     settled = true;
                     break;
                 }
-                possible.extend(new_states.iter().cloned());
-                bounded_html_states(possible.clone())?;
-                frontier = new_states;
+                loop_states = next_states;
+                loop_scopes = next_header_scopes;
             }
             if !settled {
                 return Err("Không thể xác định vị trí HTML sau vòng lặp trong template block.");
             }
-            let after_else =
-                walk_block_ast_sequence(&loop_stmt.else_body, &possible, ctx, active_loops)?;
-            possible.extend(after_else);
-            bounded_html_states(possible)
+
+            final_loop_scopes.pop_frame();
+            let mut combined_states = final_loop_states;
+            combined_states.extend(else_states);
+            if combined_states.len() > MAX_THEME_WALKER_STATES {
+                return Err("Quá nhiều trạng thái HTML sau vòng lặp block.");
+            }
+            let combined_scopes = UrlScopeStack::intersect(&final_loop_scopes, &else_scopes);
+            Ok((combined_states, combined_scopes))
         }
         Stmt::Set(s) => {
-            check_block_expr_restrictions(&s.target, ctx, active_loops)?;
-            check_block_expr_restrictions(&s.expr, ctx, active_loops)?;
-            if expr_touches_any_sensitive(&s.target, ctx, active_loops)
-                || expr_touches_any_sensitive(&s.expr, ctx, active_loops)
-            {
+            reject_style_control_flow(&states)?;
+            validate_expr(&s.target)?;
+            check_block_expr_restrictions(&s.expr, &scopes, policy)?;
+            if block_expr_touches_sensitive(&s.expr, &scopes, policy) {
                 return Err(
                     "C-SEC cấm gán (set) hoặc tạo bí danh cho biến richtext/url/media/repeater.",
                 );
             }
-            Ok(states.clone())
+            for ident in extract_bound_idents(&s.target)? {
+                if is_protected_block_binding(&ident, &scopes) {
+                    return Err("C-SEC cấm gán (set) hoặc ghi đè biến nhạy cảm của block.");
+                }
+                scopes.insert_top(ident, None);
+            }
+            Ok((states, scopes))
         }
         Stmt::SetBlock(sb) => {
+            reject_style_control_flow(&states)?;
             reject_icons_in_set_block(&sb.body)?;
             if sb.filter.is_some() {
                 return Err("C-SEC cấm modifier filter trong khối set.");
             }
-            if expr_touches_any_sensitive(&sb.target, ctx, active_loops) {
+            validate_expr(&sb.target)?;
+            let target_idents = extract_bound_idents(&sb.target)?;
+            if target_idents
+                .iter()
+                .any(|id| is_protected_block_binding(id, &scopes))
+            {
                 return Err("C-SEC cấm ghi đè biến nhạy cảm qua khối set.");
             }
-            let _ = walk_block_ast_sequence(&sb.body, states, ctx, active_loops)?;
-            // Forbid capturing any sensitive variable inside SetBlock body
             for child in &sb.body {
-                if stmt_touches_sensitive(child, ctx, active_loops) {
+                if block_stmt_touches_sensitive(child, &scopes, policy) {
                     return Err("C-SEC cấm bọc biến richtext/url/media trong khối set.");
                 }
             }
-            Ok(states.clone())
+            let (sb_states, sb_scopes) = walk_block_ast_sequence(
+                &sb.body,
+                BTreeSet::from([ThemeHtmlState::with_trust(ThemeHtmlState::Body, true, 0)]),
+                scopes.clone(),
+                policy,
+            )?;
+            if sb_states
+                .iter()
+                .any(|s| s.inner() != &ThemeHtmlState::Body || s.trusted_depth() != 0)
+            {
+                return Err("Khối set block phải đóng đủ thẻ/comment HTML bên trong.");
+            }
+            scopes = UrlScopeStack::intersect(&scopes, &sb_scopes);
+            for ident in target_idents {
+                scopes.insert_top(ident, None);
+            }
+            Ok((states, scopes))
         }
         Stmt::WithBlock(w) => {
+            reject_style_control_flow(&states)?;
+            let mut frame = BTreeMap::new();
             for (k, v) in &w.assignments {
-                check_block_expr_restrictions(k, ctx, active_loops)?;
-                check_block_expr_restrictions(v, ctx, active_loops)?;
-                if expr_touches_any_sensitive(k, ctx, active_loops)
-                    || expr_touches_any_sensitive(v, ctx, active_loops)
-                {
+                validate_expr(k)?;
+                check_block_expr_restrictions(v, &scopes, policy)?;
+                if block_expr_touches_sensitive(v, &scopes, policy) {
                     return Err(
                         "C-SEC cấm tạo bí danh cho biến richtext/url/media/repeater qua khối with.",
                     );
                 }
+                for ident in extract_bound_idents(k)? {
+                    if is_protected_block_binding(&ident, &scopes) {
+                        return Err("C-SEC cấm ghi đè biến nhạy cảm qua khối with.");
+                    }
+                    frame.insert(ident, None);
+                }
             }
-            walk_block_ast_sequence(&w.body, states, ctx, active_loops)
+            scopes.push_frame(frame);
+            let (out_states, mut out_scopes) =
+                walk_block_ast_sequence(&w.body, states, scopes, policy)?;
+            out_scopes.pop_frame();
+            Ok((out_states, out_scopes))
         }
         _ => Err("Template block sử dụng câu lệnh MiniJinja bị C-SEC cấm."),
     }
 }
 
-fn stmt_touches_sensitive(
+fn block_stmt_touches_sensitive(
     stmt: &Stmt<'_>,
-    ctx: &BlockSchemaTemplateContext,
-    active_loops: &BTreeMap<String, String>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
 ) -> bool {
     match stmt {
         Stmt::Template(t) => t
             .children
             .iter()
-            .any(|c| stmt_touches_sensitive(c, ctx, active_loops)),
+            .any(|c| block_stmt_touches_sensitive(c, scopes, policy)),
         Stmt::EmitRaw(_) => false,
-        Stmt::EmitExpr(e) => expr_touches_any_sensitive(&e.expr, ctx, active_loops),
+        Stmt::EmitExpr(e) => block_expr_touches_sensitive(&e.expr, scopes, policy),
         Stmt::IfCond(i) => {
-            expr_touches_any_sensitive(&i.expr, ctx, active_loops)
+            block_expr_touches_sensitive(&i.expr, scopes, policy)
                 || i.true_body
                     .iter()
-                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
                 || i.false_body
                     .iter()
-                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
         }
         Stmt::ForLoop(f) => {
-            expr_touches_any_sensitive(&f.iter, ctx, active_loops)
+            block_expr_touches_sensitive(&f.iter, scopes, policy)
                 || f.body
                     .iter()
-                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
                 || f.else_body
                     .iter()
-                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
         }
         Stmt::Set(s) => {
-            expr_touches_any_sensitive(&s.target, ctx, active_loops)
-                || expr_touches_any_sensitive(&s.expr, ctx, active_loops)
+            block_expr_touches_sensitive(&s.target, scopes, policy)
+                || block_expr_touches_sensitive(&s.expr, scopes, policy)
         }
         Stmt::SetBlock(sb) => {
-            expr_touches_any_sensitive(&sb.target, ctx, active_loops)
+            block_expr_touches_sensitive(&sb.target, scopes, policy)
                 || sb
                     .body
                     .iter()
-                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
         }
         Stmt::WithBlock(w) => {
             w.assignments.iter().any(|(k, v)| {
-                expr_touches_any_sensitive(k, ctx, active_loops)
-                    || expr_touches_any_sensitive(v, ctx, active_loops)
+                block_expr_touches_sensitive(k, scopes, policy)
+                    || block_expr_touches_sensitive(v, scopes, policy)
             }) || w
                 .body
                 .iter()
-                .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+                .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
         }
         _ => true,
     }
 }
 
-/// Validates a declarative `block.json` v1 `render.html` template using the joint
-/// MiniJinja AST + `HtmlScanState` checker and typed URL/RichText/Repeater rules.
+/// Validates a declarative `block.json` v1 `render.html` template using the unified
+/// `ThemeHtmlState` + MiniJinja AST + `UrlScopeStack` checker.
 pub fn validate_block_template_csec(
     block_id: &str,
     source: &str,
@@ -6855,21 +7112,23 @@ pub fn validate_block_template_csec(
     }
 
     let ctx = BlockSchemaTemplateContext::from_schema(schema);
-    let url_allowlist = ctx.url_allowlist();
-    validate_html_and_css_context_with_url_vars(source, false, Some(&url_allowlist), true)?;
-
     let ast = parse(source, block_id, SyntaxConfig::default())
         .map_err(|_| "Cú pháp MiniJinja của template block không hợp lệ.")?;
-    validate_stmt_with_icons(&ast, true, false)?;
+    validate_stmt_with_icons_ext(&ast, true, true, false)?;
 
-    let final_states = walk_block_ast_stmt(
+    let (final_states, _) = walk_block_ast_stmt(
         &ast,
-        &BTreeSet::from([HtmlScanState::Body]),
-        &ctx,
-        &BTreeMap::new(),
+        BTreeSet::from([ThemeHtmlState::with_trust(ThemeHtmlState::Body, true, 0)]),
+        ctx.root_scopes,
+        &ctx.policy,
     )?;
-    if final_states.iter().any(|s| *s != HtmlScanState::Body) {
-        return Err("Template block phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment).");
+    if final_states
+        .iter()
+        .any(|s| s.inner() != &ThemeHtmlState::Body || s.trusted_depth() != 0)
+    {
+        return Err(
+            "Template block phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment/svg).",
+        );
     }
 
     let mut env = restricted_environment();
@@ -6892,191 +7151,16 @@ fn generate_richtext_nonce() -> Result<String, &'static str> {
     Ok(nonce)
 }
 
-fn populate_leaf_field_context(
-    field: &opendash_core::block_schema::BlockFieldSpec,
-    raw_val: Option<&serde_json::Value>,
-    raw_map: Option<&BTreeMap<String, serde_json::Value>>,
-    raw_obj: Option<&serde_json::Map<String, serde_json::Value>>,
-    is_preview: bool,
-    target_map: &mut BTreeMap<String, Value>,
-    nonces: &mut BTreeMap<String, String>,
-) -> Result<(), &'static str> {
-    use opendash_core::{
-        block_schema::{BlockFieldSpec, valid_block_url, valid_sha256_media_id},
-        richtext::sanitize_richtext,
-    };
-
-    let key = field.key().to_owned();
-    match field {
-        BlockFieldSpec::Text { default, .. } | BlockFieldSpec::Textarea { default, .. } => {
-            let s = raw_val
-                .and_then(serde_json::Value::as_str)
-                .or(default.as_deref())
-                .unwrap_or("");
-            target_map.insert(key, Value::from(s.to_owned()));
-        }
-        BlockFieldSpec::Richtext { default, .. } => {
-            let s = raw_val
-                .and_then(serde_json::Value::as_str)
-                .or(default.as_deref())
-                .unwrap_or("");
-            if s.trim().is_empty() {
-                target_map.insert(key, Value::from(""));
-            } else {
-                let clean = sanitize_richtext(s)?;
-                if clean.is_empty() {
-                    target_map.insert(key, Value::from(""));
-                } else {
-                    let nonce = generate_richtext_nonce()?;
-                    nonces.insert(nonce.clone(), clean);
-                    target_map.insert(key, Value::from(nonce));
-                }
-            }
-        }
-        BlockFieldSpec::Number { default, .. } => {
-            let n = extract_scalar_or_desktop_f64(raw_val)
-                .or(*default)
-                .unwrap_or(0.0);
-            target_map.insert(key, Value::from(n));
-        }
-        BlockFieldSpec::Range { default, min, .. } => {
-            let n = extract_scalar_or_desktop_f64(raw_val)
-                .or(*default)
-                .unwrap_or(*min);
-            target_map.insert(key, Value::from(n));
-        }
-        BlockFieldSpec::Boolean { default, .. } => {
-            let b = raw_val
-                .and_then(serde_json::Value::as_bool)
-                .or(*default)
-                .unwrap_or(false);
-            target_map.insert(key, Value::from(b));
-        }
-        BlockFieldSpec::Select {
-            options, default, ..
-        }
-        | BlockFieldSpec::RadioButtons {
-            options, default, ..
-        } => {
-            let fallback = default
-                .as_deref()
-                .or_else(|| options.first().map(|o| o.value.as_str()))
-                .unwrap_or("");
-            let s = extract_scalar_or_desktop_str(raw_val).unwrap_or(fallback);
-            target_map.insert(key, Value::from(s.to_owned()));
-        }
-        BlockFieldSpec::Spacing {
-            default,
-            unit,
-            responsive,
-            ..
-        } => {
-            let css_unit = unit.unwrap_or(opendash_core::block_schema::CssUnit::Px);
-            let formatted = extract_spacing_css(raw_val, *default, css_unit).unwrap_or_default();
-            let classes = spacing_field_tailwind_classes(raw_val, *default, *responsive, css_unit)
-                .map(|list| list.join(" "))
-                .unwrap_or_default();
-            target_map.insert(format!("{key}_classes"), Value::from(classes));
-            target_map.insert(key, Value::from(formatted));
-        }
-        BlockFieldSpec::Color { default, .. } => {
-            let s = raw_val
-                .and_then(serde_json::Value::as_str)
-                .or(default.as_deref())
-                .unwrap_or("transparent");
-            target_map.insert(key, Value::from(s.to_owned()));
-        }
-        BlockFieldSpec::Media { default, .. } => {
-            let id = raw_val
-                .and_then(serde_json::Value::as_str)
-                .or(default.as_deref())
-                .unwrap_or("");
-            let url = if valid_sha256_media_id(id) {
-                if is_preview {
-                    format!("/api/admin/media/{id}/file")
-                } else {
-                    format!("/media/{id}/file")
-                }
-            } else {
-                String::new()
-            };
-            let alt_key = format!("{key}_alt");
-            let alt = raw_map
-                .and_then(|m| m.get(&alt_key))
-                .or_else(|| raw_obj.and_then(|m| m.get(&alt_key)))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            target_map.insert(format!("{key}_url"), Value::from(url));
-            target_map.insert(alt_key, Value::from(alt.to_owned()));
-            target_map.insert(format!("{key}_width"), Value::from(""));
-            target_map.insert(format!("{key}_height"), Value::from(""));
-            target_map.insert(key, Value::from(id.to_owned()));
-        }
-        BlockFieldSpec::Url { default, .. } => {
-            let raw_u = raw_val
-                .and_then(serde_json::Value::as_str)
-                .or(default.as_deref())
-                .unwrap_or("");
-            let safe_u = if !raw_u.is_empty() && valid_block_url(raw_u) {
-                raw_u
-            } else {
-                ""
-            };
-            target_map.insert(key, Value::from(safe_u.to_owned()));
-        }
-        BlockFieldSpec::Link { default, .. } => {
-            let (raw_u, new_tab, nofollow) = match raw_val {
-                Some(serde_json::Value::Object(obj)) => (
-                    obj.get("url")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or(""),
-                    obj.get("new_tab")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false),
-                    obj.get("nofollow")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false),
-                ),
-                Some(serde_json::Value::String(s)) => (s.as_str(), false, false),
-                _ => match default.as_ref() {
-                    Some(def) => (def.url.as_str(), def.new_tab, def.nofollow),
-                    None => ("", false, false),
-                },
-            };
-            let safe_u = if !raw_u.is_empty() && valid_block_url(raw_u) {
-                raw_u
-            } else {
-                ""
-            };
-            let target_attr = if new_tab { "_blank" } else { "_self" };
-            let rel_attr = match (new_tab, nofollow) {
-                (true, true) => "noopener noreferrer nofollow",
-                (true, false) => "noopener noreferrer",
-                (false, true) => "nofollow",
-                (false, false) => "",
-            };
-            target_map.insert(format!("{key}_url"), Value::from(safe_u.to_owned()));
-            target_map.insert(format!("{key}_target"), Value::from(target_attr));
-            target_map.insert(format!("{key}_rel"), Value::from(rel_attr));
-            target_map.insert(format!("{key}_new_tab"), Value::from(new_tab));
-            target_map.insert(format!("{key}_nofollow"), Value::from(nofollow));
-            target_map.insert(key, Value::from(safe_u.to_owned()));
-        }
-        BlockFieldSpec::Group { .. } | BlockFieldSpec::Repeater { .. } => {}
-    }
-    Ok(())
-}
-
 pub(crate) fn extract_spacing_breakpoint_values(
     val: Option<&serde_json::Value>,
-    fallback: Option<opendash_core::block_schema::SpacingValue>,
+    fallback: Option<opendash_core::field_schema::SpacingValue>,
     responsive: bool,
 ) -> (
-    Option<opendash_core::block_schema::SpacingValue>,
-    Option<opendash_core::block_schema::SpacingValue>,
-    Option<opendash_core::block_schema::SpacingValue>,
+    Option<opendash_core::field_schema::SpacingValue>,
+    Option<opendash_core::field_schema::SpacingValue>,
+    Option<opendash_core::field_schema::SpacingValue>,
 ) {
-    use opendash_core::block_schema::SpacingValue;
+    use opendash_core::field_schema::SpacingValue;
     let parse_sv = |v: &serde_json::Value| serde_json::from_value::<SpacingValue>(v.clone()).ok();
     match val.and_then(|v| v.as_object()) {
         Some(obj)
@@ -7108,17 +7192,24 @@ pub(crate) fn extract_spacing_breakpoint_values(
 
 pub(crate) fn spacing_field_tailwind_classes(
     val: Option<&serde_json::Value>,
-    fallback: Option<opendash_core::block_schema::SpacingValue>,
+    fallback: Option<opendash_core::field_schema::SpacingValue>,
     responsive: bool,
-    unit: opendash_core::block_schema::CssUnit,
+    unit: opendash_core::field_schema::CssUnit,
+    property: opendash_core::field_schema::SpacingProperty,
 ) -> Option<Vec<String>> {
     use opendash_core::{
-        block_schema::{CssUnit, SpacingValue},
         builder::{BoxSpacing, compile_box_spacing_tailwind},
+        field_schema::{CssUnit, SpacingProperty, SpacingValue},
     };
     if unit != CssUnit::Px {
         return None;
     }
+    let allow_negative = property == SpacingProperty::Margin;
+    let min_val = if allow_negative {
+        f64::from(i16::MIN)
+    } else {
+        0.0
+    };
     let to_box = |sv: SpacingValue| -> Option<BoxSpacing> {
         let conv = |opt: Option<f64>| -> Option<Option<i16>> {
             match opt {
@@ -7126,7 +7217,7 @@ pub(crate) fn spacing_field_tailwind_classes(
                 Some(n)
                     if n.is_finite()
                         && n.fract() == 0.0
-                        && n >= 0.0
+                        && n >= min_val
                         && n <= f64::from(i16::MAX) =>
                 {
                     Some(Some(n as i16))
@@ -7155,158 +7246,88 @@ pub(crate) fn spacing_field_tailwind_classes(
         Some(sv) => Some(to_box(sv)?),
         None => None,
     };
-    compile_box_spacing_tailwind("p", d_box, t_box, m_box, false)
+    let prefix = match property {
+        SpacingProperty::Padding => "p",
+        SpacingProperty::Margin => "m",
+    };
+    compile_box_spacing_tailwind(prefix, d_box, t_box, m_box, allow_negative)
 }
 
-fn extract_spacing_css(
-    val: Option<&serde_json::Value>,
-    fallback: Option<opendash_core::block_schema::SpacingValue>,
-    unit: opendash_core::block_schema::CssUnit,
-) -> Option<String> {
-    let (d_sv, _, _) = extract_spacing_breakpoint_values(val, fallback, false);
-    d_sv?.format_css(unit)
+pub struct BlockRenderInputs<'a> {
+    pub hydrated_props: &'a BTreeMap<String, serde_json::Value>,
+    pub local_richtext_nonces: Option<RichTextNonceTable>,
+    pub merged_options: Option<&'a BTreeMap<String, serde_json::Value>>,
+    pub site_options: Option<&'a BTreeMap<String, serde_json::Value>>,
+    pub menus: Option<&'a BTreeMap<String, serde_json::Value>>,
+    pub is_preview: bool,
+    pub fmt_cfg: &'a RenderFormattingConfig,
 }
 
-fn extract_scalar_or_desktop_f64(val: Option<&serde_json::Value>) -> Option<f64> {
-    let v = val?;
-    v.as_f64()
-        .or_else(|| v.as_object()?.get("desktop")?.as_f64())
-}
-
-fn extract_scalar_or_desktop_str(val: Option<&serde_json::Value>) -> Option<&str> {
-    let v = val?;
-    v.as_str()
-        .or_else(|| v.as_object()?.get("desktop")?.as_str())
-}
-
-/// Renders a validated `block.json` v1 template under the shared request `RenderBudget`
-/// (`<= 2_000` fuel per node, `<= 10_000` total fuel, `<= 512 KiB` total HTML) with
-/// two-stage `sanitize_richtext` + post-render single-pass `HtmlScanState::Body` nonce replacement.
-pub fn render_block_csec_with_budget(
+/// Renders a validated `block.json` v1 template from pre-hydrated field values under the
+/// shared request `RenderBudget` (`<= 2_000` fuel per node, `<= 10_000` total fuel,
+/// `<= 512 KiB` total HTML, `<= 128` RichText blocks per request).
+pub fn render_block_csec_with_inputs(
     block_id: &str,
     template_source: &str,
-    schema: &opendash_core::block_schema::BlockSchemaV1,
-    values: &BTreeMap<String, serde_json::Value>,
-    is_preview: bool,
+    inputs: BlockRenderInputs<'_>,
     budget: &mut RenderBudget,
 ) -> Result<String, &'static str> {
-    render_block_csec_with_options_and_budget(
-        block_id,
-        template_source,
-        schema,
-        values,
-        None,
-        is_preview,
-        budget,
-    )
-}
-
-pub fn render_block_csec_with_options_and_budget(
-    block_id: &str,
-    template_source: &str,
-    schema: &opendash_core::block_schema::BlockSchemaV1,
-    values: &BTreeMap<String, serde_json::Value>,
-    site_options: Option<&BTreeMap<String, serde_json::Value>>,
-    is_preview: bool,
-    budget: &mut RenderBudget,
-) -> Result<String, &'static str> {
-    render_block_csec_with_options_and_budget_and_config(
-        block_id,
-        template_source,
-        schema,
-        values,
-        site_options,
-        is_preview,
-        budget,
-        &RenderFormattingConfig::default(),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn render_block_csec_with_options_and_budget_and_config(
-    block_id: &str,
-    template_source: &str,
-    schema: &opendash_core::block_schema::BlockSchemaV1,
-    values: &BTreeMap<String, serde_json::Value>,
-    site_options: Option<&BTreeMap<String, serde_json::Value>>,
-    is_preview: bool,
-    budget: &mut RenderBudget,
-    fmt_cfg: &RenderFormattingConfig,
-) -> Result<String, &'static str> {
-    use opendash_core::block_schema::BlockFieldSpec;
-
     if budget.fuel_remaining == 0 {
         return Err("Đã hết ngân sách fuel render trang.");
+    }
+    let local_rt_count = inputs
+        .local_richtext_nonces
+        .as_ref()
+        .map_or(0, RichTextNonceTable::total_count);
+    if budget
+        .richtext_nonces
+        .total_count()
+        .saturating_add(local_rt_count)
+        > MAX_RICHTEXT_NONCES_PER_REQUEST
+    {
+        return Err("Số lượng khối RichText vượt giới hạn 128/request.");
     }
     let node_fuel = budget.fuel_remaining.min(MAX_BLOCK_FUEL_PER_NODE);
 
     let mut ctx_map: BTreeMap<String, Value> = BTreeMap::new();
-    let mut nonces: BTreeMap<String, String> = BTreeMap::new();
+    for (k, v) in inputs.hydrated_props {
+        ctx_map.insert(k.clone(), json_to_safe_value(v));
+    }
 
-    for field in schema.flattened_top_fields() {
-        match field {
-            BlockFieldSpec::Repeater {
-                key,
-                max_items,
-                fields,
-                ..
-            } => {
-                let mut rendered_items = Vec::new();
-                if let Some(arr) = values
-                    .get(key.as_str())
-                    .and_then(serde_json::Value::as_array)
-                {
-                    for item in arr.iter().take(*max_items) {
-                        if let Some(obj) = item.as_object() {
-                            let mut item_map: BTreeMap<String, Value> = BTreeMap::new();
-                            for sub in fields {
-                                populate_leaf_field_context(
-                                    sub,
-                                    obj.get(sub.key()),
-                                    None,
-                                    Some(obj),
-                                    is_preview,
-                                    &mut item_map,
-                                    &mut nonces,
-                                )?;
-                            }
-                            rendered_items.push(Value::from_pairs(item_map));
-                        }
-                    }
-                }
-                ctx_map.insert(key.clone(), Value::from(rendered_items));
-            }
-            _ => {
-                populate_leaf_field_context(
-                    field,
-                    values.get(field.key()),
-                    Some(values),
-                    None,
-                    is_preview,
-                    &mut ctx_map,
-                    &mut nonces,
-                )?;
-            }
+    let mut site_opts = opendash_core::field_schema::global_site_option_defaults();
+    if let Some(extra) = inputs.site_options {
+        for (k, v) in extra {
+            site_opts.insert(k.clone(), v.clone());
+        }
+    }
+    let mut merged_opts = site_opts.clone();
+    if let Some(extra) = inputs.merged_options {
+        for (k, v) in extra {
+            merged_opts.insert(k.clone(), v.clone());
         }
     }
 
-    let mut merged_options = opendash_core::block_schema::global_site_option_defaults();
-    if let Some(extra_options) = site_options {
-        for (k, v) in extra_options {
-            merged_options.insert(k.clone(), v.clone());
-        }
-    }
     let options_value = Value::from_pairs(
-        merged_options
+        merged_opts
             .into_iter()
             .map(|(k, v)| (k, json_to_safe_value(&v))),
     );
-    ctx_map.entry("options".to_owned()).or_insert(options_value);
-    ctx_map
-        .entry("od_is_preview".to_owned())
-        .or_insert_with(|| Value::from(is_preview));
+    let site_options_value = Value::from_pairs(
+        site_opts
+            .into_iter()
+            .map(|(k, v)| (k, json_to_safe_value(&v))),
+    );
+    let menus_value = match inputs.menus {
+        Some(m) => Value::from_pairs(m.iter().map(|(k, v)| (k.clone(), json_to_safe_value(v)))),
+        None => Value::from_pairs(std::iter::empty::<(String, Value)>()),
+    };
 
-    let mut env = restricted_environment_with_config(fmt_cfg);
+    ctx_map.insert("options".to_owned(), options_value);
+    ctx_map.insert("site_options".to_owned(), site_options_value);
+    ctx_map.insert("menus".to_owned(), menus_value);
+    ctx_map.insert("od_is_preview".to_owned(), Value::from(inputs.is_preview));
+
+    let mut env = restricted_environment_with_config(inputs.fmt_cfg);
     let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -7344,17 +7365,13 @@ pub fn render_block_csec_with_options_and_budget_and_config(
     }
     validate_html_and_css_context(shell, true, true)?;
 
-    let out = if nonces.is_empty() {
-        shell.to_owned()
-    } else {
-        let nonce_refs: BTreeMap<String, &str> = nonces
-            .iter()
-            .map(|(k, v)| (k.clone(), v.as_str()))
-            .collect();
-        insert_preview_fragments(shell, &nonce_refs)?
+    let out = match inputs.local_richtext_nonces {
+        Some(rt) if !rt.is_empty() => rt.substitute_into_document(shell.to_owned())?,
+        _ => shell.to_owned(),
     };
 
     budget.charge_html_bytes(out.len())?;
+    budget.richtext_nonces.reserve_count(local_rt_count)?;
     let additions = local_icons
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -7652,12 +7669,20 @@ mod composition_tests {
             .unwrap();
         validate_block_template_csec("test-icon", source, &schema).unwrap();
         let mut budget = RenderBudget::new();
-        let shell = render_block_csec_with_budget(
+        let props = BTreeMap::new();
+        let fmt_cfg = RenderFormattingConfig::default();
+        let shell = render_block_csec_with_inputs(
             "test-icon",
             source,
-            &schema,
-            &BTreeMap::new(),
-            false,
+            BlockRenderInputs {
+                hydrated_props: &props,
+                local_richtext_nonces: None,
+                merged_options: None,
+                site_options: None,
+                menus: None,
+                is_preview: false,
+                fmt_cfg: &fmt_cfg,
+            },
             &mut budget,
         )
         .unwrap();
@@ -7816,12 +7841,13 @@ mod composition_tests {
             }))
             .unwrap();
 
-        let valid_tpl = r#"{% if show_fb and options.social_facebook %}<a href="{{ options.social_facebook }}">FB</a>{% endif %}{% if options.site_logo %}<img src="{{ options.site_logo }}" alt="Logo">{% endif %}<p>{{ options.contact_phone }}</p>"#;
+        let valid_tpl = r#"{% if show_fb and options.social_facebook %}<a href="{{ options.social_facebook }}">FB</a>{% endif %}{% if options.site_logo and options.site_logo.url %}<img src="{{ options.site_logo.url }}" alt="Logo">{% endif %}<p>{{ options.contact_phone }}</p>"#;
         assert!(validate_block_template_csec("demo/bridge", valid_tpl, &schema).is_ok());
 
         for forbidden in [
             r#"<a href="{{ options.contact_phone }}">bad</a>"#,
             r#"<a href="{{ options.unknown_key }}">bad</a>"#,
+            r#"<img src="{{ options.site_logo }}" alt="Logo">"#,
             r#"<a href="{{ theme_options.social_facebook }}">bad</a>"#,
             r#"<p>{{ options.social_facebook }}</p>"#,
             r#"<p>{{ options }}</p>"#,
@@ -8419,6 +8445,8 @@ mod composition_tests {
             "<img src=\"/media/ok.png\" srcset=\"/&sol;evil.com/a.png 1x\">",
             "<a href=\"https://ok.example\" ping=\"/&sol;evil.com/track\">x</a>",
             "<title>bad</title>",
+            "<style>body{}</style>",
+            "<!DOCTYPE html><div>bad</div>",
             "<xmp>bad</xmp>",
             "<noembed>bad</noembed>",
             "<noframes>bad</noframes>",
@@ -8430,6 +8458,8 @@ mod composition_tests {
             "{% for item in items %}<div title=\"{{ item.content }}\"></div>{% endfor %}",
             "{% for item in items %}{% set x = item.content %}{{ x }}{% endfor %}",
             "<div>{{ items[0].label }}</div>",
+            "<div>{{ hero }}</div>",
+            "{% for item in items %}<div>{{ item.thumb }}</div>{% endfor %}",
             "<a href=\"{{ title }}\">bad non-url field in href</a>",
             "<img src=\"{{ cta_url }}\">",
             "<div>OD_RICHTEXT_0123456789abcdef0123456789abcdef</div>",
@@ -8442,16 +8472,16 @@ mod composition_tests {
             );
         }
 
-        // Valid template with top-level & repeater richtext, url, and media_url
+        // Valid template with V1 object paths (`hero.url`, `hero.alt`, `item.thumb.url`), richtext, and url
         let good_tpl = r#"<section class="card">
             <h2>{{ title }}</h2>
-            {% if hero_url %}<img src="{{ hero_url }}" alt="{{ hero_alt }}">{% endif %}
+            {% if hero and hero.url %}<img src="{{ hero.url }}" alt="{{ hero.alt }}">{% endif %}
             {% if body %}<div class="body">{{ body }}</div>{% endif %}
             {% if cta_url %}<a href="{{ cta_url }}">Go</a>{% endif %}
             {% for item in items %}
                 <div class="item">
                     <span>{{ item.label }}</span>
-                    {% if item.thumb_url %}<img src="{{ item.thumb_url }}" alt="">{% endif %}
+                    {% if item.thumb and item.thumb.url %}<img src="{{ item.thumb.url }}" alt="">{% endif %}
                     {% if item.content %}<div>{{ item.content }}</div>{% endif %}
                     {% if item.link_url %}<a href="{{ item.link_url }}">More</a>{% endif %}
                 </div>
@@ -8460,34 +8490,65 @@ mod composition_tests {
         validate_block_template_csec("core/test-card", good_tpl, &schema).unwrap();
 
         let media_id = "a".repeat(64);
-        let values = BTreeMap::from([
+        let mut local_rt = RichTextNonceTable::default();
+        let clean_body = opendash_core::richtext::sanitize_richtext(
+            "<p>Rich <strong>text</strong> <script>evil()</script><a href=\"https://opendash.vn\">link</a></p>",
+        )
+        .unwrap();
+        let body_nonce = local_rt.register_sanitized(clean_body).unwrap();
+        let clean_item =
+            opendash_core::richtext::sanitize_richtext("<p>Nội dung <em>mục 1</em></p>").unwrap();
+        let item_nonce = local_rt.register_sanitized(clean_item).unwrap();
+
+        let hydrated_props = BTreeMap::from([
             ("title".into(), json!("Chào <script>alert(1)</script>")),
-            (
-                "body".into(),
-                json!(
-                    "<p>Rich <strong>text</strong> <script>evil()</script><a href=\"https://opendash.vn\">link</a></p>"
-                ),
-            ),
+            ("body".into(), json!(body_nonce)),
             ("cta_url".into(), json!("/lien-he")),
-            ("hero".into(), json!(media_id)),
+            (
+                "hero".into(),
+                json!({
+                    "id": media_id,
+                    "url": format!("/media/{media_id}/file"),
+                    "thumbnail_url": format!("/media/{media_id}/thumbnail"),
+                    "alt": "",
+                    "width": 800,
+                    "height": 600,
+                    "kind": "image"
+                }),
+            ),
             (
                 "items".into(),
                 json!([{
                     "label": "Mục 1",
-                    "content": "<p>Nội dung <em>mục 1</em></p>",
+                    "content": item_nonce,
                     "link_url": "#top",
-                    "thumb": media_id
+                    "thumb": {
+                        "id": media_id,
+                        "url": format!("/media/{media_id}/file"),
+                        "thumbnail_url": format!("/media/{media_id}/thumbnail"),
+                        "alt": "",
+                        "width": 800,
+                        "height": 600,
+                        "kind": "image"
+                    }
                 }]),
             ),
         ]);
 
+        let fmt_cfg = RenderFormattingConfig::default();
         let mut budget = RenderBudget::new();
-        let rendered = render_block_csec_with_budget(
+        let rendered = render_block_csec_with_inputs(
             "core/test-card",
             good_tpl,
-            &schema,
-            &values,
-            false,
+            BlockRenderInputs {
+                hydrated_props: &hydrated_props,
+                local_richtext_nonces: Some(local_rt),
+                merged_options: None,
+                site_options: None,
+                menus: None,
+                is_preview: false,
+                fmt_cfg: &fmt_cfg,
+            },
             &mut budget,
         )
         .unwrap();
@@ -8497,6 +8558,7 @@ mod composition_tests {
         assert!(rendered.contains("<p>Nội dung <em>mục 1</em></p>"));
         assert!(decoded_rendered.contains(&format!("src=\"/media/{media_id}/file\"")));
         assert!(!rendered.contains("OD_RICHTEXT_"));
+        assert_eq!(budget.richtext_nonces.total_count(), 2);
         assert!(budget.fuel_remaining < TEMPLATE_FUEL_LIMIT);
         assert!(budget.html_bytes_used > 0);
 
@@ -8506,6 +8568,118 @@ mod composition_tests {
         );
         validate_safe_scoped_block_css(&preview_css, true).unwrap();
         assert!(validate_safe_scoped_block_css(&preview_css, false).is_err());
+    }
+
+    #[test]
+    fn block_csec_supports_nested_group_icon_link_spacing_and_dynamic_menus() {
+        use opendash_core::block_schema::BlockSchemaV1;
+        use serde_json::json;
+
+        let schema: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "core/showcase-test",
+            "title": "Showcase",
+            "category": "content",
+            "render": "render.html",
+            "fields": [
+                {
+                    "type": "spacing",
+                    "key": "outer_margin",
+                    "label": "Outer margin",
+                    "property": "margin",
+                    "unit": "px",
+                    "responsive": true
+                },
+                {
+                    "type": "group",
+                    "key": "hero_card",
+                    "label": "Hero",
+                    "fields": [
+                        { "type": "icon", "key": "badge_icon", "label": "Badge" },
+                        { "type": "text", "key": "eyebrow", "label": "Eyebrow" },
+                        { "type": "link", "key": "primary_link", "label": "CTA" }
+                    ]
+                },
+                {
+                    "type": "select",
+                    "key": "linked_menu",
+                    "label": "Menu",
+                    "options_source": "menus",
+                    "allow_null": true
+                }
+            ]
+        }))
+        .unwrap();
+
+        let tpl = r#"<section class="sc {{ outer_margin.classes }}" data-od-spacing="outer_margin">
+            {% if hero_card.badge_icon %}{{ od_icon(hero_card.badge_icon.name, 'h-4 w-4') }}{% endif %}
+            <span>{{ hero_card.eyebrow }}</span>
+            {% if hero_card.primary_link %}<a href="{{ hero_card.primary_link.url }}" target="{{ hero_card.primary_link.target }}" rel="{{ hero_card.primary_link.rel }}">{{ hero_card.primary_link.label }}</a>{% endif %}
+            {% if linked_menu and menus[linked_menu] is defined and menus[linked_menu] %}
+              <nav>{% for item in menus[linked_menu].items %}<a href="{{ item.url }}">{{ item.label }}</a>{% endfor %}</nav>
+            {% endif %}
+        </section>"#;
+        validate_block_template_csec("core/showcase-test", tpl, &schema).unwrap();
+
+        for bad in [
+            r#"{{ hero_card }}"#,
+            r#"{{ od_icon(hero_card.eyebrow) }}"#,
+            r#"<a href="{{ hero_card.primary_link.label }}">bad</a>"#,
+            r#"<div>{{ menus[linked_menu] }}</div>"#,
+        ] {
+            assert!(
+                validate_block_template_csec("core/showcase-test", bad, &schema).is_err(),
+                "{bad}"
+            );
+        }
+
+        let hydrated_props = BTreeMap::from([
+            (
+                "outer_margin".into(),
+                json!({ "top": -16, "bottom": 24, "css": "-16px 0px 24px 0px", "classes": "-mt-4 mb-6" }),
+            ),
+            (
+                "hero_card".into(),
+                json!({
+                    "badge_icon": { "name": "sparkles" },
+                    "eyebrow": "Mới",
+                    "primary_link": { "url": "/docs", "label": "Tài liệu", "target": "_blank", "rel": "noopener noreferrer", "new_tab": true, "nofollow": false }
+                }),
+            ),
+            ("linked_menu".into(), json!("main-nav")),
+        ]);
+        let menus = BTreeMap::from([(
+            "main-nav".into(),
+            json!({
+                "menu_id": 1,
+                "menu_key": "main-nav",
+                "title": "Main",
+                "items": [{ "id": 1, "label": "Trang chủ", "url": "/", "is_active": true, "is_ancestor": false, "is_external": false, "depth": 0, "children": [] }],
+                "diagnostics": []
+            }),
+        )]);
+        let fmt_cfg = RenderFormattingConfig::default();
+        let mut budget = RenderBudget::new();
+        let shell = render_block_csec_with_inputs(
+            "core/showcase-test",
+            tpl,
+            BlockRenderInputs {
+                hydrated_props: &hydrated_props,
+                local_richtext_nonces: None,
+                merged_options: None,
+                site_options: None,
+                menus: Some(&menus),
+                is_preview: false,
+                fmt_cfg: &fmt_cfg,
+            },
+            &mut budget,
+        )
+        .unwrap();
+        let html = budget.icon_nonces.substitute_into_document(shell).unwrap();
+        assert!(html.contains("-mt-4 mb-6"));
+        assert!(html.contains("<svg "));
+        assert!(html.contains("Tài liệu"));
+        assert!(html.contains("Trang chủ"));
     }
 }
 

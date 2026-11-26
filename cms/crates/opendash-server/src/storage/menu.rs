@@ -980,6 +980,46 @@ pub(super) async fn resolve_slot_menus_for_locale_and_path_in_tx(
     Ok(out)
 }
 
+pub async fn resolve_all_menus_for_locale_and_path_in_conn(
+    conn: &mut SqliteConnection,
+    requested_locale: Option<&str>,
+    current_path: Option<&str>,
+) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+    let slot_menus =
+        resolve_active_slot_menus_for_path_in_conn(&mut *conn, current_path, requested_locale)
+            .await?;
+    let mut out = BTreeMap::new();
+    let mut by_menu_id: BTreeMap<i64, serde_json::Value> = BTreeMap::new();
+    for (slot_key, view) in slot_menus {
+        let menu_id = view.menu_id;
+        let json_val = serde_json::to_value(&view)?;
+        by_menu_id
+            .entry(menu_id)
+            .or_insert_with(|| json_val.clone());
+        out.insert(slot_key, json_val);
+    }
+
+    let menu_rows: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, menu_key FROM site_menus ORDER BY id ASC")
+            .fetch_all(&mut *conn)
+            .await?;
+    for (menu_id, menu_key) in menu_rows {
+        let val = if let Some(cached) = by_menu_id.get(&menu_id) {
+            cached.clone()
+        } else if let Some(view) =
+            resolve_menu_view_for_path_in_tx(&mut *conn, menu_id, current_path).await?
+        {
+            let json_val = serde_json::to_value(&view)?;
+            by_menu_id.insert(menu_id, json_val.clone());
+            json_val
+        } else {
+            continue;
+        };
+        out.entry(menu_key).or_insert(val);
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MenuListPage {
     pub items: Vec<MenuRecord>,

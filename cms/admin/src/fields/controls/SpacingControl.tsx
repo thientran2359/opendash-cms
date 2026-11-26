@@ -4,7 +4,6 @@ import {
   type ResponsiveDotInfo,
 } from '../../builder/StudioFieldControls.tsx';
 import type { BoxSpacing } from '../../builder/document.ts';
-import type { BlockSpacingValue } from '../../types.ts';
 import type { FieldSpec, SpacingValue } from '../types.ts';
 
 function toBoxSpacing(raw: unknown): BoxSpacing | undefined {
@@ -18,7 +17,7 @@ function toBoxSpacing(raw: unknown): BoxSpacing | undefined {
   return out;
 }
 
-function fromBoxSpacing(box: BlockSpacingValue | BoxSpacing): SpacingValue {
+function fromBoxSpacing(box: SpacingValue | BoxSpacing): SpacingValue {
   const out: SpacingValue = {};
   if (typeof box.top === 'number' && Number.isFinite(box.top)) out.top = box.top === 0 ? 0 : box.top;
   if (typeof box.right === 'number' && Number.isFinite(box.right)) out.right = box.right === 0 ? 0 : box.right;

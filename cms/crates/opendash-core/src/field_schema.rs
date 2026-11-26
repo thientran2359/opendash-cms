@@ -15,7 +15,7 @@ use crate::{
     builder_blocks::{MAX_BUILDER_BLOCK_BODY_BYTES, contains_blocks},
     icons::lookup_core_icon_paths,
     id::valid_snake_key,
-    richtext::{MAX_RICHTEXT_OUTPUT_BYTES, sanitize_richtext},
+    richtext::{MAX_RICHTEXT_OUTPUT_BYTES, sanitize_richtext, strip_richtext_to_plain},
 };
 
 pub const MAX_FIELD_KEY_LEN: usize = 64;
@@ -2349,6 +2349,8 @@ fn validate_single_field_spec<'a>(
                     None,
                     &spec.fields,
                     &map,
+                    None,
+                    true,
                     true,
                 )?;
             }
@@ -2430,6 +2432,8 @@ fn validate_single_field_spec<'a>(
                         None,
                         &spec.fields,
                         &map,
+                        None,
+                        true,
                         true,
                     )?;
                 }
@@ -2901,9 +2905,20 @@ pub fn validate_field_values(
     values: &BTreeMap<String, Value>,
     previous_values: Option<&BTreeMap<String, Value>>,
 ) -> Result<(), &'static str> {
-    validate_map_against_specs(specs, ctx, values, previous_values, specs, values, true)
+    validate_map_against_specs(
+        specs,
+        ctx,
+        values,
+        previous_values,
+        specs,
+        values,
+        previous_values,
+        true,
+        true,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_map_against_specs(
     specs: &[FieldSpec],
     ctx: FieldContext,
@@ -2911,7 +2926,9 @@ fn validate_map_against_specs(
     previous_values: Option<&BTreeMap<String, Value>>,
     root_specs: &[FieldSpec],
     root_values: &BTreeMap<String, Value>,
+    prev_root_values: Option<&BTreeMap<String, Value>>,
     parent_visible: bool,
+    parent_prev_visible: bool,
 ) -> Result<(), &'static str> {
     let in_root =
         std::ptr::eq(specs.as_ptr(), root_specs.as_ptr()) && std::ptr::eq(values, root_values);
@@ -2921,8 +2938,15 @@ fn validate_map_against_specs(
         .map(|s| (s.key.as_str(), s))
         .collect();
 
-    for key in values.keys() {
+    for (key, val) in values {
         if !data_specs.contains_key(key.as_str()) {
+            if ctx == FieldContext::StudioBlock
+                && previous_values
+                    .and_then(|p| p.get(key.as_str()))
+                    .is_some_and(|pv| value_equals_previous(Some(val), Some(pv)))
+            {
+                continue;
+            }
             return Err("Payload chứa khóa field không tồn tại trong schema.");
         }
     }
@@ -2939,12 +2963,31 @@ fn validate_map_against_specs(
                 root_specs,
                 root_values,
             );
+        let prev_visible = parent_prev_visible
+            && previous_values.is_some_and(|prev| {
+                evaluate_conditions(
+                    spec.conditions.as_ref(),
+                    specs,
+                    prev,
+                    root_specs,
+                    prev_root_values.unwrap_or(prev),
+                )
+            });
         let cur_val = values.get(spec.key.as_str());
         let prev_val = previous_values.and_then(|p| p.get(spec.key.as_str()));
+        let upgrade_exempt = ctx == FieldContext::StudioBlock
+            && previous_values
+                .is_some_and(|prev| prev_visible && !prev.contains_key(spec.key.as_str()));
 
         let Some(raw_val) = cur_val.filter(|v| !v.is_null()) else {
-            if visible && spec.effective_required() && spec.field_type != FieldType::Secret {
-                return Err("Thiếu giá trị cho trường bắt buộc.");
+            if visible && !upgrade_exempt && spec.field_type != FieldType::Secret {
+                let missing_required = spec.effective_required()
+                    || (ctx == FieldContext::StudioBlock
+                        && spec.field_type == FieldType::Repeater
+                        && spec.min_items.is_some_and(|m| m > 0));
+                if missing_required {
+                    return Err("Thiếu giá trị cho trường bắt buộc.");
+                }
             }
             continue;
         };
@@ -2955,9 +2998,12 @@ fn validate_map_against_specs(
             ctx,
             raw_val,
             visible,
+            prev_visible,
+            upgrade_exempt,
             prev_val,
             root_specs,
             root_values,
+            prev_root_values,
             in_root,
         )?;
     }
@@ -2971,9 +3017,12 @@ fn validate_field_value(
     ctx: FieldContext,
     raw_val: &Value,
     visible: bool,
+    prev_visible: bool,
+    upgrade_exempt: bool,
     prev_val: Option<&Value>,
     root_specs: &[FieldSpec],
     root_values: &BTreeMap<String, Value>,
+    prev_root_values: Option<&BTreeMap<String, Value>>,
     in_root: bool,
 ) -> Result<(), &'static str> {
     if spec.responsive && ctx == FieldContext::StudioBlock {
@@ -2983,19 +3032,29 @@ fn validate_field_value(
                     return Err("Giá trị responsive chỉ chấp nhận desktop, tablet, mobile.");
                 }
             }
+            let mut has_non_empty = false;
             for vp in obj.values() {
                 if !vp.is_null() {
+                    if !vp.as_str().is_some_and(|s| s.trim().is_empty()) {
+                        has_non_empty = true;
+                    }
                     validate_non_responsive_value(
                         spec,
                         ctx,
                         vp,
-                        visible,
+                        false,
+                        prev_visible,
+                        false,
                         prev_val,
                         root_specs,
                         root_values,
+                        prev_root_values,
                         in_root,
                     )?;
                 }
+            }
+            if visible && !upgrade_exempt && spec.effective_required() && !has_non_empty {
+                return Err("Thiếu giá trị cho trường bắt buộc.");
             }
             return Ok(());
         }
@@ -3005,9 +3064,12 @@ fn validate_field_value(
         ctx,
         raw_val,
         visible,
+        prev_visible,
+        upgrade_exempt,
         prev_val,
         root_specs,
         root_values,
+        prev_root_values,
         in_root,
     )
 }
@@ -3018,12 +3080,15 @@ fn validate_non_responsive_value(
     ctx: FieldContext,
     val: &Value,
     visible: bool,
+    prev_visible: bool,
+    upgrade_exempt: bool,
     prev_val: Option<&Value>,
     root_specs: &[FieldSpec],
     root_values: &BTreeMap<String, Value>,
+    prev_root_values: Option<&BTreeMap<String, Value>>,
     in_root: bool,
 ) -> Result<(), &'static str> {
-    let req = visible && spec.effective_required();
+    let req = visible && !upgrade_exempt && spec.effective_required();
     match spec.field_type {
         FieldType::Text => {
             let Some(s) = val.as_str() else {
@@ -3103,7 +3168,7 @@ fn validate_non_responsive_value(
             let Some(s) = val.as_str() else {
                 return Err("Giá trị richtext phải là chuỗi.");
             };
-            if req && s.trim().is_empty() {
+            if req && strip_richtext_to_plain(s).trim().is_empty() {
                 return Err("Trường richtext bắt buộc không được để trống.");
             }
             if ctx == FieldContext::Content && in_root && spec.key == "body" {
@@ -3116,6 +3181,9 @@ fn validate_non_responsive_value(
                 }
             } else if !s.is_empty() {
                 let cleaned = sanitize_richtext(s)?;
+                if req && strip_richtext_to_plain(&cleaned).trim().is_empty() {
+                    return Err("Trường richtext bắt buộc không được để trống.");
+                }
                 let cap = spec.max_bytes.unwrap_or(MAX_RICHTEXT_OUTPUT_BYTES);
                 if cleaned.len() > cap {
                     return Err("Nội dung richtext sau làm sạch vượt quá max_bytes.");
@@ -3385,7 +3453,9 @@ fn validate_non_responsive_value(
                 prev_map.as_ref(),
                 root_specs,
                 root_values,
+                prev_root_values,
                 visible,
+                prev_visible,
             )?;
         }
         FieldType::Repeater => {
@@ -3404,13 +3474,22 @@ fn validate_non_responsive_value(
             if req && arr.is_empty() {
                 return Err("Trường repeater bắt buộc phải có ít nhất 1 phần tử.");
             }
-            if !arr.is_empty() && spec.min_items.is_some_and(|mn| arr.len() < mn) {
+            if ctx == FieldContext::StudioBlock {
+                if visible && !upgrade_exempt && spec.min_items.is_some_and(|mn| arr.len() < mn) {
+                    return Err("Số phần tử repeater ít hơn min_items.");
+                }
+            } else if !arr.is_empty() && spec.min_items.is_some_and(|mn| arr.len() < mn) {
                 return Err("Số phần tử repeater ít hơn min_items.");
             }
             for (idx, item) in arr.iter().enumerate() {
                 let Some(obj) = item.as_object() else {
                     return Err("Phần tử repeater phải là JSON object.");
                 };
+                if ctx == FieldContext::StudioBlock
+                    && obj.len() > crate::block_schema::MAX_NODE_VALUES_KEYS
+                {
+                    return Err("Phần tử Repeater vượt quá 64 khóa.");
+                }
                 let map: BTreeMap<String, Value> =
                     obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
                 let prev_map: Option<BTreeMap<String, Value>> = prev_val
@@ -3425,7 +3504,9 @@ fn validate_non_responsive_value(
                     prev_map.as_ref(),
                     root_specs,
                     root_values,
+                    prev_root_values,
                     visible,
+                    prev_visible,
                 )?;
             }
         }
@@ -3826,6 +3907,62 @@ fn collect_relational_recursive(
     }
 }
 
+pub fn collect_options_source_values(
+    specs: &[FieldSpec],
+    values: &BTreeMap<String, Value>,
+    source: SelectOptionsSource,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_options_source_values_recursive(specs, values, source, &mut out);
+    out
+}
+
+fn collect_options_source_values_recursive(
+    specs: &[FieldSpec],
+    values: &BTreeMap<String, Value>,
+    source: SelectOptionsSource,
+    out: &mut Vec<String>,
+) {
+    for spec in specs {
+        if spec.is_ui_only() || spec.field_type == FieldType::Secret {
+            continue;
+        }
+        match spec.field_type {
+            FieldType::Select if spec.options_source == Some(source) => {
+                let candidate = values.get(spec.key.as_str()).or(spec.default.as_ref());
+                match candidate {
+                    Some(Value::String(s)) => {
+                        let trimmed = s.trim();
+                        if !trimmed.is_empty() {
+                            out.push(trimmed.to_owned());
+                        }
+                    }
+                    Some(Value::Array(arr)) if spec.multiple => {
+                        for item in arr {
+                            if let Some(s) = item.as_str() {
+                                let trimmed = s.trim();
+                                if !trimmed.is_empty() {
+                                    out.push(trimmed.to_owned());
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            FieldType::Group => {
+                let child_map: BTreeMap<String, Value> = values
+                    .get(spec.key.as_str())
+                    .and_then(Value::as_object)
+                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                    .unwrap_or_default();
+                collect_options_source_values_recursive(&spec.fields, &child_map, source, out);
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn extract_visible_text(
     specs: &[FieldSpec],
     values: &BTreeMap<String, Value>,
@@ -3839,9 +3976,18 @@ pub fn extract_visible_text(
             continue;
         };
         match spec.field_type {
-            FieldType::Text | FieldType::Textarea | FieldType::Richtext => {
+            FieldType::Text | FieldType::Textarea => {
                 if let Some(s) = val.as_str() {
                     let trimmed = s.trim();
+                    if !trimmed.is_empty() {
+                        out.push(trimmed.to_owned());
+                    }
+                }
+            }
+            FieldType::Richtext => {
+                if let Some(s) = val.as_str() {
+                    let plain = strip_richtext_to_plain(s);
+                    let trimmed = plain.trim();
                     if !trimmed.is_empty() {
                         out.push(trimmed.to_owned());
                     }

@@ -272,9 +272,16 @@ async fn plugin_media_projects_to_home_entry_and_template_acl_with_privacy_guard
         .unwrap()
         .unwrap();
     let values = BTreeMap::from([("body".to_owned(), json!(raw))]);
-    entries::sync_entry_body_refs_in_conn(&mut tx, entry_id, &schema, &values, None)
-        .await
-        .unwrap();
+    entries::sync_entry_body_refs_in_conn(
+        &mut tx,
+        entry_id,
+        &schema,
+        &values,
+        None,
+        opendash_core::content::FieldRole::Admin,
+    )
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM entry_builder_media_refs WHERE entry_id = ?")
@@ -308,9 +315,16 @@ async fn plugin_media_projects_to_home_entry_and_template_acl_with_privacy_guard
         .definition
         .public_exposure = PublicExposure::Private;
     let mut tx = db.begin().await.unwrap();
-    entries::sync_entry_body_refs_in_conn(&mut tx, entry_id, &private_schema, &values, None)
-        .await
-        .unwrap();
+    entries::sync_entry_body_refs_in_conn(
+        &mut tx,
+        entry_id,
+        &private_schema,
+        &values,
+        None,
+        opendash_core::content::FieldRole::Admin,
+    )
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     assert!(
         !crate::storage::public_content::media_is_referenced(&db, &video_id)

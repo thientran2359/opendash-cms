@@ -31,7 +31,7 @@ import type { AdminLocaleState } from '../api/locales.ts';
 import { BuilderBindingFields } from './BuilderBindingFields.tsx';
 import { BuilderListFields } from './BuilderListFields.tsx';
 import { BuilderContactFormFields } from './BuilderContactFormFields.tsx';
-import { BlockSchemaForm } from './BlockSchemaForm.tsx';
+import { UnifiedFieldForm } from '../fields/UnifiedFieldForm.tsx';
 import {
   ColorSwatchControl,
   LightboxRichTextTrigger,
@@ -470,10 +470,18 @@ export function BuilderInspector({
       {element?.type === 'plugin/block' && !locked && block && (
         <div className="space-y-2" aria-label={t('builder.builder_inspector.declarative')}>
           <p className="break-all text-xs text-slate-600">{block.block_id}</p>
-          <BlockSchemaForm key={element.id + ':' + block.block_id} schema={block.schema}
-            values={element.props.values as Record<string, unknown>}
+          <UnifiedFieldForm
+            key={element.id + ':' + block.block_id}
+            fields={block.schema.fields}
+            context="studio_block"
+            layoutMode="sidebar"
+            values={(element.props.values ?? {}) as Record<string, unknown>}
             onChange={values => onChange(element.id, 'values', values as BlockPropValue)}
-            viewport={viewport} csrfToken={csrfToken} onError={onError} />
+            viewport={viewport}
+            csrfToken={csrfToken}
+            locale={localeState?.defaultLocale?.code ?? null}
+            onApiError={onError}
+          />
         </div>
       )}
       {!element && <p className="text-[11px] text-zinc-500">

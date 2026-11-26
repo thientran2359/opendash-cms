@@ -600,7 +600,13 @@ fn template_kind_str(kind: TemplateCandidateKind) -> &'static str {
     }
 }
 
-fn document_parts_and_slot_count(document: &BuilderDocument) -> ApiResult<(Vec<String>, usize)> {
+fn document_parts_and_slot_count_with_schemas(
+    document: &BuilderDocument,
+    schemas: &opendash_core::registry::RegistryCatalog<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >,
+) -> ApiResult<(Vec<String>, usize)> {
+    use opendash_core::registry::{DeclarationState, ProviderStatus};
     let mut parts = Vec::new();
     let mut slots = 0;
     for section in &document.sections {
@@ -611,6 +617,19 @@ fn document_parts_and_slot_count(document: &BuilderDocument) -> ApiResult<(Vec<S
                         ElementContent::Known(KnownElement::ContentSlot(_)) => slots += 1,
                         ElementContent::Known(KnownElement::TemplatePart(props)) => {
                             parts.push(props.part_key.clone());
+                        }
+                        ElementContent::Known(KnownElement::PluginBlock(props)) => {
+                            if let Some(entry) = schemas.get(&props.block_id)
+                                && entry.status == ProviderStatus::Active
+                                && entry.declaration_state == DeclarationState::Declared
+                            {
+                                parts.extend(
+                                    entry
+                                        .descriptor
+                                        .schema
+                                        .collect_template_part_keys(&props.values),
+                                );
+                            }
                         }
                         ElementContent::Unresolved(value)
                             if matches!(
@@ -655,8 +674,9 @@ async fn validate_part_graph_in_tx(
     target: &TemplateCandidate,
     submitted: &BuilderDocument,
 ) -> ApiResult<()> {
+    let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut **tx).await?;
     let target_key = target.canonical_key().map_err(ApiError::bad_request)?;
-    let (initial, _) = document_parts_and_slot_count(submitted)?;
+    let (initial, _) = document_parts_and_slot_count_with_schemas(submitted, &schemas)?;
     let mut stack = vec![(initial, 0_usize, vec![target_key.clone()])];
     let mut expansions = 0_usize;
     while let Some((parts, depth, path)) = stack.pop() {
@@ -688,7 +708,8 @@ async fn validate_part_graph_in_tx(
                     .map(|record| record.document)
             };
             if let Some(nested_doc) = nested_doc {
-                let (children, count) = document_parts_and_slot_count(&nested_doc)?;
+                let (children, count) =
+                    document_parts_and_slot_count_with_schemas(&nested_doc, &schemas)?;
                 validate_content_slots(&part_candidate, count)?;
                 let mut next_path = path.clone();
                 next_path.push(key);
@@ -731,16 +752,38 @@ async fn validate_typed_document_in_tx(
     document: &BuilderDocument,
     prior: Option<&BuilderDocument>,
 ) -> ApiResult<BuilderRenderContext> {
+    use opendash_core::registry::{DeclarationState, ProviderStatus};
     let scoped_fields = validate_typed_target_in_tx(tx, target).await?;
     let state = builder::read_render_context_tx(tx).await?;
+    let schemas = state.unified_block_schemas()?;
     document
-        .validate_for_save_with_schemas(&state.unified_block_schemas()?, prior)
+        .validate_for_save_with_schemas(&schemas, prior)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
     // S02 stores synchronized Pattern references per content entry through
     // entry_pattern_refs. Shared template overrides have no such ownership or
     // public-media projection, so accepting a PatternRef here would silently
     // hide its markup on public pages. Keep these blocks entry-scoped.
-    if !builder::pattern_ids(document).is_empty() {
+    let has_block_pattern = document.sections.iter().any(|s| {
+        s.children.iter().any(|r| {
+            r.children.iter().any(|c| {
+                c.children.iter().any(|el| {
+                    if let ElementContent::Known(KnownElement::PluginBlock(props)) = &el.content
+                        && let Some(entry) = schemas.get(&props.block_id)
+                        && entry.status == ProviderStatus::Active
+                        && entry.declaration_state == DeclarationState::Declared
+                    {
+                        entry
+                            .descriptor
+                            .schema
+                            .has_non_empty_pattern_source_value(&props.values)
+                    } else {
+                        false
+                    }
+                })
+            })
+        })
+    });
+    if !builder::pattern_ids_with_schemas(document, &schemas).is_empty() || has_block_pattern {
         return Err(ApiError::bad_request(
             "Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.",
         ));
@@ -757,8 +800,17 @@ async fn validate_typed_document_in_tx(
     document
         .validate_route_context_for_role(route_role, scoped_fields.as_deref())
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let (_, slots) = document_parts_and_slot_count(document)?;
+    let (_, slots) = document_parts_and_slot_count_with_schemas(document, &schemas)?;
     validate_content_slots(target, slots)?;
+    crate::storage::fields::validate_document_block_refs_in_conn(
+        &mut **tx,
+        document,
+        prior,
+        &schemas,
+        None,
+        scoped_fields.as_deref(),
+    )
+    .await?;
     builder::validate_media_refs_in_tx(&mut **tx, document).await?;
     Ok(state)
 }
@@ -989,6 +1041,7 @@ async fn preview_part_graph_from_edges(
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
     let url_policy = active_theme_url_policy(active)?;
+    let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut **tx).await?;
     let mut pending = vec![(edges, 0_usize, vec![root_key.to_owned()])];
     let mut graph = BTreeMap::new();
     while let Some((edges, depth, path)) = pending.pop() {
@@ -1021,7 +1074,9 @@ async fn preview_part_graph_from_edges(
                 graph.insert(part_key.clone(), source);
             }
             let children = match &graph[&part_key] {
-                PreviewPartSource::Builder(doc) => document_parts_and_slot_count(doc)?.0,
+                PreviewPartSource::Builder(doc) => {
+                    document_parts_and_slot_count_with_schemas(doc, &schemas)?.0
+                }
                 PreviewPartSource::Theme(source) => {
                     template_sec::preview_csec_part_keys_with_theme_urls(
                         &part_key,
@@ -1048,9 +1103,55 @@ async fn preview_part_graph(
     active: Option<&ActiveThemeV3>,
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
-    let (edges, _) = document_parts_and_slot_count(document)?;
+    let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut **tx).await?;
+    let (edges, _) = document_parts_and_slot_count_with_schemas(document, &schemas)?;
     let root_key = target.canonical_key().map_err(ApiError::bad_request)?;
     preview_part_graph_from_edges(tx, &root_key, edges, active, budget).await
+}
+
+async fn collect_db_docs_and_hydrate_state_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    state: &mut BuilderRenderContext,
+    roots: &[&BuilderDocument],
+    is_preview: bool,
+) -> ApiResult<()> {
+    let schemas = state.unified_block_schemas()?;
+    let mut visited_keys = BTreeSet::new();
+    let mut part_docs: Vec<BuilderDocument> = Vec::new();
+    let mut pending: Vec<(Vec<String>, usize)> = Vec::new();
+    for root in roots {
+        let (edges, _) = document_parts_and_slot_count_with_schemas(root, &schemas)?;
+        if !edges.is_empty() {
+            pending.push((edges, 0));
+        }
+    }
+    while let Some((edges, depth)) = pending.pop() {
+        if depth >= 3 {
+            continue;
+        }
+        for part_key in edges {
+            let target = TemplateCandidate {
+                part_key: Some(part_key),
+                ..candidate(TemplateCandidateKind::Part)
+            };
+            let canonical = target.canonical_key().map_err(ApiError::bad_request)?;
+            if !visited_keys.insert(canonical.clone()) {
+                continue;
+            }
+            if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
+                let (child_edges, _) =
+                    document_parts_and_slot_count_with_schemas(&row.document, &schemas)?;
+                if !child_edges.is_empty() {
+                    pending.push((child_edges, depth + 1));
+                }
+                part_docs.push(row.document);
+            }
+        }
+    }
+    let mut all_refs: Vec<&BuilderDocument> = roots.to_vec();
+    all_refs.extend(part_docs.iter());
+    builder::hydrate_render_context_for_documents_in_conn(&mut **tx, state, &all_refs, is_preview)
+        .await
 }
 
 fn part_scope_prefix(key: &str, expansion_idx: usize) -> String {
@@ -1100,7 +1201,8 @@ async fn render_preview_builder(
 ) -> ApiResult<RenderedLayout> {
     let mut parts = BTreeMap::new();
     let mut diagnostics = Vec::new();
-    for key in document_parts_and_slot_count(document)?.0 {
+    let schemas = ctx.state.unified_block_schemas()?;
+    for key in document_parts_and_slot_count_with_schemas(document, &schemas)?.0 {
         if parts.contains_key(&key) {
             continue;
         }
@@ -1715,7 +1817,14 @@ pub async fn preview_typed_override_with_cache_and_locale(
             Some(&mut budget.richtext_nonces),
         )
         .await?;
-    state.site_options = options.clone();
+    state.site_options = site_options.clone();
+    state.options = options.clone();
+    state.menus = menu::resolve_all_menus_for_locale_and_path_in_conn(
+        &mut *tx,
+        Some(&effective_locale),
+        None,
+    )
+    .await?;
     let menus = if let Some(active) = &active {
         menu::resolve_slot_menus_for_locale_in_tx(
             &mut tx,
@@ -1759,6 +1868,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
                 actor,
                 &record.content_type_key,
                 record.id,
+                Some(&site_options),
                 Some(&options),
                 Some(general.timezone.as_str()),
                 &mut rb,
@@ -1809,6 +1919,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
     if body.len() > template_sec::MAX_RENDERED_HTML_BYTES {
         return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
     }
+    collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[document], true).await?;
     let ctx = PreviewRenderContext {
         state: &state,
         graph: &graph,
@@ -1971,7 +2082,8 @@ async fn render_public_part(
         return Err(ApiError::internal("Template part cycle or depth limit."));
     }
     if let Some(row) = get_typed_override_on_connection(tx, &canonical).await? {
-        let (_, slots) = document_parts_and_slot_count(&row.document)?;
+        let schemas = ctx.state.unified_block_schemas()?;
+        let (_, slots) = document_parts_and_slot_count_with_schemas(&row.document, &schemas)?;
         validate_content_slots(&target, slots)?;
         let mut next_stack = stack.to_vec();
         next_stack.push(canonical);
@@ -2031,9 +2143,10 @@ async fn render_public_builder(
     let mut parts = BTreeMap::new();
     let mut child_diagnostics = Vec::new();
     let mut child_forms = false;
+    let schemas = ctx.state.unified_block_schemas()?;
     // Count every occurrence, including repeated references. A stored Builder
     // part wins before consulting the immutable active-theme source.
-    for key in document_parts_and_slot_count(document)?.0 {
+    for key in document_parts_and_slot_count_with_schemas(document, &schemas)?.0 {
         budget.charge(1)?;
         if let Some(mut rendered) =
             Box::pin(render_public_part(tx, &key, depth + 1, stack, ctx, budget)).await?
@@ -2097,7 +2210,11 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
 ) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
     let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
-    let state = builder::read_render_context_tx(&mut tx).await?;
+    let mut state =
+        builder::read_render_context_for_locale_tx(&mut tx, Some(&effective_locale), false, None)
+            .await?;
+    collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[&record.document], false)
+        .await?;
     let url_policy = active_theme_url_policy(active)?;
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
@@ -2164,6 +2281,9 @@ async fn inspect_part_slot_in_tx(
     stack: &[String],
     active: Option<&ActiveThemeV3>,
     url_policy: &template_sec::ThemeUrlPolicy,
+    schemas: &opendash_core::registry::RegistryCatalog<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >,
     uses_related_entries: &mut bool,
     uses_recent_posts: &mut bool,
 ) -> ApiResult<(bool, Option<Arc<template_sec::CompiledCsecComposition>>)> {
@@ -2176,7 +2296,7 @@ async fn inspect_part_slot_in_tx(
         return Err(ApiError::internal("Template part cycle or depth limit."));
     }
     if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
-        let (_, slots) = document_parts_and_slot_count(&row.document)?;
+        let (_, slots) = document_parts_and_slot_count_with_schemas(&row.document, schemas)?;
         validate_content_slots(&target, slots)?;
         let mut next_stack = stack.to_vec();
         next_stack.push(canonical);
@@ -2187,6 +2307,7 @@ async fn inspect_part_slot_in_tx(
             &next_stack,
             active,
             url_policy,
+            schemas,
             uses_related_entries,
             uses_recent_posts,
         ))
@@ -2225,10 +2346,13 @@ async fn inspect_db_document_surfaces_in_tx(
     stack: &[String],
     active: Option<&ActiveThemeV3>,
     url_policy: &template_sec::ThemeUrlPolicy,
+    schemas: &opendash_core::registry::RegistryCatalog<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >,
     uses_related_entries: &mut bool,
     uses_recent_posts: &mut bool,
 ) -> ApiResult<()> {
-    for key in document_parts_and_slot_count(document)?.0 {
+    for key in document_parts_and_slot_count_with_schemas(document, schemas)?.0 {
         Box::pin(inspect_part_slot_in_tx(
             tx,
             &key,
@@ -2236,6 +2360,7 @@ async fn inspect_db_document_surfaces_in_tx(
             stack,
             active,
             url_policy,
+            schemas,
             uses_related_entries,
             uses_recent_posts,
         ))
@@ -2251,6 +2376,7 @@ pub async fn inspect_public_surfaces_and_precompile(
     url_policy: &template_sec::ThemeUrlPolicy,
 ) -> ApiResult<PublicSurfaceInspection> {
     let mut tx = db.begin().await?;
+    let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut *tx).await?;
     let mut precompiled_body = None;
     let mut precompiled_shell = PrecompiledPublicShell::default();
     let mut uses_related_entries = false;
@@ -2266,6 +2392,7 @@ pub async fn inspect_public_surfaces_and_precompile(
                 &stack,
                 active,
                 url_policy,
+                &schemas,
                 &mut uses_related_entries,
                 &mut uses_recent_posts,
             )
@@ -2312,6 +2439,7 @@ pub async fn inspect_public_surfaces_and_precompile(
             &[],
             active,
             url_policy,
+            &schemas,
             &mut uses_related_entries,
             &mut uses_recent_posts,
         )
@@ -2323,6 +2451,7 @@ pub async fn inspect_public_surfaces_and_precompile(
             &[],
             active,
             url_policy,
+            &schemas,
             &mut uses_related_entries,
             &mut uses_recent_posts,
         )
@@ -2357,7 +2486,24 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
 ) -> ApiResult<(Option<String>, Option<String>, bool)> {
     let mut tx = db.begin().await?;
     let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
-    let state = builder::read_render_context_tx(&mut tx).await?;
+    let mut state =
+        builder::read_render_context_for_locale_tx(&mut tx, Some(&effective_locale), false, None)
+            .await?;
+    let mut part_docs = Vec::new();
+    for slot_key in ["header", "footer"] {
+        let target = TemplateCandidate {
+            part_key: Some(slot_key.to_owned()),
+            ..candidate(TemplateCandidateKind::Part)
+        };
+        let canonical = target.canonical_key().map_err(ApiError::internal)?;
+        if let Some(row) = get_typed_override_on_connection(&mut *tx, &canonical).await? {
+            part_docs.push(row.document);
+        }
+    }
+    if !part_docs.is_empty() {
+        let part_refs: Vec<&BuilderDocument> = part_docs.iter().collect();
+        collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &part_refs, false).await?;
+    }
     let url_policy = active_theme_url_policy(active_v3)?;
     let context = PublicBuilderContext {
         state: &state,
@@ -2383,7 +2529,8 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         };
         let canonical = target.canonical_key().map_err(ApiError::internal)?;
         if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
-            let (_, slots) = document_parts_and_slot_count(&row.document)?;
+            let schemas = context.state.unified_block_schemas()?;
+            let (_, slots) = document_parts_and_slot_count_with_schemas(&row.document, &schemas)?;
             validate_content_slots(&target, slots)?;
             let scope = part_scope_prefix(slot_key, budget.expansions);
             return Ok(Some(
@@ -2955,7 +3102,9 @@ pub async fn preview_studio_with_cache_and_locale(
     validate_typed_target_in_tx(&mut tx, target).await?;
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
-    let mut state = builder::read_render_context_tx(&mut tx).await?;
+    let mut state =
+        builder::read_render_context_for_locale_tx(&mut tx, Some(&effective_locale), true, None)
+            .await?;
     let mut options_richtext_nonces = template_sec::RichTextNonceTable::default();
     let (general, pub_settings, site_options, options, menus) = build_preview_context_in_tx(
         &mut tx,
@@ -2965,7 +3114,20 @@ pub async fn preview_studio_with_cache_and_locale(
         Some(&mut options_richtext_nonces),
     )
     .await?;
-    state.site_options = options.clone();
+    state.site_options = site_options.clone();
+    state.options = options.clone();
+    for (slot_key, view) in &menus {
+        state
+            .menus
+            .insert(slot_key.clone(), serde_json::to_value(view)?);
+    }
+    if let Some(slot_ov) = transient.and_then(|t| t.menu_slots.as_ref()) {
+        for (slot_key, maybe_id) in slot_ov {
+            if maybe_id.is_none() {
+                state.menus.remove(slot_key);
+            }
+        }
+    }
     state.timezone = general.timezone.clone();
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
@@ -3050,6 +3212,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     actor,
                     &record.content_type_key,
                     record.id,
+                    Some(&site_options),
                     Some(&options),
                     Some(general.timezone.as_str()),
                     &mut shared_rb,
@@ -3140,35 +3303,15 @@ pub async fn preview_studio_with_cache_and_locale(
         "ov".to_owned()
     };
 
-    let main_html = if let Some(doc) = document {
+    enum PreviewMainPlan<'a> {
+        DraftDoc(&'a BuilderDocument),
+        Resolved(TemplateResolution),
+    }
+    let main_plan = if let Some(doc) = document {
         let existing = get_typed_override_on_connection(&mut tx, &key).await?;
         validate_typed_document_in_tx(&mut tx, target, doc, existing.as_ref().map(|r| &r.document))
             .await?;
-        let graph =
-            preview_part_graph(&mut tx, target, doc, active.as_ref(), &mut preview_budget).await?;
-        let ctx = PreviewRenderContext {
-            state: &state,
-            graph: &graph,
-            theme_context: &theme_context,
-            route,
-            render_locale: &effective_locale,
-            cache,
-            url_policy: &url_policy,
-            fmt_cfg: &fmt_cfg,
-        };
-        let mut rendered = render_preview_builder(
-            &mut tx,
-            doc,
-            Some(&slot_fragment),
-            &ctx,
-            &mut preview_budget,
-            scope,
-            &main_scope,
-        )
-        .await?;
-        diagnostics.append(&mut rendered.diagnostics);
-        has_active_contact_form |= rendered.has_active_contact_form;
-        rendered.html
+        PreviewMainPlan::DraftDoc(doc)
     } else {
         let chain = build_reset_candidate_chain_for_locale_in_conn(
             &mut tx,
@@ -3184,9 +3327,79 @@ pub async fn preview_studio_with_cache_and_locale(
             active.as_ref().map(|a| &a.page_layouts),
         )
         .await?;
-        match resolved {
+        match &resolved {
             TemplateResolution::DbOverride(record) => {
                 canvas_layout = is_canvas_target(active.as_ref(), &record.target);
+            }
+            TemplateResolution::ActiveTheme { target_key, .. } => {
+                canvas_layout = is_canvas_resolved_key(active.as_ref(), target_key);
+            }
+            TemplateResolution::CoreFallback => {
+                canvas_layout = false;
+            }
+        }
+        PreviewMainPlan::Resolved(resolved)
+    };
+
+    let mut shell_part_docs = Vec::new();
+    if target.kind != K::Part && !canvas_layout {
+        for slot_key in ["header", "footer"] {
+            let part_target = TemplateCandidate {
+                part_key: Some(slot_key.to_owned()),
+                ..candidate(K::Part)
+            };
+            let canonical = part_target.canonical_key().map_err(ApiError::bad_request)?;
+            if let Some(row) = get_typed_override_on_connection(&mut *tx, &canonical).await? {
+                shell_part_docs.push(row.document);
+            }
+        }
+    }
+    {
+        let mut hydrate_roots: Vec<&BuilderDocument> = shell_part_docs.iter().collect();
+        match &main_plan {
+            PreviewMainPlan::DraftDoc(doc) => hydrate_roots.push(doc),
+            PreviewMainPlan::Resolved(TemplateResolution::DbOverride(record)) => {
+                hydrate_roots.push(&record.document);
+            }
+            _ => {}
+        }
+        if !hydrate_roots.is_empty() {
+            collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &hydrate_roots, true)
+                .await?;
+        }
+    }
+
+    let main_html = match main_plan {
+        PreviewMainPlan::DraftDoc(doc) => {
+            let graph =
+                preview_part_graph(&mut tx, target, doc, active.as_ref(), &mut preview_budget)
+                    .await?;
+            let ctx = PreviewRenderContext {
+                state: &state,
+                graph: &graph,
+                theme_context: &theme_context,
+                route,
+                render_locale: &effective_locale,
+                cache,
+                url_policy: &url_policy,
+                fmt_cfg: &fmt_cfg,
+            };
+            let mut rendered = render_preview_builder(
+                &mut tx,
+                doc,
+                Some(&slot_fragment),
+                &ctx,
+                &mut preview_budget,
+                scope,
+                &main_scope,
+            )
+            .await?;
+            diagnostics.append(&mut rendered.diagnostics);
+            has_active_contact_form |= rendered.has_active_contact_form;
+            rendered.html
+        }
+        PreviewMainPlan::Resolved(resolved) => match resolved {
+            TemplateResolution::DbOverride(record) => {
                 let graph = preview_part_graph(
                     &mut tx,
                     &record.target,
@@ -3225,7 +3438,6 @@ pub async fn preview_studio_with_cache_and_locale(
                 rendered.html
             }
             TemplateResolution::ActiveTheme { target_key, html } => {
-                canvas_layout = is_canvas_resolved_key(active.as_ref(), &target_key);
                 let slot = if target.kind == K::Part {
                     None
                 } else {
@@ -3244,7 +3456,6 @@ pub async fn preview_studio_with_cache_and_locale(
                 out
             }
             TemplateResolution::CoreFallback => {
-                canvas_layout = false;
                 if target.kind == K::Part {
                     String::new()
                 } else {
@@ -3256,7 +3467,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     )
                 }
             }
-        }
+        },
     };
 
     let (header_html, footer_html) = if target.kind != K::Part && !canvas_layout {
@@ -3350,7 +3561,8 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     entries::filter_entry_values_for_role(&mut record, schema, actor_role);
     let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
-    let mut state = builder::read_render_context_tx(tx).await?;
+    let mut state =
+        builder::read_render_context_for_locale_tx(tx, Some(&record.locale), true, None).await?;
     let mut options_richtext_nonces = template_sec::RichTextNonceTable::default();
     let (general, pub_settings, site_options, options, menus) = build_preview_context_in_tx(
         tx,
@@ -3363,7 +3575,13 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     entry_render_budget
         .richtext_nonces
         .extend(options_richtext_nonces);
-    state.site_options = options.clone();
+    state.site_options = site_options.clone();
+    state.options = options.clone();
+    for (slot_key, view) in &menus {
+        state
+            .menus
+            .insert(slot_key.clone(), serde_json::to_value(view)?);
+    }
     state.timezone = general.timezone.clone();
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
@@ -3450,7 +3668,37 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     let route = Some((record.content_type_key.as_str(), record.slug.as_str()));
     let mut diagnostics = entry_rendered.diagnostics;
     let mut has_active_contact_form = entry_rendered.has_active_contact_form;
-    let mut canvas_layout = false;
+    let mut canvas_layout = match &resolution {
+        TemplateResolution::DbOverride(override_rec) => {
+            is_canvas_target(active.as_ref(), &override_rec.target)
+        }
+        TemplateResolution::ActiveTheme { target_key, .. } => {
+            is_canvas_resolved_key(active.as_ref(), target_key)
+        }
+        TemplateResolution::CoreFallback => false,
+    };
+    let mut shell_part_docs = Vec::new();
+    if !canvas_layout {
+        for slot_key in ["header", "footer"] {
+            let part_target = TemplateCandidate {
+                part_key: Some(slot_key.to_owned()),
+                ..candidate(TemplateCandidateKind::Part)
+            };
+            let canonical = part_target.canonical_key().map_err(ApiError::internal)?;
+            if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
+                shell_part_docs.push(row.document);
+            }
+        }
+    }
+    {
+        let mut hydrate_roots: Vec<&BuilderDocument> = shell_part_docs.iter().collect();
+        if let TemplateResolution::DbOverride(override_rec) = &resolution {
+            hydrate_roots.push(&override_rec.document);
+        }
+        if !hydrate_roots.is_empty() {
+            collect_db_docs_and_hydrate_state_in_tx(tx, &mut state, &hydrate_roots, true).await?;
+        }
+    }
 
     let template_html = match resolution {
         TemplateResolution::DbOverride(override_rec) => {

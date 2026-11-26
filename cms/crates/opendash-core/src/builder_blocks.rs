@@ -79,6 +79,7 @@ pub struct ExtractedBlockRefs {
     pub image_ids: BTreeSet<String>,
     pub video_ids: BTreeSet<String>,
     pub poster_image_ids: BTreeSet<String>,
+    pub file_ids: BTreeSet<String>,
     pub any_media_ids: BTreeSet<String>,
     pub pattern_ids: BTreeSet<i64>,
 }
@@ -1549,7 +1550,10 @@ pub fn extract_block_refs_lenient_with_schemas(
                         let collected = entry.descriptor.schema.collect_media_ids(&props.values);
                         refs.image_ids.extend(collected.image_ids);
                         refs.video_ids.extend(collected.video_ids);
+                        refs.file_ids.extend(collected.file_ids);
                         refs.any_media_ids.extend(collected.any_ids);
+                        refs.pattern_ids
+                            .extend(entry.descriptor.schema.collect_pattern_ids(&props.values));
                     }
                 }
                 _ => {}
@@ -1951,6 +1955,8 @@ mod tests {
         let img_hex = "a".repeat(64);
         let vid_hex = "b".repeat(64);
         let any_hex = "c".repeat(64);
+        let doc_hex = "d".repeat(64);
+        let gal_hex = "e".repeat(64);
         let schema: BlockSchemaV1 = serde_json::from_value(json!({
             "schema_version": 1,
             "id": "core/showcase",
@@ -1962,6 +1968,16 @@ mod tests {
                 { "type": "richtext", "key": "summary", "label": "Summary" },
                 { "type": "media", "key": "poster", "label": "Poster", "media_kind": "image" },
                 { "type": "media", "key": "clip", "label": "Clip", "media_kind": "video" },
+                { "type": "select", "key": "pat", "label": "Pattern", "options_source": "patterns" },
+                {
+                    "type": "group",
+                    "key": "bundle",
+                    "label": "Bundle",
+                    "fields": [
+                        { "type": "media", "key": "attachment", "label": "File", "media_kind": "file" },
+                        { "type": "gallery", "key": "thumbs", "label": "Thumbs", "media_kind": "image" }
+                    ]
+                },
                 {
                     "type": "repeater",
                     "key": "slides",
@@ -1999,6 +2015,11 @@ mod tests {
                                     ("summary".into(), json!("<p>Mô tả <b>hay</b></p>")),
                                     ("poster".into(), json!(img_hex)),
                                     ("clip".into(), json!(vid_hex)),
+                                    ("pat".into(), json!("42")),
+                                    (
+                                        "bundle".into(),
+                                        json!({ "attachment": doc_hex, "thumbs": [gal_hex] }),
+                                    ),
                                     (
                                         "slides".into(),
                                         json!([{ "caption": "Slide 1", "asset": any_hex }]),
@@ -2024,9 +2045,11 @@ mod tests {
             .unwrap();
 
         let refs = extract_block_refs_lenient_with_schemas(&body, &active_catalog);
-        assert_eq!(refs.image_ids, BTreeSet::from([img_hex]));
+        assert_eq!(refs.image_ids, BTreeSet::from([img_hex, gal_hex]));
         assert_eq!(refs.video_ids, BTreeSet::from([vid_hex]));
+        assert_eq!(refs.file_ids, BTreeSet::from([doc_hex]));
         assert_eq!(refs.any_media_ids, BTreeSet::from([any_hex]));
+        assert_eq!(refs.pattern_ids, BTreeSet::from([42]));
         assert_eq!(
             extract_visible_text_with_schemas(&body, &active_catalog),
             "Tiêu đề block\n\nMô tả hay\n\nSlide 1"
