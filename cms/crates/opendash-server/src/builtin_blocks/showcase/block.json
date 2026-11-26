@@ -7,75 +7,40 @@
   "render": "render.html",
   "fields": [
     {
-      "type": "group",
-      "key": "content_group",
-      "label": "1. Nội dung & Soạn thảo",
-      "fields": [
-        {
-          "type": "text",
-          "key": "heading",
-          "label": "Tiêu đề chính (text)",
-          "required": true,
-          "default": "Trải nghiệm Đầy đủ 15 Kiểu Field"
-        },
-        {
-          "type": "textarea",
-          "key": "summary",
-          "label": "Mô tả ngắn (textarea)",
-          "default": "Khối mẫu tập hợp toàn bộ control của OpenDash Studio trong một nơi duy nhất."
-        },
-        {
-          "type": "richtext",
-          "key": "rich_body",
-          "label": "Nội dung phong phú (richtext)",
-          "default": "<p>Bấm <strong>Mở Text Editor</strong> để chỉnh sửa định dạng văn bản phong phú.</p>"
-        }
-      ]
+      "type": "tab",
+      "key": "tab_content",
+      "label": "Nội dung"
+    },
+    {
+      "type": "message",
+      "key": "intro_note",
+      "label": "Unified Field Showcase",
+      "tone": "info",
+      "body": "Khối mẫu tập hợp nested group, margin âm, dynamic icon, options_source và DNF conditions của Unified Field Engine v1.0."
+    },
+    {
+      "type": "text",
+      "key": "heading",
+      "label": "Tiêu đề chính (text)",
+      "required": true,
+      "default": "Trải nghiệm Unified Field Engine v1.0"
+    },
+    {
+      "type": "textarea",
+      "key": "summary",
+      "label": "Mô tả ngắn (textarea)",
+      "default": "Khối mẫu tập hợp toàn bộ control của OpenDash Studio trong một nơi duy nhất."
+    },
+    {
+      "type": "richtext",
+      "key": "rich_body",
+      "label": "Nội dung phong phú (richtext)",
+      "default": "<p>Bấm <strong>Mở Text Editor</strong> để chỉnh sửa định dạng văn bản phong phú.</p>"
     },
     {
       "type": "group",
-      "key": "choice_group",
-      "label": "2. Lựa chọn, Ẩn/Hiện & Căn lề",
-      "fields": [
-        {
-          "type": "radio_buttons",
-          "key": "text_align",
-          "label": "Căn lề (radio_buttons · responsive)",
-          "options": [
-            { "value": "left", "label": "Trái", "icon": "align-left" },
-            { "value": "center", "label": "Giữa", "icon": "align-center" },
-            { "value": "right", "label": "Phải", "icon": "align-right" }
-          ],
-          "default": "left",
-          "responsive": true,
-          "css_var": "--od-showcase-align"
-        },
-        {
-          "type": "select",
-          "key": "theme_variant",
-          "label": "Kiểu thẻ (select dropdown)",
-          "display": "dropdown",
-          "options": [
-            { "value": "surface", "label": "Nền sáng mặc định" },
-            { "value": "tinted", "label": "Nền xám dịu" },
-            { "value": "dark", "label": "Nền tối tương phản" },
-            { "value": "bordered", "label": "Viền mảnh sắc nét" },
-            { "value": "elevated", "label": "Đổ bóng nổi bật" }
-          ],
-          "default": "surface"
-        },
-        {
-          "type": "boolean",
-          "key": "show_cta",
-          "label": "Hiện cụm liên kết CTA (boolean · bật/tắt show_if)",
-          "default": true
-        }
-      ]
-    },
-    {
-      "type": "group",
-      "key": "link_media_group",
-      "label": "3. Media & Liên kết",
+      "key": "hero_card",
+      "label": "Thẻ nổi bật (nested group)",
       "fields": [
         {
           "type": "media",
@@ -86,68 +51,72 @@
         {
           "type": "link",
           "key": "primary_link",
-          "label": "Nút liên kết chính (link)",
-          "show_if": { "field": "show_cta", "equals": true },
-          "default": { "url": "/gioi-thieu", "new_tab": false, "nofollow": false }
+          "label": "Liên kết chính (link)",
+          "default": {
+            "url": "/gioi-thieu",
+            "label": "Khám phá ngay",
+            "new_tab": false,
+            "nofollow": false
+          }
         },
         {
-          "type": "url",
-          "key": "reference_url",
-          "label": "Liên kết tham khảo phụ (url)",
-          "show_if": { "field": "show_cta", "equals": true },
-          "default": "https://example.com"
+          "type": "icon",
+          "key": "badge_icon",
+          "label": "Biểu tượng (icon)",
+          "default": "sparkles"
         }
       ]
     },
     {
-      "type": "group",
-      "key": "style_spacing_group",
-      "label": "4. Màu sắc, Số & Thang Tailwind",
-      "fields": [
-        {
-          "type": "color",
-          "key": "accent_color",
-          "label": "Màu nhấn (color)",
-          "default": "#0284c7",
-          "css_var": "--od-showcase-accent"
-        },
-        {
-          "type": "number",
-          "key": "badge_count",
-          "label": "Con số nổi bật (number)",
-          "min": 0,
-          "max": 9999,
-          "step": 1,
-          "default": 15
-        },
-        {
-          "type": "range",
-          "key": "radius_px",
-          "label": "Bo góc (range · responsive)",
-          "min": 0,
-          "max": 32,
-          "step": 4,
-          "unit": "px",
-          "responsive": true,
-          "default": 16,
-          "css_var": "--od-showcase-radius"
-        },
-        {
-          "type": "spacing",
-          "key": "box_padding",
-          "label": "Khoảng cách đệm (spacing · Tailwind + px)",
-          "min": 0,
-          "max": 256,
-          "unit": "px",
-          "responsive": true,
-          "default": { "top": 32, "right": 24, "bottom": 32, "left": 24 }
-        }
-      ]
+      "type": "gallery",
+      "key": "photos",
+      "label": "Thư viện ảnh (gallery)",
+      "media_kind": "image",
+      "max_items": 8
+    },
+    {
+      "type": "email",
+      "key": "contact_email",
+      "label": "Email liên hệ (email)",
+      "placeholder": "hello@example.com"
+    },
+    {
+      "type": "date",
+      "key": "launch_date",
+      "label": "Ngày ra mắt (date)"
+    },
+    {
+      "type": "select",
+      "key": "linked_menu",
+      "label": "Menu liên kết (options_source: menus)",
+      "options_source": "menus",
+      "allow_null": true
+    },
+    {
+      "type": "select",
+      "key": "taxonomy_key",
+      "label": "Phân loại nguồn (options_source: taxonomies)",
+      "options_source": "taxonomies",
+      "allow_null": true
+    },
+    {
+      "type": "term_ref",
+      "key": "featured_terms",
+      "label": "Chủ đề nổi bật (term_ref động)",
+      "taxonomy_from_field": "taxonomy_key",
+      "multiple": true,
+      "max_items": 6
+    },
+    {
+      "type": "entry_ref",
+      "key": "featured_entry",
+      "label": "Nội dung liên kết (entry_ref đa CPT)",
+      "target_types": ["*"]
     },
     {
       "type": "repeater",
       "key": "highlights",
-      "label": "5. Danh sách Điểm nhấn (repeater)",
+      "label": "Danh sách Điểm nhấn (repeater)",
       "item_label_field": "title",
       "min_items": 1,
       "max_items": 8,
@@ -163,7 +132,133 @@
           "key": "detail",
           "label": "Chi tiết ngắn",
           "default": "Mô tả ngắn"
+        },
+        {
+          "type": "group",
+          "key": "meta",
+          "label": "Thông tin phụ",
+          "fields": [
+            {
+              "type": "icon",
+              "key": "item_icon",
+              "label": "Icon mục",
+              "default": "check-circle"
+            }
+          ]
         }
+      ]
+    },
+    {
+      "type": "tab",
+      "key": "tab_style",
+      "label": "Giao diện & Bố cục"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "text_align",
+      "label": "Căn lề (radio_buttons · responsive)",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" }
+      ],
+      "default": "left",
+      "responsive": true,
+      "css_var": "--od-showcase-align"
+    },
+    {
+      "type": "select",
+      "key": "theme_variant",
+      "label": "Kiểu thẻ (select dropdown)",
+      "display": "dropdown",
+      "options": [
+        { "value": "surface", "label": "Nền sáng mặc định" },
+        { "value": "tinted", "label": "Nền xám dịu" },
+        { "value": "dark", "label": "Nền tối tương phản" },
+        { "value": "bordered", "label": "Viền mảnh sắc nét" },
+        { "value": "elevated", "label": "Đổ bóng nổi bật" }
+      ],
+      "default": "surface"
+    },
+    {
+      "type": "color",
+      "key": "accent_color",
+      "label": "Màu nhấn (color)",
+      "default": "#0284c7",
+      "css_var": "--od-showcase-accent"
+    },
+    {
+      "type": "number",
+      "key": "badge_count",
+      "label": "Con số nổi bật (number)",
+      "min": 0,
+      "max": 9999,
+      "step": 1,
+      "default": 15
+    },
+    {
+      "type": "range",
+      "key": "radius_px",
+      "label": "Bo góc (range · responsive)",
+      "min": 0,
+      "max": 32,
+      "step": 4,
+      "unit": "px",
+      "responsive": true,
+      "default": 16,
+      "css_var": "--od-showcase-radius"
+    },
+    {
+      "type": "spacing",
+      "key": "box_padding",
+      "label": "Khoảng cách đệm (spacing padding · Tailwind + px)",
+      "property": "padding",
+      "min": 0,
+      "max": 256,
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 32, "right": 24, "bottom": 32, "left": 24 }
+    },
+    {
+      "type": "spacing",
+      "key": "outer_margin",
+      "label": "Canh lề ngoài (spacing margin · hỗ trợ số âm)",
+      "property": "margin",
+      "min": -64,
+      "max": 128,
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 0, "right": 0, "bottom": 0, "left": 0 }
+    },
+    {
+      "type": "boolean",
+      "key": "show_cta",
+      "label": "Hiện cụm liên kết CTA (boolean · bật/tắt conditions)",
+      "default": true
+    },
+    {
+      "type": "url",
+      "key": "reference_url",
+      "label": "Liên kết tham khảo phụ (url)",
+      "conditions": [[{ "field": "show_cta", "op": "eq", "value": true }]],
+      "default": "https://example.com"
+    },
+    {
+      "type": "accordion",
+      "key": "acc_advanced",
+      "label": "Tùy chọn nâng cao",
+      "open_by_default": false,
+      "multi_expand": true
+    },
+    {
+      "type": "checkbox",
+      "key": "features",
+      "label": "Đặc tính nổi bật (checkbox)",
+      "layout": "horizontal",
+      "options": [
+        { "value": "fast", "label": "Hiệu năng cao" },
+        { "value": "responsive", "label": "Đa màn hình" },
+        { "value": "accessible", "label": "Truy cập tốt" }
       ]
     }
   ]

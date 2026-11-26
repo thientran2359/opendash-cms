@@ -10739,6 +10739,61 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "reply_to phải là đúng 1 địa chỉ email hợp lệ.",
         "reply_to must be exactly one valid email address.",
     ),
+    (
+        "fields.menu_not_found",
+        "Menu tham chiếu không tồn tại.",
+        "Referenced menu does not exist.",
+    ),
+    (
+        "fields.menu_slot_undeclared",
+        "Vị trí menu không được khai báo trong theme đang kích hoạt.",
+        "Menu slot is not declared by the active theme.",
+    ),
+    (
+        "fields.invalid_contact_form_id",
+        "ID form liên hệ tham chiếu không hợp lệ.",
+        "Referenced contact form ID is invalid.",
+    ),
+    (
+        "fields.contact_form_not_found",
+        "Form liên hệ tham chiếu không tồn tại hoặc chưa kích hoạt.",
+        "Referenced contact form does not exist or is inactive.",
+    ),
+    (
+        "fields.invalid_content_type_key",
+        "Loại nội dung tham chiếu không hợp lệ.",
+        "Referenced content type is invalid.",
+    ),
+    (
+        "fields.content_type_not_found",
+        "Loại nội dung tham chiếu không tồn tại hoặc không hoạt động.",
+        "Referenced content type does not exist or is inactive.",
+    ),
+    (
+        "fields.taxonomy_not_found",
+        "Phân loại tham chiếu không tồn tại hoặc không hoạt động.",
+        "Referenced taxonomy does not exist or is inactive.",
+    ),
+    (
+        "fields.invalid_context_field",
+        "Trường ngữ cảnh (context field) tham chiếu không hợp lệ.",
+        "Referenced context field is invalid.",
+    ),
+    (
+        "fields.template_part_not_found",
+        "Template part tham chiếu không tồn tại.",
+        "Referenced template part does not exist.",
+    ),
+    (
+        "fields.invalid_pattern_id",
+        "ID Pattern tham chiếu không hợp lệ.",
+        "Referenced pattern ID is invalid.",
+    ),
+    (
+        "fields.pattern_not_found",
+        "Pattern tham chiếu không tồn tại.",
+        "Referenced pattern does not exist.",
+    ),
 ];
 
 const TEMPLATE_MATCHERS: &[(&str, &[&str], &[&str])] = &[

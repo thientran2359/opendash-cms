@@ -89,7 +89,10 @@ pub(crate) async fn validated_entry_block_refs_in_conn(
             }
         }
     }
-    for id in std::mem::take(&mut refs.any_media_ids) {
+    for id in std::mem::take(&mut refs.any_media_ids)
+        .into_iter()
+        .chain(std::mem::take(&mut refs.file_ids))
+    {
         if !crate::storage::media::valid_media_id(&id) {
             return Err(ApiError::unprocessable(
                 "ID media trong comment block không hợp lệ.",
@@ -124,6 +127,7 @@ pub(super) async fn sync_entry_body_refs_in_conn(
     schema: &EffectiveContentSchema,
     values: &BTreeMap<String, Value>,
     previous_body: Option<&str>,
+    actor_role: FieldRole,
 ) -> ApiResult<()> {
     if matches!(schema.base.descriptor.key.as_str(), "pattern" | "section") {
         return Ok(());
@@ -150,6 +154,26 @@ pub(super) async fn sync_entry_body_refs_in_conn(
         return Ok(());
     }
 
+    let catalog = crate::storage::page::load_unified_block_catalog_in_conn(conn).await?;
+    let allowed_context_fields: Vec<String> = schema
+        .effective_fields
+        .iter()
+        .filter(|(_, fe)| {
+            fe.effective_status == EffectiveFieldStatus::Active
+                && fe.definition.min_view_role <= actor_role
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+    crate::storage::fields::validate_comment_block_refs_in_conn(
+        conn,
+        raw_body,
+        previous_body,
+        &catalog,
+        None,
+        Some(&allowed_context_fields),
+    )
+    .await?;
+
     let refs = validated_entry_block_refs_in_conn(conn, raw_body).await?;
     if refs.pattern_ids.len() > 16 {
         return Err(ApiError::unprocessable(
@@ -157,7 +181,10 @@ pub(super) async fn sync_entry_body_refs_in_conn(
         ));
     }
     let prev_patterns = previous_body
-        .map(|b| opendash_core::builder_blocks::extract_block_refs_lenient(b).pattern_ids)
+        .map(|b| {
+            opendash_core::builder_blocks::extract_block_refs_lenient_with_schemas(b, &catalog)
+                .pattern_ids
+        })
         .unwrap_or_default();
     let mut existing_patterns = Vec::new();
     for &pid in &refs.pattern_ids {
@@ -1354,7 +1381,15 @@ pub async fn create_entry_with_fence(
     if let Some(ids) = &input.term_ids {
         replace_term_ids(&mut tx, id, ids).await?;
     }
-    sync_entry_body_refs_in_conn(&mut *tx, id, &effective, &input.values, None).await?;
+    sync_entry_body_refs_in_conn(
+        &mut *tx,
+        id,
+        &effective,
+        &input.values,
+        None,
+        actor_field_role(actor.user.role),
+    )
+    .await?;
     let row: EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -1464,6 +1499,7 @@ pub async fn update_entry_with_fence(
                 &effective,
                 &input.values,
                 previous_body.as_deref(),
+                actor_field_role(actor.user.role),
             )
             .await?;
             let row: EntryRow = sqlx::query_as(
@@ -1567,7 +1603,15 @@ pub async fn create_entry_with_schema_fence(
     if let Some(ids) = &input.term_ids {
         replace_term_ids(&mut tx, id, ids).await?;
     }
-    sync_entry_body_refs_in_conn(&mut *tx, id, &effective, &input.values, None).await?;
+    sync_entry_body_refs_in_conn(
+        &mut *tx,
+        id,
+        &effective,
+        &input.values,
+        None,
+        actor_field_role(actor.user.role),
+    )
+    .await?;
     let row: EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -1647,6 +1691,7 @@ pub async fn update_entry_with_schema_fence(
                 &effective,
                 &input.values,
                 previous_body.as_deref(),
+                actor_field_role(actor.user.role),
             )
             .await?;
             let row: EntryRow = sqlx::query_as(
@@ -2031,7 +2076,7 @@ pub async fn prepare_composite_entry_save(
         }
     }
 
-    let (plan_locale, plan_group_id, merged_values) = match entry_id {
+    let (plan_locale, plan_group_id, merged_values, preflight_prev_body) = match entry_id {
         None => {
             let mut conn = db.acquire().await?;
             let loc =
@@ -2050,7 +2095,7 @@ pub async fn prepare_composite_entry_save(
                     out.insert(k.clone(), v.clone());
                 }
             }
-            (loc, None, out)
+            (loc, None, out, None)
         }
         Some(id) => {
             let expected_ver = input.expected_version.unwrap();
@@ -2071,6 +2116,11 @@ pub async fn prepare_composite_entry_save(
                 Some(&existing.locale),
             )
             .await?;
+            let prev_body = existing
+                .values
+                .get("body")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
             let mut out = existing.values;
             for (k, v) in &input.values {
                 if v.is_null() {
@@ -2079,7 +2129,7 @@ pub async fn prepare_composite_entry_save(
                     out.insert(k.clone(), v.clone());
                 }
             }
-            (loc, Some(existing.translation_group_id), out)
+            (loc, Some(existing.translation_group_id), out, prev_body)
         }
     };
 
@@ -2105,6 +2155,26 @@ pub async fn prepare_composite_entry_save(
     {
         let mut conn = db.acquire().await?;
         validated_entry_block_refs_in_conn(&mut conn, body).await?;
+        let catalog = crate::storage::page::load_unified_block_catalog_in_conn(&mut conn).await?;
+        let caller_role = actor_field_role(actor.user.role);
+        let allowed_context_fields: Vec<String> = effective
+            .effective_fields
+            .iter()
+            .filter(|(_, fe)| {
+                fe.effective_status == EffectiveFieldStatus::Active
+                    && fe.definition.min_view_role <= caller_role
+            })
+            .map(|(k, _)| k.clone())
+            .collect();
+        crate::storage::fields::validate_comment_block_refs_in_conn(
+            &mut conn,
+            body,
+            preflight_prev_body.as_deref(),
+            &catalog,
+            None,
+            Some(&allowed_context_fields),
+        )
+        .await?;
     }
 
     Ok(CompositePreflightPlan {
@@ -2707,6 +2777,7 @@ pub async fn commit_composite_entry_save(
         &effective,
         &plan.merged_input.values,
         previous_body.as_deref(),
+        actor_field_role(actor.user.role),
     )
     .await?;
 
@@ -3263,7 +3334,23 @@ pub async fn commit_entry_translation(
         crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, new_id).await?;
     }
 
-    sync_entry_body_refs_in_conn(&mut *tx, new_id, &effective, &plan.values, None).await?;
+    let source_values_json: Option<String> =
+        sqlx::query_scalar("SELECT values_json FROM content_entries WHERE id = ?")
+            .bind(source_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let source_body = source_values_json
+        .as_deref()
+        .and_then(extract_body_from_values_json);
+    sync_entry_body_refs_in_conn(
+        &mut *tx,
+        new_id,
+        &effective,
+        &plan.values,
+        source_body.as_deref(),
+        actor_field_role(actor.user.role),
+    )
+    .await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
 
     let row: EntryRow = sqlx::query_as(

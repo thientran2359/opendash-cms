@@ -1,4 +1,7 @@
 import { tStatic } from '../i18n/index.tsx';
+import { evaluateConditions } from '../fields/conditions.ts';
+import { isUiOnlyFieldType } from '../fields/helpers.ts';
+import type { FieldSpec } from '../fields/types.ts';
 import type { BlockCatalogItemDto, BlockPropValue, BlockSchemaV1 } from '../types.ts';
 
 /** Homepage AST v1. The server validates every Save; this client preserves
@@ -556,19 +559,20 @@ function childrenAt(document: BuilderDocument, location: NodeLocation | undefine
   return current && !isElement(current.node) ? current.node.children : undefined;
 }
 
-/** Group fields are flattened in the server schema. Repeater items hold their
- * own object values; responsive defaults start at desktop and cascade in UI. */
-function initialBlockValues(fields: BlockSchemaV1['fields']): Record<string, unknown> {
+/** Group fields hold nested objects `{ ... }`; UI-only fields (`tab`, `accordion`, `message`)
+ * emit no keys; repeater items hold their own object values; responsive defaults start at desktop. */
+function initialBlockValues(fields: readonly FieldSpec[]): Record<string, unknown> {
   const values: Record<string, unknown> = {};
   for (const field of fields) {
+    if (isUiOnlyFieldType(field.type)) continue;
     if (field.type === 'group') {
-      Object.assign(values, initialBlockValues(field.fields));
+      values[field.key] = initialBlockValues(field.fields ?? []);
     } else if (field.type === 'repeater') {
       values[field.key] = Array.from({ length: field.min_items ?? 0 },
-        () => initialBlockValues(field.fields));
-    } else if ('default' in field && field.default !== undefined && field.default !== null) {
-      values[field.key] = 'responsive' in field && field.responsive
-        ? { desktop: field.default } : field.default;
+        () => initialBlockValues(field.fields ?? []));
+    } else if (field.default !== undefined && field.default !== null) {
+      const defCopy = typeof field.default === 'object' ? clone(field.default) : field.default;
+      values[field.key] = field.responsive ? { desktop: defCopy } : defCopy;
     }
   }
   return values;
@@ -657,7 +661,7 @@ export function duplicateNode(
     duplicatePath.every((step, depth) => entry.path[depth] === step));
   for (const entry of inserted) entry.node.id = newNodeId(entry.kind, next);
 
-  if (distinctPatternIdCount(next) > 16 || !withinBuilderLimits(next)
+  if (distinctPatternIdCount(next, blockCatalog) > 16 || !withinBuilderLimits(next)
       || !preservesAnchors(document, next, undefined, blockCatalog)) return null;
   const targetRelPath = [...duplicatePath, ...leafLoc.path.slice(source.path.length)];
   const returnEntry = inserted.find(entry =>
@@ -740,93 +744,166 @@ export function appendFreeformElement(
   return null;
 }
 
-/** Group fields are flattened in PluginBlockProps.values; repeater values
- * belong to their declared top-level repeater field. */
-function declaredBlockKeys(fields: BlockSchemaV1['fields']): Set<string> {
+/** Top-level persisted value keys for a unified V1 block schema (excluding UI-only fields).
+ * Groups retain nested object values under their own field key. */
+function declaredBlockKeys(fields: readonly FieldSpec[]): Set<string> {
   const keys = new Set<string>();
   for (const field of fields) {
-    if (field.type === 'group') {
-      for (const key of declaredBlockKeys(field.fields)) keys.add(key);
-    } else {
-      keys.add(field.key);
-    }
+    if (!isUiOnlyFieldType(field.type)) keys.add(field.key);
   }
   return keys;
 }
 
 /** Check the constraints that require previous_values=None in the Rust
- * BlockSchemaV1 validator: newly required fields, visible group/field rules,
- * responsive required values, and repeater min_items/subfields. */
+ * BlockSchemaV1 validator: newly required fields, visible DNF conditions,
+ * nested groups, responsive required values, and repeater min_items/subfields. */
 function pluginValuesReadyForFreshNode(
   values: Record<string, unknown>, schema: BlockSchemaV1,
 ): boolean {
   if (Object.keys(values).length > 64
       || new TextEncoder().encode(JSON.stringify(values)).byteLength > 64 * 1024) return false;
-  const fields = schema.fields.flatMap(field => field.type === 'group' ? field.fields : [field]);
-  const defaults = new Map(fields.map(field =>
-    [field.key, 'default' in field ? field.default : undefined]));
-  const visible = (rule: { field: string; equals: string | number | boolean | null } | null | undefined) => {
-    if (!rule) return true;
-    const value = values[rule.field] ?? defaults.get(rule.field) ?? null;
-    return value === rule.equals;
+  const readyPositiveInt = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v > 0;
+  const readyField = (
+    field: FieldSpec,
+    data: Record<string, unknown>,
+    scopeFields: readonly FieldSpec[],
+    parentVisible: boolean,
+  ): boolean => {
+    if (isUiOnlyFieldType(field.type)) return true;
+    const isVisible = parentVisible && evaluateConditions(
+      field.conditions, scopeFields, data, schema.fields, values,
+    );
+    return readyValue(field, data[field.key], isVisible, field.required === true);
   };
-  type Field = BlockSchemaV1['fields'][number];
-  const readyLeaf = (field: Field, value: unknown, required: boolean): boolean => {
-    if (value === undefined || value === null) return !required || !('required' in field && field.required);
-    if (field.type === 'group' || field.type === 'repeater') return false;
-    const responsive = 'responsive' in field && field.responsive;
-    if (responsive && object(value)) {
+  const readyValue = (
+    field: FieldSpec,
+    value: unknown,
+    isVisible: boolean,
+    checkRequired: boolean,
+  ): boolean => {
+    if (field.type === 'group') {
+      if (value !== undefined && value !== null && !object(value)) return false;
+      const groupObj = object(value) ? value : {};
+      if (Object.keys(groupObj).length > 64) return false;
+      const childFields = field.fields ?? [];
+      return childFields.every(child => readyField(child, groupObj, childFields, isVisible));
+    }
+    if (field.type === 'repeater') {
+      if (value === undefined || value === null) return !isVisible || (field.min_items ?? 0) === 0;
+      if (!Array.isArray(value) || value.length > (field.max_items ?? 32)
+          || (isVisible && value.length < (field.min_items ?? 0))) return false;
+      const childFields = field.fields ?? [];
+      return value.every(item => object(item)
+        && Object.keys(item).length <= 64
+        && childFields.every(child => readyField(child, item, childFields, isVisible)));
+    }
+    if (value === undefined || value === null) return !isVisible || !checkRequired || !field.required;
+    if (field.responsive && object(value)) {
       if (Object.keys(value).some(key => !['desktop', 'tablet', 'mobile'].includes(key))) return false;
       const entries = Object.values(value).filter(item => item !== null && item !== undefined);
-      if (required && 'required' in field && field.required && entries.length === 0) return false;
-      return entries.every(item => readyLeaf(field, item, false));
+      if (isVisible && checkRequired && field.required && entries.length === 0) return false;
+      return entries.every(item => readyValue(field, item, isVisible, false));
     }
     if (field.type === 'number' || field.type === 'range') {
       return typeof value === 'number' && Number.isFinite(value)
-        && (field.min === undefined || field.min === null || value >= field.min)
-        && (field.max === undefined || field.max === null || value <= field.max);
+        && (field.min === undefined || value >= field.min)
+        && (field.max === undefined || value <= field.max);
     }
     if (field.type === 'boolean') return typeof value === 'boolean';
-    if (field.type === 'select' || field.type === 'radio_buttons') return typeof value === 'string'
-      && field.options.some(option => option.value === value);
+    if (field.type === 'select') {
+      if (field.options_source) {
+        if (field.multiple) return Array.isArray(value) && value.every(v => typeof v === 'string');
+        return typeof value === 'string' && (!isVisible || !checkRequired || !field.required || value.trim().length > 0);
+      }
+      const allowed = new Set((field.options ?? []).map(o => o.value));
+      if (field.multiple) return Array.isArray(value) && value.every(v => typeof v === 'string' && allowed.has(v));
+      if (typeof value !== 'string') return false;
+      if (value === '') return Boolean(field.allow_null || (!isVisible || !checkRequired || !field.required));
+      return allowed.has(value);
+    }
+    if (field.type === 'radio_buttons') {
+      return typeof value === 'string' && (field.options ?? []).some(o => o.value === value);
+    }
+    if (field.type === 'checkbox') {
+      if (!Array.isArray(value)) return false;
+      const allowed = new Set((field.options ?? []).map(o => o.value));
+      if (field.min_items !== undefined && isVisible && value.length < field.min_items) return false;
+      if (field.max_items !== undefined && value.length > field.max_items) return false;
+      return value.every(v => typeof v === 'string' && allowed.has(v));
+    }
     if (field.type === 'spacing') {
       if (!object(value)) return false;
-      const lo = field.min ?? 0;
+      const lo = field.min ?? (field.property === 'margin' ? -128 : 0);
       const hi = field.max ?? 256;
       return Object.entries(value).every(([k, v]) =>
         ['top', 'right', 'bottom', 'left'].includes(k)
         && (v === null || v === undefined || (typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi)));
     }
     if (field.type === 'link') {
-      if (typeof value === 'string') return !required || !field.required || value.trim().length > 0;
       if (!object(value) || typeof value.url !== 'string') return false;
-      return !required || !field.required || value.url.trim().length > 0;
+      return !isVisible || !checkRequired || !field.required || value.url.trim().length > 0;
+    }
+    if (field.type === 'gallery') {
+      if (!Array.isArray(value)) return false;
+      if (field.min_items !== undefined && isVisible && value.length < field.min_items) return false;
+      if (field.max_items !== undefined && value.length > field.max_items) return false;
+      return value.every(v => typeof v === 'string' && v.trim().length > 0);
+    }
+    if (field.type === 'entry_ref' || field.type === 'term_ref') {
+      if (field.multiple) {
+        if (!Array.isArray(value)) return false;
+        if (field.min_items !== undefined && isVisible && value.length < field.min_items) return false;
+        if (field.max_items !== undefined && value.length > field.max_items) return false;
+        return value.every(readyPositiveInt);
+      }
+      return readyPositiveInt(value);
     }
     return typeof value === 'string'
-      && (!required || !('required' in field && field.required) || value.trim().length > 0);
+      && (!isVisible || !checkRequired || !field.required || value.trim().length > 0);
   };
-  const readyField = (field: Field, data: Record<string, unknown>, isVisible: boolean): boolean => {
-    const current = data[field.key];
-    if (field.type !== 'repeater') return readyLeaf(field, current, isVisible);
-    if (current === undefined || current === null) return !isVisible || (field.min_items ?? 0) === 0;
-    if (!Array.isArray(current) || current.length > (field.max_items ?? 32)
-        || (isVisible && current.length < (field.min_items ?? 0))) return false;
-    return current.every(item => object(item)
-      && Object.keys(item).length <= 64
-      && field.fields.every(child => readyLeaf(child, item[child.key],
-        isVisible && visible(child.show_if))));
-  };
-  return schema.fields.every(field => field.type === 'group'
-    ? field.fields.every(child => readyField(child, values,
-      visible(field.show_if) && visible(child.show_if)))
-    : readyField(field, values, visible(field.show_if)));
+  return schema.fields.every(field => readyField(field, values, schema.fields, true));
 }
 
-function distinctPatternIdCount(document: BuilderDocument): number {
-  return new Set(allNodes(document)
-    .filter(entry => entry.kind === 'element'
-      && (entry.node as BuilderElement).type === 'core/pattern_ref')
-    .map(entry => (entry.node as BuilderElement).props.pattern_id)).size;
+function collectPatternSourceIds(
+  fields: readonly FieldSpec[],
+  data: Record<string, unknown>,
+  out: Set<number>,
+): void {
+  for (const field of fields) {
+    if (isUiOnlyFieldType(field.type)) continue;
+    const raw = data[field.key];
+    if (raw === undefined || raw === null) continue;
+    if (field.type === 'group' && object(raw)) {
+      collectPatternSourceIds(field.fields ?? [], raw, out);
+    } else if (field.type === 'select' && field.options_source === 'patterns') {
+      const items = Array.isArray(raw) ? raw : [raw];
+      for (const item of items) {
+        if (typeof item === 'string' && /^\d+$/.test(item.trim())) {
+          const parsed = Number(item.trim());
+          if (parsed > 0) out.add(parsed);
+        }
+      }
+    }
+  }
+}
+
+function distinctPatternIdCount(
+  document: BuilderDocument,
+  blockCatalog: BlockCatalogItemDto[] = [],
+): number {
+  const ids = new Set<number>();
+  for (const entry of allNodes(document)) {
+    if (entry.kind !== 'element') continue;
+    const el = entry.node as BuilderElement;
+    if (el.type === 'core/pattern_ref') {
+      const pid = el.props.pattern_id;
+      if (typeof pid === 'number' && pid > 0) ids.add(pid);
+    } else if (el.type === 'plugin/block' && object(el.props.values)) {
+      const descriptor = blockCatalog.find(item => item.block_id === el.props.block_id);
+      if (descriptor) collectPatternSourceIds(descriptor.schema.fields, el.props.values, ids);
+    }
+  }
+  return ids.size;
 }
 
 export function copyNodeOptions(
@@ -905,6 +982,7 @@ export function canPasteOptions(
 /** Never transfer binding references or a block_id to the target node. */
 export function pasteNodeOptions(
   document: BuilderDocument, id: string, clipboard: StudioBuilderClipboard,
+  blockCatalog: BlockCatalogItemDto[] = [],
 ): BuilderDocument | null {
   const next = clone(document);
   const target = locate(next, id);
@@ -945,7 +1023,7 @@ export function pasteNodeOptions(
   }
   if (Object.keys(mergedMeta).length === 0) delete target.node.meta;
   else target.node.meta = mergedMeta;
-  return distinctPatternIdCount(next) <= 16 && withinBuilderLimits(next) ? next : null;
+  return distinctPatternIdCount(next, blockCatalog) <= 16 && withinBuilderLimits(next) ? next : null;
 }
 
 /** Drag/drop may reorder siblings only if preserved nodes retain their exact

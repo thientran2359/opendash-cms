@@ -400,7 +400,7 @@ fn builder_responsive_css(document: &BuilderDocument, is_preview: bool) -> Strin
                 if let Some(bg_color) = style
                     .background_color
                     .as_deref()
-                    .filter(|s| !s.is_empty() && opendash_core::block_schema::valid_block_color(s))
+                    .filter(|s| !s.is_empty() && opendash_core::field_schema::valid_color_value(s))
                 {
                     sec_css.push_str(&format!("background-color:{bg_color};"));
                 }
@@ -485,7 +485,7 @@ fn builder_responsive_css(document: &BuilderDocument, is_preview: bool) -> Strin
     css
 }
 
-fn format_css_number(n: f64, unit: Option<opendash_core::block_schema::CssUnit>) -> Option<String> {
+fn format_css_number(n: f64, unit: Option<opendash_core::field_schema::CssUnit>) -> Option<String> {
     if !n.is_finite() {
         return None;
     }
@@ -497,6 +497,246 @@ fn format_css_number(n: f64, unit: Option<opendash_core::block_schema::CssUnit>)
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn collect_scoped_css_for_fields(
+    fields: &[opendash_core::field_schema::FieldSpec],
+    values: &std::collections::BTreeMap<String, serde_json::Value>,
+    path_prefix: Option<&str>,
+    node_scope: &str,
+    is_preview: bool,
+    desktop_props: &mut String,
+    tablet_props: &mut String,
+    mobile_props: &mut String,
+    desktop_rules: &mut String,
+    tablet_rules: &mut String,
+    mobile_rules: &mut String,
+) {
+    use opendash_core::field_schema::{
+        FieldType, MediaFieldKind, SpacingProperty, SpacingValue, valid_color_value,
+        valid_css_select_value, valid_css_var_name, valid_sha256_media_id,
+    };
+
+    for spec in fields {
+        if spec.is_ui_only() || spec.field_type == FieldType::Secret {
+            continue;
+        }
+        let field_path = match path_prefix {
+            Some(prefix) => format!("{prefix}.{}", spec.key),
+            None => spec.key.clone(),
+        };
+        match spec.field_type {
+            FieldType::Group => {
+                let child_values: std::collections::BTreeMap<String, serde_json::Value> = values
+                    .get(&spec.key)
+                    .and_then(serde_json::Value::as_object)
+                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                    .unwrap_or_default();
+                collect_scoped_css_for_fields(
+                    &spec.fields,
+                    &child_values,
+                    Some(&field_path),
+                    node_scope,
+                    is_preview,
+                    desktop_props,
+                    tablet_props,
+                    mobile_props,
+                    desktop_rules,
+                    tablet_rules,
+                    mobile_rules,
+                );
+            }
+            FieldType::Number | FieldType::Range => {
+                let Some(var_name) = spec.css_var.as_deref() else {
+                    continue;
+                };
+                if !valid_css_var_name(var_name) {
+                    continue;
+                }
+                let default_num = spec
+                    .default
+                    .as_ref()
+                    .and_then(serde_json::Value::as_f64)
+                    .or(if spec.field_type == FieldType::Range {
+                        spec.min
+                    } else {
+                        None
+                    });
+                let raw = values.get(&spec.key);
+                if spec.responsive
+                    && let Some(obj) = raw.and_then(|v| v.as_object())
+                {
+                    if let Some(d) = obj
+                        .get("desktop")
+                        .and_then(|v| v.as_f64())
+                        .or(default_num)
+                        .and_then(|n| format_css_number(n, spec.unit))
+                    {
+                        desktop_props.push_str(&format!("{var_name}:{d};"));
+                    }
+                    if let Some(t) = obj
+                        .get("tablet")
+                        .and_then(|v| v.as_f64())
+                        .and_then(|n| format_css_number(n, spec.unit))
+                    {
+                        tablet_props.push_str(&format!("{var_name}:{t};"));
+                    }
+                    if let Some(m) = obj
+                        .get("mobile")
+                        .and_then(|v| v.as_f64())
+                        .and_then(|n| format_css_number(n, spec.unit))
+                    {
+                        mobile_props.push_str(&format!("{var_name}:{m};"));
+                    }
+                } else if let Some(d) = raw
+                    .and_then(|v| v.as_f64())
+                    .or(default_num)
+                    .and_then(|n| format_css_number(n, spec.unit))
+                {
+                    desktop_props.push_str(&format!("{var_name}:{d};"));
+                }
+            }
+            FieldType::Select | FieldType::RadioButtons => {
+                let Some(var_name) = spec.css_var.as_deref() else {
+                    continue;
+                };
+                if !valid_css_var_name(var_name) {
+                    continue;
+                }
+                let default_str = spec.default.as_ref().and_then(serde_json::Value::as_str);
+                let raw = values.get(&spec.key);
+                if spec.responsive
+                    && let Some(obj) = raw.and_then(|v| v.as_object())
+                {
+                    if let Some(d) = obj
+                        .get("desktop")
+                        .and_then(|v| v.as_str())
+                        .or(default_str)
+                        .filter(|s| valid_css_select_value(s))
+                    {
+                        desktop_props.push_str(&format!("{var_name}:{d};"));
+                    }
+                    if let Some(t) = obj
+                        .get("tablet")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| valid_css_select_value(s))
+                    {
+                        tablet_props.push_str(&format!("{var_name}:{t};"));
+                    }
+                    if let Some(m) = obj
+                        .get("mobile")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| valid_css_select_value(s))
+                    {
+                        mobile_props.push_str(&format!("{var_name}:{m};"));
+                    }
+                } else if let Some(d) = raw
+                    .and_then(|v| v.as_str())
+                    .or(default_str)
+                    .filter(|s| valid_css_select_value(s))
+                {
+                    desktop_props.push_str(&format!("{var_name}:{d};"));
+                }
+            }
+            FieldType::Spacing => {
+                let css_unit = spec.effective_unit();
+                let spacing_prop = spec.effective_spacing_property();
+                let default_sv = spec
+                    .default
+                    .as_ref()
+                    .and_then(|v| serde_json::from_value::<SpacingValue>(v.clone()).ok());
+                let raw = values.get(&spec.key);
+                let (d_sv, t_sv, m_sv) = crate::template_sec::extract_spacing_breakpoint_values(
+                    raw,
+                    default_sv,
+                    spec.responsive,
+                );
+                if let Some(var_name) = spec.css_var.as_deref() {
+                    if !valid_css_var_name(var_name) {
+                        continue;
+                    }
+                    if let Some(d_css) = d_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        desktop_props.push_str(&format!("{var_name}:{d_css};"));
+                    }
+                    if let Some(t_css) = t_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        tablet_props.push_str(&format!("{var_name}:{t_css};"));
+                    }
+                    if let Some(m_css) = m_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        mobile_props.push_str(&format!("{var_name}:{m_css};"));
+                    }
+                } else if crate::template_sec::spacing_field_tailwind_classes(
+                    raw,
+                    default_sv,
+                    spec.responsive,
+                    css_unit,
+                    spacing_prop,
+                )
+                .is_none()
+                {
+                    let css_prop = match spacing_prop {
+                        SpacingProperty::Padding => "padding",
+                        SpacingProperty::Margin => "margin",
+                    };
+                    if let Some(d_css) = d_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        desktop_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{d_css};}}"
+                        ));
+                    }
+                    if let Some(t_css) = t_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        tablet_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{t_css};}}"
+                        ));
+                    }
+                    if let Some(m_css) = m_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        mobile_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{m_css};}}"
+                        ));
+                    }
+                }
+            }
+            FieldType::Color => {
+                let Some(var_name) = spec.css_var.as_deref() else {
+                    continue;
+                };
+                if !valid_css_var_name(var_name) {
+                    continue;
+                }
+                let default_str = spec.default.as_ref().and_then(serde_json::Value::as_str);
+                if let Some(c) = values
+                    .get(&spec.key)
+                    .and_then(|v| v.as_str())
+                    .or(default_str)
+                    .filter(|s| !s.is_empty() && valid_color_value(s))
+                {
+                    desktop_props.push_str(&format!("{var_name}:{c};"));
+                }
+            }
+            FieldType::Media if spec.effective_media_kind() == MediaFieldKind::Image => {
+                let Some(var_name) = spec.css_var.as_deref() else {
+                    continue;
+                };
+                if !valid_css_var_name(var_name) {
+                    continue;
+                }
+                let default_str = spec.default.as_ref().and_then(serde_json::Value::as_str);
+                if let Some(id) = values
+                    .get(&spec.key)
+                    .and_then(|v| v.as_str())
+                    .or(default_str)
+                    .filter(|s| !s.is_empty() && valid_sha256_media_id(s))
+                {
+                    let url_path = if is_preview {
+                        format!("/api/admin/media/{id}/file")
+                    } else {
+                        format!("/media/{id}/file")
+                    };
+                    desktop_props.push_str(&format!("{var_name}:url(\"{url_path}\");"));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Emits scoped CSS custom properties (`--od-*`) for all active, declared `block.json` v1
 /// `PluginBlock` instances in `document` under `[data-od-node-scope="{scope}-{node_id}"]`.
 pub fn serialize_scoped_block_css(
@@ -505,13 +745,7 @@ pub fn serialize_scoped_block_css(
     scope: &str,
     is_preview: bool,
 ) -> ApiResult<String> {
-    use opendash_core::{
-        block_schema::{
-            BlockFieldSpec, MediaFieldKind, valid_block_color, valid_css_select_value,
-            valid_css_var_name, valid_sha256_media_id,
-        },
-        registry::{DeclarationState, ProviderStatus},
-    };
+    use opendash_core::registry::{DeclarationState, ProviderStatus};
 
     if scope.is_empty()
         || !scope
@@ -550,240 +784,19 @@ pub fn serialize_scoped_block_css(
                     let mut tablet_props = String::new();
                     let mut mobile_props = String::new();
 
-                    for field in def.schema.schema.flattened_top_fields() {
-                        match field {
-                            BlockFieldSpec::Number {
-                                key,
-                                default,
-                                unit,
-                                css_var: Some(var_name),
-                                responsive,
-                                ..
-                            }
-                            | BlockFieldSpec::Range {
-                                key,
-                                default,
-                                unit,
-                                css_var: Some(var_name),
-                                responsive,
-                                ..
-                            } => {
-                                if !valid_css_var_name(var_name) {
-                                    continue;
-                                }
-                                let raw = props.values.get(key.as_str());
-                                if *responsive && let Some(obj) = raw.and_then(|v| v.as_object()) {
-                                    if let Some(d) = obj
-                                        .get("desktop")
-                                        .and_then(|v| v.as_f64())
-                                        .or(*default)
-                                        .and_then(|n| format_css_number(n, *unit))
-                                    {
-                                        desktop_props.push_str(&format!("{var_name}:{d};"));
-                                    }
-                                    if let Some(t) = obj
-                                        .get("tablet")
-                                        .and_then(|v| v.as_f64())
-                                        .and_then(|n| format_css_number(n, *unit))
-                                    {
-                                        tablet_props.push_str(&format!("{var_name}:{t};"));
-                                    }
-                                    if let Some(m) = obj
-                                        .get("mobile")
-                                        .and_then(|v| v.as_f64())
-                                        .and_then(|n| format_css_number(n, *unit))
-                                    {
-                                        mobile_props.push_str(&format!("{var_name}:{m};"));
-                                    }
-                                } else if let Some(d) = raw
-                                    .and_then(|v| v.as_f64())
-                                    .or(*default)
-                                    .and_then(|n| format_css_number(n, *unit))
-                                {
-                                    desktop_props.push_str(&format!("{var_name}:{d};"));
-                                }
-                            }
-                            BlockFieldSpec::Select {
-                                key,
-                                default,
-                                css_var: Some(var_name),
-                                responsive,
-                                ..
-                            }
-                            | BlockFieldSpec::RadioButtons {
-                                key,
-                                default,
-                                css_var: Some(var_name),
-                                responsive,
-                                ..
-                            } => {
-                                if !valid_css_var_name(var_name) {
-                                    continue;
-                                }
-                                let raw = props.values.get(key.as_str());
-                                if *responsive && let Some(obj) = raw.and_then(|v| v.as_object()) {
-                                    if let Some(d) = obj
-                                        .get("desktop")
-                                        .and_then(|v| v.as_str())
-                                        .or(default.as_deref())
-                                        .filter(|s| valid_css_select_value(s))
-                                    {
-                                        desktop_props.push_str(&format!("{var_name}:{d};"));
-                                    }
-                                    if let Some(t) = obj
-                                        .get("tablet")
-                                        .and_then(|v| v.as_str())
-                                        .filter(|s| valid_css_select_value(s))
-                                    {
-                                        tablet_props.push_str(&format!("{var_name}:{t};"));
-                                    }
-                                    if let Some(m) = obj
-                                        .get("mobile")
-                                        .and_then(|v| v.as_str())
-                                        .filter(|s| valid_css_select_value(s))
-                                    {
-                                        mobile_props.push_str(&format!("{var_name}:{m};"));
-                                    }
-                                } else if let Some(d) = raw
-                                    .and_then(|v| v.as_str())
-                                    .or(default.as_deref())
-                                    .filter(|s| valid_css_select_value(s))
-                                {
-                                    desktop_props.push_str(&format!("{var_name}:{d};"));
-                                }
-                            }
-                            BlockFieldSpec::Spacing {
-                                key,
-                                default,
-                                unit,
-                                css_var,
-                                responsive,
-                                ..
-                            } => {
-                                let css_unit =
-                                    unit.unwrap_or(opendash_core::block_schema::CssUnit::Px);
-                                let raw = props.values.get(key.as_str());
-                                if let Some(var_name) = css_var {
-                                    if !valid_css_var_name(var_name) {
-                                        continue;
-                                    }
-                                    let parse_spacing = |v: &serde_json::Value| {
-                                        serde_json::from_value::<
-                                            opendash_core::block_schema::SpacingValue,
-                                        >(v.clone())
-                                        .ok()
-                                        .and_then(|sv| sv.format_css(css_unit))
-                                    };
-                                    if *responsive
-                                        && let Some(obj) = raw.and_then(|v| v.as_object())
-                                        && !(obj.contains_key("top")
-                                            || obj.contains_key("right")
-                                            || obj.contains_key("bottom")
-                                            || obj.contains_key("left"))
-                                    {
-                                        if let Some(d) =
-                                            obj.get("desktop").and_then(&parse_spacing).or_else(
-                                                || default.and_then(|sv| sv.format_css(css_unit)),
-                                            )
-                                        {
-                                            desktop_props.push_str(&format!("{var_name}:{d};"));
-                                        }
-                                        if let Some(t) = obj.get("tablet").and_then(&parse_spacing)
-                                        {
-                                            tablet_props.push_str(&format!("{var_name}:{t};"));
-                                        }
-                                        if let Some(m) = obj.get("mobile").and_then(&parse_spacing)
-                                        {
-                                            mobile_props.push_str(&format!("{var_name}:{m};"));
-                                        }
-                                    } else if let Some(d) = raw
-                                        .and_then(&parse_spacing)
-                                        .or_else(|| default.and_then(|sv| sv.format_css(css_unit)))
-                                    {
-                                        desktop_props.push_str(&format!("{var_name}:{d};"));
-                                    }
-                                } else if crate::template_sec::spacing_field_tailwind_classes(
-                                    raw,
-                                    *default,
-                                    *responsive,
-                                    css_unit,
-                                )
-                                .is_none()
-                                {
-                                    let (d_sv, t_sv, m_sv) =
-                                        crate::template_sec::extract_spacing_breakpoint_values(
-                                            raw,
-                                            *default,
-                                            *responsive,
-                                        );
-                                    if let Some(d_css) = d_sv.and_then(|sv| sv.format_css(css_unit))
-                                    {
-                                        desktop_rules.push_str(&format!(
-                                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{key}\"]{{padding:{d_css};}}"
-                                        ));
-                                    }
-                                    if let Some(t_css) = t_sv.and_then(|sv| sv.format_css(css_unit))
-                                    {
-                                        tablet_rules.push_str(&format!(
-                                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{key}\"]{{padding:{t_css};}}"
-                                        ));
-                                    }
-                                    if let Some(m_css) = m_sv.and_then(|sv| sv.format_css(css_unit))
-                                    {
-                                        mobile_rules.push_str(&format!(
-                                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{key}\"]{{padding:{m_css};}}"
-                                        ));
-                                    }
-                                }
-                            }
-                            BlockFieldSpec::Color {
-                                key,
-                                default,
-                                css_var: Some(var_name),
-                                ..
-                            } => {
-                                if !valid_css_var_name(var_name) {
-                                    continue;
-                                }
-                                if let Some(c) = props
-                                    .values
-                                    .get(key.as_str())
-                                    .and_then(|v| v.as_str())
-                                    .or(default.as_deref())
-                                    .filter(|s| !s.is_empty() && valid_block_color(s))
-                                {
-                                    desktop_props.push_str(&format!("{var_name}:{c};"));
-                                }
-                            }
-                            BlockFieldSpec::Media {
-                                key,
-                                media_kind: MediaFieldKind::Image,
-                                default,
-                                css_var: Some(var_name),
-                                ..
-                            } => {
-                                if !valid_css_var_name(var_name) {
-                                    continue;
-                                }
-                                if let Some(id) = props
-                                    .values
-                                    .get(key.as_str())
-                                    .and_then(|v| v.as_str())
-                                    .or(default.as_deref())
-                                    .filter(|s| !s.is_empty() && valid_sha256_media_id(s))
-                                {
-                                    let url_path = if is_preview {
-                                        format!("/api/admin/media/{id}/file")
-                                    } else {
-                                        format!("/media/{id}/file")
-                                    };
-                                    desktop_props
-                                        .push_str(&format!("{var_name}:url(\"{url_path}\");"));
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    collect_scoped_css_for_fields(
+                        &def.schema.schema.fields,
+                        &props.values,
+                        None,
+                        &node_scope,
+                        is_preview,
+                        &mut desktop_props,
+                        &mut tablet_props,
+                        &mut mobile_props,
+                        &mut desktop_rules,
+                        &mut tablet_rules,
+                        &mut mobile_rules,
+                    );
 
                     if !desktop_props.is_empty() {
                         desktop_rules.push_str(&format!(
@@ -1350,6 +1363,14 @@ pub fn render_builder_with_budget_and_base_path(
                                         escape_html(&props.block_id)
                                     ))
                                 } else {
+                                    let hydration_ctx = crate::field_hydrate::HydrationContext {
+                                        media: &state.hydration_media,
+                                        entries: &state.hydration_entries,
+                                        terms: &state.hydration_terms,
+                                        is_preview,
+                                    };
+                                    let mut local_rt =
+                                        crate::template_sec::RichTextNonceTable::default();
                                     let render_res = cache
                                         .get_or_validate(
                                             &props.block_id,
@@ -1357,22 +1378,45 @@ pub fn render_builder_with_budget_and_base_path(
                                             &def.template,
                                         )
                                         .and_then(|compiled| {
-                                            let fmt_cfg = crate::template_sec::RenderFormattingConfig {
-                                                timezone: state.timezone.clone(),
-                                            };
-                                            crate::template_sec::render_block_csec_with_options_and_budget_and_config(
+                                            let hydrated =
+                                                crate::field_hydrate::hydrate_field_values(
+                                                    &def.schema.schema.fields,
+                                                    &props.values,
+                                                    &hydration_ctx,
+                                                    Some(&mut local_rt),
+                                                    false,
+                                                )?;
+                                            let fmt_cfg =
+                                                crate::template_sec::RenderFormattingConfig {
+                                                    timezone: state.timezone.clone(),
+                                                };
+                                            let menus_opt =
+                                                (!state.menus.is_empty()).then_some(&state.menus);
+                                            crate::template_sec::render_block_csec_with_inputs(
                                                 &compiled.block_id,
                                                 &compiled.source,
-                                                &def.schema.schema,
-                                                &props.values,
-                                                Some(&state.site_options),
-                                                is_preview,
+                                                crate::template_sec::BlockRenderInputs {
+                                                    hydrated_props: &hydrated,
+                                                    local_richtext_nonces: Some(local_rt),
+                                                    merged_options: Some(&state.options),
+                                                    site_options: Some(&state.site_options),
+                                                    menus: menus_opt,
+                                                    is_preview,
+                                                    fmt_cfg: &fmt_cfg,
+                                                },
                                                 budget,
-                                                &fmt_cfg,
                                             )
                                         });
                                     match render_res {
                                         Ok(rendered_inner) => {
+                                            if !is_preview
+                                                && def
+                                                    .schema
+                                                    .schema
+                                                    .has_active_contact_form(&props.values)
+                                            {
+                                                has_active_contact_form = true;
+                                            }
                                             already_charged_bytes = already_charged_bytes
                                                 .saturating_add(rendered_inner.len());
                                             Some(format!(
@@ -2093,11 +2137,20 @@ mod m6_s05_tests {
 
     #[test]
     fn renders_all_five_core_blocks_with_scoped_css_responsive_breakpoints_and_budget_isolation() {
+        let media_id = "d".repeat(64);
         let state = BuilderRenderContext {
             declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
+            hydration_media: std::collections::BTreeMap::from([(
+                media_id.clone(),
+                crate::storage::fields::HydratedMediaRow {
+                    id: media_id.clone(),
+                    kind: "image".into(),
+                    width: Some(800),
+                    height: Some(600),
+                },
+            )]),
             ..Default::default()
         };
-        let media_id = "d".repeat(64);
         let doc = BuilderDocument {
             schema_version: 1,
             sections: vec![SectionNode {
@@ -2187,7 +2240,6 @@ mod m6_s05_tests {
                                         values: BTreeMap::from([
                                             ("layout".into(), json!("horizontal")),
                                             ("image".into(), json!(media_id)),
-                                            ("image_alt".into(), json!("Ảnh sản phẩm")),
                                             ("title".into(), json!("Thẻ VIP")),
                                             (
                                                 "body".into(),
@@ -2489,7 +2541,7 @@ mod m6_s05_tests {
             ]
         }))
         .unwrap();
-        let template = "<div class=\"ux-card\"><a href=\"{{ cta_url }}\" target=\"{{ cta_target }}\" rel=\"{{ cta_rel }}\">Go</a></div>".to_string();
+        let template = "<div class=\"ux-card\">{% if cta %}<a href=\"{{ cta.url }}\" target=\"{{ cta.target }}\" rel=\"{{ cta.rel }}\">{{ cta.label }}</a>{% endif %}</div>".to_string();
         crate::template_sec::validate_block_template_csec("demo/ux-card", &template, &schema)
             .expect("C-SEC template using Link synthetic attrs must pass validation");
 
@@ -2606,7 +2658,7 @@ mod m6_s05_tests {
                                             ),
                                             (
                                                 "cta".into(),
-                                                json!({ "url": "https://opendash.vn/docs", "new_tab": true, "nofollow": false }),
+                                                json!({ "label": "Go", "url": "https://opendash.vn/docs", "new_tab": true, "nofollow": false }),
                                             ),
                                         ]),
                                     },
@@ -2840,5 +2892,181 @@ mod m6_s05_tests {
         .unwrap();
         assert!(prev_empty.html.contains("od-social-follow-empty"));
         assert!(prev_empty.html.contains("Tùy chỉnh giao diện"));
+    }
+
+    #[test]
+    fn scoped_css_emits_negative_margin_fallback_and_nested_group_paths_and_contact_csp_flag() {
+        use opendash_core::{
+            block_schema::BlockSchemaV1,
+            builder::{
+                ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps, RowNode,
+                SectionNode,
+            },
+            registry::{DeclarationState, ProviderStatus, ResourceOwner},
+        };
+
+        let schema: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "demo/group-margin-form",
+            "title": "Group Margin Form",
+            "category": "content",
+            "render": "render.html",
+            "fields": [
+                {
+                    "type": "group",
+                    "key": "layout",
+                    "label": "Layout",
+                    "fields": [
+                        {
+                            "type": "spacing",
+                            "key": "outer_margin",
+                            "label": "Margin",
+                            "property": "margin",
+                            "unit": "rem",
+                            "responsive": true
+                        }
+                    ]
+                },
+                {
+                    "type": "select",
+                    "key": "form_id",
+                    "label": "Contact Form",
+                    "options_source": "contact_forms",
+                    "allow_null": true
+                },
+                {
+                    "type": "select",
+                    "key": "menu_key",
+                    "label": "Menu",
+                    "options_source": "menus",
+                    "allow_null": true
+                }
+            ]
+        }))
+        .unwrap();
+
+        let template = r#"<section class="demo" data-od-spacing="layout.outer_margin">{% if menu_key and menus[menu_key] is defined %}<nav>{% for item in menus[menu_key].items %}<a href="{{ item.url }}">{{ item.label }}</a>{% endfor %}</nav>{% endif %}</section>"#;
+        crate::template_sec::validate_block_template_csec(
+            "demo/group-margin-form",
+            template,
+            &schema,
+        )
+        .unwrap();
+
+        let mut declared = crate::storage::page::embedded_core_block_defs().clone();
+        declared.insert(
+            "demo/group-margin-form".into(),
+            crate::storage::page::RegisteredBlockDef {
+                block_id: "demo/group-margin-form".into(),
+                owner: ResourceOwner::Theme("demo".into()),
+                status: ProviderStatus::Active,
+                declaration_state: DeclarationState::Declared,
+                schema: opendash_core::block_schema::RegisteredBlockSchema { schema },
+                template: template.to_owned(),
+                revision_digest: "rev-gmf".into(),
+            },
+        );
+        let state = BuilderRenderContext {
+            declared_blocks: declared,
+            menus: std::collections::BTreeMap::from([(
+                "main".into(),
+                json!({
+                    "menu_id": 1,
+                    "menu_key": "main",
+                    "title": "Main",
+                    "items": [{ "id": 1, "label": "Liên hệ", "url": "/lien-he", "is_active": false, "is_ancestor": false, "is_external": false, "depth": 0, "children": [] }],
+                    "diagnostics": []
+                }),
+            )]),
+            ..Default::default()
+        };
+
+        let doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "sec-gmf".into(),
+                meta: None,
+                responsive: None,
+                style: None,
+                children: vec![RowNode {
+                    id: "row-gmf".into(),
+                    meta: None,
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "col-gmf".into(),
+                        meta: None,
+                        responsive: None,
+                        children: vec![ElementNode {
+                            id: "el-gmf".into(),
+                            meta: None,
+                            content: ElementContent::Known(KnownElement::PluginBlock(
+                                PluginBlockProps {
+                                    block_id: "demo/group-margin-form".into(),
+                                    values: std::collections::BTreeMap::from([
+                                        (
+                                            "layout".into(),
+                                            json!({
+                                                "outer_margin": {
+                                                    "desktop": { "top": -1.5, "right": 0, "bottom": 2, "left": 0 },
+                                                    "mobile": { "top": -1, "right": 0, "bottom": 1, "left": 0 }
+                                                }
+                                            }),
+                                        ),
+                                        ("form_id".into(), json!("7")),
+                                        ("menu_key".into(), json!("main")),
+                                    ]),
+                                },
+                            )),
+                        }],
+                    }],
+                }],
+            }],
+        };
+
+        let cache = BlockTemplateCache::new();
+        let mut pub_budget = RenderBudget::new();
+        let pub_rendered = render_builder_with_budget(
+            &state,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::None,
+            "entry",
+            &mut pub_budget,
+            &cache,
+        )
+        .unwrap();
+        assert!(pub_rendered.has_active_contact_form);
+        assert!(pub_rendered.html.contains("Liên hệ"));
+        assert!(pub_rendered.html.contains(
+            "[data-od-node-scope=\"entry-el-gmf\"] [data-od-spacing=\"layout.outer_margin\"]{margin:-1.5rem 0rem 2rem 0rem;}"
+        ));
+        assert!(pub_rendered.html.contains(
+            "@media (width < 768px){[data-od-node-scope=\"entry-el-gmf\"] [data-od-spacing=\"layout.outer_margin\"]{margin:-1rem 0rem 1rem 0rem;}}"
+        ));
+
+        let mut prev_budget = RenderBudget::new();
+        let prev_rendered = render_builder_with_budget(
+            &state,
+            &doc,
+            true,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::EntryBodyOnly,
+            "entry",
+            &mut prev_budget,
+            &cache,
+        )
+        .unwrap();
+        assert!(!prev_rendered.has_active_contact_form);
     }
 }

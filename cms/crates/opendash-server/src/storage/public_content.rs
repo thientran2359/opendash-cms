@@ -325,7 +325,15 @@ pub async fn load_entry_render_snapshot_with_options(
         let doc =
             opendash_core::builder_blocks::parse_blocks_lenient_or_recover(raw_body.unwrap_or(""))
                 .document;
-        let state = builder::read_render_context_tx(&mut tx).await?;
+        let mut state = builder::read_render_context_for_locale_tx(
+            &mut tx,
+            Some(entry_locale.as_str()),
+            false,
+            Some(list_base_path),
+        )
+        .await?;
+        builder::hydrate_render_context_for_documents_in_conn(&mut tx, &mut state, &[&doc], false)
+            .await?;
         let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
             &mut tx,
             &doc,
@@ -344,7 +352,7 @@ pub async fn load_entry_render_snapshot_with_options(
         let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
         let patterns = builder::resolve_patterns_in_tx_with_budget(
             &mut tx,
-            &state,
+            &mut state,
             &doc,
             false,
             &mut render_budget,

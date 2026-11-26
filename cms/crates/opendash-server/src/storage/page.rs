@@ -204,7 +204,30 @@ pub async fn load_declared_blocks_in_conn(
         let owner = parse_owner(&owner_kind, &owner_id)?;
         let status = parse_provider_status(&status_raw)?;
         let declaration_state = parse_declaration_state(&decl_raw)?;
-        let schema: BlockSchemaV1 = serde_json::from_str(&schema_json)?;
+        let expected_owner_prefix = match &owner {
+            ResourceOwner::Core | ResourceOwner::User => "core",
+            ResourceOwner::Theme(id) | ResourceOwner::Plugin(id) => id.as_str(),
+        };
+        let schema: BlockSchemaV1 = match serde_json::from_str(&schema_json) {
+            Ok(schema) => schema,
+            Err(err) => {
+                if owner_kind != "core" {
+                    eprintln!(
+                        "[opendash] skipping incompatible block schema {block_id} ({owner_kind}/{owner_id}): {err}"
+                    );
+                    continue;
+                }
+                return Err(err.into());
+            }
+        };
+        if owner_kind != "core"
+            && let Err(err) = schema.validate(expected_owner_prefix)
+        {
+            eprintln!(
+                "[opendash] skipping invalid block schema {block_id} ({owner_kind}/{owner_id}): {err}"
+            );
+            continue;
+        }
         out.insert(
             block_id.clone(),
             RegisteredBlockDef {
@@ -415,6 +438,7 @@ async fn active_media_roles_in_conn(
         (&refs.video_ids, "video", Some("video")),
         (&refs.poster_image_ids, "poster", Some("image")),
         (&refs.any_media_ids, "any", None),
+        (&refs.file_ids, "file", None),
     ] {
         for media_id in ids {
             if !crate::storage::media::valid_media_id(media_id) {
@@ -432,7 +456,7 @@ async fn active_media_roles_in_conn(
                 if required_kind.is_some_and(|expected| expected != kind) {
                     continue;
                 }
-                let projected_role = if role == "any" {
+                let projected_role = if matches!(role, "any" | "file") {
                     match kind.as_str() {
                         "image" => "image",
                         "video" => "video",

@@ -241,7 +241,7 @@ export function BuilderEditorCore({
 
   const pasteOptions = (id: string) => {
     if (disabled || !clipboard || !canPaste(id)) return;
-    const next = pasteNodeOptions(draft, id, clipboard);
+    const next = pasteNodeOptions(draft, id, clipboard, blockSchemas);
     if (!applyUpdate(next, id)) onMessage?.(t('builder.builder_workspace.paste_error'), true);
   };
 

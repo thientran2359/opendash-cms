@@ -190,6 +190,20 @@ fn parse_i64_id(val: &Value) -> Option<i64> {
     val.as_i64().filter(|id| *id > 0)
 }
 
+fn unwrap_responsive_desktop<'a>(
+    spec: &FieldSpec,
+    raw_val: Option<&'a Value>,
+) -> Option<&'a Value> {
+    let val = raw_val?;
+    if spec.responsive
+        && let Some(obj) = val.as_object()
+        && (obj.contains_key("desktop") || obj.contains_key("tablet") || obj.contains_key("mobile"))
+    {
+        return obj.get("desktop");
+    }
+    Some(val)
+}
+
 pub fn hydrate_field_value(
     spec: &FieldSpec,
     raw_val: Option<&Value>,
@@ -206,11 +220,17 @@ pub fn hydrate_field_value(
         | FieldType::Color
         | FieldType::Date
         | FieldType::Datetime
-        | FieldType::Time
-        | FieldType::RadioButtons => match raw_val {
+        | FieldType::Time => match raw_val {
             Some(Value::String(s)) => Ok(Value::String(s.clone())),
             _ => Ok(default_value_for_field_spec(spec)),
         },
+        FieldType::RadioButtons => {
+            let effective = unwrap_responsive_desktop(spec, raw_val);
+            match effective {
+                Some(Value::String(s)) => Ok(Value::String(s.clone())),
+                _ => Ok(default_value_for_field_spec(spec)),
+            }
+        }
         FieldType::Url => match raw_val {
             Some(Value::String(s)) => {
                 if s.is_empty() || valid_safe_url(s) {
@@ -222,7 +242,8 @@ pub fn hydrate_field_value(
             _ => Ok(default_value_for_field_spec(spec)),
         },
         FieldType::Number | FieldType::Range => {
-            if let Some(n) = raw_val.and_then(Value::as_f64).filter(|n| n.is_finite()) {
+            let effective = unwrap_responsive_desktop(spec, raw_val);
+            if let Some(n) = effective.and_then(Value::as_f64).filter(|n| n.is_finite()) {
                 Ok(json!(canonicalize_f64(n)))
             } else {
                 Ok(default_value_for_field_spec(spec))
@@ -233,8 +254,9 @@ pub fn hydrate_field_value(
             None => Ok(default_value_for_field_spec(spec)),
         },
         FieldType::Select => {
+            let effective = unwrap_responsive_desktop(spec, raw_val);
             if spec.multiple {
-                if let Some(arr) = raw_val.and_then(Value::as_array) {
+                if let Some(arr) = effective.and_then(Value::as_array) {
                     let items: Vec<Value> = arr
                         .iter()
                         .filter_map(|v| v.as_str().map(|s| Value::String(s.to_owned())))
@@ -244,7 +266,7 @@ pub fn hydrate_field_value(
                     Ok(default_value_for_field_spec(spec))
                 }
             } else {
-                match raw_val {
+                match effective {
                     Some(Value::String(s)) => Ok(Value::String(s.clone())),
                     Some(Value::Null) if spec.allow_null => Ok(Value::Null),
                     _ => Ok(default_value_for_field_spec(spec)),
@@ -378,8 +400,12 @@ pub fn hydrate_field_value(
             let Some(arr) = raw_val.and_then(Value::as_array) else {
                 return Ok(Value::Array(Vec::new()));
             };
-            let mut out = Vec::with_capacity(arr.len().min(MAX_REPEATER_ITEMS));
-            for item in arr.iter().take(MAX_REPEATER_ITEMS) {
+            let cap = spec
+                .max_items
+                .unwrap_or(MAX_REPEATER_ITEMS)
+                .min(MAX_REPEATER_ITEMS);
+            let mut out = Vec::with_capacity(arr.len().min(cap));
+            for item in arr.iter().take(cap) {
                 let item_raw: BTreeMap<String, Value> = item
                     .as_object()
                     .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
@@ -641,5 +667,96 @@ mod tests {
                 .contains("<strong>world</strong>")
         );
         assert!(!plain["bio"].as_str().unwrap().starts_with("OD_RICHTEXT_"));
+    }
+
+    #[test]
+    fn hydrates_responsive_studio_block_scalars_and_nested_repeater_groups() {
+        let specs: Vec<FieldSpec> = serde_json::from_value(json!([
+            {
+                "type": "radio_buttons",
+                "key": "align",
+                "label": "Align",
+                "responsive": true,
+                "default": "center",
+                "options": [
+                    { "value": "left", "label": "Left" },
+                    { "value": "center", "label": "Center" }
+                ]
+            },
+            {
+                "type": "range",
+                "key": "radius",
+                "label": "Radius",
+                "min": 0,
+                "max": 32,
+                "responsive": true,
+                "default": 8
+            },
+            {
+                "type": "select",
+                "key": "layout",
+                "label": "Layout",
+                "responsive": true,
+                "default": "grid",
+                "options": [
+                    { "value": "grid", "label": "Grid" },
+                    { "value": "stack", "label": "Stack" }
+                ]
+            },
+            {
+                "type": "repeater",
+                "key": "items",
+                "label": "Items",
+                "max_items": 1,
+                "fields": [
+                    { "type": "text", "key": "title", "label": "Title" },
+                    {
+                        "type": "group",
+                        "key": "meta",
+                        "label": "Meta",
+                        "fields": [
+                            { "type": "icon", "key": "badge", "label": "Badge" }
+                        ]
+                    }
+                ]
+            }
+        ]))
+        .unwrap();
+        opendash_core::field_schema::validate_field_specs(&specs, FieldContext::StudioBlock)
+            .unwrap();
+
+        let raw = BTreeMap::from([
+            (
+                "align".into(),
+                json!({ "desktop": "left", "mobile": "center" }),
+            ),
+            ("radius".into(), json!({ "tablet": 12 })),
+            ("layout".into(), json!({ "desktop": "stack" })),
+            (
+                "items".into(),
+                json!([
+                    { "title": "First", "meta": { "badge": "star" } },
+                    { "title": "Truncated", "meta": { "badge": "check" } }
+                ]),
+            ),
+        ]);
+        let media = BTreeMap::new();
+        let entries = BTreeMap::new();
+        let terms = BTreeMap::new();
+        let ctx = HydrationContext {
+            media: &media,
+            entries: &entries,
+            terms: &terms,
+            is_preview: false,
+        };
+        let hydrated = hydrate_field_values(&specs, &raw, &ctx, None, false).unwrap();
+        assert_eq!(hydrated["align"], json!("left"));
+        assert_eq!(hydrated["radius"], json!(8));
+        assert_eq!(hydrated["layout"], json!("stack"));
+        assert_eq!(hydrated["items"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            hydrated["items"][0]["meta"]["badge"],
+            json!({ "name": "star" })
+        );
     }
 }

@@ -6,7 +6,7 @@
 {% set icon_size_cls = 'h-5 w-5 text-xs' if button_size == 'sm' else ('h-8 w-8 text-sm' if button_size == 'lg' else 'h-6 w-6 text-xs') %}
 {% set solo_size_cls = 'h-8 w-8 text-sm' if button_size == 'sm' else ('h-10 w-10 text-base' if button_size == 'lg' else 'h-9 w-9 text-sm') %}
 {% if (show_facebook and options.social_facebook) or (show_youtube and options.social_youtube) or (show_tiktok and options.social_tiktok) or (show_instagram and options.social_instagram) or (show_x and options.social_x) or (show_linkedin and options.social_linkedin) or (show_email and options.social_email) %}
-<nav aria-label="Mạng xã hội" class="od-social-follow {{ box_padding_classes }} {{ text_align_cls }}" data-od-spacing="box_padding">
+<nav aria-label="Mạng xã hội" class="od-social-follow {{ box_padding.classes }} {{ text_align_cls }}" data-od-spacing="box_padding">
   {% if heading %}
     <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-od-muted">{{ heading }}</div>
   {% endif %}
@@ -56,7 +56,7 @@
   </div>
 </nav>
 {% elif od_is_preview %}
-<div class="od-social-follow-empty {{ box_padding_classes }} rounded-xl border border-dashed border-amber-300 bg-amber-50 p-3 text-xs text-amber-900" data-od-spacing="box_padding">
+<div class="od-social-follow-empty {{ box_padding.classes }} rounded-xl border border-dashed border-amber-300 bg-amber-50 p-3 text-xs text-amber-900" data-od-spacing="box_padding">
   <strong>Mạng xã hội:</strong> Chưa có link nào đang bật được cấu hình. Vào <em>Tùy chỉnh giao diện → Tùy chọn giao diện → Mạng xã hội</em> để nhập đường dẫn dùng chung.
 </div>
 {% endif %}

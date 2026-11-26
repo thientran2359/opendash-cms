@@ -3,7 +3,7 @@ import { useEffect, useId, useState } from 'react';
 import { queryContentEntryTable } from '../api/content.ts';
 import { mediaThumbnailUrl } from '../api/media.ts';
 import type { EntryTableRow } from '../features/content/types.ts';
-import type { BlockLinkValue, BlockMediaKind, BlockSpacingValue } from '../types.ts';
+import type { LinkValue, MediaFieldKind, SpacingValue } from '../fields/types.ts';
 import type { BoxSpacing } from './document.ts';
 import { StudioRichTextLightbox, stripRichHtmlToPreview } from './StudioRichTextLightbox.tsx';
 
@@ -34,7 +34,7 @@ export function formatGapSummary(gapPx: number | undefined): string {
 }
 
 export function formatSpacingSummary(
-  box: BlockSpacingValue | BoxSpacing | undefined,
+  box: SpacingValue | BoxSpacing | undefined,
   prop: 'p' | 'm',
   allowNegative = false,
 ): string {
@@ -540,7 +540,7 @@ export function MediaCardControl({
   id?: string;
   label: string;
   value: string;
-  acceptKind: BlockMediaKind;
+  acceptKind: MediaFieldKind;
   disabled?: boolean;
   onPick: () => void;
   onClear: () => void;
@@ -618,15 +618,15 @@ export function SpacingBoxControl({
   label: string;
   propPrefix?: 'p' | 'm';
   badge?: string;
-  value: BlockSpacingValue | BoxSpacing | undefined;
-  fallbackValue?: BlockSpacingValue | BoxSpacing;
+  value: SpacingValue | BoxSpacing | undefined;
+  fallbackValue?: SpacingValue | BoxSpacing;
   min?: number;
   max?: number;
   unit?: string;
   allowTailwind?: boolean;
   disabled?: boolean;
   responsiveInfo?: ResponsiveDotInfo;
-  onChange: (next: BlockSpacingValue) => void;
+  onChange: (next: SpacingValue) => void;
   onReset?: () => void;
   resetLabel?: string;
   testIdPrefix?: string;
@@ -864,11 +864,11 @@ export function LinkControl({
 }: {
   id?: string;
   label?: string;
-  value: BlockLinkValue;
+  value: LinkValue;
   placeholder?: string;
   showFlags?: boolean;
   disabled?: boolean;
-  onChange: (next: BlockLinkValue) => void;
+  onChange: (next: LinkValue) => void;
 }) {
   const { t } = useI18n();
   const autoId = useId();

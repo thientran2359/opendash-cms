@@ -17,7 +17,7 @@ use opendash_core::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::{QueryBuilder, Sqlite, SqlitePool, Transaction};
+use sqlx::{QueryBuilder, Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use crate::{
     auth::{Role, SessionContext},
@@ -34,6 +34,11 @@ use crate::{
 pub struct BuilderRenderContext {
     pub declared_blocks: BTreeMap<String, crate::storage::page::RegisteredBlockDef>,
     pub site_options: BTreeMap<String, serde_json::Value>,
+    pub options: BTreeMap<String, serde_json::Value>,
+    pub menus: BTreeMap<String, serde_json::Value>,
+    pub hydration_media: BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
+    pub hydration_entries: BTreeMap<i64, crate::storage::fields::HydratedEntryRefRow>,
+    pub hydration_terms: BTreeMap<i64, crate::storage::fields::HydratedTermRefRow>,
     pub timezone: String,
 }
 
@@ -42,6 +47,11 @@ impl Default for BuilderRenderContext {
         Self {
             declared_blocks: BTreeMap::new(),
             site_options: BTreeMap::new(),
+            options: BTreeMap::new(),
+            menus: BTreeMap::new(),
+            hydration_media: BTreeMap::new(),
+            hydration_entries: BTreeMap::new(),
+            hydration_terms: BTreeMap::new(),
             timezone: "UTC".to_owned(),
         }
     }
@@ -219,21 +229,133 @@ impl BuilderRenderContext {
     }
 }
 
-pub(crate) async fn read_render_context_tx(
+pub(crate) async fn read_render_context_for_locale_tx(
     tx: &mut Transaction<'_, Sqlite>,
+    requested_locale: Option<&str>,
+    is_preview: bool,
+    current_path: Option<&str>,
 ) -> ApiResult<BuilderRenderContext> {
     let declared_blocks = crate::storage::page::load_declared_blocks_in_conn(&mut **tx).await?;
-    let (_, site_options) =
-        crate::storage::settings::get_active_merged_public_options_in_conn(&mut **tx, false)
-            .await?;
+    let (site_options, options) =
+        crate::storage::settings::get_active_merged_public_options_in_conn_for_locale(
+            &mut **tx,
+            is_preview,
+            requested_locale,
+        )
+        .await?;
+    let menus = crate::storage::menu::resolve_all_menus_for_locale_and_path_in_conn(
+        &mut **tx,
+        requested_locale,
+        current_path,
+    )
+    .await?;
     let timezone = crate::storage::settings::get_general_in_conn(&mut **tx)
         .await?
         .timezone;
     Ok(BuilderRenderContext {
         declared_blocks,
         site_options,
+        options,
+        menus,
         timezone,
+        ..Default::default()
     })
+}
+
+pub(crate) async fn read_render_context_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+) -> ApiResult<BuilderRenderContext> {
+    read_render_context_for_locale_tx(tx, None, false, None).await
+}
+
+pub(crate) async fn hydrate_render_context_for_documents_in_conn(
+    conn: &mut SqliteConnection,
+    state: &mut BuilderRenderContext,
+    docs: &[&BuilderDocument],
+    is_preview: bool,
+) -> ApiResult<()> {
+    let mut media_ids = BTreeSet::new();
+    let mut entry_ids = BTreeSet::new();
+    let mut term_ids = BTreeSet::new();
+    for doc in docs {
+        for section in &doc.sections {
+            for row in &section.children {
+                for column in &row.children {
+                    for element in &column.children {
+                        let ElementContent::Known(KnownElement::PluginBlock(props)) =
+                            &element.content
+                        else {
+                            continue;
+                        };
+                        let Some(def) = state.declared_blocks.get(&props.block_id) else {
+                            continue;
+                        };
+                        if def.status != ProviderStatus::Active
+                            || def.declaration_state != DeclarationState::Declared
+                        {
+                            continue;
+                        }
+                        crate::field_hydrate::collect_hydration_ids(
+                            &def.schema.schema.fields,
+                            &props.values,
+                            false,
+                            &mut media_ids,
+                            &mut entry_ids,
+                            &mut term_ids,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    let missing_entries: BTreeSet<i64> = entry_ids
+        .into_iter()
+        .filter(|id| !state.hydration_entries.contains_key(id))
+        .collect();
+    if !missing_entries.is_empty() {
+        state.hydration_entries.extend(
+            crate::storage::fields::load_entry_ref_hydration_map_in_conn(
+                conn,
+                &missing_entries,
+                is_preview,
+                None,
+            )
+            .await?,
+        );
+    }
+
+    let missing_terms: BTreeSet<i64> = term_ids
+        .into_iter()
+        .filter(|id| !state.hydration_terms.contains_key(id))
+        .collect();
+    if !missing_terms.is_empty() {
+        let loaded_terms = crate::storage::fields::load_term_ref_hydration_map_in_conn(
+            conn,
+            &missing_terms,
+            is_preview,
+            None,
+        )
+        .await?;
+        for term in loaded_terms.values() {
+            if let Some(fid) = &term.featured_image_media_id {
+                media_ids.insert(fid.clone());
+            }
+        }
+        state.hydration_terms.extend(loaded_terms);
+    }
+
+    let missing_media: BTreeSet<String> = media_ids
+        .into_iter()
+        .filter(|id| !state.hydration_media.contains_key(id))
+        .collect();
+    if !missing_media.is_empty() {
+        state.hydration_media.extend(
+            crate::storage::fields::load_media_hydration_map_in_conn(conn, &missing_media).await?,
+        );
+    }
+
+    Ok(())
 }
 
 pub fn image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
@@ -307,6 +429,7 @@ pub(crate) struct DocumentMediaRefs {
     pub video_ids: BTreeSet<String>,
     pub poster_image_ids: BTreeSet<String>,
     pub any_media_ids: BTreeSet<String>,
+    pub file_ids: BTreeSet<String>,
 }
 
 pub(crate) fn extract_document_media_refs(
@@ -342,6 +465,7 @@ pub(crate) fn extract_document_media_refs(
                     refs.image_ids.extend(collected.image_ids);
                     refs.video_ids.extend(collected.video_ids);
                     refs.any_media_ids.extend(collected.any_ids);
+                    refs.file_ids.extend(collected.file_ids);
                 }
             }
         }
@@ -349,7 +473,7 @@ pub(crate) fn extract_document_media_refs(
     refs
 }
 
-/// Resolve media-kind 'any' against the same SQLite snapshot as the write.
+/// Resolve media-kind 'any' & 'file' against the same SQLite snapshot as the write.
 /// The returned sets are validated, active assets and safe to project into ACL.
 pub(crate) async fn resolve_document_media_refs_in_conn(
     conn: &mut sqlx::SqliteConnection,
@@ -380,7 +504,10 @@ pub(crate) async fn resolve_document_media_refs_in_conn(
             }
         }
     }
-    for id in std::mem::take(&mut refs.any_media_ids) {
+    for id in std::mem::take(&mut refs.any_media_ids)
+        .into_iter()
+        .chain(std::mem::take(&mut refs.file_ids))
+    {
         if !valid_media_id(&id) {
             return Err(ApiError::bad_request("Invalid Builder media ID"));
         }
@@ -427,6 +554,30 @@ pub fn pattern_ids(document: &BuilderDocument) -> BTreeSet<i64> {
     ids
 }
 
+pub fn pattern_ids_with_schemas(
+    document: &BuilderDocument,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> BTreeSet<i64> {
+    let mut ids = pattern_ids(document);
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if let ElementContent::Known(KnownElement::PluginBlock(props)) =
+                        &element.content
+                        && let Some(entry) = schemas.get(&props.block_id)
+                        && entry.status == ProviderStatus::Active
+                        && entry.declaration_state == DeclarationState::Declared
+                    {
+                        ids.extend(entry.descriptor.schema.collect_pattern_ids(&props.values));
+                    }
+                }
+            }
+        }
+    }
+    ids
+}
+
 fn node_count(document: &BuilderDocument) -> usize {
     document
         .sections
@@ -447,7 +598,10 @@ fn node_count(document: &BuilderDocument) -> usize {
         .sum()
 }
 
-fn has_nested_pattern_or_list(document: &BuilderDocument) -> bool {
+fn has_nested_pattern_or_list_with_schemas(
+    document: &BuilderDocument,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> bool {
     document.sections.iter().any(|section| {
         section.children.iter().any(|row| {
             row.children.iter().any(|column| {
@@ -458,6 +612,16 @@ fn has_nested_pattern_or_list(document: &BuilderDocument) -> bool {
                         ElementContent::Known(
                             KnownElement::PatternRef(_) | KnownElement::List(_),
                         ) => true,
+                        ElementContent::Known(KnownElement::PluginBlock(props)) => {
+                            schemas.get(&props.block_id).is_some_and(|entry| {
+                                entry.status == ProviderStatus::Active
+                                    && entry.declaration_state == DeclarationState::Declared
+                                    && entry
+                                        .descriptor
+                                        .schema
+                                        .has_non_empty_pattern_source_value(&props.values)
+                            })
+                        }
                         ElementContent::Unresolved(raw) => matches!(
                             raw.get("type").and_then(Value::as_str),
                             Some("core/pattern_ref" | "core/list")
@@ -506,13 +670,14 @@ async fn load_pattern_rows_in_tx(
 /// preview diagnostics. A Pattern cannot pull a second Pattern or ContentList.
 pub async fn resolve_patterns_in_tx_with_budget(
     tx: &mut Transaction<'_, Sqlite>,
-    state: &BuilderRenderContext,
+    state: &mut BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
     budget: &mut page::RenderBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<page::PatternResults> {
-    let ids = pattern_ids(document);
+    let schemas = state.unified_block_schemas()?;
+    let ids = pattern_ids_with_schemas(document, &schemas);
     let rows = load_pattern_rows_in_tx(tx, &ids).await?;
     let mut results = page::PatternResults::new();
     let mut parsed = BTreeMap::new();
@@ -521,7 +686,7 @@ pub async fn resolve_patterns_in_tx_with_budget(
         let Ok(doc) = BuilderDocument::from_json(raw.as_bytes()) else {
             continue;
         };
-        if has_nested_pattern_or_list(&doc) {
+        if has_nested_pattern_or_list_with_schemas(&doc, &schemas) {
             continue;
         }
         parsed.insert(id, (slug, doc));
@@ -545,6 +710,16 @@ pub async fn resolve_patterns_in_tx_with_budget(
         return Err(ApiError::bad_request(
             "Expanded Pattern exceeds 1024 Builder nodes.",
         ));
+    }
+    let pattern_doc_refs: Vec<&BuilderDocument> = parsed.values().map(|(_, doc)| doc).collect();
+    if !pattern_doc_refs.is_empty() {
+        hydrate_render_context_for_documents_in_conn(
+            &mut **tx,
+            state,
+            &pattern_doc_refs,
+            is_preview,
+        )
+        .await?;
     }
     for (id, (slug, doc)) in parsed {
         let bindings = builder_binding::resolve_in_tx_with_route(
@@ -1149,12 +1324,11 @@ async fn validate_entry_builder_document(
     if current.opened.type_key == "pattern" && role != FieldRole::Admin {
         return Err(ApiError::forbidden("Pattern Builder requires Admin."));
     }
-    let state = read_render_context_tx(tx).await?;
+    let state =
+        read_render_context_for_locale_tx(tx, Some(current.locale.as_str()), false, None).await?;
+    let schemas = state.unified_block_schemas()?;
     document
-        .validate_for_save_with_schemas(
-            &state.unified_block_schemas()?,
-            current.opened.document.as_ref(),
-        )
+        .validate_for_save_with_schemas(&schemas, current.opened.document.as_ref())
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
     // Validate this entry's field keys using its effective field ACL.
@@ -1176,25 +1350,37 @@ async fn validate_entry_builder_document(
         .validate_route_context_for_role(Some(route_role), Some(&allowed))
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
-    if current.opened.type_key == "pattern" && has_nested_pattern_or_list(document) {
+    if current.opened.type_key == "pattern"
+        && has_nested_pattern_or_list_with_schemas(document, &schemas)
+    {
         return Err(ApiError::bad_request(
             "Pattern cannot contain PatternRef or ContentList (depth = 1).",
         ));
     }
-    let refs = pattern_ids(document);
+    let refs = pattern_ids_with_schemas(document, &schemas);
     let rows = load_pattern_rows_in_tx(tx, &refs).await?;
     let found: BTreeSet<i64> = rows.into_iter().map(|(id, _, _)| id).collect();
     let previous_refs = current
         .opened
         .document
         .as_ref()
-        .map(pattern_ids)
+        .map(|prev_doc| pattern_ids_with_schemas(prev_doc, &schemas))
         .unwrap_or_default();
     for id in refs {
         if !found.contains(&id) && !previous_refs.contains(&id) {
             return Err(ApiError::bad_request("Referenced Pattern does not exist."));
         }
     }
+
+    crate::storage::fields::validate_document_block_refs_in_conn(
+        &mut **tx,
+        document,
+        current.opened.document.as_ref(),
+        &schemas,
+        None,
+        Some(&allowed),
+    )
+    .await?;
 
     let mut exact_schemas = BTreeMap::new();
     for section in &document.sections {
@@ -1265,7 +1451,7 @@ async fn validate_entry_builder_document(
 async fn render_entry_builder_preview(
     tx: &mut Transaction<'_, Sqlite>,
     current: &EntryBuilderSnapshot,
-    state: &BuilderRenderContext,
+    state: &mut BuilderRenderContext,
     document: &BuilderDocument,
     shared_preview: bool,
 ) -> ApiResult<RenderedLayout> {
@@ -1283,7 +1469,7 @@ async fn render_entry_builder_preview(
 async fn render_entry_builder_preview_with_scope(
     tx: &mut Transaction<'_, Sqlite>,
     current: &EntryBuilderSnapshot,
-    state: &BuilderRenderContext,
+    state: &mut BuilderRenderContext,
     document: &BuilderDocument,
     shared_preview: bool,
     annotation_scope: RenderAnnotationScope,
@@ -1306,13 +1492,14 @@ async fn render_entry_builder_preview_with_scope(
 async fn render_entry_builder_preview_with_budget(
     tx: &mut Transaction<'_, Sqlite>,
     current: &EntryBuilderSnapshot,
-    state: &BuilderRenderContext,
+    state: &mut BuilderRenderContext,
     document: &BuilderDocument,
     shared_preview: bool,
     annotation_scope: RenderAnnotationScope,
     budget: &mut page::RenderBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
+    hydrate_render_context_for_documents_in_conn(&mut **tx, state, &[document], true).await?;
     let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
         tx,
         document,
@@ -1367,6 +1554,7 @@ pub(super) async fn preview_saved_page_body_in_tx_with_options_and_budget(
     type_key: &str,
     id: i64,
     site_options_override: Option<&BTreeMap<String, serde_json::Value>>,
+    options_override: Option<&BTreeMap<String, serde_json::Value>>,
     timezone_override: Option<&str>,
     budget: &mut page::RenderBudget,
     cache: &page::BlockTemplateCache,
@@ -1383,8 +1571,11 @@ pub(super) async fn preview_saved_page_body_in_tx_with_options_and_budget(
     };
     let mut state =
         validate_entry_builder_document(tx, &current, actor_field_role(actor), document).await?;
-    if let Some(opts) = site_options_override {
-        state.site_options = opts.clone();
+    if let Some(so) = site_options_override {
+        state.site_options = so.clone();
+    }
+    if let Some(opts) = options_override {
+        state.options = opts.clone();
     }
     if let Some(tz) = timezone_override {
         state.timezone = tz.to_owned();
@@ -1393,7 +1584,7 @@ pub(super) async fn preview_saved_page_body_in_tx_with_options_and_budget(
         render_entry_builder_preview_with_budget(
             tx,
             &current,
-            &state,
+            &mut state,
             document,
             true,
             RenderAnnotationScope::None,
@@ -1444,7 +1635,8 @@ pub async fn preview_entry_builder_with_cache(
         }
     }
     let actor_role = actor_field_role(actor);
-    let state = validate_entry_builder_document(&mut tx, &current, actor_role, document).await?;
+    let mut state =
+        validate_entry_builder_document(&mut tx, &current, actor_role, document).await?;
     let scope = if type_key == "pattern" {
         RenderAnnotationScope::None
     } else {
@@ -1454,7 +1646,7 @@ pub async fn preview_entry_builder_with_cache(
     let rendered = render_entry_builder_preview_with_budget(
         &mut tx,
         &current,
-        &state,
+        &mut state,
         document,
         false,
         scope,
@@ -1580,7 +1772,8 @@ async fn replace_entry_builder_refs(
         .execute(&mut **tx)
         .await?;
     if let Some(document) = document {
-        for pattern_id in pattern_ids(document) {
+        let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut **tx).await?;
+        for pattern_id in pattern_ids_with_schemas(document, &schemas) {
             // The target may later be force-deleted; the FK cascade and
             // warning-only renderer safely preserve that historical AST.
             let exists: i64 = sqlx::query_scalar(
@@ -1640,8 +1833,9 @@ async fn mutate_entry_builder(
     }
     check_entry_builder_cas(&before, expected_version, &mutation)?;
     if let EntryBuilderMutation::Save(document) = &mutation {
-        let state = validate_entry_builder_document(&mut read_tx, &before, role, document).await?;
-        render_entry_builder_preview(&mut read_tx, &before, &state, document, false).await?;
+        let mut state =
+            validate_entry_builder_document(&mut read_tx, &before, role, document).await?;
+        render_entry_builder_preview(&mut read_tx, &before, &mut state, document, false).await?;
     }
     read_tx.commit().await?;
     let mut candidate_values = before.values.clone();
@@ -1705,9 +1899,10 @@ async fn mutate_entry_builder(
     if type_key == "pattern" {
         let (mode, document) = match mutation {
             EntryBuilderMutation::Save(document) => {
-                let state =
+                let mut state =
                     validate_entry_builder_document(&mut tx, &current, role, document).await?;
-                render_entry_builder_preview(&mut tx, &current, &state, document, false).await?;
+                render_entry_builder_preview(&mut tx, &current, &mut state, document, false)
+                    .await?;
                 let raw = String::from_utf8(
                     document
                         .to_json()
@@ -1758,11 +1953,12 @@ async fn mutate_entry_builder(
     } else {
         let (mode_db, next_values, ref_doc) = match mutation {
             EntryBuilderMutation::Save(document) => {
-                let state =
+                let mut state =
                     validate_entry_builder_document(&mut tx, &current, role, document).await?;
                 // Enforce the same renderer output/node/list/form limits even when
                 // the caller saves directly without ever requesting Preview.
-                render_entry_builder_preview(&mut tx, &current, &state, document, false).await?;
+                render_entry_builder_preview(&mut tx, &current, &mut state, document, false)
+                    .await?;
                 let body_blocks =
                     opendash_core::builder_blocks::serialize_builder_document_to_blocks(document)
                         .map_err(|err| ApiError::bad_request(err.to_string()))?;

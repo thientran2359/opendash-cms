@@ -618,9 +618,7 @@ fn builtin_starter_v1_validates_with_canvas_chrome_and_v1_options() {
 
 #[tokio::test]
 async fn starter_v1_cleanly_replaces_pre_v1_starter_without_conflict_or_fk_error() {
-    use crate::builtin_themes::{
-        STARTER_THEME_ID, STARTER_THEME_NAME, builtin_starter_theme_files,
-    };
+    use crate::builtin_themes::{STARTER_THEME_ID, builtin_starter_theme_files};
     use crate::storage::theme::{
         RevisionActivationOutcome, RevisionInstallOutcome, activate_revision,
         compute_canonical_file_map_digest, ensure_default_starter_theme, get_active_selection,

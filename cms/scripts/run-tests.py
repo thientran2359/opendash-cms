@@ -88,6 +88,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "m5_s12_*",
             "egm_cpt_builder_*",
             "studio_*",
+            "unified_field_engine_*",
         ),
         unit_filters=(
             "page::",

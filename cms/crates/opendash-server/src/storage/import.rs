@@ -1309,6 +1309,7 @@ pub async fn execute_sample_import_with_cutpoint(
                         &effective,
                         &values_map,
                         None,
+                        opendash_core::content::FieldRole::Admin,
                     )
                     .await?;
                 }
