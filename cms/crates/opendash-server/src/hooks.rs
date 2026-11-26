@@ -169,7 +169,7 @@ async fn run_async_hook_job(plugin_manager: &PluginManager, job: AsyncHookJob) {
         return;
     }
 
-    let subs: Vec<String> = match type_key.as_deref() {
+    let subs = match type_key.as_deref() {
         Some(tk)
             if matches!(
                 event,
@@ -181,17 +181,17 @@ async fn run_async_hook_job(plugin_manager: &PluginManager, job: AsyncHookJob) {
         {
             match tokio::time::timeout(
                 Duration::from_secs(1),
-                plugin_manager.content_hook_subscriptions(event, tk),
+                plugin_manager.owner_content_hook_subscriptions(event, tk),
             )
             .await
             {
-                Ok(Ok(items)) => items.into_iter().map(|(_, id)| id).collect(),
+                Ok(Ok(items)) => items,
                 _ => return,
             }
         }
         _ => match tokio::time::timeout(
             Duration::from_secs(1),
-            plugin_manager.hook_subscriptions(event),
+            plugin_manager.owner_hook_subscriptions(event),
         )
         .await
         {
@@ -219,15 +219,15 @@ async fn run_async_hook_job(plugin_manager: &PluginManager, job: AsyncHookJob) {
     }
 
     let started = Instant::now();
-    for (idx, plugin_id) in subs.into_iter().enumerate() {
+    for (idx, sub) in subs.into_iter().enumerate() {
         if idx >= MAX_HANDLERS || started.elapsed() >= DISPATCH_ADMISSION_BUDGET {
             break;
         }
         let mut plugin_env = base_env.clone();
         if let Some(tk) = type_key.as_deref() {
             plugin_manager
-                .filter_content_payload_for_plugin(
-                    &plugin_id,
+                .filter_content_payload_for_owner(
+                    &sub.owner,
                     tk,
                     actor_role,
                     &mut plugin_env.payload,
@@ -240,8 +240,8 @@ async fn run_async_hook_job(plugin_manager: &PluginManager, job: AsyncHookJob) {
             break;
         }
         if let Err((_status, resp)) = plugin_manager
-            .run_plugin_dispatch(
-                &plugin_id,
+            .run_owner_dispatch(
+                &sub.owner,
                 EnvelopeKind::Hook,
                 legacy_env,
                 event.as_str(),
@@ -257,11 +257,13 @@ async fn run_async_hook_job(plugin_manager: &PluginManager, job: AsyncHookJob) {
             .await
         {
             let err_msg = opendash_core::hooks::sanitize_plain_text(
-                resp.error.as_deref().unwrap_or("Async plugin hook failed"),
+                resp.error
+                    .as_deref()
+                    .unwrap_or("Async extension hook failed"),
                 256,
             );
             plugin_manager
-                .record_hook_failure(&plugin_id, &base_env.correlation_id, &err_msg)
+                .record_owner_hook_failure(&sub.owner, &base_env.correlation_id, &err_msg)
                 .await;
         }
     }
@@ -757,22 +759,32 @@ impl HookDispatcher {
     async fn dispatch_envelope(&self, envelope: HookEnvelope) -> DispatchReport {
         let started = Instant::now();
         let mut outcomes = Vec::new();
-        let mut ordered: Vec<(i32, String, Option<Callback>)> = self
+        let mut ordered: Vec<(
+            i32,
+            String,
+            Option<Callback>,
+            Option<crate::plugin::host_ops::RuntimeOwner>,
+        )> = self
             .handlers
             .iter()
             .filter(|h| h.event == envelope.event)
-            .map(|h| (h.priority, h.id.clone(), Some(h.callback.clone())))
+            .map(|h| (h.priority, h.id.clone(), Some(h.callback.clone()), None))
             .collect();
         match tokio::time::timeout(
             Duration::from_secs(1),
-            self.plugin_manager.hook_subscriptions(envelope.event),
+            self.plugin_manager.owner_hook_subscriptions(envelope.event),
         )
         .await
         {
-            Ok(Ok(ids)) => ordered.extend(
-                ids.into_iter()
-                    .map(|id| (100, format!("plugin/{id}"), None)),
-            ),
+            Ok(Ok(subs)) => ordered.extend(subs.into_iter().map(|sub| {
+                let prefix = sub.owner.kind.as_str();
+                (
+                    100.max(sub.priority),
+                    format!("{prefix}/{}", sub.owner.id),
+                    None,
+                    Some(sub.owner),
+                )
+            })),
             failure => {
                 let error = format!("Subscription discovery failed: {failure:?}");
                 eprintln!("{} {error}", envelope.correlation_id);
@@ -783,7 +795,7 @@ impl HookDispatcher {
             }
         }
         ordered.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-        for (index, (_, id, callback)) in ordered.into_iter().enumerate() {
+        for (index, (_, id, callback, owner_opt)) in ordered.into_iter().enumerate() {
             let result = if index >= MAX_HANDLERS || started.elapsed() >= DISPATCH_ADMISSION_BUDGET
             {
                 Err("Hook dispatch admission budget exceeded".to_string())
@@ -797,12 +809,12 @@ impl HookDispatcher {
                     Ok(result) => result,
                     Err(_) => Err("Core hook timed out".into()),
                 }
-            } else {
+            } else if let Some(ref owner) = owner_opt {
                 // No outer timeout around commit: retain M2 commit handover semantics.
                 let legacy_env = serde_json::to_value(&envelope).expect("JSON envelope");
                 self.plugin_manager
-                    .run_plugin_dispatch(
-                        id.strip_prefix("plugin/").unwrap(),
+                    .run_owner_dispatch(
+                        owner,
                         EnvelopeKind::Hook,
                         legacy_env,
                         envelope.event.as_str(),
@@ -820,14 +832,16 @@ impl HookDispatcher {
                     .map_err(|(_, response)| {
                         response
                             .error
-                            .unwrap_or_else(|| "Plugin hook failed".into())
+                            .unwrap_or_else(|| "Extension hook failed".into())
                     })
+            } else {
+                Ok(())
             };
             if let Err(error) = &result {
                 eprintln!("{} {id}: {error}", envelope.correlation_id);
-                if let Some(plugin_id) = id.strip_prefix("plugin/") {
+                if let Some(ref owner) = owner_opt {
                     self.plugin_manager
-                        .record_hook_failure(plugin_id, &envelope.correlation_id, error)
+                        .record_owner_hook_failure(owner, &envelope.correlation_id, error)
                         .await;
                 }
             }
@@ -881,7 +895,7 @@ impl HookDispatcher {
                 let subs = match tokio::time::timeout(
                     Duration::from_secs(1),
                     self.plugin_manager
-                        .content_hook_subscriptions(HookEvent::ContentBeforeSave, type_key),
+                        .owner_content_hook_subscriptions(HookEvent::ContentBeforeSave, type_key),
                 )
                 .await
                 {
@@ -889,13 +903,13 @@ impl HookDispatcher {
                     _ => {
                         return Err(ContentBeforeSaveVeto {
                             code: "hook_discovery_failed".into(),
-                            message: "Không thể tra cứu plugin content/before_save.".into(),
+                            message: "Không thể tra cứu gói mở rộng content/before_save.".into(),
                             field_errors: Default::default(),
                         });
                     }
                 };
 
-                for (index, (_prio, plugin_id)) in subs.into_iter().enumerate() {
+                for (index, sub) in subs.into_iter().enumerate() {
                     if index >= MAX_HANDLERS || started.elapsed() >= CONTENT_HOOK_PHASE_BUDGET {
                         return Err(ContentBeforeSaveVeto {
                             code: "hook_budget_exceeded".into(),
@@ -906,8 +920,8 @@ impl HookDispatcher {
                     let remaining = CONTENT_HOOK_PHASE_BUDGET.saturating_sub(started.elapsed());
                     let mut plugin_env = envelope.clone();
                     self.plugin_manager
-                        .filter_content_payload_for_plugin(
-                            &plugin_id,
+                        .filter_content_payload_for_owner(
+                            &sub.owner,
                             type_key,
                             actor_role,
                             &mut plugin_env.payload,
@@ -916,8 +930,8 @@ impl HookDispatcher {
                     let env_val = serde_json::to_value(&plugin_env).expect("JSON envelope");
                     let out = match self
                         .plugin_manager
-                        .run_plugin_dispatch(
-                            &plugin_id,
+                        .run_owner_dispatch(
+                            &sub.owner,
                             EnvelopeKind::Hook,
                             env_val,
                             plugin_env.event.as_str(),
@@ -935,11 +949,15 @@ impl HookDispatcher {
                         Ok(run_resp) => run_resp.data.unwrap_or(Value::Null),
                         Err((_status, resp)) => {
                             let err_msg = opendash_core::hooks::sanitize_plain_text(
-                                resp.error.as_deref().unwrap_or("Plugin hook failed"),
+                                resp.error.as_deref().unwrap_or("Extension hook failed"),
                                 256,
                             );
                             self.plugin_manager
-                                .record_hook_failure(&plugin_id, &envelope.correlation_id, &err_msg)
+                                .record_owner_hook_failure(
+                                    &sub.owner,
+                                    &envelope.correlation_id,
+                                    &err_msg,
+                                )
                                 .await;
                             return Err(ContentBeforeSaveVeto {
                                 code: resp.code.unwrap_or_else(|| "hook_failed".into()),
@@ -955,7 +973,11 @@ impl HookDispatcher {
                             Err(_) => {
                                 let msg = "Đầu ra content/before_save không hợp lệ.";
                                 self.plugin_manager
-                                    .record_hook_failure(&plugin_id, &envelope.correlation_id, msg)
+                                    .record_owner_hook_failure(
+                                        &sub.owner,
+                                        &envelope.correlation_id,
+                                        msg,
+                                    )
                                     .await;
                                 return Err(ContentBeforeSaveVeto {
                                     code: "invalid_hook_output".into(),
@@ -1036,7 +1058,7 @@ impl HookDispatcher {
                 let subs = match tokio::time::timeout(
                     Duration::from_secs(1),
                     self.plugin_manager
-                        .content_hook_subscriptions(HookEvent::ContentAfterSave, type_key),
+                        .owner_content_hook_subscriptions(HookEvent::ContentAfterSave, type_key),
                 )
                 .await
                 {
@@ -1050,7 +1072,7 @@ impl HookDispatcher {
                         return DispatchReport { envelope, outcomes };
                     }
                 };
-                for (index, (_prio, plugin_id)) in subs.into_iter().enumerate() {
+                for (index, sub) in subs.into_iter().enumerate() {
                     let result = if index >= MAX_HANDLERS
                         || started.elapsed() >= CONTENT_HOOK_PHASE_BUDGET
                     {
@@ -1059,8 +1081,8 @@ impl HookDispatcher {
                         let remaining = CONTENT_HOOK_PHASE_BUDGET.saturating_sub(started.elapsed());
                         let mut plugin_env = envelope.clone();
                         self.plugin_manager
-                            .filter_content_payload_for_plugin(
-                                &plugin_id,
+                            .filter_content_payload_for_owner(
+                                &sub.owner,
                                 type_key,
                                 actor_role,
                                 &mut plugin_env.payload,
@@ -1068,8 +1090,8 @@ impl HookDispatcher {
                             .await;
                         let env_val = serde_json::to_value(&plugin_env).expect("JSON envelope");
                         self.plugin_manager
-                            .run_plugin_dispatch(
-                                &plugin_id,
+                            .run_owner_dispatch(
+                                &sub.owner,
                                 EnvelopeKind::Hook,
                                 env_val,
                                 plugin_env.event.as_str(),
@@ -1090,13 +1112,18 @@ impl HookDispatcher {
                             })
                     };
                     if let Err(ref err) = result {
-                        eprintln!("{} plugin/{}: {err}", envelope.correlation_id, plugin_id);
+                        eprintln!(
+                            "{} {}/{}: {err}",
+                            envelope.correlation_id,
+                            sub.owner.kind.as_str(),
+                            sub.owner.id
+                        );
                         self.plugin_manager
-                            .record_hook_failure(&plugin_id, &envelope.correlation_id, err)
+                            .record_owner_hook_failure(&sub.owner, &envelope.correlation_id, err)
                             .await;
                     }
                     outcomes.push(HookOutcome {
-                        handler_id: format!("plugin/{plugin_id}"),
+                        handler_id: format!("{}/{}", sub.owner.kind.as_str(), sub.owner.id),
                         error: result.err(),
                     });
                 }
@@ -1141,7 +1168,7 @@ impl HookDispatcher {
         let subs = match tokio::time::timeout(
             Duration::from_secs(1),
             self.plugin_manager
-                .filter_subscriptions(HookEvent::FilterContentPrepareSave, Some(type_key)),
+                .owner_filter_subscriptions(HookEvent::FilterContentPrepareSave, Some(type_key)),
         )
         .await
         {
@@ -1161,7 +1188,7 @@ impl HookDispatcher {
         let mut running_payload = envelope.payload.clone();
         let mut merged = ContentPrepareSavePatch::default();
 
-        for (index, (_prio, plugin_id)) in subs.into_iter().enumerate() {
+        for (index, sub) in subs.into_iter().enumerate() {
             if index >= MAX_PREPARE_SAVE_PLUGINS || started.elapsed() >= PREPARE_SAVE_PHASE_BUDGET {
                 return Err(ApiError::unprocessable(
                     "Vượt quá giới hạn xử lý filter:content/prepare_save.",
@@ -1170,8 +1197,8 @@ impl HookDispatcher {
             let remaining = PREPARE_SAVE_PHASE_BUDGET.saturating_sub(started.elapsed());
             let mut plugin_payload = running_payload.clone();
             self.plugin_manager
-                .filter_content_payload_for_plugin(
-                    &plugin_id,
+                .filter_content_payload_for_owner(
+                    &sub.owner,
                     type_key,
                     actor_role,
                     &mut plugin_payload,
@@ -1186,8 +1213,8 @@ impl HookDispatcher {
             });
             let resp = match self
                 .plugin_manager
-                .run_plugin_dispatch(
-                    &plugin_id,
+                .run_owner_dispatch(
+                    &sub.owner,
                     EnvelopeKind::Filter,
                     legacy_env,
                     HookEvent::FilterContentPrepareSave.as_str(),
@@ -1217,7 +1244,7 @@ impl HookDispatcher {
                         return Err(ApiError::service_unavailable(msg));
                     }
                     self.plugin_manager
-                        .record_hook_failure(&plugin_id, &envelope.correlation_id, &msg)
+                        .record_owner_hook_failure(&sub.owner, &envelope.correlation_id, &msg)
                         .await;
                     return Err(ApiError::unprocessable(msg));
                 }
@@ -1231,7 +1258,7 @@ impl HookDispatcher {
                     Err(_) => {
                         let msg = "Đầu ra filter:content/prepare_save không hợp lệ.";
                         self.plugin_manager
-                            .record_hook_failure(&plugin_id, &envelope.correlation_id, msg)
+                            .record_owner_hook_failure(&sub.owner, &envelope.correlation_id, msg)
                             .await;
                         return Err(ApiError::unprocessable(msg));
                     }
@@ -1242,8 +1269,7 @@ impl HookDispatcher {
                 continue;
             }
 
-            let Some(manifest) = self.plugin_manager.cached_plugin_manifest(&plugin_id).await
-            else {
+            let Some(manifest) = self.plugin_manager.cached_owner_manifest(&sub.owner).await else {
                 return Err(ApiError::unprocessable(
                     "Không tìm thấy manifest plugin filter:content/prepare_save.",
                 ));
@@ -1259,7 +1285,8 @@ impl HookDispatcher {
                         "Trường '{field_key}' trong values_patch không tồn tại ở '{type_key}'."
                     )));
                 };
-                if !opendash_core::plugin::plugin_can_write_field(
+                if !opendash_core::plugin::plugin_can_write_field_for_owner(
+                    sub.owner.kind,
                     &manifest,
                     None,
                     actor_role,
@@ -1315,7 +1342,7 @@ impl HookDispatcher {
         let subs = match tokio::time::timeout(
             Duration::from_secs(1),
             self.plugin_manager
-                .filter_subscriptions(HookEvent::FilterContactBeforeSubmit, None),
+                .owner_filter_subscriptions(HookEvent::FilterContactBeforeSubmit, None),
         )
         .await
         {
@@ -1333,7 +1360,7 @@ impl HookDispatcher {
         let started = Instant::now();
         let envelope = Self::envelope(HookEvent::FilterContactBeforeSubmit, submission_payload);
 
-        for (index, (_prio, plugin_id)) in subs.into_iter().enumerate() {
+        for (index, sub) in subs.into_iter().enumerate() {
             if index >= MAX_CONTACT_FILTER_PLUGINS
                 || started.elapsed() >= CONTACT_FILTER_PHASE_BUDGET
             {
@@ -1345,8 +1372,8 @@ impl HookDispatcher {
             let legacy_env = serde_json::to_value(&envelope).unwrap_or(Value::Null);
             let out = match self
                 .plugin_manager
-                .run_plugin_dispatch(
-                    &plugin_id,
+                .run_owner_dispatch(
+                    &sub.owner,
                     EnvelopeKind::Filter,
                     legacy_env,
                     HookEvent::FilterContactBeforeSubmit.as_str(),
@@ -1376,7 +1403,7 @@ impl HookDispatcher {
                         return Err(ApiError::service_unavailable(msg));
                     }
                     self.plugin_manager
-                        .record_hook_failure(&plugin_id, &envelope.correlation_id, &msg)
+                        .record_owner_hook_failure(&sub.owner, &envelope.correlation_id, &msg)
                         .await;
                     return Err(ApiError::unprocessable(msg));
                 }
@@ -1390,7 +1417,7 @@ impl HookDispatcher {
                     Err(_) => {
                         let msg = "Đầu ra filter:contact/before_submit không hợp lệ.";
                         self.plugin_manager
-                            .record_hook_failure(&plugin_id, &envelope.correlation_id, msg)
+                            .record_owner_hook_failure(&sub.owner, &envelope.correlation_id, msg)
                             .await;
                         return Err(ApiError::unprocessable(msg));
                     }
@@ -1421,13 +1448,42 @@ impl HookDispatcher {
         Ok(ContactBeforeSubmitDecision::Allow)
     }
 
+    #[allow(dead_code)]
     pub async fn dispatch_projection_filters(
         &self,
         event: HookEvent,
         plugin_id: Option<&str>,
         entry_payload: Value,
     ) -> crate::error::ApiResult<std::collections::BTreeMap<String, Value>> {
+        let owner_filter =
+            plugin_id.map(|id| (opendash_core::hooks::ExtensionOwnerKind::Plugin, id));
+        let raw = self
+            .dispatch_projection_filters_for_owners(event, owner_filter, entry_payload)
+            .await?;
         let mut results = std::collections::BTreeMap::new();
+        for (owner_kind, id, _fence, val) in raw {
+            if owner_kind == opendash_core::hooks::ExtensionOwnerKind::Plugin {
+                results.insert(id, val);
+            }
+        }
+        Ok(results)
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub async fn dispatch_projection_filters_for_owners(
+        &self,
+        event: HookEvent,
+        owner_filter: Option<(opendash_core::hooks::ExtensionOwnerKind, &str)>,
+        entry_payload: Value,
+    ) -> crate::error::ApiResult<
+        Vec<(
+            opendash_core::hooks::ExtensionOwnerKind,
+            String,
+            Option<(String, i64)>,
+            Value,
+        )>,
+    > {
+        let mut results = Vec::new();
         let type_key = entry_payload
             .get("content_type_key")
             .and_then(Value::as_str)
@@ -1437,7 +1493,7 @@ impl HookDispatcher {
         let subs = match tokio::time::timeout(
             Duration::from_secs(1),
             self.plugin_manager
-                .filter_subscriptions(event, type_key.as_deref()),
+                .owner_filter_subscriptions(event, type_key.as_deref()),
         )
         .await
         {
@@ -1452,9 +1508,9 @@ impl HookDispatcher {
         let envelope = Self::envelope(event, entry_payload);
 
         let mut dispatched = 0usize;
-        for (_prio, pid) in subs {
-            if let Some(target_pid) = plugin_id
-                && pid != target_pid
+        for sub in subs {
+            if let Some((target_kind, target_id)) = owner_filter
+                && (sub.owner.kind != target_kind || sub.owner.id != target_id)
             {
                 continue;
             }
@@ -1468,7 +1524,7 @@ impl HookDispatcher {
             let mut plugin_payload = envelope.payload.clone();
             if let Some(tk) = type_key.as_deref() {
                 self.plugin_manager
-                    .filter_public_content_payload_for_plugin(&pid, tk, &mut plugin_payload)
+                    .filter_public_content_payload_for_owner(&sub.owner, tk, &mut plugin_payload)
                     .await;
             }
             let legacy_env = serde_json::json!({
@@ -1480,8 +1536,8 @@ impl HookDispatcher {
             });
             match self
                 .plugin_manager
-                .run_plugin_dispatch(
-                    &pid,
+                .run_owner_dispatch(
+                    &sub.owner,
                     EnvelopeKind::Filter,
                     legacy_env,
                     event.as_str(),
@@ -1500,7 +1556,7 @@ impl HookDispatcher {
                     if let Some(val) = run_resp.data
                         && !val.is_null()
                     {
-                        results.insert(pid, val);
+                        results.push((sub.owner.kind, sub.owner.id, sub.theme_fence, val));
                     }
                 }
                 Err((_status, resp)) => {
@@ -1509,7 +1565,7 @@ impl HookDispatcher {
                         256,
                     );
                     self.plugin_manager
-                        .record_hook_failure(&pid, &envelope.correlation_id, &msg)
+                        .record_owner_hook_failure(&sub.owner, &envelope.correlation_id, &msg)
                         .await;
                 }
             }

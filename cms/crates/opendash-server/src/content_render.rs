@@ -419,6 +419,8 @@ pub struct EntryView {
     pub all_terms: Vec<PublicTermView>,
     pub primary_category: Option<PublicTermView>,
     pub ext: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub theme_ext: BTreeMap<String, Value>,
 }
 
 /// Only typed site strings enter the custom-template context; MiniJinja
@@ -781,6 +783,7 @@ fn build_entry_view_with_defs(
         all_terms,
         primary_category,
         ext: BTreeMap::new(),
+        theme_ext: BTreeMap::new(),
     }
 }
 

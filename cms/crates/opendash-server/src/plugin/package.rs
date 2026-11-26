@@ -35,7 +35,7 @@ pub struct PluginCheckSummary {
 fn plugin_entry_max_bytes(name: &str) -> Option<usize> {
     if name == "manifest.json" {
         Some(MAX_MANIFEST_BYTES)
-    } else if name == "plugin.wasm" {
+    } else if name == "plugin.wasm" || name == "plugin.js" {
         Some(MAX_WASM_BYTES)
     } else if name == "README.md" {
         Some(MAX_UNCOMPRESSED_TOTAL_BYTES)
@@ -44,6 +44,97 @@ fn plugin_entry_max_bytes(name: &str) -> Option<usize> {
     } else {
         None
     }
+}
+
+pub fn validate_wasm_module_bytes(engine: &Engine, wasm_bytes: &[u8]) -> Result<(), &'static str> {
+    let module = Module::new(engine, wasm_bytes)
+        .map_err(|_| "Module WebAssembly không hợp lệ hoặc cấu trúc bị lỗi.")?;
+
+    let run_export = module.exports().find(|e| e.name() == "opendash_run");
+    let Some(run_export) = run_export else {
+        return Err("Module WebAssembly phải export 'opendash_run'.");
+    };
+    match run_export.ty() {
+        ExternType::Func(func_ty) => {
+            if !func_ty.params().is_empty() || func_ty.results() != [ValType::I32] {
+                return Err("Hàm export 'opendash_run' phải có signature () -> i32.");
+            }
+        }
+        _ => return Err("Export 'opendash_run' phải là function."),
+    }
+
+    let memory_export = module.exports().find(|e| e.name() == "memory");
+    let Some(memory_export) = memory_export else {
+        return Err("Module WebAssembly phải export 'memory'.");
+    };
+    if !matches!(memory_export.ty(), ExternType::Memory(_)) {
+        return Err("Export 'memory' phải là linear memory.");
+    }
+
+    for import in module.imports() {
+        let (expected_params, expected_results, non_func_err, bad_sig_err): (
+            &[ValType],
+            &[ValType],
+            &'static str,
+            &'static str,
+        ) = match (import.module(), import.name()) {
+            ("opendash_v1", "host_get_input_len") => (
+                &[],
+                &[ValType::I32],
+                "Import 'opendash_v1:host_get_input_len' phải là hàm.",
+                "Import 'opendash_v1:host_get_input_len' sai chữ ký hàm.",
+            ),
+            ("opendash_v1", "host_read_input") => (
+                &[ValType::I32, ValType::I32],
+                &[ValType::I32],
+                "Import 'opendash_v1:host_read_input' phải là hàm.",
+                "Import 'opendash_v1:host_read_input' sai chữ ký hàm.",
+            ),
+            ("opendash_v1", "host_write_output") => (
+                &[ValType::I32, ValType::I32],
+                &[ValType::I32],
+                "Import 'opendash_v1:host_write_output' phải là hàm.",
+                "Import 'opendash_v1:host_write_output' sai chữ ký hàm.",
+            ),
+            ("opendash_v1", "host_call") => (
+                &[ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+                &[ValType::I32],
+                "Import 'opendash_v1:host_call' phải là hàm.",
+                "Import 'opendash_v1:host_call' sai chữ ký hàm.",
+            ),
+            ("opendash_v1", "host_last_resp_len") => (
+                &[],
+                &[ValType::I32],
+                "Import 'opendash_v1:host_last_resp_len' phải là hàm.",
+                "Import 'opendash_v1:host_last_resp_len' sai chữ ký hàm.",
+            ),
+            ("opendash_v1", "host_read_last_resp") => (
+                &[ValType::I32, ValType::I32],
+                &[ValType::I32],
+                "Import 'opendash_v1:host_read_last_resp' phải là hàm.",
+                "Import 'opendash_v1:host_read_last_resp' sai chữ ký hàm.",
+            ),
+            ("env", "abort") => (
+                &[ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+                &[],
+                "Import 'env:abort' phải là hàm.",
+                "Import 'env:abort' sai chữ ký hàm.",
+            ),
+            _ => {
+                return Err(
+                    "Module WebAssembly chứa import không được phép (từ chối WASI/unknown env).",
+                );
+            }
+        };
+
+        let ExternType::Func(func_ty) = import.ty() else {
+            return Err(non_func_err);
+        };
+        if func_ty.params() != expected_params || func_ty.results() != expected_results {
+            return Err(bad_sig_err);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -68,6 +159,7 @@ impl PluginPackage {
 
         let mut manifest_content: Option<String> = None;
         let mut wasm_content: Option<Vec<u8>> = None;
+        let mut js_content: Option<Vec<u8>> = None;
         let mut total_actual_uncompressed: usize = 0;
         let mut seen_lower = HashSet::new();
         let mut block_files = BTreeMap::new();
@@ -132,6 +224,7 @@ impl PluginPackage {
                 return match name.as_str() {
                     "manifest.json" => Err("manifest.json vượt quá giới hạn kích thước 64 KB."),
                     "plugin.wasm" => Err("File plugin.wasm vượt quá giới hạn kích thước 2 MB."),
+                    "plugin.js" => Err("File plugin.js vượt quá giới hạn kích thước 2 MB."),
                     _ => Err("File trong ZIP vượt quá giới hạn kích thước."),
                 };
             }
@@ -153,6 +246,9 @@ impl PluginPackage {
                 "plugin.wasm" => {
                     wasm_content = Some(buffer);
                 }
+                "plugin.js" => {
+                    js_content = Some(buffer);
+                }
                 _ if is_block_file => {
                     block_files.insert(name, buffer);
                 }
@@ -163,8 +259,7 @@ impl PluginPackage {
         }
 
         let manifest_text = manifest_content.ok_or("ZIP thiếu file manifest.json.")?;
-        let wasm_bytes = wasm_content.ok_or("ZIP thiếu file plugin.wasm.")?;
-        Self::finish_from_raw_parts(manifest_text, wasm_bytes, block_files, engine)
+        Self::finish_from_raw_parts(manifest_text, wasm_content, js_content, block_files, engine)
     }
 
     pub fn from_dir(root: &Path, engine: &Engine) -> Result<Self, String> {
@@ -183,6 +278,7 @@ impl PluginPackage {
 
         let mut manifest_content: Option<String> = None;
         let mut wasm_content: Option<Vec<u8>> = None;
+        let mut js_content: Option<Vec<u8>> = None;
         let mut block_files = BTreeMap::new();
         let mut regular_files = 0usize;
         let mut total_actual_uncompressed = 0usize;
@@ -197,15 +293,14 @@ impl PluginPackage {
             &mut seen_lower,
             &mut manifest_content,
             &mut wasm_content,
+            &mut js_content,
             &mut block_files,
         )?;
 
         let manifest_text = manifest_content
             .ok_or_else(|| "Thư mục plugin thiếu file manifest.json.".to_owned())?;
-        let wasm_bytes =
-            wasm_content.ok_or_else(|| "Thư mục plugin thiếu file plugin.wasm.".to_owned())?;
 
-        Self::finish_from_raw_parts(manifest_text, wasm_bytes, block_files, engine)
+        Self::finish_from_raw_parts(manifest_text, wasm_content, js_content, block_files, engine)
             .map_err(str::to_owned)
     }
 
@@ -239,11 +334,15 @@ impl PluginPackage {
 
     fn finish_from_raw_parts(
         manifest_text: String,
-        wasm_bytes: Vec<u8>,
+        wasm_content: Option<Vec<u8>>,
+        js_content: Option<Vec<u8>>,
         block_files: BTreeMap<String, Vec<u8>>,
         engine: &Engine,
     ) -> Result<Self, &'static str> {
         let manifest = PluginManifest::from_json_str(&manifest_text)?;
+        if wasm_content.is_some() && js_content.is_some() {
+            return Err("Gói plugin không được chứa đồng thời cả plugin.wasm và plugin.js.");
+        }
         let blocks = crate::theme::collect_package_blocks(&block_files, &manifest.id)?;
         let raw: serde_json::Value = serde_json::from_str(&manifest_text)
             .map_err(|_| "admin_extensions không đúng JSON.")?;
@@ -255,96 +354,31 @@ impl PluginPackage {
             None => None,
         };
 
-        // Validate Wasm module structure using Wasmi
-        let module = Module::new(engine, &wasm_bytes)
-            .map_err(|_| "Module WebAssembly không hợp lệ hoặc cấu trúc bị lỗi.")?;
-
-        // Verify required exports
-        let run_export = module.exports().find(|e| e.name() == "opendash_run");
-        let Some(run_export) = run_export else {
-            return Err("Module WebAssembly phải export 'opendash_run'.");
-        };
-        match run_export.ty() {
-            ExternType::Func(func_ty) => {
-                if !func_ty.params().is_empty() || func_ty.results() != [ValType::I32] {
-                    return Err("Hàm export 'opendash_run' phải có signature () -> i32.");
-                }
-            }
-            _ => return Err("Export 'opendash_run' phải là function."),
-        }
-
-        let memory_export = module.exports().find(|e| e.name() == "memory");
-        let Some(memory_export) = memory_export else {
-            return Err("Module WebAssembly phải export 'memory'.");
-        };
-        if !matches!(memory_export.ty(), ExternType::Memory(_)) {
-            return Err("Export 'memory' phải là linear memory.");
-        }
-
-        // Verify imports: only allowed exact signatures from "opendash_v1" namespace or "env:abort"
-        for import in module.imports() {
-            let (expected_params, expected_results, non_func_err, bad_sig_err): (
-                &[ValType],
-                &[ValType],
-                &'static str,
-                &'static str,
-            ) = match (import.module(), import.name()) {
-                ("opendash_v1", "host_get_input_len") => (
-                    &[],
-                    &[ValType::I32],
-                    "Import 'opendash_v1:host_get_input_len' phải là hàm.",
-                    "Import 'opendash_v1:host_get_input_len' sai chữ ký hàm.",
-                ),
-                ("opendash_v1", "host_read_input") => (
-                    &[ValType::I32, ValType::I32],
-                    &[ValType::I32],
-                    "Import 'opendash_v1:host_read_input' phải là hàm.",
-                    "Import 'opendash_v1:host_read_input' sai chữ ký hàm.",
-                ),
-                ("opendash_v1", "host_write_output") => (
-                    &[ValType::I32, ValType::I32],
-                    &[ValType::I32],
-                    "Import 'opendash_v1:host_write_output' phải là hàm.",
-                    "Import 'opendash_v1:host_write_output' sai chữ ký hàm.",
-                ),
-                ("opendash_v1", "host_call") => (
-                    &[ValType::I32, ValType::I32, ValType::I32, ValType::I32],
-                    &[ValType::I32],
-                    "Import 'opendash_v1:host_call' phải là hàm.",
-                    "Import 'opendash_v1:host_call' sai chữ ký hàm.",
-                ),
-                ("opendash_v1", "host_last_resp_len") => (
-                    &[],
-                    &[ValType::I32],
-                    "Import 'opendash_v1:host_last_resp_len' phải là hàm.",
-                    "Import 'opendash_v1:host_last_resp_len' sai chữ ký hàm.",
-                ),
-                ("opendash_v1", "host_read_last_resp") => (
-                    &[ValType::I32, ValType::I32],
-                    &[ValType::I32],
-                    "Import 'opendash_v1:host_read_last_resp' phải là hàm.",
-                    "Import 'opendash_v1:host_read_last_resp' sai chữ ký hàm.",
-                ),
-                ("env", "abort") => (
-                    &[ValType::I32, ValType::I32, ValType::I32, ValType::I32],
-                    &[],
-                    "Import 'env:abort' phải là hàm.",
-                    "Import 'env:abort' sai chữ ký hàm.",
-                ),
-                _ => {
+        let wasm_bytes = match manifest.entrypoint.as_str() {
+            "plugin.js" => {
+                if wasm_content.is_some() {
                     return Err(
-                        "Module WebAssembly chứa import không được phép (từ chối WASI/unknown env).",
+                        "Manifest khai báo entrypoint 'plugin.js' nhưng gói chứa plugin.wasm.",
                     );
                 }
-            };
-
-            let ExternType::Func(func_ty) = import.ty() else {
-                return Err(non_func_err);
-            };
-            if func_ty.params() != expected_params || func_ty.results() != expected_results {
-                return Err(bad_sig_err);
+                let bytes = js_content.ok_or("Gói plugin thiếu file plugin.js.")?;
+                let src = std::str::from_utf8(&bytes)
+                    .map_err(|_| "File plugin.js phải là UTF-8 hợp lệ.")?;
+                super::js_runtime::validate_js_module_syntax(src)
+                    .map_err(|_| "File plugin.js có lỗi cú pháp JavaScript.")?;
+                bytes
             }
-        }
+            _ => {
+                if js_content.is_some() {
+                    return Err(
+                        "Manifest khai báo entrypoint 'plugin.wasm' nhưng gói chứa plugin.js.",
+                    );
+                }
+                let bytes = wasm_content.ok_or("Gói plugin thiếu file plugin.wasm.")?;
+                validate_wasm_module_bytes(engine, &bytes)?;
+                bytes
+            }
+        };
 
         Ok(Self {
             manifest,
@@ -365,6 +399,7 @@ fn walk_plugin_dir(
     seen_lower: &mut HashSet<String>,
     manifest_content: &mut Option<String>,
     wasm_content: &mut Option<Vec<u8>>,
+    js_content: &mut Option<Vec<u8>>,
     block_files: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<(), String> {
     let entries = std::fs::read_dir(dir)
@@ -413,6 +448,7 @@ fn walk_plugin_dir(
                 seen_lower,
                 manifest_content,
                 wasm_content,
+                js_content,
                 block_files,
             )?;
         } else if ft.is_file() {
@@ -453,6 +489,7 @@ fn walk_plugin_dir(
                     "plugin.wasm" => {
                         "File plugin.wasm vượt quá giới hạn kích thước 2 MB.".to_owned()
                     }
+                    "plugin.js" => "File plugin.js vượt quá giới hạn kích thước 2 MB.".to_owned(),
                     _ => format!("File '{rel_path}' vượt quá giới hạn kích thước."),
                 });
             }
@@ -470,6 +507,9 @@ fn walk_plugin_dir(
                 }
                 "plugin.wasm" => {
                     *wasm_content = Some(buffer);
+                }
+                "plugin.js" => {
+                    *js_content = Some(buffer);
                 }
                 _ if rel_path.starts_with("blocks/") => {
                     block_files.insert(rel_path, buffer);

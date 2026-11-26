@@ -4,7 +4,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use opendash_core::hooks::{ExecutionPrincipal, HookExecutionMode};
+use opendash_core::hooks::{
+    ExecutionPrincipal, ExtensionOwnerKind, ExtensionRuntimeKind, HookExecutionMode,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use wasmi::{Config, Engine, Linker, Module, Store, StoreLimitsBuilder, TrapCode};
@@ -12,10 +14,10 @@ use wasmi::{Config, Engine, Linker, Module, Store, StoreLimitsBuilder, TrapCode}
 use super::{
     host_ops::{
         HostContext, HostOperationResponse, HostReadRequest, HostToWorkerFrame,
-        MAX_IPC_FRAME_BYTES, WorkerExecutionResult, WorkerToHostFrame,
+        MAX_IPC_FRAME_BYTES, RuntimeOwner, WorkerExecutionResult, WorkerToHostFrame,
     },
     manifest::PluginManifest,
-    runtime::{INVOCATION_FUEL, MAX_LINEAR_MEMORY_BYTES, register_host_imports},
+    runtime::{INVOCATION_FUEL, MAX_LINEAR_MEMORY_BYTES, WasmStoreData, register_host_imports},
 };
 
 pub const IPC_STREAM_MAGIC: &[u8; 8] = b"\x00ODIPC2\x00";
@@ -37,6 +39,10 @@ pub struct WorkerInvocationRequest {
     pub principal: ExecutionPrincipal,
     #[serde(default)]
     pub action_capabilities: Option<Vec<String>>,
+    #[serde(default)]
+    pub runtime_kind: ExtensionRuntimeKind,
+    #[serde(default)]
+    pub owner_kind: ExtensionOwnerKind,
 }
 
 pub fn read_ipc_frame<R: Read, T: DeserializeOwned>(
@@ -86,6 +92,20 @@ pub fn write_ipc_frame<W: Write, T: Serialize>(
 }
 
 pub fn run_worker_from_stdio() {
+    // Apply OS-level 128 MiB worker memory limit BEFORE reading any untrusted IPC input
+    // or initializing Boa / Wasmi.
+    if let Err(err) = crate::operations_worker_process::enforce_native_memory_limit_bytes(
+        crate::operations_worker_process::PLUGIN_WORKER_MEMORY_LIMIT_BYTES,
+        crate::operations_worker_process::PLUGIN_BOOTSTRAP_PROOF,
+    ) {
+        let mut stdout = std::io::stdout().lock();
+        if stdout.write_all(IPC_STREAM_MAGIC).is_ok() && stdout.flush().is_ok() {
+            drop(stdout);
+            emit_ipc_typed_error("memory_limit", &format!("memory_limit_failed: {err}"));
+        }
+        return;
+    }
+
     {
         let mut stdout = std::io::stdout().lock();
         if stdout.write_all(IPC_STREAM_MAGIC).is_err() || stdout.flush().is_err() {
@@ -93,24 +113,24 @@ pub fn run_worker_from_stdio() {
         }
     }
 
-    // 1. Read wasm bytes and request frame from stdin
-    let (wasm_bytes, req) = {
+    // 1. Read code payload bytes (.wasm or UTF-8 .js) and request frame from stdin
+    let (code_bytes, req) = {
         let stdin = std::io::stdin();
         let mut handle = stdin.lock();
 
-        let mut wasm_len_buf = [0u8; 4];
-        if handle.read_exact(&mut wasm_len_buf).is_err() {
-            emit_ipc_error("Không thể đọc độ dài wasm bytes từ stdin.");
+        let mut code_len_buf = [0u8; 4];
+        if handle.read_exact(&mut code_len_buf).is_err() {
+            emit_ipc_error("Không thể đọc độ dài mã thực thi từ stdin.");
             return;
         }
-        let wasm_len = u32::from_le_bytes(wasm_len_buf) as usize;
-        if wasm_len == 0 || wasm_len > super::package::MAX_WASM_BYTES {
-            emit_ipc_error("Độ dài wasm bytes vượt quá giới hạn.");
+        let code_len = u32::from_le_bytes(code_len_buf) as usize;
+        if code_len == 0 || code_len > super::package::MAX_WASM_BYTES {
+            emit_ipc_error("Độ dài mã thực thi vượt quá giới hạn.");
             return;
         }
-        let mut wasm_bytes = vec![0u8; wasm_len];
-        if handle.read_exact(&mut wasm_bytes).is_err() {
-            emit_ipc_error("Không thể đọc dữ liệu wasm bytes từ stdin.");
+        let mut code_bytes = vec![0u8; code_len];
+        if handle.read_exact(&mut code_bytes).is_err() {
+            emit_ipc_error("Không thể đọc dữ liệu mã thực thi từ stdin.");
             return;
         }
 
@@ -121,17 +141,11 @@ pub fn run_worker_from_stdio() {
                 return;
             }
         };
-        (wasm_bytes, req)
+        (code_bytes, req)
     };
 
-    // 2. Setup Wasmi and execute
     let deadline = Instant::now() + Duration::from_millis(req.deadline_ms);
     let cancellation_token = Arc::new(AtomicBool::new(false));
-
-    let mut config = Config::default();
-    config.consume_fuel(true);
-    let engine = Engine::new(&config);
-
     let input_bytes = match serde_json::to_vec(&req.input) {
         Ok(b) => b,
         Err(e) => {
@@ -139,12 +153,6 @@ pub fn run_worker_from_stdio() {
             return;
         }
     };
-
-    let limits = StoreLimitsBuilder::new()
-        .memory_size(MAX_LINEAR_MEMORY_BYTES)
-        .instances(1)
-        .tables(10)
-        .build();
 
     let ipc_io_lock = Arc::new(Mutex::new(()));
     let read_ipc = Arc::new(
@@ -169,6 +177,10 @@ pub fn run_worker_from_stdio() {
     );
 
     let host_ctx = HostContext {
+        owner: RuntimeOwner {
+            kind: req.owner_kind,
+            id: req.manifest.id.clone(),
+        },
         plugin_id: req.manifest.id.clone(),
         manifest: req.manifest,
         input_bytes,
@@ -181,7 +193,6 @@ pub fn run_worker_from_stdio() {
         read_ipc: Some(read_ipc),
         _correlation_id: req.correlation_id,
         allow_loopback: req.allow_loopback,
-        limits,
         staged_kv: Default::default(),
         staged_kv_bytes: 0,
         staged_logs: vec![],
@@ -194,14 +205,44 @@ pub fn run_worker_from_stdio() {
         action_capabilities: req.action_capabilities,
     };
 
-    let mut store = Store::new(&engine, host_ctx);
-    store.limiter(|ctx: &mut HostContext| &mut ctx.limits);
+    match req.runtime_kind {
+        ExtensionRuntimeKind::Js => {
+            let Ok(js_source) = std::str::from_utf8(&code_bytes) else {
+                emit_ipc_typed_error("internal", "Mã JavaScript không phải UTF-8 hợp lệ.");
+                return;
+            };
+            let result = super::js_runtime::execute_js_worker(js_source, host_ctx, req.input);
+            emit_ipc_frame(result);
+        }
+        ExtensionRuntimeKind::Wasm => run_wasm_worker(&code_bytes, host_ctx),
+    }
+}
+
+fn run_wasm_worker(wasm_bytes: &[u8], host_ctx: HostContext) {
+    let mut config = Config::default();
+    config.consume_fuel(true);
+    let engine = Engine::new(&config);
+
+    let limits = StoreLimitsBuilder::new()
+        .memory_size(MAX_LINEAR_MEMORY_BYTES)
+        .instances(1)
+        .tables(10)
+        .build();
+
+    let mut store = Store::new(
+        &engine,
+        WasmStoreData {
+            host: host_ctx,
+            limits,
+        },
+    );
+    store.limiter(|data: &mut WasmStoreData| &mut data.limits);
     if let Err(e) = store.set_fuel(INVOCATION_FUEL) {
         emit_ipc_error(&format!("Không thể cấp fuel: {e}"));
         return;
     }
 
-    let module = match Module::new(&engine, &wasm_bytes) {
+    let module = match Module::new(&engine, wasm_bytes) {
         Ok(m) => m,
         Err(e) => {
             emit_ipc_error(&format!("Module WebAssembly không hợp lệ: {e}"));
@@ -209,7 +250,7 @@ pub fn run_worker_from_stdio() {
         }
     };
 
-    let mut linker = <Linker<HostContext>>::new(&engine);
+    let mut linker = <Linker<WasmStoreData>>::new(&engine);
     if let Err(e) = register_host_imports(&mut linker) {
         emit_ipc_error(&format!("Lỗi linker: {e}"));
         return;
@@ -274,7 +315,7 @@ pub fn run_worker_from_stdio() {
         return;
     }
 
-    let ctx = store.into_data();
+    let ctx = store.into_data().host;
     let output_bytes = match ctx.output_bytes {
         Some(b) => b,
         None => {

@@ -500,13 +500,25 @@ pub(crate) async fn batch_translations_by_group_in_tx(
     Ok(out)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnerFence {
+    Plugin {
+        plugin_id: String,
+        expected_generation: i64,
+    },
+    Theme {
+        theme_id: String,
+        revision_id: String,
+        selection_version: i64,
+    },
+}
+
 /// Acquire a writer before checking a term's existence or entry CAS. The same
 /// SQLite writer reservation is used by taxonomy term deletion, so no race can
 /// commit a link to a term that has just been deleted.
 #[derive(Debug, Clone)]
 pub struct PluginActionFence {
-    pub plugin_id: String,
-    pub expected_generation: i64,
+    pub owner_fence: OwnerFence,
     pub required_role: String,
 }
 
@@ -515,12 +527,31 @@ async fn verify_plugin_action_fence(
     actor: &SessionContext,
     fence: &PluginActionFence,
 ) -> ApiResult<()> {
-    let active = crate::storage::plugin::is_plugin_generation_active(
-        &mut **tx,
-        &fence.plugin_id,
-        fence.expected_generation,
-    )
-    .await?;
+    let active = match &fence.owner_fence {
+        OwnerFence::Plugin {
+            plugin_id,
+            expected_generation,
+        } => {
+            crate::storage::plugin::is_plugin_generation_active(
+                &mut **tx,
+                plugin_id,
+                *expected_generation,
+            )
+            .await?
+        }
+        OwnerFence::Theme {
+            revision_id,
+            selection_version,
+            ..
+        } => {
+            crate::storage::plugin::verify_active_theme_fence_in_tx(
+                &mut **tx,
+                revision_id,
+                *selection_version,
+            )
+            .await?
+        }
+    };
     if !active {
         return Err(ApiError::conflict(
             "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc thực thi.",

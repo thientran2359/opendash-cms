@@ -708,11 +708,12 @@ mod tests {
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS plugin_kv (
+                owner_kind TEXT NOT NULL DEFAULT 'plugin',
                 plugin_id TEXT NOT NULL,
                 key TEXT NOT NULL,
                 value_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                PRIMARY KEY (plugin_id, key)
+                PRIMARY KEY (owner_kind, plugin_id, key)
             );",
         )
         .execute(&pool)
@@ -722,6 +723,7 @@ mod tests {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS plugin_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_kind TEXT NOT NULL DEFAULT 'plugin',
                 plugin_id TEXT NOT NULL,
                 correlation_id TEXT NOT NULL,
                 level TEXT NOT NULL,

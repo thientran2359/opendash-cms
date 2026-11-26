@@ -472,12 +472,33 @@ pub async fn effective_list(
             }
             let mut action_id = column.action_id;
             if action_id.is_some() {
-                let raw: Option<String> = sqlx::query_scalar(
-                    "SELECT manifest_json FROM plugins WHERE id=? AND enabled=1 AND last_error IS NULL")
-                    .bind(&reg.owner_id).fetch_optional(&mut *tx).await?;
-                let Some(manifest) = raw.and_then(|raw| {
-                    opendash_core::plugin::PluginManifest::from_json_str(&raw).ok()
-                }) else {
+                let manifest_opt = if reg.owner_kind == "theme" {
+                    let raw: Option<String> = sqlx::query_scalar(
+                        "SELECT r.manifest_json
+                           FROM theme_active_selection a
+                           JOIN theme_revisions r ON r.revision_id = a.revision_id
+                          WHERE a.id = 1 AND r.theme_id = ?",
+                    )
+                    .bind(&reg.owner_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    raw.and_then(|raw| {
+                        serde_json::from_str::<opendash_core::theme::ThemeV3Manifest>(&raw)
+                            .ok()
+                            .and_then(|m| m.to_runtime_manifest())
+                    })
+                } else {
+                    let raw: Option<String> = sqlx::query_scalar(
+                        "SELECT manifest_json FROM plugins WHERE id=? AND enabled=1 AND last_error IS NULL",
+                    )
+                    .bind(&reg.owner_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    raw.and_then(|raw| {
+                        opendash_core::plugin::PluginManifest::from_json_str(&raw).ok()
+                    })
+                };
+                let Some(manifest) = manifest_opt else {
                     continue;
                 };
                 if !manifest.actions.iter().any(|action| {

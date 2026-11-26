@@ -18,6 +18,7 @@ const scanRoots = [
   'cms/crates/opendash-server/src/builtin_themes/opendash-starter',
   'cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.0.1',
   'cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.1.0',
+  'cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.1.1',
   'cms/fixtures/demo-website',
 ];
 const rustSources = [

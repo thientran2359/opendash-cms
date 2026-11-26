@@ -2138,11 +2138,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "Builder template composition exceeds 512 KiB.",
     ),
     (
-        "server.error",
-        "Thiếu descriptor theme cũ.",
-        "Missing legacy theme descriptor",
-    ),
-    (
         "page.page_rendering_fuel_budget_exhausted",
         "Đã hết ngân sách fuel render trang.",
         "Page rendering fuel budget exhausted.",
@@ -3104,11 +3099,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "Term not found.",
     ),
     (
-        "taxonomy.name_slug_parent_id_or_extensions_is_required_for_an_update",
-        "Cần name, slug, parent_id hoặc extensions để cập nhật.",
-        "name, slug, parent_id or extensions is required for an update.",
-    ),
-    (
         "taxonomy.name_slug_parent_id_featured_image_or_extensions_is_required_for_an_update",
         "Cần name, slug, parent_id, featured_image_media_id hoặc extensions để cập nhật.",
         "name, slug, parent_id, featured_image_media_id or extensions is required for an update.",
@@ -3700,28 +3690,8 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
     ),
     (
         "server.error",
-        "ID block đã cài đặt không hợp lệ.",
-        "Invalid installed block ID",
-    ),
-    (
-        "server.error",
-        "Registry block đã cài đặt không hợp lệ.",
-        "Invalid installed block registry",
-    ),
-    (
-        "server.error",
         "ID block khai báo không hợp lệ.",
         "Invalid declared block ID",
-    ),
-    (
-        "server.error",
-        "Không thể đọc tài liệu Builder đã lưu.",
-        "Stored Builder document is not readable",
-    ),
-    (
-        "builder.the_homepage_already_uses_the_tree_builder_open_api_admin_builder_homepage",
-        "Homepage đã dùng Builder dạng cây. Hãy mở /api/admin/builder/homepage.",
-        "The homepage already uses the tree Builder. Open /api/admin/builder/homepage.",
     ),
     (
         "builder.invalid_builder_media_id",
@@ -3742,11 +3712,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "builder.expanded_pattern_exceeds_1024_builder_nodes",
         "Pattern sau khi mở rộng vượt quá 1024 node Builder.",
         "Expanded Pattern exceeds 1024 Builder nodes.",
-    ),
-    (
-        "request.precondition_failed",
-        "Homepage đã thay đổi ở một tab khác. Giữ bản nháp và tải lại phiên bản.",
-        "The homepage changed in another tab. Keep your draft and reload the version.",
     ),
     (
         "builder.the_content_type_does_not_have_a_valid_body_field_for_page_builder",
@@ -4879,49 +4844,14 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "Could not read the job after deleting the artifact.",
     ),
     (
-        "overrides.the_homepage_uses_api_admin_builder_homepage_do_not_create_a_separate_override",
-        "Trang chủ dùng /api/admin/builder/homepage, không tạo override riêng.",
-        "The homepage uses /api/admin/builder/homepage; do not create a separate override.",
-    ),
-    (
-        "overrides.invalid_template_override_role",
-        "Role template override không hợp lệ.",
-        "Invalid template override role.",
-    ),
-    (
-        "overrides.this_role_does_not_support_content_type_scope",
-        "Role này không hỗ trợ scope theo loại nội dung.",
-        "This role does not support content type scope.",
-    ),
-    (
         "overrides.invalid_scope_type_key",
         "scope_type_key không hợp lệ.",
         "Invalid scope_type_key.",
     ),
     (
-        "overrides.only_the_page_or_single_role_supports_entry_scope",
-        "Chỉ role page hoặc single mới hỗ trợ scope theo entry.",
-        "Only the page or single role supports entry scope.",
-    ),
-    (
-        "overrides.scope_type_key_is_required_when_specifying_scope_entry_id",
-        "Cần scope_type_key khi chỉ định scope_entry_id.",
-        "scope_type_key is required when specifying scope_entry_id.",
-    ),
-    (
         "overrides.invalid_scope_entry_id",
         "scope_entry_id không hợp lệ.",
         "Invalid scope_entry_id.",
-    ),
-    (
-        "overrides.page_builder_requires_type_key_page",
-        "Page Builder cần type_key=page.",
-        "Page Builder requires type_key=page.",
-    ),
-    (
-        "overrides.legacy_page_scope_has_no_typed_template_identity",
-        "Scope Page cũ không có định danh template có kiểu.",
-        "Legacy Page scope has no typed template identity.",
     ),
     (
         "server.error",
@@ -5078,7 +5008,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "Kết quả xem trước vượt quá 512 KiB.",
         "Preview output exceeds 512 KiB.",
     ),
-    ("server.error", "Thiếu theme part.", "Theme part missing."),
     (
         "server.error",
         "Vòng lặp hoặc giới hạn độ sâu template part.",
@@ -5123,46 +5052,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "page.the_block_id_belongs_to_another_package",
         "ID block đã thuộc quyền sở hữu của gói khác.",
         "The block ID belongs to another package.",
-    ),
-    (
-        "page.the_block_id_conflicts_with_another_package_s_theme_blocks",
-        "ID block xung đột với theme_blocks của gói khác.",
-        "The block ID conflicts with another package's theme_blocks.",
-    ),
-    (
-        "server.error",
-        "ID block đã lưu không hợp lệ.",
-        "Invalid stored block ID",
-    ),
-    (
-        "page.invalid_block_namespace",
-        "Namespace block không hợp lệ.",
-        "Invalid block namespace",
-    ),
-    (
-        "page.the_alias_points_to_a_block_that_is_not_installed",
-        "Alias trỏ đến block chưa được cài đặt.",
-        "The alias points to a block that is not installed.",
-    ),
-    (
-        "page.the_alias_field_keys_do_not_match_the_source_block",
-        "Field keys của alias không khớp block nguồn.",
-        "The alias field keys do not match the source block.",
-    ),
-    (
-        "page.the_block_id_already_exists_in_the_data",
-        "ID block đã có trong dữ liệu.",
-        "The block ID already exists in the data.",
-    ),
-    (
-        "page.block_not_found",
-        "Không tìm thấy block",
-        "Block not found",
-    ),
-    (
-        "page.block_provider_is_inactive",
-        "Provider của block không hoạt động",
-        "Block provider is inactive",
     ),
     (
         "patterns.invalid_pattern_title_1_200_characters",
@@ -6170,11 +6059,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "Invalid theme part UTF-8.",
     ),
     (
-        "theme.the_homepage_has_switched_to_the_tree_builder_open_api_admin_builder_homepage",
-        "Homepage đã chuyển sang Builder dạng cây. Hãy mở /api/admin/builder/homepage.",
-        "The homepage has switched to the tree Builder. Open /api/admin/builder/homepage.",
-    ),
-    (
         "auth.the_username_must_contain_3_to_32_characters",
         "Tên đăng nhập phải từ 3 đến 32 ký tự.",
         "The username must contain 3 to 32 characters.",
@@ -6290,14 +6174,79 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "The ZIP contains duplicate paths.",
     ),
     (
-        "package.invalid_zip_v2_path",
-        "Đường dẫn trong ZIP v2 không hợp lệ.",
-        "Invalid ZIP v2 path.",
+        "package.invalid_theme_zip_path",
+        "Đường dẫn trong gói theme ZIP không hợp lệ.",
+        "Invalid theme ZIP path.",
     ),
     (
-        "package.the_zip_v2_path_contains_an_unsafe_segment",
-        "Đường dẫn trong ZIP v2 chứa segment không an toàn.",
-        "The ZIP v2 path contains an unsafe segment.",
+        "package.the_theme_zip_path_contains_an_unsafe_segment",
+        "Đường dẫn trong gói theme ZIP chứa segment không an toàn.",
+        "The theme ZIP path contains an unsafe segment.",
+    ),
+    (
+        "package.theme_zip_exceeds_8_mib",
+        "Gói theme ZIP vượt quá giới hạn 8 MiB.",
+        "The theme ZIP package exceeds the 8 MiB limit.",
+    ),
+    (
+        "package.invalid_theme_zip",
+        "Gói theme ZIP không hợp lệ.",
+        "Invalid theme ZIP package.",
+    ),
+    (
+        "package.could_not_read_zip_entry",
+        "Không đọc được mục trong ZIP.",
+        "Could not read entry in ZIP archive.",
+    ),
+    (
+        "package.zip_must_not_contain_symlinks",
+        "ZIP không được chứa symlink.",
+        "ZIP archive must not contain symlinks.",
+    ),
+    (
+        "package.invalid_zip_path",
+        "Đường dẫn ZIP không hợp lệ.",
+        "Invalid ZIP path.",
+    ),
+    (
+        "package.zip_directory_entry_must_not_contain_data",
+        "Mục thư mục trong ZIP không được chứa dữ liệu.",
+        "ZIP directory entry must not contain data.",
+    ),
+    (
+        "package.theme_zip_exceeds_256_files",
+        "Gói theme ZIP vượt quá giới hạn 256 file.",
+        "The theme ZIP package exceeds the 256-file limit.",
+    ),
+    (
+        "package.theme_zip_duplicate_or_case_conflict",
+        "Gói theme ZIP chứa đường dẫn trùng lặp hoặc xung đột chữ hoa/thường.",
+        "The theme ZIP archive contains duplicate paths or case conflicts.",
+    ),
+    (
+        "package.theme_zip_file_exceeds_size_limit",
+        "File trong gói theme ZIP vượt quá giới hạn kích thước cho phép.",
+        "A file in the theme ZIP archive exceeds the allowed size limit.",
+    ),
+    (
+        "package.theme_zip_extracted_file_exceeds_size_limit",
+        "File giải nén trong gói theme ZIP vượt quá giới hạn kích thước.",
+        "An extracted file in the theme ZIP archive exceeds the allowed size limit.",
+    ),
+    (
+        "package.theme_zip_total_extracted_exceeds_32_mib",
+        "Tổng dung lượng giải nén gói theme ZIP vượt quá 32 MiB.",
+        "Total extracted theme ZIP size exceeds the 32 MiB limit.",
+    ),
+    (
+        "package.could_not_read_theme_zip_file",
+        "Không thể đọc nội dung file trong gói theme ZIP.",
+        "Could not read file contents in the theme ZIP archive.",
+    ),
+    (
+        "package.theme_zip_rejected_zip_bomb",
+        "Gói theme ZIP bị từ chối do tỷ lệ giải nén bất thường (zip bomb).",
+        "The theme ZIP archive was rejected due to an abnormal expansion ratio (zip bomb).",
     ),
     (
         "package.the_backup_zip_file_size_is_outside_the_valid_range",
@@ -7700,11 +7649,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "C-SEC prohibits assigning attributes/elements with GetAttr or GetItem.",
     ),
     (
-        "template_sec.c_sec_prohibits_jinja_interpolation_and_control_blocks_inside_style",
-        "C-SEC cấm nội suy và khối điều khiển Jinja bên trong <style>.",
-        "C-SEC prohibits Jinja interpolation and control blocks inside <style>.",
-    ),
-    (
         "template_sec.the_template_must_end_in_the_html_body_state_all_tags_comments_style_title_closed",
         "Template phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment/style/title).",
         "The template must end in the HTML body state (all tags/comments/style/title closed).",
@@ -7803,21 +7747,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "template_sec.too_many_html_states_after_a_loop",
         "Quá nhiều trạng thái HTML sau vòng lặp.",
         "Too many HTML states after a loop.",
-    ),
-    (
-        "template_sec.the_style_or_title_closing_tag_must_not_contain_whitespace_or",
-        "Thẻ đóng </style> hoặc </title> không được chứa khoảng trắng hoặc /.",
-        "The </style> or </title> closing tag must not contain whitespace or /.",
-    ),
-    (
-        "template_sec.incomplete_style_or_title_closing_tag",
-        "Thẻ đóng </style> hoặc </title> không hoàn chỉnh.",
-        "Incomplete </style> or </title> closing tag.",
-    ),
-    (
-        "template_sec.the_style_or_title_tag_lacks_a_valid_closing_tag",
-        "Thẻ <style> hoặc <title> thiếu thẻ đóng hợp lệ.",
-        "The <style> or <title> tag lacks a valid closing tag.",
     ),
     (
         "template_sec.unclosed_html_comment",
@@ -8093,11 +8022,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "theme.the_v3_theme_exceeds_the_total_decoded_size_limit_of_32_mib",
         "Theme v3 vượt quá giới hạn tổng kích thước giải mã 32 MiB.",
         "The v3 theme exceeds the total decoded size limit of 32 MiB.",
-    ),
-    (
-        "theme.the_file_type_in_the_v2_theme_package_is_outside_the_allowlist",
-        "Loại file trong gói theme v2 không nằm trong danh sách cho phép.",
-        "The file type in the v2 theme package is outside the allowlist.",
     ),
     (
         "theme.invalid_declarations_format_in_theme_json",
@@ -10144,11 +10068,6 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "template_sec.template_block_fuel_tracker_missing",
         "Thiếu bộ theo dõi fuel cho template block.",
         "Template block fuel tracker missing.",
-    ),
-    (
-        "theme.could_not_render_the_template_block",
-        "Không render được template block.",
-        "Could not render the template block.",
     ),
     (
         "theme.could_not_render_the_content_template",

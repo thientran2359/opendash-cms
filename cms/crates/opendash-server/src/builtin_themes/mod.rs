@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 pub const STARTER_THEME_ID: &str = "opendash-starter";
 pub const STARTER_THEME_NAME: &str = "OpenDash Starter";
-pub const STARTER_THEME_VERSION: &str = "1.1.0";
+pub const STARTER_THEME_VERSION: &str = "1.1.1";
 
 /// Immutable embedded Starter theme resources, validated using the same v3
 /// boundary as uploaded packages before publishing an on-disk revision.
@@ -150,9 +150,9 @@ pub fn builtin_starter_theme_v101_files() -> BTreeMap<String, Vec<u8>> {
     files
 }
 
-/// v1.1.0 builds on the v1.0.1 snapshot with Theme v3 L10n dictionaries,
+/// Frozen v1.1.0 snapshot building on v1.0.1 with Theme v3 L10n dictionaries,
 /// `language-switcher` template part, and localized starter templates.
-pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
+pub fn builtin_starter_theme_v110_files() -> BTreeMap<String, Vec<u8>> {
     let mut files = builtin_starter_theme_v101_files();
     for (path, bytes) in [
         (
@@ -207,5 +207,16 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
     ] {
         files.insert(path.to_owned(), bytes.to_vec());
     }
+    files
+}
+
+/// v1.1.1 overlays the frozen v1.1.0 snapshot with `"chrome": "none"` on the
+/// `canvas` page layout without mutating earlier immutable revision digests.
+pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
+    let mut files = builtin_starter_theme_v110_files();
+    files.insert(
+        "theme.json".to_owned(),
+        include_bytes!("opendash-starter-1.1.1/theme.json").to_vec(),
+    );
     files
 }

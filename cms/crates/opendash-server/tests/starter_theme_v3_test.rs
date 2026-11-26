@@ -139,7 +139,7 @@ async fn starter_bootstrap_import_repair_and_admin_theme_selection_are_durable()
     assert_eq!(themes["selection"]["theme_id"], "opendash-starter");
     assert_eq!(themes["selection"]["version"], 1, "fresh ETag remains v1");
     assert_eq!(themes["revisions"].as_array().unwrap().len(), 1);
-    assert_eq!(themes["revisions"][0]["version"], "1.1.0");
+    assert_eq!(themes["revisions"][0]["version"], "1.1.1");
     // Strict-undefined C-SEC must not turn a brand-new site's missing menu
     // assignments or unpublished content into a public HTTP 500.
     let blank_home = client.get(format!("{}/", srv.origin)).send().await.unwrap();
@@ -174,7 +174,7 @@ async fn starter_bootstrap_import_repair_and_admin_theme_selection_are_durable()
     );
     let manifest: Value =
         serde_json::from_slice(&fs::read(rev_root.join("theme.json")).unwrap()).unwrap();
-    assert_eq!(manifest["version"], "1.1.0");
+    assert_eq!(manifest["version"], "1.1.1");
     assert_eq!(
         manifest["options"]
             .as_array()

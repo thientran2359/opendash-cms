@@ -436,12 +436,27 @@ async fn verify_plugin_fence_in_tx(
     actor: &SessionContext,
     fence: &PluginActionFence,
 ) -> ApiResult<()> {
-    let active = super::plugin::is_plugin_generation_active(
-        &mut **tx,
-        &fence.plugin_id,
-        fence.expected_generation,
-    )
-    .await?;
+    let active = match &fence.owner_fence {
+        crate::storage::entries::OwnerFence::Plugin {
+            plugin_id,
+            expected_generation,
+        } => {
+            super::plugin::is_plugin_generation_active(&mut **tx, plugin_id, *expected_generation)
+                .await?
+        }
+        crate::storage::entries::OwnerFence::Theme {
+            revision_id,
+            selection_version,
+            ..
+        } => {
+            super::plugin::verify_active_theme_fence_in_tx(
+                &mut **tx,
+                revision_id,
+                *selection_version,
+            )
+            .await?
+        }
+    };
     if !active {
         return Err(ApiError::conflict(
             "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc thực thi.",

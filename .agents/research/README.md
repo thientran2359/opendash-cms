@@ -2,7 +2,7 @@
 
 Lưu các ghi chú nghiên cứu đang mở, tài liệu vận hành CoS còn dùng, thử nghiệm EGM và các báo cáo `/egm-drift-report` sau mỗi Design Spec (`docs/designs/`). Luôn tham chiếu [`../templates/RESEARCH.md`](../templates/RESEARCH.md) khi tạo ghi chú nghiên cứu mới.
 
-## Báo cáo Drift EGM (`2026-11-21` – `2026-11-25`)
+## Báo cáo Drift EGM (`2026-11-21` – `2026-11-26`)
 
 - [Spec 1 Drift Report (2026-11-21)](2026-11-21_SPEC1_DRIFT_REPORT.md)
 - [Spec 2 S01–S03 Drift Report (2026-11-21)](2026-11-21-spec2-closure/2026-11-21_DRIFT_REPORT.md)
@@ -21,6 +21,9 @@ Lưu các ghi chú nghiên cứu đang mở, tài liệu vận hành CoS còn d�
 - [Theme Ergonomics & C-SEC Helpers Drift Report (2026-11-24)](2026-11-24_THEME_ERGONOMICS_DRIFT_REPORT.md)
 - [Admin i18n & Multilingual Settings Drift Report (2026-11-25)](2026-11-25-admin-i18n-drift-report.md)
 - [CMS README Bootstrap Drift Report (2026-11-25)](2026-11-25_CMS_README_BOOTSTRAP_DRIFT_REPORT.md)
+- [Theme Chrome, Cache & Safe Icons Drift Report (2026-11-25)](2026-11-25-theme-chrome-cache-icons-drift-report.md)
+- [Trusted Theme JS/SVG & Asset Enqueue Drift Report (2026-11-25)](2026-11-25-trusted-theme-js-svg-enqueue-drift-report.md)
+- [Phase 2 Legacy Retirement Drift Report (2026-11-26)](2026-11-26-phase2-legacy-retirement-drift-report.md)
 
 ## Ghi chú CoS Dispatch & EGM Pilot
 

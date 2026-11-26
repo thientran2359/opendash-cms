@@ -7,14 +7,17 @@ use std::{
 
 use axum::http::StatusCode;
 use opendash_core::hooks::{
-    EnvelopeKind, ExecutionPrincipal, HookEvent, HookExecutionMode, PluginEnvelopeV2,
+    EnvelopeKind, ExecutionPrincipal, ExtensionOwnerKind, ExtensionRuntimeKind, HookEvent,
+    HookExecutionMode, PluginEnvelopeV2,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
 use crate::storage::{
+    entries::OwnerFence,
     entry_lifecycle::{
         EntryCommitReceipt, EntryMutationKind, LifecycleAuthority, LifecycleCommand,
         LifecycleConfirmationEvidence, LifecycleOperation, LifecycleScope, SecondaryOutcome,
@@ -23,7 +26,7 @@ use crate::storage::{
 };
 
 use super::{
-    host_ops::StagedLifecycleOperation,
+    host_ops::{RuntimeOwner, StagedLifecycleOperation},
     lifecycle_confirmation::{
         ConfirmationStoreError, LifecycleActionOrigin, LifecycleConfirmationStore,
         NewPendingConfirmation, PluginLifecycleConfirmation,
@@ -42,6 +45,24 @@ pub struct CachedActivePlugin {
     pub revision_generation: i64,
     #[allow(dead_code)]
     pub revision_digest: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedActiveTheme {
+    pub theme_id: String,
+    pub revision_id: String,
+    #[allow(dead_code)]
+    pub revision_digest: String,
+    pub selection_version: i64,
+    pub manifest: PluginManifest,
+    pub js_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionSubscriber {
+    pub priority: i32,
+    pub owner: RuntimeOwner,
+    pub theme_fence: Option<(String, i64)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,14 +155,14 @@ fn map_lifecycle_api_error_code(err: &crate::error::ApiError) -> &'static str {
 }
 
 struct ActionLeaseGuard {
-    leases: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    plugin_id: String,
+    leases: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<RuntimeOwner>>>,
+    owner: RuntimeOwner,
 }
 
 impl Drop for ActionLeaseGuard {
     fn drop(&mut self) {
         if let Ok(mut guard) = self.leases.lock() {
-            guard.remove(&self.plugin_id);
+            guard.remove(&self.owner);
         }
     }
 }
@@ -149,25 +170,39 @@ impl Drop for ActionLeaseGuard {
 pub struct PluginManager {
     db_pool: SqlitePool,
     runtime: PluginRuntime,
-    active_action_leases: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    active_action_leases: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<RuntimeOwner>>>,
     confirmation_store: Arc<LifecycleConfirmationStore>,
     allow_loopback: bool,
     plugins_root: PathBuf,
+    themes_root: PathBuf,
     secrets_root: PathBuf,
     manifest_cache: Arc<RwLock<Option<BTreeMap<String, CachedActivePlugin>>>>,
+    active_theme_cache: Arc<RwLock<Option<Option<CachedActiveTheme>>>>,
     recovery: crate::config::RecoveryState,
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(64);
+    for b in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut out, "{b:02x}");
+    }
+    out
 }
 
 impl PluginManager {
     pub fn new(db_pool: SqlitePool, allow_loopback: bool) -> Self {
-        let (plugins_root, secrets_root) = match crate::paths::SitePaths::from_env() {
-            Ok(p) => (p.plugins_dir(), p.secrets_dir()),
+        let (plugins_root, themes_root, secrets_root) = match crate::paths::SitePaths::from_env() {
+            Ok(p) => (p.plugins_dir(), p.themes_dir(), p.secrets_dir()),
             Err(_) => (
                 std::env::temp_dir().join("opendash_plugins_default"),
+                std::env::temp_dir().join("opendash_themes_default"),
                 std::env::temp_dir().join("opendash_secrets_default"),
             ),
         };
         Self::with_roots(db_pool, allow_loopback, plugins_root, secrets_root)
+            .with_themes_root(themes_root)
     }
 
     pub fn with_plugins_root(
@@ -184,7 +219,12 @@ impl PluginManager {
                     .join("database")
                     .join("secrets")
             });
+        let themes_root = plugins_root
+            .parent()
+            .unwrap_or(&plugins_root)
+            .join("themes");
         Self::with_roots(db_pool, allow_loopback, plugins_root, secrets_root)
+            .with_themes_root(themes_root)
     }
 
     pub fn with_roots(
@@ -193,6 +233,10 @@ impl PluginManager {
         plugins_root: PathBuf,
         secrets_root: PathBuf,
     ) -> Self {
+        let themes_root = plugins_root
+            .parent()
+            .unwrap_or(&plugins_root)
+            .join("themes");
         // Layout dirs created lazily; startup quarantine runs once in main.rs.
         Self {
             db_pool,
@@ -203,14 +247,113 @@ impl PluginManager {
             confirmation_store: Arc::new(LifecycleConfirmationStore::new()),
             allow_loopback,
             plugins_root,
+            themes_root,
             secrets_root,
             manifest_cache: Arc::new(RwLock::new(None)),
+            active_theme_cache: Arc::new(RwLock::new(None)),
             recovery: crate::config::RecoveryState::new(false),
         }
     }
 
+    pub fn with_themes_root(mut self, themes_root: PathBuf) -> Self {
+        self.themes_root = themes_root;
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn themes_root(&self) -> &std::path::Path {
+        &self.themes_root
+    }
+
     pub async fn invalidate_cache(&self) {
         *self.manifest_cache.write().await = None;
+    }
+
+    pub async fn invalidate_active_theme_cache(&self) {
+        *self.active_theme_cache.write().await = None;
+    }
+
+    async fn ensure_active_theme_cache(&self) -> Result<Option<CachedActiveTheme>, String> {
+        {
+            let guard = self.active_theme_cache.read().await;
+            if let Some(ref cached) = *guard {
+                return Ok(cached.clone());
+            }
+        }
+        let snap_opt = crate::storage::theme::load_active_theme_functions_snapshot(&self.db_pool)
+            .await
+            .map_err(|e| e.1.to_string())?;
+        let built = match snap_opt {
+            None => None,
+            Some(snap) => {
+                let parsed: opendash_core::theme::ThemeV3Manifest =
+                    match serde_json::from_str(&snap.manifest_json) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            eprintln!("Invalid active theme manifest {}: {e}", snap.theme_id);
+                            *self.active_theme_cache.write().await = Some(None);
+                            return Ok(None);
+                        }
+                    };
+                match parsed.to_runtime_manifest() {
+                    None => None,
+                    Some(runtime_manifest) => {
+                        let rev_dir = self
+                            .themes_root
+                            .join("revisions")
+                            .join(&snap.revision_digest);
+                        let marker = rev_dir.join(".complete");
+                        let marker_ok = std::fs::read_to_string(&marker)
+                            .ok()
+                            .is_some_and(|s| s.trim() == snap.revision_digest);
+                        let func_path = rev_dir.join("functions.js");
+                        let no_symlink = crate::secrets::ensure_no_reparse_or_symlink(&rev_dir)
+                            .is_ok()
+                            && crate::secrets::ensure_no_reparse_or_symlink(&func_path).is_ok();
+                        let expected_hex =
+                            snap.file_digests.get("functions.js").map(String::as_str);
+                        let js_bytes_opt = if marker_ok && no_symlink {
+                            std::fs::read(&func_path).ok().filter(|bytes| {
+                                expected_hex == Some(sha256_hex(bytes).as_str())
+                                    && std::str::from_utf8(bytes).is_ok()
+                            })
+                        } else {
+                            None
+                        };
+                        js_bytes_opt.map(|js_bytes| CachedActiveTheme {
+                            theme_id: snap.theme_id,
+                            revision_id: snap.revision_id,
+                            revision_digest: snap.revision_digest,
+                            selection_version: snap.selection_version,
+                            manifest: runtime_manifest,
+                            js_bytes,
+                        })
+                    }
+                }
+            }
+        };
+        *self.active_theme_cache.write().await = Some(built.clone());
+        Ok(built)
+    }
+
+    pub async fn active_theme_manifest(&self) -> Option<(String, String, i64, PluginManifest)> {
+        let cached = self.ensure_active_theme_cache().await.ok()??;
+        Some((
+            cached.theme_id,
+            cached.revision_id,
+            cached.selection_version,
+            cached.manifest,
+        ))
+    }
+
+    pub async fn cached_owner_manifest(&self, owner: &RuntimeOwner) -> Option<PluginManifest> {
+        match owner.kind {
+            ExtensionOwnerKind::Plugin => self.cached_plugin_manifest(&owner.id).await,
+            ExtensionOwnerKind::Theme => {
+                let cached = self.ensure_active_theme_cache().await.ok()??;
+                (cached.theme_id == owner.id).then_some(cached.manifest)
+            }
+        }
     }
 
     async fn ensure_manifest_cache(&self) -> Result<BTreeMap<String, CachedActivePlugin>, String> {
@@ -252,13 +395,28 @@ impl PluginManager {
         cache.get(id).map(|item| item.manifest.clone())
     }
 
+    #[allow(dead_code)]
     pub async fn filter_public_content_payload_for_plugin(
         &self,
         plugin_id: &str,
         type_key: &str,
         payload: &mut Value,
     ) {
-        let manifest_opt = self.cached_plugin_manifest(plugin_id).await;
+        self.filter_public_content_payload_for_owner(
+            &RuntimeOwner::plugin(plugin_id),
+            type_key,
+            payload,
+        )
+        .await;
+    }
+
+    pub async fn filter_public_content_payload_for_owner(
+        &self,
+        owner: &RuntimeOwner,
+        type_key: &str,
+        payload: &mut Value,
+    ) {
+        let manifest_opt = self.cached_owner_manifest(owner).await;
         let schema_opt =
             crate::storage::content::load_effective_content_schema(&self.db_pool, type_key)
                 .await
@@ -273,7 +431,8 @@ impl PluginManager {
                             effective.effective_fields.get(k).is_some_and(|fe| {
                                 fe.definition.public_exposure
                                     == opendash_core::content::PublicExposure::Public
-                                    && opendash_core::plugin::plugin_can_read_field(
+                                    && opendash_core::plugin::plugin_can_read_field_for_owner(
+                                        owner.kind,
                                         manifest,
                                         None,
                                         opendash_core::content::FieldRole::Editor,
@@ -315,6 +474,41 @@ impl PluginManager {
         origin: LifecycleActionOrigin,
         maintenance_epoch: u64,
     ) -> Result<ActionCommitOutcome, (StatusCode, PluginRunResponse)> {
+        self.execute_owner_action(
+            ExtensionOwnerKind::Plugin,
+            Some(id),
+            action_id,
+            actor,
+            input,
+            content_registry,
+            hooks,
+            correlation_id,
+            origin,
+            maintenance_epoch,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_owner_action(
+        &self,
+        owner_kind: ExtensionOwnerKind,
+        id_opt: Option<&str>,
+        action_id: &str,
+        actor: &crate::auth::SessionContext,
+        input: Value,
+        content_registry: &std::sync::Arc<
+            tokio::sync::RwLock<
+                opendash_core::registry::RegistryCatalog<
+                    opendash_core::content::ContentTypeDefinition,
+                >,
+            >,
+        >,
+        hooks: &crate::hooks::HookDispatcher,
+        correlation_id: String,
+        origin: LifecycleActionOrigin,
+        maintenance_epoch: u64,
+    ) -> Result<ActionCommitOutcome, (StatusCode, PluginRunResponse)> {
         let mk_err = |status: StatusCode, code: &str, msg: String| {
             (
                 status,
@@ -329,12 +523,128 @@ impl PluginManager {
             )
         };
 
+        if self.recovery.is_safe_mode() {
+            return Err(mk_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "safe_mode",
+                "Hệ thống đang ở safe mode sau khi khôi phục; gói mở rộng bị tạm khóa.".into(),
+            ));
+        }
+
+        let (owner_id, code_bytes, manifest, owner_fence, runtime_kind) = match owner_kind {
+            ExtensionOwnerKind::Plugin => {
+                let id = id_opt.ok_or_else(|| {
+                    mk_err(
+                        StatusCode::NOT_FOUND,
+                        "not_found",
+                        "Plugin không tồn tại.".into(),
+                    )
+                })?;
+                let row_opt =
+                    plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
+                        .await
+                        .map_err(|e| {
+                            mk_err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "db_error",
+                                format!("Lỗi cơ sở dữ liệu: {e}"),
+                            )
+                        })?;
+                let Some((
+                    wasm_blob,
+                    manifest_json,
+                    enabled,
+                    revision_generation,
+                    revision_digest_opt,
+                )) = row_opt
+                else {
+                    return Err(mk_err(
+                        StatusCode::NOT_FOUND,
+                        "not_found",
+                        "Plugin không tồn tại.".into(),
+                    ));
+                };
+                if !enabled {
+                    return Err(mk_err(
+                        StatusCode::BAD_REQUEST,
+                        "disabled",
+                        "Plugin chưa được bật hoặc đã bị vô hiệu hóa.".into(),
+                    ));
+                }
+                let manifest =
+                    serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
+                        mk_err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "corrupt_manifest",
+                            format!("Manifest không hợp lệ: {e}"),
+                        )
+                    })?;
+                if let Some(digest) = &revision_digest_opt
+                    && let Err(err) = plugin_storage::verify_plugin_revision_durability(
+                        &self.plugins_root,
+                        digest,
+                    )
+                {
+                    return Err(mk_err(StatusCode::CONFLICT, "corrupt_revision", err));
+                }
+                let rt_kind = manifest.runtime_kind();
+                (
+                    id.to_owned(),
+                    wasm_blob,
+                    manifest,
+                    OwnerFence::Plugin {
+                        plugin_id: id.to_owned(),
+                        expected_generation: revision_generation,
+                    },
+                    rt_kind,
+                )
+            }
+            ExtensionOwnerKind::Theme => {
+                let cached = self
+                    .ensure_active_theme_cache()
+                    .await
+                    .map_err(|e| mk_err(StatusCode::INTERNAL_SERVER_ERROR, "theme_cache_error", e))?
+                    .ok_or_else(|| {
+                        mk_err(
+                            StatusCode::NOT_FOUND,
+                            "theme_functions_not_found",
+                            "Theme hiện hành không có functions.js.".into(),
+                        )
+                    })?;
+                if let Some(expected_id) = id_opt
+                    && cached.theme_id != expected_id
+                {
+                    return Err(mk_err(
+                        StatusCode::NOT_FOUND,
+                        "theme_not_active",
+                        "Theme không còn đang được kích hoạt.".into(),
+                    ));
+                }
+                let fence = OwnerFence::Theme {
+                    theme_id: cached.theme_id.clone(),
+                    revision_id: cached.revision_id.clone(),
+                    selection_version: cached.selection_version,
+                };
+                (
+                    cached.theme_id,
+                    cached.js_bytes,
+                    cached.manifest,
+                    fence,
+                    ExtensionRuntimeKind::Js,
+                )
+            }
+        };
+
+        let owner = RuntimeOwner {
+            kind: owner_kind,
+            id: owner_id.clone(),
+        };
         let _lease_guard = {
             if self.recovery.is_safe_mode() {
                 return Err(mk_err(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "safe_mode",
-                    "Hệ thống đang ở safe mode sau khi khôi phục; plugin bị tạm khóa.".into(),
+                    "Hệ thống đang ở safe mode sau khi khôi phục; gói mở rộng bị tạm khóa.".into(),
                 ));
             }
             let mut leases = self.active_action_leases.lock().map_err(|_| {
@@ -344,68 +654,19 @@ impl PluginManager {
                     "Lỗi khóa action lease.".into(),
                 )
             })?;
-            if !leases.insert(id.to_string()) {
+            if !leases.insert(owner.clone()) {
                 return Err(mk_err(
                     StatusCode::CONFLICT,
                     "recursive_dispatch",
-                    "Không cho phép gọi đệ quy action trên cùng plugin.".into(),
+                    "Không cho phép gọi đệ quy action trên cùng gói mở rộng.".into(),
                 ));
             }
             ActionLeaseGuard {
                 leases: std::sync::Arc::clone(&self.active_action_leases),
-                plugin_id: id.to_string(),
+                owner: owner.clone(),
             }
         };
 
-        let row_opt = plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
-            .await
-            .map_err(|e| {
-                mk_err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "db_error",
-                    format!("Lỗi cơ sở dữ liệu: {e}"),
-                )
-            })?;
-
-        if self.recovery.is_safe_mode() {
-            return Err((
-                StatusCode::SERVICE_UNAVAILABLE,
-                PluginRunResponse {
-                    success: false,
-                    data: None,
-                    error: Some(
-                        "Hệ thống đang ở safe mode sau khi khôi phục; plugin bị tạm khóa.".into(),
-                    ),
-                    code: Some("safe_mode".into()),
-                    correlation_id,
-                    confirmation: None,
-                },
-            ));
-        }
-        let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) =
-            row_opt
-        else {
-            return Err(mk_err(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "Plugin không tồn tại.".into(),
-            ));
-        };
-        if !enabled {
-            return Err(mk_err(
-                StatusCode::BAD_REQUEST,
-                "disabled",
-                "Plugin chưa được bật hoặc đã bị vô hiệu hóa.".into(),
-            ));
-        }
-
-        let manifest = serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
-            mk_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "corrupt_manifest",
-                format!("Manifest không hợp lệ: {e}"),
-            )
-        })?;
         let Some(action_decl) = manifest.action(action_id).cloned() else {
             return Err(mk_err(
                 StatusCode::NOT_FOUND,
@@ -442,7 +703,10 @@ impl PluginManager {
                 "kv_read" => manifest.has_sqlite_perm("kv_read"),
                 "kv_list" => manifest.has_sqlite_perm("kv_read"),
                 "kv_write" | "kv_delete" => manifest.has_sqlite_perm("kv_write"),
-                "content_read" => !manifest.permissions.content_read.is_empty(),
+                "content_read" => {
+                    !manifest.permissions.content_read.is_empty()
+                        || manifest.permissions.content_read_all_public
+                }
                 "content_read_private" => !manifest.permissions.content_read_private.is_empty(),
                 "content_write" => !manifest.permissions.content_write.is_empty(),
                 "content_write_private" => !manifest.permissions.content_write_private.is_empty(),
@@ -466,21 +730,14 @@ impl PluginManager {
                 return Err(mk_err(
                     StatusCode::FORBIDDEN,
                     "capability_denied",
-                    format!("Plugin thiếu quyền manifest cho capability '{cap}'."),
+                    format!("Gói mở rộng thiếu quyền manifest cho capability '{cap}'."),
                 ));
             }
         }
 
-        if let Some(digest) = &revision_digest_opt {
-            if let Err(err) =
-                plugin_storage::verify_plugin_revision_durability(&self.plugins_root, digest)
-            {
-                return Err(mk_err(StatusCode::CONFLICT, "corrupt_revision", err));
-            }
-        }
-
         let mut filtered_input = input;
-        self.filter_action_input_for_plugin(
+        self.filter_action_input_for_owner(
+            owner_kind,
             &manifest,
             &action_decl.capabilities,
             actor_role,
@@ -518,14 +775,16 @@ impl PluginManager {
 
         let action_res = self
             .runtime
-            .run_plugin_action_with_principal(
-                wasm_blob,
+            .run_owner_action_with_principal(
+                owner_kind,
+                runtime_kind,
+                code_bytes,
                 manifest.clone(),
                 runtime_input,
                 self.db_pool.clone(),
                 correlation_id.clone(),
                 self.allow_loopback,
-                Some(revision_generation),
+                Some(owner_fence.clone()),
                 HookExecutionMode::Standard,
                 principal,
                 None,
@@ -549,9 +808,10 @@ impl PluginManager {
                     _ => (StatusCode::BAD_REQUEST, "action_failed"),
                 };
                 let msg = err.to_string();
-                plugin_storage::record_plugin_execution_result(
+                plugin_storage::record_owner_execution_result(
                     &self.db_pool,
-                    id,
+                    owner_kind,
+                    &owner_id,
                     &correlation_id,
                     "error",
                     &msg,
@@ -567,7 +827,7 @@ impl PluginManager {
                 return Err(mk_err(
                     StatusCode::FORBIDDEN,
                     "content_write_denied",
-                    "Plugin không có quyền ghi loại nội dung này.".into(),
+                    "Gói mở rộng không có quyền ghi loại nội dung này.".into(),
                 ));
             }
             let _ = &content_registry;
@@ -596,7 +856,8 @@ impl PluginManager {
                         ),
                     ));
                 };
-                if !opendash_core::plugin::plugin_can_write_field(
+                if !opendash_core::plugin::plugin_can_write_field_for_owner(
+                    owner_kind,
                     &manifest,
                     Some(&action_decl.capabilities),
                     actor_role,
@@ -606,7 +867,9 @@ impl PluginManager {
                     return Err(mk_err(
                         StatusCode::FORBIDDEN,
                         "field_edit_forbidden",
-                        format!("Plugin hoặc tài khoản không có quyền ghi trường '{field_key}'."),
+                        format!(
+                            "Gói mở rộng hoặc tài khoản không có quyền ghi trường '{field_key}'."
+                        ),
                     ));
                 }
             }
@@ -725,8 +988,7 @@ impl PluginManager {
             }
 
             let fence = crate::storage::entries::PluginActionFence {
-                plugin_id: id.to_string(),
-                expected_generation: revision_generation,
+                owner_fence: owner_fence.clone(),
                 required_role: action_decl.required_role.clone(),
             };
             let version_before = cmd.expected_version;
@@ -783,9 +1045,10 @@ impl PluginManager {
                     serde_json::to_value(&record).unwrap_or_default(),
                 )
                 .await;
-            plugin_storage::record_plugin_execution_result(
+            plugin_storage::record_owner_execution_result(
                 &self.db_pool,
-                id,
+                owner_kind,
+                &owner_id,
                 &correlation_id,
                 "info",
                 "Thực thi action thành công",
@@ -851,7 +1114,7 @@ impl PluginManager {
                 return Err(mk_err(
                     StatusCode::FORBIDDEN,
                     "content_lifecycle_denied",
-                    format!("Plugin không có quyền '{required_cap}' cho loại nội dung này."),
+                    format!("Gói mở rộng không có quyền '{required_cap}' cho loại nội dung này."),
                 ));
             }
             if domain_op == LifecycleOperation::Purge && actor.user.role != crate::auth::Role::Admin
@@ -870,8 +1133,7 @@ impl PluginManager {
                 expected_version: staged.expected_version,
             };
             let fence = crate::storage::entries::PluginActionFence {
-                plugin_id: id.to_string(),
-                expected_generation: revision_generation,
+                owner_fence: owner_fence.clone(),
                 required_role: action_decl.required_role.clone(),
             };
 
@@ -892,9 +1154,10 @@ impl PluginManager {
                     .map_err(|err| {
                         mk_err(err.0, map_lifecycle_api_error_code(&err), err.1.to_string())
                     })?;
-                    plugin_storage::record_plugin_execution_result(
+                    plugin_storage::record_owner_execution_result(
                         &self.db_pool,
-                        id,
+                        owner_kind,
+                        &owner_id,
                         &correlation_id,
                         "info",
                         "Thực thi action thành công",
@@ -957,9 +1220,10 @@ impl PluginManager {
                                 receipt.publication_after.as_deref() == Some("published"),
                             )
                             .await;
-                        plugin_storage::record_plugin_execution_result(
+                        plugin_storage::record_owner_execution_result(
                             &self.db_pool,
-                            id,
+                            owner_kind,
+                            &owner_id,
                             &correlation_id,
                             "info",
                             "Thực thi action thành công",
@@ -987,7 +1251,19 @@ impl PluginManager {
                         });
                     }
 
-                    // Purge or immediate-mode public Restore requires explicit host-owned confirmation.
+                    // Purge or immediate-mode public Restore requires explicit host-owned confirmation
+                    // (scoped to Plugin actions).
+                    let OwnerFence::Plugin {
+                        expected_generation: revision_generation,
+                        ..
+                    } = owner_fence
+                    else {
+                        return Err(mk_err(
+                            StatusCode::FORBIDDEN,
+                            "content_lifecycle_denied",
+                            "Xác nhận thao tác vòng đời chỉ hỗ trợ cho plugin đã khai báo.".into(),
+                        ));
+                    };
                     let site_id = crate::storage::auth::compute_site_instance_id(&self.db_pool)
                         .await
                         .unwrap_or_else(|| "default-site".into());
@@ -1001,7 +1277,7 @@ impl PluginManager {
                                 session_token_hash: actor.token_hash.clone(),
                                 actor_id: actor.user.id,
                                 actor_role: actor.user.role,
-                                plugin_id: id.to_string(),
+                                plugin_id: owner_id.clone(),
                                 action_id: action_id.to_string(),
                                 expected_generation: revision_generation,
                                 origin,
@@ -1055,9 +1331,10 @@ impl PluginManager {
             }
         }
 
-        plugin_storage::record_plugin_execution_result(
+        plugin_storage::record_owner_execution_result(
             &self.db_pool,
-            id,
+            owner_kind,
+            &owner_id,
             &correlation_id,
             "info",
             "Thực thi action thành công",
@@ -1295,8 +1572,10 @@ impl PluginManager {
         }
 
         let fence = crate::storage::entries::PluginActionFence {
-            plugin_id: id.to_string(),
-            expected_generation: pending.expected_generation,
+            owner_fence: OwnerFence::Plugin {
+                plugin_id: id.to_string(),
+                expected_generation: pending.expected_generation,
+            },
             required_role: action_decl.required_role.clone(),
         };
         let authority = LifecycleAuthority {
@@ -1466,6 +1745,7 @@ impl PluginManager {
         self.run_plugin_correlated(id, input, correlation_id).await
     }
 
+    #[allow(dead_code)]
     pub async fn hook_subscriptions(&self, event: HookEvent) -> Result<Vec<String>, String> {
         let cache = self.ensure_manifest_cache().await?;
         Ok(cache
@@ -1474,6 +1754,35 @@ impl PluginManager {
             .collect())
     }
 
+    pub async fn owner_hook_subscriptions(
+        &self,
+        event: HookEvent,
+    ) -> Result<Vec<ExtensionSubscriber>, String> {
+        let mut subs = Vec::new();
+        let cache = self.ensure_manifest_cache().await?;
+        for (id, item) in cache {
+            if item.manifest.hooks.contains(&event) {
+                subs.push(ExtensionSubscriber {
+                    priority: item.manifest.hook_priority,
+                    owner: RuntimeOwner::plugin(id),
+                    theme_fence: None,
+                });
+            }
+        }
+        if let Some(theme) = self.ensure_active_theme_cache().await?
+            && theme.manifest.hooks.contains(&event)
+        {
+            subs.push(ExtensionSubscriber {
+                priority: theme.manifest.hook_priority,
+                owner: RuntimeOwner::theme(theme.theme_id),
+                theme_fence: Some((theme.revision_id, theme.selection_version)),
+            });
+        }
+        subs.sort_by(|a, b| (a.priority, &a.owner).cmp(&(b.priority, &b.owner)));
+        Ok(subs)
+    }
+
+    #[allow(dead_code)]
     pub async fn content_hook_subscriptions(
         &self,
         event: HookEvent,
@@ -1489,6 +1798,37 @@ impl PluginManager {
             })
             .collect();
         subs.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+        Ok(subs)
+    }
+
+    pub async fn owner_content_hook_subscriptions(
+        &self,
+        event: HookEvent,
+        type_key: &str,
+    ) -> Result<Vec<ExtensionSubscriber>, String> {
+        let mut subs = Vec::new();
+        let cache = self.ensure_manifest_cache().await?;
+        for (id, item) in cache {
+            if item.manifest.hooks.contains(&event) && item.manifest.can_read_content_type(type_key)
+            {
+                subs.push(ExtensionSubscriber {
+                    priority: item.manifest.hook_priority,
+                    owner: RuntimeOwner::plugin(id),
+                    theme_fence: None,
+                });
+            }
+        }
+        if let Some(theme) = self.ensure_active_theme_cache().await?
+            && theme.manifest.hooks.contains(&event)
+            && theme.manifest.can_read_content_type(type_key)
+        {
+            subs.push(ExtensionSubscriber {
+                priority: theme.manifest.hook_priority,
+                owner: RuntimeOwner::theme(theme.theme_id),
+                theme_fence: Some((theme.revision_id, theme.selection_version)),
+            });
+        }
+        subs.sort_by(|a, b| (a.priority, &a.owner).cmp(&(b.priority, &b.owner)));
         Ok(subs)
     }
 
@@ -1512,6 +1852,38 @@ impl PluginManager {
         Ok(subs)
     }
 
+    pub async fn owner_filter_subscriptions(
+        &self,
+        event: HookEvent,
+        type_key: Option<&str>,
+    ) -> Result<Vec<ExtensionSubscriber>, String> {
+        let mut subs = Vec::new();
+        let cache = self.ensure_manifest_cache().await?;
+        for (id, item) in cache {
+            let matches_type = type_key.is_none_or(|tk| item.manifest.can_read_content_type(tk));
+            if item.manifest.filters.contains(&event) && matches_type {
+                subs.push(ExtensionSubscriber {
+                    priority: item.manifest.hook_priority,
+                    owner: RuntimeOwner::plugin(id),
+                    theme_fence: None,
+                });
+            }
+        }
+        if let Some(theme) = self.ensure_active_theme_cache().await? {
+            let matches_type = type_key.is_none_or(|tk| theme.manifest.can_read_content_type(tk));
+            if theme.manifest.filters.contains(&event) && matches_type {
+                subs.push(ExtensionSubscriber {
+                    priority: theme.manifest.hook_priority,
+                    owner: RuntimeOwner::theme(theme.theme_id),
+                    theme_fence: Some((theme.revision_id, theme.selection_version)),
+                });
+            }
+        }
+        subs.sort_by(|a, b| (a.priority, &a.owner).cmp(&(b.priority, &b.owner)));
+        Ok(subs)
+    }
+
+    #[allow(dead_code)]
     pub async fn filter_content_payload_for_plugin(
         &self,
         plugin_id: &str,
@@ -1519,10 +1891,23 @@ impl PluginManager {
         actor_role: opendash_core::content::FieldRole,
         payload: &mut Value,
     ) {
-        let manifest_opt = match self.ensure_manifest_cache().await {
-            Ok(cache) => cache.get(plugin_id).map(|c| c.manifest.clone()),
-            Err(_) => None,
-        };
+        self.filter_content_payload_for_owner(
+            &RuntimeOwner::plugin(plugin_id),
+            type_key,
+            actor_role,
+            payload,
+        )
+        .await;
+    }
+
+    pub async fn filter_content_payload_for_owner(
+        &self,
+        owner: &RuntimeOwner,
+        type_key: &str,
+        actor_role: opendash_core::content::FieldRole,
+        payload: &mut Value,
+    ) {
+        let manifest_opt = self.cached_owner_manifest(owner).await;
         let schema_opt =
             crate::storage::content::load_effective_content_schema(&self.db_pool, type_key)
                 .await
@@ -1535,8 +1920,8 @@ impl PluginManager {
                     (Some(manifest), Some(effective)) => {
                         map.retain(|k, _| {
                             effective.effective_fields.get(k).is_some_and(|fe| {
-                                opendash_core::plugin::plugin_can_read_field(
-                                    manifest, None, actor_role, type_key, fe,
+                                opendash_core::plugin::plugin_can_read_field_for_owner(
+                                    owner.kind, manifest, None, actor_role, type_key, fe,
                                 )
                             })
                         });
@@ -1549,8 +1934,9 @@ impl PluginManager {
         }
     }
 
-    async fn filter_action_input_for_plugin(
+    async fn filter_action_input_for_owner(
         &self,
+        owner_kind: ExtensionOwnerKind,
         manifest: &PluginManifest,
         action_caps: &[String],
         actor_role: opendash_core::content::FieldRole,
@@ -1573,7 +1959,8 @@ impl PluginManager {
                 Some(effective) => {
                     map.retain(|k, _| {
                         effective.effective_fields.get(k).is_some_and(|fe| {
-                            opendash_core::plugin::plugin_can_read_field(
+                            opendash_core::plugin::plugin_can_read_field_for_owner(
+                                owner_kind,
                                 manifest,
                                 Some(action_caps),
                                 actor_role,
@@ -1590,10 +1977,22 @@ impl PluginManager {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn record_hook_failure(&self, id: &str, correlation_id: &str, message: &str) {
-        plugin_storage::record_plugin_execution_result(
+        self.record_owner_hook_failure(&RuntimeOwner::plugin(id), correlation_id, message)
+            .await;
+    }
+
+    pub async fn record_owner_hook_failure(
+        &self,
+        owner: &RuntimeOwner,
+        correlation_id: &str,
+        message: &str,
+    ) {
+        plugin_storage::record_owner_execution_result(
             &self.db_pool,
-            id,
+            owner.kind,
+            &owner.id,
             correlation_id,
             "error",
             message,
@@ -1654,6 +2053,39 @@ impl PluginManager {
         execution_mode: HookExecutionMode,
         timeout_override: Option<std::time::Duration>,
     ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
+        self.run_owner_dispatch(
+            &RuntimeOwner::plugin(id),
+            kind,
+            legacy_input,
+            event_str,
+            occurred_at_ms,
+            correlation_id,
+            locale,
+            principal,
+            dispatch_depth,
+            payload,
+            execution_mode,
+            timeout_override,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_owner_dispatch(
+        &self,
+        owner: &RuntimeOwner,
+        kind: EnvelopeKind,
+        legacy_input: Value,
+        event_str: &str,
+        occurred_at_ms: u64,
+        correlation_id: String,
+        locale: Option<String>,
+        principal: ExecutionPrincipal,
+        dispatch_depth: u8,
+        payload: Value,
+        execution_mode: HookExecutionMode,
+        timeout_override: Option<std::time::Duration>,
+    ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
         if matches!(kind, EnvelopeKind::Route | EnvelopeKind::Cron) {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -1678,16 +2110,173 @@ impl PluginManager {
             payload,
         ))
         .unwrap_or(Value::Null);
-        self.run_plugin_with_principal(
-            id,
-            Some(v2_envelope),
-            legacy_input,
-            correlation_id,
-            execution_mode,
-            principal,
-            timeout_override,
-        )
-        .await
+        match owner.kind {
+            ExtensionOwnerKind::Plugin => {
+                self.run_plugin_with_principal(
+                    &owner.id,
+                    Some(v2_envelope),
+                    legacy_input,
+                    correlation_id,
+                    execution_mode,
+                    principal,
+                    timeout_override,
+                )
+                .await
+            }
+            ExtensionOwnerKind::Theme => {
+                self.run_theme_with_principal(
+                    &owner.id,
+                    v2_envelope,
+                    correlation_id,
+                    execution_mode,
+                    principal,
+                    timeout_override,
+                )
+                .await
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_theme_with_principal(
+        &self,
+        expected_theme_id: &str,
+        v2_input: Value,
+        correlation_id: String,
+        execution_mode: HookExecutionMode,
+        principal: ExecutionPrincipal,
+        timeout_override: Option<std::time::Duration>,
+    ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
+        if self.recovery.is_safe_mode() {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                PluginRunResponse {
+                    success: false,
+                    data: None,
+                    error: Some(
+                        "Hệ thống đang ở safe mode sau khi khôi phục; theme functions bị tạm khóa."
+                            .into(),
+                    ),
+                    code: Some("safe_mode".into()),
+                    correlation_id,
+                    confirmation: None,
+                },
+            ));
+        }
+        let cached = match self.ensure_active_theme_cache().await {
+            Ok(Some(c)) if c.theme_id == expected_theme_id => c,
+            Ok(_) => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    PluginRunResponse {
+                        success: false,
+                        data: None,
+                        error: Some("Theme functions không tồn tại hoặc đã đổi theme.".into()),
+                        code: Some("not_found".into()),
+                        correlation_id,
+                        confirmation: None,
+                    },
+                ));
+            }
+            Err(err) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    PluginRunResponse {
+                        success: false,
+                        data: None,
+                        error: Some(err),
+                        code: Some("theme_cache_error".into()),
+                        correlation_id,
+                        confirmation: None,
+                    },
+                ));
+            }
+        };
+
+        let fence = OwnerFence::Theme {
+            theme_id: cached.theme_id.clone(),
+            revision_id: cached.revision_id.clone(),
+            selection_version: cached.selection_version,
+        };
+        let run_res = self
+            .runtime
+            .run_owner_action_with_principal(
+                ExtensionOwnerKind::Theme,
+                ExtensionRuntimeKind::Js,
+                cached.js_bytes,
+                cached.manifest,
+                v2_input,
+                self.db_pool.clone(),
+                correlation_id.clone(),
+                self.allow_loopback,
+                Some(fence),
+                execution_mode,
+                principal,
+                timeout_override,
+                None,
+                None,
+            )
+            .await
+            .map(|r| r.output);
+
+        match run_res {
+            Ok(val) => {
+                plugin_storage::record_owner_execution_result(
+                    &self.db_pool,
+                    ExtensionOwnerKind::Theme,
+                    &cached.theme_id,
+                    &correlation_id,
+                    "info",
+                    "Thực thi thành công",
+                    None,
+                )
+                .await;
+                Ok(PluginRunResponse {
+                    success: true,
+                    data: Some(val),
+                    error: None,
+                    code: None,
+                    correlation_id,
+                    confirmation: None,
+                })
+            }
+            Err(err) => {
+                let (code_str, err_msg) = match &err {
+                    PluginError::Disabled => ("disabled", err.to_string()),
+                    PluginError::NotFound => ("not_found", err.to_string()),
+                    PluginError::OutOfFuel => ("out_of_fuel", err.to_string()),
+                    PluginError::Timeout => ("timeout", err.to_string()),
+                    PluginError::BadPointer => ("bad_pointer", err.to_string()),
+                    PluginError::GuestFailed(_) => ("guest_failed", err.to_string()),
+                    PluginError::Trap(_) => ("trap", err.to_string()),
+                    PluginError::InvalidOutput(_) => ("invalid_output", err.to_string()),
+                    PluginError::ConcurrencyLimit => ("concurrency_limit", err.to_string()),
+                    PluginError::ModuleCompilation(_) => ("module_compilation", err.to_string()),
+                    PluginError::Internal(_) => ("internal_error", err.to_string()),
+                };
+                plugin_storage::record_owner_execution_result(
+                    &self.db_pool,
+                    ExtensionOwnerKind::Theme,
+                    &cached.theme_id,
+                    &correlation_id,
+                    "error",
+                    &err_msg,
+                    Some(&err_msg),
+                )
+                .await;
+                Err((
+                    StatusCode::BAD_REQUEST,
+                    PluginRunResponse {
+                        success: false,
+                        data: None,
+                        error: Some(err_msg),
+                        code: Some(code_str.to_string()),
+                        correlation_id,
+                        confirmation: None,
+                    },
+                ))
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -467,9 +467,6 @@ export function BuilderInspector({
           {t('builder.builder_inspector.locked')}
         </p>
       )}
-      {element?.type === 'legacy/block' && !locked && (
-        <p className="text-xs text-slate-500">{tStatic("feature.common.ui_block_theme")} {String(element.props.block_id)}</p>
-      )}
       {element?.type === 'plugin/block' && !locked && block && (
         <div className="space-y-2" aria-label={t('builder.builder_inspector.declarative')}>
           <p className="break-all text-xs text-slate-600">{block.block_id}</p>

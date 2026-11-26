@@ -156,6 +156,9 @@ fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
     if rel_path == "theme.json" {
         return Ok(V2_MAX_TEXT_BYTES);
     }
+    if rel_path == "functions.js" {
+        return Ok(crate::plugin::package::MAX_WASM_BYTES);
+    }
 
     let (parent, name) = match rel_path.rsplit_once('/') {
         Some((parent, name)) => (parent, name),
@@ -363,10 +366,29 @@ pub(crate) fn validate_theme_v3_files(
     let blocks =
         collect_package_blocks(&files, &manifest.theme_id).map_err(V2ZipError::BadRequest)?;
     parse_theme_declarations(&manifest_json).map_err(V2ZipError::BadRequest)?;
+    let theme_action_ids: Vec<String> = manifest
+        .functions
+        .as_ref()
+        .map(|f| f.actions.iter().map(|a| a.id.clone()).collect())
+        .unwrap_or_default();
     if let Some(extensions) = &manifest.admin_extensions {
         extensions
-            .validate("theme", &[])
+            .validate("theme", &theme_action_ids)
             .map_err(V2ZipError::BadRequest)?;
+    }
+
+    // Symmetry check for optional root functions.js
+    let has_functions_file = files.contains_key("functions.js");
+    if manifest.functions.is_some() != has_functions_file {
+        return Err(V2ZipError::BadRequest(
+            "Theme v3 phải khai báo 'functions' trong theme.json tương ứng với file functions.js ở root.",
+        ));
+    }
+    if let Some(func_bytes) = files.get("functions.js") {
+        let src = std::str::from_utf8(func_bytes)
+            .map_err(|_| V2ZipError::BadRequest("File functions.js phải là UTF-8 hợp lệ."))?;
+        crate::plugin::js_runtime::validate_js_module_syntax(src)
+            .map_err(|_| V2ZipError::BadRequest("File functions.js có lỗi cú pháp JavaScript."))?;
     }
 
     // D01: every regular asset member must be explicitly listed in the
@@ -388,6 +410,9 @@ pub(crate) fn validate_theme_v3_files(
     // Only HTML and patterns explicitly permitted by the v3 manifest may
     // enter the package. Unreferenced executable templates are rejected.
     let mut declared = BTreeSet::from(["theme.json".to_string()]);
+    if has_functions_file {
+        declared.insert("functions.js".to_string());
+    }
     let mut block_catalog = RegistryCatalog::<RegisteredBlockSchema>::new();
     for block in crate::storage::page::embedded_core_block_defs().values() {
         block_catalog.insert_loaded(
@@ -594,6 +619,8 @@ pub struct ThemeCheckSummary {
     pub blocks: Vec<String>,
     pub assets: Vec<String>,
     pub options_count: usize,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_functions: bool,
 }
 
 fn zip_err_msg(err: V2ZipError) -> String {
@@ -771,6 +798,7 @@ fn build_theme_check_summary(pkg: &ThemeV3Package) -> Result<ThemeCheckSummary, 
         blocks,
         assets,
         options_count,
+        has_functions: pkg.manifest.functions.is_some(),
     })
 }
 

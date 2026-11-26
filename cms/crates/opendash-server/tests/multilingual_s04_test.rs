@@ -153,7 +153,7 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
     let client = Client::new();
     let (cookie, csrf) = setup_and_login(&client, &srv.origin).await;
 
-    // 1. Starter v1.1.0 is active on fresh install; single-locale hides switcher & legacy fallback menus.
+    // 1. Current Starter revision (with v1.1.0 L10n overlay) is active on fresh install; single-locale hides switcher & legacy fallback menus.
     let themes: Value = client
         .get(format!("{}/api/admin/themes", srv.origin))
         .header(header::COOKIE, &cookie)
@@ -163,7 +163,7 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         .json()
         .await
         .unwrap();
-    assert_eq!(themes["revisions"][0]["version"], "1.1.0");
+    assert_eq!(themes["revisions"][0]["version"], "1.1.1");
 
     let home_single = client.get(format!("{}/", srv.origin)).send().await.unwrap();
     assert_eq!(home_single.status(), StatusCode::OK);

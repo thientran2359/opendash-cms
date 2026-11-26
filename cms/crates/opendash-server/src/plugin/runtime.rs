@@ -10,18 +10,25 @@ use std::{
 
 use opendash_core::{
     content::{FieldRole, PublicExposure},
-    hooks::{ExecutionPrincipal, HookExecutionMode},
-    plugin::{PluginSettingFieldType, plugin_can_read_field},
+    hooks::{ExecutionPrincipal, ExtensionOwnerKind, ExtensionRuntimeKind, HookExecutionMode},
+    plugin::{PluginSettingFieldType, plugin_can_read_field_for_owner},
     registry::ProviderStatus,
 };
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use tokio::sync::{Semaphore, watch};
-use wasmi::{AsContextMut, Caller, Config, Engine, Error as WasmiError, Linker};
+use wasmi::{AsContextMut, Caller, Config, Engine, Error as WasmiError, Linker, StoreLimits};
 #[cfg(test)]
 use wasmi::{Module, Store, StoreLimitsBuilder, TrapCode};
 
-use crate::storage::{entries, media, plugin as plugin_storage, plugin_kv, settings, taxonomy};
+use crate::operations_worker_process::{
+    GuardedChild, PLUGIN_BOOTSTRAP_PROOF, PLUGIN_WORKER_MEMORY_LIMIT_BYTES, WorkerSpawnConfig,
+    spawn_worker_process,
+};
+use crate::storage::{
+    entries::{self, OwnerFence},
+    media, plugin as plugin_storage, plugin_kv, settings, taxonomy,
+};
 
 use super::host_ops::{
     self, HostContext, HostOperationResponse, HostReadRequest, HostToWorkerFrame,
@@ -29,6 +36,11 @@ use super::host_ops::{
 };
 use super::manifest::PluginManifest;
 use super::worker::{IPC_STREAM_MAGIC, read_ipc_frame, write_ipc_frame};
+
+pub(crate) struct WasmStoreData {
+    pub(crate) host: HostContext,
+    pub(crate) limits: StoreLimits,
+}
 
 pub const INVOCATION_FUEL: u64 = 20_000_000;
 pub const MAX_LINEAR_MEMORY_BYTES: usize = 16 * 1024 * 1024; // 16 MB
@@ -76,7 +88,7 @@ impl Drop for StagedCommitGuard {
 }
 
 struct ProcessGuard {
-    child: Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    child: Arc<std::sync::Mutex<Option<GuardedChild>>>,
     worker_thread: Arc<std::sync::Mutex<Option<std::thread::JoinHandle<()>>>>,
     active_workers: Arc<AtomicUsize>,
     cancellation_token: Arc<AtomicBool>,
@@ -327,6 +339,48 @@ impl PluginRuntime {
         action_capabilities: Option<Vec<String>>,
         actor_fence: Option<ActionActorFence>,
     ) -> Result<ActionExecutionOutput, PluginError> {
+        let runtime_kind = manifest.runtime_kind();
+        let owner_fence = expected_generation.map(|expected_generation| OwnerFence::Plugin {
+            plugin_id: manifest.id.clone(),
+            expected_generation,
+        });
+        self.run_owner_action_with_principal(
+            ExtensionOwnerKind::Plugin,
+            runtime_kind,
+            wasm_bytes,
+            manifest,
+            input,
+            db_pool,
+            correlation_id,
+            allow_loopback,
+            owner_fence,
+            execution_mode,
+            principal,
+            timeout_override,
+            action_capabilities,
+            actor_fence,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_owner_action_with_principal(
+        &self,
+        owner_kind: ExtensionOwnerKind,
+        runtime_kind: ExtensionRuntimeKind,
+        code_bytes: Vec<u8>,
+        manifest: PluginManifest,
+        input: Value,
+        db_pool: SqlitePool,
+        correlation_id: String,
+        allow_loopback: bool,
+        owner_fence: Option<OwnerFence>,
+        execution_mode: HookExecutionMode,
+        principal: ExecutionPrincipal,
+        timeout_override: Option<Duration>,
+        action_capabilities: Option<Vec<String>>,
+        actor_fence: Option<ActionActorFence>,
+    ) -> Result<ActionExecutionOutput, PluginError> {
         let cancellation_token = Arc::new(AtomicBool::new(false));
 
         // Respect global 6-worker ceiling: 4 admin + 2 background/public
@@ -352,29 +406,30 @@ impl PluginRuntime {
             PluginError::Internal(format!("Không thể lấy đường dẫn executable hiện tại: {e}"))
         })?;
 
-        let mut cmd = std::process::Command::new(current_exe);
-        if cfg!(test) {
-            cmd.args([
+        let worker_args: &[&str] = if cfg!(test) {
+            &[
                 "plugin::tests::tests::test_worker_entry",
                 "--exact",
                 "--nocapture",
-            ]);
+            ]
         } else {
-            cmd.arg("--plugin-worker");
-        }
-        cmd.env("OPENDASH_WORKER_CHILD", "1");
-        cmd.stdin(std::process::Stdio::piped());
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::inherit());
+            &["--plugin-worker"]
+        };
 
-        let mut child = cmd.spawn().map_err(|e| {
-            PluginError::Internal(format!("Không khởi động được worker process: {e}"))
-        })?;
+        let mut child = spawn_worker_process(WorkerSpawnConfig {
+            exe: &current_exe,
+            args: worker_args,
+            env_vars: &[("OPENDASH_WORKER_CHILD", "1")],
+            memory_limit_bytes: PLUGIN_WORKER_MEMORY_LIMIT_BYTES,
+            macos_bootstrap_proof: PLUGIN_BOOTSTRAP_PROOF,
+            inherit_stderr: true,
+        })
+        .map_err(|e| PluginError::Internal(format!("Không khởi động được worker process: {e}")))?;
 
-        let mut child_stdin = child.stdin.take().ok_or_else(|| {
+        let mut child_stdin = child.take_stdin().ok_or_else(|| {
             PluginError::Internal("Không mở được stdin của worker process".into())
         })?;
-        let child_stdout = child.stdout.take().ok_or_else(|| {
+        let child_stdout = child.take_stdout().ok_or_else(|| {
             PluginError::Internal("Không mở được stdout của worker process".into())
         })?;
 
@@ -409,13 +464,13 @@ impl PluginRuntime {
 
                 let cancel_watch = cancel_rx;
                 let run = move || -> Result<super::host_ops::WorkerExecutionResult, PluginError> {
-                    let wasm_len = wasm_bytes.len() as u32;
+                    let code_len = code_bytes.len() as u32;
                     child_stdin
-                        .write_all(&wasm_len.to_le_bytes())
-                        .map_err(|e| PluginError::Internal(format!("Lỗi ghi wasm len: {e}")))?;
+                        .write_all(&code_len.to_le_bytes())
+                        .map_err(|e| PluginError::Internal(format!("Lỗi ghi code len: {e}")))?;
                     child_stdin
-                        .write_all(&wasm_bytes)
-                        .map_err(|e| PluginError::Internal(format!("Lỗi ghi wasm bytes: {e}")))?;
+                        .write_all(&code_bytes)
+                        .map_err(|e| PluginError::Internal(format!("Lỗi ghi code bytes: {e}")))?;
 
                     let req = crate::plugin::worker::WorkerInvocationRequest {
                         manifest: manifest_clone.clone(),
@@ -426,6 +481,8 @@ impl PluginRuntime {
                         execution_mode,
                         principal,
                         action_capabilities: action_caps_for_host.clone(),
+                        runtime_kind,
+                        owner_kind,
                     };
                     write_ipc_frame(&mut child_stdin, &req, MAX_IPC_FRAME_BYTES)
                         .map_err(PluginError::Internal)?;
@@ -462,8 +519,9 @@ impl PluginRuntime {
                                 let sec_root = secrets_root_clone.clone();
 
                                 let read_fut = async move {
-                                    execute_host_read_request(
+                                    execute_host_read_request_for_owner(
                                         &db,
+                                        owner_kind,
                                         &m.id,
                                         &m,
                                         execution_mode,
@@ -507,9 +565,7 @@ impl PluginRuntime {
                                 return Err(match error_type {
                                     "out_of_fuel" => PluginError::OutOfFuel,
                                     "timeout" => PluginError::Timeout,
-                                    "memory_limit" => {
-                                        PluginError::Trap("Vượt quá giới hạn bộ nhớ 16 MB.".into())
-                                    }
+                                    "memory_limit" => PluginError::Trap(err_msg),
                                     "invalid_output" => PluginError::InvalidOutput(err_msg),
                                     "guest_failed" => PluginError::GuestFailed(res.code),
                                     _ => PluginError::Trap(err_msg),
@@ -677,10 +733,33 @@ impl PluginRuntime {
                 )));
             }
 
-            if let Some(expected_gen) = expected_generation {
-                match plugin_storage::is_plugin_generation_active(conn, &plugin_id, expected_gen)
-                    .await
-                {
+            if let Some(ref fence) = owner_fence {
+                let fence_check = match fence {
+                    OwnerFence::Plugin {
+                        plugin_id: fence_pid,
+                        expected_generation,
+                    } => {
+                        plugin_storage::is_plugin_generation_active(
+                            conn,
+                            fence_pid,
+                            *expected_generation,
+                        )
+                        .await
+                    }
+                    OwnerFence::Theme {
+                        revision_id,
+                        selection_version,
+                        ..
+                    } => {
+                        plugin_storage::verify_active_theme_fence_in_tx(
+                            conn,
+                            revision_id,
+                            *selection_version,
+                        )
+                        .await
+                    }
+                };
+                match fence_check {
                     Ok(true) => {}
                     Ok(false) => {
                         let _ = plugin_kv::rollback(conn).await;
@@ -695,7 +774,7 @@ impl PluginRuntime {
                             plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                         guard.cleanup();
                         return Err(PluginError::Internal(format!(
-                            "Lỗi kiểm tra generation plugin: {e}"
+                            "Lỗi kiểm tra fence gói mở rộng: {e}"
                         )));
                     }
                 }
@@ -757,9 +836,9 @@ impl PluginRuntime {
                                 )));
                             }
                         };
-                        plugin_kv::set(conn, &plugin_id, &key, &val_str).await
+                        plugin_kv::set_for_owner(conn, owner_kind, &plugin_id, &key, &val_str).await
                     }
-                    None => plugin_kv::delete(conn, &plugin_id, &key).await,
+                    None => plugin_kv::delete_for_owner(conn, owner_kind, &plugin_id, &key).await,
                 };
 
                 if let Err(e) = write_res {
@@ -787,8 +866,9 @@ impl PluginRuntime {
                     &entry.message,
                     MAX_LOG_MESSAGE_CHARS,
                 );
-                if let Err(e) = plugin_storage::insert_plugin_log_in_conn(
+                if let Err(e) = plugin_storage::insert_owner_log_in_conn(
                     conn,
+                    owner_kind,
                     &plugin_id,
                     &correlation_for_log,
                     level,
@@ -880,8 +960,35 @@ fn scan_ipc_magic<R: std::io::Read>(reader: &mut R) -> Result<(), PluginError> {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub async fn execute_host_read_request(
     db: &SqlitePool,
+    plugin_id: &str,
+    manifest: &PluginManifest,
+    execution_mode: HookExecutionMode,
+    principal: ExecutionPrincipal,
+    action_caps: Option<&[String]>,
+    secrets_root: Option<&Path>,
+    req: HostReadRequest,
+) -> HostOperationResponse {
+    execute_host_read_request_for_owner(
+        db,
+        ExtensionOwnerKind::Plugin,
+        plugin_id,
+        manifest,
+        execution_mode,
+        principal,
+        action_caps,
+        secrets_root,
+        req,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_host_read_request_for_owner(
+    db: &SqlitePool,
+    owner_kind: ExtensionOwnerKind,
     plugin_id: &str,
     manifest: &PluginManifest,
     execution_mode: HookExecutionMode,
@@ -908,7 +1015,7 @@ pub async fn execute_host_read_request(
             if key.is_empty() || key.len() > host_ops::MAX_KV_KEY_BYTES {
                 return HostOperationResponse::err("Key không hợp lệ hoặc quá dài.");
             }
-            match plugin_kv::get(db, plugin_id, &key).await {
+            match plugin_kv::get_for_owner(db, owner_kind, plugin_id, &key).await {
                 Ok(Some(val_str)) => match serde_json::from_str::<Value>(&val_str) {
                     Ok(v) => HostOperationResponse {
                         ok: true,
@@ -940,7 +1047,7 @@ pub async fn execute_host_read_request(
         HostReadRequest::KvList { prefix, limit } => {
             let prefix_str = prefix.unwrap_or_default();
             let clamped = limit.unwrap_or(50).clamp(1, 200) as i64;
-            match plugin_kv::list(db, plugin_id, &prefix_str, clamped).await {
+            match plugin_kv::list_for_owner(db, owner_kind, plugin_id, &prefix_str, clamped).await {
                 Ok(rows) => {
                     let mut items = Vec::with_capacity(rows.len());
                     for (k, v_json) in rows {
@@ -998,6 +1105,7 @@ pub async fn execute_host_read_request(
                 }
             }
             let view = project_entry_for_host(
+                owner_kind,
                 manifest,
                 action_caps,
                 actor_role,
@@ -1068,6 +1176,7 @@ pub async fn execute_host_read_request(
                 .into_iter()
                 .map(|entry| {
                     project_entry_for_host(
+                        owner_kind,
                         manifest,
                         action_caps,
                         actor_role,
@@ -1220,10 +1329,11 @@ pub async fn execute_host_read_request(
             }
         }
         HostReadRequest::PluginSettingsGet => {
-            let raw_map = match plugin_storage::read_raw_plugin_option_map(db, plugin_id).await {
-                Ok(m) => m,
-                Err(e) => return HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
-            };
+            let raw_map =
+                match plugin_storage::read_raw_owner_option_map(db, owner_kind, plugin_id).await {
+                    Ok(m) => m,
+                    Err(e) => return HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
+                };
             let mut settings_map = serde_json::Map::new();
             for field in &manifest.settings_schema {
                 if field.field_type == PluginSettingFieldType::Secret {
@@ -1253,10 +1363,11 @@ pub async fn execute_host_read_request(
                     "Khóa secret không tồn tại trong settings_schema.",
                 );
             }
-            let raw_map = match plugin_storage::read_raw_plugin_option_map(db, plugin_id).await {
-                Ok(m) => m,
-                Err(e) => return HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
-            };
+            let raw_map =
+                match plugin_storage::read_raw_owner_option_map(db, owner_kind, plugin_id).await {
+                    Ok(m) => m,
+                    Err(e) => return HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
+                };
             let Some(secret_ref) = raw_map
                 .get(&key)
                 .and_then(|v| v.get("secret_ref"))
@@ -1268,7 +1379,7 @@ pub async fn execute_host_read_request(
                 return HostOperationResponse::err("SecretStore không khả dụng.");
             };
             let store = crate::secrets::SecretStore::for_plugin_dir(
-                sec_root.join("plugins").join(plugin_id),
+                sec_root.join(owner_kind.secrets_subdir()).join(plugin_id),
             );
             match store.read_plugin_secret(secret_ref) {
                 Ok(plaintext) => HostOperationResponse::ok_data(json!({ "value": plaintext })),
@@ -1278,7 +1389,9 @@ pub async fn execute_host_read_request(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn project_entry_for_host(
+    owner_kind: ExtensionOwnerKind,
     manifest: &PluginManifest,
     action_caps: Option<&[String]>,
     actor_role: FieldRole,
@@ -1292,9 +1405,23 @@ fn project_entry_for_host(
         if let Some(fe) = effective.effective_fields.get(&k) {
             let allowed = if is_public_scope {
                 fe.definition.public_exposure == PublicExposure::Public
-                    && plugin_can_read_field(manifest, action_caps, actor_role, type_key, fe)
+                    && plugin_can_read_field_for_owner(
+                        owner_kind,
+                        manifest,
+                        action_caps,
+                        actor_role,
+                        type_key,
+                        fe,
+                    )
             } else {
-                plugin_can_read_field(manifest, action_caps, actor_role, type_key, fe)
+                plugin_can_read_field_for_owner(
+                    owner_kind,
+                    manifest,
+                    action_caps,
+                    actor_role,
+                    type_key,
+                    fe,
+                )
             };
             if allowed {
                 filtered_values.insert(k, v);
@@ -1347,6 +1474,7 @@ fn execute_wasm_sync(
         .build();
 
     let host_ctx = HostContext {
+        owner: super::host_ops::RuntimeOwner::plugin(manifest.id.clone()),
         plugin_id: manifest.id.clone(),
         manifest,
         input_bytes,
@@ -1359,7 +1487,6 @@ fn execute_wasm_sync(
         read_ipc: None,
         _correlation_id: correlation_id,
         allow_loopback,
-        limits,
         staged_kv: Default::default(),
         staged_kv_bytes: 0,
         staged_logs: vec![],
@@ -1372,24 +1499,30 @@ fn execute_wasm_sync(
         action_capabilities: None,
     };
 
-    let mut store = Store::new(engine, host_ctx);
-    store.limiter(|ctx: &mut HostContext| &mut ctx.limits);
+    let mut store = Store::new(
+        engine,
+        WasmStoreData {
+            host: host_ctx,
+            limits,
+        },
+    );
+    store.limiter(|data: &mut WasmStoreData| &mut data.limits);
     store
         .set_fuel(INVOCATION_FUEL)
         .map_err(|e| PluginError::Internal(format!("Không thể cấp fuel: {e}")))?;
 
-    if store.data().is_cancelled() {
+    if store.data().host.is_cancelled() {
         return Err(PluginError::Timeout);
     }
 
     let module = Module::new(engine, wasm_bytes)
         .map_err(|e| PluginError::ModuleCompilation(e.to_string()))?;
 
-    let mut linker = <Linker<HostContext>>::new(engine);
+    let mut linker = <Linker<WasmStoreData>>::new(engine);
     register_host_imports(&mut linker)
         .map_err(|e| PluginError::Internal(format!("Lỗi linker: {e}")))?;
 
-    if store.data().is_cancelled() {
+    if store.data().host.is_cancelled() {
         return Err(PluginError::Timeout);
     }
 
@@ -1407,7 +1540,7 @@ fn execute_wasm_sync(
             }
         })?;
 
-    if store.data().is_cancelled() {
+    if store.data().host.is_cancelled() {
         return Err(PluginError::Timeout);
     }
 
@@ -1432,7 +1565,7 @@ fn execute_wasm_sync(
         }
     };
 
-    if store.data().is_cancelled() {
+    if store.data().host.is_cancelled() {
         return Err(PluginError::Timeout);
     }
 
@@ -1440,7 +1573,7 @@ fn execute_wasm_sync(
         return Err(PluginError::GuestFailed(result_code));
     }
 
-    let ctx = store.into_data();
+    let ctx = store.into_data().host;
     if ctx.is_cancelled() {
         return Err(PluginError::Timeout);
     }
@@ -1460,19 +1593,19 @@ fn execute_wasm_sync(
     Ok((output_val, ctx.staged_kv))
 }
 
-pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<(), WasmiError> {
+pub(crate) fn register_host_imports(linker: &mut Linker<WasmStoreData>) -> Result<(), WasmiError> {
     // 1. host_get_input_len() -> i32
     linker.func_wrap(
         "opendash_v1",
         "host_get_input_len",
-        |mut caller: Caller<'_, HostContext>| -> Result<i32, wasmi::Error> {
-            if caller.data().is_cancelled() {
+        |mut caller: Caller<'_, WasmStoreData>| -> Result<i32, wasmi::Error> {
+            if caller.data().host.is_cancelled() {
                 let _ = caller.as_context_mut().set_fuel(0);
                 return Err(wasmi::Error::new(
                     "Invocation deadline exceeded or cancelled",
                 ));
             }
-            Ok(caller.data().input_bytes.len() as i32)
+            Ok(caller.data().host.input_bytes.len() as i32)
         },
     )?;
 
@@ -1480,11 +1613,11 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
     linker.func_wrap(
         "opendash_v1",
         "host_read_input",
-        |mut caller: Caller<'_, HostContext>,
+        |mut caller: Caller<'_, WasmStoreData>,
          dest_ptr: i32,
          max_len: i32|
          -> Result<i32, wasmi::Error> {
-            if caller.data().is_cancelled() {
+            if caller.data().host.is_cancelled() {
                 let _ = caller.as_context_mut().set_fuel(0);
                 return Err(wasmi::Error::new(
                     "Invocation deadline exceeded or cancelled",
@@ -1499,7 +1632,7 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
                 return Ok(-1);
             };
 
-            let input = caller.data().input_bytes.clone();
+            let input = caller.data().host.input_bytes.clone();
             let to_copy = std::cmp::min(max, input.len());
             let Some(end) = dest.checked_add(to_copy) else {
                 return Ok(-1);
@@ -1519,11 +1652,11 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
     linker.func_wrap(
         "opendash_v1",
         "host_write_output",
-        |mut caller: Caller<'_, HostContext>,
+        |mut caller: Caller<'_, WasmStoreData>,
          src_ptr: i32,
          len: i32|
          -> Result<i32, wasmi::Error> {
-            if caller.data().is_cancelled() {
+            if caller.data().host.is_cancelled() {
                 let _ = caller.as_context_mut().set_fuel(0);
                 return Err(wasmi::Error::new(
                     "Invocation deadline exceeded or cancelled",
@@ -1559,7 +1692,7 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
                 return Ok(-4);
             }
 
-            caller.data_mut().output_bytes = Some(buf);
+            caller.data_mut().host.output_bytes = Some(buf);
             Ok(0)
         },
     )?;
@@ -1568,13 +1701,13 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
     linker.func_wrap(
         "opendash_v1",
         "host_call",
-        |mut caller: Caller<'_, HostContext>,
+        |mut caller: Caller<'_, WasmStoreData>,
          op_ptr: i32,
          op_len: i32,
          resp_ptr: i32,
          max_resp_len: i32|
          -> Result<i32, wasmi::Error> {
-            if caller.data().is_cancelled() {
+            if caller.data().host.is_cancelled() {
                 let _ = caller.as_context_mut().set_fuel(0);
                 return Err(wasmi::Error::new(
                     "Invocation deadline exceeded or cancelled",
@@ -1607,10 +1740,10 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
                 return Ok(-1);
             };
 
-            caller.data_mut().last_resp_bytes = None;
-            let resp = host_ops::handle_host_call(caller.data_mut(), op_str);
+            caller.data_mut().host.last_resp_bytes = None;
+            let resp = host_ops::handle_host_call(&mut caller.data_mut().host, op_str);
 
-            if caller.data().is_cancelled() {
+            if caller.data().host.is_cancelled() {
                 let _ = caller.as_context_mut().set_fuel(0);
                 return Err(wasmi::Error::new(
                     "Invocation deadline exceeded or cancelled",
@@ -1624,7 +1757,7 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
                 return Ok(-1);
             }
             if resp_bytes.len() > resp_max {
-                caller.data_mut().last_resp_bytes = Some(resp_bytes);
+                caller.data_mut().host.last_resp_bytes = Some(resp_bytes);
                 return Ok(-2);
             }
 
@@ -1646,8 +1779,8 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
     linker.func_wrap(
         "opendash_v1",
         "host_last_resp_len",
-        |mut caller: Caller<'_, HostContext>| -> Result<i32, wasmi::Error> {
-            if caller.data().is_cancelled() {
+        |mut caller: Caller<'_, WasmStoreData>| -> Result<i32, wasmi::Error> {
+            if caller.data().host.is_cancelled() {
                 let _ = caller.as_context_mut().set_fuel(0);
                 return Err(wasmi::Error::new(
                     "Invocation deadline exceeded or cancelled",
@@ -1655,6 +1788,7 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
             }
             Ok(caller
                 .data()
+                .host
                 .last_resp_bytes
                 .as_ref()
                 .map(|b| b.len() as i32)
@@ -1666,11 +1800,11 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
     linker.func_wrap(
         "opendash_v1",
         "host_read_last_resp",
-        |mut caller: Caller<'_, HostContext>,
+        |mut caller: Caller<'_, WasmStoreData>,
          dest_ptr: i32,
          max_len: i32|
          -> Result<i32, wasmi::Error> {
-            if caller.data().is_cancelled() {
+            if caller.data().host.is_cancelled() {
                 let _ = caller.as_context_mut().set_fuel(0);
                 return Err(wasmi::Error::new(
                     "Invocation deadline exceeded or cancelled",
@@ -1679,7 +1813,7 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
             if dest_ptr < 0 || max_len < 0 {
                 return Ok(-1);
             }
-            let Some(bytes) = caller.data().last_resp_bytes.clone() else {
+            let Some(bytes) = caller.data().host.last_resp_bytes.clone() else {
                 return Ok(-1);
             };
             let dest = dest_ptr as usize;
@@ -1698,7 +1832,7 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
                 return Ok(-1);
             }
             if to_copy == bytes.len() {
-                caller.data_mut().last_resp_bytes = None;
+                caller.data_mut().host.last_resp_bytes = None;
             }
             Ok(to_copy as i32)
         },
@@ -1707,7 +1841,7 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
     linker.func_wrap(
         "env",
         "abort",
-        |mut caller: Caller<'_, HostContext>,
+        |mut caller: Caller<'_, WasmStoreData>,
          _msg: i32,
          _file: i32,
          _line: i32,

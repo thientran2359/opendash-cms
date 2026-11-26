@@ -1,5 +1,6 @@
 pub mod egress;
 pub mod host_ops;
+pub mod js_runtime;
 pub mod lifecycle_confirmation;
 pub mod manager;
 pub mod package;

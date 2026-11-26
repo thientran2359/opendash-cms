@@ -897,12 +897,12 @@ async fn s01_sqlx_compiled_migration_refuses_unknown_newer_version_and_optional_
         );
         let site = Site::start("opendash-s01-upgrade-refusal").await;
         let db = site.db().await;
-        let applied_53: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 53")
+        let applied_54: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 54")
                 .fetch_one(&db)
                 .await
                 .unwrap();
-        assert_eq!(applied_53, 1);
+        assert_eq!(applied_54, 1);
         db.close().await;
         let root = site.stop_keeping_root();
 
@@ -915,13 +915,15 @@ async fn s01_sqlx_compiled_migration_refuses_unknown_newer_version_and_optional_
         let _ = fs::remove_dir_all(&root);
         assert!(
             !output.status.success(),
-            "baseline binary MUST refuse to open 0053-migrated database"
+            "baseline binary MUST refuse to open 0054-migrated database"
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined = format!("{stdout}\n{stderr}");
         assert!(
-            combined.contains("53") || combined.to_lowercase().contains("migration"),
+            combined.contains("54")
+                || combined.contains("53")
+                || combined.to_lowercase().contains("migration"),
             "expected migration refusal diagnostics from old binary, got: {combined}"
         );
     }

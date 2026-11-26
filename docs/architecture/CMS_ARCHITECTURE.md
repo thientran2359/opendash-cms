@@ -7,9 +7,9 @@
 
 ---
 
-## 1. Ranh giới Kiến trúc: `opendash-core`, `opendash-server` và `admin`
+## 1. Ranh giới Kiến trúc: `opendash-core`, `opendash-server`, `opendash-plugin-sdk` và `admin`
 
-Mã nguồn CMS được tổ chức thành **Workspace Rust 2 crate** kết hợp với ứng dụng **React Admin** và đóng gói ra **đúng một file thực thi duy nhất** (`opendash` / `opendash.exe`):
+Mã nguồn CMS được tổ chức thành **Workspace Rust 3 crate** (`opendash-core`, `opendash-server`, `opendash-plugin-sdk`) kết hợp với ứng dụng **React Admin** và đóng gói ra **đúng một file thực thi duy nhất** (`opendash` / `opendash.exe`):
 
 ```mermaid
 flowchart LR
@@ -50,10 +50,12 @@ flowchart LR
    - **`storage/` (32 module files + 2 test files):** Sở hữu **100% truy vấn `sqlx::query*` / `sqlx::raw_sql`**, transactions `BEGIN IMMEDIATE` và migrations `0001`–`0052`.
    - **`plugin/`:** Vòng đời plugin revisions, worker cô lập tiến trình (`--plugin-worker`), `host_ops` (`kv_get`, `kv_set`, `http_request`, `content_save`) và HTTP egress chống SSRF (`egress.rs`).
    - **Hạ tầng server:** `SiteCoordinator` (`operations.rs`), `SitePaths` (`paths.rs`), `template_sec.rs` (`C-SEC`), `document.rs` (`normalize_public_document`), `backup*.rs` & `restore.rs` (`age` encrypted), `media*.rs`, `smtp.rs`, `secrets.rs`, `config.rs`, và `rust-embed` (`app.rs`).
-3. **`cms/admin/` (Giao diện quản trị và Builder trên trình duyệt):**
+3. **`cms/crates/opendash-plugin-sdk` (Rust Guest SDK cho Plugin WASM):**
+   - Thư viện không phụ thuộc ngoài (`edition = "2024"`) nhắm tới `opendash_v1` ABI v1/v1.1 với macro `export_plugin!`, wrapper cho 15 Host Ops và `MockHost` native test harness.
+4. **`cms/admin/` (Giao diện quản trị và Builder trên trình duyệt):**
    - **`api/` (21 files):** Mọi lời gọi HTTP đi qua [`client.ts`](../../cms/admin/src/api/client.ts).
-   - **`shell/`:** `AdminShell.tsx` (điều hướng 3 nhóm `Nội dung`, `Giao diện`, `Tùy chỉnh`), `router.ts`, `AuthPanel.tsx`.
-   - **`builder/` & `studio/`:** `StudioWorkspace.tsx` (Mode 1 Customizer + Mode 2 Entry/Pattern UX Builder), `BuilderEditorCore.tsx`, `BuilderTree.tsx`, `BuilderCanvas.tsx`, `BuilderInspector.tsx`, `BuilderPreviewFrame.tsx` (`BuilderWorkspace.tsx` cũ đã được thay thế hoàn toàn).
+   - **`shell/`:** `AdminShell.tsx` (điều hướng 3 nhóm `Nội dung`, `Giao diện`, `Hệ thống`), `router.ts`, `AuthPanel.tsx`.
+   - **`builder/` & `studio/`:** `StudioWorkspace.tsx` (Mode 1 Customizer + Mode 2 Entry/Pattern UX Builder), `StudioBlockTree.tsx`, `StudioBlockCatalog.tsx`, `BuilderEditorCore.tsx`, `BuilderInspector.tsx`, `BuilderPreviewFrame.tsx` (`BuilderWorkspace.tsx`, `BuilderCanvas.tsx` và `BuilderTree.tsx` cũ đã được gỡ bỏ hoàn toàn).
    - **`features/` (17 thư mục):** `contact/`, `content/`, `dashboard/`, `editor/` (`SingleEditWorkspace.tsx`, `EditorDraftStore.ts`), `extensions/`, `library/`, `media/`, `operations/`, `patterns/`, `plugins/`, `seo/`, `settings/`, `shared/`, `system/`, `taxonomy/`, `themes/`, `users/`.
 
 ### 1.2. Luồng Xem trước (Preview), Lưu (Save), Xuất bản (Publish) và Quyền sở hữu Dữ liệu
@@ -75,14 +77,15 @@ flowchart LR
 opendash-cms/
 ├── .agents/                                # Skill ngữ cảnh opendash-elephant và tài liệu lịch sử
 ├── cms/                                    # Mã nguồn CMS, migrations và công cụ build/test
-│   ├── Cargo.toml                          # [workspace] members = ["crates/opendash-core", "crates/opendash-server"]
+│   ├── Cargo.toml                          # [workspace] members = ["crates/opendash-core", "crates/opendash-server", "crates/opendash-plugin-sdk"]
 │   ├── Cargo.lock
 │   ├── crates/
 │   │   ├── opendash-core/src/              # 15 domain modules thuần Rust (lib.rs)
+│   │   ├── opendash-plugin-sdk/src/        # Rust Guest SDK cho Plugin WASM (opendash_v1 ABI v1/v1.1)
 │   │   └── opendash-server/src/            # Server binary: routes/ (23 files), storage/ (32 module files + 2 test files), plugin/, tests/
 │   ├── admin/src/                          # React + TS + Vite + Tailwind CSS (api/, shell/, studio/, builder/, i18n/, features/)
 │   ├── migrations/                         # 51 migrations SQLite (0001–0052, bỏ qua số 0016)
-│   ├── fixtures/                           # Database mẫu kiểm tra nâng cấp (baseline_0001.sqlite)
+│   ├── fixtures/                           # baseline_0001.sqlite, admin-review/, demo-website/, m7/, m8/
 │   ├── sdk/                                # AssemblyScript Plugin SDK (sdk/as/opendash.ts)
 │   ├── examples/                           # Plugin/Theme mẫu (sample-plugin, rust-seo-plugin, sample-theme-v3)
 │   ├── deploy/                             # Cấu hình systemd & nginx mẫu cho Linux VPS

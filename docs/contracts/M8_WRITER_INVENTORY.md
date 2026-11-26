@@ -1,6 +1,6 @@
 # M8 Writer & Recovery Inventory
 
-Tài liệu này liệt kê toàn bộ top-level mutators, async/background writers và startup recovery paths trong `opendash-server`, gắn với cơ chế khóa bảo trì của [`SiteCoordinator`](../../cms/crates/opendash-server/src/operations.rs) (đồng bộ với các route registrations trong [`app.rs`](../../cms/crates/opendash-server/src/app.rs) và migrations `0001`–`0053`).
+Tài liệu này liệt kê toàn bộ top-level mutators, async/background writers và startup recovery paths trong `opendash-server`, gắn với cơ chế khóa bảo trì của [`SiteCoordinator`](../../cms/crates/opendash-server/src/operations.rs) (đồng bộ với các route registrations trong [`app.rs`](../../cms/crates/opendash-server/src/app.rs) và migrations `0001`–`0054`).
 
 ## 1. Quy tắc chung
 
@@ -33,7 +33,7 @@ Tài liệu này liệt kê toàn bộ top-level mutators, async/background writ
 | Operations, Backup & Restore | `routes::operations::{reconcile_plan, reconcile_apply, quarantine_purge, create_backup, cancel_operation_job, delete_backup_artifact, upload_restore_archive, create_restore, activate_recovery}` | `operation_jobs`, `maintenance_generation`, `media_assets`, `media_delete_jobs`, `uploads/.quarantine/`, `backups/`, `config/site.json`, `READY.json`, `builder_block_definitions` (`operations.rs`, `backup*.rs`, `restore.rs`, `storage::{operations, backup, restore, page}`) | `begin_maintenance` (`reconcile_*`, `quarantine_purge`, `create_backup`); `AdmittedMutation` (`upload_restore_archive`, `activate_recovery`); lưu ý `create_restore`, `cancel_operation_job`, `delete_backup_artifact` hiện chưa gắn `AdmittedMutation` / `begin_maintenance` trong `routes/operations.rs` |
 | Startup Recovery | `main.rs` (`init_db`, `ensure_default_starter_theme`, `ensure_embedded_core_blocks`, `recover_orphaned_import_runs`, `recover_inflight_notifications`, `mark_interrupted_on_startup`, `recover_pending_delete_jobs_on_startup`, `ensure_plugins_layout_and_quarantine_stale`, `media_store.cleanup_staging`, `migrate_demo_entry_builder_docs_on_startup`) | `theme_packages`, `theme_revisions`, `theme_active_selection`, `theme_block_definitions`, `builder_block_definitions`, `themes/revisions/`, `import_runs`, `contact_notification_attempts`, `operation_jobs`, `media_delete_jobs`, `media_assets`, `plugins/`, `uploads/`, retained non-pattern `content_entries` Builder normalization (preserves `trashed_at`, `publication_status`, identity, and pins; never publishes or reactivates rows) | Chạy sau `SiteCoordinator::acquire` và trước `TcpListener::bind`; sửa file/digest cho Starter 1.0.0 & 1.0.1 **chỉ khi DB đã có đúng revision nhúng**, cài/sửa Starter 1.1.0 hiện hành, chỉ kích hoạt khi selection rỗng. Không ghi đè lựa chọn, ETag, options hoặc Builder của Admin. [Delta](../designs/starter-typed-url-and-conformance-delta.md) |
 
-## 3. Phân loại Reader / Writer cho Vòng đời Entry (`0053_entry_lifecycle.sql`, S01)
+## 3. Phân loại Reader / Writer cho Vòng đời Entry (`0054_entry_lifecycle.sql`, S01)
 
 Mọi truy vấn `content_entries` trong `storage/` tuân thủ ranh giới ba tầng rõ ràng (không dùng SQL view chung để che giấu mục đích truy vấn):
 

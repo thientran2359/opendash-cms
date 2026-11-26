@@ -6,7 +6,7 @@ Domain feature panels and workspaces of the OpenDash React Admin (`cms/admin/`),
 
 ## Interface
 
-Active `features/*` subdirectories (18 directories on disk; no per-subdirectory `README.md` files):
+Active `features/*` subdirectories (17 directories on disk; no per-subdirectory `README.md` files):
 
 - `contact/`: `[ContactPanel.tsx:ContactPanel]` (form builder and submissions inbox) and `[SmtpSettingsPanel.tsx:SmtpSettingsPanel]` (SMTP host, TLS, credentials, test email).
 - `content/`: `[EntryListPage.tsx:EntryListPage]` (`parseEntryTableHash`, `entryTableHash`, `safePublicPath`), `[ContentTypeSchemaSettings.tsx:ContentTypeSchemaSettings]`, `[ContentTypeForm.tsx:ContentTypeForm]` (`DraftField`, `ContentTypeCreationDraft`, `blankContentTypeCreationDraft`, `isContentTypeCreationDraftDirty`), `[FieldGroupsManager.tsx:FieldGroupsManager]`, `[EditorLayoutConfigurator.tsx:EditorLayoutConfigurator]`, `[FieldValueInput.tsx:FieldValueInput]`, and wire types in `types.ts` (`[types.ts:ContentEntryRecord]`, `[types.ts:EntryTableResult]`, `[types.ts:EffectiveEditorConfigProjection]`).
@@ -18,8 +18,7 @@ Active `features/*` subdirectories (18 directories on disk; no per-subdirectory 
 - `operations/`: `[BackupToolsPanel.tsx:BackupToolsPanel]`, `[BackupsPanel.tsx:BackupsPanel]`, `[RestorePanel.tsx:RestorePanel]`, and `[ReconcilePanel.tsx:ReconcilePanel]` (encrypted backup creation/download, restore + safe-mode activation, orphan media reconciliation).
 - `patterns/`: `[PatternsPage.tsx:PatternsPage]` (private Pattern CPT CRUD and conflict-aware deletion for `core/pattern_ref`).
 - `plugins/`: `[PluginsPanel.tsx:PluginsPanel]`, `[DeclarativePluginUi.tsx:DeclarativePluginUi]`, `[PluginLifecycleConfirmation.tsx:PluginLifecycleConfirmation]` (core-owned host confirmation UI for plugin purge/public-restore), and `[declarativeSchema.ts:validateDeclarativeSchemaV1]` (`UI_SCHEMA_VERSION`, `MAX_UI_SCREENS`, `MAX_UI_DEPTH`, `MAX_UI_NODES`, `MAX_UI_PAGE_SIZE`, `buildDraftKey`, `InMemoryDraftStore`) for plugin ZIP install, enable/disable, settings, WASM run, and declarative UI.
-- `posts/`: Empty directory on disk with no active source files (`post`, `page`, and CPT editing are served uniformly by `content/` and `editor/`).
-- `seo/`: `[SeoPanel.tsx:SeoPanel]` and `[SeoPanel.tsx:EntryRouteSeoCard]` (locale-aware homepage and entry route/SEO controls).
+- `seo/`: `[SeoPanel.tsx:SeoPanel]` (locale-aware homepage SEO controls; per-entry route & SEO fields are edited atomically inside `SingleEditWorkspace.tsx`).
 - `settings/`: `[MultilingualSettingsPage.tsx:MultilingualSettingsPage]`, `[PermalinkSettingsPage.tsx:PermalinkSettingsPage]` (`discardPermalinkDraft`, `clearPermalinkDrafts`), and `[ReadingSettingsPanel.tsx:ReadingSettingsPanel]` (`discardReadingDraft`, `clearReadingDrafts`).
 - `shared/`: `[OwnerOptionsForm.tsx:OwnerOptionsForm]`, `[OwnerOptionsForm.tsx:OwnerKind]`, `[OwnerOptionsForm.tsx:OwnerOptionDef]`, `[OwnerOptionsForm.tsx:OwnerOptionsFormProps]`, `[OwnerOptionsForm.tsx:sameOwnerOptionValues]`, `[OwnerOptionsForm.tsx:isSecretConfiguredValue]`, `[OwnerOptionsForm.tsx:isClearSecretMarker]`, `[OwnerOptionsForm.tsx:normalizeOwnerValuesForSchema]`, `[OwnerOptionsForm.tsx:upcastOwnerDefToBlockField]`, and `[OwnerOptionsForm.tsx:buildOwnerOptionsSubmitPayload]` shared between theme and plugin option screens.
 - `system/`: `[GeneralSettingsPanel.tsx:GeneralSettingsPanel]` (`site_title`, `tagline`, `timezone`, `cms_locale`, public origin/indexing) and `[SystemStatus.tsx:SystemStatus]`.

@@ -26,7 +26,7 @@ async fn invocation_timeout_must_not_commit_later() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::query("CREATE TABLE plugin_kv(plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(plugin_id,key))")
+    sqlx::query("CREATE TABLE plugin_kv(owner_kind TEXT NOT NULL DEFAULT 'plugin', plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(owner_kind,plugin_id,key))")
         .execute(&pool).await.unwrap();
     let req =
         json!({"op":"http_request","method":"GET","url":format!("{origin}/slow")}).to_string();
@@ -153,7 +153,7 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
         .connect_with(options)
         .await
         .unwrap();
-    sqlx::query("CREATE TABLE plugin_kv(plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(plugin_id,key))").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE plugin_kv(owner_kind TEXT NOT NULL DEFAULT 'plugin', plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(owner_kind,plugin_id,key))").execute(&pool).await.unwrap();
     let mut lock = pool.begin().await.unwrap();
     if reader_blocks_commit {
         // A reader in rollback-journal mode allows the INSERT but blocks COMMIT.
@@ -162,7 +162,7 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
             .await
             .unwrap();
     } else {
-        sqlx::query("INSERT INTO plugin_kv VALUES ('holder','lock','1','now')")
+        sqlx::query("INSERT INTO plugin_kv (plugin_id, key, value_json, updated_at) VALUES ('holder','lock','1','now')")
             .execute(&mut *lock)
             .await
             .unwrap();
@@ -287,14 +287,14 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
         .connect_with(options)
         .await
         .unwrap();
-    sqlx::query("CREATE TABLE plugin_kv(plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(plugin_id,key))")
+    sqlx::query("CREATE TABLE plugin_kv(owner_kind TEXT NOT NULL DEFAULT 'plugin', plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(owner_kind,plugin_id,key))")
         .execute(&pool)
         .await
         .unwrap();
 
     // Lock 1: Writer holds lock, blocking INSERT from ~4200ms to 4600ms (400ms wait)
     let mut writer_lock = pool.begin().await.unwrap();
-    sqlx::query("INSERT INTO plugin_kv VALUES ('holder','wlock','1','now')")
+    sqlx::query("INSERT INTO plugin_kv (plugin_id, key, value_json, updated_at) VALUES ('holder','wlock','1','now')")
         .execute(&mut *writer_lock)
         .await
         .unwrap();
@@ -410,7 +410,7 @@ async fn ipc_kv_get_stuck_parent_must_cancel_and_clean_up() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::query("CREATE TABLE plugin_kv(plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(plugin_id,key))")
+    sqlx::query("CREATE TABLE plugin_kv(owner_kind TEXT NOT NULL DEFAULT 'plugin', plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(owner_kind,plugin_id,key))")
         .execute(&pool)
         .await
         .unwrap();
@@ -524,7 +524,7 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
         )
         .await
         .unwrap();
-    sqlx::query("CREATE TABLE plugin_kv(plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(plugin_id,key))")
+    sqlx::query("CREATE TABLE plugin_kv(owner_kind TEXT NOT NULL DEFAULT 'plugin', plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(owner_kind,plugin_id,key))")
         .execute(&pool)
         .await
         .unwrap();
@@ -662,7 +662,7 @@ async fn ipc_kv_get_stuck_parent_must_timeout_and_clean_up() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::query("CREATE TABLE plugin_kv(plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(plugin_id,key))")
+    sqlx::query("CREATE TABLE plugin_kv(owner_kind TEXT NOT NULL DEFAULT 'plugin', plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(owner_kind,plugin_id,key))")
         .execute(&pool)
         .await
         .unwrap();

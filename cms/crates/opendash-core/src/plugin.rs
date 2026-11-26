@@ -89,7 +89,11 @@ pub struct PluginSettingField {
     pub choices: Vec<PluginSettingChoice>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginPermissions {
     #[serde(default)]
@@ -100,6 +104,8 @@ pub struct PluginPermissions {
     pub network: Vec<NetworkScopeGrant>,
     #[serde(default)]
     pub content_read: Vec<String>,
+    #[serde(default)]
+    pub content_read_all_public: bool,
     #[serde(default)]
     pub content_write: Vec<String>,
     #[serde(default)]
@@ -124,6 +130,33 @@ pub struct PluginPermissions {
     pub content_restore: Vec<String>,
     #[serde(default)]
     pub content_purge: Vec<String>,
+    #[serde(default = "default_true")]
+    pub render_trusted_html: bool,
+}
+
+impl Default for PluginPermissions {
+    fn default() -> Self {
+        Self {
+            sqlite: Vec::new(),
+            http: Vec::new(),
+            network: Vec::new(),
+            content_read: Vec::new(),
+            content_read_all_public: false,
+            content_write: Vec::new(),
+            content_read_private: Vec::new(),
+            content_write_private: Vec::new(),
+            taxonomy_read: false,
+            media_read: false,
+            site_options_read: false,
+            plugin_settings_read: false,
+            plugin_secrets_read: Vec::new(),
+            content_delete: Vec::new(),
+            content_trash_read: Vec::new(),
+            content_restore: Vec::new(),
+            content_purge: Vec::new(),
+            render_trusted_html: true,
+        }
+    }
 }
 
 fn default_action_role() -> String {
@@ -253,6 +286,310 @@ where
     Ok(())
 }
 
+pub(crate) fn validate_min_host_version(
+    min_host_version: Option<&str>,
+) -> Result<(), &'static str> {
+    if let Some(min_ver) = min_host_version {
+        if !validate_semver(min_ver) {
+            return Err("min_host_version không đúng định dạng SemVer 2.0.0.");
+        }
+        if !host_satisfies_min_version(CURRENT_HOST_VERSION, min_ver) {
+            return Err("Phiên bản host hiện tại thấp hơn min_host_version yêu cầu.");
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_hooks_and_filters(
+    hooks: &[crate::hooks::HookEvent],
+    filters: &[crate::hooks::HookEvent],
+    allow_theme_after_activate: bool,
+) -> Result<(), &'static str> {
+    let mut seen_hooks = HashSet::new();
+    for event in hooks {
+        if *event == crate::hooks::HookEvent::PluginManualRun
+            || event.is_filter()
+            || (!allow_theme_after_activate
+                && *event == crate::hooks::HookEvent::ThemeAfterActivate)
+        {
+            return Err("Sự kiện hook không được hỗ trợ trong danh sách hooks.");
+        }
+        if !seen_hooks.insert(event.as_str()) {
+            return Err("Danh sách hooks không được chứa sự kiện trùng lặp.");
+        }
+    }
+    let mut seen_filters = HashSet::new();
+    for filter in filters {
+        if !filter.is_filter() {
+            return Err("Chỉ các filter:* mới được khai báo trong danh sách filters.");
+        }
+        if !seen_filters.insert(filter.as_str()) {
+            return Err("Danh sách filters không được chứa sự kiện trùng lặp.");
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_settings_schema(
+    settings_schema: &[PluginSettingField],
+) -> Result<HashSet<&str>, &'static str> {
+    if settings_schema.len() > 64 {
+        return Err("settings_schema không được vượt quá 64 trường.");
+    }
+    let mut seen_settings = HashSet::new();
+    let mut secret_keys = HashSet::new();
+    for field in settings_schema {
+        if !crate::id::valid_snake_key(&field.key) || !seen_settings.insert(field.key.as_str()) {
+            return Err("Khóa trường trong settings_schema phải là snake_case và không trùng lặp.");
+        }
+        if field.label.trim().is_empty() || field.label.chars().count() > 100 {
+            return Err("Nhãn trường trong settings_schema không hợp lệ.");
+        }
+        if field.field_type == PluginSettingFieldType::Secret {
+            if !field.default.is_null() {
+                return Err(
+                    "Trường settings kiểu secret không được đặt giá trị mặc định khác null.",
+                );
+            }
+            secret_keys.insert(field.key.as_str());
+        }
+        if let Some(min) = field.min
+            && !min.is_finite()
+        {
+            return Err("settings_schema min không hợp lệ.");
+        }
+        if let Some(max) = field.max
+            && !max.is_finite()
+        {
+            return Err("settings_schema max không hợp lệ.");
+        }
+        if let (Some(min), Some(max)) = (field.min, field.max)
+            && min > max
+        {
+            return Err("settings_schema yêu cầu min <= max.");
+        }
+        if field.field_type == PluginSettingFieldType::Select {
+            if field.choices.is_empty() || field.choices.len() > 64 {
+                return Err("Trường select trong settings_schema phải có 1..=64 lựa chọn.");
+            }
+            let mut seen_choices = HashSet::new();
+            for ch in &field.choices {
+                if ch.value.trim().is_empty()
+                    || ch.value.chars().count() > 100
+                    || ch.label.trim().is_empty()
+                    || ch.label.chars().count() > 100
+                    || !seen_choices.insert(ch.value.as_str())
+                {
+                    return Err("Lựa chọn của trường select trong settings_schema không hợp lệ.");
+                }
+            }
+        }
+    }
+    Ok(secret_keys)
+}
+
+pub(crate) fn validate_permissions(
+    permissions: &PluginPermissions,
+    secret_keys: &HashSet<&str>,
+) -> Result<(), &'static str> {
+    for ct_perm in &permissions.content_read {
+        if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+            return Err("Quyền content_read không hợp lệ.");
+        }
+    }
+    for ct_perm in &permissions.content_write {
+        if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+            return Err("Quyền content_write không hợp lệ.");
+        }
+    }
+    for ct_perm in &permissions.content_delete {
+        if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+            return Err("Quyền content_delete không hợp lệ.");
+        }
+    }
+    for ct_perm in &permissions.content_trash_read {
+        if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+            return Err("Quyền content_trash_read không hợp lệ.");
+        }
+    }
+    for ct_perm in &permissions.content_restore {
+        if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+            return Err("Quyền content_restore không hợp lệ.");
+        }
+    }
+    for ct_perm in &permissions.content_purge {
+        if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+            return Err("Quyền content_purge không hợp lệ.");
+        }
+    }
+    let mut seen_secrets_read = HashSet::new();
+    for secret_key in &permissions.plugin_secrets_read {
+        if secret_key == "*"
+            || !crate::id::valid_snake_key(secret_key)
+            || !seen_secrets_read.insert(secret_key.as_str())
+            || !secret_keys.contains(secret_key.as_str())
+        {
+            return Err(
+                "plugin_secrets_read phải liệt kê các khóa secret hợp lệ tồn tại trong settings_schema (cấm wildcard '*').",
+            );
+        }
+    }
+    validate_scoped_field_grants(
+        &permissions.content_read_private,
+        |ct| {
+            permissions.content_read_all_public
+                || permissions.content_read.iter().any(|k| k == "*" || k == ct)
+        },
+        "read",
+    )?;
+    validate_scoped_field_grants(
+        &permissions.content_write_private,
+        |ct| {
+            permissions
+                .content_write
+                .iter()
+                .any(|k| k == "*" || k == ct)
+        },
+        "write",
+    )?;
+
+    for perm in &permissions.sqlite {
+        if perm != "kv_read" && perm != "kv_write" {
+            return Err("Quyền SQLite không hợp lệ (chỉ hỗ trợ 'kv_read' và 'kv_write').");
+        }
+    }
+    for grant in &permissions.network {
+        let scheme = grant.scheme.to_ascii_lowercase();
+        if scheme != "http" && scheme != "https" {
+            return Err("Network scope scheme chỉ hỗ trợ http hoặc https.");
+        }
+        let host = grant.host.trim();
+        if host.is_empty()
+            || host.contains('/')
+            || host.contains('?')
+            || host.contains('#')
+            || host.contains('@')
+            || host.chars().any(|c| c.is_whitespace())
+        {
+            return Err("Network scope host không hợp lệ.");
+        }
+        if grant.port == Some(0) {
+            return Err("Network scope port phải lớn hơn 0.");
+        }
+        if grant.methods.is_empty() {
+            return Err("Network scope methods không được rỗng.");
+        }
+        for m in &grant.methods {
+            let upper = m.to_ascii_uppercase();
+            if !matches!(
+                upper.as_str(),
+                "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD"
+            ) {
+                return Err("Network scope method không được hỗ trợ.");
+            }
+        }
+        if let Some(prefix) = &grant.path_prefix
+            && (!prefix.starts_with('/')
+                || prefix.contains('?')
+                || prefix.contains('#')
+                || prefix.contains('%')
+                || prefix.contains('\\')
+                || prefix.contains(".."))
+        {
+            return Err("Network scope path_prefix không hợp lệ.");
+        }
+    }
+    for url_str in &permissions.http {
+        let parsed = url::Url::parse(url_str).map_err(|_| "URL trong quyền HTTP không hợp lệ.")?;
+        if parsed.scheme() != "http" && parsed.scheme() != "https" {
+            return Err("Chỉ hỗ trợ scheme http hoặc https.");
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_actions(
+    actions: &[PluginActionDeclaration],
+    permissions: &PluginPermissions,
+) -> Result<(), &'static str> {
+    let mut seen_actions = HashSet::new();
+    for action in actions {
+        if !crate::id::valid_package_id(&action.id) && !crate::id::valid_snake_key(&action.id) {
+            return Err("Action id trong manifest không hợp lệ.");
+        }
+
+        if !seen_actions.insert(action.id.as_str()) {
+            return Err("Action id trong manifest bị trùng lặp.");
+        }
+        if action.required_role != "admin" && action.required_role != "editor" {
+            return Err("Action required_role chỉ hỗ trợ 'admin' hoặc 'editor'.");
+        }
+        let mut has_kv_write = false;
+        let mut has_content_write = false;
+        let mut has_content_delete = false;
+        let mut has_content_restore = false;
+        let mut has_content_purge = false;
+        let mut has_http = false;
+        let mut has_content_read = false;
+        let mut has_content_read_private = false;
+        let mut has_content_write_private = false;
+        for cap in &action.capabilities {
+            match cap.as_str() {
+                "kv_read"
+                | "kv_list"
+                | "taxonomy_read"
+                | "media_read"
+                | "site_options_read"
+                | "plugin_settings_read"
+                | "plugin_secrets_read"
+                | "content_trash_read"
+                | "log" => {}
+                "http" => has_http = true,
+                "content_read" => has_content_read = true,
+                "content_read_private" => has_content_read_private = true,
+                "kv_write" | "kv_delete" => has_kv_write = true,
+                "content_write" => has_content_write = true,
+                "content_write_private" => has_content_write_private = true,
+                "content_delete" => has_content_delete = true,
+                "content_restore" => has_content_restore = true,
+                "content_purge" => has_content_purge = true,
+                _ => return Err("Action capability không nằm trong allowlist."),
+            }
+        }
+        if (has_kv_write as u8)
+            + (has_content_write as u8)
+            + (has_content_delete as u8)
+            + (has_content_restore as u8)
+            + (has_content_purge as u8)
+            > 1
+        {
+            return Err(
+                "Action không được kết hợp kv_write/kv_delete, content_write, content_delete, content_restore hoặc content_purge trong cùng một action.",
+            );
+        }
+        if (has_content_restore || has_content_purge) && has_http {
+            return Err(
+                "Action khai báo content_restore hoặc content_purge không được kết hợp capability http.",
+            );
+        }
+        if has_content_read_private
+            && (!has_content_read || permissions.content_read_private.is_empty())
+        {
+            return Err(
+                "Action khai báo content_read_private phải kèm content_read và permissions.content_read_private.",
+            );
+        }
+        if has_content_write_private
+            && (!has_content_write || permissions.content_write_private.is_empty())
+        {
+            return Err(
+                "Action khai báo content_write_private phải kèm content_write và permissions.content_write_private.",
+            );
+        }
+    }
+    Ok(())
+}
+
 impl PluginManifest {
     pub fn from_json_str(json_str: &str) -> Result<Self, &'static str> {
         let mut raw_val: serde_json::Value =
@@ -345,8 +682,10 @@ impl PluginManifest {
                 })
             });
         let uses_v3_features = uses_lifecycle_v011
+            || self.entrypoint == "plugin.js"
             || !self.filters.is_empty()
             || !self.settings_schema.is_empty()
+            || self.permissions.content_read_all_public
             || self.permissions.taxonomy_read
             || self.permissions.media_read
             || self.permissions.site_options_read
@@ -363,21 +702,19 @@ impl PluginManifest {
             });
         if uses_v3_features && (self.manifest_schema < 3 || self.min_host_version.is_none()) {
             return Err(
-                "Tính năng mở rộng v3 (filters, settings_schema, quyền v3, lifecycle hooks v3) yêu cầu manifest_schema >= 3 và khai báo min_host_version.",
+                "Tính năng mở rộng v3 (plugin.js, filters, settings_schema, quyền v3, lifecycle hooks v3) yêu cầu manifest_schema >= 3 và khai báo min_host_version.",
             );
         }
-        if let Some(min_ver) = &self.min_host_version {
-            if !validate_semver(min_ver) {
-                return Err("min_host_version không đúng định dạng SemVer 2.0.0.");
-            }
-            if uses_lifecycle_v011 && !host_satisfies_min_version(min_ver, "0.1.1") {
-                return Err(
-                    "Quyền vòng đời nâng cao (content_trash_read, content_restore, content_purge) yêu cầu min_host_version >= 0.1.1.",
-                );
-            }
-            if !host_satisfies_min_version(CURRENT_HOST_VERSION, min_ver) {
-                return Err("Phiên bản host hiện tại thấp hơn min_host_version yêu cầu.");
-            }
+        validate_min_host_version(self.min_host_version.as_deref())?;
+        if uses_lifecycle_v011
+            && !self
+                .min_host_version
+                .as_deref()
+                .is_some_and(|min_ver| host_satisfies_min_version(min_ver, "0.1.1"))
+        {
+            return Err(
+                "Quyền vòng đời nâng cao (content_trash_read, content_restore, content_purge) yêu cầu min_host_version >= 0.1.1.",
+            );
         }
         if !validate_semver(&self.version) {
             return Err("Phiên bản plugin không đúng định dạng SemVer 2.0.0.");
@@ -389,266 +726,13 @@ impl PluginManifest {
         if self.description.chars().count() > 500 {
             return Err("Mô tả plugin quá dài.");
         }
-        if self.entrypoint != "plugin.wasm" {
-            return Err("Entrypoint phải là 'plugin.wasm'.");
+        if self.entrypoint != "plugin.wasm" && self.entrypoint != "plugin.js" {
+            return Err("Entrypoint phải là 'plugin.wasm' hoặc 'plugin.js'.");
         }
-        let mut seen_hooks = HashSet::new();
-        for event in &self.hooks {
-            if *event == crate::hooks::HookEvent::PluginManualRun || event.is_filter() {
-                return Err("Sự kiện hook không được hỗ trợ trong danh sách hooks.");
-            }
-            if !seen_hooks.insert(event.as_str()) {
-                return Err("Danh sách hooks không được chứa sự kiện trùng lặp.");
-            }
-        }
-        let mut seen_filters = HashSet::new();
-        for filter in &self.filters {
-            if !filter.is_filter() {
-                return Err("Chỉ các filter:* mới được khai báo trong danh sách filters.");
-            }
-            if !seen_filters.insert(filter.as_str()) {
-                return Err("Danh sách filters không được chứa sự kiện trùng lặp.");
-            }
-        }
-        if self.settings_schema.len() > 64 {
-            return Err("settings_schema không được vượt quá 64 trường.");
-        }
-        let mut seen_settings = HashSet::new();
-        let mut secret_keys = HashSet::new();
-        for field in &self.settings_schema {
-            if !crate::id::valid_snake_key(&field.key) || !seen_settings.insert(field.key.as_str())
-            {
-                return Err(
-                    "Khóa trường trong settings_schema phải là snake_case và không trùng lặp.",
-                );
-            }
-            if field.label.trim().is_empty() || field.label.chars().count() > 100 {
-                return Err("Nhãn trường trong settings_schema không hợp lệ.");
-            }
-            if field.field_type == PluginSettingFieldType::Secret {
-                if !field.default.is_null() {
-                    return Err(
-                        "Trường settings kiểu secret không được đặt giá trị mặc định khác null.",
-                    );
-                }
-                secret_keys.insert(field.key.as_str());
-            }
-            if let Some(min) = field.min
-                && !min.is_finite()
-            {
-                return Err("settings_schema min không hợp lệ.");
-            }
-            if let Some(max) = field.max
-                && !max.is_finite()
-            {
-                return Err("settings_schema max không hợp lệ.");
-            }
-            if let (Some(min), Some(max)) = (field.min, field.max)
-                && min > max
-            {
-                return Err("settings_schema yêu cầu min <= max.");
-            }
-            if field.field_type == PluginSettingFieldType::Select {
-                if field.choices.is_empty() || field.choices.len() > 64 {
-                    return Err("Trường select trong settings_schema phải có 1..=64 lựa chọn.");
-                }
-                let mut seen_choices = HashSet::new();
-                for ch in &field.choices {
-                    if ch.value.trim().is_empty()
-                        || ch.value.chars().count() > 100
-                        || ch.label.trim().is_empty()
-                        || ch.label.chars().count() > 100
-                        || !seen_choices.insert(ch.value.as_str())
-                    {
-                        return Err(
-                            "Lựa chọn của trường select trong settings_schema không hợp lệ.",
-                        );
-                    }
-                }
-            }
-        }
-        for ct_perm in &self.permissions.content_read {
-            if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
-                return Err("Quyền content_read không hợp lệ.");
-            }
-        }
-        for ct_perm in &self.permissions.content_write {
-            if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
-                return Err("Quyền content_write không hợp lệ.");
-            }
-        }
-        for ct_perm in &self.permissions.content_delete {
-            if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
-                return Err("Quyền content_delete không hợp lệ.");
-            }
-        }
-        for ct_perm in &self.permissions.content_trash_read {
-            if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
-                return Err("Quyền content_trash_read không hợp lệ.");
-            }
-        }
-        for ct_perm in &self.permissions.content_restore {
-            if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
-                return Err("Quyền content_restore không hợp lệ.");
-            }
-        }
-        for ct_perm in &self.permissions.content_purge {
-            if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
-                return Err("Quyền content_purge không hợp lệ.");
-            }
-        }
-        let mut seen_secrets_read = HashSet::new();
-        for secret_key in &self.permissions.plugin_secrets_read {
-            if secret_key == "*"
-                || !crate::id::valid_snake_key(secret_key)
-                || !seen_secrets_read.insert(secret_key.as_str())
-                || !secret_keys.contains(secret_key.as_str())
-            {
-                return Err(
-                    "plugin_secrets_read phải liệt kê các khóa secret hợp lệ tồn tại trong settings_schema (cấm wildcard '*').",
-                );
-            }
-        }
-        validate_scoped_field_grants(
-            &self.permissions.content_read_private,
-            |ct| self.can_read_content_type(ct),
-            "read",
-        )?;
-        validate_scoped_field_grants(
-            &self.permissions.content_write_private,
-            |ct| self.can_write_content_type(ct),
-            "write",
-        )?;
-
-        for perm in &self.permissions.sqlite {
-            if perm != "kv_read" && perm != "kv_write" {
-                return Err("Quyền SQLite không hợp lệ (chỉ hỗ trợ 'kv_read' và 'kv_write').");
-            }
-        }
-        for grant in &self.permissions.network {
-            let scheme = grant.scheme.to_ascii_lowercase();
-            if scheme != "http" && scheme != "https" {
-                return Err("Network scope scheme chỉ hỗ trợ http hoặc https.");
-            }
-            let host = grant.host.trim();
-            if host.is_empty()
-                || host.contains('/')
-                || host.contains('?')
-                || host.contains('#')
-                || host.contains('@')
-                || host.chars().any(|c| c.is_whitespace())
-            {
-                return Err("Network scope host không hợp lệ.");
-            }
-            if grant.port == Some(0) {
-                return Err("Network scope port phải lớn hơn 0.");
-            }
-            if grant.methods.is_empty() {
-                return Err("Network scope methods không được rỗng.");
-            }
-            for m in &grant.methods {
-                let upper = m.to_ascii_uppercase();
-                if !matches!(
-                    upper.as_str(),
-                    "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD"
-                ) {
-                    return Err("Network scope method không được hỗ trợ.");
-                }
-            }
-            if let Some(prefix) = &grant.path_prefix {
-                if !prefix.starts_with('/')
-                    || prefix.contains('?')
-                    || prefix.contains('#')
-                    || prefix.contains('%')
-                    || prefix.contains('\\')
-                    || prefix.contains("..")
-                {
-                    return Err("Network scope path_prefix không hợp lệ.");
-                }
-            }
-        }
-        for url_str in &self.permissions.http {
-            let parsed =
-                url::Url::parse(url_str).map_err(|_| "URL trong quyền HTTP không hợp lệ.")?;
-            if parsed.scheme() != "http" && parsed.scheme() != "https" {
-                return Err("Chỉ hỗ trợ scheme http hoặc https.");
-            }
-        }
-        let mut seen_actions = HashSet::new();
-        for action in &self.actions {
-            if !crate::id::valid_package_id(&action.id) && !crate::id::valid_snake_key(&action.id) {
-                return Err("Action id trong manifest không hợp lệ.");
-            }
-
-            if !seen_actions.insert(action.id.as_str()) {
-                return Err("Action id trong manifest bị trùng lặp.");
-            }
-            if action.required_role != "admin" && action.required_role != "editor" {
-                return Err("Action required_role chỉ hỗ trợ 'admin' hoặc 'editor'.");
-            }
-            let mut has_kv_write = false;
-            let mut has_content_write = false;
-            let mut has_content_delete = false;
-            let mut has_content_restore = false;
-            let mut has_content_purge = false;
-            let mut has_http = false;
-            let mut has_content_read = false;
-            let mut has_content_read_private = false;
-            let mut has_content_write_private = false;
-            for cap in &action.capabilities {
-                match cap.as_str() {
-                    "kv_read"
-                    | "kv_list"
-                    | "taxonomy_read"
-                    | "media_read"
-                    | "site_options_read"
-                    | "plugin_settings_read"
-                    | "plugin_secrets_read"
-                    | "content_trash_read"
-                    | "log" => {}
-                    "http" => has_http = true,
-                    "content_read" => has_content_read = true,
-                    "content_read_private" => has_content_read_private = true,
-                    "kv_write" | "kv_delete" => has_kv_write = true,
-                    "content_write" => has_content_write = true,
-                    "content_write_private" => has_content_write_private = true,
-                    "content_delete" => has_content_delete = true,
-                    "content_restore" => has_content_restore = true,
-                    "content_purge" => has_content_purge = true,
-                    _ => return Err("Action capability không nằm trong allowlist."),
-                }
-            }
-            if (has_kv_write as u8)
-                + (has_content_write as u8)
-                + (has_content_delete as u8)
-                + (has_content_restore as u8)
-                + (has_content_purge as u8)
-                > 1
-            {
-                return Err(
-                    "Action không được kết hợp kv_write/kv_delete, content_write, content_delete, content_restore hoặc content_purge trong cùng một action.",
-                );
-            }
-            if (has_content_restore || has_content_purge) && has_http {
-                return Err(
-                    "Action khai báo content_restore hoặc content_purge không được kết hợp capability http.",
-                );
-            }
-            if has_content_read_private
-                && (!has_content_read || self.permissions.content_read_private.is_empty())
-            {
-                return Err(
-                    "Action khai báo content_read_private phải kèm content_read và permissions.content_read_private.",
-                );
-            }
-            if has_content_write_private
-                && (!has_content_write || self.permissions.content_write_private.is_empty())
-            {
-                return Err(
-                    "Action khai báo content_write_private phải kèm content_write và permissions.content_write_private.",
-                );
-            }
-        }
+        validate_hooks_and_filters(&self.hooks, &self.filters, false)?;
+        let secret_keys = validate_settings_schema(&self.settings_schema)?;
+        validate_permissions(&self.permissions, &secret_keys)?;
+        validate_actions(&self.actions, &self.permissions)?;
         let mut seen_panel_keys = HashSet::new();
         for fg in &self.declarations.field_groups {
             seen_panel_keys.insert(fg.local_key.as_str());
@@ -679,11 +763,17 @@ impl PluginManifest {
         Ok(())
     }
 
+    pub fn runtime_kind(&self) -> crate::hooks::ExtensionRuntimeKind {
+        crate::hooks::ExtensionRuntimeKind::from_entrypoint(&self.entrypoint)
+    }
+
     pub fn can_read_content_type(&self, type_key: &str) -> bool {
-        self.permissions
-            .content_read
-            .iter()
-            .any(|k| k == "*" || k == type_key)
+        self.permissions.content_read_all_public
+            || self
+                .permissions
+                .content_read
+                .iter()
+                .any(|k| k == "*" || k == type_key)
     }
 
     pub fn has_sqlite_perm(&self, perm: &str) -> bool {
@@ -849,9 +939,10 @@ impl PluginManifest {
     }
 }
 
-/// Checks whether a plugin (in hook mode `action_caps == None` or action mode `Some(caps)`)
-/// is permitted to read `field_entry` for `actor_role` (`270-R3`).
-pub fn plugin_can_read_field(
+/// Checks whether an extension (`owner_kind` Plugin or Theme) is permitted to read
+/// `field_entry` for `actor_role`.
+pub fn plugin_can_read_field_for_owner(
+    owner_kind: crate::hooks::ExtensionOwnerKind,
     manifest: &PluginManifest,
     action_caps: Option<&[String]>,
     actor_role: crate::content::FieldRole,
@@ -872,16 +963,44 @@ pub fn plugin_can_read_field(
     if field_entry.definition.public_exposure == crate::content::PublicExposure::Public {
         return true;
     }
-    if field_entry.owner == crate::registry::ResourceOwner::Plugin(manifest.id.clone()) {
+    let expected_owner = match owner_kind {
+        crate::hooks::ExtensionOwnerKind::Plugin => {
+            crate::registry::ResourceOwner::Plugin(manifest.id.clone())
+        }
+        crate::hooks::ExtensionOwnerKind::Theme => {
+            crate::registry::ResourceOwner::Theme(manifest.id.clone())
+        }
+    };
+    if field_entry.owner == expected_owner {
         return true;
     }
     manifest.has_private_read_grant(type_key, &field_entry.definition.key)
         && action_caps.is_none_or(|caps| caps.iter().any(|c| c == "content_read_private"))
 }
 
-/// Checks whether a plugin (in hook/filter mode `action_caps == None` or action mode `Some(caps)`)
-/// is permitted to write `field_entry` for `actor_role` (`270-R3`).
-pub fn plugin_can_write_field(
+/// Checks whether a plugin (in hook mode `action_caps == None` or action mode `Some(caps)`)
+/// is permitted to read `field_entry` for `actor_role` (`270-R3`).
+pub fn plugin_can_read_field(
+    manifest: &PluginManifest,
+    action_caps: Option<&[String]>,
+    actor_role: crate::content::FieldRole,
+    type_key: &str,
+    field_entry: &crate::content::EffectiveFieldEntry,
+) -> bool {
+    plugin_can_read_field_for_owner(
+        crate::hooks::ExtensionOwnerKind::Plugin,
+        manifest,
+        action_caps,
+        actor_role,
+        type_key,
+        field_entry,
+    )
+}
+
+/// Checks whether an extension (`owner_kind` Plugin or Theme) is permitted to write
+/// `field_entry` for `actor_role`.
+pub fn plugin_can_write_field_for_owner(
+    owner_kind: crate::hooks::ExtensionOwnerKind,
     manifest: &PluginManifest,
     action_caps: Option<&[String]>,
     actor_role: crate::content::FieldRole,
@@ -902,11 +1021,38 @@ pub fn plugin_can_write_field(
     if field_entry.definition.public_exposure == crate::content::PublicExposure::Public {
         return true;
     }
-    if field_entry.owner == crate::registry::ResourceOwner::Plugin(manifest.id.clone()) {
+    let expected_owner = match owner_kind {
+        crate::hooks::ExtensionOwnerKind::Plugin => {
+            crate::registry::ResourceOwner::Plugin(manifest.id.clone())
+        }
+        crate::hooks::ExtensionOwnerKind::Theme => {
+            crate::registry::ResourceOwner::Theme(manifest.id.clone())
+        }
+    };
+    if field_entry.owner == expected_owner {
         return true;
     }
     manifest.has_private_write_grant(type_key, &field_entry.definition.key)
         && action_caps.is_none_or(|caps| caps.iter().any(|c| c == "content_write_private"))
+}
+
+/// Checks whether a plugin (in hook/filter mode `action_caps == None` or action mode `Some(caps)`)
+/// is permitted to write `field_entry` for `actor_role` (`270-R3`).
+pub fn plugin_can_write_field(
+    manifest: &PluginManifest,
+    action_caps: Option<&[String]>,
+    actor_role: crate::content::FieldRole,
+    type_key: &str,
+    field_entry: &crate::content::EffectiveFieldEntry,
+) -> bool {
+    plugin_can_write_field_for_owner(
+        crate::hooks::ExtensionOwnerKind::Plugin,
+        manifest,
+        action_caps,
+        actor_role,
+        type_key,
+        field_entry,
+    )
 }
 
 pub const PLUGIN_ABI_VERSION: u32 = 1;

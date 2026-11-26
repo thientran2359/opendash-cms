@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use opendash_core::hooks::HookEvent;
+use opendash_core::hooks::{ExtensionOwnerKind, HookEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Row, SqliteConnection, SqlitePool};
@@ -66,6 +66,7 @@ pub struct MergedEntryProjection {
     pub seo_override: Option<EntrySeoPluginOverride>,
     pub json_ld: Vec<Value>,
     pub ext: BTreeMap<String, Value>,
+    pub theme_ext: BTreeMap<String, Value>,
 }
 
 struct EntryProjectionSource {
@@ -92,10 +93,12 @@ pub async fn delete_plugin_projections_in_tx(
     tx: &mut SqliteConnection,
     plugin_id: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM plugin_entry_projections WHERE plugin_id = ?")
-        .bind(plugin_id)
-        .execute(tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM plugin_entry_projections WHERE owner_kind = 'plugin' AND plugin_id = ?",
+    )
+    .bind(plugin_id)
+    .execute(tx)
+    .await?;
     Ok(())
 }
 
@@ -207,7 +210,9 @@ async fn load_published_entry_source(
 }
 
 struct ComputedPluginProjection {
+    owner_kind: ExtensionOwnerKind,
     plugin_id: String,
+    theme_fence: Option<(String, i64)>,
     seo_json: Option<String>,
     ext_json: Option<String>,
 }
@@ -216,31 +221,36 @@ async fn evaluate_entry_projections(
     db: &SqlitePool,
     hooks: &HookDispatcher,
     source: &EntryProjectionSource,
-    plugin_filter: Option<&str>,
+    owner_filter: Option<(ExtensionOwnerKind, &str)>,
 ) -> ApiResult<Vec<ComputedPluginProjection>> {
     let seo_raw = hooks
-        .dispatch_projection_filters(
+        .dispatch_projection_filters_for_owners(
             HookEvent::FilterSeoHead,
-            plugin_filter,
+            owner_filter,
             source.payload.clone(),
         )
         .await?;
     let ext_raw = hooks
-        .dispatch_projection_filters(
+        .dispatch_projection_filters_for_owners(
             HookEvent::FilterEntryView,
-            plugin_filter,
+            owner_filter,
             source.payload.clone(),
         )
         .await?;
 
-    let mut per_plugin: BTreeMap<String, (Option<String>, Option<String>)> = BTreeMap::new();
+    #[allow(clippy::type_complexity)]
+    let mut per_owner: BTreeMap<
+        (ExtensionOwnerKind, String),
+        (Option<(String, i64)>, Option<String>, Option<String>),
+    > = BTreeMap::new();
 
-    for (pid, raw_val) in seo_raw {
+    for (owner_kind, pid, fence, raw_val) in seo_raw {
         let parsed: SeoHeadFilterOutput = match serde_json::from_value(raw_val) {
             Ok(v) => v,
             Err(_) => {
-                plugin_storage::record_plugin_execution_result(
+                plugin_storage::record_owner_execution_result(
                     db,
+                    owner_kind,
                     &pid,
                     "projection:filter_seo_head",
                     "error",
@@ -262,8 +272,9 @@ async fn evaluate_entry_projections(
         let mut clean_meta = match validate_seo_input(&meta_input) {
             Ok(clean) => clean,
             Err(ApiError(_, msg)) => {
-                plugin_storage::record_plugin_execution_result(
+                plugin_storage::record_owner_execution_result(
                     db,
+                    owner_kind,
                     &pid,
                     "projection:filter_seo_head",
                     "error",
@@ -280,8 +291,9 @@ async fn evaluate_entry_projections(
         {
             let msg =
                 format!("og_image_id '{mid}' không tồn tại hoặc chưa được công khai trên site.");
-            plugin_storage::record_plugin_execution_result(
+            plugin_storage::record_owner_execution_result(
                 db,
+                owner_kind,
                 &pid,
                 "projection:filter_seo_head",
                 "error",
@@ -295,8 +307,9 @@ async fn evaluate_entry_projections(
         let valid_json_ld = match validate_json_ld_blocks(&parsed.json_ld) {
             Ok(blocks) => blocks,
             Err(err_msg) => {
-                plugin_storage::record_plugin_execution_result(
+                plugin_storage::record_owner_execution_result(
                     db,
+                    owner_kind,
                     &pid,
                     "projection:filter_seo_head",
                     "error",
@@ -320,19 +333,28 @@ async fn evaluate_entry_projections(
         };
         let seo_str =
             serde_json::to_string(&stored).map_err(|e| ApiError::internal(e.to_string()))?;
-        per_plugin.entry(pid).or_default().0 = Some(seo_str);
+        let slot = per_owner.entry((owner_kind, pid)).or_default();
+        if slot.0.is_none() {
+            slot.0 = fence;
+        }
+        slot.1 = Some(seo_str);
     }
 
-    for (pid, raw_val) in ext_raw {
+    for (owner_kind, pid, fence, raw_val) in ext_raw {
         match validate_entry_ext_value(&raw_val) {
             Ok(valid) => {
                 let ext_str =
                     serde_json::to_string(&valid).map_err(|e| ApiError::internal(e.to_string()))?;
-                per_plugin.entry(pid).or_default().1 = Some(ext_str);
+                let slot = per_owner.entry((owner_kind, pid)).or_default();
+                if slot.0.is_none() {
+                    slot.0 = fence;
+                }
+                slot.2 = Some(ext_str);
             }
             Err(err_msg) => {
-                plugin_storage::record_plugin_execution_result(
+                plugin_storage::record_owner_execution_result(
                     db,
+                    owner_kind,
                     &pid,
                     "projection:filter_entry_view",
                     "error",
@@ -344,13 +366,17 @@ async fn evaluate_entry_projections(
         }
     }
 
-    Ok(per_plugin
+    Ok(per_owner
         .into_iter()
         .map(
-            |(plugin_id, (seo_json, ext_json))| ComputedPluginProjection {
-                plugin_id,
-                seo_json,
-                ext_json,
+            |((owner_kind, plugin_id), (theme_fence, seo_json, ext_json))| {
+                ComputedPluginProjection {
+                    owner_kind,
+                    plugin_id,
+                    theme_fence,
+                    seo_json,
+                    ext_json,
+                }
             },
         )
         .collect())
@@ -401,39 +427,71 @@ async fn write_entry_projections_in_tx(
     expected_source_version: i64,
     captured_plugin_generations: &BTreeMap<String, i64>,
     items: &[ComputedPluginProjection],
-    plugin_filter: Option<&str>,
+    owner_filter: Option<(ExtensionOwnerKind, &str, Option<&(String, i64)>)>,
 ) -> Result<(), sqlx::Error> {
     if !projection_write_allowed_in_tx(tx, entry_id, Some(locale), Some(expected_source_version))
         .await?
     {
         return Ok(());
     }
-    if let Some(pid) = plugin_filter {
-        let state: Option<(i64, i64)> =
-            sqlx::query_as("SELECT enabled, revision_generation FROM plugins WHERE id = ?")
-                .bind(pid)
-                .fetch_optional(&mut *tx)
-                .await?;
-        let Some((1, current_gen)) = state else {
-            return Ok(());
+    if let Some((owner_kind, oid, theme_fence)) = owner_filter {
+        let active = match owner_kind {
+            ExtensionOwnerKind::Plugin => {
+                let state: Option<(i64, i64)> =
+                    sqlx::query_as("SELECT enabled, revision_generation FROM plugins WHERE id = ?")
+                        .bind(oid)
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                matches!(
+                    state,
+                    Some((1, current_gen))
+                        if captured_plugin_generations
+                            .get(oid)
+                            .is_none_or(|captured| *captured == current_gen)
+                )
+            }
+            ExtensionOwnerKind::Theme => {
+                if let Some((rev_id, sel_ver)) = theme_fence {
+                    plugin_storage::verify_active_theme_fence_in_tx(&mut *tx, rev_id, *sel_ver)
+                        .await?
+                } else {
+                    let cur_theme: Option<String> = sqlx::query_scalar(
+                        "SELECT r.theme_id
+                           FROM theme_active_selection a
+                           JOIN theme_revisions r ON r.revision_id = a.revision_id
+                          WHERE a.id = 1",
+                    )
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    cur_theme.as_deref() == Some(oid)
+                }
+            }
         };
-        if captured_plugin_generations
-            .get(pid)
-            .is_some_and(|captured| *captured != current_gen)
-        {
+        if !active {
             return Ok(());
         }
-        if let Some(item) = items.iter().find(|it| it.plugin_id == pid) {
+        if let Some(item) = items
+            .iter()
+            .find(|it| it.owner_kind == owner_kind && it.plugin_id == oid)
+        {
+            if item.owner_kind == ExtensionOwnerKind::Theme
+                && let Some((ref rev_id, sel_ver)) = item.theme_fence
+                && !plugin_storage::verify_active_theme_fence_in_tx(&mut *tx, rev_id, sel_ver)
+                    .await?
+            {
+                return Ok(());
+            }
             sqlx::query(
-                "INSERT INTO plugin_entry_projections (entry_id, plugin_id, locale, seo_json, ext_json, updated_at)
-                 VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                 ON CONFLICT(entry_id, plugin_id) DO UPDATE SET
+                "INSERT INTO plugin_entry_projections (entry_id, owner_kind, plugin_id, locale, seo_json, ext_json, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                 ON CONFLICT(entry_id, owner_kind, plugin_id) DO UPDATE SET
                     locale = excluded.locale,
                     seo_json = excluded.seo_json,
                     ext_json = excluded.ext_json,
                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             )
             .bind(entry_id)
+            .bind(item.owner_kind.as_str())
             .bind(&item.plugin_id)
             .bind(locale)
             .bind(&item.seo_json)
@@ -442,10 +500,12 @@ async fn write_entry_projections_in_tx(
             .await?;
         } else {
             sqlx::query(
-                "DELETE FROM plugin_entry_projections WHERE entry_id = ? AND plugin_id = ?",
+                "DELETE FROM plugin_entry_projections
+                  WHERE entry_id = ? AND owner_kind = ? AND plugin_id = ?",
             )
             .bind(entry_id)
-            .bind(pid)
+            .bind(owner_kind.as_str())
+            .bind(oid)
             .execute(&mut *tx)
             .await?;
         }
@@ -459,51 +519,72 @@ async fn write_entry_projections_in_tx(
             .into_iter()
             .collect();
 
-    let mut fresh_items = Vec::new();
+    let mut valid_items: Vec<&ComputedPluginProjection> = Vec::with_capacity(items.len());
     for item in items {
-        if let Some(&cur_gen) = current_plugins.get(&item.plugin_id)
-            && captured_plugin_generations
-                .get(&item.plugin_id)
-                .is_none_or(|captured| *captured == cur_gen)
-        {
-            fresh_items.push(item);
+        match item.owner_kind {
+            ExtensionOwnerKind::Plugin => {
+                if !current_plugins
+                    .get(&item.plugin_id)
+                    .is_some_and(|&cur_gen| {
+                        captured_plugin_generations
+                            .get(&item.plugin_id)
+                            .is_none_or(|captured| *captured == cur_gen)
+                    })
+                {
+                    continue;
+                }
+            }
+            ExtensionOwnerKind::Theme => {
+                if let Some((ref rev_id, sel_ver)) = item.theme_fence
+                    && !plugin_storage::verify_active_theme_fence_in_tx(&mut *tx, rev_id, sel_ver)
+                        .await?
+                {
+                    continue;
+                }
+            }
         }
+        valid_items.push(item);
     }
 
     // Preserve rows belonging to plugins enabled or upgraded after our source snapshot.
-    let mut keep_ids: Vec<&str> = fresh_items.iter().map(|it| it.plugin_id.as_str()).collect();
+    let mut keep_pairs: Vec<String> = valid_items
+        .iter()
+        .map(|it| format!("{}:{}", it.owner_kind.as_str(), it.plugin_id))
+        .collect();
     for (pid, &cur_gen) in &current_plugins {
         if captured_plugin_generations.get(pid) != Some(&cur_gen) {
-            keep_ids.push(pid.as_str());
+            keep_pairs.push(format!("plugin:{pid}"));
         }
     }
-    if keep_ids.is_empty() {
+
+    if keep_pairs.is_empty() {
         delete_entry_projections_in_tx(tx, entry_id).await?;
         return Ok(());
     }
 
-    let keep_ids_json = serde_json::to_string(&keep_ids).unwrap_or_else(|_| "[]".into());
+    let active_pairs_json = serde_json::to_string(&keep_pairs).unwrap_or_else(|_| "[]".into());
     sqlx::query(
         "DELETE FROM plugin_entry_projections
           WHERE entry_id = ?
-            AND plugin_id NOT IN (SELECT value FROM json_each(?))",
+            AND (owner_kind || ':' || plugin_id) NOT IN (SELECT value FROM json_each(?))",
     )
     .bind(entry_id)
-    .bind(&keep_ids_json)
+    .bind(&active_pairs_json)
     .execute(&mut *tx)
     .await?;
 
-    for item in fresh_items {
+    for item in valid_items {
         sqlx::query(
-            "INSERT INTO plugin_entry_projections (entry_id, plugin_id, locale, seo_json, ext_json, updated_at)
-             VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-             ON CONFLICT(entry_id, plugin_id) DO UPDATE SET
+            "INSERT INTO plugin_entry_projections (entry_id, owner_kind, plugin_id, locale, seo_json, ext_json, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT(entry_id, owner_kind, plugin_id) DO UPDATE SET
                 locale = excluded.locale,
                 seo_json = excluded.seo_json,
                 ext_json = excluded.ext_json,
                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         )
         .bind(entry_id)
+        .bind(item.owner_kind.as_str())
         .bind(&item.plugin_id)
         .bind(locale)
         .bind(&item.seo_json)
@@ -550,6 +631,30 @@ pub async fn spawn_recompute_plugin_projections_batched(
     hooks: Arc<HookDispatcher>,
     coordinator: Arc<SiteCoordinator>,
     plugin_id: String,
+    maintenance_cancel_rx: watch::Receiver<bool>,
+    shutdown_rx: watch::Receiver<bool>,
+) -> tokio::task::JoinHandle<()> {
+    spawn_recompute_owner_projections_batched(
+        db,
+        hooks,
+        coordinator,
+        ExtensionOwnerKind::Plugin,
+        plugin_id,
+        None,
+        maintenance_cancel_rx,
+        shutdown_rx,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn spawn_recompute_owner_projections_batched(
+    db: SqlitePool,
+    hooks: Arc<HookDispatcher>,
+    coordinator: Arc<SiteCoordinator>,
+    owner_kind: ExtensionOwnerKind,
+    owner_id: String,
+    theme_fence: Option<(String, i64)>,
     mut maintenance_cancel_rx: watch::Receiver<bool>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
@@ -569,14 +674,34 @@ pub async fn spawn_recompute_plugin_projections_batched(
                 continue;
             }
 
-            let enabled: Option<i64> =
-                sqlx::query_scalar("SELECT enabled FROM plugins WHERE id = ?")
-                    .bind(&plugin_id)
-                    .fetch_optional(&db)
-                    .await
-                    .ok()
-                    .flatten();
-            if enabled != Some(1) {
+            let still_active = match owner_kind {
+                ExtensionOwnerKind::Plugin => {
+                    let enabled: Option<i64> =
+                        sqlx::query_scalar("SELECT enabled FROM plugins WHERE id = ?")
+                            .bind(&owner_id)
+                            .fetch_optional(&db)
+                            .await
+                            .ok()
+                            .flatten();
+                    enabled == Some(1)
+                }
+                ExtensionOwnerKind::Theme => {
+                    if let Some((ref rev_id, sel_ver)) = theme_fence {
+                        if let Ok(mut conn) = db.acquire().await {
+                            plugin_storage::verify_active_theme_fence_in_tx(
+                                &mut conn, rev_id, sel_ver,
+                            )
+                            .await
+                            .unwrap_or(false)
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+            };
+            if !still_active {
                 return;
             }
 
@@ -604,7 +729,8 @@ pub async fn spawn_recompute_plugin_projections_batched(
                 Ok(ids) => ids,
                 Err(err) => {
                     eprintln!(
-                        "spawn_recompute_plugin_projections_batched query error ({plugin_id}): {err}"
+                        "spawn_recompute_owner_projections_batched query error ({}:{owner_id}): {err}",
+                        owner_kind.as_str()
                     );
                     return;
                 }
@@ -635,8 +761,13 @@ pub async fn spawn_recompute_plugin_projections_batched(
                     }
                 }
                 if let Ok(Some(source)) = load_published_entry_source(&db, eid).await
-                    && let Ok(items) =
-                        evaluate_entry_projections(&db, &hooks, &source, Some(&plugin_id)).await
+                    && let Ok(items) = evaluate_entry_projections(
+                        &db,
+                        &hooks,
+                        &source,
+                        Some((owner_kind, &owner_id)),
+                    )
+                    .await
                 {
                     computed_batch.push((
                         eid,
@@ -678,11 +809,14 @@ pub async fn spawn_recompute_plugin_projections_batched(
                         *source_version,
                         captured_gens,
                         items,
-                        Some(&plugin_id),
+                        Some((owner_kind, &owner_id, theme_fence.as_ref())),
                     )
                     .await
                     {
-                        eprintln!("batch write projection error ({plugin_id}, {eid}): {err}");
+                        eprintln!(
+                            "batch write projection error ({}:{owner_id}, {eid}): {err}",
+                            owner_kind.as_str()
+                        );
                         break;
                     }
                 }
@@ -704,15 +838,25 @@ pub async fn batch_load_entry_projections_in_conn(
 
     let ids_json =
         serde_json::to_string(entry_ids).map_err(|e| ApiError::internal(e.to_string()))?;
+    // Theme rows apply first (0), then Plugin rows (1) so SEO precedence is
+    // strictly Admin > Plugin > Theme.
     let rows = sqlx::query(
-        "SELECT pep.entry_id, pep.plugin_id, pep.seo_json, pep.ext_json
+        "SELECT pep.entry_id, pep.owner_kind, pep.plugin_id, pep.seo_json, pep.ext_json
            FROM plugin_entry_projections pep
            JOIN json_each(?) ids ON ids.value = pep.entry_id
            JOIN content_entries e ON e.id = pep.entry_id
             AND e.trashed_at IS NULL
             AND e.publication_status = 'published'
-           JOIN plugins p ON p.id = pep.plugin_id AND p.enabled = 1
-          ORDER BY pep.entry_id ASC, pep.plugin_id ASC",
+           LEFT JOIN plugins p
+             ON pep.owner_kind = 'plugin' AND p.id = pep.plugin_id AND p.enabled = 1
+           LEFT JOIN theme_active_selection tas
+             ON pep.owner_kind = 'theme' AND tas.id = 1
+           LEFT JOIN theme_revisions tr
+             ON pep.owner_kind = 'theme' AND tr.revision_id = tas.revision_id AND tr.theme_id = pep.plugin_id
+          WHERE p.id IS NOT NULL OR tr.revision_id IS NOT NULL
+          ORDER BY pep.entry_id ASC,
+                   CASE WHEN pep.owner_kind = 'theme' THEN 0 ELSE 1 END ASC,
+                   pep.plugin_id ASC",
     )
     .bind(&ids_json)
     .fetch_all(&mut *conn)
@@ -722,6 +866,7 @@ pub async fn batch_load_entry_projections_in_conn(
 
     for row in rows {
         let entry_id: i64 = row.try_get("entry_id")?;
+        let owner_kind_str: String = row.try_get("owner_kind")?;
         let plugin_id: String = row.try_get("plugin_id")?;
         let seo_json: Option<String> = row.try_get("seo_json")?;
         let ext_json: Option<String> = row.try_get("ext_json")?;
@@ -766,7 +911,15 @@ pub async fn batch_load_entry_projections_in_conn(
             && let Ok(ext_val) = serde_json::from_str::<Value>(&raw_ext)
             && ext_val.is_object()
         {
-            merged.ext.insert(plugin_id, ext_val);
+            if owner_kind_str == "theme" {
+                if let Value::Object(map) = ext_val {
+                    for (k, v) in map {
+                        merged.theme_ext.insert(k, v);
+                    }
+                }
+            } else {
+                merged.ext.insert(plugin_id, ext_val);
+            }
         }
     }
 
@@ -821,7 +974,9 @@ mod tests {
             .unwrap()
             .unwrap();
         let items = vec![ComputedPluginProjection {
+            owner_kind: ExtensionOwnerKind::Plugin,
             plugin_id: "projection-test".into(),
+            theme_fence: None,
             seo_json: None,
             ext_json: Some(r#"{"badge":"original"}"#.into()),
         }];
@@ -888,7 +1043,7 @@ mod tests {
                 source.version,
                 &source.plugin_generations,
                 &[],
-                Some("projection-test"),
+                Some((ExtensionOwnerKind::Plugin, "projection-test", None)),
             )
             .await
             .unwrap();
@@ -982,7 +1137,9 @@ mod tests {
             .unwrap();
         assert_eq!(v2_source.version, 2);
         let v2_items = vec![ComputedPluginProjection {
+            owner_kind: ExtensionOwnerKind::Plugin,
             plugin_id: "projection-race".into(),
+            theme_fence: None,
             seo_json: None,
             ext_json: Some(r#"{"ver":"v2"}"#.into()),
         }];
@@ -1035,7 +1192,9 @@ mod tests {
             .unwrap();
         assert_eq!(v5_source.version, 5);
         let v5_items = vec![ComputedPluginProjection {
+            owner_kind: ExtensionOwnerKind::Plugin,
             plugin_id: "projection-race".into(),
+            theme_fence: None,
             seo_json: None,
             ext_json: Some(r#"{"ver":"v5"}"#.into()),
         }];
@@ -1076,7 +1235,7 @@ mod tests {
                 v2_source.version,
                 &v2_source.plugin_generations,
                 &[],
-                Some("projection-race"),
+                Some((ExtensionOwnerKind::Plugin, "projection-race", None)),
             )
             .await
             .unwrap();
@@ -1110,7 +1269,7 @@ mod tests {
                 v5_source.version,
                 &v5_source.plugin_generations,
                 &v5_items,
-                Some("projection-race"),
+                Some((ExtensionOwnerKind::Plugin, "projection-race", None)),
             )
             .await
             .unwrap();
