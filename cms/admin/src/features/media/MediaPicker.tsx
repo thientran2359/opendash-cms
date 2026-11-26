@@ -9,6 +9,7 @@ interface MediaPickerProps {
   mode: PickerMode;
   acceptKind?: MediaKind | 'any';
   selectedIds: string[];
+  maxItems?: number;
   csrfToken: string | null;
   onApply: (ids: string[]) => void;
   onClose: () => void;
@@ -16,11 +17,13 @@ interface MediaPickerProps {
 }
 
 const PAGE_SIZE = 48;
+const DEFAULT_MAX_ITEMS = 50;
 
 export const MediaPicker: React.FC<MediaPickerProps> = ({
-  mode, acceptKind = 'image', selectedIds, csrfToken, onApply, onClose, onError,
+  mode, acceptKind = 'image', selectedIds, maxItems = DEFAULT_MAX_ITEMS, csrfToken, onApply, onClose, onError,
 }) => {
   const { t: translate, tCount } = useI18n();
+  const effectiveMaxItems = Math.max(1, Math.min(50, Math.floor(maxItems)));
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [picked, setPicked] = useState<string[]>(selectedIds);
   const [filter, setFilter] = useState<'all' | MediaKind>(acceptKind === 'any' ? 'all' : acceptKind);
@@ -107,7 +110,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
       setNotice(tStatic('feature.media.mediapicker.uploaded_value1_media_files', { value1: uploaded.length }));
       if (mode === 'image' && uploaded.length === 1) setPicked([uploaded[0].id]);
       if (mode === 'gallery') {
-        setPicked(previous => [...new Set([...previous, ...uploaded.map(item => item.id)])].slice(0, 50));
+        setPicked(previous => [...new Set([...previous, ...uploaded.map(item => item.id)])].slice(0, effectiveMaxItems));
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : tStatic('feature.media.mediapicker.upload_failed'));
@@ -125,7 +128,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
     } else {
       setPicked(previous => previous.includes(id)
         ? previous.filter(current => current !== id)
-        : previous.length < 50 ? [...previous, id] : previous);
+        : previous.length < effectiveMaxItems ? [...previous, id] : previous);
     }
   };
 

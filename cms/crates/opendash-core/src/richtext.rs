@@ -1,4 +1,4 @@
-use crate::block_schema::valid_block_url;
+use crate::field_schema::valid_safe_url;
 
 pub const MAX_RICHTEXT_INPUT_BYTES: usize = 65_536;
 pub const MAX_RICHTEXT_OUTPUT_BYTES: usize = 32_768;
@@ -323,7 +323,7 @@ pub fn sanitize_richtext(raw: &str) -> Result<String, &'static str> {
                 if decoded_href.contains('\0')
                     || decoded_href.bytes().any(|b| b <= 0x1F || b == 0x7F)
                     || decoded_href != trimmed_href
-                    || !valid_block_url(&decoded_href)
+                    || !valid_safe_url(&decoded_href)
                 {
                     continue;
                 }

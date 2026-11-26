@@ -5,6 +5,7 @@ pub mod builder;
 pub mod builder_blocks;
 pub mod contact;
 pub mod content;
+pub mod field_schema;
 pub mod hooks;
 pub mod i18n;
 pub mod icons;

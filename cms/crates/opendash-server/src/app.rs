@@ -599,6 +599,14 @@ pub fn build_router_with_themes_root(
             get(effective_editor_config_get),
         )
         .route(
+            "/api/admin/fields/options-source",
+            get(crate::routes::fields::options_source_get),
+        )
+        .route(
+            "/api/admin/fields/entries-resolve",
+            get(crate::routes::fields::entries_resolve_get),
+        )
+        .route(
             "/api/admin/content-field-groups",
             get(field_group_list)
                 .post(field_group_create)
