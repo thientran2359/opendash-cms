@@ -1,13 +1,14 @@
 # Unified JS Runtime (`boa_engine`), Render/Route Hooks, Extension Secrets & Dev Live-Edit
 
 * **Author:** Elephant (Antigravity)
-* **Status:** Approved
+* **Status:** Verified
 * **Date:** 2026-11-26
-* **Baseline:** `main@66ebd73`
+* **Baseline:** `main@66ebd73` · **Verified On:** `main@745cd36` (`PR #586`, `#587`, `#589`, `#590`, `#591`, `#592`)
 * **Approved By:** Owner
 * **Approval Evidence:** Owner chat 2026-11-26 ("Duyệt Spec B, nhưng bạn tự triển khai full Slice S01 → S04 nhé" — duyệt kiến trúc `boa_engine`, `functions.js`/`plugin.js`, Render Filters, Custom Routes `/p/` + `/api/p/` + `/api/public/p/`, Dev Live-Edit và 4 điểm nới DX/bảo mật)
 * **Approval Gate Note:** Thêm dependency `boa_engine` vào `cms/Cargo.toml`, thêm migration `0053`, thay đổi phạm vi V1 trong `docs/product/PRODUCT_REQUIREMENTS.md` §5/§7 và `docs/architecture/TECH_STACK.md` — đã được `Owner` phê duyệt trực tiếp theo [ADR-0010](../decisions/ADR-0010-agent-project-and-merge-authority.md).
 * **Goldfish Review:** 3-agent independent review loop (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`) + readiness & delta re-verify `READY` · 2026-11-26 · reviewed `main@66ebd73` (0 Blocker / 0 Major)
+* **Verification & Drift Closure:** [Biên bản kiểm chứng](../verification/2026-11-26-unified-js-runtime-verified.md) · [Goldfish Drift Report](../../.agents/research/2026-11-26-unified-js-runtime-drift-report.md) (3 vòng audit `38199ce8` → `ea75ff3b` → `2af31f4f` trên `main@745cd36`: `0 Blocker / 0 Major / 0 Minor / 0 Nit`)
 * **Related Specs:**
   * [Plugin Hooks, Host Ops v1.1, Owner Settings (`SecretStore`) & Write-Time Projections](plugin-hooks-host-ops-and-projections.md)
   * [Dual Guest SDK (`AssemblyScript` & `opendash-plugin-sdk`) & Reference Examples](plugin-dual-sdk-and-examples.md)
