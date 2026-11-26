@@ -1057,6 +1057,82 @@ pub fn finalize_document_icons(
         .map_err(ApiError::internal)
 }
 
+pub const MAX_RENDER_HOOK_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
+
+/// Applies already-sanitized per-subscriber render-hook outputs (`OD_HOOK_<32hex>` slots,
+/// `filter:render/head` fragments/styles/scripts, and `filter:render/footer` fragments)
+/// strictly AFTER `compose_document_with_seo_with_assets` and BEFORE `finalize_document_icons`.
+pub fn apply_render_hooks_to_document(
+    mut html: String,
+    head_html: &str,
+    head_styles: &[String],
+    head_scripts: &[String],
+    footer_html: &str,
+    slot_replacements: &[(String, String)],
+) -> ApiResult<String> {
+    let apply = || -> Result<String, &'static str> {
+        if !slot_replacements.is_empty() {
+            let mut matches: Vec<(usize, &str, &str)> = Vec::new();
+            for (nonce, replacement) in slot_replacements {
+                let mut search_from = 0;
+                while let Some(rel) = html[search_from..].find(nonce.as_str()) {
+                    let offset = search_from + rel;
+                    matches.push((offset, nonce.as_str(), replacement.as_str()));
+                    search_from = offset + nonce.len();
+                }
+            }
+            matches.sort_by_key(|(offset, _, _)| *offset);
+            let mut out = String::with_capacity(html.len());
+            let mut cursor = 0usize;
+            for (offset, nonce, replacement) in matches {
+                if offset < cursor {
+                    continue;
+                }
+                out.push_str(&html[cursor..offset]);
+                out.push_str(replacement);
+                cursor = offset + nonce.len();
+                if out.len() > MAX_RENDER_HOOK_DOCUMENT_BYTES {
+                    return Err("Document chứa render hooks vượt giới hạn HTML.");
+                }
+            }
+            out.push_str(&html[cursor..]);
+            html = out;
+        }
+
+        let has_head_additions =
+            !head_styles.is_empty() || !head_scripts.is_empty() || !head_html.is_empty();
+        if has_head_additions && let Some(pos) = html.find("</head>") {
+            let mut injected = String::new();
+            for style in head_styles {
+                injected.push_str(style);
+            }
+            for script in head_scripts {
+                injected.push_str(script);
+            }
+            injected.push_str(head_html);
+            if html.len().saturating_add(injected.len()) > MAX_RENDER_HOOK_DOCUMENT_BYTES {
+                return Err("Document chứa render hooks vượt giới hạn HTML.");
+            }
+            html.insert_str(pos, &injected);
+        }
+
+        if !footer_html.is_empty()
+            && let Some(pos) = html.rfind("</body>")
+        {
+            if html.len().saturating_add(footer_html.len()) > MAX_RENDER_HOOK_DOCUMENT_BYTES {
+                return Err("Document chứa render hooks vượt giới hạn HTML.");
+            }
+            html.insert_str(pos, footer_html);
+        }
+
+        if html.len() > MAX_RENDER_HOOK_DOCUMENT_BYTES {
+            return Err("Document chứa render hooks vượt giới hạn HTML.");
+        }
+        Ok(html)
+    };
+    apply().map_err(ApiError::internal)
+}
+
 pub fn compose_document_with_seo_with_body_classes(
     header_html: Option<&str>,
     rendered_layout: &str,

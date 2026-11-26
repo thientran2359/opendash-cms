@@ -1369,6 +1369,7 @@ pub async fn create_entry_with_fence(
     let record = decoded_with_terms(&mut tx, row).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(record)
 }
 
@@ -1479,6 +1480,7 @@ pub async fn update_entry_with_fence(
             let record = decoded_with_terms(&mut tx, row).await?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
             tx.commit().await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(record)
         }
     }
@@ -1580,6 +1582,7 @@ pub async fn create_entry_with_schema_fence(
     let record = decoded_with_terms(&mut tx, row).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(record)
 }
 
@@ -1660,6 +1663,7 @@ pub async fn update_entry_with_schema_fence(
             let record = decoded_with_terms(&mut tx, row).await?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
             tx.commit().await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(record)
         }
     }
@@ -2743,6 +2747,7 @@ pub async fn commit_composite_entry_save(
     }
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
 
     Ok(CompositeEntrySaveResult {
@@ -3265,6 +3270,7 @@ pub async fn commit_entry_translation(
     .await?;
     let mut record = decoded_with_terms(&mut tx, row).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
     Ok(record)
 }
@@ -3303,6 +3309,7 @@ pub async fn delete_entry(
     super::plugin_projections::delete_entry_projections_in_tx(&mut tx, id).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     Ok(())
 }
 
@@ -3361,6 +3368,7 @@ pub async fn set_publication_status(
     crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
     get_entry(db, type_key, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải trạng thái xuất bản."))

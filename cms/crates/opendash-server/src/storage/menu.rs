@@ -1186,6 +1186,7 @@ pub async fn create_menu_admin(
     match res {
         Ok(out) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(out)
         }
         Err(err) => {
@@ -1220,6 +1221,7 @@ pub async fn update_menu_with_title(
     match res {
         Ok(out) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(out)
         }
         Err(err) => {
@@ -1264,6 +1266,7 @@ pub async fn delete_menu(db: &SqlitePool, menu_id: i64, expected_version: i64) -
     match res {
         Ok(()) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(())
         }
         Err(err) => {
@@ -1553,6 +1556,7 @@ pub async fn put_menu_slots_for_locale(
     match res {
         Ok(out) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(out)
         }
         Err(err) => {

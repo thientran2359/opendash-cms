@@ -592,6 +592,7 @@ pub async fn stage_and_commit_v3_revision(
     match tx_res {
         Ok(outcome) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(outcome)
         }
         Err(err) => {
@@ -1006,6 +1007,7 @@ pub async fn activate_revision(
                 return Err(err);
             }
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(RevisionActivationOutcome::Activated(
                 get_active_selection(db).await?,
             ))

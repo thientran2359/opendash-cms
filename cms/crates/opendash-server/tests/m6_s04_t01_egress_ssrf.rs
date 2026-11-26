@@ -47,6 +47,7 @@ fn build_scoped_manifest(port: u16) -> PluginManifest {
         declarations: Default::default(),
         editor_panels: vec![],
         settings_schema: vec![],
+        ..Default::default()
     }
 }
 

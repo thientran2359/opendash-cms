@@ -592,6 +592,7 @@ pub async fn put_entry_route(
     match res {
         Ok(out) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(out)
         }
         Err(err) => {
@@ -900,6 +901,7 @@ pub async fn put_entry_seo(
     match res {
         Ok(out) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(out)
         }
         Err(err) => {
@@ -1034,6 +1036,7 @@ pub async fn put_home_seo_for_locale(
     match res {
         Ok(out) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(out)
         }
         Err(err) => {

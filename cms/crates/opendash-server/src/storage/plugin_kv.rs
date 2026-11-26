@@ -57,7 +57,9 @@ pub async fn rollback(conn: &mut SqliteConnection) -> Result<SqliteQueryResult, 
 }
 
 pub async fn commit(conn: &mut SqliteConnection) -> Result<SqliteQueryResult, sqlx::Error> {
-    sqlx::query("COMMIT").execute(conn).await
+    let res = sqlx::query("COMMIT").execute(conn).await?;
+    crate::cache::SiteCacheEpoch::global().bump();
+    Ok(res)
 }
 
 #[allow(dead_code)]

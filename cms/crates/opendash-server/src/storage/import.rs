@@ -1088,6 +1088,7 @@ pub async fn execute_sample_import_with_cutpoint(
         .execute(&mut *conn)
         .await?;
         sqlx::query("COMMIT").execute(&mut *conn).await?;
+        crate::cache::SiteCacheEpoch::global().bump();
     }
 
     if cutpoint == ImportCutpoint::AfterPhase1Staged {
@@ -1525,6 +1526,7 @@ pub async fn execute_sample_import_with_cutpoint(
     match tx_res {
         Ok(outcome) => {
             sqlx::query("COMMIT").execute(&mut *conn).await?;
+            crate::cache::SiteCacheEpoch::global().bump();
             Ok(outcome)
         }
         Err(err) => {

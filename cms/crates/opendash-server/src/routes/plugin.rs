@@ -773,6 +773,8 @@ mod declarative_ui_tests {
             coordinator,
             backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
             block_template_cache: crate::page::BlockTemplateCache::global().clone(),
+            site_cache_epoch: Arc::clone(crate::cache::SiteCacheEpoch::global()),
+            render_cache: Arc::new(crate::cache::ExtensionRenderCache::new()),
             recovery: crate::config::RecoveryState::new(false),
             runtime_config,
         };

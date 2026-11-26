@@ -441,6 +441,11 @@ pub struct ThemeFunctionsSpec {
     pub permissions: Option<crate::plugin::PluginPermissions>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<crate::plugin::PluginActionDeclaration>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::plugin::RenderCachePolicy::is_default"
+    )]
+    pub render_cache: crate::plugin::RenderCachePolicy,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub settings_schema: Vec<crate::plugin::PluginSettingField>,
 }
@@ -621,6 +626,7 @@ impl ThemeV3Manifest {
             filters: func.filters.clone(),
             hook_priority: func.hook_priority,
             actions: func.actions.clone(),
+            render_cache: func.render_cache,
             declarations: Default::default(),
             editor_panels: Vec::new(),
             settings_schema: func.settings_schema.clone(),
