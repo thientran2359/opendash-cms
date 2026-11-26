@@ -10,6 +10,8 @@ import {
   type AdminLocaleState,
 } from './api/locales.ts';
 import * as api from './api/index.ts';
+import { getHealth } from './api/client.ts';
+import { syncDevManifest } from './api/themes.ts';
 import { AdminShell, isRouteAllowed, parseAdminRoute, type ParsedRoute } from './shell/AdminShell.tsx';
 import { getEffectiveContentTypeTaxonomies, listContentTypes } from './api/content.ts';
 import { listTaxonomyDefinitions } from './api/taxonomy.ts';
@@ -165,6 +167,10 @@ const AppContent: React.FC = () => {
 
   const [builderReset, setBuilderReset] = useState(0);
   const [themeRevision, setThemeRevision] = useState(0);
+  const [devMode, setDevMode] = useState(false);
+  const [devTheme, setDevTheme] = useState<string | null>(null);
+  const [devPlugins, setDevPlugins] = useState<string[]>([]);
+  const [devSyncing, setDevSyncing] = useState(false);
   // Retain the Builder draft across a 401 only when the same account signs back in.
   const lastAuthenticatedUserId = useRef<number | null>(null);
 
@@ -374,6 +380,39 @@ const AppContent: React.FC = () => {
       }
     } catch (err) {
       handleApiError(err, tStatic("app.plugin_list_error"));
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void getHealth(controller.signal)
+      .then(health => {
+        setDevMode(Boolean(health.dev_mode));
+        setDevTheme(health.dev_theme ?? null);
+        setDevPlugins(health.dev_plugins ?? []);
+      })
+      .catch(() => {
+        // Health check is best-effort on boot.
+      });
+    return () => controller.abort();
+  }, []);
+
+  const handleSyncDevManifest = async () => {
+    if (!csrfToken || user?.role !== 'admin' || devSyncing) return;
+    setDevSyncing(true);
+    try {
+      const res = await syncDevManifest(csrfToken);
+      const parts: string[] = [];
+      if (res.synced_theme) parts.push(`theme:${res.synced_theme}`);
+      if (res.synced_plugins.length > 0) parts.push(`plugins:${res.synced_plugins.join(',')}`);
+      const summary = parts.length > 0 ? parts.join(' · ') : '0';
+      setStatus(() => tStatic('app.dev_sync_success', { summary }), false);
+      setThemeRevision(v => v + 1);
+      await Promise.all([loadCptTypes(), loadPlugins()]);
+    } catch (err) {
+      handleApiError(err, tStatic('app.dev_sync_error'));
+    } finally {
+      setDevSyncing(false);
     }
   };
 
@@ -637,6 +676,11 @@ const AppContent: React.FC = () => {
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
+      devMode={devMode}
+      devTheme={devTheme}
+      devPlugins={devPlugins}
+      devSyncing={devSyncing}
+      onSyncDevManifest={() => { void handleSyncDevManifest(); }}
       studioContent={lastStudioRouteRef.current && (!user || isRouteAllowed(lastStudioRouteRef.current, user.role)) ? <StudioWorkspace
         key={studioIdentity(lastStudioRouteRef.current) ?? 'studio-mode1'}
         route={route.view === 'studio' || route.view === 'studio-entry' ? route : lastStudioRouteRef.current}
@@ -652,6 +696,8 @@ const AppContent: React.FC = () => {
         onSavedSettingsOrTheme={() => setThemeRevision(v => v + 1)}
       /> : null}
       themesContent={<ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
+        devTheme={devTheme}
+        themeRevision={themeRevision}
         onInstalled={() => setThemeRevision(value => value + 1)}
         onActivated={() => setThemeRevision(value => value + 1)}
       />}
@@ -733,6 +779,7 @@ const AppContent: React.FC = () => {
       pluginsContent={<PluginsPanel
         mode={route.view === 'plugins' && route.sub === 'install' ? 'install' : 'list'}
         plugins={plugins}
+        devPlugins={devPlugins}
         selectedPluginId={selectedPluginId}
         pluginInputJson={pluginInputJson}
         pluginRunOutput={pluginRunOutput}

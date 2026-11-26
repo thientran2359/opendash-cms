@@ -143,7 +143,7 @@ pub struct ThemeV3Package {
 // The approved v3 active asset cap is 512 KiB; retain legacy text caps.
 const V3_MAX_ACTIVE_ASSET_BYTES: usize = 512 * 1024;
 
-fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
+pub(crate) fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
     if rel_path == "theme.json" {
         return Ok(V2_MAX_TEXT_BYTES);
     }

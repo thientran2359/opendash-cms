@@ -333,6 +333,20 @@ pub async fn verify_restored_db_references(db_path: &Path, site_root: &Path) -> 
         }
     }
 
+    for ext in &inventory.extension_secret_refs {
+        let sec = site_root
+            .join("database")
+            .join("secrets")
+            .join(&ext.owner_subdir)
+            .join(&ext.package_id)
+            .join(format!("{}.json", ext.secret_ref));
+        if !sec.is_file() {
+            return Err(ApiError::bad_request(
+                "Bản sao khôi phục thiếu tệp bí mật extension được tham chiếu trong DB.",
+            ));
+        }
+    }
+
     for tr in &inventory.theme_revisions {
         if tr.source_format == "v3" {
             let rev_dir = site_root

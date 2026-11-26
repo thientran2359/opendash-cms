@@ -8,6 +8,7 @@ mod cache;
 mod config;
 mod contact;
 mod content_render;
+mod dev_mode;
 mod document;
 mod error;
 mod hooks;
@@ -149,16 +150,118 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(async_main())
+        .block_on(async_main(args))
 }
 
-async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
+struct DevCliOptions {
+    theme_dir: Option<std::path::PathBuf>,
+    plugin_dirs: Vec<std::path::PathBuf>,
+    allow_dev_remote: bool,
+}
+
+fn parse_dev_cli_options(args: &[OsString]) -> Result<DevCliOptions, String> {
+    let mut theme_dir: Option<std::path::PathBuf> = None;
+    let mut plugin_dirs: Vec<std::path::PathBuf> = Vec::new();
+    let mut allow_dev_remote = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "--allow-dev-remote" {
+            allow_dev_remote = true;
+            i += 1;
+            continue;
+        }
+        if arg == "--dev-theme" {
+            let next = args
+                .get(i + 1)
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| "Thiếu đường dẫn thư mục sau '--dev-theme'.".to_owned())?;
+            theme_dir = Some(std::path::PathBuf::from(next));
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = strip_os_prefix(arg, "--dev-theme=") {
+            if rest.is_empty() {
+                return Err("Thiếu đường dẫn thư mục sau '--dev-theme='.".to_owned());
+            }
+            theme_dir = Some(std::path::PathBuf::from(rest));
+            i += 1;
+            continue;
+        }
+        if arg == "--dev-plugin" {
+            let next = args
+                .get(i + 1)
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| "Thiếu đường dẫn thư mục sau '--dev-plugin'.".to_owned())?;
+            plugin_dirs.push(std::path::PathBuf::from(next));
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = strip_os_prefix(arg, "--dev-plugin=") {
+            if rest.is_empty() {
+                return Err("Thiếu đường dẫn thư mục sau '--dev-plugin='.".to_owned());
+            }
+            plugin_dirs.push(std::path::PathBuf::from(rest));
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+
+    if theme_dir.is_none()
+        && let Some(env_theme) = env::var_os("OPENDASH_DEV_THEME_DIR")
+        && !env_theme.is_empty()
+    {
+        theme_dir = Some(std::path::PathBuf::from(env_theme));
+    }
+    if plugin_dirs.is_empty()
+        && let Some(env_plugins) = env::var_os("OPENDASH_DEV_PLUGIN_DIR")
+        && !env_plugins.is_empty()
+    {
+        for p in env::split_paths(&env_plugins) {
+            if !p.as_os_str().is_empty() {
+                plugin_dirs.push(p);
+            }
+        }
+    }
+
+    Ok(DevCliOptions {
+        theme_dir,
+        plugin_dirs,
+        allow_dev_remote,
+    })
+}
+
+async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error>> {
+    let dev_opts = parse_dev_cli_options(&args)?;
     let paths = paths::SitePaths::from_env()?;
     let coordinator = Arc::new(operations::SiteCoordinator::acquire(paths)?);
     let paths = coordinator.paths().clone();
     let runtime_cfg =
         config::RuntimeConfigV1::load(&paths).map_err(|e| format!("{}: {}", e.0, e.1))?;
+    let has_dev_flags = dev_opts.theme_dir.is_some() || !dev_opts.plugin_dirs.is_empty();
+    dev_mode::validate_startup_guards(
+        has_dev_flags,
+        &runtime_cfg.portable,
+        dev_opts.allow_dev_remote,
+    )?;
     let recovery = config::RecoveryState::new(runtime_cfg.portable.recovery_safe_mode);
+    if has_dev_flags {
+        let dev_engine = wasmi::Engine::default();
+        let dev_cfg = dev_mode::DevOverlayConfig::load_and_validate(
+            dev_opts.theme_dir,
+            dev_opts.plugin_dirs,
+            recovery.clone(),
+            &dev_engine,
+        )?;
+        eprintln!(
+            "OpenDash DEV MODE active: theme={:?}, plugins={:?}",
+            dev_cfg.dev_theme_id(),
+            dev_cfg.dev_plugin_ids()
+        );
+        dev_mode::DevOverlayConfig::init_global(Arc::new(dev_cfg));
+    }
     let db = storage::init_db(paths.db_path()).await?;
     storage::theme::ensure_default_starter_theme(&db, &paths.themes_dir())
         .await

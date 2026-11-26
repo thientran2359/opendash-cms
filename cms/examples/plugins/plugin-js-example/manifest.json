@@ -1,0 +1,32 @@
+{
+  "id": "plugin-js-example",
+  "version": "1.0.0",
+  "api_version": 1,
+  "manifest_schema": 3,
+  "min_host_version": "0.1.0",
+  "name": "Plugin JS Example",
+  "description": "Zero-build JavaScript plugin example demonstrating render hooks, scoped routes, KV, and actions.",
+  "entrypoint": "plugin.js",
+  "filters": ["filter:render/footer", "filter:render/slot"],
+  "render_cache": "global",
+  "permissions": {
+    "sqlite": ["kv_read", "kv_write"],
+    "plugin_settings_read": true,
+    "render_trusted_html": true
+  },
+  "routes": [
+    { "id": "status", "method": "GET", "path": "/status", "access": "public" },
+    { "id": "echo", "method": "POST", "path": "/echo", "access": "public" }
+  ],
+  "actions": [
+    {
+      "id": "reset_counter",
+      "title": "Reset Counter",
+      "required_role": "admin",
+      "capabilities": ["kv_write", "log"]
+    }
+  ],
+  "settings_schema": [
+    { "key": "footer_note", "label": "Footer Note", "type": "text", "default": "Powered by OpenDash JS Plugin" }
+  ]
+}

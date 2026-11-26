@@ -32,7 +32,7 @@ pub struct PluginCheckSummary {
     pub settings_count: usize,
 }
 
-fn plugin_entry_max_bytes(name: &str) -> Option<usize> {
+pub(crate) fn plugin_entry_max_bytes(name: &str) -> Option<usize> {
     if name == "manifest.json" {
         Some(MAX_MANIFEST_BYTES)
     } else if name == "plugin.wasm" || name == "plugin.js" {

@@ -734,8 +734,11 @@ pub fn resolve_enqueued_assets(
     route_condition: EnqueueCondition,
 ) -> ResolvedEnqueuedAssets {
     let mut result = ResolvedEnqueuedAssets::default();
-    if revision_digest.len() != 64
-        || !revision_digest
+    let hex_part = revision_digest
+        .strip_prefix("dev-")
+        .unwrap_or(revision_digest);
+    if hex_part.len() != 64
+        || !hex_part
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
         || manifest.validate().is_err()

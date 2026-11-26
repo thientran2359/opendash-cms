@@ -7,7 +7,10 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Connection, Row, SqliteConnection, SqlitePool};
 
 use crate::error::{ApiError, ApiResult};
-use crate::storage::media_refs::collect_referenced_secret_refs;
+use crate::storage::media_refs::{
+    ExtensionSecretInventoryItem, collect_referenced_extension_secret_refs,
+    collect_referenced_secret_refs,
+};
 
 #[derive(Debug, Clone)]
 pub struct BackupMediaItem {
@@ -29,6 +32,7 @@ pub struct BackupInventory {
     pub quarantine_job_ids: Vec<String>,
     pub theme_revisions: Vec<BackupThemeRevisionItem>,
     pub secret_refs: HashSet<String>,
+    pub extension_secret_refs: Vec<ExtensionSecretInventoryItem>,
 }
 
 /// Executes `VACUUM main INTO <destination>` on a dedicated connection outside any open tx,
@@ -155,11 +159,13 @@ pub async fn collect_backup_inventory(db: &SqlitePool) -> ApiResult<BackupInvent
     }
 
     let secret_refs = collect_referenced_secret_refs(db).await?;
+    let extension_secret_refs = collect_referenced_extension_secret_refs(db).await?;
 
     Ok(BackupInventory {
         media,
         quarantine_job_ids,
         theme_revisions,
         secret_refs,
+        extension_secret_refs,
     })
 }

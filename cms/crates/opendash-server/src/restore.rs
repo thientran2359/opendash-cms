@@ -113,6 +113,13 @@ fn resolve_logical_dest(stage_root: &Path, record: &BackupFileRecord) -> ApiResu
             }
             Ok(p)
         }
+        BackupFileKind::ExtensionSecret => {
+            let mut p = stage_root.join("database");
+            for seg in segments {
+                p.push(seg);
+            }
+            Ok(p)
+        }
     }
 }
 
@@ -153,6 +160,15 @@ pub async fn restore_to_new_root(
         let src_path = validated.payload_dir.join(&record.entry_name);
         let dest_path = resolve_logical_dest(&stage_root, record)?;
         if let Some(parent) = dest_path.parent() {
+            if record.kind == BackupFileKind::ExtensionSecret {
+                let db_dir = stage_root.join("database");
+                let sec_dir = db_dir.join("secrets");
+                ensure_private_directory_tree(&db_dir)?;
+                ensure_private_directory_tree(&sec_dir)?;
+                if let Some(subdir_dir) = parent.parent() {
+                    ensure_private_directory_tree(subdir_dir)?;
+                }
+            }
             ensure_private_directory_tree(parent)?;
         }
 
@@ -197,6 +213,11 @@ pub async fn restore_to_new_root(
         }
         dst.sync_all()
             .map_err(|_| ApiError::internal("Lỗi fsync payload khôi phục."))?;
+        drop(dst);
+        if record.kind == BackupFileKind::ExtensionSecret {
+            ensure_no_reparse_or_symlink(&dest_path)?;
+            crate::secrets::verify_file_acl(&dest_path)?;
+        }
 
         if actual_size != record.size || hex_lower(&hasher.finalize()) != record.sha256 {
             return Err(ApiError::bad_request(

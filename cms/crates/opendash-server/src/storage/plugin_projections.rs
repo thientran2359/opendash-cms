@@ -428,8 +428,24 @@ async fn write_entry_projections_in_tx(
             }
             ExtensionOwnerKind::Theme => {
                 if let Some((rev_id, sel_ver)) = theme_fence {
-                    plugin_storage::verify_active_theme_fence_in_tx(&mut *tx, rev_id, *sel_ver)
-                        .await?
+                    if rev_id.starts_with("dev:") {
+                        let cur_theme: Option<String> = sqlx::query_scalar(
+                            "SELECT r.theme_id
+                               FROM theme_active_selection a
+                               JOIN theme_revisions r ON r.revision_id = a.revision_id
+                              WHERE a.id = 1",
+                        )
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                        cur_theme.as_deref() == Some(oid)
+                            && plugin_storage::verify_active_theme_fence_in_tx(
+                                &mut *tx, rev_id, *sel_ver,
+                            )
+                            .await?
+                    } else {
+                        plugin_storage::verify_active_theme_fence_in_tx(&mut *tx, rev_id, *sel_ver)
+                            .await?
+                    }
                 } else {
                     let cur_theme: Option<String> = sqlx::query_scalar(
                         "SELECT r.theme_id
@@ -491,11 +507,25 @@ async fn write_entry_projections_in_tx(
     let mut valid_items: Vec<&ComputedPluginProjection> = Vec::with_capacity(items.len());
     for item in items {
         if item.owner_kind == ExtensionOwnerKind::Theme {
-            if let Some((ref rev_id, sel_ver)) = item.theme_fence
-                && !plugin_storage::verify_active_theme_fence_in_tx(&mut *tx, rev_id, sel_ver)
+            if let Some((ref rev_id, sel_ver)) = item.theme_fence {
+                if rev_id.starts_with("dev:") {
+                    let cur_theme: Option<String> = sqlx::query_scalar(
+                        "SELECT r.theme_id
+                           FROM theme_active_selection a
+                           JOIN theme_revisions r ON r.revision_id = a.revision_id
+                          WHERE a.id = 1",
+                    )
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    if cur_theme.as_deref() != Some(item.plugin_id.as_str()) {
+                        continue;
+                    }
+                }
+                if !plugin_storage::verify_active_theme_fence_in_tx(&mut *tx, rev_id, sel_ver)
                     .await?
-            {
-                continue;
+                {
+                    continue;
+                }
             }
         }
         valid_items.push(item);
