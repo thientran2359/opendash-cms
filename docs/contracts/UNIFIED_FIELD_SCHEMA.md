@@ -1,6 +1,6 @@
-# OpenDash — Hợp đồng Hệ kiểu Trường Thống nhất (`UNIFIED_FIELD_SCHEMA` v1.2)
+# OpenDash — Hợp đồng Hệ kiểu Trường Thống nhất (`UNIFIED_FIELD_SCHEMA` V1)
 
-- **Phiên bản:** `1.2` (`Clean-Slate V1` — cập nhật 2026-11-26: bổ sung `spacing.property` & `select.options_source` ở v1.1; đồng bộ quyết định D1=1B của Luồng A ở v1.2: bỏ `bindable` & `storage/builder_binding.rs`, thêm `term_ref.taxonomy_from_field` và `entry_ref.target_types: ["*"]` cho `StudioBlock`)
+- **Phiên bản:** `1.0.0` (`Clean-Slate V1` — hướng tới phát hành V1.0 đầu tiên; mọi mã nguồn/schema tiền-V1 cũ đều bị loại bỏ hoàn toàn thay vì đánh nhánh phiên bản kế thừa; đã gộp đầy đủ `spacing.property`, `select.options_source`, `term_ref.taxonomy_from_field`, `entry_ref.target_types: ["*"]` và bỏ `bindable` / `storage/builder_binding.rs` theo quyết định D1=1B của Luồng A)
 - **Trạng thái:** `AGREED` *(Chủ dự án phê duyệt 2026-11-26)* · `not_yet_implemented` *(hợp đồng giao diện bắt buộc trước khi triển khai mã nguồn ở các Design Spec EGM liên quan)*
 - **Tài liệu liên quan:** [Yêu cầu sản phẩm V1](../product/PRODUCT_REQUIREMENTS.md) · [Core Foundation](CORE_FOUNDATION.md) · [Plugin ABI](PLUGIN_ABI.md) · [M8 Writer Inventory](M8_WRITER_INVENTORY.md) · [Design Sitemap](../designs/SITEMAP.md)
 
@@ -202,4 +202,4 @@ Mọi bề mặt dùng chung **1 quy tắc hydrate chuẩn (Zero-N+1 batching)**
 |---|---|---|
 | **Đợt 1 — Unified Field Engine *(Nền chung — merge trước)*** | `opendash-core/src/field_schema.rs`, `block_schema.rs`, `opendash-server/src/{page.rs,template_sec.rs,content_render.rs,storage/{settings,media_refs}.rs}`, `cms/admin/src/fields/`, cập nhật `7` builtin blocks + `opendash-starter` + examples/fixtures | Hiện thực hóa §2, §3, §4, §6; xóa bỏ 4 hệ field cũ. |
 | **Luồng A — Builder Blocks *(Độc lập sau Đợt 1; thiết kế song song ngay)*** | `builtin_blocks/<new-block>/{block.json,render.html}`, theme blocks/patterns, Studio Block Catalog & Canvas UX | Mọi `block.json` & `render.html` mới tuân thủ đúng §2, §3, §6 của hợp đồng này. |
-| **Luồng B — Content Structure ACF *(Đợt 2 & Đợt 3 — Độc lập với Luồng A)*** | `opendash-core/src/content.rs`, `migrations/0054+*`, `storage/{content,taxonomy,entries,permalinks}.rs`, `routes/{content,taxonomy}.rs`, `cms/admin/src/features/{content,taxonomy,editor}/` | Hiện thực hóa §5 (CPT v2, Taxonomies v2, Field Groups + Location Rules, Term Meta, Relational `entry_ref`/`term_ref`, Custom Options Pages, Hierarchical CPT). |
+| **Luồng B — Content Structure ACF *(Đợt 2 & Đợt 3 — Độc lập với Luồng A)*** | `opendash-core/src/content.rs`, `migrations/0057+*`, `storage/{content,taxonomy,entries,permalinks}.rs`, `routes/{content,taxonomy}.rs`, `cms/admin/src/features/{content,taxonomy,editor}/` | Hiện thực hóa §5 (CPT v2, Taxonomies v2, Field Groups + Location Rules, Term Meta, Relational `entry_ref`/`term_ref`, Custom Options Pages, Hierarchical CPT). |
