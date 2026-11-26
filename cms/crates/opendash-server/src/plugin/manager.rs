@@ -274,6 +274,10 @@ impl PluginManager {
         &self.themes_root
     }
 
+    pub fn engine(&self) -> &wasmi::Engine {
+        self.runtime.engine()
+    }
+
     pub async fn invalidate_cache(&self) {
         *self.manifest_cache.write().await = None;
     }
@@ -283,6 +287,44 @@ impl PluginManager {
     }
 
     async fn ensure_active_theme_cache(&self) -> Result<Option<CachedActiveTheme>, String> {
+        if let Some(dev) = crate::dev_mode::DevOverlayConfig::global()
+            && dev.dev_theme_id().is_some()
+        {
+            return match dev.load_dev_theme() {
+                Ok(Some(snap)) => {
+                    let Some(runtime_manifest) = snap.manifest.to_runtime_manifest() else {
+                        return Ok(None);
+                    };
+                    let Some(js_bytes) = snap.functions_js else {
+                        return Ok(None);
+                    };
+                    let db_sel = crate::storage::theme::get_active_selection(&self.db_pool)
+                        .await
+                        .map_err(|e| e.1.to_string())?;
+                    let revision_id =
+                        if db_sel.theme_id.as_deref() == Some(snap.manifest.theme_id.as_str()) {
+                            db_sel
+                                .revision_id
+                                .unwrap_or_else(|| format!("dev:{}", snap.manifest.theme_id))
+                        } else {
+                            format!("dev:{}", snap.manifest.theme_id)
+                        };
+                    Ok(Some(CachedActiveTheme {
+                        theme_id: snap.manifest.theme_id,
+                        revision_id,
+                        revision_digest: snap.revision_digest,
+                        selection_version: db_sel.version,
+                        manifest: runtime_manifest,
+                        js_bytes,
+                    }))
+                }
+                Ok(None) => Ok(None),
+                Err(err) => {
+                    eprintln!("Dev theme functions load failed: {err}");
+                    Ok(None)
+                }
+            };
+        }
         {
             let guard = self.active_theme_cache.read().await;
             if let Some(ref cached) = *guard {
@@ -366,7 +408,8 @@ impl PluginManager {
     }
 
     async fn ensure_manifest_cache(&self) -> Result<BTreeMap<String, CachedActivePlugin>, String> {
-        {
+        let dev_overlay = crate::dev_mode::DevOverlayConfig::global();
+        if dev_overlay.is_none() {
             let guard = self.manifest_cache.read().await;
             if let Some(ref map) = *guard {
                 return Ok(map.clone());
@@ -377,6 +420,10 @@ impl PluginManager {
             .map_err(|e| e.to_string())?;
         let mut built = BTreeMap::new();
         for row in rows {
+            if row.wasm_blob.is_empty() && row.revision_digest.is_none() {
+                // Dev-only placeholder synced via /api/admin/dev/sync; only active when mounted via --dev-plugin.
+                continue;
+            }
             match PluginManifest::from_json_str(&row.manifest_json) {
                 Ok(manifest) if manifest.id == row.id => {
                     built.insert(
@@ -394,6 +441,24 @@ impl PluginManager {
                     eprintln!("Invalid cached manifest {}: {error}", row.id);
                 }
             }
+        }
+        if let Some(dev) = dev_overlay {
+            for snap in dev.load_all_dev_plugins_best_effort(self.runtime.engine()) {
+                let db_gen = built
+                    .get(&snap.manifest.id)
+                    .map(|existing| existing.revision_generation)
+                    .unwrap_or(0);
+                built.insert(
+                    snap.manifest.id.clone(),
+                    CachedActivePlugin {
+                        manifest: snap.manifest,
+                        wasm_blob: snap.code_bytes,
+                        revision_generation: db_gen,
+                        revision_digest: Some(snap.revision_digest),
+                    },
+                );
+            }
+            return Ok(built);
         }
         *self.manifest_cache.write().await = Some(built.clone());
         Ok(built)
@@ -549,64 +614,104 @@ impl PluginManager {
                         "Plugin không tồn tại.".into(),
                     )
                 })?;
-                let row_opt =
-                    plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
-                        .await
-                        .map_err(|e| {
+                if let Some(dev) = crate::dev_mode::DevOverlayConfig::global()
+                    && dev.has_dev_plugin(id)
+                {
+                    let snap = dev
+                        .load_dev_plugin_by_id(id, self.runtime.engine())
+                        .map_err(|err| mk_err(StatusCode::CONFLICT, "dev_plugin_invalid", err))?
+                        .ok_or_else(|| {
                             mk_err(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "db_error",
-                                format!("Lỗi cơ sở dữ liệu: {e}"),
+                                StatusCode::NOT_FOUND,
+                                "not_found",
+                                "Plugin không tồn tại.".into(),
                             )
                         })?;
-                let Some((
-                    wasm_blob,
-                    manifest_json,
-                    enabled,
-                    revision_generation,
-                    revision_digest_opt,
-                )) = row_opt
-                else {
-                    return Err(mk_err(
-                        StatusCode::NOT_FOUND,
-                        "not_found",
-                        "Plugin không tồn tại.".into(),
-                    ));
-                };
-                if !enabled {
-                    return Err(mk_err(
-                        StatusCode::BAD_REQUEST,
-                        "disabled",
-                        "Plugin chưa được bật hoặc đã bị vô hiệu hóa.".into(),
-                    ));
-                }
-                let manifest =
-                    serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
-                        mk_err(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "corrupt_manifest",
-                            format!("Manifest không hợp lệ: {e}"),
-                        )
-                    })?;
-                if let Some(digest) = &revision_digest_opt
-                    && let Err(err) = plugin_storage::verify_plugin_revision_durability(
-                        &self.plugins_root,
-                        digest,
+                    let db_gen =
+                        plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
+                            .await
+                            .ok()
+                            .flatten()
+                            .and_then(|(_, _, enabled, gen_val, _)| enabled.then_some(gen_val))
+                            .unwrap_or(0);
+                    let rt_kind = snap.manifest.runtime_kind();
+                    (
+                        id.to_owned(),
+                        snap.code_bytes,
+                        snap.manifest,
+                        OwnerFence::Plugin {
+                            plugin_id: id.to_owned(),
+                            expected_generation: db_gen,
+                        },
+                        rt_kind,
                     )
-                {
-                    return Err(mk_err(StatusCode::CONFLICT, "corrupt_revision", err));
+                } else {
+                    let row_opt =
+                        plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
+                            .await
+                            .map_err(|e| {
+                                mk_err(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "db_error",
+                                    format!("Lỗi cơ sở dữ liệu: {e}"),
+                                )
+                            })?;
+                    let Some((
+                        wasm_blob,
+                        manifest_json,
+                        enabled,
+                        revision_generation,
+                        revision_digest_opt,
+                    )) = row_opt
+                    else {
+                        return Err(mk_err(
+                            StatusCode::NOT_FOUND,
+                            "not_found",
+                            "Plugin không tồn tại.".into(),
+                        ));
+                    };
+                    if !enabled {
+                        return Err(mk_err(
+                            StatusCode::BAD_REQUEST,
+                            "disabled",
+                            "Plugin chưa được bật hoặc đã bị vô hiệu hóa.".into(),
+                        ));
+                    }
+                    if wasm_blob.is_empty() && revision_digest_opt.is_none() {
+                        return Err(mk_err(
+                            StatusCode::NOT_FOUND,
+                            "dev_plugin_unmounted",
+                            "Plugin chỉ có ở chế độ dev; hãy khởi chạy kèm --dev-plugin hoặc cài bản ZIP chính thức.".into(),
+                        ));
+                    }
+                    let manifest =
+                        serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
+                            mk_err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "corrupt_manifest",
+                                format!("Manifest không hợp lệ: {e}"),
+                            )
+                        })?;
+                    if let Some(digest) = &revision_digest_opt
+                        && let Err(err) = plugin_storage::verify_plugin_revision_durability(
+                            &self.plugins_root,
+                            digest,
+                        )
+                    {
+                        return Err(mk_err(StatusCode::CONFLICT, "corrupt_revision", err));
+                    }
+                    let rt_kind = manifest.runtime_kind();
+                    (
+                        id.to_owned(),
+                        wasm_blob,
+                        manifest,
+                        OwnerFence::Plugin {
+                            plugin_id: id.to_owned(),
+                            expected_generation: revision_generation,
+                        },
+                        rt_kind,
+                    )
                 }
-                let rt_kind = manifest.runtime_kind();
-                (
-                    id.to_owned(),
-                    wasm_blob,
-                    manifest,
-                    OwnerFence::Plugin {
-                        plugin_id: id.to_owned(),
-                        expected_generation: revision_generation,
-                    },
-                    rt_kind,
-                )
             }
             ExtensionOwnerKind::Theme => {
                 let cached = self
@@ -2348,22 +2453,6 @@ impl PluginManager {
         principal: ExecutionPrincipal,
         timeout_override: Option<std::time::Duration>,
     ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
-        let row_opt = plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    PluginRunResponse {
-                        success: false,
-                        data: None,
-                        error: Some(format!("Lỗi cơ sở dữ liệu: {e}")),
-                        code: Some("db_error".into()),
-                        correlation_id: correlation_id.clone(),
-                        confirmation: None,
-                    },
-                )
-            })?;
-
         if self.recovery.is_safe_mode() {
             return Err((
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -2379,67 +2468,141 @@ impl PluginManager {
                 },
             ));
         }
-        let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) =
-            row_opt
-        else {
-            return Err((
-                StatusCode::NOT_FOUND,
-                PluginRunResponse {
-                    success: false,
-                    data: None,
-                    error: Some("Plugin không tồn tại.".into()),
-                    code: Some("not_found".into()),
-                    correlation_id,
-                    confirmation: None,
-                },
-            ));
-        };
 
-        if !enabled {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                PluginRunResponse {
-                    success: false,
-                    data: None,
-                    error: Some("Plugin chưa được bật hoặc đã bị vô hiệu hóa.".into()),
-                    code: Some("disabled".into()),
-                    correlation_id,
-                    confirmation: None,
-                },
-            ));
-        }
-
-        let manifest = serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                PluginRunResponse {
-                    success: false,
-                    data: None,
-                    error: Some(format!("Manifest trong database không hợp lệ: {e}")),
-                    code: Some("corrupt_manifest".into()),
-                    correlation_id: correlation_id.clone(),
-                    confirmation: None,
-                },
-            )
-        })?;
-
-        if let Some(digest) = &revision_digest_opt {
-            if let Err(err) =
-                plugin_storage::verify_plugin_revision_durability(&self.plugins_root, digest)
-            {
+        let (wasm_blob, manifest, revision_generation) = if let Some(dev) =
+            crate::dev_mode::DevOverlayConfig::global()
+            && dev.has_dev_plugin(id)
+        {
+            let snap = dev
+                .load_dev_plugin_by_id(id, self.runtime.engine())
+                .map_err(|err| {
+                    (
+                        StatusCode::CONFLICT,
+                        PluginRunResponse {
+                            success: false,
+                            data: None,
+                            error: Some(err),
+                            code: Some("dev_plugin_invalid".into()),
+                            correlation_id: correlation_id.clone(),
+                            confirmation: None,
+                        },
+                    )
+                })?
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        PluginRunResponse {
+                            success: false,
+                            data: None,
+                            error: Some("Plugin không tồn tại.".into()),
+                            code: Some("not_found".into()),
+                            correlation_id: correlation_id.clone(),
+                            confirmation: None,
+                        },
+                    )
+                })?;
+            let db_gen = plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|(_, _, enabled, gen_val, _)| enabled.then_some(gen_val))
+                .unwrap_or(0);
+            (snap.code_bytes, snap.manifest, db_gen)
+        } else {
+            let row_opt = plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        PluginRunResponse {
+                            success: false,
+                            data: None,
+                            error: Some(format!("Lỗi cơ sở dữ liệu: {e}")),
+                            code: Some("db_error".into()),
+                            correlation_id: correlation_id.clone(),
+                            confirmation: None,
+                        },
+                    )
+                })?;
+            let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) =
+                row_opt
+            else {
                 return Err((
-                    StatusCode::CONFLICT,
+                    StatusCode::NOT_FOUND,
                     PluginRunResponse {
                         success: false,
                         data: None,
-                        error: Some(err),
-                        code: Some("corrupt_revision".into()),
+                        error: Some("Plugin không tồn tại.".into()),
+                        code: Some("not_found".into()),
+                        correlation_id,
+                        confirmation: None,
+                    },
+                ));
+            };
+
+            if !enabled {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    PluginRunResponse {
+                        success: false,
+                        data: None,
+                        error: Some("Plugin chưa được bật hoặc đã bị vô hiệu hóa.".into()),
+                        code: Some("disabled".into()),
                         correlation_id,
                         confirmation: None,
                     },
                 ));
             }
-        }
+            if wasm_blob.is_empty() && revision_digest_opt.is_none() {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    PluginRunResponse {
+                        success: false,
+                        data: None,
+                        error: Some(
+                            "Plugin chỉ có ở chế độ dev; hãy khởi chạy kèm --dev-plugin hoặc cài bản ZIP chính thức."
+                                .into(),
+                        ),
+                        code: Some("dev_plugin_unmounted".into()),
+                        correlation_id,
+                        confirmation: None,
+                    },
+                ));
+            }
+
+            let manifest = serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    PluginRunResponse {
+                        success: false,
+                        data: None,
+                        error: Some(format!("Manifest trong database không hợp lệ: {e}")),
+                        code: Some("corrupt_manifest".into()),
+                        correlation_id: correlation_id.clone(),
+                        confirmation: None,
+                    },
+                )
+            })?;
+
+            if let Some(digest) = &revision_digest_opt {
+                if let Err(err) =
+                    plugin_storage::verify_plugin_revision_durability(&self.plugins_root, digest)
+                {
+                    return Err((
+                        StatusCode::CONFLICT,
+                        PluginRunResponse {
+                            success: false,
+                            data: None,
+                            error: Some(err),
+                            code: Some("corrupt_revision".into()),
+                            correlation_id,
+                            confirmation: None,
+                        },
+                    ));
+                }
+            }
+            (wasm_blob, manifest, revision_generation)
+        };
 
         let input = if manifest.manifest_schema >= 3 {
             v2_input.unwrap_or(legacy_input)
@@ -2553,10 +2716,50 @@ impl PluginManager {
             return Ok(None);
         }
 
-        // 1. Check enabled plugin with matching package ID and route
-        if let Ok(Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest))) =
+        // 1. Check mounted dev plugin first, then enabled plugin in DB
+        if let Some(dev) = crate::dev_mode::DevOverlayConfig::global()
+            && dev.has_dev_plugin(pkg)
+        {
+            if let Ok(Some(snap)) = dev.load_dev_plugin_by_id(pkg, self.runtime.engine()) {
+                let db_gen =
+                    plugin_storage::load_plugin_executable_with_generation(&self.db_pool, pkg)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|(_, _, enabled, gen_val, _)| enabled.then_some(gen_val))
+                        .unwrap_or(0);
+                for route in &snap.manifest.routes {
+                    if route.method == method
+                        && let Some(params) =
+                            opendash_core::plugin::match_route_path(&route.path, subpath)
+                    {
+                        let runtime_kind =
+                            ExtensionRuntimeKind::from_entrypoint(&snap.manifest.entrypoint);
+                        return Ok(Some(ResolvedExtensionRoute {
+                            owner: RuntimeOwner::plugin(snap.manifest.id.clone()),
+                            route: route.clone(),
+                            params,
+                            code_bytes: snap.code_bytes,
+                            runtime_kind,
+                            owner_fence: OwnerFence::Plugin {
+                                plugin_id: snap.manifest.id.clone(),
+                                expected_generation: db_gen,
+                            },
+                            manifest: snap.manifest,
+                        }));
+                    }
+                }
+            }
+        } else if let Ok(Some((
+            wasm_blob,
+            manifest_json,
+            enabled,
+            revision_generation,
+            revision_digest,
+        ))) =
             plugin_storage::load_plugin_executable_with_generation(&self.db_pool, pkg).await
             && enabled
+            && !(wasm_blob.is_empty() && revision_digest.is_none())
             && let Ok(manifest) = serde_json::from_str::<PluginManifest>(&manifest_json)
         {
             for route in &manifest.routes {
@@ -2747,8 +2950,7 @@ impl PluginManager {
             }
         };
 
-        let render_trusted_html =
-            owner_kind == ExtensionOwnerKind::Theme || manifest.permissions.render_trusted_html;
+        let render_trusted_html = manifest.permissions.render_trusted_html;
 
         if execution_mode == HookExecutionMode::RoutePost {
             if let Some(cmd) = exec_out.staged_content_command {

@@ -238,8 +238,8 @@ pub enum EnvelopeKind {
     Filter,
     Action,
     Manual,
-    // Reserved Stage 5-6 seams (rejected in V1 dispatchers)
     Route,
+    // Reserved future seam (rejected in V1 dispatchers)
     Cron,
 }
 

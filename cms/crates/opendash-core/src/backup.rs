@@ -102,6 +102,7 @@ pub enum BackupFileKind {
     ThemePackageFile,
     PluginPackageFile,
     SmtpSecret,
+    ExtensionSecret,
     QuarantineObject,
     PortableConfig,
 }
@@ -261,6 +262,33 @@ pub fn validate_logical_key(kind: BackupFileKind, key: &str) -> Result<(), &'sta
                 Err("Secret logical_key phải là 64-hex.")
             }
         }
+        BackupFileKind::ExtensionSecret => {
+            let rest = key
+                .strip_prefix("secrets/")
+                .ok_or("Extension secret logical_key phải bắt đầu bằng secrets/.")?;
+            let (subdir, tail) = rest
+                .split_once('/')
+                .ok_or("Extension secret logical_key thiếu thư mục sở hữu.")?;
+            if !matches!(subdir, "plugins" | "themes") {
+                return Err("Extension secret chỉ hỗ trợ secrets/plugins/ hoặc secrets/themes/.");
+            }
+            let (package_id, fname) = tail
+                .split_once('/')
+                .ok_or("Extension secret logical_key thiếu package_id.")?;
+            if fname.contains('/') || crate::id::validate_package_id(package_id).is_err() {
+                return Err(
+                    "Extension secret logical_key có package_id hoặc tên tệp không hợp lệ.",
+                );
+            }
+            let stem = fname
+                .strip_suffix(".json")
+                .ok_or("Extension secret logical_key phải có đuôi .json.")?;
+            if is_valid_sha256_hex(stem) {
+                Ok(())
+            } else {
+                Err("Extension secret logical_key phải là 64-hex.")
+            }
+        }
         BackupFileKind::QuarantineObject => {
             let rest = key
                 .strip_prefix("quarantine/")
@@ -387,6 +415,41 @@ mod tests {
                 &format!("secrets/smtp/{h}.json")
             )
             .is_ok()
+        );
+        assert!(
+            validate_logical_key(
+                BackupFileKind::ExtensionSecret,
+                &format!("secrets/plugins/demo-plugin/{h}.json")
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_logical_key(
+                BackupFileKind::ExtensionSecret,
+                &format!("secrets/themes/demo-theme/{h}.json")
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_logical_key(
+                BackupFileKind::ExtensionSecret,
+                &format!("secrets/smtp/{h}.json")
+            )
+            .is_err()
+        );
+        assert!(
+            validate_logical_key(
+                BackupFileKind::ExtensionSecret,
+                &format!("secrets/plugins/BAD_ID/{h}.json")
+            )
+            .is_err()
+        );
+        assert!(
+            validate_logical_key(
+                BackupFileKind::ExtensionSecret,
+                "secrets/plugins/demo-plugin/not-hex.json"
+            )
+            .is_err()
         );
         assert!(validate_logical_key(BackupFileKind::Db, "db/../main.sqlite").is_err());
         assert!(validate_logical_key(BackupFileKind::Db, "db/CON").is_err());

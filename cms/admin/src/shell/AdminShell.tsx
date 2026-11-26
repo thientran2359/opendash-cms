@@ -244,6 +244,11 @@ interface AdminShellProps {
   cptTaxonomies?: Record<string, Array<{ key: string; label: string }>>;
   onNavigateHash: (hash: string) => void;
   hasUnsavedChanges: boolean;
+  devMode?: boolean;
+  devTheme?: string | null;
+  devPlugins?: string[];
+  devSyncing?: boolean;
+  onSyncDevManifest?: () => void;
   contentContent: React.ReactNode;
   schemaSettingsContent: React.ReactNode;
   postsContent: React.ReactNode;
@@ -266,6 +271,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   route, routeForbidden, cptTypes, cptTaxonomies, onNavigateHash, hasUnsavedChanges,
+  devMode = false, devTheme = null, devPlugins = [], devSyncing = false, onSyncDevManifest,
   contentContent, schemaSettingsContent,
   postsContent, pagesContent, patternsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
@@ -517,6 +523,27 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               </div>
             </div>
             <div className="od-topbar-actions flex flex-wrap items-center gap-2.5">
+              {devMode && (
+                <div className="flex flex-wrap items-center gap-2" data-testid="dev-mode-banner">
+                  <span
+                    className="inline-flex items-center rounded-md border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-bold tracking-wide text-amber-900"
+                    title={[devTheme ? `Theme: ${devTheme}` : null, devPlugins.length > 0 ? `Plugins: ${devPlugins.join(', ')}` : null].filter(Boolean).join(' · ') || undefined}
+                  >
+                    {t('shell.dev_mode_badge')}
+                  </span>
+                  {user?.role === 'admin' && onSyncDevManifest && (
+                    <button
+                      type="button"
+                      data-testid="dev-sync-button"
+                      disabled={devSyncing}
+                      onClick={onSyncDevManifest}
+                      className="inline-flex h-7 items-center rounded-md border border-amber-300 bg-white px-2.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-50 disabled:opacity-50"
+                    >
+                      {devSyncing ? t('shell.dev_syncing') : t('shell.dev_sync_button')}
+                    </button>
+                  )}
+                </div>
+              )}
               {hasUnsavedChanges && <span className="od-unsaved-label" role="status">{t('shell.unsaved')}</span>}
               {user && <AuthPanel
                 user={user} authUsername={authUsername} authPassword={authPassword}

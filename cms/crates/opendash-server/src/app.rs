@@ -223,6 +223,11 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
         )
         .route(
+            "/api/public/p/{pkg}",
+            post(crate::routes::extensions::extension_public_post_root)
+                .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
+        )
+        .route(
             "/api/public/p/{pkg}/{*subpath}",
             post(crate::routes::extensions::extension_public_post)
                 .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
@@ -524,6 +529,25 @@ pub fn build_router_with_themes_root(
             axum::routing::put(theme_activate).layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/themes/active/layouts", get(crate::routes::themes::active_layouts))
+        .route(
+            "/api/admin/themes/active/functions/settings",
+            get(crate::routes::themes::theme_functions_get_settings)
+                .put(crate::routes::themes::theme_functions_put_settings)
+                .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/themes/active/actions/{action_id}",
+            post(crate::routes::themes::theme_active_action)
+                .layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/themes/active/functions/logs",
+            get(crate::routes::themes::theme_functions_logs),
+        )
+        .route(
+            "/api/admin/dev/sync",
+            post(crate::routes::themes::dev_sync).layer(DefaultBodyLimit::max(4096)),
+        )
         .route(
             "/api/themes/{theme_id}/options",
             get(theme_options_get)

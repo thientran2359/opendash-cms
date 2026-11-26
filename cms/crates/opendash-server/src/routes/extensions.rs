@@ -291,8 +291,19 @@ async fn format_route_output(
                 &ResolvedEnqueuedAssets::default(),
                 render_trusted_html,
             ) {
-                Ok(doc) if doc.len() <= MAX_EXTENSION_ROUTE_RESPONSE_BYTES => doc,
-                _ => {
+                Ok(doc) => {
+                    let doc = doc.replace(content_render::HEAD_END_MARKER, "");
+                    if doc.len() <= MAX_EXTENSION_ROUTE_RESPONSE_BYTES {
+                        doc
+                    } else {
+                        return json_error_response(
+                            StatusCode::BAD_GATEWAY,
+                            "invalid_html_output",
+                            "Không thể dựng tài liệu HTML cho route mở rộng.",
+                        );
+                    }
+                }
+                Err(_) => {
                     return json_error_response(
                         StatusCode::BAD_GATEWAY,
                         "invalid_html_output",
@@ -590,20 +601,21 @@ pub async fn extension_api_post(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn extension_public_post(
-    State(coordinator): State<Arc<SiteCoordinator>>,
-    State(hooks): State<Arc<HookDispatcher>>,
-    State(db): State<SqlitePool>,
-    Extension(rate_limiter): Extension<ExtensionRouteRateLimiter>,
-    Extension(ExpectedListenerOrigin(listener_origin)): Extension<ExpectedListenerOrigin>,
+async fn execute_public_post(
+    coordinator: Arc<SiteCoordinator>,
+    hooks: Arc<HookDispatcher>,
+    db: SqlitePool,
+    rate_limiter: ExtensionRouteRateLimiter,
+    listener_origin: String,
     runtime_cfg: Option<Extension<crate::config::RuntimeConfigV1>>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
-    Path((pkg, subpath)): Path<(String, String)>,
-    OriginalUri(uri): OriginalUri,
+    pkg: String,
+    subpath: Option<String>,
+    uri: axum::http::Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult<Response> {
-    let norm_sub = normalized_subpath(Some(&subpath));
+    let norm_sub = normalized_subpath(subpath.as_deref());
     let resolved = match hooks
         .resolve_extension_route(&pkg, RouteMethod::Post, &norm_sub)
         .await
@@ -749,4 +761,66 @@ pub async fn extension_public_post(
         }
         Err((st, err_resp)) => Ok((st, no_store_nosniff_headers(), Json(err_resp)).into_response()),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn extension_public_post_root(
+    State(coordinator): State<Arc<SiteCoordinator>>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    State(db): State<SqlitePool>,
+    Extension(rate_limiter): Extension<ExtensionRouteRateLimiter>,
+    Extension(ExpectedListenerOrigin(listener_origin)): Extension<ExpectedListenerOrigin>,
+    runtime_cfg: Option<Extension<crate::config::RuntimeConfigV1>>,
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
+    Path(pkg): Path<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    execute_public_post(
+        coordinator,
+        hooks,
+        db,
+        rate_limiter,
+        listener_origin,
+        runtime_cfg,
+        connect_info,
+        pkg,
+        None,
+        uri,
+        headers,
+        body,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn extension_public_post(
+    State(coordinator): State<Arc<SiteCoordinator>>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    State(db): State<SqlitePool>,
+    Extension(rate_limiter): Extension<ExtensionRouteRateLimiter>,
+    Extension(ExpectedListenerOrigin(listener_origin)): Extension<ExpectedListenerOrigin>,
+    runtime_cfg: Option<Extension<crate::config::RuntimeConfigV1>>,
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
+    Path((pkg, subpath)): Path<(String, String)>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    execute_public_post(
+        coordinator,
+        hooks,
+        db,
+        rate_limiter,
+        listener_origin,
+        runtime_cfg,
+        connect_info,
+        pkg,
+        Some(subpath),
+        uri,
+        headers,
+        body,
+    )
+    .await
 }

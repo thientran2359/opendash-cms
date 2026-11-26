@@ -68,8 +68,10 @@ impl SecretStore {
 
     pub fn ensure_private_dir(&self) -> ApiResult<()> {
         if let Some(secrets_root) = self.smtp_dir.parent() {
-            if secrets_root.file_name() == Some(std::ffi::OsStr::new("plugins"))
-                && let Some(base_secrets) = secrets_root.parent()
+            if matches!(
+                secrets_root.file_name().and_then(|s| s.to_str()),
+                Some("plugins" | "themes")
+            ) && let Some(base_secrets) = secrets_root.parent()
             {
                 ensure_no_reparse_or_symlink(base_secrets)?;
                 fs::create_dir_all(base_secrets)
@@ -259,6 +261,10 @@ pub fn ensure_private_directory_tree(dir: &Path) -> ApiResult<()> {
 
 pub fn create_private_file(path: &Path) -> ApiResult<File> {
     create_protected_empty_file(path)
+}
+
+pub fn verify_file_acl(path: &Path) -> ApiResult<()> {
+    platform::verify_file_acl(path)
 }
 
 fn create_protected_empty_file(path: &Path) -> ApiResult<File> {

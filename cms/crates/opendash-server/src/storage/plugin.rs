@@ -833,6 +833,11 @@ pub async fn is_plugin_generation_active(
     id: &str,
     expected_generation: i64,
 ) -> Result<bool, sqlx::Error> {
+    if expected_generation == 0
+        && crate::dev_mode::DevOverlayConfig::global().is_some_and(|dev| dev.has_dev_plugin(id))
+    {
+        return Ok(true);
+    }
     let row_opt: Option<(i64, i64)> =
         sqlx::query_as("SELECT enabled, revision_generation FROM plugins WHERE id = ?")
             .bind(id)
@@ -850,6 +855,13 @@ pub async fn verify_active_theme_fence_in_tx(
         sqlx::query_as("SELECT revision_id, version FROM theme_active_selection WHERE id = 1")
             .fetch_optional(conn)
             .await?;
+    if let Some(dev_theme_id) = expected_revision_id.strip_prefix("dev:") {
+        let dev_matches = crate::dev_mode::DevOverlayConfig::global()
+            .is_some_and(|dev| dev.dev_theme_id() == Some(dev_theme_id));
+        return Ok(
+            dev_matches && matches!(row_opt, Some((_, ver)) if ver == expected_selection_version)
+        );
+    }
     Ok(matches!(
         row_opt,
         Some((Some(ref rev_id), ver))
@@ -1080,6 +1092,153 @@ pub async fn insert_owner_log_in_conn(
     .bind(message)
     .execute(conn)
     .await
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OwnerLogEntry {
+    pub id: i64,
+    pub correlation_id: String,
+    pub level: String,
+    pub message: String,
+    pub created_at: String,
+}
+
+pub async fn list_owner_logs(
+    db: &SqlitePool,
+    owner_kind: opendash_core::hooks::ExtensionOwnerKind,
+    owner_id: &str,
+    limit: i64,
+) -> crate::error::ApiResult<Vec<OwnerLogEntry>> {
+    let rows = sqlx::query(
+        "SELECT id, correlation_id, level, message, created_at
+           FROM plugin_logs
+          WHERE owner_kind = ? AND plugin_id = ?
+          ORDER BY id DESC
+          LIMIT ?",
+    )
+    .bind(owner_kind.as_str())
+    .bind(owner_id)
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        out.push(OwnerLogEntry {
+            id: row.get("id"),
+            correlation_id: row.get("correlation_id"),
+            level: row.get("level"),
+            message: row.get("message"),
+            created_at: row.get("created_at"),
+        });
+    }
+    Ok(out)
+}
+
+/// Synchronizes a mounted `--dev-plugin` manifest, declarations, admin extensions,
+/// and blocks into SQLite without polluting immutable `plugin_revisions` or
+/// persisting raw dev code bytes into `plugins.wasm_blob`.
+pub async fn sync_dev_plugin_in_db(
+    db_pool: &SqlitePool,
+    snap: &crate::dev_mode::DevPluginSnapshot,
+) -> crate::error::ApiResult<()> {
+    let manifest = &snap.manifest;
+    let mut tx = db_pool.begin_with("BEGIN IMMEDIATE").await?;
+
+    let existing_committed: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT active_revision_id FROM plugins WHERE id = ?")
+            .bind(&manifest.id)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    if existing_committed.flatten().is_some() {
+        // Preserve committed plugin revision metadata and executable blob untouched;
+        // live Dev Mode execution reads code & manifest from DevOverlayConfig directly.
+        sqlx::query(
+            "UPDATE plugins
+             SET enabled = 1,
+                 last_error = NULL,
+                 revision_generation = revision_generation + 1,
+                 cas_version = cas_version + 1,
+                 updated_at = datetime('now')
+             WHERE id = ?",
+        )
+        .bind(&manifest.id)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        // Dev-only plugin (never installed as a committed ZIP revision): store an empty
+        // placeholder blob so raw dev code never enters SQLite or VACUUM INTO backups,
+        // and cannot execute once the server restarts without --dev-plugin.
+        let empty_blob: &[u8] = &[];
+        sqlx::query(
+            "INSERT INTO plugins (id, version, name, description, manifest_json, wasm_blob, enabled, last_error, revision_generation, cas_version, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 1, NULL, 1, 1, datetime('now'))
+             ON CONFLICT(id) DO UPDATE SET
+                 version = excluded.version,
+                 name = excluded.name,
+                 description = excluded.description,
+                 manifest_json = excluded.manifest_json,
+                 wasm_blob = excluded.wasm_blob,
+                 enabled = 1,
+                 last_error = NULL,
+                 revision_generation = plugins.revision_generation + 1,
+                 cas_version = plugins.cas_version + 1,
+                 updated_at = excluded.updated_at",
+        )
+        .bind(&manifest.id)
+        .bind(&manifest.version)
+        .bind(&manifest.name)
+        .bind(&manifest.description)
+        .bind(&snap.manifest_json)
+        .bind(empty_blob)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    crate::storage::content::sync_plugin_cnt_declarations_in_tx(
+        &mut tx,
+        &manifest.id,
+        &manifest.declarations,
+    )
+    .await?;
+    crate::storage::admin_extensions::require_capacity_in_conn(
+        &mut tx,
+        "plugin",
+        &manifest.id,
+        snap.admin_extensions.as_ref(),
+    )
+    .await?;
+    crate::storage::admin_extensions::sync_owner_in_conn(
+        &mut tx,
+        "plugin",
+        &manifest.id,
+        snap.admin_extensions.as_ref(),
+        "active",
+        &manifest
+            .actions
+            .iter()
+            .map(|a| a.id.clone())
+            .collect::<Vec<_>>(),
+    )
+    .await?;
+    crate::storage::page::sync_owner_blocks_in_tx(
+        &mut tx,
+        "plugin",
+        &manifest.id,
+        ProviderStatus::Active,
+        &snap.revision_digest,
+        &snap.blocks,
+    )
+    .await?;
+    crate::storage::page::resync_plugin_block_acls_in_tx(&mut tx).await?;
+    super::plugin_projections::delete_plugin_projections_in_tx(&mut tx, &manifest.id)
+        .await
+        .map_err(|_| crate::error::ApiError::internal("Lỗi xóa plugin projections cũ."))?;
+
+    tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
+    Ok(())
 }
 
 #[allow(dead_code)]

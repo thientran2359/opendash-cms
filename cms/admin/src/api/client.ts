@@ -247,6 +247,10 @@ export interface HealthResponse {
   status: string;
   database: string;
   scaffold: boolean;
+  safe_mode?: boolean;
+  dev_mode?: boolean;
+  dev_theme?: string | null;
+  dev_plugins?: string[];
 }
 
 export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {

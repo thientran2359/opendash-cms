@@ -1,0 +1,11 @@
+<section class="starter-shell">
+  {{ od_hook("hero_banner") }}
+  <main class="starter-list">
+    <h1>{{ site.title }}</h1>
+    {% for item in entries %}
+      <article class="starter-card">
+        <h2><a href="{{ item.url }}">{{ item.title }}</a></h2>
+      </article>
+    {% endfor %}
+  </main>
+</section>

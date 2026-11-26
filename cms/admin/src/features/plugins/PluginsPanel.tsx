@@ -22,6 +22,7 @@ import { DeclarativePluginUi } from './DeclarativePluginUi.tsx';
 interface PluginsPanelProps {
   mode?: 'list' | 'install';
   plugins: PluginSummary[];
+  devPlugins?: string[];
   selectedPluginId: string;
   pluginInputJson: string;
   pluginRunOutput: string;
@@ -62,6 +63,7 @@ function readableError(error: unknown): string {
 export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   mode = 'list',
   plugins,
+  devPlugins = [],
   selectedPluginId,
   pluginInputJson,
   pluginRunOutput,
@@ -355,9 +357,14 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
                     <h4 className="break-words text-sm font-semibold text-zinc-950">{plugin.name}</h4>
                     <p className="mt-0.5 break-all text-xs text-zinc-500">{plugin.id} · v{plugin.version}</p>
                   </div>
-                  <AdminBadge tone={plugin.enabled ? 'success' : 'neutral'}>
-                    {plugin.enabled ? translate('multilingual.active') : translate('multilingual.inactive')}
-                  </AdminBadge>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {devPlugins.includes(plugin.id) && (
+                      <AdminBadge tone="warning">{translate('shell.dev_mode_badge')}</AdminBadge>
+                    )}
+                    <AdminBadge tone={plugin.enabled ? 'success' : 'neutral'}>
+                      {plugin.enabled ? translate('multilingual.active') : translate('multilingual.inactive')}
+                    </AdminBadge>
+                  </div>
                 </div>
                 {plugin.description && <p className="mt-2.5 break-words text-sm text-zinc-600">{plugin.description}</p>}
                 <div className="mt-3 rounded-lg border border-zinc-100 bg-zinc-50 p-3">

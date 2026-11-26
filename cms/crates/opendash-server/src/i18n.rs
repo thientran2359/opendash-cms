@@ -507,6 +507,46 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "System is busy processing a write; please try again shortly.",
     ),
     (
+        "backup.missing_extension_secret",
+        "Thiếu tệp bí mật extension được tham chiếu; không thể tạo snapshot.",
+        "Referenced extension secret file is missing; cannot create snapshot.",
+    ),
+    (
+        "restore.missing_extension_secret",
+        "Bản sao khôi phục thiếu tệp bí mật extension được tham chiếu trong DB.",
+        "Restored copy is missing an extension secret file referenced by the database.",
+    ),
+    (
+        "plugin.delete_projections_failed",
+        "Lỗi xóa plugin projections cũ.",
+        "Failed to delete old plugin projections.",
+    ),
+    (
+        "theme.functions_not_found",
+        "Theme hiện hành không có functions.js.",
+        "The active theme does not include functions.js.",
+    ),
+    (
+        "theme.functions_settings_too_large",
+        "Dữ liệu cài đặt Theme Functions vượt quá 1 MiB.",
+        "Theme Functions settings payload exceeds 1 MiB.",
+    ),
+    (
+        "theme.functions_settings_invalid",
+        "Dữ liệu cài đặt Theme Functions không hợp lệ.",
+        "Theme Functions settings payload is invalid.",
+    ),
+    (
+        "dev.sync_safe_mode",
+        "Hệ thống đang ở safe mode; không thể đồng bộ Dev Manifest.",
+        "Safe mode is enabled; Dev Manifest sync is unavailable.",
+    ),
+    (
+        "dev.mode_disabled",
+        "Dev Mode hiện không được bật.",
+        "Dev Mode is not enabled.",
+    ),
+    (
         "request.invalid_body",
         "Body của DELETE locale phải rỗng.",
         "DELETE locale body must be empty.",

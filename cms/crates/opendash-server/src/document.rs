@@ -94,12 +94,24 @@ fn parse_attributes(
             && bytes[i] != b'='
             && bytes[i] != b'/'
         {
+            if matches!(bytes[i], b'"' | b'\'' | b'<' | b'>' | b'`') {
+                return Err(DocumentNormalizationDiagnostic::new(
+                    "invalid_attribute_syntax",
+                    "Tên thuộc tính HTML chứa ký tự không hợp lệ.",
+                ));
+            }
             i += 1;
         }
         let name = attrs_raw[name_start..i].to_ascii_lowercase();
         if name.is_empty() {
-            i += 1;
-            continue;
+            if bytes[i] == b'/' {
+                i += 1;
+                continue;
+            }
+            return Err(DocumentNormalizationDiagnostic::new(
+                "invalid_attribute_syntax",
+                "Cú pháp thuộc tính HTML không hợp lệ.",
+            ));
         }
         if name.starts_with("on") && !allow_trusted_theme_markup {
             return Err(DocumentNormalizationDiagnostic::new(
@@ -142,6 +154,12 @@ fn parse_attributes(
             } else {
                 let val_start = i;
                 while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                    if matches!(bytes[i], b'"' | b'\'' | b'<' | b'>' | b'=' | b'`') {
+                        return Err(DocumentNormalizationDiagnostic::new(
+                            "invalid_attribute_syntax",
+                            "Giá trị thuộc tính HTML không có dấu nháy chứa ký tự không hợp lệ.",
+                        ));
+                    }
                     i += 1;
                 }
                 attrs_raw[val_start..i].to_string()
@@ -207,20 +225,108 @@ fn is_authorized_stylesheet_link(attrs: &[(String, String)]) -> bool {
     decoded_href.starts_with('/') && !decoded_href.starts_with("//") && !decoded_href.contains("..")
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TagScanState {
+    BeforeAttrName,
+    AttrName,
+    AfterAttrName,
+    BeforeAttrValue,
+    QuotedValue(u8),
+    UnquotedValue,
+}
+
 fn find_tag_end(raw: &str, start: usize) -> Result<usize, DocumentNormalizationDiagnostic> {
     let bytes = raw.as_bytes();
     let mut i = start;
-    let mut quote: Option<u8> = None;
+    let mut state = TagScanState::BeforeAttrName;
     while i < bytes.len() {
         let b = bytes[i];
-        if let Some(q) = quote {
-            if b == q {
-                quote = None;
+        match state {
+            TagScanState::BeforeAttrName => {
+                if b == b'>' {
+                    return Ok(i);
+                }
+                if b.is_ascii_whitespace() || b == b'/' {
+                    // stay in BeforeAttrName
+                } else if matches!(b, b'"' | b'\'' | b'<' | b'=' | b'`') {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "invalid_tag_syntax",
+                        "Cú pháp thẻ HTML chứa ký tự không hợp lệ ở vị trí tên thuộc tính.",
+                    ));
+                } else {
+                    state = TagScanState::AttrName;
+                }
             }
-        } else if b == b'"' || b == b'\'' {
-            quote = Some(b);
-        } else if b == b'>' {
-            return Ok(i);
+            TagScanState::AttrName => {
+                if b == b'>' {
+                    return Ok(i);
+                }
+                if b.is_ascii_whitespace() {
+                    state = TagScanState::AfterAttrName;
+                } else if b == b'/' {
+                    state = TagScanState::BeforeAttrName;
+                } else if b == b'=' {
+                    state = TagScanState::BeforeAttrValue;
+                } else if matches!(b, b'"' | b'\'' | b'<' | b'`') {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "invalid_tag_syntax",
+                        "Tên thuộc tính HTML chứa ký tự không hợp lệ.",
+                    ));
+                }
+            }
+            TagScanState::AfterAttrName => {
+                if b == b'>' {
+                    return Ok(i);
+                }
+                if b.is_ascii_whitespace() {
+                    // stay
+                } else if b == b'/' {
+                    state = TagScanState::BeforeAttrName;
+                } else if b == b'=' {
+                    state = TagScanState::BeforeAttrValue;
+                } else if matches!(b, b'"' | b'\'' | b'<' | b'`') {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "invalid_tag_syntax",
+                        "Cú pháp thẻ HTML chứa ký tự không hợp lệ sau tên thuộc tính.",
+                    ));
+                } else {
+                    state = TagScanState::AttrName;
+                }
+            }
+            TagScanState::BeforeAttrValue => {
+                if b.is_ascii_whitespace() {
+                    // stay
+                } else if b == b'>' {
+                    return Ok(i);
+                } else if b == b'"' || b == b'\'' {
+                    state = TagScanState::QuotedValue(b);
+                } else if matches!(b, b'<' | b'=' | b'`') {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "invalid_tag_syntax",
+                        "Giá trị thuộc tính HTML bắt đầu bằng ký tự không hợp lệ.",
+                    ));
+                } else {
+                    state = TagScanState::UnquotedValue;
+                }
+            }
+            TagScanState::QuotedValue(q) => {
+                if b == q {
+                    state = TagScanState::BeforeAttrName;
+                }
+            }
+            TagScanState::UnquotedValue => {
+                if b == b'>' {
+                    return Ok(i);
+                }
+                if b.is_ascii_whitespace() {
+                    state = TagScanState::BeforeAttrName;
+                } else if matches!(b, b'"' | b'\'' | b'<' | b'=' | b'`') {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "invalid_tag_syntax",
+                        "Giá trị thuộc tính HTML không có dấu nháy chứa ký tự không hợp lệ.",
+                    ));
+                }
+            }
         }
         i += 1;
     }
@@ -538,8 +644,8 @@ pub fn normalize_public_document(
 }
 
 fn is_json_ld_script_block(raw_script: &str) -> bool {
-    let Some(gt) = raw_script.find('>') else {
-        return false;
+    let Ok(gt) = find_tag_end(raw_script, "<script".len()) else {
+        return true;
     };
     let open = &raw_script[..gt];
     let attrs_raw = open
@@ -547,14 +653,18 @@ fn is_json_ld_script_block(raw_script: &str) -> bool {
         .unwrap_or("")
         .trim_end_matches('/');
     let Ok(attrs) = parse_attributes(attrs_raw, true) else {
-        return false;
+        return true;
     };
     attrs.iter().any(|(k, v)| {
-        k == "type"
-            && v.split(';')
-                .next()
-                .map(str::trim)
-                .is_some_and(|mime| mime.eq_ignore_ascii_case("application/ld+json"))
+        if k != "type" {
+            return false;
+        }
+        let decoded = opendash_core::richtext::decode_html5_entities(v);
+        decoded
+            .split(';')
+            .next()
+            .map(str::trim)
+            .is_some_and(|mime| mime.eq_ignore_ascii_case("application/ld+json"))
     })
 }
 
@@ -603,9 +713,12 @@ pub fn sanitize_render_head_fragment(
                 }
                 let attrs = parse_attributes(attrs_raw, allow_trusted_html)?;
                 if name == "meta" {
-                    let is_robots = attrs
-                        .iter()
-                        .any(|(k, v)| k == "name" && v.trim().eq_ignore_ascii_case("robots"));
+                    let is_robots = attrs.iter().any(|(k, v)| {
+                        k == "name"
+                            && opendash_core::richtext::decode_html5_entities(v)
+                                .trim()
+                                .eq_ignore_ascii_case("robots")
+                    });
                     let is_http_equiv = attrs.iter().any(|(k, _)| k == "http-equiv");
                     if is_robots || is_http_equiv || !allow_trusted_html {
                         continue;
@@ -614,16 +727,17 @@ pub fn sanitize_render_head_fragment(
                     continue;
                 }
                 if name == "link" {
-                    let rel_val = attrs
-                        .iter()
-                        .find(|(k, _)| k == "rel")
-                        .map(|(_, v)| v.to_ascii_lowercase())
-                        .unwrap_or_default();
-                    let rel_tokens: Vec<&str> = rel_val.split_whitespace().collect();
-                    if rel_tokens
-                        .iter()
-                        .any(|t| matches!(*t, "canonical" | "alternate"))
-                    {
+                    let is_forbidden_rel = attrs.iter().any(|(k, v)| {
+                        if k != "rel" {
+                            return false;
+                        }
+                        let decoded =
+                            opendash_core::richtext::decode_html5_entities(v).to_ascii_lowercase();
+                        decoded
+                            .split_whitespace()
+                            .any(|t| matches!(t, "canonical" | "alternate"))
+                    });
+                    if is_forbidden_rel {
                         continue;
                     }
                     if !allow_trusted_html {
@@ -1295,5 +1409,59 @@ mod tests {
                 "expected reject on {rejected}"
             );
         }
+    }
+
+    #[test]
+    fn sanitize_render_head_fragment_strips_entity_encoded_seo_tags() {
+        let raw = concat!(
+            r#"<meta name="&#114;obots" content="index,follow">"#,
+            r#"<meta name="&#x52;OBOTS" content="all">"#,
+            r#"<link rel="&#99;anonical" href="https://evil.example/">"#,
+            r#"<link rel="&#x61;lternate" hreflang="en" href="https://evil.example/en">"#,
+            r#"<script type="&#97;pplication/ld+json">{"@type":"Fake"}</script>"#,
+            r#"<script type="application&#x2f;ld&#43;json">{"@type":"Fake2"}</script>"#,
+            r#"<script data-x=">" type="application/ld+json">{"@type":"GtInAttr"}</script>"#,
+            r#"<meta name="author" content="OpenDash">"#,
+        );
+        let parts = sanitize_render_head_fragment(raw, true).expect("head fragment sanitizes");
+        assert!(
+            !parts.body_fragment.contains("evil.example"),
+            "canonical/alternate escaped: {}",
+            parts.body_fragment
+        );
+        assert!(
+            !parts.body_fragment.contains("index,follow") && !parts.body_fragment.contains("OBOTS"),
+            "robots meta escaped: {}",
+            parts.body_fragment
+        );
+        assert!(
+            parts.authorized_head_scripts.is_empty(),
+            "json-ld script escaped: {:?}",
+            parts.authorized_head_scripts
+        );
+        assert!(
+            parts
+                .body_fragment
+                .contains(r#"<meta name="author" content="OpenDash">"#),
+            "safe meta should be preserved: {}",
+            parts.body_fragment
+        );
+
+        // Unquoted-attribute / attr-name quote smuggling must be rejected (F-01 & F-02)
+        for smuggled in [
+            r#"<div data-x=a'><script>alert(1)</script>'></div>"#,
+            r#"<div data-x=a'><img/src="x"/onerror="alert(1)">'></div>"#,
+            r#"<div a"><script>alert(1)</script>"></div>"#,
+        ] {
+            assert!(
+                normalize_public_document_with_options(smuggled, false).is_err(),
+                "expected document normalizer to reject quote differential payload: {smuggled}"
+            );
+        }
+        let head_smuggle = r#"<meta name="author" content=a'><title>Hijacked</title><meta/name="robots"/content="index"><link/rel="canonical"/href="https://evil.example/"><script/type="application/ld+json">{"@type":"Fake"}</script>'>"#;
+        assert!(
+            sanitize_render_head_fragment(head_smuggle, true).is_err(),
+            "expected sanitize_render_head_fragment to reject unquoted-attr SEO smuggling"
+        );
     }
 }

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "theme_id": "theme-js-starter",
+  "name": "Theme JS Starter",
+  "version": "1.0.0",
+  "templates": [
+    { "kind": "index", "file": "index.html" },
+    { "kind": "single", "file": "single.html" }
+  ],
+  "assets": ["assets/style.css"],
+  "styles": [
+    { "handle": "starter-main", "src": "assets/style.css", "conditions": ["all"] }
+  ],
+  "functions": {
+    "min_host_version": "0.1.0",
+    "hooks": ["theme/after_activate"],
+    "filters": ["filter:render/head", "filter:render/slot", "filter:entry/view"],
+    "render_cache": "by_route",
+    "routes": [
+      { "id": "hello", "method": "GET", "path": "/hello", "access": "public" }
+    ],
+    "actions": [
+      {
+        "id": "ping",
+        "title": "Ping Theme Functions",
+        "required_role": "admin",
+        "capabilities": ["kv_read", "kv_write", "log"]
+      }
+    ],
+    "settings_schema": [
+      { "key": "banner_text", "label": "Banner Text", "type": "text", "default": "Welcome to OpenDash JS Theme" },
+      { "key": "webhook_secret", "label": "Webhook Secret", "type": "secret", "required": false }
+    ]
+  }
+}

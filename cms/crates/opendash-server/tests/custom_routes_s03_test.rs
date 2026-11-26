@@ -311,6 +311,7 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
             { "id": "private-view", "method": "GET", "path": "/private", "access": "session" },
             { "id": "create-post", "method": "POST", "path": "/create-post", "access": "session", "capabilities": ["content_write"] },
             { "id": "admin-only", "method": "POST", "path": "/admin-only", "access": "admin", "capabilities": ["kv_write"] },
+            { "id": "public-root", "method": "POST", "path": "/", "access": "public" },
             { "id": "public-vote", "method": "POST", "path": "/vote", "access": "public" },
             { "id": "stripe-hook", "method": "POST", "path": "/stripe-hook", "access": "webhook" }
         ]
@@ -383,6 +384,10 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
         od.addRoute("admin-only", (env) => {{
             od.kv.set("admin_mark", (env.payload.body && env.payload.body.mark) || "admin-ok");
             return {{ json: {{ ok: true }} }};
+        }});
+
+        od.addRoute("public-root", (env) => {{
+            return {{ json: {{ root_ok: true, subpath: env.payload.subpath }} }};
         }});
 
         od.addRoute("public-vote", (env) => {{
@@ -488,7 +493,7 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
         .unwrap();
     assert_eq!(install_p2.status(), StatusCode::CREATED);
 
-    // 3. Install & activate Theme with a custom route (/p/route-theme/banner)
+    // 3. Install & activate Theme with a custom route (/p/route-theme/banner) and explicit render_trusted_html: false opt-out
     let theme_manifest = json!({
         "manifest_version": 3,
         "theme_id": "route-theme",
@@ -497,8 +502,12 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
         "templates": [{ "kind": "index", "file": "index.html" }],
         "functions": {
             "api_version": 1,
+            "permissions": {
+                "render_trusted_html": false
+            },
             "routes": [
-                { "id": "banner", "method": "GET", "path": "/banner", "access": "public" }
+                { "id": "banner", "method": "GET", "path": "/banner", "access": "public" },
+                { "id": "theme-xss", "method": "GET", "path": "/xss", "access": "public" }
             ]
         }
     });
@@ -506,6 +515,11 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
         od.addRoute("banner", () => ({
             content_type: "text/plain",
             body: "theme-custom-route-ok"
+        }));
+        od.addRoute("theme-xss", () => ({
+            content_type: "text/html",
+            title: "Theme XSS Opt-Out",
+            body: '<a {{ href="javascript:alert(1)" }}>Click</a>'
         }));
     "#;
     let install_t = client
@@ -585,8 +599,12 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
         item_html.contains(r#"data-cookie-leaked="no""#),
         "{item_html}"
     );
+    assert!(
+        !item_html.contains("opendash-head-end"),
+        "HEAD_END_MARKER leaked into /p/ HTML response: {item_html}"
+    );
 
-    // Theme route works
+    // Theme route works, and explicit render_trusted_html: false opt-out enforces strict C-SEC (including Jinja attribute smuggling)
     let theme_route = client
         .get(format!("{base_url}/p/route-theme/banner"))
         .send()
@@ -594,6 +612,17 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
         .unwrap();
     assert_eq!(theme_route.status(), StatusCode::OK);
     assert_eq!(theme_route.text().await.unwrap(), "theme-custom-route-ok");
+
+    let theme_xss = client
+        .get(format!("{base_url}/p/route-theme/xss"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        theme_xss.status(),
+        StatusCode::BAD_GATEWAY,
+        "Theme with render_trusted_html: false must reject unsafe HTML"
+    );
 
     // Untrusted plugin HTML XSS rejected, safe HTML accepted
     let xss_resp = client
@@ -753,6 +782,19 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
         .await
         .unwrap();
     assert_eq!(pub_foreign_origin.status(), StatusCode::FORBIDDEN);
+
+    // Root POST /api/public/p/{pkg} (path: "/") with valid Origin -> 200
+    let pub_root_ok = client
+        .post(format!("{base_url}/api/public/p/route-plugin"))
+        .header("Origin", &base_url)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pub_root_ok.status(), StatusCode::OK);
+    let pub_root_json: Value = pub_root_ok.json().await.unwrap();
+    assert_eq!(pub_root_json["root_ok"], json!(true));
+    assert_eq!(pub_root_json["subpath"], json!("/"));
 
     // Public route: valid Origin -> 200, KV committed, content_save refused!
     let pub_ok = client

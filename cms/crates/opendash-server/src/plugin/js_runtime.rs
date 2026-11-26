@@ -113,7 +113,9 @@ const OD_BOOTSTRAP_JS: &str = r#"
     const raw = _rawHostCall(JSON.stringify(opObj));
     const resp = JSON.parse(raw);
     if (!resp || resp.ok !== true) {
-      throw new Error((resp && resp.error) ? String(resp.error) : "host_call_failed");
+      const code = (resp && resp.code) ? String(resp.code) : "host_call_failed";
+      const msg = (resp && resp.error) ? String(resp.error) : "host_call_failed";
+      throw new Error(msg.startsWith("[") ? msg : ("[" + code + "] " + msg));
     }
     return resp;
   }
