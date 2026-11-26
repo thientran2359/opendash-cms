@@ -54,6 +54,9 @@ Gói plugin cài đặt vào OpenDash (dạng `.zip` qua Admin API hoặc thư m
     "content_read": ["post"],
     "content_write": ["post"],
     "content_delete": ["post"],
+    "content_trash_read": ["post"],
+    "content_restore": ["post"],
+    "content_purge": ["post"],
     "content_read_private": [{ "content_type": "post", "field_keys": ["internal_note"] }],
     "content_write_private": [{ "content_type": "post", "field_keys": ["internal_note"] }],
     "taxonomy_read": true,
@@ -74,13 +77,13 @@ Gói plugin cài đặt vào OpenDash (dạng `.zip` qua Admin API hoặc thư m
 ```
 
 ### Quy tắc `PluginManifest` (`cms/crates/opendash-core/src/plugin.rs`) & Theme `functions.js` (`opendash-core/src/theme.rs`):
-- **`manifest_schema` & `entrypoint`:** Hỗ trợ `1`, `2`, `3` (mặc định `1`). `entrypoint` chấp nhận `"plugin.wasm"` (Wasmi `=2.0.0`) hoặc `"plugin.js"` (Boa `=0.22.0`, bắt buộc `manifest_schema >= 3`). Theme v3 có thể khai báo mục `functions` trong `theme.json` trỏ tới `"functions.js"` ở root (mặc định mở `content_read_all_public`, `taxonomy_read`, `media_read`, `site_options_read`, `plugin_settings_read`, `sqlite: ["kv_read", "kv_write"]`, `render_trusted_html: true` trừ khi chủ theme đặt tường minh `false`). Khai báo bất kỳ tính năng v3 (`filters`, `routes`, `render_cache`, `settings_schema`, quyền v3 `taxonomy_read`/`media_read`/`site_options_read`/`plugin_settings_read`/`plugin_secrets_read`/`content_delete`/`content_read_all_public`, hoặc lifecycle `hooks` v3 ngoài `page/after_save`, `content/before_save`, `content/after_save`) bắt buộc đặt `manifest_schema >= 3` và khai báo `min_host_version` (`render_trusted_html` mặc định `true` ở mọi schema và không tự ép nâng `manifest_schema >= 3`).
+- **`manifest_schema` & `entrypoint`:** Hỗ trợ `1`, `2`, `3` (mặc định `1`). `entrypoint` chấp nhận `"plugin.wasm"` (Wasmi `=2.0.0`) hoặc `"plugin.js"` (Boa `=0.22.0`, bắt buộc `manifest_schema >= 3`). Theme v3 có thể khai báo mục `functions` trong `theme.json` trỏ tới `"functions.js"` ở root (mặc định mở `content_read_all_public`, `taxonomy_read`, `media_read`, `site_options_read`, `plugin_settings_read`, `sqlite: ["kv_read", "kv_write"]`, `render_trusted_html: true` trừ khi chủ theme đặt tường minh `false`; cấm khai báo `content_trash_read`/`content_restore`/`content_purge`). Khai báo bất kỳ tính năng v3 (`filters`, `routes`, `render_cache`, `settings_schema`, quyền v3 `taxonomy_read`/`media_read`/`site_options_read`/`plugin_settings_read`/`plugin_secrets_read`/`content_delete`/`content_read_all_public`, hoặc lifecycle `hooks` v3 ngoài `page/after_save`, `content/before_save`, `content/after_save`) bắt buộc đặt `manifest_schema >= 3` và khai báo `min_host_version`; khai báo bất kỳ quyền vòng đời Trash mới nào (`content_trash_read`, `content_restore`, `content_purge`) bắt buộc `manifest_schema >= 3` và **`min_host_version >= "0.1.1"`** (`render_trusted_html` mặc định `true` ở mọi schema và không tự ép nâng `manifest_schema >= 3`).
 - **Lifecycle `hooks`:** `page/after_save`, `content/before_save`, `content/after_save`, và các post-commit async events (`content/after_delete`, `content/after_publish`, `content/after_unpublish`, `contact/after_submit`, `plugin/after_enable`, `plugin/after_disable`, `settings/after_save`, `theme/after_activate`). Không chứa `plugin/manual_run` hay `filter:*`.
 - **Synchronous `filters`:**
   - Write/Submit/Projection filters: `filter:content/prepare_save`, `filter:contact/before_submit`, `filter:seo/head`, `filter:entry/view`.
   - Public Render filters (Spec B S02): `filter:render/head`, `filter:render/footer`, `filter:render/slot` (nhúng qua `{{ od_hook("slot", expr?) }}` trong template/block; cache qua `ExtensionRenderCache` theo `SiteCacheEpoch` và `render_cache: "by_route" | "global" | "none"`). Mặc định `render_trusted_html: true` (opt-out `false` áp dụng kiểm duyệt C-SEC nghiêm ngặt).
 - **Scoped Custom Routes (`routes`, tối đa 32/gói — Spec B S03):** Khai báo `{ id, method: "GET"|"POST", path, access: "public"|"session"|"admin"|"webhook", capabilities?, cache?: "by_route"|"global"|"none" }` (`ExtensionRouteDecl` với `#[serde(deny_unknown_fields)]`; `content_type` là trường response runtime trong `OdRouteResponse`, không phải trường manifest) phục vụ qua `/p/{pkg}/*`, `/api/p/{pkg}/*`, `/api/public/p/{pkg}` và `/api/public/p/{pkg}/*` (`GET` cấm `access: "webhook"`; `/api/public/p/` áp `Public` strict Origin hoặc `Webhook` raw-body + allowlisted HMAC headers + RateLimit và chặn `content_save`/`content_delete`).
-- **Actions & `capabilities`:** Allowlist gồm `kv_read`, `kv_list`, `kv_write`, `kv_delete`, `http`, `content_read`, `content_read_private`, `content_write`, `content_write_private`, `content_delete`, `taxonomy_read`, `media_read`, `site_options_read`, `plugin_settings_read`, `plugin_secrets_read`, `log`. Trong một action **không được kết hợp** nhiều scope ghi khác loại (`kv_write`/`kv_delete` vs `content_write` vs `content_delete` ⇒ từ chối ngay lúc validate/runtime với `ERR_MIXED_WRITE_SCOPE`).
+- **Actions & `capabilities`:** Allowlist gồm `kv_read`, `kv_list`, `kv_write`, `kv_delete`, `http`, `content_read`, `content_read_private`, `content_write`, `content_write_private`, `content_delete`, `content_trash_read`, `content_restore`, `content_purge`, `taxonomy_read`, `media_read`, `site_options_read`, `plugin_settings_read`, `plugin_secrets_read`, `log`. Trong một action **không được kết hợp** nhiều scope ghi khác loại (`kv_write`/`kv_delete` vs `content_write` vs `content_delete`/`content_restore`/`content_purge` ⇒ từ chối ngay lúc validate/runtime với `ERR_MIXED_WRITE_SCOPE`), và action khai báo `content_restore` hoặc `content_purge` **bị cấm kết hợp capability `http`** ở cả manifest validation lẫn runtime defense-in-depth.
 - **Settings, Isolation & `SecretStore` (Migrations `0050` & `0053`):**
   - Migration `0053_theme_functions_runtime.sql` tách `owner_kind` (`'plugin'` vs `'theme'` / `'theme_functions'`) trên `plugin_kv`, `plugin_entry_projections`, `plugin_logs`, và `theme_option_{values,versions,media_refs}` (không giữ FK cứng trỏ tới `plugins(id)`).
   - `settings_schema` tối đa `64` trường (`text`, `textarea`, `number`, `boolean`, `select`, `url`, `media`, `secret`). Trường `secret` cấm đặt `default` khác `null`, lưu ngoài SQLite qua `SecretStore` tại `database/secrets/plugins/<plugin_id>/<64-hex>.json` và `database/secrets/themes/<theme_id>/<64-hex>.json` (giới hạn `4096 B` plaintext, quyền thư mục `0700` / file `0600` trên Unix, Protected DACL trên Windows; được sao lưu & phục hồi qua `BackupFileKind::ExtensionSecret`).
@@ -126,13 +129,13 @@ Gói plugin cài đặt vào OpenDash (dạng `.zip` qua Admin API hoặc thư m
 
 ---
 
-## 4. Binary Worker IPC Framing & Ma trận 15 Host Operations (`HostPolicy`)
+## 4. Binary Worker IPC Framing & Ma trận 19 Host Operations (`HostPolicy`)
 
 - **Worker IPC Framing (`cms/crates/opendash-server/src/plugin/worker.rs`, `runtime.rs`):**
   - Tiến trình con `--plugin-worker` gửi magic `\x00ODIPC2\x00` trên `stdout`, sau đó Host ↔ Worker giao tiếp bằng **binary `u32 LE` length prefix + UTF-8 JSON payload** (`MAX_IPC_FRAME_BYTES = 2 MiB`) hỗ trợ dữ liệu chứa `\n` mà không vỡ khung.
-  - Worker không giữ `SqlitePool`; mọi `HostReadRequest` (`kv_get`, `kv_list`, `content_get`, `content_list`, `taxonomy_list`, `media_get`, `site_options_get`, `plugin_settings_get`, `plugin_secret_get`) đi qua `WorkerToHostFrame::ReadRequest` / `HostToWorkerFrame::ReadResponse` về Host chính chịu kiểm soát `HostPolicy` và `Actor`/`Principal`.
+  - Worker không giữ `SqlitePool`; mọi `HostReadRequest` (`kv_get`, `kv_list`, `content_get`, `content_list`, `content_trash_get`, `content_trash_list`, `taxonomy_list`, `media_get`, `site_options_get`, `plugin_settings_get`, `plugin_secret_get`) đi qua `WorkerToHostFrame::ReadRequest` / `HostToWorkerFrame::ReadResponse` về Host chính chịu kiểm soát `HostPolicy` và `Actor`/`Principal`.
 
-### Bảng 15 Host Operations (`plugin/host_ops.rs`)
+### Bảng 19 Host Operations (`plugin/host_ops.rs`)
 
 | Host Op (`op`) | Quyền Manifest | Mode Cho phép (`HookExecutionMode`) | Phạm vi, Giới hạn & Ghi chú |
 |---|---|---|---|

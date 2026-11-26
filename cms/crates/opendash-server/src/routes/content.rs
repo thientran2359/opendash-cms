@@ -107,38 +107,47 @@ pub async fn content_entry_publication(
     let entry =
         entry_storage::set_publication_status(&db, &type_key, id, expected_version, &input.status)
             .await?;
-    let projection = crate::storage::entry_lifecycle::recompute_projections_nonfatal(
-        &db, &hooks, entry.id, true,
-    )
-    .await;
-    let principal = match actor.user.role {
-        Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
-        Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
+    let transitioned = entry.version != expected_version;
+    let projection = if transitioned {
+        crate::storage::entry_lifecycle::recompute_projections_nonfatal(&db, &hooks, entry.id, true)
+            .await
+    } else {
+        crate::storage::entry_lifecycle::ProjectionOutcome::NotNeeded
     };
-    let receipt = crate::storage::entry_lifecycle::EntryCommitReceipt {
-        operation: if entry.publication_status == "published" {
-            crate::storage::entry_lifecycle::EntryMutationKind::Publish
-        } else {
-            crate::storage::entry_lifecycle::EntryMutationKind::Unpublish
-        },
-        id: entry.id,
-        type_key: entry.content_type_key.clone(),
-        locale: entry.locale.clone(),
-        translation_group_id: entry.translation_group_id.clone(),
-        version_before: Some(expected_version),
-        version_after: Some(entry.version),
-        publication_before: None,
-        publication_after: Some(entry.publication_status.clone()),
-        trashed_at: None,
-        published_at: entry.published_at.clone(),
+    let (hook_enqueued, hook_dropped) = if transitioned {
+        let principal = match actor.user.role {
+            Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
+            Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
+        };
+        let receipt = crate::storage::entry_lifecycle::EntryCommitReceipt {
+            operation: if entry.publication_status == "published" {
+                crate::storage::entry_lifecycle::EntryMutationKind::Publish
+            } else {
+                crate::storage::entry_lifecycle::EntryMutationKind::Unpublish
+            },
+            id: entry.id,
+            type_key: entry.content_type_key.clone(),
+            locale: entry.locale.clone(),
+            translation_group_id: entry.translation_group_id.clone(),
+            version_before: Some(expected_version),
+            version_after: Some(entry.version),
+            publication_before: None,
+            publication_after: Some(entry.publication_status.clone()),
+            trashed_at: None,
+            published_at: entry.published_at.clone(),
+        };
+        let hook_out = hooks.enqueue_entry_lifecycle_hooks(principal, &receipt, lease);
+        (hook_out.enqueued, hook_out.dropped)
+    } else {
+        drop(lease);
+        (0, 0)
     };
-    let hook_out = hooks.enqueue_entry_lifecycle_hooks(principal, &receipt, lease);
     let response = PublicationCommitResponse {
         entry,
         secondary: crate::storage::entry_lifecycle::SecondaryOutcome {
             projection,
-            hook_enqueued: hook_out.enqueued,
-            hook_dropped: hook_out.dropped,
+            hook_enqueued,
+            hook_dropped,
         },
     };
     Ok((

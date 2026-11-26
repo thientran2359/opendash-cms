@@ -1307,3 +1307,274 @@ async fn s03_metadata_prepare_save_scope_veto_sequential_and_projections() {
     .unwrap();
     assert_eq!(proj_after_unpub, 0);
 }
+
+#[tokio::test]
+async fn s03_draft_quick_edit_slug_collision_publish_and_parked_locale_guard() {
+    let site = Site::start("s03-drift-f01-f03-f06").await;
+    let client = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let (cookie, csrf) = setup_admin(&client, &site.base).await;
+    let post_token = schema_token(&client, &site.base, &cookie, "post").await;
+
+    // F-01: Create never-published draft post, Quick Edit slug (collision rejected + valid rename),
+    // then Publish via /publication and verify public URL serves 200 at new slug & 404 at old slug.
+    let created = client
+        .post(format!(
+            "{}/api/admin/content-types/post/entries/composite",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .json(&json!({
+            "expected_schema_token": post_token,
+            "title": "Draft Rename Target",
+            "slug": "draft-orig-slug",
+            "locale": "vi",
+            "publication_status": "draft",
+            "values": { "body": "<p>Draft body</p>" }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let entry = created.json::<Value>().await.unwrap()["entry"].clone();
+    let id = entry["id"].as_i64().unwrap();
+    let ver = entry["version"].as_i64().unwrap();
+
+    // Reserved root slug collision ("admin") MUST be rejected even on a never-published draft.
+    let bad_slug = client
+        .patch(format!(
+            "{}/api/admin/content-types/post/entries/{id}/metadata",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{ver}\""))
+        .json(&json!({
+            "expected_schema_token": post_token,
+            "slug": "admin"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        bad_slug.status() == StatusCode::CONFLICT
+            || bad_slug.status() == StatusCode::UNPROCESSABLE_ENTITY,
+        "reserved slug collision on draft quick edit must fail, got {}",
+        bad_slug.status()
+    );
+
+    // Valid slug rename on never-published draft MUST update permalink_route_claims without creating 301 redirect.
+    let renamed = client
+        .patch(format!(
+            "{}/api/admin/content-types/post/entries/{id}/metadata",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{ver}\""))
+        .json(&json!({
+            "expected_schema_token": post_token,
+            "slug": "draft-renamed-slug"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(renamed.status(), StatusCode::OK);
+    let ver = renamed.json::<Value>().await.unwrap()["version"]
+        .as_i64()
+        .unwrap();
+
+    let db = site.db().await;
+    let claimed_paths: Vec<String> = sqlx::query_scalar(
+        "SELECT path FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?",
+    )
+    .bind(id.to_string())
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(claimed_paths, vec!["/draft-renamed-slug".to_string()]);
+    let redirect_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM permalink_route_redirects WHERE target_kind = 'entry' AND target_id = ?",
+    )
+    .bind(id.to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(redirect_count, 0);
+
+    // Publish via /publication endpoint -> new slug returns 200, old slug returns 404.
+    let pub_resp = client
+        .post(format!(
+            "{}/api/admin/content-types/post/entries/{id}/publication",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{ver}\""))
+        .json(&json!({"status": "published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pub_resp.status(), StatusCode::OK);
+    let pub_body = pub_resp.json::<Value>().await.unwrap();
+    let pub_ver = pub_body["version"].as_i64().unwrap();
+    assert_eq!(pub_ver, ver + 1);
+
+    assert_eq!(
+        client
+            .get(format!("{}/draft-renamed-slug", site.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        client
+            .get(format!("{}/draft-orig-slug", site.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    // F-06: Idempotent no-op publish MUST NOT increment version or enqueue hooks/projections.
+    let noop_pub = client
+        .post(format!(
+            "{}/api/admin/content-types/post/entries/{id}/publication",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{pub_ver}\""))
+        .json(&json!({"status": "published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(noop_pub.status(), StatusCode::OK);
+    let noop_body = noop_pub.json::<Value>().await.unwrap();
+    assert_eq!(noop_body["version"].as_i64().unwrap(), pub_ver);
+    assert_eq!(noop_body["secondary"]["hook_enqueued"].as_u64().unwrap(), 0);
+    assert_eq!(noop_body["secondary"]["projection"]["status"], "not_needed");
+
+    // F-03: Enable multilingual, create secondary locale ("en") entry, Trash it, then park secondary locale
+    // (multilingual_enabled = false). Entry table MUST exclude parked secondary-locale rows.
+    let loc_state = client
+        .get(format!("{}/api/admin/locales", site.base))
+        .header(header::COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let mut loc_ver = loc_state["version"].as_i64().unwrap();
+    let ml_on = client
+        .put(format!("{}/api/admin/locales/multilingual", site.base))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{loc_ver}\""))
+        .json(&json!({"enabled": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ml_on.status(), StatusCode::OK);
+    loc_ver = ml_on.json::<Value>().await.unwrap()["version"]
+        .as_i64()
+        .unwrap();
+
+    let add_en = client
+        .post(format!("{}/api/admin/locales", site.base))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{loc_ver}\""))
+        .json(&json!({"code": "en", "label": "English", "direction": "ltr"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(add_en.status(), StatusCode::CREATED);
+    loc_ver = add_en.json::<Value>().await.unwrap()["version"]
+        .as_i64()
+        .unwrap();
+
+    let en_created = client
+        .post(format!(
+            "{}/api/admin/content-types/post/entries/composite",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .json(&json!({
+            "expected_schema_token": post_token,
+            "title": "Parked EN Post",
+            "slug": "parked-en-post",
+            "locale": "en",
+            "publication_status": "draft",
+            "values": { "body": "<p>EN body</p>" }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(en_created.status(), StatusCode::CREATED);
+    let en_entry = en_created.json::<Value>().await.unwrap()["entry"].clone();
+    let en_id = en_entry["id"].as_i64().unwrap();
+    let en_ver = en_entry["version"].as_i64().unwrap();
+    let en_trash = client
+        .post(format!(
+            "{}/api/admin/content-types/post/entries/{en_id}/trash",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{en_ver}\""))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(en_trash.status(), StatusCode::OK);
+
+    // Park secondary locale by disabling multilingual mode.
+    let ml_off = client
+        .put(format!("{}/api/admin/locales/multilingual", site.base))
+        .header(header::COOKIE, &cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{loc_ver}\""))
+        .json(&json!({"enabled": false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ml_off.status(), StatusCode::OK);
+
+    let table_trash = client
+        .get(format!(
+            "{}/api/admin/content-types/post/entry-table?status=trash",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(
+        table_trash["total"].as_i64().unwrap(),
+        0,
+        "parked secondary-locale Trash rows must be excluded from ordinary entry-table"
+    );
+    assert_eq!(table_trash["status_counts"]["trash"].as_i64().unwrap(), 0);
+}

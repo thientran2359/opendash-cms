@@ -26,6 +26,11 @@ use crate::{
 pub(crate) const ACTIVE_ENTRY_PREDICATE: &str = "e.trashed_at IS NULL";
 pub(crate) const TRASHED_ENTRY_PREDICATE: &str = "e.trashed_at IS NOT NULL";
 pub(crate) const ACTIVE_ENTRY_UNALIASED: &str = "trashed_at IS NULL";
+/// Shared predicate limiting Trash/maintenance queries to currently manageable (non-deleted, non-parked) locales.
+pub(crate) const MANAGEABLE_LOCALE_EXISTS_SQL: &str = "EXISTS (SELECT 1 FROM site_locales sl \
+    WHERE sl.code = e.locale \
+      AND sl.deleted_at IS NULL \
+      AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))";
 
 /// Server-only lifecycle operation enum (never deserialized from untrusted guest payloads).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -215,6 +220,7 @@ pub(super) struct RetainedEntryIdentity {
     pub values_json: String,
     pub version: i64,
     pub publication_status: String,
+    pub has_been_published: i64,
     pub trashed_at: Option<String>,
     pub published_at: Option<String>,
     pub primary_category_term_id: Option<i64>,
@@ -314,13 +320,15 @@ pub(super) async fn load_retained_entry_identity_in_tx(
         String,
         i64,
         String,
+        i64,
         Option<String>,
         Option<String>,
         Option<i64>,
     );
     let row: Option<RowTuple> = sqlx::query_as(
         "SELECT id, content_type_key, locale, translation_group_id, slug, title, values_json,
-                version, publication_status, trashed_at, published_at, primary_category_term_id
+                version, publication_status, has_been_published, trashed_at, published_at,
+                primary_category_term_id
            FROM content_entries
           WHERE content_type_key = ? AND id = ?",
     )
@@ -339,6 +347,7 @@ pub(super) async fn load_retained_entry_identity_in_tx(
             values_json,
             version,
             publication_status,
+            has_been_published,
             trashed_at,
             published_at,
             primary_category_term_id,
@@ -352,6 +361,7 @@ pub(super) async fn load_retained_entry_identity_in_tx(
             values_json,
             version,
             publication_status,
+            has_been_published,
             trashed_at,
             published_at,
             primary_category_term_id,
@@ -398,18 +408,66 @@ pub(super) async fn physical_delete_cleanup_in_tx(
         crate::storage::permalinks::sync_claims_in_tx(tx).await?;
     } else {
         let id_str = row.id.to_string();
-        sqlx::query(
-            "DELETE FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?",
-        )
-        .bind(&id_str)
-        .execute(&mut **tx)
-        .await?;
-        sqlx::query(
-            "DELETE FROM permalink_route_redirects WHERE target_kind = 'entry' AND target_id = ?",
-        )
-        .bind(&id_str)
-        .execute(&mut **tx)
-        .await?;
+        if row.has_been_published != 0 {
+            // Preserve existing historical redirects and promote any active canonical claim
+            // of a previously published entry into an orphan historical redirect (matching
+            // permalinks::sync_claims_in_tx orphan semantics without an O(N) full-table rebuild).
+            let old_claims: Vec<(String, String)> = sqlx::query_as(
+                "SELECT c.path, c.locale
+                   FROM permalink_route_claims c
+                   JOIN site_locales sl
+                     ON sl.code = c.locale
+                    AND sl.enabled = 1
+                    AND sl.deleted_at IS NULL
+                    AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+                  WHERE c.target_kind = 'entry' AND c.target_id = ?",
+            )
+            .bind(&id_str)
+            .fetch_all(&mut **tx)
+            .await?;
+            for (claim_path, claim_locale) in old_claims {
+                if claim_path == "/" {
+                    continue;
+                }
+                sqlx::query(
+                    "INSERT INTO permalink_route_redirects(source_path, target_kind, target_id, locale, origin)
+                     VALUES (?, 'entry', ?, ?, 'canonical')
+                     ON CONFLICT(source_path) DO UPDATE SET
+                        target_kind = excluded.target_kind,
+                        target_id = excluded.target_id,
+                        locale = excluded.locale,
+                        origin = excluded.origin,
+                        created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     WHERE permalink_route_redirects.origin = 'locale_swap'
+                        OR permalink_route_redirects.locale IN
+                           (SELECT code FROM site_locales WHERE deleted_at IS NOT NULL)",
+                )
+                .bind(&claim_path)
+                .bind(&id_str)
+                .bind(&claim_locale)
+                .execute(&mut **tx)
+                .await?;
+            }
+            sqlx::query(
+                "DELETE FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?",
+            )
+            .bind(&id_str)
+            .execute(&mut **tx)
+            .await?;
+        } else {
+            sqlx::query(
+                "DELETE FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?",
+            )
+            .bind(&id_str)
+            .execute(&mut **tx)
+            .await?;
+            sqlx::query(
+                "DELETE FROM permalink_route_redirects WHERE target_kind = 'entry' AND target_id = ?",
+            )
+            .bind(&id_str)
+            .execute(&mut **tx)
+            .await?;
+        }
     }
     Ok(EntryCommitReceipt {
         operation: EntryMutationKind::Purge,
@@ -1128,12 +1186,12 @@ pub async fn preflight_plugin_lifecycle_confirmation(
         }));
     }
 
-    let locale_row: Option<(i64, Option<String>)> =
-        sqlx::query_as("SELECT enabled, deleted_at FROM site_locales WHERE code = ?")
+    let locale_row: Option<(i64, i64, Option<String>)> =
+        sqlx::query_as("SELECT enabled, is_default, deleted_at FROM site_locales WHERE code = ?")
             .bind(&row.locale)
             .fetch_optional(&mut *tx)
             .await?;
-    let Some((locale_enabled, locale_deleted_at)) = locale_row else {
+    let Some((locale_enabled, locale_is_default, locale_deleted_at)) = locale_row else {
         return Err(ApiError::conflict(
             "locale_deleted: Ngôn ngữ của nội dung đã bị xóa; hãy xử lý trong mục bảo trì ngôn ngữ.",
         ));
@@ -1141,6 +1199,15 @@ pub async fn preflight_plugin_lifecycle_confirmation(
     if locale_deleted_at.is_some() {
         return Err(ApiError::conflict(
             "locale_deleted: Ngôn ngữ của nội dung đã bị xóa; hãy xử lý trong mục bảo trì ngôn ngữ.",
+        ));
+    }
+    let multilingual_enabled: i64 =
+        sqlx::query_scalar("SELECT multilingual_enabled FROM site_locales_state WHERE id = 1")
+            .fetch_one(&mut *tx)
+            .await?;
+    if locale_is_default == 0 && multilingual_enabled == 0 {
+        return Err(ApiError::conflict(
+            "locale_parked: Ngôn ngữ phụ đang bị tạm dừng; hãy bật lại chế độ đa ngôn ngữ trước khi thao tác.",
         ));
     }
 
@@ -1233,7 +1300,7 @@ pub async fn get_trashed_entry_metadata_for_host(
             AND e.id = ?
             AND {TRASHED_ENTRY_PREDICATE}
             AND (? IS NULL OR e.locale = ?)
-            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)"
+            AND {MANAGEABLE_LOCALE_EXISTS_SQL}"
     );
     let row: Option<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(type_key)
@@ -1311,7 +1378,7 @@ pub async fn list_trashed_entries_metadata_for_host(
           WHERE e.content_type_key = ?
             AND {TRASHED_ENTRY_PREDICATE}
             AND (? IS NULL OR e.locale = ?)
-            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)"
+            AND {MANAGEABLE_LOCALE_EXISTS_SQL}"
     );
     let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(count_sql))
         .bind(type_key)
@@ -1338,7 +1405,7 @@ pub async fn list_trashed_entries_metadata_for_host(
           WHERE e.content_type_key = ?
             AND {TRASHED_ENTRY_PREDICATE}
             AND (? IS NULL OR e.locale = ?)
-            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)
+            AND {MANAGEABLE_LOCALE_EXISTS_SQL}
           ORDER BY e.trashed_at DESC, e.id DESC
           LIMIT ? OFFSET ?"
     );
@@ -2376,11 +2443,12 @@ async fn commit_metadata_patch_inner(
         false
     };
 
-    let needs_claim_sync = (was_ever_published || final_status == "published")
-        && (slug_changed
-            || (status_changed && (type_key == "page" || !was_ever_published))
-            || primary_changed
-            || (type_key == "post" && category_terms_changed));
+    let needs_claim_sync = slug_changed
+        || primary_changed
+        || (type_key == "post" && category_terms_changed)
+        || (status_changed
+            && (was_ever_published || final_status == "published")
+            && (type_key == "page" || !was_ever_published));
     if needs_claim_sync {
         if !was_ever_published {
             sqlx::query(

@@ -40,7 +40,7 @@ See [Plugin ABI](../../../docs/contracts/PLUGIN_ABI.md) and [M6 Plugin Extension
 
 ## Verification
 
-Run the SDK unit tests (covers all 15 host operations, `-2` readback, v1/v2 envelopes, CAS conflicts, and panic cleanup) from the repository root:
+Run the SDK unit tests (covers all 19 host operations, `-2` readback, v1/v2 envelopes, CAS conflicts, and panic cleanup) from the repository root:
 
 ```powershell
 cargo test --manifest-path cms/Cargo.toml -p opendash-plugin-sdk --locked

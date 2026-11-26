@@ -291,7 +291,10 @@ pub async fn query(
         Vec::new()
     } else {
         sqlx::query_scalar(
-            "SELECT code FROM site_locales WHERE deleted_at IS NULL ORDER BY code ASC",
+            "SELECT code FROM site_locales
+              WHERE deleted_at IS NULL
+                AND (is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+              ORDER BY code ASC",
         )
         .fetch_all(&mut *tx)
         .await?
@@ -743,19 +746,21 @@ async fn query_retained_trash_maintenance(
         ));
     }
 
-    let total: i64 = sqlx::query_scalar(
+    let total_sql = format!(
         "SELECT COUNT(*)
            FROM content_entries e
           WHERE e.content_type_key = ?
             AND e.trashed_at IS NOT NULL
             AND (? IS NULL OR e.locale = ?)
-            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)",
-    )
-    .bind(type_key)
-    .bind(resolved_locale.as_deref())
-    .bind(resolved_locale.as_deref())
-    .fetch_one(&mut *tx)
-    .await?;
+            AND {}",
+        entry_lifecycle::MANAGEABLE_LOCALE_EXISTS_SQL
+    );
+    let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(total_sql))
+        .bind(type_key)
+        .bind(resolved_locale.as_deref())
+        .bind(resolved_locale.as_deref())
+        .fetch_one(&mut *tx)
+        .await?;
 
     type RetainedRow = (
         i64,
@@ -771,7 +776,7 @@ async fn query_retained_trash_maintenance(
         Option<String>,
         String,
     );
-    let rows: Vec<RetainedRow> = sqlx::query_as(
+    let rows_sql = format!(
         "SELECT e.id, e.content_type_key, e.locale, e.slug, e.title,
                 e.publication_status, e.version, e.created_at, e.updated_at,
                 e.published_at, e.trashed_at, e.translation_group_id
@@ -779,17 +784,19 @@ async fn query_retained_trash_maintenance(
           WHERE e.content_type_key = ?
             AND e.trashed_at IS NOT NULL
             AND (? IS NULL OR e.locale = ?)
-            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)
+            AND {}
           ORDER BY e.trashed_at DESC, e.id DESC
           LIMIT ? OFFSET ?",
-    )
-    .bind(type_key)
-    .bind(resolved_locale.as_deref())
-    .bind(resolved_locale.as_deref())
-    .bind(filter.limit)
-    .bind(filter.offset)
-    .fetch_all(&mut *tx)
-    .await?;
+        entry_lifecycle::MANAGEABLE_LOCALE_EXISTS_SQL
+    );
+    let rows: Vec<RetainedRow> = sqlx::query_as(sqlx::AssertSqlSafe(rows_sql))
+        .bind(type_key)
+        .bind(resolved_locale.as_deref())
+        .bind(resolved_locale.as_deref())
+        .bind(filter.limit)
+        .bind(filter.offset)
+        .fetch_all(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     let items = rows

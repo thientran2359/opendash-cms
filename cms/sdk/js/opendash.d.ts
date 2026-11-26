@@ -189,6 +189,15 @@ export interface OpenDashHostApi {
     list(params: OdContentListParams): { items: OdEntryRecord[]; total: number };
     save(params: OdContentSaveParams): void;
     delete(params: OdContentDeleteParams): { staged: boolean; entry_id: number };
+    trashGet(typeKey: string, entryId: number, locale?: string): { entry: Record<string, unknown> | null };
+    trashList(
+      params:
+        | string
+        | { type_key: string; locale?: string; limit?: number; offset?: number },
+      opts?: { locale?: string; limit?: number; offset?: number }
+    ): { items: Array<Record<string, unknown>>; total: number; limit: number; offset: number };
+    restore(params: OdContentDeleteParams): { staged: boolean; operation: "restore"; entry_id: number };
+    purge(params: OdContentDeleteParams): { staged: boolean; operation: "purge"; entry_id: number };
   };
 
   readonly taxonomy: {

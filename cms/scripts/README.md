@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/scripts/` contains **35** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, canonical lifecycle benchmarks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
+`cms/scripts/` contains **36** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, canonical lifecycle benchmarks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
 
 ## Interface
 
@@ -41,7 +41,7 @@ All smoke scripts launch isolated server instances (ephemeral loopback ports and
 - [`egm_pattern_s02_migration.py`](egm_pattern_s02_migration.py) — In-memory SQLite migration test applying `0001`–`0043` then `0044` (`apply_through`) to verify Section-to-Pattern upgrade integrity.
 - [`entry_lifecycle_benchmark.py`](entry_lifecycle_benchmark.py) — Canonical S04 baseline-vs-candidate performance benchmark (`--baseline-binary`, `--candidate-binary`, `--artifact-dir`, optional `--sizes`) verifying NFR gates P1–P3 across deterministic 1k/10k/50k fixtures.
 
-### Live Browser E2E Suites (15)
+### Live Browser E2E Suites (16)
 
 Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-specific `--artifact-dir` / `--browser` flags):
 

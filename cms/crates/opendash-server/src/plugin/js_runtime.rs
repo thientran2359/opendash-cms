@@ -230,6 +230,46 @@ const OD_BOOTSTRAP_JS: &str = r#"
           expected_version: Number(p.expected_version),
         }).data;
       },
+      trashGet(typeKey, entryId, locale) {
+        const req = { op: "content_trash_get", type_key: String(typeKey), entry_id: Number(entryId) };
+        if (locale !== undefined && locale !== null) req.locale = String(locale);
+        return _invoke(req).data;
+      },
+      trashList(params, maybeOpts) {
+        let req;
+        if (typeof params === "string") {
+          const opts = (maybeOpts && typeof maybeOpts === "object") ? maybeOpts : {};
+          req = { op: "content_trash_list", type_key: params };
+          if (opts.locale !== undefined && opts.locale !== null) req.locale = String(opts.locale);
+          if (opts.limit !== undefined && opts.limit !== null) req.limit = Number(opts.limit);
+          if (opts.offset !== undefined && opts.offset !== null) req.offset = Number(opts.offset);
+        } else {
+          const p = (params && typeof params === "object") ? params : {};
+          req = { op: "content_trash_list", type_key: String(p.type_key || "") };
+          if (p.locale !== undefined && p.locale !== null) req.locale = String(p.locale);
+          if (p.limit !== undefined && p.limit !== null) req.limit = Number(p.limit);
+          if (p.offset !== undefined && p.offset !== null) req.offset = Number(p.offset);
+        }
+        return _invoke(req).data;
+      },
+      restore(params) {
+        const p = (params && typeof params === "object") ? params : {};
+        return _invoke({
+          op: "content_restore",
+          type_key: String(p.type_key || ""),
+          entry_id: Number(p.entry_id),
+          expected_version: Number(p.expected_version),
+        }).data;
+      },
+      purge(params) {
+        const p = (params && typeof params === "object") ? params : {};
+        return _invoke({
+          op: "content_purge",
+          type_key: String(p.type_key || ""),
+          entry_id: Number(p.entry_id),
+          expected_version: Number(p.expected_version),
+        }).data;
+      },
     }),
     taxonomy: Object.freeze({
       list(kind, locale, limit) {

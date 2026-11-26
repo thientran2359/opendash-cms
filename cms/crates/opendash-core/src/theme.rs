@@ -424,11 +424,31 @@ impl ThemeFunctionsSpec {
         crate::plugin::validate_hooks_and_filters(&self.hooks, &self.filters, true)?;
         let secret_keys = crate::plugin::validate_settings_schema(&self.settings_schema)?;
         if let Some(raw) = &self.permissions {
+            if !raw.content_trash_read.is_empty()
+                || !raw.content_restore.is_empty()
+                || !raw.content_purge.is_empty()
+            {
+                return Err(
+                    "Theme functions.js không hỗ trợ quyền content_trash_read/content_restore/content_purge; chỉ plugin khai báo min_host_version >= 0.1.1 mới được cấp.",
+                );
+            }
             // Validate declared entries (including invalid sqlite/http/network tokens)
             // before merging defaults, allowing content_read_private against effective reads.
             let mut merged = raw.clone();
             merged.content_read_all_public = true;
             crate::plugin::validate_permissions(&merged, &secret_keys)?;
+        }
+        for action in &self.actions {
+            if action.capabilities.iter().any(|c| {
+                matches!(
+                    c.as_str(),
+                    "content_trash_read" | "content_restore" | "content_purge"
+                )
+            }) {
+                return Err(
+                    "Theme functions.js actions không hỗ trợ capability content_trash_read/content_restore/content_purge.",
+                );
+            }
         }
         let effective = self.effective_permissions();
         crate::plugin::validate_permissions(&effective, &secret_keys)?;

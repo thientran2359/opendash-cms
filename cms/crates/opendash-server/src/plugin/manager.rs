@@ -144,6 +144,8 @@ fn map_lifecycle_api_error_code(err: &crate::error::ApiError) -> &'static str {
         "provider_inactive"
     } else if msg.starts_with("locale_disabled:") {
         "locale_disabled"
+    } else if msg.starts_with("locale_parked:") {
+        "locale_parked"
     } else if msg.starts_with("locale_deleted:") {
         "locale_deleted"
     } else if msg.starts_with("entry_purge_forbidden:") {
@@ -2952,6 +2954,7 @@ impl PluginManager {
 
         let render_trusted_html = manifest.permissions.render_trusted_html;
 
+        let mut committed_receipt: Option<EntryCommitReceipt> = None;
         if execution_mode == HookExecutionMode::RoutePost {
             if let Some(cmd) = exec_out.staged_content_command {
                 let Some(actor) = actor else {
@@ -2968,19 +2971,34 @@ impl PluginManager {
                         "Ghi nội dung bị cấm trên public route.".into(),
                     ));
                 }
-                self.commit_staged_content_with_actor(
-                    owner_kind,
-                    &owner_id,
-                    &manifest,
-                    caps_opt.as_deref(),
-                    owner_fence,
-                    &required_role,
-                    actor,
-                    cmd,
-                    hooks,
-                    &correlation_id,
-                )
-                .await?;
+                let version_before = cmd.expected_version;
+                let record = self
+                    .commit_staged_content_with_actor(
+                        owner_kind,
+                        &owner_id,
+                        &manifest,
+                        caps_opt.as_deref(),
+                        owner_fence,
+                        &required_role,
+                        actor,
+                        cmd,
+                        hooks,
+                        &correlation_id,
+                    )
+                    .await?;
+                committed_receipt = Some(EntryCommitReceipt {
+                    operation: EntryMutationKind::Save,
+                    id: record.id,
+                    type_key: record.content_type_key.clone(),
+                    locale: record.locale.clone(),
+                    translation_group_id: record.translation_group_id.clone(),
+                    version_before,
+                    version_after: Some(record.version),
+                    publication_before: None,
+                    publication_after: Some(record.publication_status.clone()),
+                    trashed_at: None,
+                    published_at: record.published_at.clone(),
+                });
             } else if let Some(del) = exec_out.staged_lifecycle_command {
                 if del.operation != StagedLifecycleOperation::Trash {
                     return Err(mk_err(
@@ -3014,7 +3032,7 @@ impl PluginManager {
                     owner_fence,
                     required_role,
                 };
-                if let Err(err) = plugin_storage::delete_entry_with_plugin_fence(
+                match plugin_storage::delete_entry_with_plugin_fence(
                     &self.db_pool,
                     actor,
                     &del.type_key,
@@ -3024,7 +3042,12 @@ impl PluginManager {
                 )
                 .await
                 {
-                    return Err(mk_err(err.0, "content_delete_fenced", err.1.to_string()));
+                    Ok(receipt) => {
+                        committed_receipt = Some(receipt);
+                    }
+                    Err(err) => {
+                        return Err(mk_err(err.0, "content_delete_fenced", err.1.to_string()));
+                    }
                 }
             }
             plugin_storage::record_owner_execution_result(
@@ -3043,6 +3066,7 @@ impl PluginManager {
             output: exec_out.output,
             render_trusted_html,
             correlation_id,
+            committed: committed_receipt,
         })
     }
 
@@ -3312,4 +3336,5 @@ pub struct ExtensionRouteExecOutput {
     pub output: Value,
     pub render_trusted_html: bool,
     pub correlation_id: String,
+    pub committed: Option<EntryCommitReceipt>,
 }

@@ -590,6 +590,28 @@ async fn s04_broadened_cpt_bulk_taxonomy_lifecycle_mixed_cas_and_privacy_diag() 
         .unwrap();
     assert_eq!(adm_purge.status(), StatusCode::NO_CONTENT);
 
+    // F-02: Purging a previously published non-page entry removes its canonical claim
+    // while retaining an orphan historical redirect in permalink_route_redirects.
+    let purged_claim_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?",
+    )
+    .bind(article_ids[0].to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(purged_claim_count, 0);
+    let purged_orphan_redirect_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM permalink_route_redirects WHERE target_kind = 'entry' AND target_id = ?",
+    )
+    .bind(article_ids[0].to_string())
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert!(
+        purged_orphan_redirect_count >= 1,
+        "purging a previously published entry must retain its orphan historical redirect"
+    );
+
     // Shared media MUST remain active & publicly accessible because article_ids[2] is published and still references it.
     let pub_media = client
         .get(format!("{}/media/{media_id}/file", site.base))

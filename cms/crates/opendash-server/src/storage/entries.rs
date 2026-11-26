@@ -3329,14 +3329,21 @@ pub async fn set_publication_status(
         ));
     }
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
-    let locale: String = sqlx::query_scalar(
-        "SELECT locale FROM content_entries WHERE content_type_key = ? AND id = ?",
+    let (locale, current_status): (String, String) = sqlx::query_as(
+        "SELECT locale, publication_status FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
     resolve_entry_write_locale_in_tx(&mut tx, None, Some(&locale)).await?;
+    if current_status == status {
+        let record = get_entry_in_tx(&mut tx, type_key, id)
+            .await?
+            .ok_or_else(|| ApiError::internal("Không thể tải trạng thái xuất bản."))?;
+        tx.commit().await?;
+        return Ok(record);
+    }
     let result = sqlx::query(
         "UPDATE content_entries
          SET publication_status = ?,

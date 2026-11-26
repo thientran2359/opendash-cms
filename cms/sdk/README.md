@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/sdk/` contains the official AssemblyScript guest SDK for OpenDash CMS plugins targeting the Wasmi host ABI v1.1 (`opendash_v1`), `PluginEnvelopeV2`, and all 15 Host Ops defined in [PLUGIN_ABI.md](../../docs/contracts/PLUGIN_ABI.md). All v1 helpers (`getInput`, `setOutput`, `hostCall`, `kvGet`, `kvSet`, `httpRequest`, `escapeJsonString`, `stringifyValue`) remain backwards-compatible so legacy v1 plugins such as [`sample-plugin`](../examples/plugins/sample-plugin/README.md) compile and run unchanged.
+`cms/sdk/` contains the official AssemblyScript guest SDK for OpenDash CMS plugins targeting the Wasmi host ABI v1.1 (`opendash_v1`), `PluginEnvelopeV2`, and all 19 Host Ops defined in [PLUGIN_ABI.md](../../docs/contracts/PLUGIN_ABI.md). All v1 helpers (`getInput`, `setOutput`, `hostCall`, `kvGet`, `kvSet`, `httpRequest`, `escapeJsonString`, `stringifyValue`) remain backwards-compatible so legacy v1 plugins such as [`sample-plugin`](../examples/plugins/sample-plugin/README.md) compile and run unchanged.
 
 `cms/sdk/` does not have its own `package.json`; AssemblyScript (`assemblyscript = "=0.27.34"`) and `assemblyscript-json` (`1.1.0`) are pinned in [`../examples/plugins/sample-plugin/package.json`](../examples/plugins/sample-plugin/package.json). (Rust-authored plugins use the sibling workspace crate [`opendash-plugin-sdk`](../crates/opendash-plugin-sdk/src/abi.rs) implementing the same `opendash_v1` wire protocol.)
 
@@ -10,8 +10,8 @@
 
 ### Files
 
-- [`as/opendash.ts`](as/opendash.ts) — AssemblyScript SDK module (`opendash_v1` imports, `Envelope`/`readEnvelope`, 15 Host Op wrappers, and typed output helpers).
-- [`as/test_harness.ts`](as/test_harness.ts) — Guest WASM test harness exercising v1/v2 envelopes, `-2` oversized readback, all 15 Host Ops, and all typed output helpers (`opendash_run`).
+- [`as/opendash.ts`](as/opendash.ts) — AssemblyScript SDK module (`opendash_v1` imports, `Envelope`/`readEnvelope`, 19 Host Op wrappers, and typed output helpers).
+- [`as/test_harness.ts`](as/test_harness.ts) — Guest WASM test harness exercising v1/v2 envelopes, `-2` oversized readback, all 19 Host Ops, and all typed output helpers (`opendash_run`).
 - [`as/test_sdk_v11.mjs`](as/test_sdk_v11.mjs) — Node.js WebAssembly mock-host test runner (`runHarness`) that verifies `cms/target/opendash_sdk_test.wasm`.
 
 ### Host Imports (`"opendash_v1"`) & Buffer Constants

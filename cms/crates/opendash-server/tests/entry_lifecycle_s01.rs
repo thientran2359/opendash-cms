@@ -1,4 +1,4 @@
-//! S01: Entry lifecycle foundation, additive migration 0053, full public/writer visibility
+//! S01: Entry lifecycle foundation, additive migration 0054, full public/writer visibility
 //! closure, query-plan verification, backup/restore compatibility, and old-binary refusal proof.
 //! Every test owns a disposable site root and an ephemeral loopback port (never touches 18964).
 
