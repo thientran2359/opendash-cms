@@ -31,8 +31,8 @@
 ## Interface
 
 - **Embedded migrator:** [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) configures `SqliteConnectOptions` (`create_if_missing(true)`, `foreign_keys(true)`, `SqliteJournalMode::Wal`, `busy_timeout(5s)`), runs preflight checks, executes `sqlx::migrate!("../../migrations").run(&db)`, and seeds core blocks.
-- **Pre-migration hook:** [`storage/content.rs:preflight_builtin_key_collisions`](../crates/opendash-server/src/storage/content.rs) validates built-in `post`/`page` descriptor keys before SQLx applies migration `0008`.
-- **Post-migration seed:** [`storage/page.rs:ensure_embedded_core_blocks`](../crates/opendash-server/src/storage/page.rs) upserts `core`-owned rows in `builder_block_definitions`.
+- **Pre-migration hook:** [`storage/content.rs:preflight_builtin_key_collisions`](../crates/opendash-server/src/storage/content/mod.rs) validates built-in `post`/`page` descriptor keys before SQLx applies migration `0008`.
+- **Post-migration seed:** [`storage/page.rs:ensure_embedded_core_blocks`](../crates/opendash-server/src/storage/page/mod.rs) upserts `core`-owned rows in `builder_block_definitions`.
 - **Release manifest tracking:** [`build-release-linux.sh`](../scripts/build-release-linux.sh) hashes every `cms/migrations/*.sql` file into `release-manifest.json` (`migration_checksums`).
 
 ## Invariants

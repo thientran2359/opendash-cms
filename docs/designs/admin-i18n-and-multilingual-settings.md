@@ -194,7 +194,7 @@ ALTER TABLE site_locales
   ```
 - **Contract `GeneralSettings` & `GeneralSettingsInput`** ([`storage/settings.rs#L781-L821`](../../cms/crates/opendash-server/src/storage/settings/mod.rs)):
   - Thêm `pub cms_locale: String` vào `GeneralSettings` (trả trong cả `get_general_in_conn_for_locale` và `SaveOutcome::Saved`).
-  - Derive `Default` trên `GeneralSettingsInput` và thêm `#[serde(default)] pub cms_locale: Option<String>` (cập nhật 2 vị trí khởi tạo struct trong Rust: [`storage/overrides.rs#L3155-L3159`](../../cms/crates/opendash-server/src/storage/overrides.rs#L3155-L3159) và unit test `settings.rs#L2667-L2671`).
+  - Derive `Default` trên `GeneralSettingsInput` và thêm `#[serde(default)] pub cms_locale: Option<String>` (cập nhật 2 vị trí khởi tạo struct trong Rust: [`storage/overrides.rs#L3155-L3159`](../../cms/crates/opendash-server/src/storage/overrides/mod.rs) và unit test `settings.rs#L2667-L2671`).
   - Cập nhật `GeneralSettingsDraft` trong [`cms/admin/src/api/settings.ts`](../../cms/admin/src/api/settings.ts#L14) thêm `cms_locale?: string`.
   - Quy tắc xử lý trong `save_general_for_locale` (`BEGIN IMMEDIATE`):
     1. Đọc `global_tz, global_cms_locale` từ `SELECT timezone, cms_locale FROM site_general_settings WHERE id = 1`.
@@ -209,7 +209,7 @@ Thiết kế giải quyết triệt để hiệu năng `0`-query khi lỗi, an t
 1. **Giữ nguyên signature `ApiError` & Bổ sung `AppState.ui_locale` Cache:**
    - Giữ nguyên [`pub struct ApiError(pub StatusCode, pub Cow<'static, str>);`](../../cms/crates/opendash-server/src/error.rs#L9) cho mọi call site trong codebase.
    - Bổ sung `pub ui_locale: std::sync::Arc<std::sync::atomic::AtomicU8>` vào [`AppState`](../../cms/crates/opendash-server/src/app.rs#L78-L93) (`0 = UNSET`, `1 = EN`, `2 = VI`; cập nhật cả 3 chỗ khởi tạo `AppState`: `main.rs#L195`, `routes/plugin.rs#L766`, `routes/operations.rs#L1169`). Khi server boot (`main.rs`), nạp `site_general_settings.cms_locale` qua [`storage/settings.rs`](../../cms/crates/opendash-server/src/storage/settings/mod.rs) helper; mỗi lần `general_put` lưu thành công sẽ cập nhật nguyên tử vào `state.ui_locale`.
-   - Khắc phục trước toàn bộ **`18` chuỗi mojibake `?`** trong [`cms/crates/opendash-server/src/storage/entries.rs`](../../cms/crates/opendash-server/src/storage/entries.rs) (`L1405, L1410, L1459, L1528, L1533, L1806, L1813, L1818, L1825, L1831, L1838, L1856, L1861, L1953, L1956, L2513, L2579, L2584`) về UTF-8 tiếng Việt sạch để bảng khớp chuẩn không bị rớt.
+   - Khắc phục trước toàn bộ **`18` chuỗi mojibake `?`** trong [`cms/crates/opendash-server/src/storage/entries.rs`](../../cms/crates/opendash-server/src/storage/entries/mod.rs) (`L1405, L1410, L1459, L1528, L1533, L1806, L1813, L1818, L1825, L1831, L1838, L1856, L1861, L1953, L1956, L2513, L2579, L2584`) về UTF-8 tiếng Việt sạch để bảng khớp chuẩn không bị rớt.
 
 2. **Động cơ Ánh xạ & Dịch Hai Chiều (`cms/crates/opendash-server/src/i18n.rs`):**
    - `pub struct LocalizedError { pub code: &'static str, pub message: String }`
@@ -368,29 +368,29 @@ Tất cả endpoint ghi dưới đây dùng `AdmittedMutation`, `require_admin_w
    - `get_default_locale_code_in_conn` (`L135`), `get_locale_bcp47_and_dir_in_conn` (`L168`), `resolve_requested_locale_in_conn` (`L229`), `list_locales_in_conn` (`L255`), `update_locale` (`L408`), `set_default_locale` (`L471`): thêm `deleted_at IS NULL`.
    - `enabled_secondary_locale_for_segment` (`L150`): thêm `AND deleted_at IS NULL AND EXISTS (SELECT 1 FROM site_locales_state WHERE id = 1 AND multilingual_enabled = 1)`.
    - `save_public` (`L3815`): đếm `COUNT(*) FROM site_locales WHERE deleted_at IS NULL`. Nếu `multilingual_enabled == 1` hoặc count `> 1` -> `MultiLocaleConflict`. Nếu đơn ngữ (`<= 1`) đổi `content_language`, kiểm tra `SELECT EXISTS(SELECT 1 FROM site_locales WHERE code = ? AND deleted_at IS NOT NULL)` -> `409 Conflict` (`locale.orphaned_conflict`); và cập nhật thêm `UPDATE plugin_entry_projections SET locale = ? WHERE locale = ?`.
-2. **[`storage/permalinks.rs`](../../cms/crates/opendash-server/src/storage/permalinks.rs):**
+2. **[`storage/permalinks.rs`](../../cms/crates/opendash-server/src/storage/permalinks/mod.rs):**
    - `load_secondary_locale_roots_in_conn` (`L145`), `sync_claims_with_options_and_swap` (`L1002-1017`), và toàn bộ `JOIN site_locales sl` (`L587, L607, L635, L660, L1198, L1316, L1354, L2013, L2025, L2053, L2112`): áp dụng `sl.deleted_at IS NULL AND sl.enabled = 1 AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)`.
    - **Tách `parked_redirects` trong `old_redirects` (`L1526-1562`) & write-back (`L1973-1996`) — Bảo toàn lossless + Không vỡ PK:**
      - Đọc tập `soft_deleted_codes` (`SELECT code FROM site_locales WHERE deleted_at IS NOT NULL`) trong transaction.
      - Mọi dòng trong `old_redirects` có `locale` thuộc `soft_deleted_codes` được xem là **`parked`**: **KHÔNG** đưa vào `previous_history` và **KHÔNG** đưa vào `historical`. Nhờ đó `L1973-1980` giữ nguyên dữ liệu redirect của ngôn ngữ đang chờ Purge (bảo toàn 100% nếu Admin `revive`), không đếm vào `MAX_REDIRECTS`, và không tạo lỗi collision cho site đang chạy.
      - Các ngôn ngữ còn tồn tại (`deleted_at IS NULL`, kể cả đang tắt `enabled = 0` hay tạm ngưng `multilingual_enabled = 0`) giữ nguyên logic `old_redirects` hiện hành để bảo toàn lịch sử redirect canonical.
      - Tại vòng lặp ghi (`L1982-1996`), dùng `INSERT INTO permalink_route_redirects(source_path,target_kind,target_id,locale,origin) VALUES (?,?,?,?,?) ON CONFLICT(source_path) DO UPDATE SET target_kind=excluded.target_kind, target_id=excluded.target_id, locale=excluded.locale, origin=excluded.origin, created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE permalink_route_redirects.locale IN (SELECT code FROM site_locales WHERE deleted_at IS NOT NULL)` — ghi đè an toàn nếu một tuyến active hợp lệ chiếm lại `source_path` đang parked mà không bao giờ dính `SQLITE_CONSTRAINT_PRIMARYKEY` (`500`).
-3. **[`storage/seo.rs`](../../cms/crates/opendash-server/src/storage/seo.rs):**
+3. **[`storage/seo.rs`](../../cms/crates/opendash-server/src/storage/seo/mod.rs):**
    - `L74, L91, L153, L608, L656, L692, L1228, L1232, L1387, L1456, L1535`: áp dụng `sl.deleted_at IS NULL` (và gating `sl.enabled = 1` + `multilingual_enabled = 1` cho truy vấn public).
    - **`validate_route_claim_in_tx` (`L320-326`)** & `check_cpt_root_claim_in_tx` (`L345..L416`): lọc `JOIN site_locales sl ON sl.code = r.locale AND sl.deleted_at IS NULL` ở `L320`, `L383` (`entry_redirects r`), `L398` (`permalink_route_redirects r`), đặt alias `entry_public_paths p` tại `L357` với `JOIN site_locales sl ON sl.code = p.locale AND sl.deleted_at IS NULL`, và bổ sung `AND deleted_at IS NULL` tại `L345` để các đường dẫn `parked` của ngôn ngữ đã soft-delete không chặn author đặt custom URL hay tạo CPT mới.
    - `has_multilingual_alternates_prereq` (`L1106`, đổi `L1117` sang **`settings::list_enabled_locales_in_conn(conn)`** để short-circuit ngay khi `multilingual_enabled == 0`) & **`build_theme_locale_context_in_conn` (`L1655-L1770`)**: đổi `L1660` sang **`settings::list_enabled_locales_in_conn(conn)`** (nay đã có trường `label`), và trong `ThemeLocaleTarget::{Home, Entry, Archive, Term}` (`L1691-1767`) lọc chỉ các locale thuộc tập `enabled`.
 4. **[`storage/sitemap.rs`](../../cms/crates/opendash-server/src/storage/sitemap.rs):**
    - `L40, L75, L106, L145, L223, L247, L288, L333, L366`: dùng chung điều kiện `sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)`.
-5. **[`storage/public_content.rs`](../../cms/crates/opendash-server/src/storage/public_content.rs):**
+5. **[`storage/public_content.rs`](../../cms/crates/opendash-server/src/storage/public_content/mod.rs):**
    - Cập nhật toàn bộ **`6` hàm đọc public** (`get_by_slug_for_locale` `L93`, `get_published_by_id_in_tx` `L131`, `taxonomy_public_page_for_locale` `L556`, **`taxonomy_public_page_by_id` `L597`**, `query_related_entries` `L1091`, `query_recent_posts` `L1168`) và toàn bộ **`11` truy vấn trong `media_is_referenced`** (`L1200, L1225, L1280, L1290, L1305, L1313, L1318, L1324, L1333, L1356`, và **truy vấn thứ 2 Builder + Pattern ở `L1393`**): áp dụng `sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)`. Khi truyền trực tiếp một `Some(raw)` locale đã bị soft-delete, tắt (`enabled = 0`) hoặc là ngôn ngữ phụ trong lúc `multilingual_enabled == 0`, `get_by_slug_for_locale` (`L85`) và `taxonomy_public_page_for_locale` (`L549`) trả `Ok(None)` (nhất quán `404` công khai thay vì `400`).
-6. **[`storage/entries.rs`](../../cms/crates/opendash-server/src/storage/entries.rs):**
+6. **[`storage/entries.rs`](../../cms/crates/opendash-server/src/storage/entries/mod.rs):**
    - `decoded_with_terms` (`L403`) & `batch_translations_by_group_in_tx` (`L477`): thêm `AND sl.deleted_at IS NULL`.
    - `FILTERED_ENTRIES_WHERE` (`L1015-1033`): khi `locale IS NULL`, lọc `EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)`.
    - `resolve_entry_write_locale_in_tx` (`L628`): lọc `deleted_at IS NULL`; nếu ghi ngôn ngữ không mặc định khi `multilingual_enabled == 0` -> trả `409 multilingual.disabled`.
    - `prepare_entry_translation` (`L2823`–`L2863`) & `commit_entry_translation` (`L3006`–`L3035`): chặn hoàn toàn mọi tạo bản dịch mới (`409 multilingual.disabled`) nếu `multilingual_enabled == 0` (kể cả dịch từ bài phụ còn lại sang ngôn ngữ mặc định!), đồng thời kiểm tra cả source lẫn target đều `deleted_at IS NULL`.
-7. **[`storage/entry_table.rs`](../../cms/crates/opendash-server/src/storage/entry_table.rs):**
+7. **[`storage/entry_table.rs`](../../cms/crates/opendash-server/src/storage/entry_table/mod.rs):**
    - `SCOPE` (`L108-126`): lọc `EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)` khi `filter.locale` là `None`.
-8. **[`storage/taxonomy.rs`](../../cms/crates/opendash-server/src/storage/taxonomy.rs):**
+8. **[`storage/taxonomy.rs`](../../cms/crates/opendash-server/src/storage/taxonomy/mod.rs):**
    - `batch_term_translations_in_conn` (`L101`): thêm `AND sl.deleted_at IS NULL`.
    - `list_terms_for_locale` (`L780-806`): thêm `EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = locale AND sl.deleted_at IS NULL)` vào **cả `SELECT COUNT(*)` (`L780-789`) lẫn `SELECT ... LIMIT ? OFFSET ?` (`L791-806`)** khi `resolved_locale` là `None`.
    - `create_term_with_locale` (`L948-949`): nếu `multilingual_enabled == 0` và (`target_locale != default_code` hoặc `source_term_id.is_some()`), trả `409 multilingual.disabled`.
@@ -398,7 +398,7 @@ Tất cả endpoint ghi dưới đây dùng `AdmittedMutation`, `require_admin_w
    - `get_counts`: lọc `EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = content_entries.locale AND sl.deleted_at IS NULL)`.
 10. **[`storage/builder_binding.rs`](../../cms/crates/opendash-server/src/storage/builder_binding.rs#L113) & [`storage/media_refs.rs`](../../cms/crates/opendash-server/src/storage/media_refs.rs#L319):**
     - `builder_binding.rs#L113`: lọc `sl.deleted_at IS NULL` và trên public (`authenticated_preview == 0`) lọc thêm `(sl.is_default = 1 OR multilingual_enabled = 1)`. `media_refs.rs#L319`: `AND deleted_at IS NULL`.
-11. **[`storage/plugin.rs`](../../cms/crates/opendash-server/src/storage/plugin.rs#L1040-L1058) & [`plugin/runtime.rs`](../../cms/crates/opendash-server/src/plugin/runtime/mod.rs):**
+11. **[`storage/plugin.rs`](../../cms/crates/opendash-server/src/storage/plugin/mod.rs) & [`plugin/runtime.rs`](../../cms/crates/opendash-server/src/plugin/runtime/mod.rs):**
     - `plugin::count_entries_for_host_list` (`storage/plugin.rs#L1040-L1058`) bổ sung tham số `enforce_public_locale: bool` (hoặc join `site_locales sl ON sl.code = content_entries.locale AND sl.deleted_at IS NULL` và khi public: `sl.enabled = 1 AND (sl.is_default = 1 OR multilingual_enabled = 1)`), đồng bộ hoàn toàn giữa `items` và `total`.
     - `entries::list_published_filtered` và `HostReadRequest::{ContentGet, ContentList, TaxonomyList}` (`plugin/runtime.rs#L965-L1123`) thực thi gating `sl.deleted_at IS NULL`, và khi `is_public_scope == true` chỉ cho phép các ngôn ngữ thực sự public (`sl.enabled = 1` + `multilingual_enabled = 1` cho phụ), ngăn plugin rò rỉ dữ liệu ngôn ngữ đã xóa/tạm ngưng qua public hook/filter.
 

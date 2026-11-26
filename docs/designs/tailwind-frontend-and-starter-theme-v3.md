@@ -168,7 +168,7 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>>;
 
 #### 2.2. Hàm `storage::theme::ensure_default_starter_theme` & Tích hợp Startup / Backup
 
-1. **Chữ ký hàm trong [`cms/crates/opendash-server/src/storage/theme.rs`](../../cms/crates/opendash-server/src/storage/theme.rs):**
+1. **Chữ ký hàm trong [`cms/crates/opendash-server/src/storage/theme.rs`](../../cms/crates/opendash-server/src/storage/theme/mod.rs):**
    ```rust
    pub async fn ensure_default_starter_theme(
        db: &SqlitePool,
@@ -226,7 +226,7 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>>;
      - `header_cta_url` (`string`, default: `"/gioi-thieu"`, `public: true`)
      - `footer_copyright` (`string`, default: `"Xây dựng trên nền tảng OpenDash CMS — Single-Binary Rust + SQLite & Tailwind CSS v4."`, `public: true`)
      - `show_tagline` (`boolean`, default: `true`, `public: true`)
-   - `sample` (`ThemeSampleManifest` chuẩn tại [`storage/import.rs#L54-L131`](../../cms/crates/opendash-server/src/storage/import.rs#L54-L131)):
+   - `sample` (`ThemeSampleManifest` chuẩn tại [`storage/import.rs#L54-L131`](../../cms/crates/opendash-server/src/storage/import/mod.rs)):
      - `sample_key`: `"starter_default"`
      - `pages` (5 mục — dùng Comment Block `<!-- od:... -->` hoặc RichText trong `values.body`):
        - `home_page` (`slug: "trang-chu"`, `title: "Trang chủ OpenDash"`, `content_type: "page"`, `values.body` chứa Comment Block AST ghép `core/banner` + `opendash-starter/stats-bar` + 3 `core/card` + `opendash-starter/quote-box` + `core/accordion`)
