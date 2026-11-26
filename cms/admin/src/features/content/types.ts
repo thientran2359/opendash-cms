@@ -125,6 +125,33 @@ export interface LifecycleSummary {
   secondary?: SecondaryOutcome;
 }
 
+export interface PublishedAtPatch {
+  local_datetime: string;
+  timezone: string;
+}
+
+export type TaxonomyDeltaOp = 'add' | 'remove' | 'replace';
+
+export interface MetadataTaxonomyPatch {
+  key: string;
+  operation: TaxonomyDeltaOp;
+  term_ids: number[];
+}
+
+export interface MetadataPatch {
+  expected_schema_token: string;
+  title?: string;
+  slug?: string;
+  publication_status?: 'draft' | 'published';
+  published_at?: PublishedAtPatch;
+  taxonomy?: MetadataTaxonomyPatch;
+}
+
+export interface MetadataPatchResponse extends EntryTableRow {
+  schema_token: string;
+  secondary?: SecondaryOutcome;
+}
+
 export interface EntryRowCapabilities {
   edit: boolean;
   quick_edit: boolean;

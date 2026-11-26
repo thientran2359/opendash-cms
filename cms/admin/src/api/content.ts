@@ -12,6 +12,8 @@ import {
   EffectiveEditorConfigProjection,
   FieldGroupRecord,
   LifecycleSummary,
+  MetadataPatch,
+  MetadataPatchResponse,
   OwnedContentType,
   UserFieldGroupInput,
 } from '../features/content/types.ts';
@@ -392,6 +394,26 @@ export function purgeContentEntry(
     signal: options?.signal,
     defaultErrorMessage: tStatic('api.content.purge_the_entry'),
   }).then(() => undefined);
+}
+
+/** Narrow sparse metadata and single-taxonomy update shared by Quick Edit and Bulk Taxonomy. */
+export function patchEntryMetadata(
+  typeKey: string,
+  id: number,
+  version: number,
+  patch: MetadataPatch,
+  csrfToken: string,
+  signal?: AbortSignal,
+): Promise<MetadataPatchResponse> {
+  return requestJson<MetadataPatchResponse>(`${entryPath(typeKey, id)}/metadata`, {
+    method: 'PATCH',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify(patch),
+    signal,
+    defaultErrorMessage: tStatic('api.content.patch_entry_metadata'),
+  });
 }
 
 /** Legacy HTTP DELETE alias now performs recoverable Trash. */

@@ -1309,6 +1309,978 @@ pub async fn list_trashed_entries_metadata_for_host(
     Ok((items, total))
 }
 
+/// Returns `(kind, locale, active_and_declared)` for a single term ID (used by S03 hook scope checks).
+pub(crate) async fn lookup_term_scope_in_conn(
+    conn: &mut SqliteConnection,
+    term_id: i64,
+) -> ApiResult<Option<(String, String, bool)>> {
+    let row: Option<(String, String, String, String)> = sqlx::query_as(
+        "SELECT t.kind, t.locale, d.provider_status, d.declaration_state
+           FROM taxonomy_terms t
+           JOIN taxonomy_definitions d ON d.key = t.kind
+          WHERE t.id = ?",
+    )
+    .bind(term_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(
+        row.map(|(kind, locale, provider_status, declaration_state)| {
+            (
+                kind,
+                locale,
+                provider_status == "active" && declaration_state == "declared",
+            )
+        }),
+    )
+}
+
+fn deserialize_non_null_option<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublishedAtPatch {
+    pub local_datetime: String,
+    pub timezone: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaxonomyDeltaOp {
+    Add,
+    Remove,
+    Replace,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetadataTaxonomyPatch {
+    pub key: String,
+    pub operation: TaxonomyDeltaOp,
+    pub term_ids: Vec<i64>,
+}
+
+/// Sparse narrow metadata patch shared by Quick Edit and Bulk Taxonomy (`PATCH .../metadata`).
+/// Omission means retain; explicit `null` and unknown fields are rejected at deserialization.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetadataPatch {
+    #[serde(default, deserialize_with = "deserialize_non_null_option")]
+    pub expected_schema_token: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_non_null_option")]
+    pub title: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_non_null_option")]
+    pub slug: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_non_null_option")]
+    pub publication_status: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_non_null_option")]
+    pub published_at: Option<PublishedAtPatch>,
+    #[serde(default, deserialize_with = "deserialize_non_null_option")]
+    pub taxonomy: Option<MetadataTaxonomyPatch>,
+}
+
+impl MetadataPatch {
+    pub fn has_any_field(&self) -> bool {
+        self.title.is_some()
+            || self.slug.is_some()
+            || self.publication_status.is_some()
+            || self.published_at.is_some()
+            || self.taxonomy.is_some()
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct MetadataPatchResponse {
+    #[serde(flatten)]
+    pub row: crate::storage::entry_table::EntryTableRow,
+    pub schema_token: String,
+    pub secondary: SecondaryOutcome,
+}
+
+pub struct MetadataPreflightPlan {
+    pub preflight_schema_token: String,
+    pub effective: opendash_core::content::EffectiveContentSchema,
+    pub entry_locale: String,
+    pub translation_group_id: String,
+    pub candidate_title: String,
+    pub candidate_slug: String,
+    pub candidate_values: BTreeMap<String, Value>,
+    pub candidate_term_ids: Vec<i64>,
+    pub candidate_status: String,
+    pub explicit_published_at_utc: Option<String>,
+    pub requested_title: bool,
+    pub requested_slug: bool,
+    pub requested_taxonomy_key: Option<String>,
+    pub hook_modified_terms: bool,
+}
+
+fn validate_metadata_title(raw: &str) -> ApiResult<String> {
+    if raw.chars().any(char::is_control) {
+        return Err(ApiError::unprocessable(
+            "Tiêu đề không được chứa ký tự điều khiển.",
+        ));
+    }
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 200 {
+        return Err(ApiError::unprocessable(
+            "Tiêu đề phải có từ 1 đến 200 ký tự.",
+        ));
+    }
+    Ok(trimmed.to_owned())
+}
+
+fn validate_metadata_slug(raw: &str) -> ApiResult<String> {
+    if !valid_kebab_segment_with_limit(raw, 64) {
+        return Err(ApiError::unprocessable(
+            "Slug không hợp lệ (chỉ gồm chữ thường, số, gạch ngang và tối đa 64 ký tự).",
+        ));
+    }
+    Ok(raw.to_owned())
+}
+
+/// Strictly parses ASCII `YYYY-MM-DDTHH:mm:ss` (mandatory seconds, no suffix/fraction),
+/// enforces echoed site IANA timezone, rejects nonexistent/ambiguous DST wall times
+/// via `jiff::tz::Disambiguation::Reject`, rejects future timestamps, and returns
+/// canonical SQLite UTC `"YYYY-MM-DD HH:MM:SS"`.
+pub(crate) fn parse_and_convert_published_at(
+    patch: &PublishedAtPatch,
+    current_site_timezone: &str,
+) -> ApiResult<String> {
+    if patch.timezone.trim() != current_site_timezone {
+        return Err(ApiError::conflict(
+            "timezone_changed: Múi giờ hệ thống đã thay đổi; hãy tải lại biểu mẫu trước khi lưu ngày xuất bản.",
+        ));
+    }
+    let raw = patch.local_datetime.as_str();
+    let b = raw.as_bytes();
+    if b.len() != 19
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || b[10] != b'T'
+        || b[13] != b':'
+        || b[16] != b':'
+        || !b[0..4].iter().all(u8::is_ascii_digit)
+        || !b[5..7].iter().all(u8::is_ascii_digit)
+        || !b[8..10].iter().all(u8::is_ascii_digit)
+        || !b[11..13].iter().all(u8::is_ascii_digit)
+        || !b[14..16].iter().all(u8::is_ascii_digit)
+        || !b[17..19].iter().all(u8::is_ascii_digit)
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_published_at: Ngày xuất bản phải đúng định dạng YYYY-MM-DDTHH:mm:ss (bắt buộc có giây, không có hậu tố múi giờ).",
+        ));
+    }
+    let year: i16 = raw[0..4].parse().map_err(|_| {
+        ApiError::unprocessable("invalid_published_at: Ngày xuất bản không hợp lệ theo lịch dương.")
+    })?;
+    let month: i8 = raw[5..7].parse().map_err(|_| {
+        ApiError::unprocessable("invalid_published_at: Ngày xuất bản không hợp lệ theo lịch dương.")
+    })?;
+    let day: i8 = raw[8..10].parse().map_err(|_| {
+        ApiError::unprocessable("invalid_published_at: Ngày xuất bản không hợp lệ theo lịch dương.")
+    })?;
+    let hour: i8 = raw[11..13].parse().map_err(|_| {
+        ApiError::unprocessable("invalid_published_at: Ngày xuất bản không hợp lệ theo lịch dương.")
+    })?;
+    let minute: i8 = raw[14..16].parse().map_err(|_| {
+        ApiError::unprocessable("invalid_published_at: Ngày xuất bản không hợp lệ theo lịch dương.")
+    })?;
+    let second: i8 = raw[17..19].parse().map_err(|_| {
+        ApiError::unprocessable("invalid_published_at: Ngày xuất bản không hợp lệ theo lịch dương.")
+    })?;
+    if year < 1970 {
+        return Err(ApiError::unprocessable(
+            "invalid_published_at: Năm của ngày xuất bản phải từ 1970 trở đi.",
+        ));
+    }
+    let date = jiff::civil::Date::new(year, month, day).map_err(|_| {
+        ApiError::unprocessable("invalid_published_at: Ngày xuất bản không hợp lệ theo lịch dương.")
+    })?;
+    let time = jiff::civil::Time::new(hour, minute, second, 0).map_err(|_| {
+        ApiError::unprocessable("invalid_published_at: Ngày xuất bản không hợp lệ theo lịch dương.")
+    })?;
+    let civil_dt = jiff::civil::DateTime::from_parts(date, time);
+    let tz = jiff::tz::TimeZone::get(current_site_timezone).map_err(|_| {
+        ApiError::internal("Múi giờ hệ thống không tồn tại trong cơ sở dữ liệu IANA.")
+    })?;
+    let utc_ts = tz
+        .to_ambiguous_timestamp(civil_dt)
+        .disambiguate(jiff::tz::Disambiguation::Reject)
+        .map_err(|_| {
+            ApiError::unprocessable(
+                "invalid_published_at: Thời điểm cục bộ không tồn tại hoặc mơ hồ do chuyển giờ mùa hè (DST); hãy chọn thời điểm hợp lệ không mơ hồ.",
+            )
+        })?;
+    if utc_ts > jiff::Timestamp::now() {
+        return Err(ApiError::unprocessable(
+            "published_at_in_future: Không hỗ trợ đặt ngày xuất bản trong tương lai.",
+        ));
+    }
+    let utc_dt = utc_ts.to_zoned_datetime(jiff::tz::TimeZone::UTC).datetime();
+    Ok(format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        utc_dt.year(),
+        utc_dt.month(),
+        utc_dt.day(),
+        utc_dt.hour(),
+        utc_dt.minute(),
+        utc_dt.second(),
+    ))
+}
+
+async fn resolve_taxonomy_delta_in_conn(
+    conn: &mut SqliteConnection,
+    type_key: &str,
+    entry_id: i64,
+    entry_locale: &str,
+    delta: &MetadataTaxonomyPatch,
+) -> ApiResult<(Vec<i64>, std::collections::BTreeSet<i64>)> {
+    if !valid_content_type_key(&delta.key) {
+        return Err(ApiError::unprocessable(
+            "invalid_taxonomy_delta: Khóa phân loại không hợp lệ.",
+        ));
+    }
+    let tax_row: Option<(String, String)> = sqlx::query_as(
+        "SELECT provider_status, declaration_state FROM taxonomy_definitions WHERE key = ?",
+    )
+    .bind(&delta.key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some((provider_status, declaration_state)) = tax_row else {
+        return Err(ApiError::unprocessable(
+            "invalid_taxonomy_delta: Phân loại không tồn tại hoặc không khả dụng.",
+        ));
+    };
+    if provider_status != "active" || declaration_state != "declared" {
+        return Err(ApiError::unprocessable(
+            "invalid_taxonomy_delta: Phân loại hiện không hoạt động hoặc đã bị thu hồi.",
+        ));
+    }
+    let eligible = crate::storage::content::load_effective_taxonomies_in_tx(conn, type_key).await?;
+    if !eligible.iter().any(|k| k == &delta.key) {
+        return Err(ApiError::unprocessable(
+            "invalid_taxonomy_delta: Phân loại không được phép dùng cho loại nội dung này.",
+        ));
+    }
+    if matches!(
+        delta.operation,
+        TaxonomyDeltaOp::Add | TaxonomyDeltaOp::Remove
+    ) && delta.term_ids.is_empty()
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_taxonomy_delta: Thao tác thêm hoặc gỡ phân loại cần ít nhất một term_id.",
+        ));
+    }
+    let max_for_kind = if delta.key == "category" { 32 } else { 64 };
+    if delta.term_ids.len() > max_for_kind {
+        return Err(ApiError::unprocessable(
+            "invalid_taxonomy_delta: Số lượng term vượt quá giới hạn của phân loại.",
+        ));
+    }
+    let mut input_ids = std::collections::BTreeSet::new();
+    for &tid in &delta.term_ids {
+        if tid <= 0 {
+            return Err(ApiError::unprocessable(
+                "invalid_taxonomy_delta: Danh sách term_ids chứa ID không hợp lệ.",
+            ));
+        }
+        if !input_ids.insert(tid) {
+            return Err(ApiError::unprocessable(
+                "invalid_taxonomy_delta: Danh sách term_ids không được chứa ID trùng lặp.",
+            ));
+        }
+        let found: Option<(String, String, String, String)> = sqlx::query_as(
+            "SELECT t.kind, t.locale, d.provider_status, d.declaration_state
+               FROM taxonomy_terms t
+               JOIN taxonomy_definitions d ON d.key = t.kind
+              WHERE t.id = ?",
+        )
+        .bind(tid)
+        .fetch_optional(&mut *conn)
+        .await?;
+        let Some((kind, term_locale, ps, ds)) = found else {
+            return Err(ApiError::unprocessable(
+                "invalid_taxonomy_delta: Term ID không tồn tại.",
+            ));
+        };
+        if ps != "active" || ds != "declared" {
+            return Err(ApiError::unprocessable(
+                "invalid_taxonomy_delta: Term thuộc phân loại không hoạt động.",
+            ));
+        }
+        if kind != delta.key {
+            return Err(ApiError::unprocessable(
+                "invalid_taxonomy_delta: Term ID không thuộc phân loại được chỉ định.",
+            ));
+        }
+        if term_locale != entry_locale {
+            return Err(ApiError::unprocessable(
+                "invalid_taxonomy_delta: Term thuộc ngôn ngữ khác với nội dung.",
+            ));
+        }
+    }
+
+    let existing_rows: Vec<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT t.id, t.kind, d.provider_status, d.declaration_state
+           FROM entry_terms et
+           JOIN taxonomy_terms t ON t.id = et.term_id
+           JOIN taxonomy_definitions d ON d.key = t.kind
+          WHERE et.entry_id = ?
+          ORDER BY t.id ASC",
+    )
+    .bind(entry_id)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    let mut other_ids = std::collections::BTreeSet::new();
+    let mut other_active_eligible_count = 0usize;
+    let mut current_kind_ids = std::collections::BTreeSet::new();
+    for (tid, kind, ps, ds) in existing_rows {
+        if kind == delta.key {
+            current_kind_ids.insert(tid);
+        } else {
+            other_ids.insert(tid);
+            if ps == "active" && ds == "declared" && eligible.iter().any(|k| k == &kind) {
+                other_active_eligible_count += 1;
+            }
+        }
+    }
+
+    let next_kind_ids: std::collections::BTreeSet<i64> = match delta.operation {
+        TaxonomyDeltaOp::Add => current_kind_ids.union(&input_ids).copied().collect(),
+        TaxonomyDeltaOp::Remove => current_kind_ids.difference(&input_ids).copied().collect(),
+        TaxonomyDeltaOp::Replace => input_ids,
+    };
+
+    if next_kind_ids.len() > max_for_kind {
+        return Err(ApiError::unprocessable(
+            "invalid_taxonomy_delta: Số lượng term sau khi cập nhật vượt quá giới hạn của phân loại.",
+        ));
+    }
+    if other_active_eligible_count + next_kind_ids.len() > 96 {
+        return Err(ApiError::unprocessable(
+            "invalid_taxonomy_delta: Tổng số term hoạt động của nội dung vượt quá giới hạn 96.",
+        ));
+    }
+
+    let merged: Vec<i64> = other_ids.union(&next_kind_ids).copied().collect();
+    Ok((merged, next_kind_ids))
+}
+
+async fn validate_hook_adjusted_terms_in_conn(
+    conn: &mut SqliteConnection,
+    type_key: &str,
+    entry_id: i64,
+    entry_locale: &str,
+    allowed_key: &str,
+    candidate_ids: &[i64],
+) -> ApiResult<Vec<i64>> {
+    let eligible = crate::storage::content::load_effective_taxonomies_in_tx(conn, type_key).await?;
+    let existing_rows: Vec<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT t.id, t.kind, d.provider_status, d.declaration_state
+           FROM entry_terms et
+           JOIN taxonomy_terms t ON t.id = et.term_id
+           JOIN taxonomy_definitions d ON d.key = t.kind
+          WHERE et.entry_id = ?
+          ORDER BY t.id ASC",
+    )
+    .bind(entry_id)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    let mut other_ids = std::collections::BTreeSet::new();
+    let mut other_active_eligible_count = 0usize;
+    for (tid, kind, ps, ds) in existing_rows {
+        if kind != allowed_key {
+            other_ids.insert(tid);
+            if ps == "active" && ds == "declared" && eligible.iter().any(|k| k == &kind) {
+                other_active_eligible_count += 1;
+            }
+        }
+    }
+
+    let mut next_kind_ids = std::collections::BTreeSet::new();
+    for &tid in candidate_ids {
+        if other_ids.contains(&tid) {
+            continue;
+        }
+        let info = lookup_term_scope_in_conn(conn, tid).await?;
+        let Some((kind, loc, active)) = info else {
+            return Err(ApiError::unprocessable(
+                "metadata_hook_scope_conflict: Plugin filter trả về term không tồn tại.",
+            ));
+        };
+        if !active || kind != allowed_key || loc != entry_locale {
+            return Err(ApiError::unprocessable(
+                "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi phân loại ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+            ));
+        }
+        next_kind_ids.insert(tid);
+    }
+
+    let max_for_kind = if allowed_key == "category" { 32 } else { 64 };
+    if next_kind_ids.len() > max_for_kind || other_active_eligible_count + next_kind_ids.len() > 96
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_taxonomy_delta: Số lượng term sau khi filter vượt quá giới hạn cho phép.",
+        ));
+    }
+    Ok(other_ids.union(&next_kind_ids).copied().collect())
+}
+
+/// Read-only preflight for `PATCH .../entries/{id}/metadata`.
+/// Holds no SQLite writer across plugin `prepare_save` / `before_save` hook execution.
+pub async fn prepare_metadata_patch(
+    db: &SqlitePool,
+    _actor: &SessionContext,
+    type_key: &str,
+    entry_id: i64,
+    expected_version: i64,
+    patch: &MetadataPatch,
+) -> ApiResult<MetadataPreflightPlan> {
+    if !valid_content_type_key(type_key) {
+        return Err(ApiError::bad_request("Khóa loại nội dung không hợp lệ."));
+    }
+    if matches!(type_key, "pattern" | "section") {
+        return Err(ApiError::forbidden(
+            "entry_lifecycle_forbidden: Không hỗ trợ thao tác vòng đời chung cho Pattern hoặc Section.",
+        ));
+    }
+    if entry_id < 1 {
+        return Err(ApiError::bad_request("ID nội dung không hợp lệ."));
+    }
+    let client_token = patch
+        .expected_schema_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            ApiError(
+                axum::http::StatusCode::PRECONDITION_REQUIRED,
+                "missing_schema_token: Thiếu expected_schema_token.".into(),
+            )
+        })?;
+    if !patch.has_any_field() {
+        return Err(ApiError::unprocessable(
+            "metadata_empty_patch: Cần chọn ít nhất một trường siêu dữ liệu để cập nhật.",
+        ));
+    }
+
+    let mut tx = db.begin().await?;
+    let ct_row: Option<(String, String)> = sqlx::query_as(
+        "SELECT provider_status, declaration_state FROM content_types WHERE key = ?",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((provider_status, declaration_state)) = ct_row else {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    };
+    if provider_status != "active" || declaration_state != "declared" {
+        return Err(ApiError::conflict(
+            "provider_inactive: Loại nội dung hiện không hoạt động hoặc đã bị thu hồi.",
+        ));
+    }
+    let Some(effective) =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key).await?
+    else {
+        return Err(ApiError::conflict(
+            "provider_inactive: Không thể tải schema hiện hành của loại nội dung.",
+        ));
+    };
+    if client_token != effective.schema_token {
+        return Err(ApiError::precondition_failed(
+            "schema_version_conflict: Cấu trúc trường của loại nội dung đã thay đổi; hãy tải lại trước khi lưu.",
+        ));
+    }
+
+    // Enforce CAS (412) before lifecycle conflict (409 entry_trashed).
+    let Some(row) = load_retained_entry_identity_in_tx(&mut tx, type_key, entry_id).await? else {
+        return Err(ApiError::not_found("Không tìm thấy nội dung."));
+    };
+    if row.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
+        ));
+    }
+    if row.trashed_at.is_some() {
+        return Err(ApiError::conflict(
+            "entry_trashed: Nội dung đang ở trong Thùng rác và không thể chỉnh sửa cho đến khi khôi phục.",
+        ));
+    }
+
+    // Verify locale manageability (matching Single Edit contract).
+    let locale_row: Option<(i64, Option<String>)> =
+        sqlx::query_as("SELECT is_default, deleted_at FROM site_locales WHERE code = ?")
+            .bind(&row.locale)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((locale_is_default, locale_deleted_at)) = locale_row else {
+        return Err(ApiError::conflict(
+            "locale_deleted: Ngôn ngữ của nội dung không còn tồn tại trong cấu hình.",
+        ));
+    };
+    if locale_deleted_at.is_some() {
+        return Err(ApiError::conflict(
+            "locale_deleted: Ngôn ngữ của nội dung đã bị xóa; hãy dùng công cụ dọn ngôn ngữ mồ côi.",
+        ));
+    }
+    if locale_is_default == 0 {
+        let multilingual_enabled: i64 =
+            sqlx::query_scalar("SELECT multilingual_enabled FROM site_locales_state WHERE id = 1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if multilingual_enabled == 0 {
+            return Err(ApiError::conflict(
+                "locale_parked: Ngôn ngữ phụ đang bị tạm dừng; hãy bật lại chế độ đa ngôn ngữ trước khi thao tác.",
+            ));
+        }
+    }
+
+    let candidate_title = match patch.title.as_deref() {
+        Some(raw) => validate_metadata_title(raw)?,
+        None => row.title.clone(),
+    };
+    let candidate_slug = match patch.slug.as_deref() {
+        Some(raw) => validate_metadata_slug(raw)?,
+        None => row.slug.clone(),
+    };
+
+    let is_draft_publish =
+        effective.base.descriptor.settings.publication == ContentPublication::DraftPublish;
+    let candidate_status = match patch.publication_status.as_deref() {
+        Some(st) => {
+            if !is_draft_publish {
+                return Err(ApiError::conflict(
+                    "publication_policy_unsupported: Loại nội dung lưu ngay không hỗ trợ đổi trạng thái xuất bản qua thao tác này.",
+                ));
+            }
+            if st != "draft" && st != "published" {
+                return Err(ApiError::unprocessable(
+                    "publication_status chỉ hỗ trợ 'draft' hoặc 'published'.",
+                ));
+            }
+            st.to_owned()
+        }
+        None => row.publication_status.clone(),
+    };
+
+    let explicit_published_at_utc = match &patch.published_at {
+        Some(date_patch) => {
+            if candidate_status != "published" && row.published_at.is_none() {
+                return Err(ApiError::unprocessable(
+                    "draft_cannot_set_published_at: Bản nháp chưa từng xuất bản không thể đặt ngày xuất bản nếu không xuất bản tường minh.",
+                ));
+            }
+            let general = crate::storage::settings::get_general_in_conn(&mut tx).await?;
+            Some(parse_and_convert_published_at(
+                date_patch,
+                &general.timezone,
+            )?)
+        }
+        None => None,
+    };
+
+    let candidate_term_ids = match &patch.taxonomy {
+        Some(delta) => {
+            let (merged, _) =
+                resolve_taxonomy_delta_in_conn(&mut tx, type_key, entry_id, &row.locale, delta)
+                    .await?;
+            merged
+        }
+        None => {
+            sqlx::query_scalar(
+                "SELECT term_id FROM entry_terms WHERE entry_id = ? ORDER BY term_id ASC",
+            )
+            .bind(entry_id)
+            .fetch_all(&mut *tx)
+            .await?
+        }
+    };
+
+    let candidate_values: BTreeMap<String, Value> = serde_json::from_str(&row.values_json)
+        .map_err(|_| ApiError::internal("Dữ liệu custom fields không hợp lệ."))?;
+    tx.commit().await?;
+
+    Ok(MetadataPreflightPlan {
+        preflight_schema_token: effective.schema_token.clone(),
+        effective,
+        entry_locale: row.locale,
+        translation_group_id: row.translation_group_id,
+        candidate_title,
+        candidate_slug,
+        candidate_values,
+        candidate_term_ids,
+        candidate_status,
+        explicit_published_at_utc,
+        requested_title: patch.title.is_some(),
+        requested_slug: patch.slug.is_some(),
+        requested_taxonomy_key: patch.taxonomy.as_ref().map(|t| t.key.clone()),
+        hook_modified_terms: false,
+    })
+}
+
+/// Applies validated, scope-checked `filter:content/prepare_save` modifications to a metadata plan
+/// and re-validates title/slug bounds before `before_save` and commit.
+pub fn apply_prepare_save_to_metadata_plan(
+    plan: &mut MetadataPreflightPlan,
+    hook_patch: crate::hooks::ContentPrepareSavePatch,
+) -> ApiResult<()> {
+    if let Some(title) = hook_patch.title {
+        plan.candidate_title = validate_metadata_title(&title)?;
+    }
+    if let Some(slug) = hook_patch.slug {
+        plan.candidate_slug = validate_metadata_slug(&slug)?;
+    }
+    if let Some(term_ids) = hook_patch.term_ids {
+        plan.candidate_term_ids = term_ids;
+        plan.hook_modified_terms = true;
+    }
+    Ok(())
+}
+
+/// Commits a narrow metadata patch under a single reserved SQLite writer transaction,
+/// re-verifying live session/role, active CPT, schema token (412), entry version (412)
+/// before lifecycle (409), timezone (409), date <= now, taxonomy bounds, and route claims.
+/// Rejects completely unchanged final patches with `422 metadata_no_change` (no version bump or hooks).
+pub async fn commit_metadata_patch(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    entry_id: i64,
+    expected_version: i64,
+    patch: &MetadataPatch,
+    plan: &MetadataPreflightPlan,
+) -> ApiResult<(
+    crate::storage::entry_table::EntryTableRow,
+    String,
+    EntryCommitReceipt,
+)> {
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
+
+    verify_live_session_and_role_in_tx(&mut tx, actor).await?;
+
+    let ct_row: Option<(String, String)> = sqlx::query_as(
+        "SELECT provider_status, declaration_state FROM content_types WHERE key = ?",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((provider_status, declaration_state)) = ct_row else {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    };
+    if provider_status != "active" || declaration_state != "declared" {
+        return Err(ApiError::conflict(
+            "provider_inactive: Loại nội dung hiện không hoạt động hoặc đã bị thu hồi.",
+        ));
+    }
+    let Some(effective) =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key).await?
+    else {
+        return Err(ApiError::conflict(
+            "provider_inactive: Không thể tải schema hiện hành của loại nội dung.",
+        ));
+    };
+    let client_token = patch.expected_schema_token.as_deref().unwrap_or("").trim();
+    if client_token != effective.schema_token
+        || plan.preflight_schema_token != effective.schema_token
+    {
+        return Err(ApiError::precondition_failed(
+            "schema_version_conflict: Cấu trúc trường của loại nội dung đã thay đổi; hãy tải lại trước khi lưu.",
+        ));
+    }
+
+    let Some(row) = load_retained_entry_identity_in_tx(&mut tx, type_key, entry_id).await? else {
+        return Err(ApiError::not_found("Không tìm thấy nội dung."));
+    };
+    if row.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
+        ));
+    }
+    if row.trashed_at.is_some() {
+        return Err(ApiError::conflict(
+            "entry_trashed: Nội dung đang ở trong Thùng rác và không thể chỉnh sửa cho đến khi khôi phục.",
+        ));
+    }
+
+    let locale_row: Option<(i64, Option<String>)> =
+        sqlx::query_as("SELECT is_default, deleted_at FROM site_locales WHERE code = ?")
+            .bind(&row.locale)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((locale_is_default, locale_deleted_at)) = locale_row else {
+        return Err(ApiError::conflict(
+            "locale_deleted: Ngôn ngữ của nội dung không còn tồn tại trong cấu hình.",
+        ));
+    };
+    if locale_deleted_at.is_some() {
+        return Err(ApiError::conflict(
+            "locale_deleted: Ngôn ngữ của nội dung đã bị xóa; hãy dùng công cụ dọn ngôn ngữ mồ côi.",
+        ));
+    }
+    if locale_is_default == 0 {
+        let multilingual_enabled: i64 =
+            sqlx::query_scalar("SELECT multilingual_enabled FROM site_locales_state WHERE id = 1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if multilingual_enabled == 0 {
+            return Err(ApiError::conflict(
+                "locale_parked: Ngôn ngữ phụ đang bị tạm dừng; hãy bật lại chế độ đa ngôn ngữ trước khi thao tác.",
+            ));
+        }
+    }
+
+    let final_title = validate_metadata_title(&plan.candidate_title)?;
+    let final_slug = validate_metadata_slug(&plan.candidate_slug)?;
+
+    let is_draft_publish =
+        effective.base.descriptor.settings.publication == ContentPublication::DraftPublish;
+    let final_status = match patch.publication_status.as_deref() {
+        Some(st) => {
+            if !is_draft_publish {
+                return Err(ApiError::conflict(
+                    "publication_policy_unsupported: Loại nội dung lưu ngay không hỗ trợ đổi trạng thái xuất bản qua thao tác này.",
+                ));
+            }
+            if st != "draft" && st != "published" {
+                return Err(ApiError::unprocessable(
+                    "publication_status chỉ hỗ trợ 'draft' hoặc 'published'.",
+                ));
+            }
+            st.to_owned()
+        }
+        None => row.publication_status.clone(),
+    };
+
+    let explicit_published_at_utc = match &patch.published_at {
+        Some(date_patch) => {
+            if final_status != "published" && row.published_at.is_none() {
+                return Err(ApiError::unprocessable(
+                    "draft_cannot_set_published_at: Bản nháp chưa từng xuất bản không thể đặt ngày xuất bản nếu không xuất bản tường minh.",
+                ));
+            }
+            let general = crate::storage::settings::get_general_in_conn(&mut tx).await?;
+            Some(parse_and_convert_published_at(
+                date_patch,
+                &general.timezone,
+            )?)
+        }
+        None => None,
+    };
+
+    let current_terms_with_kind: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT t.id, t.kind
+           FROM entry_terms et
+           JOIN taxonomy_terms t ON t.id = et.term_id
+          WHERE et.entry_id = ?
+          ORDER BY t.id ASC",
+    )
+    .bind(entry_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let current_all_terms: std::collections::BTreeSet<i64> =
+        current_terms_with_kind.iter().map(|(id, _)| *id).collect();
+    let current_category_terms: std::collections::BTreeSet<i64> = current_terms_with_kind
+        .iter()
+        .filter(|(_, k)| k == "category")
+        .map(|(id, _)| *id)
+        .collect();
+
+    let final_term_ids: Vec<i64> = match &patch.taxonomy {
+        Some(delta) if plan.hook_modified_terms => {
+            validate_hook_adjusted_terms_in_conn(
+                &mut tx,
+                type_key,
+                entry_id,
+                &row.locale,
+                &delta.key,
+                &plan.candidate_term_ids,
+            )
+            .await?
+        }
+        Some(delta) => {
+            let (merged, _) =
+                resolve_taxonomy_delta_in_conn(&mut tx, type_key, entry_id, &row.locale, delta)
+                    .await?;
+            merged
+        }
+        None => current_all_terms.iter().copied().collect(),
+    };
+    let final_all_terms: std::collections::BTreeSet<i64> = final_term_ids.iter().copied().collect();
+
+    // Preserve primary category unless it was removed from the entry's term set; never invent one.
+    let final_primary_category = row
+        .primary_category_term_id
+        .filter(|pid| final_all_terms.contains(pid));
+
+    let title_changed = final_title != row.title;
+    let slug_changed = final_slug != row.slug;
+    let status_changed = final_status != row.publication_status;
+    let published_at_changed =
+        explicit_published_at_utc.is_some() && explicit_published_at_utc != row.published_at;
+    let terms_changed = final_all_terms != current_all_terms;
+    let primary_changed = final_primary_category != row.primary_category_term_id;
+
+    if !title_changed
+        && !slug_changed
+        && !status_changed
+        && !published_at_changed
+        && !terms_changed
+        && !primary_changed
+    {
+        return Err(ApiError::unprocessable(
+            "metadata_no_change: Không có thay đổi nào so với dữ liệu hiện tại.",
+        ));
+    }
+
+    let was_ever_published_int: i64 = sqlx::query_scalar(
+        "SELECT has_been_published FROM content_entries WHERE content_type_key = ? AND id = ?",
+    )
+    .bind(type_key)
+    .bind(entry_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let was_ever_published = was_ever_published_int != 0;
+
+    let res = sqlx::query(
+        "UPDATE content_entries
+            SET title = ?,
+                slug = ?,
+                publication_status = ?,
+                published_at = CASE
+                    WHEN ? IS NOT NULL THEN ?
+                    WHEN ? = 'published' THEN COALESCE(published_at, datetime('now'))
+                    ELSE published_at
+                END,
+                primary_category_term_id = ?,
+                version = version + 1,
+                updated_at = datetime('now')
+          WHERE content_type_key = ? AND id = ? AND version = ? AND trashed_at IS NULL",
+    )
+    .bind(&final_title)
+    .bind(&final_slug)
+    .bind(&final_status)
+    .bind(explicit_published_at_utc.as_deref())
+    .bind(explicit_published_at_utc.as_deref())
+    .bind(&final_status)
+    .bind(final_primary_category)
+    .bind(type_key)
+    .bind(entry_id)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await;
+
+    match res {
+        Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+            return Err(ApiError::conflict("Slug đã tồn tại trong loại nội dung."));
+        }
+        other => {
+            if other?.rows_affected() != 1 {
+                return Err(ApiError::precondition_failed(
+                    "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
+                ));
+            }
+        }
+    }
+
+    if terms_changed {
+        for &tid in current_all_terms.difference(&final_all_terms) {
+            sqlx::query("DELETE FROM entry_terms WHERE entry_id = ? AND term_id = ?")
+                .bind(entry_id)
+                .bind(tid)
+                .execute(&mut *tx)
+                .await?;
+        }
+        for &tid in final_all_terms.difference(&current_all_terms) {
+            sqlx::query("INSERT INTO entry_terms (entry_id, term_id) VALUES (?, ?)")
+                .bind(entry_id)
+                .bind(tid)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+
+    if status_changed {
+        crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, entry_id).await?;
+        if final_status == "draft" {
+            super::plugin_projections::delete_entry_projections_in_tx(&mut tx, entry_id).await?;
+        }
+    }
+
+    let category_terms_changed = if terms_changed && type_key == "post" {
+        let final_cats: Vec<i64> = sqlx::query_scalar(
+            "SELECT t.id
+               FROM entry_terms et
+               JOIN taxonomy_terms t ON t.id = et.term_id
+              WHERE et.entry_id = ? AND t.kind = 'category'
+              ORDER BY t.id ASC",
+        )
+        .bind(entry_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let final_cat_set: std::collections::BTreeSet<i64> = final_cats.into_iter().collect();
+        final_cat_set != current_category_terms
+    } else {
+        false
+    };
+
+    let needs_claim_sync = (was_ever_published || final_status == "published")
+        && (slug_changed
+            || status_changed
+            || primary_changed
+            || (type_key == "post" && (category_terms_changed || published_at_changed)));
+    if needs_claim_sync {
+        if !was_ever_published {
+            sqlx::query(
+                "DELETE FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?",
+            )
+            .bind(entry_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
+        crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    }
+
+    let caller_role = match actor.user.role {
+        Role::Admin => opendash_core::content::FieldRole::Admin,
+        Role::Editor => opendash_core::content::FieldRole::Editor,
+    };
+    let committed_row = crate::storage::entry_table::load_single_active_row_in_tx(
+        &mut tx,
+        type_key,
+        entry_id,
+        caller_role,
+        &effective,
+    )
+    .await?;
+
+    let receipt = EntryCommitReceipt {
+        operation: EntryMutationKind::Metadata,
+        id: committed_row.id,
+        type_key: committed_row.type_key.clone(),
+        locale: committed_row.locale.clone(),
+        translation_group_id: committed_row.translation_group_id.clone(),
+        version_before: Some(row.version),
+        version_after: Some(committed_row.version),
+        publication_before: Some(row.publication_status),
+        publication_after: Some(committed_row.publication_status.clone()),
+        trashed_at: None,
+        published_at: committed_row.published_at.clone(),
+    };
+
+    tx.commit().await?;
+    Ok((committed_row, effective.schema_token, receipt))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

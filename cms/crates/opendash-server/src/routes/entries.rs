@@ -26,6 +26,7 @@ use crate::{
 };
 
 pub const MAX_CONTENT_ENTRY_JSON_BYTES: usize = 768 * 1024;
+pub const MAX_METADATA_PATCH_JSON_BYTES: usize = 64 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -959,6 +960,119 @@ pub async fn entry_purge(
     Ok((
         StatusCode::NO_CONTENT,
         [(header::CACHE_CONTROL, "no-store")],
+    )
+        .into_response())
+}
+
+/// Narrow sparse metadata & single-taxonomy mutation shared by Quick Edit and Bulk Taxonomy.
+pub async fn entry_metadata_patch(
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    Json(patch): Json<crate::storage::entry_lifecycle::MetadataPatch>,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    let expected_ver = expected_version(&headers)?;
+    valid_type_key(&type_key)?;
+
+    let mut plan = crate::storage::entry_lifecycle::prepare_metadata_patch(
+        &db,
+        &actor,
+        &type_key,
+        id,
+        expected_ver,
+        &patch,
+    )
+    .await?;
+    let actor_role = actor_field_role(&actor);
+
+    let prepare_payload = json!({
+        "operation": "metadata",
+        "type_key": &type_key,
+        "entry_id": id,
+        "locale": &plan.entry_locale,
+        "title": &plan.candidate_title,
+        "slug": &plan.candidate_slug,
+        "candidate_values": &plan.candidate_values,
+        "term_ids": &plan.candidate_term_ids,
+    });
+    let hook_patch = hooks
+        .dispatch_content_prepare_save_with_scope(
+            &type_key,
+            actor_role,
+            &plan.effective,
+            prepare_payload,
+            crate::hooks::PrepareSaveMutationScope::Metadata {
+                requested_title: plan.requested_title,
+                requested_slug: plan.requested_slug,
+                taxonomy_key: plan.requested_taxonomy_key.clone(),
+                entry_locale: plan.entry_locale.clone(),
+            },
+            Some(&db),
+        )
+        .await?;
+    crate::storage::entry_lifecycle::apply_prepare_save_to_metadata_plan(&mut plan, hook_patch)?;
+
+    let candidate = json!({
+        "operation": "metadata",
+        "type_key": &type_key,
+        "entry_id": id,
+        "expected_version": expected_ver,
+        "locale": &plan.entry_locale,
+        "translation_group_id": &plan.translation_group_id,
+        "title": &plan.candidate_title,
+        "slug": &plan.candidate_slug,
+        "publication_status": &plan.candidate_status,
+        "candidate_values": &plan.candidate_values,
+        "term_ids": &plan.candidate_term_ids,
+    });
+    if let Err(veto) = hooks
+        .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
+        .await
+    {
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
+    }
+
+    let (row, schema_token, receipt) = crate::storage::entry_lifecycle::commit_metadata_patch(
+        &db,
+        &actor,
+        &type_key,
+        id,
+        expected_ver,
+        &patch,
+        &plan,
+    )
+    .await?;
+
+    let projection = crate::storage::entry_lifecycle::recompute_projections_nonfatal(
+        &db,
+        &hooks,
+        receipt.id,
+        receipt.publication_after.as_deref() == Some("published"),
+    )
+    .await;
+    let hook_out =
+        hooks.enqueue_entry_lifecycle_hooks(execution_principal_for_actor(&actor), &receipt, lease);
+
+    let response = crate::storage::entry_lifecycle::MetadataPatchResponse {
+        schema_token,
+        secondary: crate::storage::entry_lifecycle::SecondaryOutcome {
+            projection,
+            hook_enqueued: hook_out.enqueued,
+            hook_dropped: hook_out.dropped,
+        },
+        row,
+    };
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::ETAG, etag(response.row.version)),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+        ],
+        Json(response),
     )
         .into_response())
 }

@@ -1,6 +1,6 @@
 import { formatNumber } from '../../i18n/format.ts';
 import { tStatic, useI18n } from '../../i18n/index.tsx';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   changeContentEntryPublication, getEffectiveContentTypeTaxonomies,
   purgeContentEntry, queryContentEntryTable, getEffectiveEntryListConfig,
@@ -21,7 +21,9 @@ import {
 } from '../../api/taxonomy.ts';
 import type { AuthUser, PluginLifecycleConfirmation as PluginLifecycleConfirmationDto } from '../../types.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { editorDraftStore } from '../editor/EditorDraftStore.ts';
 import { PluginLifecycleConfirmation } from '../plugins/PluginLifecycleConfirmation.tsx';
+import { QuickEditForm } from './QuickEditForm.tsx';
 import type { EntryTableQuery, EntryTableResult, EntryTableRow } from './types.ts';
 
 interface Props {
@@ -200,6 +202,9 @@ export function EntryListPage({
     reconciledAfterRetry: number;
   } | null>(null);
   const [dataRevision, setDataRevision] = useState(0);
+  const [quickEditRowId, setQuickEditRowId] = useState<number | null>(null);
+  const quickEditDirtyRef = useRef(false);
+  const [quickEditNotice, setQuickEditNotice] = useState('');
   const isBuiltIn = typeKey === 'post' || typeKey === 'page';
   const isTrashView = filters.status === 'trash';
   const data = dataState?.scope === scope ? dataState.value : null;
@@ -212,6 +217,12 @@ export function EntryListPage({
 
   const updateFilter = (patch: Partial<TaxonomyTableQuery>, resetPage = true) => {
     if (bulkBusyRef.current) return;
+    if (quickEditRowId !== null && quickEditDirtyRef.current) {
+      if (!window.confirm(tStatic('quick_edit.confirm_discard'))) return;
+      editorDraftStore.deleteQuickEdit(typeKey, quickEditRowId);
+      quickEditDirtyRef.current = false;
+      setQuickEditRowId(null);
+    }
     const next = { ...filters, ...patch };
     if (patch.status === 'trash') {
       delete next.category_id;
@@ -250,7 +261,19 @@ export function EntryListPage({
     setBulkBlockMessage('');
     setBulkBatchMeta(null);
     setPendingProviderConfirmation(null);
+    setQuickEditRowId(null);
+    quickEditDirtyRef.current = false;
+    setQuickEditNotice('');
   }, [scope]);
+
+  // Auto-reopen an authorized quarantined/active Quick Edit draft for this type after re-login.
+  useEffect(() => {
+    if (!data || isTrashView || quickEditRowId !== null) return;
+    const saved = editorDraftStore.findQuickEditForType(siteInstanceId, user.id, typeKey);
+    if (saved && data.items.some(item => item.id === saved.entry_id)) {
+      setQuickEditRowId(saved.entry_id);
+    }
+  }, [data, isTrashView, quickEditRowId, siteInstanceId, user.id, typeKey]);
 
   // A taxonomy choice alone is not a valid server filter. Keep it local until
   // a term is chosen, so the server never receives an incomplete pair.
@@ -1135,6 +1158,63 @@ export function EntryListPage({
       })()}
 
       {providerNotice && <AdminAlert tone="info" data-testid="provider-action-result">{providerNotice}</AdminAlert>}
+      {quickEditNotice && <AdminAlert tone="success" data-testid="quick-edit-saved-notice">{quickEditNotice}</AdminAlert>}
+      {!isTrashView && quickEditRowId !== null && !currentRows.some(r => r.id === quickEditRowId) && (() => {
+        const detachedDraft = editorDraftStore.getQuickEdit(typeKey, quickEditRowId);
+        const recoverable = JSON.stringify(
+          detachedDraft?.patch ?? {},
+          null,
+          2,
+        );
+        return (
+          <div
+            role="alert"
+            data-testid="quick-edit-trashed-guard"
+            className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-950"
+          >
+            <p className="font-semibold">{tStatic('quick_edit.trashed_title')}</p>
+            <p>{tStatic('quick_edit.trashed_hint')}</p>
+            {detachedDraft && (
+              <label className="block space-y-1">
+                <span className="font-medium">{tStatic('quick_edit.recoverable_draft_label')}</span>
+                <textarea
+                  readOnly
+                  rows={5}
+                  data-testid="quick-edit-recoverable-text"
+                  value={recoverable}
+                  className="w-full rounded border border-amber-300 bg-white p-2 font-mono text-xs text-zinc-900"
+                />
+              </label>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <AdminButton
+                type="button"
+                size="sm"
+                variant="primary"
+                onClick={() => onNavigateHash(`${base}?status=trash`)}
+              >
+                {tStatic('entry_lifecycle.open_trash_view')}
+              </AdminButton>
+              <AdminButton
+                type="button"
+                size="sm"
+                variant="secondary"
+                data-testid="quick-edit-cancel-btn"
+                onClick={() => {
+                  if (quickEditDirtyRef.current && !window.confirm(tStatic('quick_edit.confirm_discard'))) {
+                    return;
+                  }
+                  editorDraftStore.deleteQuickEdit(typeKey, quickEditRowId);
+                  quickEditDirtyRef.current = false;
+                  setQuickEditRowId(null);
+                }}
+              >
+                {tStatic('quick_edit.cancel')}
+              </AdminButton>
+            </div>
+          </div>
+        );
+      })()}
       {providerError && <AdminAlert tone="error" className="flex flex-wrap items-center gap-2">
         <span>{tStatic("feature.content.entrylistpage.could_not_load_extension_columns")}{' '}{providerError}</span>
         <AdminButton variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>{tStatic("feature.dashboard.dashboardpage.retry")}</AdminButton>
@@ -1214,7 +1294,9 @@ export function EntryListPage({
               const thumbId = !isTrashView && typeof row.fields?.featured_image === 'string' ? row.fields.featured_image.trim() : '';
               const readingBlocked = row.blocked_reasons?.trash === 'reading_page_assigned';
               const restoreLocaleBlocked = row.blocked_reasons?.restore === 'locale_disabled';
-              return <tr key={row.id} data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
+              const totalCols = isTrashView ? 3 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length;
+              const isQuickEditing = !isTrashView && quickEditRowId === row.id;
+              return <Fragment key={row.id}><tr data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
                 {!isTrashView && (
                   <td className="px-3 py-2.5"><input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_item_value", { value1: row.id })}
                     checked={selected.has(row.id)} disabled={bulkBusy}
@@ -1320,6 +1402,40 @@ export function EntryListPage({
                         >
                           {tStatic("shell.edit")}
                         </button>
+                        {csrfToken && row.capabilities?.quick_edit !== false && (
+                          <>
+                            <span className="text-zinc-300" aria-hidden="true">·</span>
+                            <button
+                              type="button"
+                              data-testid={`entry-quick-edit-btn-${row.id}`}
+                              className="font-medium text-zinc-700 hover:text-od-accent hover:underline disabled:opacity-50"
+                              disabled={bulkBusy}
+                              aria-expanded={isQuickEditing}
+                              onClick={() => {
+                                if (quickEditRowId === row.id) {
+                                  if (quickEditDirtyRef.current && !window.confirm(tStatic('quick_edit.confirm_discard'))) {
+                                    return;
+                                  }
+                                  editorDraftStore.deleteQuickEdit(typeKey, row.id);
+                                  quickEditDirtyRef.current = false;
+                                  setQuickEditRowId(null);
+                                  return;
+                                }
+                                if (quickEditRowId !== null && quickEditDirtyRef.current) {
+                                  if (!window.confirm(tStatic('quick_edit.confirm_discard'))) {
+                                    return;
+                                  }
+                                  editorDraftStore.deleteQuickEdit(typeKey, quickEditRowId);
+                                  quickEditDirtyRef.current = false;
+                                }
+                                setQuickEditNotice('');
+                                setQuickEditRowId(row.id);
+                              }}
+                            >
+                              {tStatic("quick_edit.button")}
+                            </button>
+                          </>
+                        )}
                         {path && (
                           <>
                             <span className="text-zinc-300" aria-hidden="true">·</span>
@@ -1400,7 +1516,54 @@ export function EntryListPage({
                     ? (row.trashed_at ? `${row.trashed_at.slice(0, 16)} UTC` : '—')
                     : `${row.updated_at.slice(0, 16)} UTC`}
                 </td>
-              </tr>;
+              </tr>
+              {isQuickEditing && (
+                <tr data-testid={`quick-edit-row-${row.id}`} className="bg-zinc-50/70">
+                  <td colSpan={totalCols} className="p-3">
+                    <QuickEditForm
+                      typeKey={typeKey}
+                      row={row}
+                      schemaToken={data?.schema_token ?? ''}
+                      taxonomies={terms?.definitions ?? []}
+                      user={user}
+                      siteInstanceId={siteInstanceId}
+                      authGeneration={authGeneration}
+                      csrfToken={csrfToken}
+                      editHref={`${base}/${row.id}/edit${editSuffix}`}
+                      trashHref={`${base}?status=trash`}
+                      onSaved={updated => {
+                        setQuickEditRowId(null);
+                        quickEditDirtyRef.current = false;
+                        setQuickEditNotice(
+                          tStatic('quick_edit.saved_notice', { value1: updated.id }),
+                        );
+                        setRetry(prev => prev + 1);
+                      }}
+                      onCancel={() => {
+                        setQuickEditRowId(null);
+                        quickEditDirtyRef.current = false;
+                      }}
+                      onRefreshServerRow={async () => {
+                        const fresh = await queryContentEntryTable(typeKey, filters);
+                        if (aliveRef.current && scopeRef.current === scope) {
+                          setDataState({ scope, value: fresh });
+                          setDataRevision(rev => rev + 1);
+                        }
+                        return {
+                          row: fresh.items.find(item => item.id === row.id) ?? null,
+                          schemaToken: fresh.schema_token ?? '',
+                        };
+                      }}
+                      onNavigateHash={onNavigateHash}
+                      onApiError={onApiError}
+                      onDirtyChange={dirty => {
+                        quickEditDirtyRef.current = dirty;
+                      }}
+                    />
+                  </td>
+                </tr>
+              )}
+              </Fragment>;
             })}
           </tbody>
         </table>

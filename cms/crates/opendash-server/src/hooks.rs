@@ -90,6 +90,19 @@ pub struct ContentPrepareSavePatch {
     pub term_ids: Option<Vec<i64>>,
 }
 
+/// Server-owned mutation scope for `filter:content/prepare_save`.
+/// Deliberately does NOT implement `Deserialize`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrepareSaveMutationScope {
+    Full,
+    Metadata {
+        requested_title: bool,
+        requested_slug: bool,
+        taxonomy_key: Option<String>,
+        entry_locale: String,
+    },
+}
+
 impl ContentPrepareSavePatch {
     pub fn is_empty(&self) -> bool {
         self.title.is_none()
@@ -1163,6 +1176,26 @@ impl HookDispatcher {
         effective_schema: &opendash_core::content::EffectiveContentSchema,
         payload: Value,
     ) -> crate::error::ApiResult<ContentPrepareSavePatch> {
+        self.dispatch_content_prepare_save_with_scope(
+            type_key,
+            actor_role,
+            effective_schema,
+            payload,
+            PrepareSaveMutationScope::Full,
+            None,
+        )
+        .await
+    }
+
+    pub async fn dispatch_content_prepare_save_with_scope(
+        &self,
+        type_key: &str,
+        actor_role: opendash_core::content::FieldRole,
+        effective_schema: &opendash_core::content::EffectiveContentSchema,
+        mut payload: Value,
+        scope: PrepareSaveMutationScope,
+        db: Option<&sqlx::SqlitePool>,
+    ) -> crate::error::ApiResult<ContentPrepareSavePatch> {
         use crate::error::ApiError;
 
         let subs = match tokio::time::timeout(
@@ -1181,6 +1214,25 @@ impl HookDispatcher {
         };
         if subs.is_empty() {
             return Ok(ContentPrepareSavePatch::default());
+        }
+
+        if let PrepareSaveMutationScope::Metadata {
+            requested_title,
+            requested_slug,
+            ref taxonomy_key,
+            ..
+        } = scope
+            && let Some(obj) = payload.as_object_mut()
+        {
+            obj.insert(
+                "mutation_scope".into(),
+                serde_json::json!({
+                    "mode": "metadata",
+                    "requested_title": requested_title,
+                    "requested_slug": requested_slug,
+                    "taxonomy_key": taxonomy_key,
+                }),
+            );
         }
 
         let started = Instant::now();
@@ -1299,33 +1351,154 @@ impl HookDispatcher {
                 }
             }
 
-            if let Some(t) = patch.title {
-                merged.title = Some(t.clone());
-                if let Some(obj) = running_payload.as_object_mut() {
-                    obj.insert("title".into(), Value::String(t));
-                }
-            }
-            if let Some(s) = patch.slug {
-                merged.slug = Some(s.clone());
-                if let Some(obj) = running_payload.as_object_mut() {
-                    obj.insert("slug".into(), Value::String(s));
-                }
-            }
-            if let Some(term_ids) = patch.term_ids {
-                if let Some(obj) = running_payload.as_object_mut() {
-                    obj.insert("term_ids".into(), serde_json::json!(term_ids));
-                }
-                merged.term_ids = Some(term_ids);
-            }
-            for (k, v) in patch.values_patch {
-                if let Some(Value::Object(vals)) = running_payload.get_mut("candidate_values") {
-                    if v.is_null() {
-                        vals.remove(&k);
-                    } else {
-                        vals.insert(k.clone(), v.clone());
+            match &scope {
+                PrepareSaveMutationScope::Full => {
+                    if let Some(t) = patch.title {
+                        merged.title = Some(t.clone());
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("title".into(), Value::String(t));
+                        }
+                    }
+                    if let Some(s) = patch.slug {
+                        merged.slug = Some(s.clone());
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("slug".into(), Value::String(s));
+                        }
+                    }
+                    if let Some(term_ids) = patch.term_ids {
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("term_ids".into(), serde_json::json!(term_ids));
+                        }
+                        merged.term_ids = Some(term_ids);
+                    }
+                    for (k, v) in patch.values_patch {
+                        if let Some(Value::Object(vals)) =
+                            running_payload.get_mut("candidate_values")
+                        {
+                            if v.is_null() {
+                                vals.remove(&k);
+                            } else {
+                                vals.insert(k.clone(), v.clone());
+                            }
+                        }
+                        merged.values_patch.insert(k, v);
                     }
                 }
-                merged.values_patch.insert(k, v);
+                PrepareSaveMutationScope::Metadata {
+                    requested_title,
+                    requested_slug,
+                    taxonomy_key,
+                    entry_locale,
+                } => {
+                    let prior_title = running_payload
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned();
+                    let prior_slug = running_payload
+                        .get("slug")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned();
+                    let prior_values = running_payload
+                        .get("candidate_values")
+                        .and_then(Value::as_object);
+                    let prior_terms: std::collections::BTreeSet<i64> = running_payload
+                        .get("term_ids")
+                        .and_then(Value::as_array)
+                        .map(|arr| arr.iter().filter_map(Value::as_i64).collect())
+                        .unwrap_or_default();
+
+                    for (k, v) in &patch.values_patch {
+                        let prior_val = prior_values.and_then(|vals| vals.get(k));
+                        let is_noop = if v.is_null() {
+                            prior_val.is_none() || prior_val == Some(&Value::Null)
+                        } else {
+                            prior_val == Some(v)
+                        };
+                        if !is_noop {
+                            return Err(ApiError::unprocessable(
+                                "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi trường nội dung ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                            ));
+                        }
+                    }
+
+                    if let Some(ref t) = patch.title
+                        && t != &prior_title
+                    {
+                        if !requested_title {
+                            return Err(ApiError::unprocessable(
+                                "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi tiêu đề ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                            ));
+                        }
+                        merged.title = Some(t.clone());
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("title".into(), Value::String(t.clone()));
+                        }
+                    }
+
+                    if let Some(ref s) = patch.slug
+                        && s != &prior_slug
+                    {
+                        if !requested_slug {
+                            return Err(ApiError::unprocessable(
+                                "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi slug ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                            ));
+                        }
+                        merged.slug = Some(s.clone());
+                        if let Some(obj) = running_payload.as_object_mut() {
+                            obj.insert("slug".into(), Value::String(s.clone()));
+                        }
+                    }
+
+                    if let Some(ref term_ids) = patch.term_ids {
+                        let mut new_set = std::collections::BTreeSet::new();
+                        for &tid in term_ids {
+                            if tid <= 0 || !new_set.insert(tid) {
+                                return Err(ApiError::unprocessable(
+                                    "metadata_hook_scope_conflict: Plugin filter trả về danh sách term_ids không hợp lệ trong phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                                ));
+                            }
+                        }
+                        if new_set != prior_terms {
+                            let Some(allowed_key) = taxonomy_key.as_deref() else {
+                                return Err(ApiError::unprocessable(
+                                    "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi phân loại ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                                ));
+                            };
+                            let Some(pool) = db else {
+                                return Err(ApiError::unprocessable(
+                                    "metadata_hook_scope_conflict: Không thể xác minh phạm vi phân loại của plugin filter; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                                ));
+                            };
+                            let changed: Vec<i64> = prior_terms
+                                .symmetric_difference(&new_set)
+                                .copied()
+                                .collect();
+                            let mut conn = pool.acquire().await?;
+                            for tid in changed {
+                                let info =
+                                    crate::storage::entry_lifecycle::lookup_term_scope_in_conn(
+                                        &mut conn, tid,
+                                    )
+                                    .await?;
+                                let valid = info.is_some_and(|(kind, loc, active)| {
+                                    active && kind == allowed_key && loc == *entry_locale
+                                });
+                                if !valid {
+                                    return Err(ApiError::unprocessable(
+                                        "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi phân loại ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+                                    ));
+                                }
+                            }
+                            let canonical_ids: Vec<i64> = new_set.into_iter().collect();
+                            if let Some(obj) = running_payload.as_object_mut() {
+                                obj.insert("term_ids".into(), serde_json::json!(canonical_ids));
+                            }
+                            merged.term_ids = Some(canonical_ids);
+                        }
+                    }
+                }
             }
         }
 

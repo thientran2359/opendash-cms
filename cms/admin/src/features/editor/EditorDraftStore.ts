@@ -1,7 +1,68 @@
-import type { ContentFieldValue, ContentMode } from '../content/types.ts';
+import type {
+  ContentFieldValue,
+  ContentMode,
+  EntryTableRow,
+  TaxonomyDeltaOp,
+} from '../content/types.ts';
 import type { EffectiveEditorConfigWithSettings } from '../../api/content.ts';
 
 export type DraftStatus = 'active' | 'quarantined';
+
+export interface QuickEditOriginalMetadata {
+  title: string;
+  slug: string;
+  publication_status: 'draft' | 'published';
+  published_at: string | null;
+  published_at_local: string;
+  timezone: string;
+  term_ids: number[];
+  locale: string;
+}
+
+export interface QuickEditTaxonomyDraft {
+  key: string;
+  operation: TaxonomyDeltaOp;
+  term_ids: number[];
+}
+
+export interface QuickEditDraftPatch {
+  title?: string;
+  slug?: string;
+  publication_status?: 'draft' | 'published';
+  published_at_local?: string;
+  timezone?: string;
+  taxonomy?: QuickEditTaxonomyDraft;
+}
+
+/**
+ * Distinct in-memory Quick Edit draft stored under `quick_edit:<typeKey>:<entryId>`.
+ * Shares session epoch and quarantine/clear lifecycle with Single Edit drafts,
+ * but never overwrites or clears a full Single Edit draft for the same entry.
+ */
+export interface QuickEditDraftEntry {
+  kind: 'quick_edit';
+  draft_key: string;
+  site_instance_id: string;
+  user_id: number;
+  auth_generation: number;
+  type_key: string;
+  entry_id: number;
+  status: DraftStatus;
+  base_version: number;
+  schema_token: string;
+  original: QuickEditOriginalMetadata;
+  patch: QuickEditDraftPatch;
+}
+
+export function isQuickEditPatchDirty(patch: QuickEditDraftPatch): boolean {
+  return (
+    patch.title !== undefined ||
+    patch.slug !== undefined ||
+    patch.publication_status !== undefined ||
+    patch.published_at_local !== undefined ||
+    patch.taxonomy !== undefined
+  );
+}
 
 export interface EditorDraftPayload {
   id: number | null;
@@ -72,6 +133,7 @@ export function diffEditorPayload(
  */
 export class EditorDraftStore {
   private drafts = new Map<string, EditorDraftEntry>();
+  private quickEditDrafts = new Map<string, QuickEditDraftEntry>();
   private sessionEpoch = 1;
 
   getSessionEpoch(): number {
@@ -86,6 +148,81 @@ export class EditorDraftStore {
   makeDraftKey(typeKey: string, entryId: number | null, draftUuid?: string): string {
     if (entryId !== null) return `${typeKey}:${entryId}`;
     return `${typeKey}:new:${draftUuid ?? 'default'}`;
+  }
+
+  makeQuickEditKey(typeKey: string, entryId: number): string {
+    return `quick_edit:${typeKey}:${entryId}`;
+  }
+
+  getQuickEdit(typeKey: string, entryId: number): QuickEditDraftEntry | undefined {
+    return this.quickEditDrafts.get(this.makeQuickEditKey(typeKey, entryId));
+  }
+
+  setQuickEdit(entry: QuickEditDraftEntry): void {
+    if (!isQuickEditPatchDirty(entry.patch)) {
+      this.quickEditDrafts.delete(entry.draft_key);
+      return;
+    }
+    this.quickEditDrafts.set(entry.draft_key, entry);
+  }
+
+  deleteQuickEdit(typeKey: string, entryId: number): void {
+    this.quickEditDrafts.delete(this.makeQuickEditKey(typeKey, entryId));
+  }
+
+  findQuickEditForType(
+    siteInstanceId: string,
+    userId: number,
+    typeKey: string,
+  ): QuickEditDraftEntry | undefined {
+    for (const draft of this.quickEditDrafts.values()) {
+      if (
+        draft.site_instance_id === siteInstanceId &&
+        draft.user_id === userId &&
+        draft.type_key === typeKey &&
+        isQuickEditPatchDirty(draft.patch)
+      ) {
+        return draft;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Restores a Quick Edit draft only after verifying the same authorized site, actor,
+   * type, and entry ID against a freshly fetched authoritative row. Keeps base_version
+   * and schema_token intact so stale saves trigger explicit 412 reconciliation.
+   */
+  restoreAuthorizedQuickEditDraft(
+    siteInstanceId: string,
+    userId: number,
+    authGeneration: number,
+    typeKey: string,
+    freshRow: EntryTableRow,
+  ): QuickEditDraftEntry | undefined {
+    const key = this.makeQuickEditKey(typeKey, freshRow.id);
+    const saved = this.quickEditDrafts.get(key);
+    if (!saved) return undefined;
+    if (
+      saved.site_instance_id !== siteInstanceId ||
+      saved.user_id !== userId ||
+      saved.type_key !== typeKey ||
+      saved.entry_id !== freshRow.id
+    ) {
+      this.quickEditDrafts.delete(key);
+      return undefined;
+    }
+    if (!isQuickEditPatchDirty(saved.patch)) {
+      this.quickEditDrafts.delete(key);
+      return undefined;
+    }
+    const restored: QuickEditDraftEntry = {
+      ...saved,
+      status: 'active',
+      auth_generation: authGeneration,
+    };
+    this.quickEditDrafts.set(key, restored);
+    return restored;
   }
 
   get(draftKey: string): EditorDraftEntry | undefined {
@@ -115,6 +252,11 @@ export class EditorDraftStore {
         return true;
       }
     }
+    for (const q of this.quickEditDrafts.values()) {
+      if (isQuickEditPatchDirty(q.patch)) {
+        return true;
+      }
+    }
     return false;
   }
 
@@ -123,11 +265,15 @@ export class EditorDraftStore {
     for (const [k, d] of this.drafts.entries()) {
       this.drafts.set(k, { ...d, status: 'quarantined' });
     }
+    for (const [k, q] of this.quickEditDrafts.entries()) {
+      this.quickEditDrafts.set(k, { ...q, status: 'quarantined' });
+    }
   }
 
   clear(): void {
     this.bumpSessionEpoch();
     this.drafts.clear();
+    this.quickEditDrafts.clear();
   }
 
   /** Rehydration only after a fresh server config and entry read. Never allow

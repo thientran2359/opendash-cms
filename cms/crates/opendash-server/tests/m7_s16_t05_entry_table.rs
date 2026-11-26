@@ -434,12 +434,25 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
     assert!(legacy.is_array(), "legacy GET must remain a bare array");
     assert_eq!(legacy.as_array().unwrap().len(), 2);
 
+    let trash_snap: Value = table(&client, &site, Some(&admin_cookie), "post", "?status=trash")
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(trash_snap["total"], 0);
+    assert_eq!(trash_snap["status_counts"]["trash"], 0);
+    assert!(
+        trash_snap["schema_token"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+    );
+
     for query in [
         "?limit=0",
         "?limit=101",
         "?offset=-1",
         "?offset=1000001",
-        "?status=trash",
+        "?status=archived",
         "?status=all&status=draft",
         "?q=ok&q=again",
         "?sort=updated_at%20DROP%20TABLE",

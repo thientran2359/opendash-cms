@@ -499,6 +499,139 @@ pub async fn query(
     })
 }
 
+/// Loads one active entry formatted with the exact same role-filtered table projection,
+/// capabilities, blocked reasons, translations, terms, and public URL as `entry_table::query`.
+pub(crate) async fn load_single_active_row_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    entry_id: i64,
+    caller_role: FieldRole,
+    effective: &opendash_core::content::EffectiveContentSchema,
+) -> ApiResult<EntryTableRow> {
+    type SelectedRow = (
+        i64,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+    );
+    let row: SelectedRow = sqlx::query_as(
+        "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
+                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
+                e.locale, e.translation_group_id
+           FROM content_entries e
+          WHERE e.content_type_key = ? AND e.id = ? AND e.trashed_at IS NULL",
+    )
+    .bind(type_key)
+    .bind(entry_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+
+    let (
+        id,
+        content_type_key,
+        slug,
+        title,
+        json,
+        publication_status,
+        version,
+        created_at,
+        updated_at,
+        published_at,
+        locale,
+        translation_group_id,
+    ) = row;
+
+    let is_draft_publish =
+        effective.base.descriptor.settings.publication == ContentPublication::DraftPublish;
+    let assigned_reading_pages = if type_key == "page" {
+        entry_lifecycle::load_assigned_reading_page_ids_in_tx(tx).await?
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    let group_ids = vec![translation_group_id.clone()];
+    let translations = entries::batch_translations_by_group_in_tx(tx, type_key, &group_ids)
+        .await?
+        .remove(&translation_group_id)
+        .unwrap_or_default();
+    let term_ids = entries::batch_load_term_ids_in_conn(&mut **tx, &[id])
+        .await?
+        .remove(&id)
+        .unwrap_or_default();
+    let public_url = if publication_status == "published" {
+        seo::resolve_public_entry_paths_by_entry_ids_in_conn(&mut **tx, &[id])
+            .await?
+            .remove(&id)
+    } else {
+        None
+    };
+
+    let mut record = entries::decode_row((
+        id,
+        content_type_key,
+        slug,
+        title,
+        json,
+        publication_status,
+        version,
+        created_at,
+        updated_at,
+        published_at.clone(),
+    ))?;
+    record.values.retain(|key, _| {
+        effective.effective_fields.get(key).is_some_and(|field| {
+            field.effective_status == EffectiveFieldStatus::Active
+                && caller_role >= field.definition.min_view_role
+                && field.definition.public_exposure == PublicExposure::Public
+        })
+    });
+    let is_reading_assigned = assigned_reading_pages.contains(&record.id);
+    let mut blocked_reasons = BTreeMap::new();
+    if is_reading_assigned {
+        blocked_reasons.insert("trash".into(), "reading_page_assigned".into());
+    }
+
+    Ok(EntryTableRow {
+        id: record.id,
+        type_key: record.content_type_key,
+        locale,
+        translation_group_id,
+        title: record.title,
+        slug: record.slug,
+        publication_status: record.publication_status.clone(),
+        lifecycle: "active".into(),
+        version: record.version,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        published_at,
+        trashed_at: None,
+        term_ids,
+        public_url,
+        fields: record.values,
+        translations,
+        capabilities: EntryRowCapabilities {
+            edit: true,
+            publish: is_draft_publish && record.publication_status == "draft",
+            unpublish: is_draft_publish && record.publication_status == "published",
+            trash: !is_reading_assigned,
+            restore: false,
+            purge: false,
+            quick_edit: true,
+            immediate_public_restore: false,
+        },
+        blocked_reasons,
+    })
+}
+
 /// Admin-only dormant retained-Trash metadata query for an inactive/withdrawn ordinary CPT.
 async fn query_retained_trash_maintenance(
     db: &SqlitePool,

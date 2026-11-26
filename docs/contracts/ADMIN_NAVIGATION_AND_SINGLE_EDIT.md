@@ -904,6 +904,11 @@ pub struct CompositeEntrySaveInput {
    - Khi đăng nhập lại cùng `(site_instance_id, user_id)`, trước khi hiển thị bản nháp `quarantined`, client bắt buộc gọi mới `GET /api/admin/content-types/{type_key}/effective-editor-config`:
      - Mọi `field_key` không còn trong tập trường được phép xem (`caller.role < min_view_role`, ví dụ tài khoản vừa bị hạ quyền `Admin → Editor`) bị **xóa vĩnh viễn khỏi `draft.payload.values` và `draft.dirty_fields` trước khi render**.
      - Mọi `field_key` chuyển sang chỉ đọc (`editable == false`, tức `caller.role < min_edit_role`) bị hủy bỏ phần sửa nháp và đặt lại theo giá trị hiện hành trên server.
+5. **Sửa nhanh siêu dữ liệu & phân loại (`PATCH /api/admin/content-types/{type_key}/entries/{id}/metadata`, S03):**
+   - Dùng chung cho biểu mẫu Sửa nhanh (`QuickEditForm.tsx`) và thao tác gắn/gỡ/thay thế 1 phân loại hàng loạt; yêu cầu `If-Match: "vN"`, `X-CSRF-Token`, `expected_schema_token` (`428` nếu thiếu, `412` nếu lệch schema/version, `409` nếu xung đột vòng đời/múi giờ/chính sách/slug).
+   - Quy ước thưa: bỏ qua trường đồng nghĩa giữ nguyên; từ chối tường minh `null`, trường lạ (`body`, `values`, `seo`, `custom_path`, `created_at`, `updated_at`), patch rỗng hoặc không có thay đổi thực tế (`422 metadata_no_change`).
+   - `published_at: { local_datetime, timezone }` bắt buộc định dạng ASCII `YYYY-MM-DDTHH:mm:ss` khớp múi giờ site hiện hành, chuyển UTC bằng `jiff` với `Disambiguation::Reject` (chặn khoảng trống/mơ hồ DST và thời điểm tương lai), không cho bản nháp chưa từng xuất bản đặt ngày nếu không xuất bản tường minh.
+   - Bản nháp Sửa nhanh lưu trong không gian tên RAM riêng `quick_edit:${type_key}:${entry_id}` trong `EditorDraftStore`, dùng chung `sessionEpoch`/`quarantineAll()`/`clear()`/`hasAnyDirty()` nhưng tuyệt đối không ghi đè hay xóa nháp Single Edit đầy đủ của cùng `entry_id`.
 
 ---
 

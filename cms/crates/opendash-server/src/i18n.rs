@@ -312,6 +312,191 @@ const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
         "decision must be either confirm or cancel.",
     ),
     (
+        "entry.metadata_empty_patch",
+        "metadata_empty_patch: Cần chọn ít nhất một trường siêu dữ liệu để cập nhật.",
+        "metadata_empty_patch: Provide at least one metadata field to update.",
+    ),
+    (
+        "entry.metadata_no_change",
+        "metadata_no_change: Không có thay đổi nào so với dữ liệu hiện tại.",
+        "metadata_no_change: No changes compared to current stored metadata.",
+    ),
+    (
+        "entry.schema_version_conflict",
+        "schema_version_conflict: Cấu trúc trường của loại nội dung đã thay đổi; hãy tải lại trước khi lưu.",
+        "schema_version_conflict: The content type schema has changed; reload before saving.",
+    ),
+    (
+        "entry.publication_policy_unsupported",
+        "publication_policy_unsupported: Loại nội dung lưu ngay không hỗ trợ đổi trạng thái xuất bản qua thao tác này.",
+        "publication_policy_unsupported: Immediate-publication content types do not support changing publication status here.",
+    ),
+    (
+        "entry.timezone_changed",
+        "timezone_changed: Múi giờ hệ thống đã thay đổi; hãy tải lại biểu mẫu trước khi lưu ngày xuất bản.",
+        "timezone_changed: The site timezone has changed; reload the form before saving the publication date.",
+    ),
+    (
+        "entry.invalid_published_at",
+        "invalid_published_at: Ngày xuất bản phải đúng định dạng YYYY-MM-DDTHH:mm:ss (bắt buộc có giây, không có hậu tố múi giờ).",
+        "invalid_published_at: Publication date must match exact ASCII YYYY-MM-DDTHH:mm:ss (seconds required, no timezone suffix).",
+    ),
+    (
+        "entry.invalid_published_at",
+        "invalid_published_at: Ngày xuất bản không hợp lệ theo lịch dương.",
+        "invalid_published_at: Publication date is not a valid calendar date or time.",
+    ),
+    (
+        "entry.invalid_published_at",
+        "invalid_published_at: Năm của ngày xuất bản phải từ 1970 trở đi.",
+        "invalid_published_at: Publication date year must be 1970 or later.",
+    ),
+    (
+        "entry.invalid_published_at",
+        "invalid_published_at: Thời điểm cục bộ không tồn tại hoặc mơ hồ do chuyển giờ mùa hè (DST); hãy chọn thời điểm hợp lệ không mơ hồ.",
+        "invalid_published_at: Local time does not exist or is ambiguous due to daylight saving time (DST); choose a valid unambiguous time.",
+    ),
+    (
+        "entry.published_at_in_future",
+        "published_at_in_future: Không hỗ trợ đặt ngày xuất bản trong tương lai.",
+        "published_at_in_future: Future publication dates are not supported.",
+    ),
+    (
+        "entry.draft_cannot_set_published_at",
+        "draft_cannot_set_published_at: Bản nháp chưa từng xuất bản không thể đặt ngày xuất bản nếu không xuất bản tường minh.",
+        "draft_cannot_set_published_at: A never-published draft cannot set a publication date without publishing explicitly.",
+    ),
+    (
+        "entry.invalid_title_control",
+        "Tiêu đề không được chứa ký tự điều khiển.",
+        "Title cannot contain control characters.",
+    ),
+    (
+        "entry.invalid_title_length",
+        "Tiêu đề phải có từ 1 đến 200 ký tự.",
+        "Title must be between 1 and 200 characters.",
+    ),
+    (
+        "entry.invalid_slug",
+        "Slug không hợp lệ (chỉ gồm chữ thường, số, gạch ngang và tối đa 64 ký tự).",
+        "Invalid slug (lowercase letters, digits, hyphens only, up to 64 characters).",
+    ),
+    (
+        "entry.invalid_site_timezone",
+        "Múi giờ hệ thống không tồn tại trong cơ sở dữ liệu IANA.",
+        "Configured site timezone was not found in the IANA database.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Khóa phân loại không hợp lệ.",
+        "invalid_taxonomy_delta: Invalid taxonomy key.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Phân loại không tồn tại hoặc không khả dụng.",
+        "invalid_taxonomy_delta: Taxonomy does not exist or is unavailable.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Phân loại hiện không hoạt động hoặc đã bị thu hồi.",
+        "invalid_taxonomy_delta: Taxonomy is inactive or withdrawn.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Phân loại không được phép dùng cho loại nội dung này.",
+        "invalid_taxonomy_delta: Taxonomy is not eligible for this content type.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Thao tác thêm hoặc gỡ phân loại cần ít nhất một term_id.",
+        "invalid_taxonomy_delta: Taxonomy add or remove requires at least one term ID.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Số lượng term vượt quá giới hạn của phân loại.",
+        "invalid_taxonomy_delta: Term count exceeds the taxonomy limit.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Danh sách term_ids chứa ID không hợp lệ.",
+        "invalid_taxonomy_delta: term_ids contains an invalid ID.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Danh sách term_ids không được chứa ID trùng lặp.",
+        "invalid_taxonomy_delta: term_ids must not contain duplicate IDs.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Term ID không tồn tại.",
+        "invalid_taxonomy_delta: Term ID does not exist.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Term thuộc phân loại không hoạt động.",
+        "invalid_taxonomy_delta: Term belongs to an inactive taxonomy.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Term ID không thuộc phân loại được chỉ định.",
+        "invalid_taxonomy_delta: Term ID does not belong to the specified taxonomy.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Term thuộc ngôn ngữ khác với nội dung.",
+        "invalid_taxonomy_delta: Term belongs to a different language than the entry.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Số lượng term sau khi cập nhật vượt quá giới hạn của phân loại.",
+        "invalid_taxonomy_delta: Resulting term count exceeds the taxonomy limit.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Tổng số term hoạt động của nội dung vượt quá giới hạn 96.",
+        "invalid_taxonomy_delta: Total active terms for this entry exceeds the limit of 96.",
+    ),
+    (
+        "entry.invalid_taxonomy_delta",
+        "invalid_taxonomy_delta: Số lượng term sau khi filter vượt quá giới hạn cho phép.",
+        "invalid_taxonomy_delta: Term count after plugin filter exceeds the allowed limit.",
+    ),
+    (
+        "entry.metadata_hook_scope_conflict",
+        "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi trường nội dung ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+        "metadata_hook_scope_conflict: A plugin filter tried to modify content fields outside Quick Edit scope; use Single Edit instead.",
+    ),
+    (
+        "entry.metadata_hook_scope_conflict",
+        "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi tiêu đề ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+        "metadata_hook_scope_conflict: A plugin filter tried to modify the title outside Quick Edit scope; use Single Edit instead.",
+    ),
+    (
+        "entry.metadata_hook_scope_conflict",
+        "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi slug ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+        "metadata_hook_scope_conflict: A plugin filter tried to modify the slug outside Quick Edit scope; use Single Edit instead.",
+    ),
+    (
+        "entry.metadata_hook_scope_conflict",
+        "metadata_hook_scope_conflict: Plugin filter trả về danh sách term_ids không hợp lệ trong phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+        "metadata_hook_scope_conflict: A plugin filter returned invalid term IDs in Quick Edit scope; use Single Edit instead.",
+    ),
+    (
+        "entry.metadata_hook_scope_conflict",
+        "metadata_hook_scope_conflict: Plugin filter cố gắng thay đổi phân loại ngoài phạm vi Sửa nhanh; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+        "metadata_hook_scope_conflict: A plugin filter tried to modify taxonomy terms outside Quick Edit scope; use Single Edit instead.",
+    ),
+    (
+        "entry.metadata_hook_scope_conflict",
+        "metadata_hook_scope_conflict: Không thể xác minh phạm vi phân loại của plugin filter; hãy mở trình chỉnh sửa đầy đủ (Single Edit).",
+        "metadata_hook_scope_conflict: Could not verify the taxonomy scope of a plugin filter; use Single Edit instead.",
+    ),
+    (
+        "entry.metadata_hook_scope_conflict",
+        "metadata_hook_scope_conflict: Plugin filter trả về term không tồn tại.",
+        "metadata_hook_scope_conflict: A plugin filter returned a nonexistent term.",
+    ),
+    (
         "entry.confirmation_id_required",
         "Thiếu confirmation_id hợp lệ.",
         "Missing a valid confirmation_id.",

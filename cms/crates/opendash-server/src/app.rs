@@ -606,6 +606,12 @@ pub fn build_router_with_themes_root(
             delete(crate::routes::entries::entry_purge),
         )
         .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/metadata",
+            axum::routing::patch(crate::routes::entries::entry_metadata_patch).layer(
+                DefaultBodyLimit::max(crate::routes::entries::MAX_METADATA_PATCH_JSON_BYTES),
+            ),
+        )
+        .route(
             "/api/admin/content-types/{type_key}/entries/{id}/publication",
             post(content_entry_publication).layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
         )
