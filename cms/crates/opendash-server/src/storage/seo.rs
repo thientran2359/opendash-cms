@@ -47,10 +47,6 @@ pub enum ReadingPageState {
     Missing,
 }
 
-pub async fn reading_page_state(db: &SqlitePool, homepage: bool) -> ApiResult<ReadingPageState> {
-    reading_page_state_for_locale(db, None, homepage).await
-}
-
 pub async fn reading_page_state_for_locale(
     db: &SqlitePool,
     locale: Option<&str>,
@@ -104,15 +100,6 @@ pub async fn reading_page_state_for_locale(
         Some(id) if published != 0 => ReadingPageState::Published(id),
         Some(_) => ReadingPageState::Missing,
     })
-}
-
-/// Resolves the canonical public path for an entry ID (custom path if set, else default `/content/{type}/{slug}`).
-/// Returns `None` if the entry does not exist or its CPT provider is inactive.
-pub async fn resolve_entry_path_in_tx(
-    conn: &mut SqliteConnection,
-    entry_id: i64,
-) -> ApiResult<Option<String>> {
-    crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
 /// Resolves the canonical public path ONLY if the entry is published and its CPT is active.
@@ -600,32 +587,6 @@ pub async fn put_entry_route(
             Err(err)
         }
     }
-}
-
-/// Checks if a published default-locale entry has a custom path (used by `/content/{type}/{slug}` to emit 301).
-pub async fn custom_path_for_published_slug(
-    db: &SqlitePool,
-    type_key: &str,
-    slug: &str,
-) -> ApiResult<Option<String>> {
-    let custom: Option<String> = sqlx::query_scalar(
-        "SELECT p.path
-           FROM content_entries e
-           JOIN site_locales sl ON sl.code = e.locale AND sl.is_default = 1 AND sl.enabled = 1 AND sl.deleted_at IS NULL
-           JOIN content_types t ON t.key = e.content_type_key
-           JOIN entry_public_paths p ON p.entry_id = e.id
-          WHERE e.content_type_key = ?
-            AND e.slug = ?
-            AND e.publication_status = 'published'
-            AND e.content_type_key != 'pattern'
-            AND t.provider_status = 'active'
-            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
-    )
-    .bind(type_key)
-    .bind(slug)
-    .fetch_optional(db)
-    .await?;
-    Ok(custom)
 }
 
 /// Resolves an arbitrary public fallback path against `entry_public_paths` and `entry_redirects`
@@ -1129,23 +1090,6 @@ async fn has_multilingual_alternates_prereq(
     Ok(Some(origin.to_owned()))
 }
 
-pub async fn build_entry_seo_view(
-    db: &SqlitePool,
-    entry_id: i64,
-    entry_title: &str,
-    canonical_path: &str,
-) -> ApiResult<SeoView> {
-    let mut conn = db.acquire().await?;
-    let locale: Option<String> =
-        sqlx::query_scalar("SELECT locale FROM content_entries WHERE id = ?")
-            .bind(entry_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    drop(conn);
-    build_entry_seo_view_for_locale(db, entry_id, entry_title, locale.as_deref(), canonical_path)
-        .await
-}
-
 pub async fn build_entry_seo_view_for_locale(
     db: &SqlitePool,
     entry_id: i64,
@@ -1282,10 +1226,6 @@ pub async fn build_entry_seo_view_for_locale(
         og_image_url,
         json_ld: proj.json_ld,
     })
-}
-
-pub async fn build_home_seo_view(db: &SqlitePool) -> ApiResult<SeoView> {
-    build_home_seo_view_for_locale(db, None, "/", true).await
 }
 
 pub async fn build_home_seo_view_for_locale(
@@ -1592,15 +1532,6 @@ pub async fn build_term_seo_view_for_locale(
         view.alternates = finalize_alternates_for_origin(&origin, &members);
     }
     Ok(view)
-}
-
-pub async fn build_simple_seo_view(
-    db: &SqlitePool,
-    page_title: &str,
-    canonical_path: Option<&str>,
-    noindex_override: bool,
-) -> ApiResult<SeoView> {
-    build_simple_seo_view_for_locale(db, None, page_title, canonical_path, noindex_override).await
 }
 
 pub async fn build_simple_seo_view_for_locale(

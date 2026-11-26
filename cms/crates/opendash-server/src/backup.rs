@@ -24,28 +24,6 @@ pub struct SnapshotReceipt {
     pub manifest: BackupManifestV1,
 }
 
-pub async fn create_snapshot(
-    db: &SqlitePool,
-    paths: &SitePaths,
-    _maint: &ExclusiveOpsContext,
-) -> ApiResult<SnapshotReceipt> {
-    create_snapshot_with_timeout(db, paths, MAX_SNAPSHOT_WALL_TIMEOUT).await
-}
-
-pub async fn create_snapshot_with_timeout(
-    db: &SqlitePool,
-    paths: &SitePaths,
-    wall_timeout: Duration,
-) -> ApiResult<SnapshotReceipt> {
-    create_snapshot_with_timeout_and_cancel(
-        db,
-        paths,
-        wall_timeout,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    )
-    .await
-}
-
 pub async fn create_snapshot_with_cancel(
     db: &SqlitePool,
     paths: &SitePaths,

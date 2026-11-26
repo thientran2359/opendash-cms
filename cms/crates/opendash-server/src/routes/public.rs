@@ -182,17 +182,3 @@ pub fn rendered_layout_with_form_csp(html: String, allow_form_self: bool) -> Res
 pub fn rendered_layout(html: String) -> Response {
     rendered_layout_with_form_csp(html, false)
 }
-
-pub fn rendered(html: String) -> Response {
-    (
-        [
-            (
-                header::CONTENT_SECURITY_POLICY,
-                "sandbox; default-src 'none'",
-            ),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-        ],
-        Html(html),
-    )
-        .into_response()
-}

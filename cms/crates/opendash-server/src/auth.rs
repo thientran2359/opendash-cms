@@ -190,16 +190,6 @@ pub fn clear_session_cookie_header_with_secure(secure: bool) -> String {
     format!("{SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{sec}")
 }
 
-pub fn session_cookie_header(token: &str) -> String {
-    format!(
-        "{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_DURATION_SECS}"
-    )
-}
-
-pub fn clear_session_cookie_header() -> String {
-    format!("{SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
-}
-
 pub fn extract_session_token(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     for part in cookie_header.split(';') {

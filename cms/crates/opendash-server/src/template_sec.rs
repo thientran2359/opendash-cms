@@ -871,26 +871,6 @@ pub(crate) fn preview_csec_part_keys_with_theme_urls(
         .collect()
 }
 
-/// Literal part edges of a validated public Theme part. Unlike the preview
-/// compiler this does not change the accepted source format or marker rules.
-pub(crate) fn csec_part_keys(name: &str, source: &str) -> Result<Vec<String>, &'static str> {
-    csec_part_keys_with_theme_urls(name, source, &ThemeUrlPolicy::default())
-}
-
-pub(crate) fn csec_part_keys_with_theme_urls(
-    name: &str,
-    source: &str,
-    policy: &ThemeUrlPolicy,
-) -> Result<Vec<String>, &'static str> {
-    composition_sites(name, source, true, policy)?
-        .into_iter()
-        .map(|site| match site.call {
-            CompositionCall::Part(key) => Ok(key),
-            CompositionCall::Content => Err("Template part không được chứa od_content()."),
-        })
-        .collect()
-}
-
 fn preview_composition_sites(
     name: &str,
     source: &str,

@@ -4,7 +4,6 @@ use std::{
     path::Path,
 };
 
-pub use opendash_core::theme::{Block, BlockDescriptor, Fields};
 use opendash_core::{
     block_schema::{BlockSchemaV1, RegisteredBlockSchema},
     builder::BuilderDocument,
@@ -122,14 +121,6 @@ mod s03_package_block_tests {
 
 /// Shared MiniJinja C-SEC HTML auto-escaping and fuel budget for theme CPT
 /// templates and the built-in fallback, matching the Builder's rendering rules.
-pub fn render_content(template: &str, data: &serde_json::Value) -> Result<String, &'static str> {
-    render_content_with_config(
-        template,
-        data,
-        &crate::template_sec::RenderFormattingConfig::default(),
-    )
-}
-
 pub fn render_content_with_config(
     template: &str,
     data: &serde_json::Value,
@@ -442,7 +433,6 @@ pub(crate) fn validate_theme_v3_files(
                 declaration_state: DeclarationState::Declared,
                 descriptor: RegisteredBlockSchema {
                     schema: schema.clone(),
-                    legacy_mode: false,
                 },
             },
         );
@@ -837,21 +827,6 @@ pub fn check_theme_path(path: &Path) -> Result<ThemeCheckSummary, String> {
         ));
     };
     build_theme_check_summary(&pkg)
-}
-
-pub fn manifest_has_declarations(manifest_json: &str) -> bool {
-    let Ok(val) = serde_json::from_str::<serde_json::Value>(manifest_json) else {
-        return false;
-    };
-    let has_decl = val.get("declarations").is_some_and(|decl| {
-        !decl.is_null()
-            && !matches!(decl, serde_json::Value::Object(m) if m.is_empty())
-            && !matches!(decl, serde_json::Value::Array(a) if a.is_empty())
-    });
-    let has_top_fg = val.get("field_groups").is_some_and(|fg| {
-        !fg.is_null() && !matches!(fg, serde_json::Value::Array(a) if a.is_empty())
-    });
-    has_decl || has_top_fg
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

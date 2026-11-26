@@ -97,10 +97,7 @@ pub fn embedded_core_block_defs() -> &'static BTreeMap<String, RegisteredBlockDe
                     owner: ResourceOwner::Core,
                     status: ProviderStatus::Active,
                     declaration_state: DeclarationState::Declared,
-                    schema: RegisteredBlockSchema {
-                        schema,
-                        legacy_mode: false,
-                    },
+                    schema: RegisteredBlockSchema { schema },
                     template: (*raw_tpl).to_owned(),
                     revision_digest: digest,
                 },
@@ -215,10 +212,7 @@ pub async fn load_declared_blocks_in_conn(
                 owner,
                 status,
                 declaration_state,
-                schema: RegisteredBlockSchema {
-                    schema,
-                    legacy_mode: false,
-                },
+                schema: RegisteredBlockSchema { schema },
                 template,
                 revision_digest,
             },
