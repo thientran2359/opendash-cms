@@ -21,15 +21,17 @@ export function parseCreatorFieldOptions(
     bounds: (line: string) => string;
     duplicate: () => string;
   },
+  fieldType?: FieldType,
 ): SelectOption[] {
+  const maxOptions = fieldType === 'radio_buttons' ? 12 : 100;
   const lines = optionsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  if (!lines.length || lines.length > 100) throw new Error(formatErr.count());
+  if (!lines.length || lines.length > maxOptions) throw new Error(formatErr.count());
   const options = lines.map(line => {
     const separator = line.indexOf('|');
     if (separator < 1) throw new Error(formatErr.format(line));
     const value = line.slice(0, separator).trim();
     const label = line.slice(separator + 1).trim();
-    if (!value || value.length > 128 || !label || label.length > 100) {
+    if (!value || value.length > 64 || !label || label.length > 100) {
       throw new Error(formatErr.bounds(line));
     }
     return { value, label };
@@ -44,7 +46,7 @@ export function withCreatorFieldDefaults(spec: FieldSpec): FieldSpec {
   return {
     ...spec,
     ...(spec.type === 'range' ? { min: spec.min ?? 0, max: spec.max ?? 100, step: spec.step ?? 1 } : {}),
-    ...(spec.type === 'entry_ref' ? { target_types: spec.target_types?.length ? spec.target_types : ['*'] } : {}),
+    ...(spec.type === 'entry_ref' ? { target_types: spec.target_types?.length ? spec.target_types : ['post'] } : {}),
     ...(spec.type === 'term_ref' ? { taxonomy: spec.taxonomy ?? 'category' } : {}),
   };
 }
