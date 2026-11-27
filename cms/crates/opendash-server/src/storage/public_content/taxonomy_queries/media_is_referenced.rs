@@ -251,7 +251,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                 .map(|(_, entry)| entry.definition.clone())
                 .collect();
             let collected =
-                opendash_core::field_schema::collect_public_media_ids(&specs, &values, true);
+                opendash_core::field_schema::collect_public_media_ids(&specs, &values, false);
             if collected.all_ids().contains(id) {
                 return Ok(true);
             }

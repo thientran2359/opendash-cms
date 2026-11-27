@@ -504,11 +504,11 @@ pub fn entry_view_with_url(
     schema: &ContentTypeDefinition,
     url: Option<String>,
 ) -> EntryView {
-    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = schema
-        .fields
-        .iter()
-        .filter(|d| !d.is_ui_only() && d.effective_acl().2 == PublicExposure::Public)
-        .collect();
+    let vis = opendash_core::field_schema::HydrationVisibility::ContentPublic {
+        max_view_role: FieldRole::Editor,
+    };
+    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> =
+        schema.fields.iter().filter(|d| vis.allows(d)).collect();
     build_entry_view_with_defs(
         &record,
         &schema.key,

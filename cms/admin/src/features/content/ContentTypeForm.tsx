@@ -132,7 +132,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
           format: line => __("Option \"{{value1}}\" must use the format value|Label.", { value1: line }),
           bounds: line => __("Option \"{{value1}}\" has an invalid value or label.", { value1: line }),
           duplicate: () => __("Field \"{{value1}}\" has duplicate options.", { value1: field.label }),
-        });
+        }, field.type);
       }
       return withCreatorFieldDefaults({
         key: field.key,
