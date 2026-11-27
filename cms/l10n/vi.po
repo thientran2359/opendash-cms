@@ -19196,3 +19196,466 @@ msgstr "Builder JSON không hợp lệ."
 #: server:error:autosave.studio_body_too_large
 msgid "Serialized Studio body exceeds 384 KiB limit."
 msgstr "Body Studio vượt quá giới hạn 384 KiB."
+
+#: admin:revisions.revisions
+msgid "Could not load revision history."
+msgstr "Không thể tải lịch sử phiên bản."
+
+#: admin:revisions.revisions
+msgid "Could not load revision details."
+msgstr "Không thể tải chi tiết phiên bản."
+
+#: admin:revisions.revisions
+msgid "Could not compare revisions."
+msgstr "Không thể so sánh các phiên bản."
+
+#: admin:revisions.revisions
+msgid "Could not restore this revision."
+msgstr "Không thể khôi phục phiên bản này."
+
+#: admin:revisions.revisions
+msgid "Could not check for an autosaved draft."
+msgstr "Không thể kiểm tra bản lưu tự động."
+
+#: admin:revisions.revisions
+msgid "Could not save autosave draft."
+msgstr "Không thể lưu bản nháp tự động."
+
+#: admin:revisions.revisions
+msgid "Could not discard the autosaved draft."
+msgstr "Không thể hủy bản lưu tự động."
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Studio"
+msgstr "Studio"
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Autosave recovery"
+msgstr "Khôi phục bản lưu tự động"
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Your unsaved draft from this session is already active. A server autosave from {{value1}} ({{value2}}) is also stored."
+msgstr "Bản nháp chưa lưu trong phiên hiện tại của bạn đang được giữ lại. Máy chủ cũng có bản lưu tự động lúc {{value1}} ({{value2}})."
+
+#: admin:revisions.autosaverecoverybanner
+msgid "A newer autosave from {{value1}} ({{value2}}) is available."
+msgstr "Có bản lưu tự động mới hơn từ {{value1}} ({{value2}})."
+
+#: admin:revisions.autosaverecoverybanner
+msgid "This autosave was based on version v{{value1}}. Restoring it preserves the current entry version so you can review before saving."
+msgstr "Bản lưu tự động này dựa trên phiên bản v{{value1}}. Khôi phục sẽ giữ nguyên version hiện tại để bạn rà soát trước khi lưu."
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Administrator-only fields are omitted from this autosave and will stay unchanged from the saved entry."
+msgstr "Các trường chỉ dành cho Quản trị viên được lược khỏi bản lưu tự động này và sẽ giữ nguyên theo bản đã lưu."
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Restore autosave"
+msgstr "Khôi phục bản lưu tự động"
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Compare with current"
+msgstr "So sánh với bản hiện tại"
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Discard autosave"
+msgstr "Hủy bản lưu tự động"
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Autosaving…"
+msgstr "Đang tự động lưu…"
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Autosaved at {{value1}}"
+msgstr "Đã tự động lưu lúc {{value1}}"
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Stale base version"
+msgstr "Phiên bản gốc đã cũ"
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Revisions:"
+msgstr "Phiên bản:"
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Autosave"
+msgstr "Lưu tự động"
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Browse"
+msgstr "Xem lịch sử"
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Autosave failed."
+msgstr "Lưu tự động thất bại."
+
+#: admin:revisions.revisiondiffview
+msgctxt "revision.diff_empty"
+msgid "(empty)"
+msgstr "(trống)"
+
+#: admin:revisions.revisiondiffview
+msgid "{{value1}} unchanged lines collapsed"
+msgstr "Đã thu gọn {{value1}} dòng không đổi"
+
+#: admin:revisions.revisiondiffview
+msgid "Large content diff was truncated to keep comparison fast. Inspect individual snapshots for the complete text."
+msgstr "Phần so sánh nội dung lớn đã được rút gọn để giữ tốc độ. Hãy xem từng bản lưu để đọc toàn bộ nội dung."
+
+#: admin:revisions.revisiondiffview
+msgid "No text changes."
+msgstr "Không có thay đổi văn bản."
+
+#: admin:revisions.revisiondiffview
+msgid "Before"
+msgstr "Trước"
+
+#: admin:revisions.revisiondiffview
+msgid "After"
+msgstr "Sau"
+
+#: admin:revisions.revisiondiffview
+msgid "v{{value1}} -> v{{value2}}"
+msgstr "v{{value1}} -> v{{value2}}"
+
+#: admin:revisions.revisiondiffview
+msgid "Administrator-only fields differ between these snapshots and are hidden from this view."
+msgstr "Các trường chỉ dành cho Quản trị viên có khác biệt giữa hai bản lưu và được ẩn khỏi chế độ xem này."
+
+#: admin:revisions.revisiondiffview
+msgid "Content mode changed: {{value1}} -> {{value2}}"
+msgstr "Chế độ nội dung đã đổi: {{value1}} -> {{value2}}"
+
+#: admin:revisions.revisiondiffview
+msgid "No visible differences between the selected snapshots."
+msgstr "Không có khác biệt hiển thị nào giữa các bản lưu đã chọn."
+
+#: admin:revisions.revisiondiffview
+msgid "Body content"
+msgstr "Nội dung chính"
+
+#: admin:revisions.revisiondiffview
+msgid "Builder blocks"
+msgstr "Các khối Builder"
+
+#: admin:revisions.revisiondiffview
+msgid "Nodes: {{value1}} -> {{value2}} ({{value3}} unchanged)"
+msgstr "Số nút: {{value1}} -> {{value2}} ({{value3}} không đổi)"
+
+#: admin:revisions.revisiondiffview
+msgid "Block comparison was truncated due to document size."
+msgstr "So sánh khối đã được rút gọn do kích thước tài liệu lớn."
+
+#: admin:revisions.revisiondiffview
+msgid "Fields"
+msgstr "Trường dữ liệu"
+
+#: admin:revisions.revisiondiffview
+msgid "Taxonomy terms"
+msgstr "Thuật ngữ phân loại"
+
+#: admin:revisions.revisiondiffview
+msgid "missing"
+msgstr "bị thiếu"
+
+#: admin:revisions.revisiondiffview
+msgid "Primary category:"
+msgstr "Chuyên mục chính:"
+
+#: admin:revisions.revisiondiffview
+msgctxt "revision.none"
+msgid "(none)"
+msgstr "(không có)"
+
+#: admin:revisions.revisiondiffview
+msgid "Theme & Layout"
+msgstr "Giao diện & Bố cục"
+
+#: admin:revisions.revisiondiffview
+msgid "Page layout:"
+msgstr "Bố cục trang:"
+
+#: admin:revisions.revisiondiffview
+msgctxt "revision.default"
+msgid "(default)"
+msgstr "(mặc định)"
+
+#: admin:revisions.revisiondiffview
+msgid "Custom template:"
+msgstr "Mẫu tùy chỉnh:"
+
+#: admin:revisions.revisiondiffview
+msgid "SEO metadata"
+msgstr "Dữ liệu SEO"
+
+#: admin:revisions.revisiondiffview
+msgid "References unavailable in source snapshot ({{value1}})"
+msgstr "Tham chiếu không khả dụng ở bản nguồn ({{value1}})"
+
+#: admin:revisions.revisiondiffview
+msgid "References unavailable in target snapshot ({{value1}})"
+msgstr "Tham chiếu không khả dụng ở bản đích ({{value1}})"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Your session expired while loading revision history."
+msgstr "Phiên đăng nhập hết hạn khi tải lịch sử phiên bản."
+
+#: admin:revisions.revisionhistorymodal
+msgid "Your session expired while comparing revisions."
+msgstr "Phiên đăng nhập hết hạn khi so sánh phiên bản."
+
+#: admin:revisions.revisionhistorymodal
+msgid "Your session expired while loading revision details."
+msgstr "Phiên đăng nhập hết hạn khi tải chi tiết phiên bản."
+
+#: admin:revisions.revisionhistorymodal
+msgid "Could not load more revisions."
+msgstr "Không thể tải thêm phiên bản."
+
+#: admin:revisions.revisionhistorymodal
+msgid "Current saved state"
+msgstr "Trạng thái đã lưu hiện tại"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Latest autosave"
+msgstr "Bản lưu tự động mới nhất"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Revision History"
+msgstr "Lịch sử phiên bản"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Current saved version: v{{value1}}"
+msgstr "Phiên bản đã lưu hiện tại: v{{value1}}"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Revision inspection mode"
+msgstr "Chế độ kiểm tra phiên bản"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Compare changes"
+msgstr "So sánh thay đổi"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Snapshot details"
+msgstr "Chi tiết bản lưu"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Restoring…"
+msgstr "Đang khôi phục…"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Restore #{{value1}}"
+msgstr "Khôi phục #{{value1}}"
+
+#: admin:revisions.revisionhistorymodal
+msgid "This revision references items that are missing or inactive. Restoring it will drop or sanitize those references."
+msgstr "Phiên bản này có tham chiếu đến mục đã bị xóa hoặc không còn hoạt động. Khôi phục sẽ loại bỏ hoặc làm sạch các tham chiếu đó."
+
+#: admin:revisions.revisionhistorymodal
+msgid "Acknowledge and restore"
+msgstr "Xác nhận và khôi phục"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Compare from"
+msgstr "So sánh từ"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Compare to"
+msgstr "So sánh tới"
+
+#: admin:revisions.revisionhistorymodal
+msgid "Computing comparison…"
+msgstr "Đang tính toán so sánh…"
+
+#: admin:revisions.revisionlistsidebar
+msgid "Saved revisions"
+msgstr "Danh sách phiên bản đã lưu"
+
+#: admin:revisions.revisionlistsidebar
+msgid "Snapshots ({{value1}})"
+msgstr "Các bản lưu ({{value1}})"
+
+#: admin:revisions.revisionlistsidebar
+msgid "Loading revisions…"
+msgstr "Đang tải danh sách phiên bản…"
+
+#: admin:revisions.revisionlistsidebar
+msgid "Restored from #{{value1}}"
+msgstr "Khôi phục từ #{{value1}}"
+
+#: admin:revisions.revisionlistsidebar
+msgid "Load older revisions"
+msgstr "Tải các phiên bản cũ hơn"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing media ({{value1}}): {{value2}}"
+msgstr "Thiếu media ({{value1}}): {{value2}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing taxonomy term ID: {{value1}}"
+msgid_plural "Missing taxonomy term IDs: {{value1}}"
+msgstr[0] "Thiếu ID thuật ngữ phân loại: {{value1}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing referenced entry IDs: {{value1}}"
+msgstr "Thiếu ID bài viết được tham chiếu: {{value1}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing Pattern IDs: {{value1}}"
+msgstr "Thiếu ID Pattern: {{value1}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing contact form IDs: {{value1}}"
+msgstr "Thiếu ID biểu mẫu liên hệ: {{value1}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing dynamic options ({{value1}}): {{value2}}"
+msgstr "Thiếu tùy chọn động ({{value1}}): {{value2}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Invalid List block filters ({{value1}}): {{value2}}"
+msgstr "Bộ lọc khối List không hợp lệ ({{value1}}): {{value2}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Unavailable Builder blocks ({{value1}}): {{value2}}"
+msgstr "Khối Builder không khả dụng ({{value1}}): {{value2}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Field bindings that will be cleared ({{value1}}): {{value2}}"
+msgstr "Liên kết trường sẽ bị xóa ({{value1}}): {{value2}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing theme templates/layouts: {{value1}}"
+msgstr "Thiếu mẫu/bố cục theme: {{value1}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Removed schema fields ignored on restore: {{value1}}"
+msgstr "Trường schema đã xóa được bỏ qua khi khôi phục: {{value1}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Removed block properties ignored on restore: {{value1}}"
+msgstr "Thuộc tính khối đã xóa được bỏ qua khi khôi phục: {{value1}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Restricted fields preserved from current entry: {{value1}}"
+msgstr "Trường giới hạn quyền được giữ nguyên từ bài viết hiện tại: {{value1}}"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing or changed references detected"
+msgstr "Phát hiện tham chiếu bị thiếu hoặc đã thay đổi"
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Snapshot normalization notes"
+msgstr "Ghi chú chuẩn hóa bản lưu"
+
+#: admin:revisions.revisionsnapshotview
+msgid "Loading snapshot details…"
+msgstr "Đang tải chi tiết bản lưu…"
+
+#: admin:revisions.revisionsnapshotview
+msgid "Title:"
+msgstr "Tiêu đề:"
+
+#: admin:revisions.revisionsnapshotview
+msgid "Slug:"
+msgstr "Slug:"
+
+#: admin:revisions.revisionsnapshotview
+msgid "Content mode:"
+msgstr "Chế độ nội dung:"
+
+#: admin:revisions.revisionsnapshotview
+msgid "Author:"
+msgstr "Tác giả:"
+
+#: admin:revisions.revisionsnapshotview
+msgid "Administrator-only fields in this snapshot are hidden from your role."
+msgstr "Các trường chỉ dành cho Quản trị viên trong bản lưu này được ẩn với vai trò của bạn."
+
+#: admin:revisions.revisionsnapshotview
+msgid "Builder sections:"
+msgstr "Số Section Builder:"
+
+#: admin:revisions.revisionsnapshotview
+msgid "Taxonomy terms:"
+msgstr "Thuật ngữ phân loại:"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Created"
+msgstr "Tạo mới"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Saved"
+msgstr "Đã lưu"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Builder save"
+msgstr "Lưu Builder"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Builder reset"
+msgstr "Đặt lại Builder"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Quick edit"
+msgstr "Sửa nhanh"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "SEO save"
+msgstr "Lưu SEO"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Pattern save"
+msgstr "Lưu Pattern"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Plugin save"
+msgstr "Lưu từ Plugin"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Restored"
+msgstr "Đã khôi phục"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Imported"
+msgstr "Đã nhập"
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Baseline"
+msgstr "Mốc ban đầu"
+
+#: admin:revisions.types
+msgid "Unknown time"
+msgstr "Không rõ thời gian"
+
+#: admin:revisions.useentryautosave
+msgid "Your session expired while autosaving."
+msgstr "Phiên đăng nhập hết hạn khi đang tự động lưu."
+
+#: admin:revisions.usesingleeditrevisions
+msgid "Your session expired while checking revision history."
+msgstr "Phiên đăng nhập hết hạn khi kiểm tra lịch sử phiên bản."
+
+#: admin:revisions.usesingleeditrevisions
+msgid "Autosaved changes were loaded into your working draft. Review and save to create a new revision."
+msgstr "Các thay đổi lưu tự động đã được nạp vào bản nháp làm việc. Hãy kiểm tra và lưu để tạo phiên bản mới."
+
+#: admin:revisions.usesingleeditrevisions
+msgid "Server autosave discarded."
+msgstr "Đã hủy bản lưu tự động trên máy chủ."
+
+#: admin:revisions.singleeditworkspace
+msgid "Restored snapshot #{{value1}} as new version v{{value2}}."
+msgstr "Đã khôi phục bản lưu #{{value1}} thành phiên bản mới v{{value2}}."

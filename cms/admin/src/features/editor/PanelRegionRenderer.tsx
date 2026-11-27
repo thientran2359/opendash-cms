@@ -1,5 +1,4 @@
 import { __, _x, useI18n } from '../../i18n/index.tsx';
-import { formatDateTime } from '../../i18n/format.ts';
 import React, { useState } from 'react';
 import type {
   ContentFieldValue,
@@ -7,6 +6,7 @@ import type {
   EffectivePanelProjection,
 } from '../content/types.ts';
 import { PanelFieldSliceForm } from './PanelFieldSliceForm.tsx';
+import { PublishBoxPanel } from './PublishBoxPanel.tsx';
 import { TermPicker } from '../taxonomy/TermPicker.tsx';
 import { mediaThumbnailUrl } from '../../api/media.ts';
 
@@ -38,6 +38,7 @@ export interface PanelRegionRendererProps {
   updatedAt?: string | null;
   onCreatedAtChange?: (isoUtc: string | null) => void;
   onUpdatedAtChange?: (isoUtc: string | null) => void;
+  revisionsControlNode?: React.ReactNode;
   templatePanelNode?: React.ReactNode;
   locale?: string | null;
   translationPanelNode?: React.ReactNode;
@@ -95,6 +96,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   updatedAt,
   onCreatedAtChange,
   onUpdatedAtChange,
+  revisionsControlNode,
   templatePanelNode,
   locale,
   translationPanelNode,
@@ -122,39 +124,11 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
 }) => {
   useI18n();
   const [editingPermalink, setEditingPermalink] = useState(false);
-  const [editingStatus, setEditingStatus] = useState(false);
-  const [editingCreatedAt, setEditingCreatedAt] = useState(false);
-  const [editingUpdatedAt, setEditingUpdatedAt] = useState(false);
   const isBuiltInContent = config.type_key === 'post' || config.type_key === 'page';
   const isDraftPublish = publicationPolicy === 'draft_publish' || isBuiltInContent;
   const permalinkPreview = customPath.trim()
     ? (customPath.trim().startsWith('/') ? customPath.trim() : `/${customPath.trim()}`)
     : `/${slug || '...'}`;
-  const parseUtcTimestamp = (raw?: string | null): Date | null => {
-    if (!raw) return null;
-    const iso = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`;
-    const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? null : d;
-  };
-  const formatTimestamp = (raw?: string | null): string => {
-    const d = parseUtcTimestamp(raw);
-    if (!d) return raw || __("On save");
-    return formatDateTime(d, {
-      day: '2-digit', month: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    });
-  };
-  const toDatetimeLocalValue = (raw?: string | null): string => {
-    const d = parseUtcTimestamp(raw) ?? new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-  const fromDatetimeLocalValue = (localVal: string): string | null => {
-    if (!localVal) return null;
-    const d = new Date(localVal);
-    if (Number.isNaN(d.getTime())) return null;
-    return d.toISOString().slice(0, 19).replace('T', ' ');
-  };
 
   const renderPanelBody = (proj: EffectivePanelProjection) => {
     const renderSlice = (fieldKeys: readonly string[], usePanelFields = false) => (
@@ -393,199 +367,25 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           );
         case 'publish_box':
           return (
-            <div className="space-y-3.5">
-              {/* Top secondary bar: Save Draft + Draft Preview (only for drafts) */}
-              {((isDraftPublish && publicationStatus === 'draft') || draftPreviewPath) && (
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  {isDraftPublish && publicationStatus === 'draft' ? (
-                    <button
-                      type="button"
-                      onClick={() => onSave('draft')}
-                      disabled={saving}
-                      className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 transition-colors hover:border-zinc-400 hover:bg-zinc-50 disabled:opacity-50"
-                    >
-                      {saving ? __("Saving...") : _x("Save draft", "feature.editor")}
-                    </button>
-                  ) : <span />}
-                  {draftPreviewPath && (
-                    <a
-                      href={draftPreviewPath}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 no-underline transition-colors hover:border-zinc-400 hover:bg-zinc-50"
-                    >
-                      {__("Preview draft")}
-                    </a>
-                  )}
-                </div>
-              )}
-
-              {/* WordPress-style metadata rows */}
-              <div className="space-y-2 border-y border-zinc-100 py-2.5 text-xs text-zinc-600">
-                <div className="flex flex-wrap items-center justify-between gap-1.5">
-                  <span>
-                    {__("Status:")}{' '}
-                    <strong className="font-semibold text-zinc-900">
-                      {publicationStatus === 'published' ? __("Published") : __("Draft")}
-                    </strong>
-                  </span>
-                  {isDraftPublish && (
-                    <button
-                      type="button"
-                      onClick={() => setEditingStatus(prev => !prev)}
-                      className="text-od-accent hover:underline"
-                    >
-                      {editingStatus ? __("Close") : _x("Edit", "shell.edit")}
-                    </button>
-                  )}
-                </div>
-                {isDraftPublish && editingStatus && (
-                  <div className="flex items-center gap-2 pt-1">
-                    <select
-                      aria-label={__("Publication status")}
-                      className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-                      value={publicationStatus}
-                      onChange={e => onPublicationStatusChange(e.target.value as 'draft' | 'published')}
-                    >
-                      <option value="draft">{__("Draft")}</option>
-                      <option value="published">{__("Published")}</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setEditingStatus(false)}
-                      className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
-                    >
-                      OK
-                    </button>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between gap-1.5">
-                  <span>
-                    {__("Visibility:")}{' '}
-                    <strong className="font-semibold text-zinc-900">
-                      {isPublic ? __("Public") : __("Private")}
-                    </strong>
-                  </span>
-                  {dirty && <span className="font-medium text-amber-700">{__("● Unsaved")}</span>}
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-1.5">
-                    <span>
-                      {__("Created:")}{' '}
-                      <strong className="font-medium text-zinc-800">
-                        {formatTimestamp(createdAt)}
-                      </strong>
-                    </span>
-                    {onCreatedAtChange && (
-                      <button
-                        type="button"
-                        onClick={() => setEditingCreatedAt(prev => !prev)}
-                        className="text-od-accent hover:underline"
-                      >
-                        {editingCreatedAt ? __("Close") : _x("Edit", "shell.edit")}
-                      </button>
-                    )}
-                  </div>
-                  {editingCreatedAt && onCreatedAtChange && (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="datetime-local"
-                        aria-label={__("Created date")}
-                        className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-                        value={toDatetimeLocalValue(createdAt)}
-                        onChange={e => onCreatedAtChange(fromDatetimeLocalValue(e.target.value))}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setEditingCreatedAt(false)}
-                        className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
-                      >
-                        OK
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {entryId !== null && (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-1.5">
-                      <span>
-                        {__("Updated:")}{' '}
-                        <strong className="font-medium text-zinc-800">
-                          {formatTimestamp(updatedAt)}
-                        </strong>
-                      </span>
-                      {onUpdatedAtChange && (
-                        <button
-                          type="button"
-                          onClick={() => setEditingUpdatedAt(prev => !prev)}
-                          className="text-od-accent hover:underline"
-                        >
-                          {editingUpdatedAt ? __("Close") : _x("Edit", "shell.edit")}
-                        </button>
-                      )}
-                    </div>
-                    {editingUpdatedAt && onUpdatedAtChange && (
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="datetime-local"
-                          aria-label={__("Updated date")}
-                          className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-                          value={toDatetimeLocalValue(updatedAt)}
-                          onChange={e => onUpdatedAtChange(fromDatetimeLocalValue(e.target.value))}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setEditingUpdatedAt(false)}
-                          className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
-                        >
-                          OK
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {canOpenBuilder && (
-                <button
-                  type="button"
-                  onClick={onOpenBuilder}
-                  className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 transition-colors hover:border-zinc-400 hover:bg-zinc-50"
-                >
-                  {__("Edit with Builder")}
-                </button>
-              )}
-
-              {/* Bottom footer bar: Delete + Primary Save/Publish */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-                {onDelete ? (
-                  <button
-                    type="button"
-                    disabled={saving}
-                    onClick={onDelete}
-                    data-testid="single-edit-move-to-trash"
-                    className="text-xs font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50"
-                  >
-                    {__("Move to Trash")}
-                  </button>
-                ) : <span />}
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => onSave(isDraftPublish ? (publicationStatus === 'draft' && !editingStatus ? 'published' : publicationStatus) : undefined)}
-                  className="inline-flex h-9 items-center justify-center rounded-md bg-od-accent px-4 text-sm font-medium text-white shadow-2xs transition-colors hover:bg-od-accent-hover disabled:opacity-50"
-                >
-                  {saving
-                    ? __("Saving...")
-                    : isDraftPublish
-                      ? (publicationStatus === 'published' ? __("Update") : __("Publish post"))
-                      : (entryId === null ? __("Create new") : __("Update"))}
-                </button>
-              </div>
-            </div>
+            <PublishBoxPanel
+              entryId={entryId}
+              publicationStatus={publicationStatus}
+              isDraftPublish={isDraftPublish}
+              isPublic={isPublic}
+              draftPreviewPath={draftPreviewPath}
+              createdAt={createdAt}
+              updatedAt={updatedAt}
+              onCreatedAtChange={onCreatedAtChange}
+              onUpdatedAtChange={onUpdatedAtChange}
+              revisionsControlNode={revisionsControlNode}
+              onPublicationStatusChange={onPublicationStatusChange}
+              onSave={onSave}
+              onDelete={onDelete}
+              onOpenBuilder={onOpenBuilder}
+              canOpenBuilder={canOpenBuilder}
+              saving={saving}
+              dirty={dirty}
+            />
           );
         case 'page_attributes':
           return templatePanelNode ? (

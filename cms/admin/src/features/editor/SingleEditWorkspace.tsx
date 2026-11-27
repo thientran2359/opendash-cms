@@ -1,8 +1,7 @@
-import { __, _x, useI18n } from '../../i18n/index.tsx';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { __, useI18n } from '../../i18n/index.tsx';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createEntryComposite,
-  createEntryTranslation,
   contentEntryPreviewPath,
   effectiveContentTypeSettings,
   getContentEntry,
@@ -14,6 +13,7 @@ import {
   updateEntryComposite,
 } from '../../api/content.ts';
 import { runPluginAction } from '../../api/plugins.ts';
+import { isRestoreEntryOutcome, type RestoreRevisionResponse } from '../../api/revisions.ts';
 import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
 import { ApiClientError } from '../../api/client.ts';
 import { getActiveThemeLayouts, type ThemeLayoutCatalog } from '../../api/themes.ts';
@@ -22,12 +22,20 @@ import type { AuthUser, PluginLifecycleConfirmation as PluginLifecycleConfirmati
 import type { ContentFieldValue, EffectiveEditorConfigProjection, EffectivePanelProjection, TranslationLinkSummary } from '../content/types.ts';
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
+import { SingleEditBuilderPromptDialog } from './SingleEditBuilderPromptDialog.tsx';
+import { SingleEditTranslationsPanel } from './SingleEditTranslationsPanel.tsx';
 import { validateRequiredEditorFields } from './editorFieldValidation.ts';
 import { useSiteTimezone } from '../../fields/useSiteTimezone.ts';
 import { isUiOnlyFieldType } from '../../fields/helpers.ts';
 import { MediaPicker } from '../media/MediaPicker.tsx';
 import { EntryListPage, entryTableHash, parseEntryTableHash, safePublicPath } from '../content/EntryListPage.tsx';
 import { PluginLifecycleConfirmation } from '../plugins/PluginLifecycleConfirmation.tsx';
+import { PublishBoxRevisionsControl } from '../revisions/PublishBoxRevisionsControl.tsx';
+import { SingleEditRevisionsOverlay } from '../revisions/SingleEditRevisionsOverlay.tsx';
+import {
+  buildRestoredEditorPayload,
+  useSingleEditRevisions,
+} from '../revisions/useSingleEditRevisions.ts';
 
 interface FieldMediaPickerTarget {
   fieldKey: string;
@@ -141,11 +149,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
   const [entryLocale, setEntryLocale] = useState<string>(defaultLocaleCode);
   const [translations, setTranslations] = useState<TranslationLinkSummary[]>([]);
-  const [translationModalLocale, setTranslationModalLocale] = useState<string | null>(null);
-  const [translationTitle, setTranslationTitle] = useState('');
-  const [translationSlug, setTranslationSlug] = useState('');
-  const [creatingTranslation, setCreatingTranslation] = useState(false);
-  const [translationError, setTranslationError] = useState<string | null>(null);
   useEffect(() => {
     if (entryId === null && !entryLocale && defaultLocaleCode) {
       setEntryLocale(defaultLocaleCode);
@@ -160,7 +163,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [slug, setSlug] = useState('');
   const [publicationStatus, setPublicationStatus] = useState<'draft' | 'published'>('draft');
   const [builderPromptOpen, setBuilderPromptOpen] = useState(false);
-  const builderDialogRef = useRef<HTMLDialogElement | null>(null);
   const [values, setValues] = useState<Record<string, ContentFieldValue>>({});
   const [clearedFields, setClearedFields] = useState<string[]>([]);
   const [termIds, setTermIds] = useState<number[]>([]);
@@ -193,6 +195,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [saving, setSaving] = useState(false);
   const saveInFlightRef = useRef(false);
   const [dirty, setDirty] = useState(false);
+  const [editRevision, setEditRevision] = useState(0);
+  const [hasLocalRestoredDraft, setHasLocalRestoredDraft] = useState(false);
   const [statusNote, setStatusNote] = useState<string | null>(null);
   const [confirmedPublicLink, setConfirmedPublicLink] = useState<{
     scope: string; version: number; path: string | null;
@@ -275,6 +279,14 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     setSeoOgImageId(payload.seo?.og_image_id ?? '');
     setSeoNoindex(Boolean(payload.seo?.noindex));
     if (payload.locale) setEntryLocale(payload.locale);
+    const nextThemeKey = typeKey === 'page'
+      ? (payload.page_layout_key ?? null)
+      : (payload.custom_template_key ?? null);
+    selectedThemeKeyRef.current = nextThemeKey;
+    setSelectedThemeKey(nextThemeKey);
+    const themeDiffers = nextThemeKey !== savedThemeKeyRef.current;
+    themeKeyDirtyRef.current = themeDiffers;
+    setThemeKeyDirty(themeDiffers);
   };
 
   const persistDraftPatch = (patch: Partial<EditorDraftPayload>) => {
@@ -284,6 +296,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     const updated = { ...previous, ...patch };
     draftRef.current = updated;
     editRevisionRef.current += 1;
+    setEditRevision(editRevisionRef.current);
     const changed = diffEditorPayload(baseline, updated);
     setDirty(changed.length > 0 || themeKeyDirtyRef.current);
     if (!changed.length) {
@@ -308,16 +321,52 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     });
   };
 
+  const handleTrashedConflict = useCallback((message: string) => {
+    setTrashedBlockedReason(message);
+    setStatusNote(
+      __(
+        "This entry was moved to Trash in another session (409). Your unsaved draft is retained; restore the entry from Trash before saving.",
+      ),
+    );
+  }, []);
+
+  const revisions = useSingleEditRevisions({
+    typeKey,
+    mode,
+    entryId,
+    isPattern,
+    user,
+    config,
+    trashedBlockedReason,
+    csrfToken,
+    siteInstanceId,
+    authGeneration,
+    dirty,
+    editRevision,
+    hasLocalRestoredDraft,
+    supportAllowsField,
+    baselineRef,
+    draftRef,
+    savedThemeKeyRef,
+    selectedThemeKeyRef,
+    canWriteSeoRef,
+    onApplyMergedAutosave: (merged, nextSelectedThemeKey) => {
+      selectedThemeKeyRef.current = nextSelectedThemeKey;
+      setSelectedThemeKey(nextSelectedThemeKey);
+      const themeDiffers = nextSelectedThemeKey !== savedThemeKeyRef.current;
+      themeKeyDirtyRef.current = themeDiffers;
+      setThemeKeyDirty(themeDiffers);
+      persistDraftPatch(merged);
+      applyPayload(merged);
+    },
+    onTrashedConflict: handleTrashedConflict,
+    onStatusNote: setStatusNote,
+    onApiError,
+  });
+
   useEffect(() => {
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
-
-  useEffect(() => {
-    const dialog = builderDialogRef.current;
-    if (!dialog) return;
-    if (builderPromptOpen && !dialog.open) dialog.showModal();
-    else if (!builderPromptOpen && dialog.open) dialog.close();
-  }, [builderPromptOpen]);
 
   useEffect(() => {
     setConfirmedPublicLink(null);
@@ -327,6 +376,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       baselineRef.current = null;
       draftRef.current = null;
       setDirty(false);
+      setHasLocalRestoredDraft(false);
       return;
     }
     let active = true;
@@ -337,6 +387,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       baselineRef.current = null;
       draftRef.current = null;
       setDirty(false);
+      setHasLocalRestoredDraft(false);
       return;
     }
 
@@ -346,6 +397,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           baselineRef.current = null;
           draftRef.current = null;
           setDirty(false);
+          setHasLocalRestoredDraft(false);
           return;
         }
 
@@ -395,9 +447,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           setEntryTimestamps({ createdAt: rec.created_at, updatedAt: rec.updated_at });
           setCustomCreatedAt(null);
           setCustomUpdatedAt(null);
-          const themeKey = typeKey === 'page'
-            ? (rec as typeof rec & { page_layout_key?: string | null }).page_layout_key ?? null
-            : (rec as typeof rec & { custom_template_key?: string | null }).custom_template_key ?? null;
+          const pageLayoutKey =
+            (rec as typeof rec & { page_layout_key?: string | null }).page_layout_key ?? null;
+          const customTemplateKey =
+            (rec as typeof rec & { custom_template_key?: string | null }).custom_template_key ?? null;
+          const themeKey = typeKey === 'page' ? pageLayoutKey : customTemplateKey;
           savedThemeKeyRef.current = themeKey;
           selectedThemeKeyRef.current = themeKey;
           themeKeyDirtyRef.current = false;
@@ -419,6 +473,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             content_mode: rec.content_mode,
             values: allowedValues, cleared_fields: [], term_ids: rec.term_ids ?? [],
             primary_category_term_id: rec.primary_category_term_id ?? null,
+            page_layout_key: pageLayoutKey,
+            custom_template_key: customTemplateKey,
             custom_path: routeSnap?.custom_path ?? '',
             seo: seoSnap ? {
               title: seoSnap.title, description: seoSnap.description,
@@ -441,6 +497,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               ? 'draft' : 'published',
             content_mode: 'editor',
             values: {}, cleared_fields: [], term_ids: [], primary_category_term_id: null,
+            page_layout_key: null,
+            custom_template_key: null,
             custom_path: '', seo: emptySeo,
           };
         }
@@ -459,6 +517,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         canWriteRouteRef.current = routeReadable;
         canWriteSeoRef.current = seoReadable;
         editRevisionRef.current = 0;
+        setEditRevision(0);
+        setHasLocalRestoredDraft(Boolean(restored?.dirty_fields.length));
         applyPayload(draftRef.current);
         setDirty(Boolean(restored?.dirty_fields.length));
         setConfig(freshCfg);
@@ -483,6 +543,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           setConfig(null);
           baselineRef.current = null;
           draftRef.current = null;
+          setHasLocalRestoredDraft(false);
           setDirty(false);
           setTrashedBlockedReason(err.message);
           return;
@@ -491,6 +552,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         setConfig(null);
         baselineRef.current = null;
         draftRef.current = null;
+        setHasLocalRestoredDraft(false);
         setDirty(false);
         onApiError(err, __("Could not load editor screen data."));
       }
@@ -518,6 +580,31 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       const el = document.querySelector(`[data-field-key="${fieldKey}"] input, [data-field-key="${fieldKey}"] textarea, [data-field-key="${fieldKey}"] select`) as HTMLElement | null;
       el?.focus();
     }, 20);
+  };
+
+  const refreshPublishedPublicLink = (
+    targetId: number,
+    targetVersion: number,
+    requestEpoch: number,
+  ) => {
+    void getEntryRoute(typeKey, targetId).then(routeSnap => {
+      if (requestEpoch !== editorDraftStore.getSessionEpoch() ||
+          activeDraftKeyRef.current !== draftKey ||
+          activeMediaScopeRef.current !== mediaScopeKey) return;
+      if (routeSnap.entry_version !== targetVersion) return;
+      setConfirmedPublicLink({
+        scope: mediaScopeKey,
+        version: targetVersion,
+        path: safePublicPath(routeSnap.public_url),
+      });
+    }).catch(error => {
+      if (requestEpoch === editorDraftStore.getSessionEpoch() &&
+          activeDraftKeyRef.current === draftKey &&
+          activeMediaScopeRef.current === mediaScopeKey &&
+          error instanceof ApiClientError && error.status === 401) {
+        onApiError(error, __("Your session expired while loading the public URL."));
+      }
+    });
   };
 
   const handleSave = async (intent?: 'draft' | 'published', navigateOnCreate = true): Promise<number | null> => {
@@ -549,6 +636,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     }
 
     setFieldErrors({});
+    revisions.abortAndClearInflight();
     saveInFlightRef.current = true;
     setSaving(true);
     setStatusNote(null);
@@ -609,6 +697,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey) return null;
       setEntryLocale(res.entry.locale ?? entryLocale);
       if (res.entry.translations) setTranslations(res.entry.translations);
+      const pageLayoutKey =
+        (res.entry as typeof res.entry & { page_layout_key?: string | null }).page_layout_key ?? null;
+      const customTemplateKey =
+        (res.entry as typeof res.entry & { custom_template_key?: string | null }).custom_template_key ?? null;
+      const savedSelection = typeKey === 'page' ? pageLayoutKey : customTemplateKey;
       const saved: EditorDraftPayload = {
         ...snapshot,
         id: res.entry.id, version: res.entry.version, title: res.entry.title, slug: res.entry.slug,
@@ -616,6 +709,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         content_mode: res.entry.content_mode,
         values: res.entry.values, cleared_fields: [], term_ids: res.entry.term_ids ?? snapshot.term_ids,
         primary_category_term_id: res.entry.primary_category_term_id ?? null,
+        page_layout_key: pageLayoutKey,
+        custom_template_key: customTemplateKey,
         custom_path: res.custom_path ?? '',
         seo: res.seo ? {
           title: res.seo.title, description: res.seo.description,
@@ -627,9 +722,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       setEntryTimestamps({ createdAt: res.entry.created_at, updatedAt: res.entry.updated_at });
       setCustomCreatedAt(null);
       setCustomUpdatedAt(null);
-      const savedSelection = typeKey === 'page'
-        ? (res.entry as typeof res.entry & { page_layout_key?: string | null }).page_layout_key ?? null
-        : (res.entry as typeof res.entry & { custom_template_key?: string | null }).custom_template_key ?? null;
       savedThemeKeyRef.current = savedSelection;
       if (editRevisionRef.current === submittedRevision) {
         selectedThemeKeyRef.current = savedSelection;
@@ -645,24 +737,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       // link. Require a matching server response before exposing another URL.
       setConfirmedPublicLink(null);
       if (entryId !== null && saved.publication_status === 'published') {
-        void getEntryRoute(typeKey, res.entry.id).then(routeSnap => {
-          if (requestEpoch !== editorDraftStore.getSessionEpoch() ||
-              activeDraftKeyRef.current !== draftKey ||
-              activeMediaScopeRef.current !== mediaScopeKey) return;
-          if (routeSnap.entry_version !== res.entry.version) return;
-          setConfirmedPublicLink({
-            scope: mediaScopeKey,
-            version: res.entry.version,
-            path: safePublicPath(routeSnap.public_url),
-          });
-        }).catch(error => {
-          if (requestEpoch === editorDraftStore.getSessionEpoch() &&
-              activeDraftKeyRef.current === draftKey &&
-              activeMediaScopeRef.current === mediaScopeKey &&
-              error instanceof ApiClientError && error.status === 401) {
-            onApiError(error, __("Your session expired while loading the public URL."));
-          }
-        });
+        refreshPublishedPublicLink(res.entry.id, res.entry.version, requestEpoch);
       }
       schemaTokenRef.current = config.schema_token;
       editorDraftStore.delete(draftKey);
@@ -692,6 +767,13 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         }
         setDirty(changed.length > 0 || themeKeyDirtyRef.current);
       }
+      setHasLocalRestoredDraft(false);
+      revisions.clearServerAutosaveState();
+      if (hasNewerChanges) {
+        editRevisionRef.current += 1;
+        setEditRevision(editRevisionRef.current);
+      }
+      void revisions.refreshRevisionCount();
       setStatusNote(hasNewerChanges
         ? __("Saved snapshot v{{value1}}; newer edits remain unsaved.", { value1: res.entry.version })
         : __("Saved successfully (v{{value1}}).", { value1: res.entry.version }));
@@ -724,6 +806,39 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       saveInFlightRef.current = false;
       setSaving(false);
     }
+  };
+
+  const handleRevisionRestored = (res: RestoreRevisionResponse, restoredFromRevNum: number) => {
+    if (!isRestoreEntryOutcome(res) || !config || !user) return;
+    const { payload: restoredPayload, savedSelection } = buildRestoredEditorPayload(typeKey, res, config);
+    savedThemeKeyRef.current = savedSelection;
+    baselineRef.current = restoredPayload;
+    draftRef.current = restoredPayload;
+    schemaTokenRef.current = res.schema_token;
+    setEntryLocale(res.entry.locale ?? entryLocale);
+    if (res.entry.translations) setTranslations(res.entry.translations);
+    setEntryTimestamps({ createdAt: res.entry.created_at, updatedAt: res.entry.updated_at });
+    setCustomCreatedAt(null);
+    setCustomUpdatedAt(null);
+    setFieldErrors({});
+    editRevisionRef.current += 1;
+    setEditRevision(editRevisionRef.current);
+    applyPayload(restoredPayload);
+    editorDraftStore.delete(draftKey);
+    setDirty(false);
+    onDirtyChange(false);
+    setHasLocalRestoredDraft(false);
+    revisions.clearServerAutosaveState();
+    revisions.handleCloseHistory();
+    void revisions.refreshRevisionCount();
+    setConfirmedPublicLink(null);
+    if (restoredPayload.publication_status === 'published') {
+      refreshPublishedPublicLink(res.entry.id, res.entry.version, editorDraftStore.getSessionEpoch());
+    }
+    setStatusNote(__("Restored snapshot #{{value1}} as new version v{{value2}}.", {
+      value1: restoredFromRevNum,
+      value2: res.entry.version,
+    }));
   };
 
   if (isPattern) {
@@ -812,8 +927,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             const differs = choice !== savedThemeKeyRef.current;
             themeKeyDirtyRef.current = differs;
             setThemeKeyDirty(differs);
-            if (differs) editRevisionRef.current++;
-            setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
+            persistDraftPatch(
+              typeKey === 'page'
+                ? { page_layout_key: choice }
+                : { custom_template_key: choice },
+            );
           }}
         >
           <option value="">{__("Theme default")}</option>
@@ -829,139 +947,39 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     </div>
   ) : null;
 
-  const missingTranslationLocales = localeState.allLocales.filter(
-    loc => loc.code !== entryLocale && !translations.some(tr => tr.locale === loc.code),
-  );
-
-  const handleCreateTranslation = async () => {
-    if (!csrfToken || entryId === null || !translationModalLocale) return;
-    const expectedVersion = baselineRef.current?.version;
-    if (expectedVersion === undefined || expectedVersion === null) return;
-    setCreatingTranslation(true);
-    setTranslationError(null);
-    try {
-      const created = await createEntryTranslation(
-        typeKey,
-        entryId,
-        {
-          target_locale: translationModalLocale,
-          title: translationTitle.trim() || undefined,
-          slug: translationSlug.trim() || slug || `${typeKey}-${translationModalLocale}`,
-          auto_unique_slug: !translationSlug.trim(),
-        },
-        expectedVersion,
-        csrfToken,
-      );
-      setTranslationModalLocale(null);
-      onNavigateHash(`${listHashPrefix}/${created.id}`);
-    } catch (error) {
-      if (error instanceof ApiClientError) {
-        setTranslationError(error.message);
-      } else {
-        setTranslationError(__("Could not create translation."));
-      }
-      onApiError(error, __("Could not create translation"));
-    } finally {
-      setCreatingTranslation(false);
-    }
-  };
-
   const translationPanelNode = localeState.hasMultipleLocales && !isPattern ? (
-    <div className="space-y-2.5" data-testid="entry-translations-panel">
-      {entryId === null ? (
-        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-locale-select">
-          <span>{__("Content language")}</span>
-          <select
-            id="entry-locale-select"
-            data-testid="entry-locale-select"
-            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-            value={entryLocale || defaultLocaleCode}
-            disabled={saving || !csrfToken}
-            onChange={event => {
-              const nextLocale = event.target.value;
-              setEntryLocale(nextLocale);
-              persistDraftPatch({ locale: nextLocale });
-            }}
-          >
-            {localeState.allLocales.map(loc => (
-              <option key={loc.code} value={loc.code}>
-                {loc.label} ({loc.code}){loc.is_default ? __(" — Default") : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : (
-        <>
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-medium text-zinc-700">{__("Language")}</span>
-            <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-zinc-800" data-testid="entry-locked-locale">
-              {entryLocale || defaultLocaleCode}
-            </span>
-          </div>
-          {translations.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-zinc-600">{__("Linked translations")}</p>
-              <ul className="space-y-1">
-                {translations.map(tr => (
-                  <li key={tr.id} className="flex items-center justify-between gap-2 text-xs">
-                    <a
-                      href={`${listHashPrefix}/${tr.id}`}
-                      onClick={e => {
-                        e.preventDefault();
-                        onNavigateHash(`${listHashPrefix}/${tr.id}`);
-                      }}
-                      className="truncate font-medium text-od-accent hover:underline"
-                    >
-                      [{tr.locale}] {tr.title || `#${tr.id}`}
-                    </a>
-                    <span className="shrink-0 text-[11px] text-zinc-500">
-                      {tr.publication_status === 'published'
-                        ? __("published")
-                        : tr.publication_status === 'draft'
-                          ? __("draft")
-                          : tr.publication_status}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {missingTranslationLocales.length > 0 && (
-            <div className="space-y-1 pt-1">
-              <p className="text-xs font-medium text-zinc-600">{__("Create translation")}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {missingTranslationLocales.map(loc => (
-                  <button
-                    key={loc.code}
-                    type="button"
-                    disabled={saving || !csrfToken}
-                    onClick={() => {
-                      setTranslationModalLocale(loc.code);
-                      setTranslationTitle('');
-                      setTranslationSlug('');
-                      setTranslationError(null);
-                    }}
-                    data-testid={`create-translation-${loc.code}`}
-                    className="inline-flex h-7 items-center rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
-                  >
-                    {__("+ Create translation (")}{loc.code})
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
+    <SingleEditTranslationsPanel
+      typeKey={typeKey}
+      entryId={entryId}
+      expectedVersion={baselineRef.current?.version ?? null}
+      slug={slug}
+      title={title}
+      entryLocale={entryLocale}
+      defaultLocaleCode={defaultLocaleCode}
+      translations={translations}
+      localeState={localeState}
+      listHashPrefix={listHashPrefix}
+      saving={saving}
+      csrfToken={csrfToken}
+      onLocaleChange={nextLocale => {
+        setEntryLocale(nextLocale);
+        persistDraftPatch({ locale: nextLocale });
+      }}
+      onApiError={onApiError}
+      onNavigateHash={onNavigateHash}
+    />
   ) : null;
 
   const handleDelete = async () => {
     const version = baselineRef.current?.version;
     if (entryId === null || version === null || version === undefined || !csrfToken || saving) return;
     if (!window.confirm(__("Move this entry to Trash? You can restore it later from Trash."))) return;
+    revisions.abortAndClearInflight();
     setSaving(true);
     try {
       await trashContentEntry(typeKey, entryId, version, csrfToken);
+      revisions.clearServerAutosaveState();
+      setHasLocalRestoredDraft(false);
       editorDraftStore.delete(draftKey);
       setDirty(false);
       onDirtyChange(false);
@@ -1029,6 +1047,26 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           {statusNote}
         </div>
       )}
+      {mode === 'edit' && entryId !== null && !isPattern && (
+        <SingleEditRevisionsOverlay
+          typeKey={typeKey}
+          entryId={entryId}
+          csrfToken={csrfToken}
+          currentVersion={baselineRef.current?.version ?? 0}
+          serverAutosave={revisions.serverAutosave}
+          hasNewerLocalDraft={revisions.hasNewerLocalDraft}
+          discardingAutosave={revisions.discardingAutosave}
+          historyOpen={revisions.historyOpen}
+          initialCompare={revisions.initialCompare}
+          onApplyAutosave={revisions.handleApplyServerAutosave}
+          onCompareAutosave={() => revisions.handleOpenHistory({ from: 'current', to: 'autosave' })}
+          onDiscardAutosave={() => void revisions.handleDiscardServerAutosave()}
+          onCloseHistory={revisions.handleCloseHistory}
+          onBeforeRestore={revisions.abortAndClearInflight}
+          onRestored={handleRevisionRestored}
+          onApiError={onApiError}
+        />
+      )}
       <div>
       <PanelRegionRenderer
         config={editorConfig ?? config}
@@ -1064,6 +1102,17 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           setCustomUpdatedAt(val);
           setDirty(true);
         }}
+        revisionsControlNode={
+          mode === 'edit' && entryId !== null && !isPattern ? (
+            <PublishBoxRevisionsControl
+              revisionCount={revisions.revisionCount}
+              hasAutosave={revisions.hasServerAutosave}
+              autosaveState={revisions.autosaveState}
+              disabled={saving || !user}
+              onOpenHistory={() => revisions.handleOpenHistory()}
+            />
+          ) : undefined
+        }
         templatePanelNode={templatePanelNode}
         translationPanelNode={translationPanelNode}
         locale={localeState.hasMultipleLocales && !isPattern ? (entryLocale || defaultLocaleCode || undefined) : undefined}
@@ -1189,67 +1238,30 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         }}
       />
       </div>
-      <dialog
-        ref={builderDialogRef}
-        aria-labelledby="builder-unsaved-title"
+      <SingleEditBuilderPromptDialog
+        open={builderPromptOpen}
+        entryId={entryId}
+        saving={saving}
         onClose={() => setBuilderPromptOpen(false)}
-        className="od-confirm-dialog m-auto max-w-md rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-xl"
-      >
-        <style>{'dialog.od-confirm-dialog:modal{overscroll-behavior:contain} dialog.od-confirm-dialog::backdrop{overflow:hidden;overscroll-behavior:contain;background:rgba(9,9,11,0.45)}'}</style>
-        <h2 id="builder-unsaved-title" className="text-base font-semibold text-zinc-950">
-          {__("Unsaved editor changes")}
-        </h2>
-        <p className="mt-2 text-sm text-zinc-600">
-          {__("Do you want to save your current edits before opening Appearance customization (Builder)?")}
-        </p>
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
-          {entryId !== null && (
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => {
-                setBuilderPromptOpen(false);
-                editorDraftStore.delete(draftKey);
-                setDirty(false);
-                onDirtyChange(false);
-                onNavigateHash(entryBuilderHash);
-              }}
-              data-testid="builder-prompt-discard"
-              className="inline-flex h-9 items-center rounded-md border border-rose-200 bg-rose-50 px-3 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-            >
-              {__("Discard changes & open")}
-            </button>
-          )}
-          <button
-            type="button"
-            autoFocus
-            disabled={saving}
-            onClick={() => setBuilderPromptOpen(false)}
-            data-testid="builder-prompt-cancel"
-            className="inline-flex h-9 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
-          >
-            {_x("Cancel", "multilingual.cancel")}
-          </button>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => {
-              void (async () => {
-                const intent = publicationPolicy === 'draft_publish' ? publicationStatus : undefined;
-                const savedId = await handleSave(intent, false);
-                setBuilderPromptOpen(false);
-                if (savedId !== null) {
-                  onNavigateHash(`#/studio/entry/${encodeURIComponent(typeKey)}/${savedId}`);
-                }
-              })();
-            }}
-            data-testid="builder-prompt-save"
-            className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
-          >
-            {saving ? __("Saving…") : __("Save & open Builder")}
-          </button>
-        </div>
-      </dialog>
+        onDiscardAndOpen={() => {
+          revisions.abortAndClearInflight();
+          setBuilderPromptOpen(false);
+          editorDraftStore.delete(draftKey);
+          setDirty(false);
+          onDirtyChange(false);
+          onNavigateHash(entryBuilderHash);
+        }}
+        onSaveAndOpen={() => {
+          void (async () => {
+            const intent = publicationPolicy === 'draft_publish' ? publicationStatus : undefined;
+            const savedId = await handleSave(intent, false);
+            setBuilderPromptOpen(false);
+            if (savedId !== null) {
+              onNavigateHash(`#/studio/entry/${encodeURIComponent(typeKey)}/${savedId}`);
+            }
+          })();
+        }}
+      />
       {mediaPicker && mediaPicker.scopeKey === mediaScopeKey && csrfToken && user && config
         && config.schema_token === mediaPicker.schemaToken
         && editorDraftStore.getSessionEpoch() === mediaPicker.sessionEpoch
@@ -1281,65 +1293,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             }}
           />
         )}
-      {translationModalLocale && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          data-testid="create-translation-modal"
-        >
-          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl space-y-4">
-            <h3 className="text-base font-semibold text-zinc-900">
-              {__("Create translation (")}{translationModalLocale})
-            </h3>
-            <p className="text-xs text-zinc-600">
-              {__("The system copies content, custom fields, matching-language taxonomy terms and referenced media to a new draft translation.")}
-            </p>
-            <div className="space-y-3">
-              <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-                <span>{__("Title (optional)")}</span>
-                <input
-                  type="text"
-                  value={translationTitle}
-                  onChange={e => setTranslationTitle(e.target.value)}
-                  placeholder={title || __("Leave empty to copy the original title")}
-                  className="h-9 rounded-md border border-zinc-300 px-2.5 text-sm text-zinc-900"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-                <span>{__("Slug (optional)")}</span>
-                <input
-                  type="text"
-                  value={translationSlug}
-                  onChange={e => setTranslationSlug(e.target.value)}
-                  placeholder={__("Leave empty to generate from title")}
-                  className="h-9 rounded-md border border-zinc-300 px-2.5 text-sm text-zinc-900"
-                />
-              </label>
-              {translationError && (
-                <p className="text-xs font-medium text-rose-700">{translationError}</p>
-              )}
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={creatingTranslation}
-                onClick={() => setTranslationModalLocale(null)}
-                className="inline-flex h-9 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
-              >
-                {_x("Cancel", "multilingual.cancel")}
-              </button>
-              <button
-                type="button"
-                disabled={creatingTranslation || !csrfToken}
-                onClick={() => void handleCreateTranslation()}
-                data-testid="confirm-create-translation"
-                className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
-              >
-                {creatingTranslation ? __("Creating…") : __("Create translation")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      </div>
   );
 };

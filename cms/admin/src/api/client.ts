@@ -1,5 +1,6 @@
 import { __ } from '../i18n/index.tsx';
 import type { PluginLifecycleConfirmation } from '../types.ts';
+import type { MissingRefsReport } from './revisions.ts';
 
 export interface PermalinkConflictItem {
   path: string;
@@ -11,7 +12,10 @@ export class ApiClientError extends Error {
   status: number;
   readonly conflicts?: PermalinkConflictItem[];
   readonly errorCode?: string;
+  readonly bodyCode?: string;
   readonly confirmation?: PluginLifecycleConfirmation;
+  readonly missingRefs?: MissingRefsReport;
+  readonly fieldErrors?: Record<string, string>;
 
   constructor(
     status: number,
@@ -19,13 +23,19 @@ export class ApiClientError extends Error {
     conflicts?: PermalinkConflictItem[],
     errorCode?: string,
     confirmation?: PluginLifecycleConfirmation,
+    bodyCode?: string,
+    missingRefs?: MissingRefsReport,
+    fieldErrors?: Record<string, string>,
   ) {
     super(message);
     this.name = 'ApiClientError';
     this.status = status;
     this.conflicts = conflicts;
     this.errorCode = errorCode;
+    this.bodyCode = bodyCode;
     this.confirmation = confirmation;
+    this.missingRefs = missingRefs;
+    this.fieldErrors = fieldErrors;
   }
 }
 
@@ -35,6 +45,7 @@ export interface ApiRequestOptions {
   contentType?: string;
   body?: BodyInit | null;
   signal?: AbortSignal;
+  keepalive?: boolean;
   /** M3 optimistic edit version, serialized as If-Match: "vN". */
   ifMatchVersion?: number;
   /** Explicit If-Match header value (e.g. "gv1-v1" for media lifecycle). */
@@ -128,6 +139,8 @@ function responseError(
   let conflicts: PermalinkConflictItem[] | undefined;
   let confirmation: PluginLifecycleConfirmation | undefined;
   let bodyCode: string | undefined;
+  let missingRefs: MissingRefsReport | undefined;
+  let fieldErrors: Record<string, string> | undefined;
   try {
     const errObj = JSON.parse(text);
     if (errObj && typeof errObj.message === 'string') msg = errObj.message;
@@ -143,6 +156,27 @@ function responseError(
           && typeof row.existing_target === 'string';
       }).slice(0, 20);
     }
+    if (
+      res.status === 409 &&
+      errObj?.code === 'revision_missing_refs' &&
+      errObj.missing_refs &&
+      typeof errObj.missing_refs === 'object' &&
+      !Array.isArray(errObj.missing_refs)
+    ) {
+      missingRefs = errObj.missing_refs as MissingRefsReport;
+    }
+    if (
+      res.status === 422 &&
+      errObj?.field_errors &&
+      typeof errObj.field_errors === 'object' &&
+      !Array.isArray(errObj.field_errors)
+    ) {
+      const entries = Object.entries(errObj.field_errors as Record<string, unknown>)
+        .filter((pair): pair is [string, string] => typeof pair[1] === 'string');
+      if (entries.length > 0) {
+        fieldErrors = Object.fromEntries(entries);
+      }
+    }
     confirmation = parseTrustedLifecycleConfirmation(res, errObj, expectLifecycleConfirmation);
   } catch {
     // Plain text error response.
@@ -154,6 +188,9 @@ function responseError(
     conflicts,
     res.headers.get('X-OpenDash-Error-Code') ?? bodyCode,
     confirmation,
+    bodyCode,
+    missingRefs,
+    fieldErrors,
   );
 }
 
@@ -183,6 +220,7 @@ export async function requestText(url: string, options: ApiRequestOptions): Prom
     ),
     body: options.body,
     signal: options.signal,
+    keepalive: options.keepalive,
   });
   return handleResponseText(res, options.defaultErrorMessage, options.expectLifecycleConfirmation);
 }
@@ -223,6 +261,7 @@ export async function requestJson<T>(url: string, options: ApiRequestOptions): P
     ),
     body: options.body,
     signal: options.signal,
+    keepalive: options.keepalive,
   });
 
   const text = await res.text();
