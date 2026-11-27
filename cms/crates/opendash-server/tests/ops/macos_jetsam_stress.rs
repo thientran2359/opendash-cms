@@ -33,7 +33,7 @@ fn macos_jetsam_stress_limit() {
             &exe,
             &[
                 "--exact",
-                "m8_macos_jetsam_stress::macos_jetsam_stress_limit",
+                "macos_jetsam_stress::macos_jetsam_stress_limit",
                 "--nocapture",
             ],
         )

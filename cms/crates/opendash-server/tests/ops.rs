@@ -1,28 +1,28 @@
-#[path = "ops/m8_macos_jetsam_stress.rs"]
-mod m8_macos_jetsam_stress;
-#[path = "ops/m8_review_fixes.rs"]
-mod m8_review_fixes;
-#[path = "ops/m8_s01_t01_coordinator.rs"]
-mod m8_s01_t01_coordinator;
-#[path = "ops/m8_s01_t02_writer_barrier.rs"]
-mod m8_s01_t02_writer_barrier;
-#[path = "ops/m8_s02_t01_media_delete.rs"]
-mod m8_s02_t01_media_delete;
-#[path = "ops/m8_s02_t02_reconcile.rs"]
-mod m8_s02_t02_reconcile;
-#[path = "ops/m8_s03_t01_snapshot.rs"]
-mod m8_s03_t01_snapshot;
-#[path = "ops/m8_s04_t01_backup_codec.rs"]
-mod m8_s04_t01_backup_codec;
-#[path = "ops/m8_s04_t02_backup_admin.rs"]
-mod m8_s04_t02_backup_admin;
-#[path = "ops/m8_s05_t01_restore.rs"]
-mod m8_s05_t01_restore;
-#[path = "ops/m8_s05_t02_restore_admin.rs"]
-mod m8_s05_t02_restore_admin;
-#[path = "ops/m8_s06_t01_runtime.rs"]
-mod m8_s06_t01_runtime;
-#[path = "ops/m8_s08_t01_e2e.rs"]
-mod m8_s08_t01_e2e;
-#[path = "ops/m8_s10_t01_restored_startup.rs"]
-mod m8_s10_t01_restored_startup;
+#[path = "ops/backup_admin_jobs.rs"]
+mod backup_admin_jobs;
+#[path = "ops/backup_codec.rs"]
+mod backup_codec;
+#[path = "ops/backup_restore_e2e.rs"]
+mod backup_restore_e2e;
+#[path = "ops/macos_jetsam_stress.rs"]
+mod macos_jetsam_stress;
+#[path = "ops/media_delete_quarantine.rs"]
+mod media_delete_quarantine;
+#[path = "ops/media_reconcile.rs"]
+mod media_reconcile;
+#[path = "ops/proxy_and_restore_cancel.rs"]
+mod proxy_and_restore_cancel;
+#[path = "ops/restore_admin_safe_mode.rs"]
+mod restore_admin_safe_mode;
+#[path = "ops/restore_failpoints.rs"]
+mod restore_failpoints;
+#[path = "ops/restored_startup.rs"]
+mod restored_startup;
+#[path = "ops/runtime_config_and_proxy.rs"]
+mod runtime_config_and_proxy;
+#[path = "ops/site_coordinator.rs"]
+mod site_coordinator;
+#[path = "ops/snapshot_worker.rs"]
+mod snapshot_worker;
+#[path = "ops/writer_barrier.rs"]
+mod writer_barrier;

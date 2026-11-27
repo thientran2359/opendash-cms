@@ -95,7 +95,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="plugin",
         description="Plugin runtime (Wasmi/JS), Hooks, Egress SSRF, Projections, Admin Extensions & SDK",
-        test_patterns=("plugin", "m6_s04_t01_egress_ssrf"),
+        test_patterns=("plugin", "plugin_egress_ssrf"),
         unit_filters=(
             "plugin::",
             "hooks::",
@@ -646,7 +646,7 @@ class RunTestsSelfTest(unittest.TestCase):
     def test_nested_integration_test_routes_to_group(self) -> None:
         all_tests = discover_integration_tests()
         plan = build_plan_from_files(
-            ["cms/crates/opendash-server/tests/theme/starter_theme_v3_test.rs"],
+            ["cms/crates/opendash-server/tests/theme/starter_theme.rs"],
             all_tests,
         )
         self.assertEqual(plan.groups, ("theme",))

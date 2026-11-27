@@ -2,7 +2,7 @@
 
 ## Overview
 
-Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 backup, restore, and recovery harnesses ([m8_s08_t01_e2e.rs](../../crates/opendash-server/tests/ops/m8_s08_t01_e2e.rs) and [m8_browser_e2e.py](../../scripts/m8_browser_e2e.py)). Static `.odbackup.age` archives and passphrases are never stored in Git; tests synthesize encrypted backups dynamically in disposable temporary site roots.
+Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 backup, restore, and recovery harnesses ([m8_s08_t01_e2e.rs](../../crates/opendash-server/tests/ops/backup_restore_e2e.rs) and [m8_browser_e2e.py](../../scripts/m8_browser_e2e.py)). Static `.odbackup.age` archives and passphrases are never stored in Git; tests synthesize encrypted backups dynamically in disposable temporary site roots.
 
 ## Interface
 
@@ -16,7 +16,7 @@ Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 ba
   3. `site_smtp_settings.enabled` is reset to `0` (`false`), while `BackupFileKind::SmtpSecret` restores referenced SMTP secret blobs (`secrets/smtp/{sref}.*`) and `validate_restored_db_read_only` fails restore if any referenced secret file is missing.
   4. Active/queued `operation_jobs` at snapshot time transition to `interrupted` on restart without silent retry.
   5. External `OPENDASH_DB_PATH` values rebase to `<target_root>/database/opendash.sqlite`, applying private ACLs to `target_parent`, `stage_root`, and restored subdirectories (`database/`, `config/`, `uploads/`, `themes/`, `secrets/`).
-- **Negative Corpus & Recovery Tests (`cms/crates/opendash-server/tests/ops/m8_s08_t01_e2e.rs`):**
+- **Negative Corpus & Recovery Tests (`cms/crates/opendash-server/tests/ops/backup_restore_e2e.rs`):**
   - `[m8_s08_t01_e2e.rs:negative_corpus_preserves_source_and_never_publishes_target]` verifies fail-closed behavior (source intact, no `READY.json` published) on tampered `.odbackup.age` ciphertext, wrong passphrase, newer `schema_version` (`9999`), and `507 Insufficient Storage` at `MAX_BACKUP_ARTIFACTS = 10` (`[cms/crates/opendash-server/src/backup.rs:MAX_BACKUP_ARTIFACTS]`).
   - `[m8_s08_t01_e2e.rs:upgrade_0031_to_0033_and_interrupted_job_recovery]` verifies `'running'` `operation_jobs` transition to `'interrupted'` on restart.
 

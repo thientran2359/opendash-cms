@@ -65,7 +65,7 @@ Bộ test Rust của OpenDash CMS chậm do ba nút thắt chính: (1) mỗi l�
   - `cms/crates/opendash-server/src/storage/page/write.rs`: bọc `ensure_embedded_core_blocks` trong `BEGIN IMMEDIATE ... COMMIT`.
   - `cms/crates/opendash-server/src/storage/theme/write.rs`: thêm `sync_staged_file` dùng `libc::fsync` trên macOS (`sync_data()` trên non-macOS) cho từng file staging; giữ `f.sync_all()` trên `.complete` trong `storage/theme/read.rs`.
 - **Wave 2 (Domain Binary Consolidation):**
-  - Gộp 98 file `tests/*.rs` vào 7 thư mục con + 7 entrypoint `tests/<group>.rs` dùng `#[path = "..."]`; giữ `tests/m6_s04_t01_egress_ssrf.rs` độc lập; cập nhật `cms/scripts/run-tests.py` hỗ trợ nested test routing.
+  - Gộp 98 file `tests/*.rs` vào 7 thư mục con + 7 entrypoint `tests/<group>.rs` dùng `#[path = "..."]`; giữ `tests/plugin_egress_ssrf.rs` độc lập; cập nhật `cms/scripts/run-tests.py` hỗ trợ nested test routing.
 
 ### Các Slice tiếp theo (S01–S03)
 - **Slice S01:** Cập nhật `m8_s01_t02_writer_barrier.rs` để đọc cả file đơn `routes/<stem>.rs` lẫn toàn bộ `*.rs` (sắp xếp theo tên) trong thư mục `routes/<stem>/` (cho `entries/`, `operations/`, `plugin/`, `themes/`), đảm bảo không bỏ sót handler nào; ghi nhận bản vá `store_limits.rs:1072` và guard chống treo trong `suite_02.rs`.
@@ -93,7 +93,7 @@ Bộ test Rust của OpenDash CMS chậm do ba nút thắt chính: (1) mỗi l�
 
 ### Slice S01: Fix M8 Writer Barrier Audit for Split Route Modules & Plugin Worker Deadlock Guard
 - **Dependencies:** None (chạy ngay trên `refactor/feature-first-modularization`).
-- **File Ownership:** `cms/crates/opendash-server/tests/ops/m8_s01_t02_writer_barrier.rs`, `cms/crates/opendash-server/src/plugin/runtime/store_limits.rs`, `cms/crates/opendash-server/src/plugin/review_regressions/suite_02.rs`.
+- **File Ownership:** `cms/crates/opendash-server/tests/ops/writer_barrier.rs`, `cms/crates/opendash-server/src/plugin/runtime/store_limits.rs`, `cms/crates/opendash-server/src/plugin/review_regressions/suite_02.rs`.
 - **Acceptance Criteria:** `cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test ops -- m8_s01_t02_writer_barrier` và `plugin::review_regressions::` pass 100%; mọi mutating handler trong `routes/{entries,operations,plugin,themes}/*.rs` đều được kiểm tra `AdmittedMutation`.
 - **Rollback:** `git checkout` 3 file thuộc quyền sở hữu của slice.
 
@@ -110,7 +110,7 @@ Bộ test Rust của OpenDash CMS chậm do ba nút thắt chính: (1) mỗi l�
 - **Rollback:** Gỡ `tests/common/mod.rs` và giữ `spawn_server*` cục bộ.
 
 ### Target Files to Create/Modify
-- `cms/crates/opendash-server/tests/ops/m8_s01_t02_writer_barrier.rs`: thêm helper `read_route_sources(routes_dir: &Path, file: &str) -> String` đọc `routes_dir.join(file)` nếu tồn tại hoặc nối nội dung mọi `*.rs` trong `routes_dir.join(stem)` nếu là thư mục.
+- `cms/crates/opendash-server/tests/ops/writer_barrier.rs`: thêm helper `read_route_sources(routes_dir: &Path, file: &str) -> String` đọc `routes_dir.join(file)` nếu tồn tại hoặc nối nội dung mọi `*.rs` trong `routes_dir.join(stem)` nếu là thư mục.
 - `cms/crates/opendash-server/src/plugin/tests/suite_01.rs`: gỡ `PLUGIN_TEST_SERIAL` khỏi các test `sqlite::memory:` độc lập không chạm global state.
 - `cms/crates/opendash-server/tests/common/mod.rs` *(S03)*: helper `ensure_seeded_site_root_template()` và `wait_for_health()`.
 

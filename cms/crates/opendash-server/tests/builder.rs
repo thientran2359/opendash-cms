@@ -1,16 +1,16 @@
-#[path = "builder/egm_cpt_builder_s01.rs"]
-mod egm_cpt_builder_s01;
-#[path = "builder/egm_cpt_builder_s02.rs"]
-mod egm_cpt_builder_s02;
-#[path = "builder/m4_s11_t01_page_scope.rs"]
-mod m4_s11_t01_page_scope;
-#[path = "builder/m4_s11_t02_sections.rs"]
-mod m4_s11_t02_sections;
-#[path = "builder/m5_s12_t01_library.rs"]
-mod m5_s12_t01_library;
-#[path = "builder/studio_builder_test.rs"]
-mod studio_builder_test;
-#[path = "builder/studio_s02_preview_api.rs"]
-mod studio_s02_preview_api;
-#[path = "builder/unified_field_engine_test.rs"]
-mod unified_field_engine_test;
+#[path = "builder/cpt_builder_capabilities.rs"]
+mod cpt_builder_capabilities;
+#[path = "builder/page_scope_acl.rs"]
+mod page_scope_acl;
+#[path = "builder/pattern_library.rs"]
+mod pattern_library;
+#[path = "builder/pattern_private_crud.rs"]
+mod pattern_private_crud;
+#[path = "builder/pattern_references.rs"]
+mod pattern_references;
+#[path = "builder/studio_builder.rs"]
+mod studio_builder;
+#[path = "builder/studio_preview_api.rs"]
+mod studio_preview_api;
+#[path = "builder/unified_field_engine.rs"]
+mod unified_field_engine;

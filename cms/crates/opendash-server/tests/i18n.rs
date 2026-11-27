@@ -1,14 +1,14 @@
-#[path = "i18n/admin_i18n_s01_test.rs"]
-mod admin_i18n_s01_test;
-#[path = "i18n/admin_i18n_s02_multilingual_purge_test.rs"]
-mod admin_i18n_s02_multilingual_purge_test;
-#[path = "i18n/multilingual_s01_test.rs"]
-mod multilingual_s01_test;
-#[path = "i18n/multilingual_s02_test.rs"]
-mod multilingual_s02_test;
-#[path = "i18n/multilingual_s03_test.rs"]
-mod multilingual_s03_test;
-#[path = "i18n/multilingual_s04_test.rs"]
-mod multilingual_s04_test;
-#[path = "i18n/multilingual_test.rs"]
-mod multilingual_test;
+#[path = "i18n/admin_locale_settings.rs"]
+mod admin_locale_settings;
+#[path = "i18n/locale_registry.rs"]
+mod locale_registry;
+#[path = "i18n/locale_routing_and_seo.rs"]
+mod locale_routing_and_seo;
+#[path = "i18n/multilingual_e2e.rs"]
+mod multilingual_e2e;
+#[path = "i18n/multilingual_orphan_purge.rs"]
+mod multilingual_orphan_purge;
+#[path = "i18n/theme_l10n.rs"]
+mod theme_l10n;
+#[path = "i18n/translation_copy_on_create.rs"]
+mod translation_copy_on_create;

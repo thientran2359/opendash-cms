@@ -1,40 +1,40 @@
-#[path = "content/content_foundation_m3_s31_t01.rs"]
-mod content_foundation_m3_s31_t01;
-#[path = "content/content_foundation_m4_s12_t01.rs"]
-mod content_foundation_m4_s12_t01;
-#[path = "content/content_foundation_m4_s12_t02.rs"]
-mod content_foundation_m4_s12_t02;
-#[path = "content/content_foundation_m6_s11_t01.rs"]
-mod content_foundation_m6_s11_t01;
-#[path = "content/content_foundation_m7_s17_t01.rs"]
-mod content_foundation_m7_s17_t01;
-#[path = "content/content_foundation_m7_s17_t02.rs"]
-mod content_foundation_m7_s17_t02;
-#[path = "content/entry_lifecycle_s01.rs"]
-mod entry_lifecycle_s01;
-#[path = "content/entry_lifecycle_s02.rs"]
-mod entry_lifecycle_s02;
-#[path = "content/entry_lifecycle_s03.rs"]
-mod entry_lifecycle_s03;
-#[path = "content/entry_lifecycle_s04.rs"]
-mod entry_lifecycle_s04;
-#[path = "content/m7_s09_t01_schema_field_groups.rs"]
-mod m7_s09_t01_schema_field_groups;
-#[path = "content/m7_s09_t02_exposure_and_plugin_grants.rs"]
-mod m7_s09_t02_exposure_and_plugin_grants;
-#[path = "content/m7_s10_t01_panel_registry_and_layout.rs"]
-mod m7_s10_t01_panel_registry_and_layout;
-#[path = "content/m7_s11_t01_composite_save_and_profile.rs"]
-mod m7_s11_t01_composite_save_and_profile;
-#[path = "content/m7_s12_t01_navigation_and_schema_ui.rs"]
-mod m7_s12_t01_navigation_and_schema_ui;
-#[path = "content/m7_s12_t02_single_edit_and_draft_recovery.rs"]
-mod m7_s12_t02_single_edit_and_draft_recovery;
-#[path = "content/m7_s15_t03_publication_create.rs"]
-mod m7_s15_t03_publication_create;
-#[path = "content/m7_s16_t03_editor_publication.rs"]
-mod m7_s16_t03_editor_publication;
-#[path = "content/m7_s16_t04_term_routes.rs"]
-mod m7_s16_t04_term_routes;
-#[path = "content/m7_s16_t05_entry_table.rs"]
-mod m7_s16_t05_entry_table;
+#[path = "content/admin_navigation_schema.rs"]
+mod admin_navigation_schema;
+#[path = "content/admin_view_url_preview.rs"]
+mod admin_view_url_preview;
+#[path = "content/composite_save_and_profile.rs"]
+mod composite_save_and_profile;
+#[path = "content/cpt_publication_policy.rs"]
+mod cpt_publication_policy;
+#[path = "content/editor_panel_layout.rs"]
+mod editor_panel_layout;
+#[path = "content/entry_table.rs"]
+mod entry_table;
+#[path = "content/field_exposure_grants.rs"]
+mod field_exposure_grants;
+#[path = "content/field_groups.rs"]
+mod field_groups;
+#[path = "content/lifecycle_bulk_actions.rs"]
+mod lifecycle_bulk_actions;
+#[path = "content/lifecycle_closure.rs"]
+mod lifecycle_closure;
+#[path = "content/lifecycle_quick_edit_hooks.rs"]
+mod lifecycle_quick_edit_hooks;
+#[path = "content/lifecycle_trash_restore_purge.rs"]
+mod lifecycle_trash_restore_purge;
+#[path = "content/page_taxonomy_defaults.rs"]
+mod page_taxonomy_defaults;
+#[path = "content/permalink_redirects_cas.rs"]
+mod permalink_redirects_cas;
+#[path = "content/provider_taxonomy_and_routes.rs"]
+mod provider_taxonomy_and_routes;
+#[path = "content/publication_create.rs"]
+mod publication_create;
+#[path = "content/single_edit_draft_recovery.rs"]
+mod single_edit_draft_recovery;
+#[path = "content/taxonomy_builder_ast.rs"]
+mod taxonomy_builder_ast;
+#[path = "content/taxonomy_definitions.rs"]
+mod taxonomy_definitions;
+#[path = "content/term_routes.rs"]
+mod term_routes;

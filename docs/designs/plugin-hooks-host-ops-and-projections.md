@@ -222,7 +222,7 @@ pub struct PluginEnvelopeV2 {
   2. `hooks.rs:242, 389` & `routes/entries.rs:423, 438, 491, 509, 680, 689, 740, 749`: truyền `actor_role` thật từ `actor_field_role(&actor)` (thay vì luôn `FieldRole::Admin` khi gọi từ `routes/entries.rs`).
   3. `plugin/host_ops.rs:175`: bổ sung `|| path.starts_with("/api/p/")` vào danh sách chặn loopback (seam Giai đoạn 5).
   4. `plugin_can_write_field` (`opendash-core/src/plugin.rs:635-658`): đổi tham số `action_caps: &[String]` sang `action_caps: Option<&[String]>` (đồng bộ với `plugin_can_read_field` tại `L605-611`), và cập nhật caller tại `plugin/manager.rs:336` sang `Some(&action_decl.capabilities)`.
-  5. Cập nhật toàn bộ struct literal `PluginManifest { ... }` không dùng `..Default::default()` trong `plugin/review_regressions.rs`, `plugin/tests.rs` và `tests/m6_s04_t01_egress_ssrf.rs` để điền `filters: Vec::new()` và `settings_schema: Vec::new()`.
+  5. Cập nhật toàn bộ struct literal `PluginManifest { ... }` không dùng `..Default::default()` trong `plugin/review_regressions.rs`, `plugin/tests.rs` và `tests/plugin_egress_ssrf.rs` để điền `filters: Vec::new()` và `settings_schema: Vec::new()`.
 
 ---
 
@@ -703,7 +703,7 @@ pub async fn delete_plugin_projections_in_tx(
   - `cms/crates/opendash-server/src/plugin/manager.rs` (sửa `L228` kiểm `network`, `L336` truyền `Some(&action_decl.capabilities)`, `with_roots(...)`, `manifest_cache` invalidation, thực thi `staged_content_delete` có fence + CAS, truyền `ExecutionPrincipal`/`EnvelopeV2` cho schema `>= 3`)
   - `cms/crates/opendash-server/src/plugin/review_regressions.rs` (cập nhật `PluginManifest { ... }` struct literals thêm `filters`/`settings_schema`)
   - `cms/crates/opendash-server/src/plugin/tests.rs` (cập nhật `PluginManifest { ... }` struct literals thêm `filters`/`settings_schema`)
-  - `cms/crates/opendash-server/tests/m6_s04_t01_egress_ssrf.rs` (cập nhật `PluginManifest { ... }` struct literal tại `L20` thêm `filters`/`settings_schema`)
+  - `cms/crates/opendash-server/tests/plugin_egress_ssrf.rs` (cập nhật `PluginManifest { ... }` struct literal tại `L20` thêm `filters`/`settings_schema`)
   - `cms/crates/opendash-server/src/storage/plugin.rs` (helper `load_all_enabled_plugins_for_cache` và helper `content_delete` / `plugin_logs` batch)
   - `cms/crates/opendash-server/src/storage/plugin_kv.rs` (`delete` và `list` với prefix + limit)
   - `cms/crates/opendash-server/src/hooks.rs` (sửa `L242, 389` nhận `actor_role` thật và hỗ trợ `filter_subscriptions`)
@@ -808,7 +808,7 @@ pub async fn delete_plugin_projections_in_tx(
 - `cms/crates/opendash-server/src/routes/plugin.rs` *(Modify)*
 - `cms/crates/opendash-server/src/routes/public_content.rs` *(Modify)*
 - `cms/crates/opendash-server/tests/content_foundation_m6_s11_t01.rs` *(Modify)*
-- `cms/crates/opendash-server/tests/m6_s04_t01_egress_ssrf.rs` *(Modify)*
+- `cms/crates/opendash-server/tests/plugin_egress_ssrf.rs` *(Modify)*
 - `cms/crates/opendash-server/tests/plugin_extensibility_test.rs` *(Create)*
 - `cms/admin/src/types.ts` *(Modify)*
 - `cms/admin/src/api/plugins.ts` *(Modify)*
