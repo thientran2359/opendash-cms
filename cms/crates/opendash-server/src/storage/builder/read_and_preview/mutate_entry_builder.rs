@@ -84,6 +84,11 @@ pub(in crate::storage) async fn mutate_entry_builder(
         )
         .into());
     }
+    let rev_source = match &mutation {
+        EntryBuilderMutation::Save(_) => opendash_core::revisions::RevisionSource::BuilderSave,
+        EntryBuilderMutation::Reset => opendash_core::revisions::RevisionSource::BuilderReset,
+    };
+    crate::storage::revisions::capture_baseline_if_missing_in_tx(&mut *tx, id).await?;
 
     if type_key == "pattern" {
         let (mode, document) = match mutation {
@@ -213,6 +218,14 @@ pub(in crate::storage) async fn mutate_entry_builder(
         crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, id).await?;
     }
     let saved = entry_builder_snapshot(&mut tx, type_key, id).await?;
+    crate::storage::revisions::record_entry_revision_and_clear_autosave_in_tx(
+        &mut *tx,
+        id,
+        rev_source,
+        crate::storage::revisions::RevisionActor::User(actor),
+        Some(actor.user.id),
+    )
+    .await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     let _ = crate::storage::plugin_projections::recompute_entry_projections(db, hooks, id).await;

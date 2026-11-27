@@ -78,6 +78,8 @@ export interface EditorDraftPayload {
   cleared_fields: string[];
   term_ids: number[];
   primary_category_term_id: number | null;
+  page_layout_key?: string | null;
+  custom_template_key?: string | null;
   custom_path?: string | null;
   custom_path_dirty?: boolean;
   seo?: {
@@ -110,7 +112,18 @@ export function diffEditorPayload(
   draft: EditorDraftPayload,
 ): string[] {
   const changed: string[] = [];
-  for (const key of ['title', 'slug', 'publication_status', 'content_mode', 'term_ids', 'primary_category_term_id', 'custom_path', 'seo'] as const) {
+  for (const key of [
+    'title',
+    'slug',
+    'publication_status',
+    'content_mode',
+    'term_ids',
+    'primary_category_term_id',
+    'page_layout_key',
+    'custom_template_key',
+    'custom_path',
+    'seo',
+  ] as const) {
     if (JSON.stringify(baseline[key]) !== JSON.stringify(draft[key])) changed.push(key);
   }
   const fieldKeys = new Set([
@@ -135,6 +148,14 @@ export class EditorDraftStore {
   private drafts = new Map<string, EditorDraftEntry>();
   private quickEditDrafts = new Map<string, QuickEditDraftEntry>();
   private sessionEpoch = 1;
+  private listeners = new Set<() => void>();
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
 
   getSessionEpoch(): number {
     return this.sessionEpoch;
@@ -142,6 +163,13 @@ export class EditorDraftStore {
 
   bumpSessionEpoch(): number {
     this.sessionEpoch += 1;
+    for (const listener of Array.from(this.listeners)) {
+      try {
+        listener();
+      } catch {
+        // Ignore subscriber errors during session reset.
+      }
+    }
     return this.sessionEpoch;
   }
 
@@ -330,6 +358,12 @@ export class EditorDraftStore {
       primary_category_term_id: savedDirty.has('primary_category_term_id')
         && freshConfig.taxonomies.includes('category')
         ? (saved.payload.primary_category_term_id ?? null) : fresh.primary_category_term_id,
+      page_layout_key: savedDirty.has('page_layout_key')
+        ? (saved.payload.page_layout_key ?? null)
+        : (fresh.page_layout_key ?? null),
+      custom_template_key: savedDirty.has('custom_template_key')
+        ? (saved.payload.custom_template_key ?? null)
+        : (fresh.custom_template_key ?? null),
       values,
       cleared_fields: clearedFields,
       custom_path: routeReadable && saved.payload.custom_path_dirty

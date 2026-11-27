@@ -24,7 +24,7 @@ import { clearReadingDrafts, discardReadingDraft, ReadingSettingsPanel } from '.
 import { StudioWorkspace } from './studio/StudioWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
-import { SingleEditWorkspace } from './features/editor/SingleEditWorkspace.tsx';
+import { buildContentWorkspaces, draftUuidFromHash } from './shell/ContentWorkspaces.tsx';
 import { editorDraftStore } from './features/editor/EditorDraftStore.ts';
 
 import { MediaRoute } from './shell/MediaRoute.tsx';
@@ -42,11 +42,6 @@ import { PatternsPage } from './features/patterns/PatternsPage.tsx';
 import { TemplateLibraryPage } from './features/library/TemplateLibraryPage.tsx';
 
 const HISTORY_INDEX = '__openDashAdminHistoryIndex';
-
-function draftUuidFromHash(hash: string): string | null {
-  const param = new URLSearchParams(hash.split('?')[1] ?? '').get('draft');
-  return param && /^[a-zA-Z0-9_-]{8,64}$/.test(param) ? param : null;
-}
 
 function normalizeEditorHash(hash: string): string {
   const normalized = hash.startsWith('#') ? hash : '#' + hash;
@@ -172,6 +167,7 @@ const AppContent: React.FC = () => {
   const [pluginRunOutput, setPluginRunOutput] = useState<string>('');
 
   const [builderReset, setBuilderReset] = useState(0);
+  const [studioResetEpoch, setStudioResetEpoch] = useState(0);
   const [themeRevision, setThemeRevision] = useState(0);
   const [devMode, setDevMode] = useState(false);
   const [devTheme, setDevTheme] = useState<string | null>(null);
@@ -268,6 +264,11 @@ const AppContent: React.FC = () => {
           : leavingSchema || leavingPattern || leavingPermalinks || leavingReading || leavingTools
             ? __("There are unsaved changes. Leaving may discard your draft. Continue?")
             : __("There are unsaved changes. Leave this screen? The draft will be kept for this session."));
+    if (approved && leavingStudio) {
+      lastStudioRouteRef.current = null;
+      setStudioResetEpoch(value => value + 1);
+      markStudioDirty(false);
+    }
     if (approved && leavingPermalinks && userRef.current) {
       discardPermalinkDraft(siteInstanceIdRef.current, userRef.current.id);
       markPermalinkDirty(false);
@@ -637,12 +638,14 @@ const AppContent: React.FC = () => {
       devSyncing={devSyncing}
       onSyncDevManifest={() => { void handleSyncDevManifest(); }}
       studioContent={lastStudioRouteRef.current && (!user || isRouteAllowed(lastStudioRouteRef.current, user.role)) ? <StudioWorkspace
-        key={studioIdentity(lastStudioRouteRef.current) ?? 'studio-mode1'}
+        key={`${studioIdentity(lastStudioRouteRef.current) ?? 'studio-mode1'}:${studioResetEpoch}`}
         route={route.view === 'studio' || route.view === 'studio-entry' ? route : lastStudioRouteRef.current}
         active={(route.view === 'studio' || route.view === 'studio-entry') && isRouteAllowed(route, user?.role ?? 'editor')}
         user={user}
+        siteInstanceId={siteInstanceId}
+        authGeneration={authGeneration}
         csrfToken={csrfToken}
-        resetToken={builderReset}
+        resetToken={builderReset + studioResetEpoch}
         themeRevision={themeRevision}
         localeState={localeState}
         onNavigateHash={navigateHash}
@@ -754,65 +757,20 @@ const AppContent: React.FC = () => {
           setCsrfToken(null);
         }}
       />}
-      contentContent={
-        route.view === 'cpt' && route.typeKey ? (
-          <SingleEditWorkspace
-            key={`cpt-${route.typeKey}-${contentRevision}`}
-            typeKey={route.typeKey}
-            mode={route.sub === 'new' ? 'new' : route.sub === 'edit' ? 'edit' : 'list'}
-            entryId={route.entryId ?? null}
-            user={user}
-            siteInstanceId={siteInstanceId}
-            authGeneration={authGeneration}
-            draftUuid={draftUuidFromHash(route.rawHash) ?? undefined}
-            routeHash={route.rawHash}
-            isActive={route.view === 'cpt'}
-            csrfToken={csrfToken}
-            localeState={localeState}
-            onApiError={handleApiError}
-            onDirtyChange={setContentDirty}
-            onNavigateHash={navigateHash}
-          />
-        ) : null
-      }
-      postsContent={
-        <SingleEditWorkspace
-          key={'posts-' + contentRevision}
-          typeKey="post"
-          mode={route.view === 'posts' ? (route.sub === 'new' ? 'new' : route.sub === 'edit' ? 'edit' : 'list') : 'list'}
-          entryId={route.view === 'posts' ? (route.entryId ?? null) : null}
-          user={user}
-          siteInstanceId={siteInstanceId}
-          authGeneration={authGeneration}
-          draftUuid={draftUuidFromHash(route.rawHash) ?? undefined}
-          routeHash={route.view === 'posts' ? route.rawHash : '#/posts'}
-          isActive={route.view === 'posts'}
-          csrfToken={csrfToken}
-          localeState={localeState}
-          onApiError={handleApiError}
-          onDirtyChange={setPostsDirty}
-          onNavigateHash={navigateHash}
-        />
-      }
-      pagesContent={
-        <SingleEditWorkspace
-          key={'pages-' + contentRevision}
-          typeKey="page"
-          mode={route.view === 'pages' ? (route.sub === 'new' ? 'new' : route.sub === 'edit' ? 'edit' : 'list') : 'list'}
-          entryId={route.view === 'pages' ? (route.entryId ?? null) : null}
-          user={user}
-          siteInstanceId={siteInstanceId}
-          authGeneration={authGeneration}
-          draftUuid={draftUuidFromHash(route.rawHash) ?? undefined}
-          routeHash={route.view === 'pages' ? route.rawHash : '#/pages'}
-          isActive={route.view === 'pages'}
-          csrfToken={csrfToken}
-          localeState={localeState}
-          onApiError={handleApiError}
-          onDirtyChange={setPagesDirty}
-          onNavigateHash={navigateHash}
-        />
-      }
+      {...buildContentWorkspaces({
+        route,
+        contentRevision,
+        user,
+        siteInstanceId,
+        authGeneration,
+        csrfToken,
+        localeState,
+        onApiError: handleApiError,
+        onNavigateHash: navigateHash,
+        onContentDirtyChange: setContentDirty,
+        onPostsDirtyChange: setPostsDirty,
+        onPagesDirtyChange: setPagesDirty,
+      })}
       patternsContent={
         <PatternsPage key={siteInstanceId}
           route={route} user={user} csrfToken={csrfToken} onApiError={handleApiError}

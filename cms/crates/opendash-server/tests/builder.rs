@@ -10,6 +10,8 @@ mod pattern_private_crud;
 mod pattern_references;
 #[path = "builder/public_site_search_studio.rs"]
 mod public_site_search_studio;
+#[path = "builder/revisions_builder.rs"]
+mod revisions_builder;
 #[path = "builder/studio_builder.rs"]
 mod studio_builder;
 #[path = "builder/studio_preview_api.rs"]

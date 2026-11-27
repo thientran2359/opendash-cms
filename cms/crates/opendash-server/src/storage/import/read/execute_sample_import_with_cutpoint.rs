@@ -290,6 +290,9 @@ pub async fn execute_sample_import_with_cutpoint(
         for &entry_id in page_id_by_object.values() {
             crate::storage::search::sync_entry_search_index_in_conn(&mut conn, entry_id).await?;
         }
+        let imported_ids: Vec<i64> = page_id_by_object.values().copied().collect();
+        crate::storage::revisions::capture_import_revisions_in_conn(&mut *conn, &imported_ids)
+            .await?;
 
         // Insert menus + items + slot assignment + provenance
         for item in &plan.items {

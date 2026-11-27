@@ -90,7 +90,7 @@ pub async fn put_entry_route(
 ) -> ApiResult<impl IntoResponse> {
     let session = require_session_with_csrf(&headers, &db).await?;
     require_editor_or_admin(session.user.role)?;
-    if !valid_content_type_key(&type_key) {
+    if !valid_content_type_key(&type_key) || type_key == "pattern" {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     }
     let expected_version = parse_if_match(&headers)?;
@@ -492,7 +492,7 @@ pub async fn get_entry_seo(
 ) -> ApiResult<impl IntoResponse> {
     let session = require_session(&headers, &db).await?;
     require_editor_or_admin(session.user.role)?;
-    if !valid_content_type_key(&type_key) {
+    if !valid_content_type_key(&type_key) || type_key == "pattern" {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     }
     let snapshot = seo::get_entry_seo(&db, &type_key, id).await?;
@@ -511,11 +511,13 @@ pub async fn put_entry_seo(
 ) -> ApiResult<impl IntoResponse> {
     let session = require_session_with_csrf(&headers, &db).await?;
     require_editor_or_admin(session.user.role)?;
-    if !valid_content_type_key(&type_key) {
+    if !valid_content_type_key(&type_key) || type_key == "pattern" {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     }
     let expected_version = parse_if_match(&headers)?;
-    let snapshot = seo::put_entry_seo(&db, &type_key, id, expected_version, input).await?;
+    let snapshot =
+        seo::put_entry_seo_for_actor(&db, &type_key, id, expected_version, input, Some(&session))
+            .await?;
     Ok((
         no_store_headers(Some(snapshot.entry_version)),
         Json(snapshot),
