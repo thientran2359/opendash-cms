@@ -71,6 +71,9 @@ pub async fn plugin_install(
     if summary.enabled {
         maybe_spawn_projection_recompute(&db, &plugins, &hooks, &coordinator, &summary.id).await;
     }
+    let _ = crate::l10n::CatalogRegistry::global()
+        .reload_site_with_active_packages(&db, coordinator.paths())
+        .await;
     Ok((StatusCode::CREATED, Json(summary)).into_response())
 }
 
@@ -135,6 +138,7 @@ pub async fn plugin_disable(
         >,
     >,
     State(hooks): State<Arc<HookDispatcher>>,
+    State(coordinator): State<Arc<crate::operations::SiteCoordinator>>,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
@@ -147,6 +151,9 @@ pub async fn plugin_disable(
         .map_err(map_plugin_storage_err)?;
     *content_registry.write().await =
         crate::storage::content::load_content_type_catalog(&db).await?;
+    let _ = crate::l10n::CatalogRegistry::global()
+        .reload_site_with_active_packages(&db, coordinator.paths())
+        .await;
     hooks.enqueue_async(crate::hooks::AsyncHookJob {
         event: opendash_core::hooks::HookEvent::PluginAfterDisable,
         principal: opendash_core::hooks::ExecutionPrincipal::Admin,
@@ -193,6 +200,9 @@ pub async fn plugin_enable(
     *content_registry.write().await =
         crate::storage::content::load_content_type_catalog(&db).await?;
     maybe_spawn_projection_recompute(&db, &plugins, &hooks, &coordinator, &id).await;
+    let _ = crate::l10n::CatalogRegistry::global()
+        .reload_site_with_active_packages(&db, coordinator.paths())
+        .await;
     hooks.enqueue_async(crate::hooks::AsyncHookJob {
         event: opendash_core::hooks::HookEvent::PluginAfterEnable,
         principal: opendash_core::hooks::ExecutionPrincipal::Admin,

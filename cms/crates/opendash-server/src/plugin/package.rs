@@ -202,7 +202,7 @@ impl PluginPackage {
             let name = validate_theme_relative_path(&name)?;
             regular_files += 1;
             if regular_files > MAX_PLUGIN_FILES {
-                return Err("ZIP chứa quá nhiều file (tối đa 72 file).");
+                return Err("ZIP chứa quá nhiều file (tối đa 104 file).");
             }
             if !seen_lower.insert(name.to_ascii_lowercase()) {
                 return Err("ZIP chứa mục trùng lặp hoặc xung đột chữ hoa/thường.");

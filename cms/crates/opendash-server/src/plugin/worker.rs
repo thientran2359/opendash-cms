@@ -43,6 +43,8 @@ pub struct WorkerInvocationRequest {
     pub runtime_kind: ExtensionRuntimeKind,
     #[serde(default)]
     pub owner_kind: ExtensionOwnerKind,
+    #[serde(default)]
+    pub default_locale: Option<String>,
 }
 
 pub fn read_ipc_frame<R: Read, T: DeserializeOwned>(
@@ -189,7 +191,7 @@ pub fn run_worker_from_stdio() {
         host_calls_count: 0,
         http_calls_count: 0,
         l10n_calls_count: 0,
-        default_locale: None,
+        default_locale: req.default_locale,
         db_pool: None,
         secrets_root: None,
         read_ipc: Some(read_ipc),

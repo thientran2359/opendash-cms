@@ -38,6 +38,7 @@ pub struct CoreL10n {
     pub list_unavailable: Cow<'static, str>,
     pub page_empty: Cow<'static, str>,
     pub back_to_first_page: Cow<'static, str>,
+    pub home_label: Cow<'static, str>,
     pub list_prev: Cow<'static, str>,
     pub list_next: Cow<'static, str>,
     pub contact_unavailable: Cow<'static, str>,
@@ -62,7 +63,7 @@ fn embedded_vi_catalog() -> &'static opendash_core::l10n::Catalog {
 
 /// Returns Core fallback strings resolved from `CatalogRegistry` (or embedded `.mo` / English fallback).
 pub fn core_l10n(locale_code: &str) -> CoreL10n {
-    core_l10n_with_registry(None, locale_code)
+    core_l10n_with_registry(Some(crate::l10n::CatalogRegistry::global()), locale_code)
 }
 
 pub fn core_l10n_with_registry(
@@ -103,6 +104,7 @@ pub fn core_l10n_with_registry(
         image_alt_prefix: tr("Illustration "),
         list_unavailable: tr("List is currently unavailable."),
         page_empty: tr("This page has no content."),
+        home_label: tr("Home"),
         back_to_first_page: tr("Back to first page"),
         list_prev: tr("Previous"),
         list_next: tr("Next"),
@@ -152,7 +154,7 @@ pub const DEFAULT_SINGLE: &str = r##"<!doctype html>
 {% endfor %}</dl>
 </article></main></body></html>"##;
 
-pub const DEFAULT_BREADCRUMB_HOME_LABEL: &str = "Trang chủ";
+pub const DEFAULT_BREADCRUMB_HOME_LABEL: &str = "Home";
 
 pub const DEFAULT_BREADCRUMB_HOME_URL: &str = "/";
 

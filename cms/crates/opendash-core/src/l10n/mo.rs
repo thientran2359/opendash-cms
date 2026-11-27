@@ -63,7 +63,10 @@ pub fn parse_mo(bytes: &[u8]) -> Result<Catalog, L10nError> {
     let orig_table_offset = endian.read_u32(bytes, 12)? as usize;
     let trans_table_offset = endian.read_u32(bytes, 16)? as usize;
 
-    if minor == 1 && bytes.len() >= 36 {
+    if minor == 1 {
+        if bytes.len() < 36 {
+            return Err(L10nError::new("Header .mo rev 0.1 bị cắt cụt."));
+        }
         // GNU .mo rev 0.1 puts n_sysdep_strings at offset 32 (after hash size + offset).
         let n_sysdep = endian.read_u32(bytes, 32)?;
         if n_sysdep != 0 {

@@ -442,6 +442,21 @@ pub async fn execute_host_read_request_for_owner(
     }
 }
 
+fn lookup_in_catalog(
+    cat: &opendash_core::l10n::Catalog,
+    msgid: &str,
+    msgid_plural: Option<&str>,
+    count: Option<i64>,
+    context: Option<&str>,
+) -> Option<String> {
+    if let (Some(_plural), Some(n)) = (msgid_plural, count) {
+        cat.get_plural_with_context(context, msgid, n)
+            .map(ToOwned::to_owned)
+    } else {
+        cat.get_with_context(context, msgid).map(ToOwned::to_owned)
+    }
+}
+
 fn translate_for_host_read(
     manifest: &PluginManifest,
     text_domain: Option<&str>,
@@ -455,20 +470,27 @@ fn translate_for_host_read(
         .or(manifest.text_domain.as_deref())
         .unwrap_or(&manifest.id);
     let loc = locale.unwrap_or("en").trim().to_ascii_lowercase();
+    let reg = crate::l10n::CatalogRegistry::global();
+    for scope in [
+        crate::l10n::L10nScope::Plugin,
+        crate::l10n::L10nScope::Theme,
+        crate::l10n::L10nScope::Core,
+    ] {
+        if let Some(loaded) = reg.resolve(scope, domain, &loc)
+            && let Some(found) =
+                lookup_in_catalog(&loaded.catalog, msgid, msgid_plural, count, context)
+        {
+            return found;
+        }
+    }
     if domain == "opendash" && (loc == "vi" || loc.starts_with("vi-")) {
         static EMBEDDED: std::sync::OnceLock<opendash_core::l10n::Catalog> =
             std::sync::OnceLock::new();
         let cat = EMBEDDED.get_or_init(|| {
             opendash_core::l10n::parse_mo(crate::l10n::EMBEDDED_VI_MO).unwrap_or_default()
         });
-        if let (Some(plural), Some(n)) = (msgid_plural, count) {
-            if let Some(found) = cat.get_plural_with_context(context, msgid, n) {
-                return found.to_owned();
-            }
-            return if n == 1 { msgid } else { plural }.to_owned();
-        }
-        if let Some(found) = cat.get_with_context(context, msgid) {
-            return found.to_owned();
+        if let Some(found) = lookup_in_catalog(cat, msgid, msgid_plural, count, context) {
+            return found;
         }
     }
     if let (Some(plural), Some(n)) = (msgid_plural, count) {

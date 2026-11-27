@@ -220,13 +220,16 @@ pub(crate) fn validate_l10n_call(
             minijinja::machinery::ast::CallArg::Pos(Expr::Const(c)) if c.value.as_str().is_some()
         )
     };
+    let is_static_domain_or_params = |arg: &minijinja::machinery::ast::CallArg<'_>| -> bool {
+        is_const_str(arg) || matches!(arg, minijinja::machinery::ast::CallArg::Pos(Expr::Map(_)))
+    };
     match v.id {
         "__" => {
             if call.args.is_empty() || !is_const_str(&call.args[0]) {
                 return Err("__() yêu cầu msgid là chuỗi literal tĩnh.");
             }
             if let Some(arg1) = call.args.get(1)
-                && matches!(arg1, minijinja::machinery::ast::CallArg::Pos(Expr::Const(c)) if c.value.as_str().is_none())
+                && !is_static_domain_or_params(arg1)
             {
                 return Err("__() domain phải là chuỗi literal tĩnh.");
             }
@@ -240,7 +243,7 @@ pub(crate) fn validate_l10n_call(
                 return Err("_x() yêu cầu msgid và context là chuỗi literal tĩnh.");
             }
             if let Some(arg2) = call.args.get(2)
-                && matches!(arg2, minijinja::machinery::ast::CallArg::Pos(Expr::Const(c)) if c.value.as_str().is_none())
+                && !is_static_domain_or_params(arg2)
             {
                 return Err("_x() domain phải là chuỗi literal tĩnh.");
             }
@@ -252,6 +255,11 @@ pub(crate) fn validate_l10n_call(
         "_n" => {
             if call.args.len() < 3 || !is_const_str(&call.args[0]) || !is_const_str(&call.args[1]) {
                 return Err("_n() yêu cầu singular và plural là chuỗi literal tĩnh.");
+            }
+            if let Some(arg3) = call.args.get(3)
+                && !is_static_domain_or_params(arg3)
+            {
+                return Err("_n() domain phải là chuỗi literal tĩnh.");
             }
             for arg in &call.args {
                 validate_call_arg(arg)?;

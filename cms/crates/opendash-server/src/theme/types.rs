@@ -37,10 +37,6 @@ pub(super) const V3_MAX_ACTIVE_ASSET_BYTES: usize = 512 * 1024;
 
 pub(crate) const MAX_THEME_LOCALE_FILES: usize = 32;
 
-pub(crate) const MAX_THEME_LOCALE_KEYS: usize = 512;
-
-pub(crate) const MAX_THEME_LOCALE_VALUE_CHARS: usize = 500;
-
 /// Revalidate direct storage callers with the same manifest, path and
 /// composition guarantees as the bounded ZIP parser.
 pub(crate) fn validate_theme_v3_files(
