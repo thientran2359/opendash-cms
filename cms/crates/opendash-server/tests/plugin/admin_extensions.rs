@@ -187,8 +187,8 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
       "kind":"term_panel",
       "config":{"local_key":"internal_note","label":"Internal Note","kind":"category","order":1,
         "fields":[
-          {"key":"secret","label":"Admin secret","type":"text","required":true,"min_role":"admin"},
-          {"key":"shared","label":"Shared","type":"boolean","required":false,"min_role":"editor"}
+          {"key":"secret","label":"Admin secret","type":"text","required":true,"acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}},
+          {"key":"shared","label":"Shared","type":"boolean","required":false,"acl":{"min_view_role":"editor","min_edit_role":"editor","public_exposure":"private"}}
         ]
       }
     });
@@ -302,9 +302,8 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
     let private_schema = json!({
       "key":"private_cpt","label":"Private CPT",
       "fields":[{"key":"admin_note","label":"Admin note",
-        "type":"short_text","required":false,"options":[],
-        "min_view_role":"admin","min_edit_role":"admin",
-        "public_exposure":"private"}],
+        "type":"text","required":false,
+        "acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}}],
     });
     sqlx::query(
         "INSERT INTO content_types(key,definition_json,owner_kind,provider_status,declaration_state,version)

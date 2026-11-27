@@ -7,9 +7,8 @@ import {
   updateFieldGroup,
 } from '../../api/content.ts';
 import {
-  CONTENT_FIELD_TYPES,
-  type ContentFieldDefinition,
-  type ContentFieldType,
+  type FieldSpec,
+  type FieldType,
   type EditorRegion,
   type FieldGroupRecord,
   type FieldRole,
@@ -40,10 +39,10 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
   const [defaultRegion, setDefaultRegion] = useState<EditorRegion>('main_bottom');
   const [fieldKey, setFieldKey] = useState('');
   const [fieldLabel, setFieldLabel] = useState('');
-  const [fieldType, setFieldType] = useState<ContentFieldType>('short_text');
+  const [fieldType, setFieldType] = useState<FieldType>('text');
   const [minViewRole, setMinViewRole] = useState<FieldRole>('editor');
   const [minEditRole, setMinEditRole] = useState<FieldRole>('editor');
-  const [publicExposure, setPublicExposure] = useState<PublicExposure>('private');
+  const [publicExposure, setPublicExposure] = useState<PublicExposure>('public');
   const [saving, setSaving] = useState(false);
   const onCountChangeRef = useRef(onCountChange);
   onCountChangeRef.current = onCountChange;
@@ -73,16 +72,18 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
     if (!csrfToken) return;
     setSaving(true);
     try {
-      const fields: ContentFieldDefinition[] = [
+      const fields: FieldSpec[] = [
         {
           key: fieldKey.trim(),
           label: fieldLabel.trim(),
           type: fieldType,
           required: false,
           options: [],
-          min_view_role: minViewRole,
-          min_edit_role: minEditRole,
-          public_exposure: publicExposure,
+          acl: {
+            min_view_role: minViewRole,
+            min_edit_role: minEditRole,
+            public_exposure: publicExposure,
+          },
         },
       ];
       await createFieldGroup(
@@ -244,9 +245,9 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
           <select
             className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
             value={fieldType}
-            onChange={e => setFieldType(e.target.value as ContentFieldType)}
+            onChange={e => setFieldType(e.target.value as FieldType)}
           >
-            {CONTENT_FIELD_TYPES.map(ft => (
+            {(['text','textarea','richtext','number','boolean','date','select','media','gallery'] as FieldType[]).map(v => ({ value: v, label: v })).map(ft => (
               <option key={ft.value} value={ft.value}>{ft.label}</option>
             ))}
           </select>

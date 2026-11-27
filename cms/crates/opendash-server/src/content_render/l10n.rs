@@ -7,8 +7,7 @@ pub(super) use std::borrow::Cow;
 pub(super) use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) use opendash_core::content::{
-    ContentFieldDefinition, ContentFieldType, ContentTypeDefinition, EffectiveContentSchema,
-    EffectiveFieldStatus, FieldRole, PublicExposure,
+    ContentTypeDefinition, EffectiveContentSchema, EffectiveFieldStatus, FieldRole, PublicExposure,
 };
 
 pub(super) use opendash_core::theme::ResolvedEnqueuedAssets;
@@ -142,7 +141,7 @@ pub const DEFAULT_SINGLE: &str = r##"<!doctype html>
 <header class="mb-8"><strong class="text-xl font-od-heading font-semibold">{{ site.title }}</strong>{% if site.tagline %}<p class="text-od-muted">{{ site.tagline }}</p>{% endif %}</header>
 {% if archive_url %}<nav class="mb-6"><a class="text-od-primary hover:underline" href="{{ archive_url }}">← {{ content_type.label }}</a></nav>{% endif %}
 <article class="od-prose"><h1>{{ entry.title }}</h1>
-<dl class="mt-8">{% for field in entry.fields %}
+<dl class="mt-8">{% for field in entry.field_list %}
 {% if field.text or field.image_url or field.gallery_urls %}
 <dt class="mt-6 font-semibold">{{ field.label }}</dt>
 {% if field.image_url %}<dd class="my-2"><img class="h-auto max-w-full rounded-lg" src="{{ field.image_url }}" alt="{{ field.label }}" loading="lazy"></dd>

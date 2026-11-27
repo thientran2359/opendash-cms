@@ -41,7 +41,7 @@
             "label": "Caption",
             "type": "textarea",
             "required": false,
-            "min_role": "admin"
+            "acl": { "min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private" }
           }
         ]
       }

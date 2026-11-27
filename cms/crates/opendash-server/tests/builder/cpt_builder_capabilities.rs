@@ -103,7 +103,7 @@ fn type_input(builder: bool) -> Value {
     json!({
         "key": "project",
         "label": "Projects",
-        "fields": [{"key":"body","label":"Project text","type":"rich_text"}],
+        "fields": [{"key":"body","label":"Project text","type":"richtext"}],
         "settings": {
             "public":true,"has_archive":true,"publication":"draft_publish","supports":supports
         }

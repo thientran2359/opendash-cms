@@ -288,13 +288,13 @@ pub fn build_core_and_group_panels(
         let min_view_role = group
             .fields
             .iter()
-            .map(|f| f.min_view_role)
+            .map(|f| f.effective_acl().0)
             .min()
             .unwrap_or(FieldRole::Editor);
         let min_edit_role = group
             .fields
             .iter()
-            .map(|f| f.min_edit_role)
+            .map(|f| f.effective_acl().1)
             .min()
             .unwrap_or(FieldRole::Editor);
         let effective_status = if group.status == FieldGroupStatus::Withdrawn
@@ -442,11 +442,11 @@ pub fn resolve_and_validate_editor_layout(
                 ));
             }
             if let Some(eff) = effective.effective_fields.get(fk) {
-                if eff.definition.min_view_role < min_view {
-                    min_view = eff.definition.min_view_role;
+                if eff.definition.effective_acl().0 < min_view {
+                    min_view = eff.definition.effective_acl().0;
                 }
-                if eff.definition.min_edit_role < min_edit {
-                    min_edit = eff.definition.min_edit_role;
+                if eff.definition.effective_acl().1 < min_edit {
+                    min_edit = eff.definition.effective_acl().1;
                 }
             }
         }
@@ -559,7 +559,7 @@ pub fn resolve_and_validate_editor_layout(
                 for fk in fkeys {
                     if let Some(eff) = effective.effective_fields.get(fk) {
                         if eff.effective_required()
-                            && eff.definition.min_edit_role == FieldRole::Editor
+                            && eff.definition.effective_acl().1 == FieldRole::Editor
                             && (!p.enabled
                                 || def.min_view_role == FieldRole::Admin
                                 || def.min_edit_role == FieldRole::Admin)
@@ -653,7 +653,7 @@ pub fn project_effective_editor_config(
 
     let mut projected_fields = BTreeMap::new();
     for (k, entry) in &effective.effective_fields {
-        if caller_role < entry.definition.min_view_role {
+        if caller_role < entry.definition.effective_acl().0 {
             continue;
         }
         projected_fields.insert(
@@ -664,7 +664,7 @@ pub fn project_effective_editor_config(
                 source_id: entry.source_id.clone(),
                 effective_status: entry.effective_status,
                 effective_required: entry.effective_required(),
-                editable: caller_role >= entry.definition.min_edit_role,
+                editable: caller_role >= entry.definition.effective_acl().1,
             },
         );
     }

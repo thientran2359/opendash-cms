@@ -344,12 +344,10 @@ async fn s03_metadata_patch_validation_dates_dst_taxonomy_and_invariants() {
             "fields": [{
                 "key": "secret_note",
                 "label": "Secret Note",
-                "type": "short_text",
+                "type": "text",
                 "required": false,
                 "options": [],
-                "min_view_role": "admin",
-                "min_edit_role": "admin",
-                "public_exposure": "private"
+                "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}
             }]
         }))
         .send()
@@ -397,7 +395,7 @@ async fn s03_metadata_patch_validation_dates_dst_taxonomy_and_invariants() {
             "key": "item",
             "label": "Items",
             "settings": { "public": true, "has_archive": true, "publication": "immediate", "supports": ["editor"] },
-            "fields": [{ "key": "body", "label": "Body", "type": "rich_text", "required": false, "options": [] }]
+            "fields": [{ "key": "body", "label": "Body", "type": "richtext", "required": false, "options": [] }]
         }))
         .send()
         .await

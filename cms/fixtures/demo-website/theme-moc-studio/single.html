@@ -4,7 +4,7 @@
     <h1>{{ entry.title }}</h1>
     <div class="ms-content od-prose">{{ od_content() }}</div>
     <dl class="ms-meta-dl">
-      {% for field in entry.fields %}
+      {% for field in entry.field_list %}
         {% if field.text or field.image_url or field.gallery_urls %}
           <dt>{{ field.label }}</dt>
           {% if field.image_url %}

@@ -29,33 +29,33 @@ impl FieldGroupStatus {
 }
 
 /// Wire input DTO for `POST /api/admin/content-types` and `PUT /api/admin/content-types/{type_key}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentTypeDefinitionInput {
     pub key: String,
     pub label: String,
     #[serde(default)]
-    pub fields: Vec<FieldDefinitionInput>,
+    pub fields: Vec<crate::field_schema::FieldSpec>,
     #[serde(default)]
     pub settings: Option<ContentTypeSettings>,
 }
 
 /// Schema is independent of the theme/plugin that declared it. Ownership and
 /// provider status are managed by the existing `RegistryCatalog` instead.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentTypeDefinition {
     pub key: String,
     pub label: String,
     #[serde(default)]
-    pub fields: Vec<ContentFieldDefinition>,
+    pub fields: Vec<crate::field_schema::FieldSpec>,
     /// Legacy definitions without this property deserialize to public immediate.
     #[serde(default)]
     pub settings: ContentTypeSettings,
 }
 
 /// Wire DTO for `field_groups` in `theme.json` (v2) and `plugin.json` (`manifest_schema: 2`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManifestFieldGroupInput {
     pub local_key: String,
@@ -69,11 +69,11 @@ pub struct ManifestFieldGroupInput {
     pub default_order: i32,
     #[serde(default = "default_true")]
     pub collapsible: bool,
-    pub fields: Vec<FieldDefinitionInput>,
+    pub fields: Vec<crate::field_schema::FieldSpec>,
 }
 
 /// Wire DTO for User `POST /api/admin/content-field-groups` and `PUT /api/admin/content-field-groups/{group_id}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UserFieldGroupInput {
     #[serde(default)]
@@ -90,7 +90,7 @@ pub struct UserFieldGroupInput {
     pub default_order: i32,
     #[serde(default = "default_true")]
     pub collapsible: bool,
-    pub fields: Vec<FieldDefinitionInput>,
+    pub fields: Vec<crate::field_schema::FieldSpec>,
 }
 
 impl UserFieldGroupInput {
@@ -186,7 +186,7 @@ impl UserFieldGroupInput {
     pub fn validate_and_normalize(
         &self,
         expected_group_id: Option<&str>,
-    ) -> Result<(ScopedResourceId, Vec<ContentFieldDefinition>), &'static str> {
+    ) -> Result<(ScopedResourceId, Vec<crate::field_schema::FieldSpec>), &'static str> {
         let scoped_id = self.resolve_user_scoped_id(expected_group_id)?;
         let as_manifest = ManifestFieldGroupInput {
             local_key: scoped_id.local_key.clone(),
@@ -198,7 +198,9 @@ impl UserFieldGroupInput {
             collapsible: self.collapsible,
             fields: self.fields.clone(),
         };
-        let fields = as_manifest.validate_and_normalize()?;
+        let fields = as_manifest.validate_and_normalize_for_scope(
+            crate::field_schema::FieldScopeKind::UserFieldGroup,
+        )?;
         Ok((scoped_id, fields))
     }
 }
@@ -209,14 +211,14 @@ pub struct FieldGroupTargetBinding {
     pub association_state: DeclarationState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldGroupRecord {
     pub group_id: String,
     pub owner: ResourceOwner,
     pub local_key: String,
     pub title: String,
     pub description: String,
-    pub fields: Vec<ContentFieldDefinition>,
+    pub fields: Vec<crate::field_schema::FieldSpec>,
     pub targets: Vec<FieldGroupTargetBinding>,
     pub default_region: EditorRegion,
     pub default_order: i32,
@@ -227,14 +229,14 @@ pub struct FieldGroupRecord {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AttachedFieldGroupSnapshot {
     pub group_id: String,
     pub owner: ResourceOwner,
     pub local_key: String,
     pub title: String,
     pub description: String,
-    pub fields: Vec<ContentFieldDefinition>,
+    pub fields: Vec<crate::field_schema::FieldSpec>,
     pub default_region: EditorRegion,
     pub default_order: i32,
     pub collapsible: bool,
@@ -243,16 +245,18 @@ pub struct AttachedFieldGroupSnapshot {
     pub version: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectiveContentSchema {
     pub base: OwnedDescriptor<ContentTypeDefinition>,
     pub base_version: i64,
     pub attached_groups: Vec<AttachedFieldGroupSnapshot>,
     pub effective_fields: BTreeMap<String, EffectiveFieldEntry>,
+    #[serde(default)]
+    pub ui_fields: Vec<crate::field_schema::FieldSpec>,
     pub schema_token: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CntDeclarations {
     #[serde(default)]
@@ -347,14 +351,21 @@ impl ContentEntryInput {
             }
         }
         for key in self.values.keys() {
-            if !schema.fields.iter().any(|field| field.key == *key) {
+            if !schema
+                .fields
+                .iter()
+                .any(|field| !field.is_ui_only() && field.key == *key)
+            {
                 return Err("Giá trị chứa custom field chưa được khai báo.");
             }
         }
         for field in &schema.fields {
+            if field.is_ui_only() {
+                continue;
+            }
             let value = self.values.get(&field.key).unwrap_or(&Value::Null);
             if value.is_null() {
-                if field.required && field.declaration_state != DeclarationState::Withdrawn {
+                if field.effective_required() {
                     return Err("Thiếu custom field bắt buộc.");
                 }
                 continue;

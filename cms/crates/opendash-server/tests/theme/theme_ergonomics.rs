@@ -235,7 +235,7 @@ fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
                 "key": "portfolio",
                 "label": "Portfolio",
                 "fields": [
-                    { "key": "summary", "label": "Summary", "type": "short_text", "required": false },
+                    { "key": "summary", "label": "Summary", "type": "text", "required": false },
                     { "key": "price", "label": "Price", "type": "number", "required": false }
                 ],
                 "taxonomies": ["category", "tag"]
@@ -280,7 +280,7 @@ fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
 <div class="slot">{{ od_content() }}</div>
 </main>"#;
 
-    let single_post_html = br#"<main data-tpl="single-post" data-type="{{ entry.type_key }}" data-read-min="{{ entry.reading_time_minutes }}" data-civil="{{ '2026-06-15' | date_format('%Y-%m-%d') }}" data-pub-hcm="{{ entry.published_at | date_format('%Y-%m-%d', 'Asia/Ho_Chi_Minh') }}" data-null-def="{{ entry.values.featured_image | default('none-fallback') }}" data-num="{{ 12500 | format_number }}">
+    let single_post_html = br#"<main data-tpl="single-post" data-type="{{ entry.type_key }}" data-read-min="{{ entry.reading_time_minutes }}" data-civil="{{ '2026-06-15' | date_format('%Y-%m-%d') }}" data-pub-hcm="{{ entry.published_at | date_format('%Y-%m-%d', 'Asia/Ho_Chi_Minh') }}" data-null-def="{{ entry.fields.featured_image | default('none-fallback') }}" data-num="{{ 12500 | format_number }}">
 <nav data-bc>{% for b in breadcrumbs %}<span data-bc-cur="{{ b.is_current }}">{{ b.name }}</span>{% endfor %}</nav>
 <article>
 <h1>{{ entry.title }}</h1>
@@ -288,7 +288,7 @@ fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
 <span data-prim-cat>{{ entry.primary_category.name if entry.primary_category is defined and entry.primary_category is not none else '' }}</span>
 <span data-cat-count>{{ entry.terms.category | length }}</span>
 <span data-all-terms>{{ entry.all_terms | length }}</span>
-{% if entry.title is string and entry.id is number and entry.values is mapping and entry.all_terms is sequence %}<span data-tests="ok">yes</span>{% endif %}
+{% if entry.title is string and entry.id is number and entry.fields is mapping and entry.all_terms is sequence %}<span data-tests="ok">yes</span>{% endif %}
 <div class="plain-text"><p>1 < 2</p><p>1 < 2 it's ok</p><p>a < b</p>< !doctype></div>
 <div class="slot">{{ od_content() }}</div>
 </article>

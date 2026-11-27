@@ -350,7 +350,7 @@ pub struct ThemeContentTypeDeclaration {
     pub key: String,
     pub label: String,
     #[serde(default)]
-    pub fields: Vec<opendash_core::content::ContentFieldDefinition>,
+    pub fields: Vec<opendash_core::field_schema::FieldSpec>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -110,6 +110,7 @@ pub struct ThemeUrlPolicy {
     pub(crate) declared_assets: BTreeSet<String>,
     pub(crate) site_options_tree: BTreeMap<String, FieldTemplateNode>,
     pub(crate) options_tree: BTreeMap<String, FieldTemplateNode>,
+    pub(crate) entry_field_nodes: BTreeMap<String, FieldTemplateNode>,
 }
 
 impl ThemeUrlPolicy {
@@ -124,6 +125,7 @@ impl ThemeUrlPolicy {
             declared_assets,
             site_options_tree: BTreeMap::new(),
             options_tree: BTreeMap::new(),
+            entry_field_nodes: BTreeMap::new(),
         }
     }
 
@@ -165,7 +167,33 @@ impl ThemeUrlPolicy {
             declared_assets,
             site_options_tree,
             options_tree,
+            entry_field_nodes: BTreeMap::new(),
         }
+    }
+
+    pub(crate) fn without_cpt_entry_fields(&self) -> Self {
+        let mut copy = self.clone();
+        copy.entry_field_nodes.clear();
+        copy
+    }
+
+    pub(crate) fn with_cpt_entry_fields(
+        &self,
+        fields: &[opendash_core::field_schema::FieldSpec],
+    ) -> Self {
+        let mut copy = self.clone();
+        copy.entry_field_nodes.clear();
+        for spec in fields {
+            if spec.is_ui_only()
+                || spec.effective_acl().2 != opendash_core::content::PublicExposure::Public
+            {
+                continue;
+            }
+            if let Some(node) = field_template_node_from_spec(spec) {
+                copy.entry_field_nodes.insert(spec.key.clone(), node);
+            }
+        }
+        copy
     }
 
     pub(crate) fn allows_cite_href(&self, expr: &str) -> bool {

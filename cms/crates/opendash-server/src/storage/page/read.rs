@@ -349,10 +349,12 @@ pub async fn resync_plugin_block_acls_in_tx(conn: &mut SqliteConnection) -> ApiR
             ExtractedBlockRefs::default()
         };
         let roles = active_media_roles_in_conn(&mut *conn, &refs).await?;
-        sqlx::query("DELETE FROM entry_builder_media_refs WHERE entry_id = ?")
-            .bind(entry_id)
-            .execute(&mut *conn)
-            .await?;
+        sqlx::query(
+            "DELETE FROM entry_builder_media_refs WHERE entry_id = ? AND source_kind = 'builder'",
+        )
+        .bind(entry_id)
+        .execute(&mut *conn)
+        .await?;
         for (media_id, role) in roles {
             sqlx::query("INSERT INTO entry_builder_media_refs(entry_id, media_id, ref_role) VALUES (?, ?, ?)")
                 .bind(entry_id)

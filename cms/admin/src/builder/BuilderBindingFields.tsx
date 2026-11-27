@@ -3,19 +3,19 @@ import { useEffect, useRef, useState } from 'react';
 import { getContentEntry, listContentEntries, listContentTypes } from '../api/content.ts';
 import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../api/locales.ts';
 import { ApiClientError } from '../api/client.ts';
-import type { ContentEntryRecord, ContentFieldType, OwnedContentType } from '../features/content/types.ts';
+import type { ContentEntryRecord, FieldType, OwnedContentType } from '../features/content/types.ts';
 import type { BindingSource, BindingTarget, BuilderElement, ElementBinding, ElementType } from './document.ts';
 
 /** ADR-0009. Do not infer safe coercions from the displayed entry value. */
-const COMPATIBLE: Record<BindingTarget, readonly ContentFieldType[]> = {
-  text: ['short_text', 'long_text', 'rich_text', 'number', 'boolean', 'date', 'select'],
-  media_id: ['image'],
-  alt: ['short_text', 'select'],
-  label: ['short_text', 'select'],
-  url: ['short_text', 'select'],
+const COMPATIBLE: Record<BindingTarget, readonly FieldType[]> = {
+  text: ['text', 'textarea', 'richtext', 'number', 'boolean', 'date', 'select'],
+  media_id: ['media'],
+  alt: ['text', 'select'],
+  label: ['text', 'select'],
+  url: ['text', 'select'],
 };
 // Heading text has a stricter matrix than core/text.
-const HEADING_TEXT: readonly ContentFieldType[] = ['short_text', 'select'];
+const HEADING_TEXT: readonly FieldType[] = ['text', 'select'];
 const PAGE_SIZE = 50;
 
 interface Props {
@@ -41,7 +41,7 @@ function sourceValue(source: BindingSource): string {
   return 'field:' + source.key;
 }
 
-function allowed(element: BuilderElement, target: BindingTarget, fieldType: ContentFieldType): boolean {
+function allowed(element: BuilderElement, target: BindingTarget, fieldType: FieldType): boolean {
   if (element.type === 'core/heading' && target === 'text') return HEADING_TEXT.includes(fieldType);
   return COMPATIBLE[target].includes(fieldType);
 }

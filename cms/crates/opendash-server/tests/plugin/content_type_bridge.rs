@@ -201,7 +201,7 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
                     "key": "job_posting",
                     "label": "Job Posting",
                     "fields": [
-                        { "key": "company", "label": "Company", "type": "short_text", "required": true },
+                        { "key": "company", "label": "Company", "type": "text", "required": true },
                         { "key": "salary", "label": "Salary", "type": "number", "required": false }
                     ]
                 }
@@ -472,7 +472,7 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
                     "key": "job_posting",
                     "label": "Job Posting",
                     "fields": [
-                        { "key": "company", "label": "Company", "type": "short_text", "required": true },
+                        { "key": "company", "label": "Company", "type": "text", "required": true },
                         { "key": "salary", "label": "Salary", "type": "boolean", "required": false }
                     ]
                 }

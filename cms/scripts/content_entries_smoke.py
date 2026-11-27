@@ -82,9 +82,9 @@ def definition(key="portfolio"):
         "key": key,
         "label": "Dự án",
         "fields": [
-            {"key": "caption", "label": "Chú thích", "type": "short_text", "required": True},
-            {"key": "description", "label": "Mô tả", "type": "long_text"},
-            {"key": "html", "label": "Nội dung", "type": "rich_text"},
+            {"key": "caption", "label": "Chú thích", "type": "text", "required": True},
+            {"key": "description", "label": "Mô tả", "type": "textarea"},
+            {"key": "html", "label": "Nội dung", "type": "richtext"},
             {"key": "price", "label": "Giá", "type": "number", "required": True},
             {"key": "active", "label": "Kích hoạt", "type": "boolean", "required": True},
             {"key": "date", "label": "Ngày", "type": "date"},
@@ -92,7 +92,7 @@ def definition(key="portfolio"):
                 "key": "state", "label": "Trạng thái", "type": "select", "required": True,
                 "options": [{"value": "open", "label": "Đang mở"}, {"value": "closed", "label": "Đã đóng"}],
             },
-            {"key": "cover", "label": "Ảnh", "type": "image"},
+            {"key": "cover", "label": "Ảnh", "type": "media"},
             {"key": "gallery", "label": "Album", "type": "gallery"},
         ],
     }

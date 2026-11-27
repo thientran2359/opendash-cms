@@ -69,7 +69,7 @@ pub async fn prepare_composite_entry_save(
                 "unknown_field_key: Trường '{key}' không thuộc loại nội dung '{type_key}'."
             )));
         };
-        if caller_role < fe.definition.min_edit_role {
+        if caller_role < fe.definition.effective_acl().1 {
             return Err(ApiError::forbidden(format!(
                 "field_edit_forbidden: Vai trò hiện tại không có quyền sửa trường '{key}'."
             )));
@@ -147,7 +147,7 @@ pub async fn prepare_composite_entry_save(
             for (k, fe) in &effective.effective_fields {
                 if !input.values.contains_key(k)
                     && fe.effective_status != EffectiveFieldStatus::Withdrawn
-                    && let Some(def) = &fe.definition.default_value
+                    && let Some(def) = &fe.definition.default
                 {
                     out.insert(k.clone(), def.clone());
                 }
@@ -216,7 +216,7 @@ pub async fn prepare_composite_entry_save(
         .await?;
     if let Some(body) = merged_input.values.get("body").and_then(Value::as_str)
         && effective.effective_fields.get("body").is_some_and(|field| {
-            field.definition.field_type == opendash_core::content::ContentFieldType::RichText
+            field.definition.field_type == opendash_core::field_schema::FieldType::Richtext
         })
         && opendash_core::builder_blocks::contains_blocks(body)
     {
@@ -229,7 +229,7 @@ pub async fn prepare_composite_entry_save(
             .iter()
             .filter(|(_, fe)| {
                 fe.effective_status == EffectiveFieldStatus::Active
-                    && fe.definition.min_view_role <= caller_role
+                    && fe.definition.effective_acl().0 <= caller_role
             })
             .map(|(k, _)| k.clone())
             .collect();

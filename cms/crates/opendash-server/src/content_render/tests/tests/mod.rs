@@ -1,5 +1,5 @@
 use super::*;
-use opendash_core::content::{ContentFieldDefinition, ContentFieldType};
+use opendash_core::field_schema::FieldSpec;
 
 fn assert_ordered_markup(html: &str, fragments: &[&str]) {
     let mut at = 0;

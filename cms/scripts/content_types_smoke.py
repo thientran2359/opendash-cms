@@ -7,37 +7,56 @@ Run from the project root:
 import argparse
 import json
 import os
+import socket
 import sqlite3
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from pathlib import Path
-from queue import Queue
 from tempfile import TemporaryDirectory
-from threading import Thread
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
 @contextmanager
 def running(binary: Path, db: Path):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
     env = dict(
         os.environ,
-        OPENDASH_PORT="0",
+        OPENDASH_HOST="127.0.0.1",
+        OPENDASH_PORT=str(port),
         OPENDASH_SITE_ROOT=str(db.parent.parent),
         OPENDASH_DB_PATH=str(db),
     )
+    base = f"http://127.0.0.1:{port}"
     with subprocess.Popen(
-        [str(binary)], env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8"
+        [str(binary)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     ) as process:
-        output = Queue()
-        Thread(target=lambda: output.put(process.stdout.readline()), daemon=True).start()
         try:
-            line = output.get(timeout=30).strip()
-            assert line.startswith("OpenDash: http://127.0.0.1:") and line.endswith("/builder"), line
-            yield line.removeprefix("OpenDash: ").removesuffix("/builder")
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                try:
+                    with urlopen(base + "/api/health", timeout=2) as resp:
+                        if resp.status == 200:
+                            break
+                except Exception:
+                    pass
+                if process.poll() is not None:
+                    raise RuntimeError(f"opendash exited early with code {process.returncode}")
+                time.sleep(0.05)
+            else:
+                raise RuntimeError("opendash did not become healthy within 30s")
+            yield base
         finally:
             process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
 
 def request(base, path, body=None, headers=None):
@@ -69,7 +88,7 @@ def sample_content_type(key="portfolio_item"):
         "key": key,
         "label": "Dự án",
         "fields": [
-            {"key": "summary", "label": "Tóm tắt", "type": "long_text", "required": False},
+            {"key": "summary", "label": "Tóm tắt", "type": "textarea", "required": False},
             {
                 "key": "status",
                 "label": "Trạng thái",
@@ -94,7 +113,7 @@ def test_fresh_site(binary):
             assert request(base, "/auth/setup", admin)[0] == 201
             auth = login(base, **admin)
             builtins = json.loads(request(base, endpoint, headers=auth)[1])
-            assert [item["descriptor"]["key"] for item in builtins] == ["page", "post"], builtins
+            assert [item["descriptor"]["key"] for item in builtins] == ["page", "pattern", "post"], builtins
             assert all(item["owner"] == {"kind": "core"} and item["status"] == "active" for item in builtins)
             assert request(base, endpoint, sample_content_type("post"), auth)[0] == 409
             assert request(base, endpoint, sample_content_type("page"), auth)[0] == 409
@@ -127,7 +146,7 @@ def test_fresh_site(binary):
             status, listing, _ = request(base, endpoint, headers=auth)
             assert status == 200
             keys = [item["descriptor"]["key"] for item in json.loads(listing)]
-            assert keys == ["news_item", "page", "portfolio_item", "post"], keys
+            assert keys == ["news_item", "page", "pattern", "portfolio_item", "post"], keys
 
             editor = {"username": "editor", "password": "password123"}
             assert request(base, "/api/admin/users", editor, auth)[0] == 201
@@ -137,7 +156,7 @@ def test_fresh_site(binary):
             assert request(base, endpoint, {"key": "huge", "label": "X" * 600_000}, auth)[0] == 413
 
         with closing(sqlite3.connect(db)) as conn, conn:
-            assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 4
+            assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 5
             assert conn.execute(
                 "SELECT owner_kind, owner_id, provider_status FROM content_types WHERE key = 'portfolio_item'"
             ).fetchone() == ("user", None, "active")
@@ -164,7 +183,7 @@ def test_fresh_site(binary):
             status, body, _ = request(base, "/api/admin/content-types", headers=auth)
             assert status == 200
             items = {item["descriptor"]["key"]: item for item in json.loads(body)}
-            assert len(items) == 4
+            assert len(items) == 5
             assert items["portfolio_item"]["owner"] == {"kind": "plugin", "id": "missing-plugin"}
             assert items["portfolio_item"]["status"] == "provider_inactive"
             assert items["portfolio_item"]["descriptor"]["fields"][1]["type"] == "select"
@@ -191,7 +210,7 @@ def test_upgrading_legacy_database(binary, fixture):
         with closing(sqlite3.connect(db)) as conn, conn:
             after = conn.execute("SELECT block_id, values_json FROM home_page WHERE id = 1").fetchone()
             assert after == before, (before, after)
-            assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 3
+            assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 4
             assert conn.execute("SELECT success FROM _sqlx_migrations WHERE version = 4").fetchone() == (1,)
             assert conn.execute("SELECT success FROM _sqlx_migrations WHERE version = 8").fetchone() == (1,)
 

@@ -1,7 +1,7 @@
 use super::*;
 #[allow(clippy::too_many_arguments)]
 
-pub(crate) fn validate_field_value(
+pub fn validate_field_value(
     spec: &FieldSpec,
     ctx: FieldContext,
     raw_val: &Value,
@@ -178,7 +178,7 @@ pub(crate) fn check_compat4_recursive(specs: &[FieldSpec]) -> Result<(), &'stati
                     .is_some_and(|v| is_non_empty_json_value(spec, v));
                 if !valid {
                     return Err(
-                        "Trường required với min_edit_role = admin bắt buộc có default hợp lệ, khác rỗng.",
+                        "admin_required_field_missing_default: Trường required với min_edit_role = admin bắt buộc có default hợp lệ, khác rỗng.",
                     );
                 }
             }

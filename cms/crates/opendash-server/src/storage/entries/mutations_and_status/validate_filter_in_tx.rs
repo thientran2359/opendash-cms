@@ -85,7 +85,7 @@ pub fn filter_entry_values_for_role(
         effective
             .effective_fields
             .get(key)
-            .map(|fe| caller_role >= fe.definition.min_view_role)
+            .map(|fe| caller_role >= fe.definition.effective_acl().0)
             .unwrap_or(true)
     });
 }

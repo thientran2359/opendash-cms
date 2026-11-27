@@ -330,7 +330,7 @@ def main() -> int:
                     "key": "project",
                     "label": "Dự án Mộc Studio",
                     "fields": [
-                        {"key": "client_name", "label": "Khách hàng", "type": "short_text", "required": True},
+                        {"key": "client_name", "label": "Khách hàng", "type": "text", "required": True},
                         {"key": "area_m2", "label": "Diện tích (m2)", "type": "number", "required": False},
                         {
                             "key": "internal_cost",

@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { getEditorLayout, putEditorLayout } from '../../api/content.ts';
 import type {
   BaseFieldSlicePanelConfig,
-  ContentFieldDefinition,
+  FieldSpec,
   EditorLayoutConfigV1,
   EditorLayoutSnapshot,
   PanelPlacementConfig,
@@ -12,7 +12,7 @@ import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimi
 
 interface EditorLayoutConfiguratorProps {
   typeKey: string;
-  baseFields: ContentFieldDefinition[];
+  baseFields: FieldSpec[];
   csrfToken: string | null;
   onApiError: (error: unknown, fallback: string) => void;
   onVersionChange?: (version: number | null) => void;

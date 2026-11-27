@@ -1,30 +1,6 @@
-import { __ } from '../../i18n/index.tsx';
-/** Wire types for M3–M7 content, field groups, panel registry, and composite save APIs. */
-export type ContentFieldType =
-  | 'short_text'
-  | 'long_text'
-  | 'rich_text'
-  | 'number'
-  | 'boolean'
-  | 'date'
-  | 'select'
-  | 'image'
-  | 'gallery';
+import type { FieldAcl, FieldRole, FieldSpec, FieldType, PublicExposure } from '../../fields/types';
 
-export const CONTENT_FIELD_TYPES: Array<{ value: ContentFieldType; label: string }> = [
-  { value: 'short_text', get label() { return __("Short text"); } },
-  { value: 'long_text', get label() { return __("Long text"); } },
-  { value: 'rich_text', get label() { return __("Rich text content"); } },
-  { value: 'number', get label() { return __("Number"); } },
-  { value: 'boolean', get label() { return __("On / off"); } },
-  { value: 'date', get label() { return __("Date"); } },
-  { value: 'select', get label() { return __("Choice"); } },
-  { value: 'image', get label() { return __("Image (media ID)"); } },
-  { value: 'gallery', get label() { return __("Gallery (list of IDs)"); } },
-];
-
-export type FieldRole = 'editor' | 'admin';
-export type PublicExposure = 'public' | 'private';
+export type { FieldAcl, FieldRole, FieldSpec, FieldType, PublicExposure };
 export type DeclarationState = 'active' | 'withdrawn';
 export type ProviderStatus = 'active' | 'provider_inactive';
 export type EditorRegion = 'header_bar' | 'main_top' | 'main_primary' | 'main_bottom' | 'sidebar';
@@ -34,23 +10,10 @@ export interface SelectOption {
   label: string;
 }
 
-export interface ContentFieldDefinition {
-  key: string;
-  label: string;
-  type: ContentFieldType;
-  required: boolean;
-  options: SelectOption[];
-  default_value?: ContentFieldValue;
-  min_view_role?: FieldRole;
-  min_edit_role?: FieldRole;
-  public_exposure?: PublicExposure;
-  declaration_state?: DeclarationState;
-}
-
 export interface ContentTypeDefinition {
   key: string;
   label: string;
-  fields: ContentFieldDefinition[];
+  fields: FieldSpec[];
 }
 
 export interface ResourceOwner {
@@ -216,7 +179,7 @@ export interface UserFieldGroupInput {
   local_key: string;
   title: string;
   target_types: string[];
-  fields: ContentFieldDefinition[];
+  fields: FieldSpec[];
   default_region?: EditorRegion;
   default_order?: number;
 }
@@ -236,7 +199,7 @@ export interface FieldGroupRecord {
   default_order: number;
   version: number;
   targets: FieldGroupTargetBinding[];
-  fields: ContentFieldDefinition[];
+  fields: FieldSpec[];
 }
 
 export interface LayoutFieldSubgroup {
@@ -311,7 +274,7 @@ export interface EditorLayoutSnapshot {
 }
 
 export interface EffectiveFieldProjection {
-  definition: ContentFieldDefinition;
+  definition: FieldSpec;
   owner: ResourceOwner;
   source_id: string;
   effective_status: 'active' | 'provider_inactive' | 'withdrawn';

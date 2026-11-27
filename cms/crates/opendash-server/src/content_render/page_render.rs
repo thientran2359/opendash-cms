@@ -265,8 +265,8 @@ pub struct EntryView {
     pub published_at: Option<String>,
     pub excerpt: String,
     pub reading_time_minutes: u32,
-    pub values: BTreeMap<String, Value>,
-    pub fields: Vec<FieldView>,
+    pub fields: BTreeMap<String, Value>,
+    pub field_list: Vec<FieldView>,
     pub cover_url: Option<String>,
     pub terms: BTreeMap<String, Vec<PublicTermView>>,
     pub all_terms: Vec<PublicTermView>,
@@ -300,7 +300,7 @@ pub(super) fn media_url(value: &Value) -> Option<String> {
 pub(super) fn rewrite_preview_media_urls(mut view: EntryView, type_key: &str) -> EntryView {
     let admin_media = |url: &str| url.replacen("/media/", "/api/admin/media/", 1);
     view.cover_url = view.cover_url.as_deref().map(admin_media);
-    for field in &mut view.fields {
+    for field in &mut view.field_list {
         field.image_url = field.image_url.as_deref().map(admin_media);
         field.gallery_urls = field
             .gallery_urls

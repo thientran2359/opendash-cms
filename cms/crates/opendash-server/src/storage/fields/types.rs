@@ -9,7 +9,7 @@ pub(super) use opendash_core::{
     block_schema::RegisteredBlockSchema,
     builder::{BuilderDocument, ElementContent, KnownElement},
     builder_blocks::parse_blocks_lenient_or_recover,
-    content::{ContentFieldType, EffectiveFieldStatus, FieldRole, PublicExposure},
+    content::{EffectiveFieldStatus, FieldRole, PublicExposure},
     field_schema::{
         CollectedMediaIds, FieldSpec, FieldType, SelectOptionsSource, valid_sha256_media_id,
     },

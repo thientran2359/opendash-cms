@@ -163,18 +163,16 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
                 {
                     "key": "client_name",
                     "label": "Khách hàng",
-                    "type": "short_text",
+                    "type": "text",
                     "required": true,
-                    "min_view_role": "editor",
-                    "min_edit_role": "editor"
+                    "acl": {"min_view_role": "editor", "min_edit_role": "editor"}
                 },
                 {
                     "key": "budget",
                     "label": "Ngân sách",
                     "type": "number",
                     "required": false,
-                    "min_view_role": "editor",
-                    "min_edit_role": "admin"
+                    "acl": {"min_view_role": "editor", "min_edit_role": "admin"}
                 },
                 {
                     "key": "completion_date",
@@ -185,11 +183,9 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
                 {
                     "key": "internal_note",
                     "label": "Ghi chú nội bộ",
-                    "type": "short_text",
+                    "type": "text",
                     "required": false,
-                    "min_view_role": "admin",
-                    "min_edit_role": "admin",
-                    "public_exposure": "private"
+                    "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}
                 }
             ]
         }))
@@ -462,7 +458,7 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
             "title": "Liên kết dự án",
             "target_types": ["project"],
             "fields": [
-                { "key": "repo_url", "label": "Repo URL", "type": "short_text", "required": false }
+                { "key": "repo_url", "label": "Repo URL", "type": "text", "required": false }
             ]
         }))
         .send()
@@ -494,7 +490,7 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
                 "title": "SEO Fields",
                 "target_types": ["project"],
                 "fields": [
-                    { "key": "seo_title", "label": "SEO Title", "type": "short_text", "required": false }
+                    { "key": "seo_title", "label": "SEO Title", "type": "text", "required": false }
                 ]
             }]
         },

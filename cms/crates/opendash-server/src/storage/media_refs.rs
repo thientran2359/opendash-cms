@@ -262,6 +262,28 @@ pub async fn collect_pins_in_tx(
     }
 
     // 6. Entry SEO + Home SEO
+    let term_ext_rows = sqlx::query(
+        "SELECT term_id, owner_kind, owner_id, local_key, values_json FROM term_extension_values",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    for row in term_ext_rows {
+        let term_id: i64 = row.try_get("term_id")?;
+        let owner_kind: String = row.try_get("owner_kind")?;
+        let owner_id: String = row.try_get("owner_id")?;
+        let local_key: String = row.try_get("local_key")?;
+        let raw_json: String = row.try_get("values_json")?;
+        if let Ok(val) = serde_json::from_str::<Value>(&raw_json)
+            && json_contains_media_pin(&val, media_id)
+        {
+            push_pin(
+                &mut summary,
+                "term_extension",
+                format!("term:{term_id}:{owner_kind}:{owner_id}:{local_key}"),
+            );
+        }
+    }
+
     let entry_seo_rows = sqlx::query("SELECT entry_id FROM entry_seo WHERE og_image_id = ?")
         .bind(media_id)
         .fetch_all(&mut *conn)

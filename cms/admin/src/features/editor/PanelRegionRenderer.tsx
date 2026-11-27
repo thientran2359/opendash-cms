@@ -2,13 +2,12 @@ import { __, _x, useI18n } from '../../i18n/index.tsx';
 import { formatDateTime } from '../../i18n/format.ts';
 import React, { useState } from 'react';
 import type {
-  ContentFieldDefinition,
   ContentFieldValue,
   EffectiveEditorConfigProjection,
   EffectiveFieldProjection,
   EffectivePanelProjection,
 } from '../content/types.ts';
-import { FieldValueInput } from '../content/FieldValueInput.tsx';
+import { UnifiedFieldForm } from '../../fields/UnifiedFieldForm.tsx';
 import { TermPicker } from '../taxonomy/TermPicker.tsx';
 import { mediaThumbnailUrl } from '../../api/media.ts';
 
@@ -64,29 +63,8 @@ export interface PanelRegionRendererProps {
   dirty: boolean;
 }
 
-function toInputString(val: ContentFieldValue | undefined): string {
-  if (val === undefined || val === null) return '';
-  if (Array.isArray(val)) return val.join('\n');
-  return String(val);
-}
 
-function parseInputString(def: ContentFieldDefinition, raw: string): ContentFieldValue {
-  if (def.type === 'number') {
-    if (!raw.trim()) return null;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : raw;
-  }
-  if (def.type === 'boolean') {
-    return raw === 'true';
-  }
-  if (def.type === 'gallery') {
-    return raw
-      .split(/[\n,]+/)
-      .map(s => s.trim())
-      .filter(Boolean);
-  }
-  return raw;
-}
+
 
 export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   config,
@@ -179,7 +157,6 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
     if (!eff) return null;
     const isWithdrawn = eff.effective_status !== 'active';
     const isCleared = clearedFields.includes(fieldKey);
-    const valStr = isCleared ? '' : toInputString(values[fieldKey]);
     const err = fieldErrors[fieldKey];
 
     return (
@@ -207,21 +184,17 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
             </button>
           )}
         </div>
-        <FieldValueInput
-          field={eff.definition}
-          value={valStr}
+        <UnifiedFieldForm
+          context="content"
+          fields={[eff.definition]}
+          values={values}
+          onChange={next => onFieldChange(fieldKey, next[fieldKey] as ContentFieldValue)}
+          csrfToken={null}
           disabled={!eff.editable || (
-            (eff.definition.type === 'image' || eff.definition.type === 'gallery')
+            (eff.definition.type === 'media' || eff.definition.type === 'gallery')
             && eff.effective_status !== 'active'
           )}
-          onChange={raw => onFieldChange(fieldKey, parseInputString(eff.definition, raw))}
-          onPickMedia={
-            eff.editable
-            && eff.effective_status === 'active'
-            && (eff.definition.type === 'image' || eff.definition.type === 'gallery')
-              ? () => onPickMedia(fieldKey, eff.definition.type as 'image' | 'gallery')
-              : undefined
-          }
+          onApiError={() => {}}
         />
         {err && (
           <p className="text-xs font-medium text-rose-700" role="alert">
@@ -344,7 +317,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           const eff = config.effective_fields.featured_image;
           if (!eff) return null;
           const isCleared = clearedFields.includes('featured_image');
-          const imgId = isCleared ? '' : toInputString(values.featured_image).trim();
+          const imgId = isCleared ? '' : (typeof values.featured_image === 'string' ? values.featured_image.trim() : '');
           const canEditImg = eff.editable && eff.effective_status === 'active';
           const imgErr = fieldErrors.featured_image;
           return (

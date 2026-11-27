@@ -412,11 +412,11 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
                 "key": "portfolio",
                 "label": "Dự án",
                 "fields": [
-                    { "key": "pub_summary", "label": "Tóm tắt công khai", "type": "short_text", "public_exposure": "public" },
-                    { "key": "pub_photo", "label": "Ảnh công khai", "type": "image", "public_exposure": "public" },
-                    { "key": "secret_note", "label": "Ghi chú nội bộ", "type": "short_text", "public_exposure": "private" },
-                    { "key": "priv_photo", "label": "Ảnh nội bộ", "type": "image", "public_exposure": "private" },
-                    { "key": "dual_photo", "label": "Ảnh dùng chung", "type": "image", "public_exposure": "private" }
+                    { "key": "pub_summary", "label": "Tóm tắt công khai", "type": "text", "acl": {"public_exposure": "public"} },
+                    { "key": "pub_photo", "label": "Ảnh công khai", "type": "media", "acl": {"public_exposure": "public"} },
+                    { "key": "secret_note", "label": "Ghi chú nội bộ", "type": "text", "acl": {"public_exposure": "private"} },
+                    { "key": "priv_photo", "label": "Ảnh nội bộ", "type": "media", "acl": {"public_exposure": "private"} },
+                    { "key": "dual_photo", "label": "Ảnh dùng chung", "type": "media", "acl": {"public_exposure": "private"} }
                 ]
             }))
             .send()
@@ -708,16 +708,14 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
                 "key": "deal",
                 "label": "Giao dịch",
                 "fields": [
-                    { "key": "deal_title", "label": "Tên", "type": "short_text", "required": true },
+                    { "key": "deal_title", "label": "Tên", "type": "text", "required": true },
                     {
                         "key": "admin_margin",
                         "label": "Biên lợi nhuận",
                         "type": "number",
                         "required": true,
-                        "default_value": 10,
-                        "min_view_role": "admin",
-                        "min_edit_role": "admin",
-                        "public_exposure": "private"
+                        "default": 10,
+                        "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}
                     }
                 ]
             }))

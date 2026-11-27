@@ -234,15 +234,13 @@ async fn s04_broadened_cpt_bulk_taxonomy_lifecycle_mixed_cas_and_privacy_diag() 
                 "supports": ["editor"]
             },
             "fields": [
-                {"key": "summary", "label": "Summary", "type": "short_text"},
-                {"key": "cover", "label": "Cover", "type": "image"},
+                {"key": "summary", "label": "Summary", "type": "text"},
+                {"key": "cover", "label": "Cover", "type": "media"},
                 {
                     "key": "secret_note",
                     "label": "Secret Note",
-                    "type": "short_text",
-                    "min_view_role": "admin",
-                    "min_edit_role": "admin",
-                    "public_exposure": "private"
+                    "type": "text",
+                    "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}
                 }
             ]
         }))
@@ -285,7 +283,7 @@ async fn s04_broadened_cpt_bulk_taxonomy_lifecycle_mixed_cas_and_privacy_diag() 
                 "publication": "immediate",
                 "supports": ["editor"]
             },
-            "fields": [{"key": "sku", "label": "SKU", "type": "short_text"}]
+            "fields": [{"key": "sku", "label": "SKU", "type": "text"}]
         }))
         .send()
         .await

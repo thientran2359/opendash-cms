@@ -113,12 +113,10 @@ async fn reading_page_guard_bidirectional_and_immediate_restore_schema_and_local
         "fields": [{
             "key": "summary",
             "label": "Summary",
-            "type": "short_text",
+            "type": "text",
             "required": false,
             "options": [],
-            "min_view_role": "editor",
-            "min_edit_role": "editor",
-            "public_exposure": "public"
+            "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public"}
         }],
         "settings": {
             "public": true,
@@ -237,7 +235,7 @@ async fn startup_builder_migration_preserves_trashed_row_lifecycle_and_pins() {
                     "id": "col-1",
                     "children": [{
                         "id": "el-1",
-                        "type": "image",
+                        "type": "media",
                         "media_id": pic_id,
                         "alt": "Pic"
                     }]

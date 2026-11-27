@@ -74,7 +74,7 @@ pub async fn load_effective_content_schema_in_tx(
             assoc_str,
         ) in group_rows
         {
-            let fields: Vec<ContentFieldDefinition> =
+            let fields: Vec<opendash_core::field_schema::FieldSpec> =
                 serde_json::from_str(&fields_json).map_err(|_| {
                     ApiError::internal("Dữ liệu fields_json của field group không hợp lệ.")
                 })?;
@@ -180,7 +180,7 @@ pub(in crate::storage) async fn load_content_type_definition_in_conn(
 pub(in crate::storage) async fn has_persisted_group_values_for_type_in_tx(
     conn: &mut SqliteConnection,
     type_key: &str,
-    fields: &[ContentFieldDefinition],
+    fields: &[opendash_core::field_schema::FieldSpec],
 ) -> ApiResult<bool> {
     if fields.is_empty() {
         return Ok(false);

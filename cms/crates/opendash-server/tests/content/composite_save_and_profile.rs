@@ -163,36 +163,31 @@ async fn composite_entry_save_patch_semantics_acl_fence_and_profile_api() {
                 {
                     "key": "summary",
                     "label": "Tóm tắt",
-                    "type": "short_text",
+                    "type": "text",
                     "required": true,
-                    "min_view_role": "editor",
-                    "min_edit_role": "editor"
+                    "acl": {"min_view_role": "editor", "min_edit_role": "editor"}
                 },
                 {
                     "key": "optional_tag",
                     "label": "Nhãn tùy chọn",
-                    "type": "short_text",
+                    "type": "text",
                     "required": false,
-                    "default_value": "Standard",
-                    "min_view_role": "editor",
-                    "min_edit_role": "editor"
+                    "default": "Standard",
+                    "acl": {"min_view_role": "editor", "min_edit_role": "editor"}
                 },
                 {
                     "key": "approved_budget",
                     "label": "Ngân sách duyệt",
                     "type": "number",
                     "required": false,
-                    "min_view_role": "editor",
-                    "min_edit_role": "admin"
+                    "acl": {"min_view_role": "editor", "min_edit_role": "admin"}
                 },
                 {
                     "key": "internal_audit",
                     "label": "Kiểm toán nội bộ",
-                    "type": "short_text",
+                    "type": "text",
                     "required": false,
-                    "min_view_role": "admin",
-                    "min_edit_role": "admin",
-                    "public_exposure": "private"
+                    "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}
                 }
             ]
         }))

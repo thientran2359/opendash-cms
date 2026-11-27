@@ -1,12 +1,13 @@
 //! Exact-entry and RouteContext Builder field resolution; never trust a client query
 //! or bypass publication. Every read takes a consistent SQLite snapshot.
+use opendash_core::field_schema::FieldType;
 use std::collections::BTreeMap;
 
 use opendash_core::{
     builder::{
         BindingSource, BindingTarget, BuilderDocument, ElementBinding, ElementContent, KnownElement,
     },
-    content::{ContentFieldType, ContentTypeDefinition, PublicExposure},
+    content::{ContentTypeDefinition, PublicExposure},
 };
 use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -249,8 +250,7 @@ fn extract_route_context(
         }
         "cover_url" => {
             let Some(img_field) = schema.fields.iter().find(|f| {
-                f.field_type == ContentFieldType::Image
-                    && f.public_exposure == PublicExposure::Public
+                f.field_type == FieldType::Media && f.effective_acl().2 == PublicExposure::Public
             }) else {
                 return BindingResult::Unavailable;
             };
@@ -283,26 +283,25 @@ fn extract_field_value(
     let Some(field) = schema
         .fields
         .iter()
-        .find(|field| field.key == key && field.public_exposure == PublicExposure::Public)
+        .find(|field| field.key == key && field.effective_acl().2 == PublicExposure::Public)
     else {
         return Err(BindingResult::Unavailable);
     };
     let compatible = match target {
         BindingTarget::Text => matches!(
             field.field_type,
-            ContentFieldType::ShortText
-                | ContentFieldType::LongText
-                | ContentFieldType::RichText
-                | ContentFieldType::Number
-                | ContentFieldType::Boolean
-                | ContentFieldType::Date
-                | ContentFieldType::Select
+            FieldType::Text
+                | FieldType::Textarea
+                | FieldType::Richtext
+                | FieldType::Number
+                | FieldType::Boolean
+                | FieldType::Date
+                | FieldType::Select
         ),
-        BindingTarget::MediaId => field.field_type == ContentFieldType::Image,
-        BindingTarget::Alt | BindingTarget::Label | BindingTarget::Url => matches!(
-            field.field_type,
-            ContentFieldType::ShortText | ContentFieldType::Select
-        ),
+        BindingTarget::MediaId => field.field_type == FieldType::Media,
+        BindingTarget::Alt | BindingTarget::Label | BindingTarget::Url => {
+            matches!(field.field_type, FieldType::Text | FieldType::Select)
+        }
     };
     if !compatible {
         return Err(BindingResult::Incompatible);
@@ -312,7 +311,7 @@ fn extract_field_value(
     };
     match value {
         Value::String(s) => {
-            if field.field_type == ContentFieldType::RichText
+            if field.field_type == FieldType::Richtext
                 && opendash_core::builder_blocks::contains_blocks(s)
             {
                 Ok(opendash_core::builder_blocks::extract_visible_text(s))
