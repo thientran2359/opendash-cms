@@ -290,12 +290,12 @@ Migration `cms/migrations/0058_responsive_media_and_replace.sql` chạy tuần t
    - `MediaAssetDetails`: `#[serde(flatten)] pub asset: MediaAsset`, `variants: Vec<MediaVariantView>`, `webp_srcset: Option<String>`, `fallback_srcset: Option<String>`, `etag: String`.
    - `MediaVariantsStatus`: `{ total_images: i64, ready_images: i64, pending_images: i64, variant_files_bytes: i64, active_run_id: Option<String> }` (`variant_files_bytes` tính O(1) qua `SELECT COALESCE(SUM(byte_size), 0) FROM media_variants`).
    - `RegenerateVariantsRequest`: `{ after_id: Option<String>, batch_size: Option<u32>, force: Option<bool>, run_id: Option<String> }` (`batch_size` kẹp `1..=25`, mặc định `15`).
-2. **Routes, Guard RBAC, Body Limit, `ETag` & `Cache-Control` (`routes/media.rs`, `routes/public_content.rs`, `app.rs`):**
-   - **Public (`routes/public_content.rs` & `app.rs:194-195`):**
+2. **Routes, Guard RBAC, Body Limit, `ETag` & `Cache-Control` (`routes/media/`, `routes/public_content/`, `app.rs`):**
+   - **Public (`routes/public_content/` & `app.rs:132-134`):**
      - `GET|HEAD /media/{id}/file`
      - `GET|HEAD /media/{id}/thumbnail`
      - `GET|HEAD /media/{id}/variant/{spec_ext}`
-   - **Admin (`routes/media.rs` & `app.rs:711-726` — 100% tiền tố `/api/admin/media/...`):**
+   - **Admin (`routes/media/` & `app.rs:646-675` — 100% tiền tố `/api/admin/media/...`):**
      - `POST /api/admin/media` (`require_session_with_csrf`) — giữ nguyên quyền Editor + Admin.
      - `POST /api/admin/media/video` (`require_session_with_csrf`) — giữ nguyên quyền Editor + Admin.
      - `GET /api/admin/media` (`require_session`) — trả `Vec<MediaAsset>`.

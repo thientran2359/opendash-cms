@@ -3,7 +3,7 @@
 - **Design Spec:** [docs/designs/responsive-media-and-replace.md](../../docs/designs/responsive-media-and-replace.md) (Locked options: `1A + 2A + 3A + 4A`, migration `0058_responsive_media_and_replace.sql`)
 - **Worktree / Branch:** `opendash-responsive-media` / `feat/responsive-media-and-replace`
 - **Merged Base:** `origin/main` (`d5ece6b`) at commit `cdf43c8`
-- **Final Goldfish Verdict:** **PASS — Ready for PR Review** (`0 Blocker / 0 Major / 0 Minor / 2 Nit`)
+- **Final Goldfish Verdict:** **PASS — Ready for PR Review** (`0 Blocker / 0 Major / 0 Minor / 0 Open Nit` — 2 doc Nits resolved before merge)
 
 ## Summary of Goldfish Rounds
 
@@ -23,12 +23,12 @@ All 11 findings from Round 1 (`B-01`, `B-02`, `M-01..M-04`, `m-01..m-02`, `N-01.
 - **Contract & Docs Sync (`M-03`, `m-02`, `N-01`, `N-03`):** Synced [`docs/contracts/M8_WRITER_INVENTORY.md`](../../docs/contracts/M8_WRITER_INVENTORY.md), [`docs/contracts/CORE_FOUNDATION.md`](../../docs/contracts/CORE_FOUNDATION.md), [`docs/architecture/TECH_STACK.md`](../../docs/architecture/TECH_STACK.md), module `README.md` inventories, `remove_dir_best_effort`, and `x-file-name` test coverage.
 - **Post-`origin/main@d5ece6b` Merge Verification (`cdf43c8`):** Round 2 confirmed recursive `HydrationVisibility` filtering remains intact, `tag_media_provenance` remains enabled on template/Builder loaders, `false` on stateless/plugin `SiteOptionsGet`/`MediaGet`, stripped before `dispatch_render_hooks`, and Admin Builder responsive preview rewriting intact.
 
-## Remaining Non-Blocking Nits (2)
+## Post-Audit Doc Nits Resolved Before Merge (2)
 
-Left untouched after Tier-1 verification on `cdf43c8` to avoid invalidating the test pass; both are documentation-only and scheduled for Step 7 PR closure cleanup alongside [`docs/designs/SITEMAP.md`](../../docs/designs/SITEMAP.md):
+Both documentation-only Nits reported in Round 2 were resolved alongside updating [`docs/designs/SITEMAP.md`](../../docs/designs/SITEMAP.md) to `Implemented` prior to PR #627 merge:
 
-1. [`cms/crates/opendash-server/src/routes/README.md`](../../cms/crates/opendash-server/src/routes/README.md) (lines 5, 11): still reads `25 handler modules` / `25 submodules` (omits `l10n`; actual count in `routes/mod.rs` is `26`).
-2. [`docs/designs/responsive-media-and-replace.md`](../../docs/designs/responsive-media-and-replace.md) (lines 293–294, 298): references pre-modularization handler paths (`routes/media.rs`, `routes/public_content.rs`) and older `app.rs` line numbers (`194-195`, `711-726` vs current `132-134`, `646-675` on `origin/main@d5ece6b`).
+1. [`cms/crates/opendash-server/src/routes/README.md`](../../cms/crates/opendash-server/src/routes/README.md) (lines 5, 11, 30–31): updated module count from `25` to `26` and documented `l10n` (`l10n.rs`).
+2. [`docs/designs/responsive-media-and-replace.md`](../../docs/designs/responsive-media-and-replace.md) (lines 293–298): updated pre-modularization paths (`routes/media/`, `routes/public_content/`) and current `app.rs` line ranges (`app.rs:132-134`, `app.rs:646-675`).
 
 ## Tier-1 Verification Record on `cdf43c8`
 
