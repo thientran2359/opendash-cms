@@ -83,7 +83,7 @@ pub(crate) fn classify_node_and_tail(
         ) => None,
         (
             FieldTemplateNode::TermRef { multiple: false },
-            &["id" | "taxonomy_key" | "name" | "slug" | "description"],
+            &["id" | "kind" | "name" | "slug" | "description"],
         ) => None,
         (FieldTemplateNode::TermRef { .. }, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
     }

@@ -11941,7 +11941,7 @@ msgid "Private"
 msgstr ""
 
 #: admin:feature.content.fieldgroupsmanager.private_default
-msgid "Private (default)"
+msgid "Public (default)"
 msgstr ""
 
 #: admin:feature.patterns.patternspage.private_patterns_share_builder_layouts_changes_are_reflected_everywhere_they_are

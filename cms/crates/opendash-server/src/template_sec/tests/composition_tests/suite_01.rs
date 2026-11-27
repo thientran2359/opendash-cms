@@ -212,6 +212,27 @@ fn icon_nonce_rejects_attribute_and_style_and_duplicate_substitution() {
 }
 
 #[test]
+fn richtext_nonce_html_scan_handles_lt_text_and_nested_lt_tag() {
+    let mut table = RichTextNonceTable::default();
+    let nonce = table.register_sanitized("<p>safe</p>".to_owned()).unwrap();
+    let ok_html = format!("<p>1 < 2 it's ok</p><p>< !doctype></p><div>{nonce}</div>");
+    let rendered = table.substitute_into_document(ok_html).unwrap();
+    assert!(rendered.contains("<div><p>safe</p></div>"));
+    assert!(!rendered.contains(&nonce));
+
+    assert!(
+        table
+            .substitute_into_document(format!("<<script>{nonce}</script>"))
+            .is_err()
+    );
+    assert!(
+        table
+            .substitute_into_document(format!("<<div data-x=\"{nonce}\"></div>"))
+            .is_err()
+    );
+}
+
+#[test]
 fn icon_budget_caps_128_total_across_segments_and_charges_growth() {
     let compiled = validate_and_compile_csec_composition(
         "p",

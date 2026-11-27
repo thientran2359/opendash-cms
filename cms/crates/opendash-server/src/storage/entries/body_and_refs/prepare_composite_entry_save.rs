@@ -138,67 +138,76 @@ pub async fn prepare_composite_entry_save(
         }
     }
 
-    let (plan_locale, plan_group_id, merged_values, preflight_prev_body) = match entry_id {
-        None => {
-            let mut conn = db.acquire().await?;
-            let loc =
-                resolve_entry_write_locale_in_tx(&mut conn, input.locale.as_deref(), None).await?;
-            let mut out = BTreeMap::new();
-            for (k, fe) in &effective.effective_fields {
-                if !input.values.contains_key(k)
-                    && fe.effective_status != EffectiveFieldStatus::Withdrawn
-                    && let Some(def) = &fe.definition.default
-                {
-                    out.insert(k.clone(), def.clone());
+    let (plan_locale, plan_group_id, merged_values, preflight_prev_body, preflight_prev_values) =
+        match entry_id {
+            None => {
+                let mut conn = db.acquire().await?;
+                let loc =
+                    resolve_entry_write_locale_in_tx(&mut conn, input.locale.as_deref(), None)
+                        .await?;
+                let mut out = BTreeMap::new();
+                for (k, fe) in &effective.effective_fields {
+                    if !input.values.contains_key(k)
+                        && fe.effective_status != EffectiveFieldStatus::Withdrawn
+                        && let Some(def) = &fe.definition.default
+                    {
+                        out.insert(k.clone(), def.clone());
+                    }
                 }
-            }
-            for (k, v) in &input.values {
-                if !v.is_null() {
-                    out.insert(k.clone(), v.clone());
+                for (k, v) in &input.values {
+                    if !v.is_null() {
+                        out.insert(k.clone(), v.clone());
+                    }
                 }
+                (loc, None, out, None, None)
             }
-            (loc, None, out, None)
-        }
-        Some(id) => {
-            let expected_ver = input.expected_version.unwrap();
-            crate::storage::entry_lifecycle::ensure_active_entry_version(
-                db,
-                type_key,
-                id,
-                expected_ver,
-            )
-            .await?;
-            let existing = get_entry(db, type_key, id)
-                .await?
-                .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
-            if existing.version != expected_ver {
-                return Err(ApiError::precondition_failed(
-                    "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
-                ));
-            }
-            let mut conn = db.acquire().await?;
-            let loc = resolve_entry_write_locale_in_tx(
-                &mut conn,
-                input.locale.as_deref(),
-                Some(&existing.locale),
-            )
-            .await?;
-            let prev_body = existing
-                .values
-                .get("body")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned);
-            let mut out = existing.values;
-            for (k, v) in &input.values {
-                if v.is_null() {
-                    out.remove(k);
-                } else {
-                    out.insert(k.clone(), v.clone());
+            Some(id) => {
+                let expected_ver = input.expected_version.unwrap();
+                crate::storage::entry_lifecycle::ensure_active_entry_version(
+                    db,
+                    type_key,
+                    id,
+                    expected_ver,
+                )
+                .await?;
+                let existing = get_entry(db, type_key, id)
+                    .await?
+                    .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+                if existing.version != expected_ver {
+                    return Err(ApiError::precondition_failed(
+                        "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
+                    ));
                 }
+                let mut conn = db.acquire().await?;
+                let loc = resolve_entry_write_locale_in_tx(
+                    &mut conn,
+                    input.locale.as_deref(),
+                    Some(&existing.locale),
+                )
+                .await?;
+                let prev_body = existing
+                    .values
+                    .get("body")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                let prev_values = existing.values.clone();
+                let mut out = existing.values;
+                for (k, v) in &input.values {
+                    if v.is_null() {
+                        out.remove(k);
+                    } else {
+                        out.insert(k.clone(), v.clone());
+                    }
+                }
+                (
+                    loc,
+                    Some(existing.translation_group_id),
+                    out,
+                    prev_body,
+                    Some(prev_values),
+                )
             }
-            (loc, Some(existing.translation_group_id), out, prev_body)
-        }
-    };
+        };
 
     let merged_input = ContentEntryInput {
         title: input.title.clone(),
@@ -214,13 +223,21 @@ pub async fn prepare_composite_entry_save(
     let effective_ct_def = effective_as_ct_def(&effective);
     crate::storage::media::require_existing_references(db, &effective_ct_def, &merged_input)
         .await?;
+    let mut conn = db.acquire().await?;
+    validate_effective_relational_refs_in_conn(
+        &mut conn,
+        &effective,
+        &merged_input.values,
+        preflight_prev_values.as_ref(),
+        &plan_locale,
+    )
+    .await?;
     if let Some(body) = merged_input.values.get("body").and_then(Value::as_str)
         && effective.effective_fields.get("body").is_some_and(|field| {
             field.definition.field_type == opendash_core::field_schema::FieldType::Richtext
         })
         && opendash_core::builder_blocks::contains_blocks(body)
     {
-        let mut conn = db.acquire().await?;
         validated_entry_block_refs_in_conn(&mut conn, body).await?;
         let catalog = crate::storage::page::load_unified_block_catalog_in_conn(&mut conn).await?;
         let caller_role = actor_field_role(actor.user.role);
@@ -230,6 +247,7 @@ pub async fn prepare_composite_entry_save(
             .filter(|(_, fe)| {
                 fe.effective_status == EffectiveFieldStatus::Active
                     && fe.definition.effective_acl().0 <= caller_role
+                    && fe.definition.effective_acl().2 == PublicExposure::Public
             })
             .map(|(k, _)| k.clone())
             .collect();

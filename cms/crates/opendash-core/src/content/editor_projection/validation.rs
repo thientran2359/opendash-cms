@@ -2,16 +2,26 @@ use super::*;
 
 pub fn valid_field_value(field: &crate::field_schema::FieldSpec, value: &Value) -> bool {
     let empty = BTreeMap::new();
+    valid_field_value_in_context(field, value, std::slice::from_ref(field), &empty, true)
+}
+
+pub fn valid_field_value_in_context(
+    field: &crate::field_schema::FieldSpec,
+    value: &Value,
+    root_specs: &[crate::field_schema::FieldSpec],
+    root_values: &BTreeMap<String, Value>,
+    visible: bool,
+) -> bool {
     crate::field_schema::validate_field_value(
         field,
         crate::field_schema::FieldContext::Content,
         value,
-        true,
+        visible,
         true,
         false,
         None,
-        std::slice::from_ref(field),
-        &empty,
+        root_specs,
+        root_values,
         None,
         true,
     )

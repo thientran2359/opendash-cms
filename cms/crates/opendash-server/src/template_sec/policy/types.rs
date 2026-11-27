@@ -207,4 +207,11 @@ impl ThemeUrlPolicy {
     pub(crate) fn allows_declared_asset(&self, path: &str) -> bool {
         self.declared_assets.contains(path)
     }
+
+    pub(crate) fn entry_fields_fingerprint(&self) -> String {
+        if self.entry_field_nodes.is_empty() {
+            return String::new();
+        }
+        format!("{:?}", self.entry_field_nodes)
+    }
 }

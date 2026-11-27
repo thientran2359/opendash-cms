@@ -231,31 +231,16 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
             >(&values_json) else {
                 continue;
             };
-            for (key, entry) in &schema.effective_fields {
-                if key == "body" {
-                    continue;
-                }
-                if entry.definition.effective_acl().2
-                    != opendash_core::content::PublicExposure::Public
-                {
-                    continue;
-                }
-                if let Some(val) = values.get(key) {
-                    let collected = opendash_core::field_schema::collect_media_ids(
-                        std::slice::from_ref(&entry.definition),
-                        &std::collections::BTreeMap::from([(
-                            entry.definition.key.clone(),
-                            val.clone(),
-                        )]),
-                    );
-                    if collected.image_ids.contains(id)
-                        || collected.video_ids.contains(id)
-                        || collected.any_ids.contains(id)
-                        || collected.file_ids.contains(id)
-                    {
-                        return Ok(true);
-                    }
-                }
+            let specs: Vec<opendash_core::field_schema::FieldSpec> = schema
+                .effective_fields
+                .iter()
+                .filter(|(k, _)| k.as_str() != "body")
+                .map(|(_, entry)| entry.definition.clone())
+                .collect();
+            let collected =
+                opendash_core::field_schema::collect_public_media_ids(&specs, &values, true);
+            if collected.all_ids().contains(id) {
+                return Ok(true);
             }
         }
     }

@@ -218,71 +218,34 @@ pub fn verify_effective_schema_transition(
     has_existing_entries: bool,
 ) -> Result<(), SchemaTransitionError> {
     if let Some(old) = old_effective {
+        let mut old_specs = Vec::new();
         for (old_key, old_entry) in &old.effective_fields {
-            let Some(new_entry) = new_effective.effective_fields.get(old_key) else {
-                // Allow removing the synthetic core-injected `body` field when a custom CPT disables Builder.
-                if old_key == "body"
-                    && old_entry.owner == ResourceOwner::Core
-                    && !matches!(old.base.descriptor.key.as_str(), "post" | "page")
-                    && !new_effective
-                        .base
-                        .descriptor
-                        .settings
-                        .supports(ContentSupport::Builder)
-                {
-                    continue;
-                }
-                if has_existing_entries {
-                    return Err(SchemaTransitionError::CannotRemoveFieldWithData(format!(
-                        "Không thể xóa hẳn trường '{old_key}' khi đã có dữ liệu; hãy đặt declaration_state = withdrawn."
-                    )));
-                }
+            // Allow removing the synthetic core-injected `body` field when a custom CPT disables Builder.
+            if !new_effective.effective_fields.contains_key(old_key)
+                && old_key == "body"
+                && old_entry.owner == ResourceOwner::Core
+                && !matches!(old.base.descriptor.key.as_str(), "post" | "page")
+                && !new_effective
+                    .base
+                    .descriptor
+                    .settings
+                    .supports(ContentSupport::Builder)
+            {
                 continue;
-            };
-
-            if old_entry.definition.field_type != new_entry.definition.field_type {
-                return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
-                    "Không thể đổi kiểu dữ liệu (type) của trường '{old_key}' đã tồn tại."
-                )));
             }
-
-            if old_entry.definition.field_type == crate::field_schema::FieldType::Select
-                && has_existing_entries
-            {
-                let new_opts: HashSet<&str> = new_entry
-                    .definition
-                    .options
-                    .iter()
-                    .map(|o| o.value.as_str())
-                    .collect();
-                for old_opt in &old_entry.definition.options {
-                    if !new_opts.contains(old_opt.value.as_str()) {
-                        return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
-                            "Không thể xóa phương án lựa chọn '{}' của trường '{old_key}' khi đã có dữ liệu.",
-                            old_opt.value
-                        )));
-                    }
-                }
-            }
-
-            let old_req = old_entry.effective_required();
-            let new_req = new_entry.effective_required();
-            if !old_req && new_req && has_existing_entries {
-                return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
-                    "Không thể đổi trường '{old_key}' sang bắt buộc (required) khi đã có dữ liệu."
-                )));
-            }
+            old_specs.push(old_entry.definition.clone());
         }
-
-        for (new_key, new_entry) in &new_effective.effective_fields {
-            if !old.effective_fields.contains_key(new_key)
-                && new_entry.effective_required()
-                && has_existing_entries
-            {
-                return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
-                    "Không thể thêm trường bắt buộc (required) mới '{new_key}' khi đã có dữ liệu."
-                )));
-            }
+        let new_specs: Vec<crate::field_schema::FieldSpec> = new_effective
+            .effective_fields
+            .values()
+            .map(|entry| entry.definition.clone())
+            .collect();
+        if let Err(msg) = crate::field_schema::check_schema_compatibility(
+            &old_specs,
+            &new_specs,
+            has_existing_entries,
+        ) {
+            return Err(classify_validation_error(msg));
         }
     }
 

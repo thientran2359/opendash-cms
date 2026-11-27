@@ -2,36 +2,14 @@ import { __, _x, useI18n } from '../i18n/index.tsx';
 import { useState } from 'react';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
 import type { BlockCatalogItemDto, BlockPropValue } from '../types.ts';
-import type {
-  BoxSpacing,
-  BuilderDocument,
-  BuilderElement,
-  BuilderSection,
-  BuilderViewport,
-  ElementBinding,
-  ListProps,
-  NodeMeta,
-  ResponsiveAlign,
-  ResponsiveContainer,
-  ResponsiveField,
-  SectionStyle,
-  SectionWidth,
-} from './document.ts';
-import {
-  VALID_TEMPLATE_PART_KEY,
-  canDeleteElement,
-  effectiveResponsive,
-  isElement,
-  isLockedElement,
-  locate,
-  nodeTitle,
-  nodeTypeTitle,
-} from './document.ts';
+import type { BoxSpacing, BuilderDocument, BuilderElement, BuilderSection, BuilderViewport, ElementBinding, ListProps, NodeMeta, ResponsiveAlign, ResponsiveContainer, ResponsiveField, SectionStyle, SectionWidth } from './document.ts';
+import { VALID_TEMPLATE_PART_KEY, canDeleteElement, effectiveResponsive, isElement, isLockedElement, locate, nodeTitle, nodeTypeTitle } from './document.ts';
 import type { AdminLocaleState } from '../api/locales.ts';
 import { BuilderBindingFields } from './BuilderBindingFields.tsx';
 import { BuilderListFields } from './BuilderListFields.tsx';
 import { BuilderContactFormFields } from './BuilderContactFormFields.tsx';
 import { UnifiedFieldForm } from '../fields/UnifiedFieldForm.tsx';
+import { useSiteTimezone } from '../fields/useSiteTimezone.ts';
 import {
   ColorSwatchControl,
   LightboxRichTextTrigger,
@@ -55,6 +33,9 @@ interface Props {
   viewport: BuilderViewport;
   allowRouteContext?: boolean;
   localeState?: AdminLocaleState;
+  contextTypeKey?: string | null;
+  locale?: string | null;
+  siteTimezone?: string;
   requiresContentSlot?: boolean;
   availablePartKeys?: string[];
   patterns: PatternRecord[];
@@ -139,6 +120,9 @@ export function BuilderInspector({
   viewport,
   allowRouteContext,
   localeState,
+  contextTypeKey,
+  locale,
+  siteTimezone,
   requiresContentSlot = false,
   availablePartKeys,
   patterns,
@@ -160,6 +144,7 @@ export function BuilderInspector({
 }: Props) {
   const { __, _x } = useI18n();
   const [showPicker, setShowPicker] = useState<'image' | 'video' | 'poster' | 'section-bg' | null>(null);
+  const resolvedTimezone = useSiteTimezone(siteTimezone);
   const item = locate(document, selectedId);
   if (!item) return (
     <section className={hideHeader ? 'px-1 py-2' : 'rounded-xl border border-slate-200 bg-white p-4'} aria-label={__("Inspector")}>
@@ -478,8 +463,10 @@ export function BuilderInspector({
             values={(element.props.values ?? {}) as Record<string, unknown>}
             onChange={values => onChange(element.id, 'values', values as BlockPropValue)}
             viewport={viewport}
+            siteTimezone={resolvedTimezone}
             csrfToken={csrfToken}
-            locale={localeState?.defaultLocale?.code ?? null}
+            contextTypeKey={contextTypeKey ?? null}
+            locale={locale ?? localeState?.defaultLocale?.code ?? null}
             onApiError={onError}
           />
         </div>

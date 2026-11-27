@@ -12,22 +12,26 @@ pub async fn commit_composite_entry_save(
     let effective =
         verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
-    let existing_locale: Option<String> = if let Some(id) = entry_id {
-        let expected_ver = input
-            .expected_version
-            .ok_or_else(|| ApiError::bad_request("Thiếu phiên bản nội dung."))?;
-        current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
-        let loc: String = sqlx::query_scalar(
-            "SELECT locale FROM content_entries WHERE content_type_key = ? AND id = ?",
-        )
-        .bind(type_key)
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await?;
-        Some(loc)
-    } else {
-        None
-    };
+    let (existing_locale, previous_values): (Option<String>, Option<BTreeMap<String, Value>>) =
+        if let Some(id) = entry_id {
+            let expected_ver = input
+                .expected_version
+                .ok_or_else(|| ApiError::bad_request("Thiếu phiên bản nội dung."))?;
+            current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
+            let (loc, old_values_json): (String, String) = sqlx::query_as(
+                "SELECT locale, values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
+            )
+            .bind(type_key)
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+            (
+                Some(loc),
+                serde_json::from_str::<BTreeMap<String, Value>>(&old_values_json).ok(),
+            )
+        } else {
+            (None, None)
+        };
     let entry_locale = resolve_entry_write_locale_in_tx(
         &mut tx,
         input.locale.as_deref(),
@@ -64,6 +68,14 @@ pub async fn commit_composite_entry_save(
         &mut tx,
         &plan.effective_ct_def,
         &plan.merged_input,
+    )
+    .await?;
+    validate_effective_relational_refs_in_conn(
+        &mut tx,
+        &effective,
+        &plan.merged_input.values,
+        previous_values.as_ref(),
+        &entry_locale,
     )
     .await?;
     if let Some(ids) = &plan.merged_input.term_ids {

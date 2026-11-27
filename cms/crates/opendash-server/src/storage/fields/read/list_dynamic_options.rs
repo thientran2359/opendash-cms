@@ -382,17 +382,25 @@ pub async fn load_entry_ref_hydration_map_in_conn(
         let cover_key = load_effective_content_schema_in_tx(conn, &type_key)
             .await?
             .and_then(|schema| {
-                schema.effective_fields.into_iter().find_map(|(k, fe)| {
-                    if fe.effective_status == EffectiveFieldStatus::Active
-                        && fe.definition.effective_acl().2 == PublicExposure::Public
-                        && fe.definition.effective_acl().0 == FieldRole::Editor
-                        && fe.definition.field_type == opendash_core::field_schema::FieldType::Media
-                    {
-                        Some(k)
-                    } else {
-                        None
-                    }
-                })
+                schema
+                    .effective_fields
+                    .into_iter()
+                    .filter(|(_, fe)| {
+                        fe.effective_status == EffectiveFieldStatus::Active
+                            && fe.definition.effective_acl().2 == PublicExposure::Public
+                            && fe.definition.effective_acl().0 == FieldRole::Editor
+                            && fe.definition.field_type
+                                == opendash_core::field_schema::FieldType::Media
+                            && fe.definition.effective_media_kind()
+                                == opendash_core::field_schema::MediaFieldKind::Image
+                    })
+                    .fold(None::<String>, |best, (k, _)| {
+                        if k == "featured_image" {
+                            Some(k)
+                        } else {
+                            best.or(Some(k))
+                        }
+                    })
             });
         cover_field_by_type.insert(type_key, cover_key);
     }
@@ -448,7 +456,7 @@ pub async fn load_entry_ref_hydration_map_in_conn(
         let cover_url = candidate_cover_id.and_then(|mid| {
             cover_media_map
                 .get(&mid)
-                .filter(|m| m.kind == "media")
+                .filter(|m| m.kind == "image")
                 .map(|m| format!("{media_prefix}/{}/file", m.id))
         });
         out.insert(

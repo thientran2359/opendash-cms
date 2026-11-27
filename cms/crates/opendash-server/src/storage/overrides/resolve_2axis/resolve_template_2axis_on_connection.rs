@@ -462,6 +462,7 @@ pub(in crate::storage) async fn render_public_part(
     let Some(source) = active.parts.get(key) else {
         return Ok(None);
     };
+    let part_url_policy = ctx.url_policy.without_cpt_entry_fields();
     let compiled = template_sec::ThemeCompositionCache::global()
         .get_or_compile(
             &active.revision_digest,
@@ -469,7 +470,7 @@ pub(in crate::storage) async fn render_public_part(
             source,
             &active.parts,
             template_sec::CsecContentKind::NonEntry,
-            ctx.url_policy,
+            &part_url_policy,
         )
         .map_err(ApiError::internal)?;
     if depth + compiled.max_part_depth > 3 {

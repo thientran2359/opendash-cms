@@ -4,10 +4,11 @@ use super::*;
 pub struct FieldView {
     pub key: String,
     pub label: String,
-    pub kind: &'static str,
+    pub field_type: &'static str,
     pub text: String,
-    pub image_url: Option<String>,
-    pub gallery_urls: Vec<String>,
+    pub media: Option<Value>,
+    pub gallery: Vec<Value>,
+    pub link: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -297,16 +298,44 @@ pub(super) fn media_url(value: &Value) -> Option<String> {
     valid_media_id(id).then(|| format!("/media/{id}/file"))
 }
 
-pub(super) fn rewrite_preview_media_urls(mut view: EntryView, type_key: &str) -> EntryView {
+fn rewrite_media_urls_in_value(val: &mut Value) {
+    match val {
+        Value::Object(obj) => {
+            for k in ["url", "thumbnail_url", "cover_url"] {
+                if let Some(Value::String(s)) = obj.get_mut(k)
+                    && s.starts_with("/media/")
+                {
+                    *s = s.replacen("/media/", "/api/admin/media/", 1);
+                }
+            }
+            for child in obj.values_mut() {
+                if child.is_object() || child.is_array() {
+                    rewrite_media_urls_in_value(child);
+                }
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                rewrite_media_urls_in_value(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn rewrite_preview_media_urls(mut view: EntryView, type_key: &str) -> EntryView {
     let admin_media = |url: &str| url.replacen("/media/", "/api/admin/media/", 1);
     view.cover_url = view.cover_url.as_deref().map(admin_media);
+    for val in view.fields.values_mut() {
+        rewrite_media_urls_in_value(val);
+    }
     for field in &mut view.field_list {
-        field.image_url = field.image_url.as_deref().map(admin_media);
-        field.gallery_urls = field
-            .gallery_urls
-            .iter()
-            .map(|url| admin_media(url))
-            .collect();
+        if let Some(ref mut media) = field.media {
+            rewrite_media_urls_in_value(media);
+        }
+        for item in &mut field.gallery {
+            rewrite_media_urls_in_value(item);
+        }
     }
     if view.url.is_none() {
         view.url = Some(format!(

@@ -110,15 +110,17 @@ pub struct EffectiveFieldProjection {
     pub editable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectivePanelProjection {
     pub panel: PanelDefinition,
     pub placement: PanelPlacementConfig,
     pub field_keys: Vec<String>,
     pub subgroups: Vec<LayoutFieldSubgroup>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panel_fields: Vec<crate::field_schema::FieldSpec>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EffectiveEditorRegionsProjection {
     pub main_top: Vec<EffectivePanelProjection>,
     pub main_primary: Vec<EffectivePanelProjection>,

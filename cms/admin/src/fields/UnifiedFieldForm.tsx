@@ -49,6 +49,8 @@ export interface UnifiedFieldFormProps {
   readOnlyKeys?: ReadonlySet<string>;
   fieldErrors?: Record<string, string>;
   savedValues?: Record<string, unknown>;
+  rootSpecs?: readonly FieldSpec[];
+  rootValues?: Record<string, unknown>;
   onApiError: (error: unknown, fallback: string) => void;
 }
 
@@ -131,12 +133,16 @@ export const UnifiedFieldForm: React.FC<UnifiedFieldFormProps> = ({
   readOnlyKeys,
   fieldErrors,
   savedValues,
+  rootSpecs,
+  rootValues,
   onApiError,
 }) => {
   const { __ } = useI18n();
   const idPrefix = useId();
   const [activeTabKey, setActiveTabKey] = useState<string>('');
   const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({});
+  const effectiveRootSpecs = rootSpecs ?? fields;
+  const effectiveRootValues = rootValues ?? values;
 
   const scopeRenderer = (
     scopeFields: readonly FieldSpec[],
@@ -155,8 +161,8 @@ export const UnifiedFieldForm: React.FC<UnifiedFieldFormProps> = ({
           item.conditions,
           scopeFields,
           scopeValues,
-          fields,
-          values,
+          effectiveRootSpecs,
+          effectiveRootValues,
         );
         if (!visibleTab) {
           currentTab = null;
@@ -172,7 +178,7 @@ export const UnifiedFieldForm: React.FC<UnifiedFieldFormProps> = ({
     }
 
     const renderFieldLeaf = (field: FieldSpec): React.ReactNode => {
-      if (!evaluateConditions(field.conditions, scopeFields, scopeValues, fields, values)) {
+      if (!evaluateConditions(field.conditions, scopeFields, scopeValues, effectiveRootSpecs, effectiveRootValues)) {
         return null;
       }
 
@@ -376,9 +382,9 @@ export const UnifiedFieldForm: React.FC<UnifiedFieldFormProps> = ({
                 field={field}
                 value={effectiveVal}
                 scopeValues={scopeValues}
-                rootValues={values}
+                rootValues={effectiveRootValues}
                 scopeSpecs={scopeFields}
-                rootSpecs={fields}
+                rootSpecs={effectiveRootSpecs}
                 locale={locale}
                 disabled={isFieldDisabled}
                 onChange={emitValue}
@@ -424,6 +430,7 @@ export const UnifiedFieldForm: React.FC<UnifiedFieldFormProps> = ({
         <div
           key={field.key}
           className={`${spanClass} space-y-1`.trim()}
+          data-field-key={fullKey}
           data-testid={`unified-field-${fullKey}`}
         >
           {renderControl()}
@@ -462,7 +469,7 @@ export const UnifiedFieldForm: React.FC<UnifiedFieldFormProps> = ({
             }
 
             const visibleSections = seg.sections.filter(s =>
-              evaluateConditions(s.header.conditions, scopeFields, scopeValues, fields, values),
+              evaluateConditions(s.header.conditions, scopeFields, scopeValues, effectiveRootSpecs, effectiveRootValues),
             );
             if (visibleSections.length === 0) return null;
             const allowMulti = visibleSections.some(s => s.header.multi_expand);
@@ -527,6 +534,6 @@ export const UnifiedFieldForm: React.FC<UnifiedFieldFormProps> = ({
   return useMemo(
     () => scopeRenderer(fields, values, onChange, disabled, ''),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fields, values, layoutMode, viewport, siteTimezone, csrfToken, contextTypeKey, locale, disabled, readOnlyKeys, fieldErrors, savedValues, activeTabKey, openAccordions],
+    [fields, values, layoutMode, viewport, siteTimezone, csrfToken, contextTypeKey, locale, disabled, readOnlyKeys, fieldErrors, savedValues, rootSpecs, rootValues, activeTabKey, openAccordions],
   );
 };

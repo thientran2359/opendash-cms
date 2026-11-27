@@ -363,14 +363,21 @@ impl ContentEntryInput {
             if field.is_ui_only() {
                 continue;
             }
+            let visible = crate::field_schema::evaluate_conditions(
+                field.conditions.as_ref(),
+                &schema.fields,
+                &self.values,
+                &schema.fields,
+                &self.values,
+            );
             let value = self.values.get(&field.key).unwrap_or(&Value::Null);
             if value.is_null() {
-                if field.effective_required() {
+                if visible && field.effective_required() {
                     return Err("Thiếu custom field bắt buộc.");
                 }
                 continue;
             }
-            if !valid_field_value(field, value) {
+            if !valid_field_value_in_context(field, value, &schema.fields, &self.values, visible) {
                 return Err("Giá trị custom field không đúng kiểu hoặc vượt giới hạn.");
             }
         }
@@ -403,15 +410,34 @@ impl ContentEntryInput {
                 return Err("Giá trị chứa custom field chưa được khai báo.");
             }
         }
+        let root_specs: Vec<crate::field_schema::FieldSpec> = effective
+            .effective_fields
+            .values()
+            .map(|e| e.definition.clone())
+            .chain(effective.ui_fields.iter().cloned())
+            .collect();
         for (key, entry) in &effective.effective_fields {
+            let visible = crate::field_schema::evaluate_conditions(
+                entry.definition.conditions.as_ref(),
+                &root_specs,
+                &self.values,
+                &root_specs,
+                &self.values,
+            );
             let value = self.values.get(key).unwrap_or(&Value::Null);
             if value.is_null() {
-                if entry.effective_required() {
+                if visible && entry.effective_required() {
                     return Err("Thiếu custom field bắt buộc.");
                 }
                 continue;
             }
-            if !valid_field_value(&entry.definition, value) {
+            if !valid_field_value_in_context(
+                &entry.definition,
+                value,
+                &root_specs,
+                &self.values,
+                visible,
+            ) {
                 return Err("Giá trị custom field không đúng kiểu hoặc vượt giới hạn.");
             }
         }

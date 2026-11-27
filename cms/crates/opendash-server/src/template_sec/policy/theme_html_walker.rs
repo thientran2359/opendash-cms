@@ -6,7 +6,6 @@ pub(crate) enum UrlSourceKind {
     TrustedEntryBatch,
     TrustedLink,
     TrustedField,
-    TrustedRawUrl,
     FieldNode(FieldTemplateNode),
 }
 

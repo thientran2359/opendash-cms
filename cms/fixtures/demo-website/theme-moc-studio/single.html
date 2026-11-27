@@ -5,16 +5,20 @@
     <div class="ms-content od-prose">{{ od_content() }}</div>
     <dl class="ms-meta-dl">
       {% for field in entry.field_list %}
-        {% if field.text or field.image_url or field.gallery_urls %}
+        {% if field.text or field.media or field.gallery or field.link %}
           <dt>{{ field.label }}</dt>
-          {% if field.image_url %}
-            <dd><img src="{{ field.image_url }}" alt="{{ field.label }}" loading="lazy"></dd>
-          {% elif field.gallery_urls %}
+          {% if field.media %}
+            <dd><img src="{{ field.media.url }}" alt="{{ field.media.alt or field.label }}" loading="lazy"></dd>
+          {% elif field.gallery %}
             <dd class="ms-gallery">
-              {% for url in field.gallery_urls %}
-                <img src="{{ url }}" alt="{{ field.label }}" loading="lazy">
+              {% for img in field.gallery %}
+                <img src="{{ img.url }}" alt="{{ img.alt or field.label }}" loading="lazy">
               {% endfor %}
             </dd>
+          {% elif field.link %}
+            <dd><a href="{{ field.link.url }}">{{ field.link.label or field.link.url }}</a></dd>
+          {% elif field.field_type == "richtext" %}
+            <dd class="od-prose">{{ field.text }}</dd>
           {% else %}
             <dd>{{ field.text }}</dd>
           {% endif %}
