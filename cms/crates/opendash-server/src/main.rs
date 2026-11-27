@@ -384,15 +384,8 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
         site_cache_epoch: Arc::clone(crate::cache::SiteCacheEpoch::global()),
         render_cache: Arc::new(crate::cache::ExtensionRenderCache::new()),
         catalog_registry: {
-            let reg = Arc::new(crate::l10n::CatalogRegistry::new_empty());
-            let mut embedded = std::collections::BTreeMap::new();
-            embedded.insert("vi".to_owned(), crate::l10n::EMBEDDED_VI_MO.to_vec());
-            let _ = reg.reload_from_site_paths(
-                &paths,
-                embedded,
-                std::collections::BTreeMap::new(),
-                std::collections::BTreeMap::new(),
-            );
+            let reg = Arc::clone(crate::l10n::CatalogRegistry::global());
+            let _ = reg.reload_site_with_active_packages(&db, &paths).await;
             reg
         },
         recovery,

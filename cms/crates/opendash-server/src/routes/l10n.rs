@@ -106,7 +106,7 @@ fn validate_domain(scope: L10nScope, raw: &str) -> ApiResult<String> {
         }
         return Ok("opendash".to_owned());
     }
-    if !opendash_core::id::valid_package_id(trimmed) {
+    if opendash_core::l10n::validate_extension_text_domain(trimmed).is_err() {
         return Err(ApiError::bad_request("Text domain không hợp lệ."));
     }
     Ok(trimmed.to_owned())
@@ -122,6 +122,34 @@ fn scope_dir(paths: &SitePaths, scope: L10nScope) -> PathBuf {
 
 fn pack_stem(_scope: L10nScope, domain: &str, locale: &str) -> String {
     format!("{domain}-{locale}")
+}
+
+fn ensure_safe_l10n_dir_and_count(paths: &SitePaths, dir: &Path) -> ApiResult<usize> {
+    let root = paths.languages_dir();
+    if root.exists() {
+        crate::secrets::ensure_no_reparse_or_symlink(&root)
+            .map_err(|_| ApiError::bad_request("Thư mục languages/ chứa symlink không hợp lệ."))?;
+    }
+    if dir.exists() {
+        crate::secrets::ensure_no_reparse_or_symlink(dir).map_err(|_| {
+            ApiError::bad_request("Thư mục con languages/ chứa symlink không hợp lệ.")
+        })?;
+    }
+    let mut total = 0usize;
+    for s in [L10nScope::Core, L10nScope::Theme, L10nScope::Plugin] {
+        let sub = scope_dir(paths, s);
+        if sub.exists()
+            && let Ok(rd) = fs::read_dir(&sub)
+        {
+            for ent in rd.flatten() {
+                let name = ent.file_name().to_string_lossy().to_string();
+                if !name.starts_with(".tmp-") && ent.path().is_file() {
+                    total += 1;
+                }
+            }
+        }
+    }
+    Ok(total)
 }
 
 fn has_site_override(paths: &SitePaths, scope: L10nScope, domain: &str, locale: &str) -> bool {
@@ -189,18 +217,14 @@ fn decode_base64(input: &str) -> ApiResult<Vec<u8>> {
     Ok(out)
 }
 
-fn reload_catalog_registry(state: &AppState) -> ApiResult<()> {
-    let mut embedded = BTreeMap::new();
-    embedded.insert("vi".to_owned(), crate::l10n::EMBEDDED_VI_MO.to_vec());
+async fn reload_catalog_registry(state: &AppState) -> ApiResult<()> {
     state
         .catalog_registry
-        .reload_from_site_paths(
-            state.coordinator.paths(),
-            embedded,
-            BTreeMap::new(),
-            BTreeMap::new(),
-        )
-        .map_err(|e| ApiError::internal(format!("Không thể nạp lại catalog l10n: {e}")))
+        .reload_site_with_active_packages(&state.db, state.coordinator.paths())
+        .await
+        .map_err(|e| ApiError::internal(format!("Không thể nạp lại catalog l10n: {e}")))?;
+    crate::cache::SiteCacheEpoch::global().bump();
+    Ok(())
 }
 
 pub async fn l10n_packs_list(
@@ -332,9 +356,23 @@ pub async fn l10n_pack_upload(
         .map_err(|e| ApiError::bad_request(format!("File language pack không hợp lệ: {e}")))?;
 
     let dir = scope_dir(state.coordinator.paths(), scope);
+    let existing_count = ensure_safe_l10n_dir_and_count(state.coordinator.paths(), &dir)?;
     let stem = pack_stem(scope, &domain, &locale);
     let mo_path = dir.join(format!("{stem}.mo"));
     let po_path = dir.join(format!("{stem}.po"));
+    for p in [&po_path, &mo_path] {
+        if p.exists() {
+            crate::secrets::ensure_no_reparse_or_symlink(p).map_err(|_| {
+                ApiError::bad_request("File language pack là symlink không hợp lệ.")
+            })?;
+        }
+    }
+    let needed_new = usize::from(!mo_path.exists()) + usize::from(is_po && !po_path.exists());
+    if existing_count + needed_new > opendash_core::l10n::MAX_SITE_LANGUAGE_FILES {
+        return Err(ApiError::bad_request(
+            "Thư mục languages/ đã đạt giới hạn 128 file.",
+        ));
+    }
 
     if is_po {
         let po_text = std::str::from_utf8(&bytes)
@@ -350,7 +388,7 @@ pub async fn l10n_pack_upload(
         }
     }
 
-    reload_catalog_registry(&state)?;
+    reload_catalog_registry(&state).await?;
     let loaded = state
         .catalog_registry
         .resolve(scope, &domain, &locale)
@@ -383,12 +421,16 @@ pub async fn l10n_pack_delete(
         .map_err(|_| ApiError::bad_request("Mã locale BCP47 không hợp lệ."))?;
 
     let dir = scope_dir(state.coordinator.paths(), scope);
+    let _ = ensure_safe_l10n_dir_and_count(state.coordinator.paths(), &dir)?;
     let stem = pack_stem(scope, &domain, &locale);
     let po_path = dir.join(format!("{stem}.po"));
     let mo_path = dir.join(format!("{stem}.mo"));
     let mut removed = false;
     for path in [&po_path, &mo_path] {
         if path.exists() {
+            crate::secrets::ensure_no_reparse_or_symlink(path).map_err(|_| {
+                ApiError::bad_request("File language pack là symlink không hợp lệ.")
+            })?;
             fs::remove_file(path)
                 .map_err(|e| ApiError::internal(format!("Không thể xóa language pack: {e}")))?;
             removed = true;
@@ -400,7 +442,7 @@ pub async fn l10n_pack_delete(
         ));
     }
 
-    reload_catalog_registry(&state)?;
+    reload_catalog_registry(&state).await?;
     Ok((
         StatusCode::OK,
         Json(serde_json::json!({
