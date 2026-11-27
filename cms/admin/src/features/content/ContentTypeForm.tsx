@@ -2,8 +2,12 @@ import { __, _x, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import {
-  FieldSpec,
-  FieldType,
+  CONTENT_CREATOR_FIELD_TYPES,
+  OPTION_BEARING_CREATOR_TYPES,
+  type FieldSpec,
+  type FieldType,
+  parseCreatorFieldOptions,
+  withCreatorFieldDefaults,
 } from './types.ts';
 import type { ContentPublicationPolicy, ContentSupport, ContentTypeDefinitionWithSettings } from '../../api/content.ts';
 
@@ -122,32 +126,21 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
       if (usedKeys.has(field.key)) throw new Error(__("Field \"{{value1}}\" has a duplicate key.", { value1: field.key }));
       usedKeys.add(field.key);
       let options: FieldSpec['options'] = [];
-      if (field.type === 'select') {
-        const lines = field.optionsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-        if (!lines.length || lines.length > 100) {
-          throw new Error(__("Field \"{{value1}}\" requires 1 to 100 options.", { value1: field.label }));
-        }
-        options = lines.map(line => {
-          const separator = line.indexOf('|');
-          if (separator < 1) throw new Error(__("Option \"{{value1}}\" must use the format value|Label.", { value1: line }));
-          const value = line.slice(0, separator).trim();
-          const optionLabel = line.slice(separator + 1).trim();
-          if (!value || value.length > 128 || !optionLabel || optionLabel.length > 100) {
-            throw new Error(__("Option \"{{value1}}\" has an invalid value or label.", { value1: line }));
-          }
-          return { value, label: optionLabel };
+      if (OPTION_BEARING_CREATOR_TYPES.includes(field.type)) {
+        options = parseCreatorFieldOptions(field.optionsText, {
+          count: () => __("Field \"{{value1}}\" requires 1 to 100 options.", { value1: field.label }),
+          format: line => __("Option \"{{value1}}\" must use the format value|Label.", { value1: line }),
+          bounds: line => __("Option \"{{value1}}\" has an invalid value or label.", { value1: line }),
+          duplicate: () => __("Field \"{{value1}}\" has duplicate options.", { value1: field.label }),
         });
-        if (new Set(options.map(option => option.value)).size !== options.length) {
-          throw new Error(__("Field \"{{value1}}\" has duplicate options.", { value1: field.label }));
-        }
       }
-      return {
+      return withCreatorFieldDefaults({
         key: field.key,
         label: field.label,
         type: field.type,
         required: field.required,
         options,
-      };
+      });
     });
     return { key, label, fields: resultFields,
       settings: { public: isPublic, has_archive: hasArchive, publication, supports },
@@ -319,8 +312,8 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
                 disabled={disabled}
                 onChange={event => updateField(field.id, { type: event.target.value as FieldType })}
               >
-                {(['text','textarea','richtext','number','boolean','date','select','media','gallery'] as FieldType[]).map(v => ({ value: v, label: v })).map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                {CONTENT_CREATOR_FIELD_TYPES.map(v => (
+                  <option key={v} value={v}>{v}</option>
                 ))}
               </select>
             </label>
@@ -335,7 +328,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               <span>{__("Required")}</span>
             </label>
           </div>
-          {field.type === 'select' && (
+          {OPTION_BEARING_CREATOR_TYPES.includes(field.type) && (
             <label htmlFor={`schema-field-options-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
               <span>{__("Options * (one per line: value|Label)")}</span>
               <textarea

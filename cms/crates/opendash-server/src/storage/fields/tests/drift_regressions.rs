@@ -71,7 +71,7 @@ async fn f01_media_is_referenced_detects_nested_repeater_and_group_media_on_publ
     let mut rep = FieldSpec::new(FieldType::Repeater, "slides", "Slides");
     rep.fields = vec![slide_img];
 
-    let mut badge_img = FieldSpec::new(FieldType::Media, "badge_img", "Huy hiệu");
+    let badge_img = FieldSpec::new(FieldType::Media, "badge_img", "Huy hiệu");
     let mut grp = FieldSpec::new(FieldType::Group, "meta_box", "Meta");
     grp.fields = vec![badge_img];
 
@@ -115,6 +115,65 @@ async fn f01_media_is_referenced_detects_nested_repeater_and_group_media_on_publ
         .unwrap();
         assert!(media_is_referenced(&db, mid).await.unwrap());
     }
+
+    // F-01: Deactivating owning CPT or withdrawing Field Group must revoke public media grants.
+    sqlx::query(
+        "UPDATE content_types SET provider_status = 'provider_inactive' WHERE key = 'showcase'",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    assert!(!media_is_referenced(&db, &card_media).await.unwrap());
+    sqlx::query("UPDATE content_types SET provider_status = 'active' WHERE key = 'showcase'")
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(media_is_referenced(&db, &card_media).await.unwrap());
+
+    let fg_media = "f".repeat(64);
+    sqlx::query(
+        "INSERT INTO media_assets (id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height, lifecycle_state, generation, version)
+         VALUES (?, 'image', 'fg.png', 'image/png', 'png', 100, 10, 10, 10, 10, 'active', 1, 1)",
+    )
+    .bind(&fg_media)
+    .execute(&db)
+    .await
+    .unwrap();
+    let mut fg_img = FieldSpec::new(FieldType::Media, "fg_banner", "Banner");
+    fg_img.media_kind = Some(MediaFieldKind::Image);
+    sqlx::query(
+        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, default_region, default_order, collapsible, status, version)
+         VALUES ('user:showcase_fg', 'user', NULL, 'showcase_fg', 'Extra', '', ?, 'main_bottom', 0, 0, 'active', 1)",
+    )
+    .bind(serde_json::to_string(&vec![fg_img]).unwrap())
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO content_field_group_targets (group_id, type_key, association_state) VALUES ('user:showcase_fg', 'showcase', 'declared')")
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE content_entries SET values_json = ? WHERE id = ?")
+        .bind(json!({"slides": [{"slide_img": card_media}], "meta_box": {"badge_img": grp_media}, "fg_banner": fg_media}).to_string())
+        .bind(entry_id)
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO entry_builder_media_refs (entry_id, media_id, ref_role, source_kind) VALUES (?, ?, 'image', 'field')")
+        .bind(entry_id)
+        .bind(&fg_media)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(media_is_referenced(&db, &fg_media).await.unwrap());
+
+    sqlx::query(
+        "UPDATE content_field_groups SET status = 'withdrawn' WHERE group_id = 'user:showcase_fg'",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    assert!(!media_is_referenced(&db, &fg_media).await.unwrap());
 }
 
 #[tokio::test]
@@ -349,4 +408,79 @@ async fn f11_f16_context_fields_without_list_and_term_extension_media_pins() {
             .iter()
             .any(|p| p.source_kind == "term_extension")
     );
+}
+
+#[tokio::test]
+async fn f11_cpt_target_fields_excludes_private_and_includes_public_field_groups() {
+    let tmp = TempDir::new("f11-cpt-target");
+    let db = init_db(&tmp.0.join("database/opendash.sqlite"))
+        .await
+        .unwrap();
+
+    let ui_tab = FieldSpec::new(FieldType::Tab, "tab_info", "Tab");
+    let pub_base = FieldSpec::new(FieldType::Text, "pub_sub", "Public Sub");
+    let mut priv_base = FieldSpec::new(FieldType::Text, "secret_note", "Secret");
+    priv_base.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        min_edit_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Private),
+    });
+    let mut admin_base = FieldSpec::new(FieldType::Text, "admin_only", "Admin Only");
+    admin_base.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Admin),
+        min_edit_role: Some(FieldRole::Admin),
+        public_exposure: Some(PublicExposure::Private),
+    });
+    let def = ContentTypeDefinition {
+        key: "guide".into(),
+        label: "Guide".into(),
+        fields: vec![ui_tab, pub_base, priv_base, admin_base],
+        settings: ContentTypeSettings::default(),
+    };
+    sqlx::query(
+        "INSERT INTO content_types (key, definition_json, owner_kind, provider_status, declaration_state, version)
+         VALUES ('guide', ?, 'user', 'active', 'declared', 1)",
+    )
+    .bind(serde_json::to_string(&def).unwrap())
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let mut fg_pub = FieldSpec::new(FieldType::Text, "fg_badge", "FG Badge");
+    fg_pub.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        min_edit_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Public),
+    });
+    let mut fg_priv = FieldSpec::new(FieldType::Text, "fg_secret", "FG Secret");
+    fg_priv.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        min_edit_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Private),
+    });
+    sqlx::query(
+        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, default_region, default_order, collapsible, status, version)
+         VALUES ('user:guide_fg', 'user', NULL, 'guide_fg', 'Guide FG', '', ?, 'main_bottom', 0, 0, 'active', 1)",
+    )
+    .bind(serde_json::to_string(&vec![fg_pub, fg_priv]).unwrap())
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO content_field_group_targets (group_id, type_key, association_state) VALUES ('user:guide_fg', 'guide', 'declared')")
+        .execute(&db)
+        .await
+        .unwrap();
+
+    let mut tx = db.begin().await.unwrap();
+    let allowed =
+        crate::storage::overrides::validate_cpt_target_fields_in_tx(&mut tx, "guide", None)
+            .await
+            .unwrap()
+            .unwrap();
+    assert!(allowed.contains(&"pub_sub".to_owned()));
+    assert!(allowed.contains(&"fg_badge".to_owned()));
+    assert!(!allowed.contains(&"tab_info".to_owned()));
+    assert!(!allowed.contains(&"secret_note".to_owned()));
+    assert!(!allowed.contains(&"admin_only".to_owned()));
+    assert!(!allowed.contains(&"fg_secret".to_owned()));
 }

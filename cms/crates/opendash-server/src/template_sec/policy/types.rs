@@ -48,9 +48,19 @@ pub enum FieldTemplateNode {
 pub fn field_template_node_from_spec(
     spec: &opendash_core::field_schema::FieldSpec,
 ) -> Option<FieldTemplateNode> {
+    field_template_node_from_spec_with_visibility(
+        spec,
+        opendash_core::field_schema::HydrationVisibility::All,
+    )
+}
+
+pub fn field_template_node_from_spec_with_visibility(
+    spec: &opendash_core::field_schema::FieldSpec,
+    visibility: opendash_core::field_schema::HydrationVisibility,
+) -> Option<FieldTemplateNode> {
     use opendash_core::field_schema::FieldType;
 
-    if spec.is_ui_only() || spec.field_type == FieldType::Secret {
+    if !visibility.allows(spec) {
         return None;
     }
     match spec.field_type {
@@ -66,23 +76,21 @@ pub fn field_template_node_from_spec(
         FieldType::TermRef => Some(FieldTemplateNode::TermRef {
             multiple: spec.multiple,
         }),
-        FieldType::Group => {
-            let mut children = BTreeMap::new();
-            for child in &spec.fields {
-                if let Some(node) = field_template_node_from_spec(child) {
-                    children.insert(child.key.clone(), node);
-                }
-            }
-            Some(FieldTemplateNode::Group(children))
-        }
-        FieldType::Repeater => {
-            let mut children = BTreeMap::new();
-            for child in &spec.fields {
-                if let Some(node) = field_template_node_from_spec(child) {
-                    children.insert(child.key.clone(), node);
-                }
-            }
-            Some(FieldTemplateNode::Repeater(children))
+        FieldType::Group | FieldType::Repeater => {
+            let child_vis = visibility.child_visibility();
+            let children = spec
+                .fields
+                .iter()
+                .filter_map(|child| {
+                    field_template_node_from_spec_with_visibility(child, child_vis)
+                        .map(|node| (child.key.clone(), node))
+                })
+                .collect();
+            Some(if spec.field_type == FieldType::Group {
+                FieldTemplateNode::Group(children)
+            } else {
+                FieldTemplateNode::Repeater(children)
+            })
         }
         FieldType::Text
         | FieldType::Textarea
@@ -145,19 +153,19 @@ impl ThemeUrlPolicy {
     ) -> Self {
         let mut site_options_tree = BTreeMap::new();
         for spec in opendash_core::field_schema::global_site_option_fields() {
-            if spec.is_ui_only() || !spec.public {
-                continue;
-            }
-            if let Some(node) = field_template_node_from_spec(&spec) {
+            if let Some(node) = field_template_node_from_spec_with_visibility(
+                &spec,
+                opendash_core::field_schema::HydrationVisibility::OptionsPublicOnly,
+            ) {
                 site_options_tree.insert(spec.key, node);
             }
         }
         let mut options_tree = site_options_tree.clone();
         for spec in theme_options {
-            if spec.is_ui_only() || !spec.public {
-                continue;
-            }
-            if let Some(node) = field_template_node_from_spec(spec) {
+            if let Some(node) = field_template_node_from_spec_with_visibility(
+                spec,
+                opendash_core::field_schema::HydrationVisibility::OptionsPublicOnly,
+            ) {
                 options_tree.insert(spec.key.clone(), node);
             }
         }
@@ -183,13 +191,11 @@ impl ThemeUrlPolicy {
     ) -> Self {
         let mut copy = self.clone();
         copy.entry_field_nodes.clear();
+        let vis = opendash_core::field_schema::HydrationVisibility::ContentPublic {
+            max_view_role: opendash_core::content::FieldRole::Editor,
+        };
         for spec in fields {
-            if spec.is_ui_only()
-                || spec.effective_acl().2 != opendash_core::content::PublicExposure::Public
-            {
-                continue;
-            }
-            if let Some(node) = field_template_node_from_spec(spec) {
+            if let Some(node) = field_template_node_from_spec_with_visibility(spec, vis) {
                 copy.entry_field_nodes.insert(spec.key.clone(), node);
             }
         }

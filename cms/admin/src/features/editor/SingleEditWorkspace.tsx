@@ -22,7 +22,7 @@ import type { AuthUser, PluginLifecycleConfirmation as PluginLifecycleConfirmati
 import type { ContentFieldValue, EffectiveEditorConfigProjection, EffectivePanelProjection, TranslationLinkSummary } from '../content/types.ts';
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
-import { validateRequiredEditorFields } from './editorFieldValidation.ts';
+import { matchesMediaPickerKind, validateRequiredEditorFields } from './editorFieldValidation.ts';
 import { useSiteTimezone } from '../../fields/useSiteTimezone.ts';
 import { isUiOnlyFieldType } from '../../fields/helpers.ts';
 import { MediaPicker } from '../media/MediaPicker.tsx';
@@ -242,7 +242,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       || target.schemaToken !== activeMediaSchemaRef.current
       || !eff || !eff.editable || eff.effective_status !== 'active'
       || !supportAllowsField(typeKey, target.fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
-      || eff.definition.type !== (target.kind === 'image' ? 'media' : 'gallery')
+      || !matchesMediaPickerKind(eff.definition.type, target.kind)
     ) return;
     setMediaPicker(null);
     // Trust the picker-provided ordered selection, not any stale React values
@@ -1116,7 +1116,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             !csrfToken || !user || !draftRef.current
             || !eff || !eff.editable || eff.effective_status !== 'active'
             || !supportAllowsField(typeKey, fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
-            || eff.definition.type !== kind
+            || !matchesMediaPickerKind(eff.definition.type, kind)
           ) return;
           setMediaPicker({
             fieldKey, kind, scopeKey: mediaScopeKey,
@@ -1256,7 +1256,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         && config.effective_fields[mediaPicker.fieldKey]?.editable
         && config.effective_fields[mediaPicker.fieldKey]?.effective_status === 'active'
         && supportAllowsField(typeKey, mediaPicker.fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
-        && config.effective_fields[mediaPicker.fieldKey]?.definition.type === mediaPicker.kind
+        && matchesMediaPickerKind(config.effective_fields[mediaPicker.fieldKey]?.definition.type, mediaPicker.kind)
         && (
           <MediaPicker
             key={`${mediaPicker.scopeKey}:${mediaPicker.fieldKey}`}

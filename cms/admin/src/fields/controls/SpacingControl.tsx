@@ -35,7 +35,7 @@ export const SpacingControl: React.FC<{
 }> = ({ field, value, disabled = false, responsiveInfo, onChange }) => {
   const prop = field.property === 'margin' ? 'margin' : 'padding';
   const propPrefix = prop === 'margin' ? 'm' : 'p';
-  const minVal = field.min ?? (prop === 'margin' ? -128 : 0);
+  const minVal = field.min ?? (prop === 'margin' ? -256 : 0);
   const maxVal = field.max ?? 256;
   const unit = field.unit ?? 'px';
 

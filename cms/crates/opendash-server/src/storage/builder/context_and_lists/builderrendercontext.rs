@@ -236,7 +236,7 @@ pub(crate) async fn hydrate_render_context_for_documents_in_conn(
                         crate::field_hydrate::collect_hydration_ids(
                             &def.schema.schema.fields,
                             &props.values,
-                            false,
+                            crate::field_hydrate::HydrationVisibility::All,
                             &mut media_ids,
                             &mut entry_ids,
                             &mut term_ids,

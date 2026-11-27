@@ -194,3 +194,137 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
     assert_eq!(body_field.text, "<p>Builder Copy</p>");
     assert!(builder_nonces.is_empty());
 }
+
+#[test]
+fn r2_01_entry_view_strips_private_children_inside_public_group_and_repeater() {
+    use opendash_core::field_schema::FieldAcl;
+
+    let pub_hex = "a".repeat(64);
+    let priv_hex = "b".repeat(64);
+    let mut pub_media = FieldSpec::new(FieldType::Media, "pub_img", "Public Img");
+    pub_media.media_kind = Some(MediaFieldKind::Image);
+    let mut priv_media = FieldSpec::new(FieldType::Media, "priv_img", "Private Img");
+    priv_media.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        min_edit_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Private),
+    });
+    let mut priv_rt = FieldSpec::new(FieldType::Richtext, "priv_rt", "Private RichText");
+    priv_rt.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Admin),
+        min_edit_role: Some(FieldRole::Admin),
+        public_exposure: Some(PublicExposure::Private),
+    });
+    let mut pub_group = FieldSpec::new(FieldType::Group, "pub_group", "Public Group");
+    pub_group.fields = vec![pub_media, priv_media, priv_rt];
+
+    let pub_text = FieldSpec::new(FieldType::Text, "label_txt", "Label");
+    let mut priv_rep_rt = FieldSpec::new(FieldType::Richtext, "secret_rt", "Secret");
+    priv_rep_rt.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        min_edit_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Private),
+    });
+    let mut pub_rep = FieldSpec::new(FieldType::Repeater, "pub_rep", "Public Rep");
+    pub_rep.fields = vec![pub_text, priv_rep_rt];
+
+    let mut schema_def = ContentTypeDefinition {
+        key: "case_r2".into(),
+        label: "Case R2".into(),
+        fields: vec![pub_group, pub_rep],
+        settings: ContentTypeSettings::default(),
+    };
+    for f in &mut schema_def.fields {
+        f.acl = Some(FieldAcl {
+            min_view_role: Some(FieldRole::Editor),
+            min_edit_role: Some(FieldRole::Editor),
+            public_exposure: Some(PublicExposure::Public),
+        });
+    }
+    let effective = EffectiveContentSchema::assemble(
+        OwnedDescriptor {
+            owner: ResourceOwner::User,
+            status: ProviderStatus::Active,
+            declaration_state: DeclarationState::Declared,
+            descriptor: schema_def,
+        },
+        1,
+        vec![],
+    )
+    .unwrap();
+
+    let mut media_map = BTreeMap::new();
+    media_map.insert(
+        pub_hex.clone(),
+        HydratedMediaRow {
+            id: pub_hex.clone(),
+            kind: "image".into(),
+            width: Some(100),
+            height: Some(100),
+        },
+    );
+    media_map.insert(
+        priv_hex.clone(),
+        HydratedMediaRow {
+            id: priv_hex.clone(),
+            kind: "image".into(),
+            width: Some(100),
+            height: Some(100),
+        },
+    );
+    let hctx = HydrationContext {
+        media: &media_map,
+        entries: &BTreeMap::new(),
+        terms: &BTreeMap::new(),
+        is_preview: false,
+    };
+    let record = ContentEntryRecord {
+        id: 22,
+        content_type_key: "case_r2".into(),
+        locale: "vi".into(),
+        translation_group_id: "tg-case-r2".into(),
+        translations: vec![],
+        slug: "r2".into(),
+        title: "R2".into(),
+        values: [
+            (
+                "pub_group".into(),
+                json!({ "pub_img": pub_hex, "priv_img": priv_hex, "priv_rt": "<p>secret</p>" }),
+            ),
+            (
+                "pub_rep".into(),
+                json!([{ "label_txt": "Open", "secret_rt": "<p>leak</p>" }]),
+            ),
+        ]
+        .into(),
+        term_ids: vec![],
+        primary_category_term_id: None,
+        publication_status: "published".into(),
+        page_layout_key: None,
+        custom_template_key: None,
+        content_mode: ContentMode::Editor,
+        version: 1,
+        created_at: String::new(),
+        updated_at: String::new(),
+        published_at: None,
+    };
+    let mut nonces = RichTextNonceTable::default();
+    let view = build_hydrated_entry_view_with_context(
+        &record,
+        &effective,
+        None,
+        &[],
+        &[],
+        FieldRole::Editor,
+        Some(&hctx),
+        Some(&mut nonces),
+    );
+    let grp = view.fields["pub_group"].as_object().unwrap();
+    assert!(grp.contains_key("pub_img"));
+    assert!(!grp.contains_key("priv_img"));
+    assert!(!grp.contains_key("priv_rt"));
+    let rep_row = view.fields["pub_rep"][0].as_object().unwrap();
+    assert_eq!(rep_row["label_txt"], json!("Open"));
+    assert!(!rep_row.contains_key("secret_rt"));
+    assert!(nonces.is_empty());
+}

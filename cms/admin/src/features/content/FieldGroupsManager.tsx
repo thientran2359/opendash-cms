@@ -7,12 +7,16 @@ import {
   updateFieldGroup,
 } from '../../api/content.ts';
 import {
+  CONTENT_CREATOR_FIELD_TYPES,
+  OPTION_BEARING_CREATOR_TYPES,
   type FieldSpec,
   type FieldType,
   type EditorRegion,
   type FieldGroupRecord,
   type FieldRole,
   type PublicExposure,
+  parseCreatorFieldOptions,
+  withCreatorFieldDefaults,
 } from './types.ts';
 import { AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 
@@ -40,6 +44,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
   const [fieldKey, setFieldKey] = useState('');
   const [fieldLabel, setFieldLabel] = useState('');
   const [fieldType, setFieldType] = useState<FieldType>('text');
+  const [optionsText, setOptionsText] = useState('');
   const [minViewRole, setMinViewRole] = useState<FieldRole>('editor');
   const [minEditRole, setMinEditRole] = useState<FieldRole>('editor');
   const [publicExposure, setPublicExposure] = useState<PublicExposure>('public');
@@ -72,19 +77,27 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
     if (!csrfToken) return;
     setSaving(true);
     try {
+      const options = OPTION_BEARING_CREATOR_TYPES.includes(fieldType)
+        ? parseCreatorFieldOptions(optionsText, {
+          count: () => __("Field \"{{value1}}\" requires 1 to 100 options.", { value1: fieldLabel.trim() || fieldKey.trim() }),
+          format: line => __("Option \"{{value1}}\" must use the format value|Label.", { value1: line }),
+          bounds: line => __("Option \"{{value1}}\" has an invalid value or label.", { value1: line }),
+          duplicate: () => __("Field \"{{value1}}\" has duplicate options.", { value1: fieldLabel.trim() || fieldKey.trim() }),
+        })
+        : [];
       const fields: FieldSpec[] = [
-        {
+        withCreatorFieldDefaults({
           key: fieldKey.trim(),
           label: fieldLabel.trim(),
           type: fieldType,
           required: false,
-          options: [],
+          options,
           acl: {
             min_view_role: minViewRole,
             min_edit_role: minEditRole,
             public_exposure: publicExposure,
           },
-        },
+        }),
       ];
       await createFieldGroup(
         {
@@ -100,6 +113,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
       setTitle('');
       setFieldKey('');
       setFieldLabel('');
+      setOptionsText('');
       setShowCreateForm(false);
       await reload();
       onChanged();
@@ -247,8 +261,8 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
             value={fieldType}
             onChange={e => setFieldType(e.target.value as FieldType)}
           >
-            {(['text','textarea','richtext','number','boolean','date','select','media','gallery'] as FieldType[]).map(v => ({ value: v, label: v })).map(ft => (
-              <option key={ft.value} value={ft.value}>{ft.label}</option>
+            {CONTENT_CREATOR_FIELD_TYPES.map(ft => (
+              <option key={ft} value={ft}>{ft}</option>
             ))}
           </select>
           <select
@@ -273,6 +287,16 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
             <option value="private">{__("Private")}</option>
           </select>
         </div>
+        {OPTION_BEARING_CREATOR_TYPES.includes(fieldType) && (
+          <textarea
+            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+            placeholder={__("Options * (one per line: value|Label)")}
+            rows={3}
+            value={optionsText}
+            onChange={e => setOptionsText(e.target.value)}
+            required
+          />
+        )}
         <AdminButton type="submit" variant="primary" size="sm" disabled={saving || !csrfToken}>
           {saving ? __("Creating...") : __("Create field group")}
         </AdminButton>

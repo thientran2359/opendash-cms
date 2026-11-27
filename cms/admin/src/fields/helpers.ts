@@ -146,7 +146,7 @@ export function normalizeSpacingValue(
   max?: number,
 ): SpacingValue {
   const loBound = property === 'margin' ? -256 : 0;
-  const lo = Math.max(loBound, min ?? (property === 'margin' ? -128 : 0));
+  const lo = Math.max(loBound, min ?? loBound);
   const hi = Math.min(256, max ?? 256);
   const clampSide = (v: unknown): number | undefined => {
     if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
