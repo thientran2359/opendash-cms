@@ -18944,3 +18944,123 @@ msgstr "Dữ liệu JSON chuyển hướng không hợp lệ hoặc vượt quá
 #: server:error:redirects.csv_http_payload_too_large
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr "Nội dung yêu cầu nhập CSV vượt quá giới hạn kích thước HTTP cho phép."
+
+#: admin:studio.unified_ast.add_child
+msgid "Add {{title}}"
+msgstr "Thêm {{title}}"
+
+#: admin:builder.inspector.attributes_visibility
+msgid "Block attributes & visibility"
+msgstr "Thuộc tính & hiển thị Block"
+
+#: admin:builder.editor_core.settings_failed
+msgid "Block settings action failed."
+msgstr "Thao tác cài đặt block thất bại."
+
+#: admin:builder.inspector.css_classes
+msgid "CSS classes"
+msgstr "Lớp CSS"
+
+#: admin:builder.inspector.invalid_css_classes
+msgid "CSS classes may only contain ASCII letters, numbers, spaces, '-' or '_' (max 256)."
+msgstr "Lớp CSS chỉ được chứa chữ cái ASCII, số, khoảng trắng, '-' hoặc '_' (tối đa 256 ký tự)."
+
+#: admin:builder.editor_core.cannot_add_here
+msgid "Cannot add this block at the selected location."
+msgstr "Không thể thêm block này tại vị trí đã chọn."
+
+#: admin:builder.editor_core.locked_ancestor_delete
+msgid "Cannot delete a node inside an inactive container."
+msgstr "Không thể xóa nút nằm bên trong vùng chứa đang tạm ngưng."
+
+#: admin:builder.editor_core.cannot_insert_image
+msgid "Cannot insert image at this location."
+msgstr "Không thể chèn ảnh tại vị trí này."
+
+#: admin:builder.editor_core.cannot_move_here
+msgid "Cannot move block into that target container."
+msgstr "Không thể di chuyển block vào vùng chứa đích đó."
+
+#: admin:builder.builder_preview_frame.gear_container
+msgid "Container actions"
+msgstr "Thao tác vùng chứa"
+
+#: admin:builder.inspector.custom_label
+msgid "Custom label"
+msgstr "Nhãn tùy chỉnh"
+
+#: admin:builder.inspector.invalid_html_id
+msgid "HTML ID may only contain letters, numbers, '-' or '_' (max 64)."
+msgstr "ID HTML chỉ được chứa chữ cái, số, '-' hoặc '_' (tối đa 64 ký tự)."
+
+#: admin:builder.inspector.html_anchor_id
+msgid "HTML anchor ID"
+msgstr "ID neo HTML"
+
+#: admin:builder.inspector.hide_desktop
+msgid "Hide desktop"
+msgstr "Ẩn trên máy tính"
+
+#: admin:builder.inspector.hide_mobile
+msgid "Hide mobile"
+msgstr "Ẩn trên di động"
+
+#: admin:builder.inspector.hide_tablet
+msgid "Hide tablet"
+msgstr "Ẩn trên máy tính bảng"
+
+#: admin:studio.catalog.limit_pattern_refs
+msgid "Limit of 16 pattern references"
+msgstr "Giới hạn 16 tham chiếu pattern"
+
+#: admin:studio.catalog.max_depth_8
+msgid "Maximum nesting depth of 8 reached"
+msgstr "Đã đạt độ sâu lồng tối đa 8 cấp"
+
+#: admin:builder.inspector.responsive_visibility
+msgid "Responsive visibility"
+msgstr "Hiển thị theo thiết bị"
+
+#: admin:builder.inspector.empty_selection
+msgid "Select a block on the tree or canvas to edit its settings."
+msgstr "Chọn một block trên cây cấu trúc hoặc vùng xem để chỉnh sửa cài đặt."
+
+#: admin:builder.editor_core.pattern_refs_limit
+msgid "The pattern exceeds the limit of 16 pattern references."
+msgstr "Mẫu thiết kế vượt quá giới hạn 16 tham chiếu pattern."
+
+#: admin:builder.editor_core.pattern_distinct_limit
+msgid "The pattern exceeds the limit of 16 reusable patterns."
+msgstr "Mẫu thiết kế vượt quá giới hạn 16 pattern tái sử dụng."
+
+#: admin:builder.editor_core.pattern_depth_limit
+msgid "The theme pattern exceeds the maximum nesting depth."
+msgstr "Mẫu giao diện vượt quá độ sâu lồng tối đa cho phép."
+
+#: admin:builder.inspector.locked_notice
+msgid "This block belongs to an inactive or unavailable provider and is preserved read-only."
+msgstr "Block này thuộc về nguồn cung cấp đang tắt hoặc không khả dụng và được giữ nguyên ở chế độ chỉ đọc."
+
+#: admin:builder.inspector.no_fields
+msgid "This block has no configurable fields."
+msgstr "Block này không có trường cấu hình nào."
+
+#: admin:studio.catalog.invalid_container
+msgid "This container no longer exists or cannot accept child blocks."
+msgstr "Vùng chứa này không còn tồn tại hoặc không thể nhận block con."
+
+#: admin:builder.editor_core.pattern_incompatible
+msgid "This pattern contains blocks incompatible with the current target."
+msgstr "Mẫu thiết kế chứa các block không tương thích với đích hiện tại."
+
+#: admin:studio.workspace.forbids_slot
+msgid "This template must not contain core/content-slot."
+msgstr "Mẫu giao diện này không được chứa core/content-slot."
+
+#: admin:builder.editor_core.requires_slot
+msgid "This template must retain at least one core/content-slot."
+msgstr "Mẫu giao diện này phải giữ lại ít nhất một core/content-slot."
+
+#: admin:studio.workspace.requires_slot
+msgid "This template requires exactly one core/content-slot."
+msgstr "Mẫu giao diện này yêu cầu đúng một core/content-slot."

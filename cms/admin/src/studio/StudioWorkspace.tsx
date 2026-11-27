@@ -17,9 +17,9 @@ import { saveThemeOptions } from '../api/themes.ts';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
 import { BuilderPreviewFrame } from '../builder/BuilderPreviewFrame.tsx';
 import {
-  EMPTY_DOCUMENT, VALID_TEMPLATE_PART_KEY, allNodes, canDeleteElement, countElementsByType,
-  createStarterTemplateDocument, isElement, locate, visibleNodesInTree,
-  type BuilderDocument, type BuilderElement, type BuilderViewport, type StudioBuilderClipboard,
+  EMPTY_DOCUMENT, VALID_TEMPLATE_PART_KEY, allNodes, countBlocksByType,
+  createStarterTemplateDocument, locate, parsePositiveInt, visibleNodesInTree,
+  type BuilderDocument, type BuilderViewport, type StudioBuilderClipboard,
 } from '../builder/document.ts';
 import { editorDraftStore } from '../features/editor/EditorDraftStore.ts';
 import type { ParsedRoute, StudioPanelId } from '../shell/router.ts';
@@ -347,7 +347,9 @@ export const StudioWorkspace: React.FC<Props> = ({
       setTemplateSelectedNodeId(visibleNodesInTree(existing.ast_json)[0]?.node.id ?? null);
     } else {
       const targetInfo = items.find(t => t.canonical_target_key === targetKey);
-      const starter = createStarterTemplateDocument(Boolean(targetInfo?.requires_content_slot));
+      const starter = createStarterTemplateDocument({
+        includeContentSlot: Boolean(targetInfo?.requires_content_slot),
+      });
       setTemplateEditingEnabled(false);
       setTemplateSavedVersion(null);
       setTemplateSavedDoc(starter);
@@ -776,19 +778,18 @@ export const StudioWorkspace: React.FC<Props> = ({
     }
 
     if (templateDirty && selectedTarget) {
-      if (selectedTarget.requires_content_slot && countElementsByType(templateDoc, 'core/content_slot') !== 1) {
-        setStatus(__("This template requires exactly one core/content_slot."), true);
+      if (selectedTarget.requires_content_slot && countBlocksByType(templateDoc, 'core/content-slot') !== 1) {
+        setStatus(__("This template requires exactly one core/content-slot."), true);
         return;
       }
-      if (selectedTarget.forbids_content_slot && countElementsByType(templateDoc, 'core/content_slot') > 0) {
-        setStatus(__("This template must not contain core/content_slot."), true);
+      if (selectedTarget.forbids_content_slot && countBlocksByType(templateDoc, 'core/content-slot') > 0) {
+        setStatus(__("This template must not contain core/content-slot."), true);
         return;
       }
       const badPart = allNodes(templateDoc).some(
         n =>
-          n.kind === 'element' &&
-          (n.node as BuilderElement).type === 'core/template_part' &&
-          !VALID_TEMPLATE_PART_KEY.test(String((n.node as BuilderElement).props.part_key ?? '')),
+          n.node.block_id === 'core/template-part'
+          && !VALID_TEMPLATE_PART_KEY.test(String(n.node.props?.part_key ?? '')),
       );
       if (badPart) {
         setStatus(__("A template part has an invalid part_key."), true);
@@ -902,9 +903,9 @@ export const StudioWorkspace: React.FC<Props> = ({
     if (!active || !user || !csrfToken || !isMode2 || entryId === null || entryVersion === null || savingRef.current || entryTrashedBlocked) return;
 
     const refs = allNodes(entryDoc)
-      .filter(node => node.kind === 'element' && isElement(node.node) && node.node.type === 'core/pattern_ref')
-      .map(node => Number((node.node as BuilderElement).props.pattern_id));
-    if (refs.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(refs).size > 16) {
+      .filter(entry => entry.node.block_id === 'core/pattern-ref')
+      .map(entry => parsePositiveInt(entry.node.props?.pattern_id));
+    if (refs.length > 16 || refs.some(id => id === null) || new Set(refs).size > 16) {
       setStatus(__("Each reusable pattern requires a valid pattern (up to 16 patterns per page)."), true);
       return;
     }
@@ -1021,13 +1022,6 @@ export const StudioWorkspace: React.FC<Props> = ({
     onNavigateHash('#/dashboard');
   };
 
-  const refreshPatterns = () => {
-    if (!user || !csrfToken) return;
-    listPatterns()
-      .then(res => { setPatterns(res.items); setPatternsLoaded(true); })
-      .catch(cause => onApiError(cause, __("Cannot reload the pattern list.")));
-  };
-
   const handleMenusMutated = async () => {
     try {
       const res = await listMenus(100, 0);
@@ -1037,12 +1031,6 @@ export const StudioWorkspace: React.FC<Props> = ({
       onApiError(cause, __("Cannot reload the menu list."));
     }
   };
-
-  const availablePartKeys = targets
-    .filter(t => t.target.kind === 'part' && t.target.part_key)
-    .map(t => t.target.part_key as string);
-
-  void canDeleteElement;
 
   const canSaveMode2 =
     !entryTrashedBlocked &&
@@ -1238,18 +1226,11 @@ export const StudioWorkspace: React.FC<Props> = ({
                 onChangeDocument={handleBuilderChange}
                 csrfToken={csrfToken}
                 viewport={viewport}
+                contextTarget={isPatternEntry ? { kind: 'pattern' } : { kind: 'entry_body', type_key: entryTypeKey }}
                 contextTypeKey={isPatternEntry ? null : entryTypeKey}
                 locale={entryLocale ?? effectivePreviewLocale ?? null}
                 siteTimezone={generalDraft?.timezone ?? generalSaved?.timezone}
                 themeRevision={themeRevision}
-                patterns={patterns}
-                patternsLoaded={patternsLoaded}
-                onRefreshPatterns={refreshPatterns}
-                allowRouteContext={!isPatternEntry}
-                allowPatternRef={!isPatternEntry}
-                allowList={!isPatternEntry}
-                allowContentSlot={false}
-                allowTemplatePart={false}
                 requiresContentSlot={false}
                 diagnostics={entryDiagnostics}
                 hadFreeformWrap={entryHadFreeformWrap}
@@ -1322,10 +1303,6 @@ export const StudioWorkspace: React.FC<Props> = ({
               templateDirty={templateDirty}
               viewport={viewport}
               themeRevision={themeRevision}
-              patterns={patterns}
-              patternsLoaded={patternsLoaded}
-              onRefreshPatterns={refreshPatterns}
-              availablePartKeys={availablePartKeys}
               onBuilderMessage={(msg, failed) => setStatus(msg, Boolean(failed))}
               onApiError={onApiError}
               disabled={loading || saving || !csrfToken || localeDraftBlocked}

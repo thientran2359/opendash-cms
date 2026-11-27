@@ -28,6 +28,7 @@ const BRIDGE_SCRIPT = [
   'for(var j=0;j<nodes.length;j++){',
   'if(nodes[j].getAttribute("data-node-id")===id){',
   'nodes[j].setAttribute(attr,"1");',
+  'if(attr==="data-od-selected"){var anc=nodes[j];while(anc){if(anc.tagName==="DETAILS")anc.open=true;anc=anc.parentElement;}}',
   'if(doScroll&&nodes[j].scrollIntoView){nodes[j].scrollIntoView({block:"nearest",behavior:"smooth"});}',
   'break;',
   '}',
@@ -41,12 +42,13 @@ const BRIDGE_SCRIPT = [
   'var replaced={IMG:1,HR:1,BR:1,INPUT:1,VIDEO:1,AUDIO:1,IFRAME:1,EMBED:1,SOURCE:1};',
   'for(var g=0;g<gearHosts.length;g++){',
   'var host=gearHosts[g];var kind=host.getAttribute("data-od-kind");',
-  'if((kind!=="section"&&kind!=="element")||replaced[host.tagName])continue;',
+  'if((kind!=="section"&&kind!=="container"&&kind!=="block")||replaced[host.tagName])continue;',
   'var nodeId=host.getAttribute("data-node-id");if(!nodeId)continue;',
   'var gear=document.createElement("button");',
   'gear.type="button";gear.className="od-canvas-gear";',
   'gear.setAttribute("data-od-gear",nodeId);',
-  'var labelMeta=document.querySelector(kind==="section"?\'meta[name="od-studio-gear-section"]\':\'meta[name="od-studio-gear-element"]\');',
+  'var gearKind=kind==="section"?"section":kind==="container"?"container":"block";',
+  'var labelMeta=document.querySelector(\'meta[name="od-studio-gear-\'+gearKind+\'"]\');',
   'var titleMeta=document.querySelector(\'meta[name="od-studio-gear-title"]\');',
   'gear.setAttribute("aria-label",labelMeta?labelMeta.getAttribute("content")||"":"Block actions");',
   'gear.setAttribute("title",titleMeta?titleMeta.getAttribute("content")||"":"Block actions");',
@@ -131,7 +133,7 @@ const BRIDGE_SCRIPT = [
   '})();',
 ].join('\n');
 
-const BRIDGE_SCRIPT_SHA256 = 'cSCTsWih/Rgol2yZrAzuk3bDAqtf38Y4+/IPQYma/zQ=';
+const BRIDGE_SCRIPT_SHA256 = 'nhn4sQjJEPssH234n9sJ7uB1zD8gJ1/vb7e2th/SeG8=';
 
 function generateStudioNonce(): string {
   const bytes = new Uint8Array(16);
@@ -184,7 +186,9 @@ export async function preparePreviewMarkup(
   // Resolve private admin media paths into inline raster data URLs.
   const privateTargets = [
     ...Array.from(parsed.querySelectorAll('img[src]')).map(el => ({ el, attr: 'src' })),
+    ...Array.from(parsed.querySelectorAll('video[src]')).map(el => ({ el, attr: 'src' })),
     ...Array.from(parsed.querySelectorAll('video[poster]')).map(el => ({ el, attr: 'poster' })),
+    ...Array.from(parsed.querySelectorAll('video source[src]')).map(el => ({ el, attr: 'src' })),
   ];
   const scopedStyles = Array.from(parsed.querySelectorAll<HTMLStyleElement>('style[data-od-block-styles], style[data-builder-responsive]'));
   const cssPrivatePaths = scopedStyles.flatMap(style =>
@@ -215,7 +219,7 @@ export async function preparePreviewMarkup(
       continue;
     }
     if (
-      !['image/png', 'image/jpeg', 'image/webp'].includes(blob.type) ||
+      !['image/png', 'image/jpeg', 'image/webp', 'video/mp4'].includes(blob.type) ||
       !blob.size ||
       bytes + blob.size > MEDIA_PREVIEW_BYTES_LIMIT
     ) {
@@ -314,7 +318,8 @@ export async function preparePreviewMarkup(
     // Keep the bridge script constant; translated strings travel as inert metadata.
     for (const [name, label] of [
       ['section', __("Section actions")],
-      ['element', __("Element actions")],
+      ['container', __("Container actions")],
+      ['block', __("Block actions")],
       ['title', __("Block actions")],
     ]) {
       const labelMeta = parsed.createElement('meta');

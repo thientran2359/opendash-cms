@@ -18947,3 +18947,123 @@ msgstr ""
 #: server:error:redirects.csv_http_payload_too_large
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr ""
+
+#: admin:studio.unified_ast.add_child
+msgid "Add {{title}}"
+msgstr ""
+
+#: admin:builder.inspector.attributes_visibility
+msgid "Block attributes & visibility"
+msgstr ""
+
+#: admin:builder.editor_core.settings_failed
+msgid "Block settings action failed."
+msgstr ""
+
+#: admin:builder.inspector.css_classes
+msgid "CSS classes"
+msgstr ""
+
+#: admin:builder.inspector.invalid_css_classes
+msgid "CSS classes may only contain ASCII letters, numbers, spaces, '-' or '_' (max 256)."
+msgstr ""
+
+#: admin:builder.editor_core.cannot_add_here
+msgid "Cannot add this block at the selected location."
+msgstr ""
+
+#: admin:builder.editor_core.locked_ancestor_delete
+msgid "Cannot delete a node inside an inactive container."
+msgstr ""
+
+#: admin:builder.editor_core.cannot_insert_image
+msgid "Cannot insert image at this location."
+msgstr ""
+
+#: admin:builder.editor_core.cannot_move_here
+msgid "Cannot move block into that target container."
+msgstr ""
+
+#: admin:builder.builder_preview_frame.gear_container
+msgid "Container actions"
+msgstr ""
+
+#: admin:builder.inspector.custom_label
+msgid "Custom label"
+msgstr ""
+
+#: admin:builder.inspector.invalid_html_id
+msgid "HTML ID may only contain letters, numbers, '-' or '_' (max 64)."
+msgstr ""
+
+#: admin:builder.inspector.html_anchor_id
+msgid "HTML anchor ID"
+msgstr ""
+
+#: admin:builder.inspector.hide_desktop
+msgid "Hide desktop"
+msgstr ""
+
+#: admin:builder.inspector.hide_mobile
+msgid "Hide mobile"
+msgstr ""
+
+#: admin:builder.inspector.hide_tablet
+msgid "Hide tablet"
+msgstr ""
+
+#: admin:studio.catalog.limit_pattern_refs
+msgid "Limit of 16 pattern references"
+msgstr ""
+
+#: admin:studio.catalog.max_depth_8
+msgid "Maximum nesting depth of 8 reached"
+msgstr ""
+
+#: admin:builder.inspector.responsive_visibility
+msgid "Responsive visibility"
+msgstr ""
+
+#: admin:builder.inspector.empty_selection
+msgid "Select a block on the tree or canvas to edit its settings."
+msgstr ""
+
+#: admin:builder.editor_core.pattern_refs_limit
+msgid "The pattern exceeds the limit of 16 pattern references."
+msgstr ""
+
+#: admin:builder.editor_core.pattern_distinct_limit
+msgid "The pattern exceeds the limit of 16 reusable patterns."
+msgstr ""
+
+#: admin:builder.editor_core.pattern_depth_limit
+msgid "The theme pattern exceeds the maximum nesting depth."
+msgstr ""
+
+#: admin:builder.inspector.locked_notice
+msgid "This block belongs to an inactive or unavailable provider and is preserved read-only."
+msgstr ""
+
+#: admin:builder.inspector.no_fields
+msgid "This block has no configurable fields."
+msgstr ""
+
+#: admin:studio.catalog.invalid_container
+msgid "This container no longer exists or cannot accept child blocks."
+msgstr ""
+
+#: admin:builder.editor_core.pattern_incompatible
+msgid "This pattern contains blocks incompatible with the current target."
+msgstr ""
+
+#: admin:studio.workspace.forbids_slot
+msgid "This template must not contain core/content-slot."
+msgstr ""
+
+#: admin:builder.editor_core.requires_slot
+msgid "This template must retain at least one core/content-slot."
+msgstr ""
+
+#: admin:studio.workspace.requires_slot
+msgid "This template requires exactly one core/content-slot."
+msgstr ""

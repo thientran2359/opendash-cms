@@ -1,176 +1,408 @@
 import { evaluateConditions } from '../../fields/conditions.ts';
 import { isUiOnlyFieldType } from '../../fields/helpers.ts';
 import type { FieldSpec } from '../../fields/types.ts';
-import type { BlockCatalogItemDto } from '../../types.ts';
-import type { BlockSchemaV1 } from '../../types.ts';
-import { type BuilderElement, type BuilderDocument, allNodes, locate } from './types_and_tree.ts';
-import { object } from './mutations.ts';
+import type { BlockCatalogItemDto, BlockSchema, DefaultChildSpec } from '../../types.ts';
+import {
+  type BlockNode,
+  type BuilderContextTarget,
+  type BuilderDocument,
+  type DragCompatibilityMask,
+  allNodes,
+  findActiveCatalogItem,
+  findCatalogItem,
+  locate,
+  maxSubtreeDepth,
+  object,
+} from './types_and_tree.ts';
 
-export const ELEMENT_PROP_KEYS: Record<string, readonly string[]> = {
-  'core/heading': ['level', 'text', 'binding'],
-  'core/text': ['text', 'rich', 'binding'],
-  'core/image': ['media_id', 'alt', 'binding'],
-  'core/video': ['media_id', 'poster_image_id', 'controls', 'muted'],
-  'core/button': ['label', 'url', 'new_tab', 'nofollow', 'binding'],
-  'core/list': ['type_key', 'category_id', 'tag_id', 'taxonomy_key', 'term_id',
-    'include_descendants', 'sort', 'page_size'],
-  'core/contact_form': ['form_id', 'submit_label'],
-  'core/pattern_ref': ['pattern_id'],
-  'core/content_slot': [],
-  'core/template_part': ['part_key'],
-  'legacy/block': ['block_id', 'values'],
-  'plugin/block': ['block_id', 'values'],
-};
+export const MAX_BUILDER_DEPTH = 8;
+export const MAX_BUILDER_NODES = 512;
+export const MAX_BUILDER_BYTES = 256 * 1024;
+export const MAX_BUILDER_LISTS = 8;
+export const MAX_BUILDER_PATTERN_INSTANCES = 16;
+export const MAX_BUILDER_CONTENT_SLOTS = 1;
 
+const TEMPLATE_CONTEXT_KINDS = new Set<BuilderContextTarget['kind']>([
+  'single',
+  'single_custom',
+  'singular',
+  'page',
+  'page_layout',
+  'home',
+  'index',
+  'archive',
+  'taxonomy',
+  'not_found',
+]);
 
-export function hasUnexpectedElementFields(element: BuilderElement): boolean {
-  const allowed = ELEMENT_PROP_KEYS[element.type];
-  return !allowed
-    || Object.keys(element).some(key => key !== 'id' && key !== 'type' && key !== 'props' && key !== 'meta')
-    || !object(element.props)
-    || Object.keys(element.props).some(key => !allowed.includes(key));
-}
-
-
-export function hasInvalidCoreBinding(element: BuilderElement): boolean {
-  const binding = element.props.binding;
-  if (binding === undefined) return false;
-  if (!object(binding) || typeof binding.type_key !== 'string'
-      || typeof binding.entry_slug !== 'string'
-      || !['text', 'media_id', 'alt', 'label', 'url'].includes(String(binding.target))
-      || Object.keys(binding).some(key => !['type_key', 'entry_slug', 'source', 'target'].includes(key))
-      || !object(binding.source)) return true;
-  const source = binding.source;
-  const sourceKeys = source.kind === 'title' ? ['kind']
-    : source.kind === 'field' ? ['kind', 'key']
-      : source.kind === 'route_context' ? ['kind', 'field_key'] : null;
-  return !sourceKeys || Object.keys(source).some(key => !sourceKeys.includes(key))
-    || (source.kind === 'field' && typeof source.key !== 'string')
-    || (source.kind === 'route_context' && typeof source.field_key !== 'string');
-}
-
-/** Mirrors the core/list validation contract for both editor updates and
- * locked historical nodes. Category + tag may coexist; generic filters
- * cannot be mixed with those legacy aliases.
- */
-
-export function validListTaxonomyFilter(props: {
-  category_id?: unknown;
-  tag_id?: unknown;
-  taxonomy_key?: unknown;
-  term_id?: unknown;
-  include_descendants?: unknown;
-}): boolean {
-  const category = props.category_id !== undefined;
-  const tag = props.tag_id !== undefined;
-  const taxonomy = props.taxonomy_key !== undefined;
-  const term = props.term_id !== undefined;
-  return !(category && (!Number.isSafeInteger(props.category_id) || Number(props.category_id) <= 0))
-    && !(tag && (!Number.isSafeInteger(props.tag_id) || Number(props.tag_id) <= 0))
-    && !(taxonomy && (typeof props.taxonomy_key !== 'string'
-      || !/^[a-z][a-z0-9_]{0,63}$/.test(props.taxonomy_key)))
-    && !(term && (!Number.isSafeInteger(props.term_id) || Number(props.term_id) <= 0))
-    && taxonomy === term
-    && !(taxonomy && (category || tag))
-    && (props.include_descendants === undefined || typeof props.include_descendants === 'boolean')
-    && !(props.include_descendants === true && !category && !taxonomy);
-}
-
-/** Unknown, malformed, or inactive-provider elements are immutable anchors.
- * The server's is_preserved validator is the final authority. */
-
-export function isLockedElement(
-  element: BuilderElement,
-  blockCatalog: BlockCatalogItemDto[] = [],
-): boolean {
-  const props = element.props;
-  if (hasUnexpectedElementFields(element) || hasInvalidCoreBinding(element)) return true;
-  switch (element.type) {
-    case 'core/heading': return !Number.isInteger(props.level) || Number(props.level) < 1
-      || Number(props.level) > 6 || typeof props.text !== 'string';
-    case 'core/text': return typeof props.text !== 'string'
-      || (props.rich !== undefined && typeof props.rich !== 'boolean');
-    case 'core/image': return typeof props.media_id !== 'string' || typeof props.alt !== 'string';
-    case 'core/video': return typeof props.media_id !== 'string';
-    case 'core/button': return typeof props.label !== 'string' || typeof props.url !== 'string'
-      || (props.new_tab !== undefined && typeof props.new_tab !== 'boolean')
-      || (props.nofollow !== undefined && typeof props.nofollow !== 'boolean');
-    case 'core/contact_form': return typeof props.form_id !== 'number' || props.form_id <= 0 || typeof props.submit_label !== 'string' || !props.submit_label.trim();
-    case 'core/list': return typeof props.type_key !== 'string'
-      || !/^[a-z][a-z0-9_]{0,63}$/.test(props.type_key)
-      || !validListTaxonomyFilter(props)
-      || (props.sort !== undefined && !['id_desc', 'id_asc'].includes(String(props.sort)))
-      || (props.page_size !== undefined && (!Number.isInteger(props.page_size)
-        || Number(props.page_size) < 1 || Number(props.page_size) > 20));
-    // 0 is the intentional client-side placeholder while selecting a Pattern.
-    // Server validation rejects it on Save; retain the Inspector so the user
-    // can select a valid Pattern without throwing away the new block.
-    case 'core/pattern_ref': return !Number.isSafeInteger(props.pattern_id) || Number(props.pattern_id) < 0;
-    case 'core/content_slot': return Object.keys(props).length > 0;
-    case 'core/template_part': return typeof props.part_key !== 'string';
-    case 'legacy/block':
-      // Retired M1–M4 theme block nodes remain immutable read-only anchors (D3).
-      return true;
-    case 'plugin/block': {
-      // Rust PluginBlockProps has deny_unknown_fields. An extra top-level
-      // property (including a seemingly valid binding) makes the entire node
-      // unresolved; never offer mutable controls for that preserved payload.
-      if (typeof props.block_id !== 'string' || !object(props.values)
-          || Object.keys(props).some(key => key !== 'block_id' && key !== 'values')) return true;
-      const descriptor = blockCatalog.find(item => item.block_id === props.block_id);
-      return !descriptor || descriptor.status !== 'active' || descriptor.declaration_state !== 'declared';
-    }
-    default: return true;
+export function parsePositiveInt(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
   }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!/^[1-9]\d{0,18}$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
 }
 
+/** Evaluate allow/deny pattern lists identically to Rust `matches_pattern_list`. */
+export function matchesPatternList(
+  patterns: readonly string[] | null | undefined,
+  token: string,
+): boolean {
+  if (!patterns || patterns.length === 0) return true;
+  if (patterns.some(entry => entry === `!${token}`)) return false;
+  const positive = patterns.filter(entry => !entry.startsWith('!'));
+  if (positive.length === 0) return true;
+  return positive.includes('*') || positive.includes(token);
+}
+
+function matchesContextToken(target: BuilderContextTarget, token: string): boolean {
+  if (target.kind === 'loop_item') return false;
+  if (token === '*') return true;
+  if (token === 'template') return TEMPLATE_CONTEXT_KINDS.has(target.kind);
+  if (token === 'single') {
+    return target.kind === 'single' || target.kind === 'single_custom' || target.kind === 'singular';
+  }
+  if (token.startsWith('entry_body:')) {
+    return target.kind === 'entry_body' && target.type_key === token.slice('entry_body:'.length);
+  }
+  if (token.startsWith('part:')) {
+    return target.kind === 'part' && target.part_key === token.slice('part:'.length);
+  }
+  if (token.startsWith('single:')) {
+    const key = token.slice('single:'.length);
+    return (target.kind === 'single' || target.kind === 'single_custom') && target.type_key === key;
+  }
+  if (token.startsWith('archive:')) {
+    return target.kind === 'archive' && target.type_key === token.slice('archive:'.length);
+  }
+  if (token.startsWith('taxonomy:')) {
+    return target.kind === 'taxonomy' && target.taxonomy_key === token.slice('taxonomy:'.length);
+  }
+  return target.kind === token;
+}
+
+export function matchesContextTarget(
+  contextTarget: BuilderContextTarget | null | undefined,
+  allowedContexts: readonly string[] | null | undefined,
+): boolean {
+  if (!contextTarget) return true;
+  if (contextTarget.kind === 'loop_item') return false;
+  if (!allowedContexts || allowedContexts.length === 0) return true;
+  if (allowedContexts.some(token => token.startsWith('!') && matchesContextToken(contextTarget, token.slice(1)))) {
+    return false;
+  }
+  const positive = allowedContexts.filter(token => !token.startsWith('!'));
+  if (positive.length === 0) return true;
+  return positive.some(token => matchesContextToken(contextTarget, token));
+}
+
+export function isLockedNode(
+  node: BlockNode,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
+): boolean {
+  const validShape = typeof node.id === 'string'
+    && typeof node.block_id === 'string'
+    && (node.props === undefined || object(node.props))
+    && (node.children === undefined || Array.isArray(node.children))
+    && Object.keys(node).every(k => k === 'id' || k === 'block_id' || k === 'props' || k === 'meta' || k === 'children');
+  if (!validShape) return true;
+  return !findActiveCatalogItem(blockCatalog, node.block_id);
+}
+
+export function hasLockedAncestor(
+  document: BuilderDocument,
+  id: string,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
+): boolean {
+  const entries = allNodes(document);
+  const location = entries.find(entry => entry.node.id === id);
+  if (!location || location.path.length <= 1) return false;
+  for (let depth = 1; depth < location.path.length; depth += 1) {
+    const ancestorPath = location.path.slice(0, depth);
+    const ancestor = entries.find(
+      entry => entry.path.length === ancestorPath.length
+        && ancestorPath.every((step, idx) => entry.path[idx] === step),
+    );
+    if (ancestor && isLockedNode(ancestor.node, blockCatalog)) return true;
+  }
+  return false;
+}
 
 export function isProtectedNode(
-  document: BuilderDocument, id: string,
-  blockCatalog: BlockCatalogItemDto[] = [],
+  document: BuilderDocument,
+  id: string,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
 ): boolean {
   const entries = allNodes(document);
   const location = entries.find(entry => entry.node.id === id);
   if (!location) return false;
-  return entries.some(entry =>
-    entry.kind === 'element'
-    && isLockedElement(entry.node as BuilderElement, blockCatalog)
-    && entry.path.slice(0, location.path.length).every((step, index) => step === location.path[index])
+  if (hasLockedAncestor(document, id, blockCatalog)) return true;
+  return entries.some(
+    entry => entry.path.length >= location.path.length
+      && location.path.every((step, index) => entry.path[index] === step)
+      && isLockedNode(entry.node, blockCatalog),
   );
 }
 
-/** Preserve the absolute index and ancestor IDs of every unresolvable node,
- * even when other nodes are added/moved. Mirrors server's is_preserved guard. */
-
-export function preservesAnchors(
-  before: BuilderDocument, after: BuilderDocument,
-  deletedId?: string,
-  blockCatalog: BlockCatalogItemDto[] = [],
+export function canParentAcceptChild(
+  parentSchema: BlockSchema | null | undefined,
+  childSchema: BlockSchema | null | undefined,
+  parentId: string | null,
+  childBlockId?: string,
 ): boolean {
-  const deleted = deletedId ? locate(before, deletedId) : undefined;
-  const afterEntries = allNodes(after);
-  const beforeEntries = allNodes(before);
-  return beforeEntries.every(entry => {
-    if (entry.kind !== 'element' || !isLockedElement(entry.node as BuilderElement, blockCatalog)) return true;
-    if (deleted && deleted.path.every((step, index) => entry.path[index] === step)) return true;
-    const current = afterEntries.find(item => item.node.id === entry.node.id);
-    return !!current && JSON.stringify(current.node) === JSON.stringify(entry.node)
-      && JSON.stringify(current.path) === JSON.stringify(entry.path)
-      && entry.path.every((_, depth) => {
-        const oldAncestor = beforeEntries.find(item => JSON.stringify(item.path) === JSON.stringify(entry.path.slice(0, depth + 1)));
-        const newAncestor = afterEntries.find(item => JSON.stringify(item.path) === JSON.stringify(entry.path.slice(0, depth + 1)));
-        return oldAncestor?.node.id === newAncestor?.node.id;
-      });
-  });
+  const resolvedChildId = childSchema?.id ?? childBlockId ?? '';
+  if (!resolvedChildId) return false;
+  if (parentId !== null) {
+    if (!parentSchema || !parentSchema.supports_children) return false;
+    if (!matchesPatternList(parentSchema.allowed_children, resolvedChildId)) return false;
+  }
+  if (!childSchema) return false;
+  const parentToken = parentId === null ? 'root' : parentSchema?.id;
+  if (!parentToken) return false;
+  return matchesPatternList(childSchema.allowed_parents, parentToken);
 }
 
+export function countBlocksByType(
+  document: BuilderDocument | null | undefined,
+  blockId: string,
+): number {
+  return allNodes(document).filter(entry => entry.node.block_id === blockId).length;
+}
+
+export function countDescendantBlocksByType(
+  document: BuilderDocument | null | undefined,
+  rootId: string,
+  blockId: string,
+): number {
+  const target = locate(document, rootId);
+  if (!target) return 0;
+  return allNodes(document).filter(
+    entry => entry.path.length >= target.path.length
+      && target.path.every((step, idx) => entry.path[idx] === step)
+      && entry.node.block_id === blockId,
+  ).length;
+}
+
+export function canDeleteNode(
+  document: BuilderDocument,
+  id: string,
+  options?: {
+    requiresContentSlot?: boolean;
+    blockCatalog?: readonly BlockCatalogItemDto[];
+  },
+): boolean {
+  const target = locate(document, id);
+  if (!target) return false;
+  if (options?.blockCatalog && hasLockedAncestor(document, id, options.blockCatalog)) {
+    return false;
+  }
+  if (options?.requiresContentSlot) {
+    const totalSlots = countBlocksByType(document, 'core/content-slot');
+    const subtreeSlots = countDescendantBlocksByType(document, id, 'core/content-slot');
+    if (totalSlots > 0 && subtreeSlots >= totalSlots) return false;
+  }
+  return true;
+}
 
 export function withinBuilderLimits(document: BuilderDocument): boolean {
-  return allNodes(document).length <= 512
-    && new TextEncoder().encode(JSON.stringify(document)).byteLength <= 256 * 1024;
+  return allNodes(document).length <= MAX_BUILDER_NODES
+    && new TextEncoder().encode(JSON.stringify(document)).byteLength <= MAX_BUILDER_BYTES;
 }
 
-/** Duplicate an editable subtree without moving any immutable anchor. */
+export function computeDragMask(
+  document: BuilderDocument,
+  sourceId: string,
+  blockCatalog: readonly BlockCatalogItemDto[],
+  contextTarget?: BuilderContextTarget | null,
+): DragCompatibilityMask | null {
+  const source = locate(document, sourceId);
+  if (!source) return null;
+  const sourceSubtreeHeight = maxSubtreeDepth(source.node);
+  const validParentIds = new Set<string | null>();
+  const validSiblingTargetIds = new Set<string>();
+
+  if (hasLockedAncestor(document, sourceId, blockCatalog)) {
+    return { sourceId, sourceSubtreeHeight, validParentIds, validSiblingTargetIds };
+  }
+
+  const entries = allNodes(document);
+  const subtreeIds = new Set(
+    entries
+      .filter(
+        entry => entry.path.length >= source.path.length
+          && source.path.every((step, idx) => entry.path[idx] === step),
+      )
+      .map(entry => entry.node.id),
+  );
+
+  const sourceSchema = findActiveCatalogItem(blockCatalog, source.node.block_id)?.schema;
+  const sourceLocked = isLockedNode(source.node, blockCatalog);
+
+  if (sourceSubtreeHeight <= MAX_BUILDER_DEPTH) {
+    if (!sourceLocked && sourceSchema) {
+      if (
+        matchesContextTarget(contextTarget, sourceSchema.allowed_contexts)
+        && canParentAcceptChild(null, sourceSchema, null)
+      ) {
+        validParentIds.add(null);
+      }
+    } else if (sourceLocked) {
+      validParentIds.add(null);
+    }
+  }
+
+  for (const entry of entries) {
+    if (subtreeIds.has(entry.node.id)) continue;
+    if (entry.depth + sourceSubtreeHeight > MAX_BUILDER_DEPTH) continue;
+    if (isLockedNode(entry.node, blockCatalog) || hasLockedAncestor(document, entry.node.id, blockCatalog)) {
+      continue;
+    }
+    const parentSchema = findActiveCatalogItem(blockCatalog, entry.node.block_id)?.schema;
+    if (!parentSchema?.supports_children) continue;
+
+    if (!sourceLocked && sourceSchema) {
+      if (
+        matchesContextTarget(contextTarget, sourceSchema.allowed_contexts)
+        && canParentAcceptChild(parentSchema, sourceSchema, entry.node.id)
+      ) {
+        validParentIds.add(entry.node.id);
+      }
+    } else if (
+      source.parentId === entry.node.id
+      || (
+        matchesPatternList(parentSchema.allowed_children, '*')
+        && matchesPatternList(parentSchema.allowed_children, source.node.block_id)
+      )
+    ) {
+      validParentIds.add(entry.node.id);
+    }
+  }
+
+  for (const entry of entries) {
+    if (subtreeIds.has(entry.node.id) || entry.node.id === sourceId) continue;
+    if (validParentIds.has(entry.parentId)) {
+      validSiblingTargetIds.add(entry.node.id);
+    }
+  }
+
+  return { sourceId, sourceSubtreeHeight, validParentIds, validSiblingTargetIds };
+}
+
+function summarizeDefaultChildren(
+  specs: readonly DefaultChildSpec[] | undefined,
+): { height: number; nodes: number; lists: number; slots: number; patternRefs: number } {
+  if (!specs || specs.length === 0) {
+    return { height: 0, nodes: 0, lists: 0, slots: 0, patternRefs: 0 };
+  }
+  let maxH = 0;
+  let nodes = 0;
+  let lists = 0;
+  let slots = 0;
+  let patternRefs = 0;
+  for (const spec of specs) {
+    const child = summarizeDefaultChildren(spec.children);
+    if (1 + child.height > maxH) maxH = 1 + child.height;
+    nodes += 1 + child.nodes;
+    lists += (spec.block_id === 'core/list' ? 1 : 0) + child.lists;
+    slots += (spec.block_id === 'core/content-slot' ? 1 : 0) + child.slots;
+    patternRefs += (spec.block_id === 'core/pattern-ref' ? 1 : 0) + child.patternRefs;
+  }
+  return { height: maxH, nodes, lists, slots, patternRefs };
+}
+
+export function canInsertBlockAt(
+  document: BuilderDocument,
+  schema: BlockSchema,
+  parentId: string | null,
+  blockCatalog: readonly BlockCatalogItemDto[],
+  contextTarget?: BuilderContextTarget | null,
+  presetKey?: string,
+): boolean {
+  if (!matchesContextTarget(contextTarget, schema.allowed_contexts)) return false;
+
+  let parentDepth = 0;
+  let parentSchema: BlockSchema | null = null;
+  if (parentId !== null) {
+    const parentLoc = locate(document, parentId);
+    if (!parentLoc) return false;
+    if (isLockedNode(parentLoc.node, blockCatalog) || hasLockedAncestor(document, parentId, blockCatalog)) {
+      return false;
+    }
+    parentSchema = findActiveCatalogItem(blockCatalog, parentLoc.node.block_id)?.schema ?? null;
+    if (!parentSchema?.supports_children) return false;
+    parentDepth = parentLoc.depth;
+  }
+
+  if (!canParentAcceptChild(parentSchema, schema, parentId)) return false;
+
+  const preset = presetKey ? schema.presets?.find(p => p.key === presetKey) : undefined;
+  const childSpecs = preset?.children?.length ? preset.children : schema.default_children;
+  const sub = summarizeDefaultChildren(childSpecs);
+  const subtreeHeight = 1 + sub.height;
+  if (parentDepth + subtreeHeight > MAX_BUILDER_DEPTH) return false;
+
+  const nodesAdded = 1 + sub.nodes;
+  if (allNodes(document).length + nodesAdded > MAX_BUILDER_NODES) return false;
+  const listsAdded = (schema.id === 'core/list' ? 1 : 0) + sub.lists;
+  if (countBlocksByType(document, 'core/list') + listsAdded > MAX_BUILDER_LISTS) return false;
+  const slotsAdded = (schema.id === 'core/content-slot' ? 1 : 0) + sub.slots;
+  if (countBlocksByType(document, 'core/content-slot') + slotsAdded > MAX_BUILDER_CONTENT_SLOTS) return false;
+  const patternRefsAdded = (schema.id === 'core/pattern-ref' ? 1 : 0) + sub.patternRefs;
+  if (countBlocksByType(document, 'core/pattern-ref') + patternRefsAdded > MAX_BUILDER_PATTERN_INSTANCES) {
+    return false;
+  }
+  return true;
+}
+
+/** Guarantee immutable/inactive nodes retain identity, props, and inactive container subtrees. */
+export function preservesAnchors(
+  before: BuilderDocument,
+  after: BuilderDocument,
+  deletedId?: string,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
+): boolean {
+  const beforeEntries = allNodes(before);
+  const afterEntries = allNodes(after);
+  const deleted = deletedId ? locate(before, deletedId) : undefined;
+  if (deletedId && deleted && hasLockedAncestor(before, deletedId, blockCatalog)) {
+    return false;
+  }
+  const afterById = new Map(afterEntries.map(entry => [entry.node.id, entry]));
+  for (const entry of beforeEntries) {
+    if (!isLockedNode(entry.node, blockCatalog)) continue;
+    if (
+      deleted
+      && entry.path.length >= deleted.path.length
+      && deleted.path.every((step, idx) => entry.path[idx] === step)
+    ) {
+      continue;
+    }
+    const current = afterById.get(entry.node.id);
+    if (!current || JSON.stringify(current.node) !== JSON.stringify(entry.node)) {
+      return false;
+    }
+    if (current.parentId !== entry.parentId) {
+      if (hasLockedAncestor(before, entry.node.id, blockCatalog)) return false;
+      if (current.parentId !== null) {
+        const nextParent = afterById.get(current.parentId);
+        const parentSchema = nextParent ? findActiveCatalogItem(blockCatalog, nextParent.node.block_id)?.schema : undefined;
+        if (
+          !parentSchema
+          || !matchesPatternList(parentSchema.allowed_children, '*')
+          || !matchesPatternList(parentSchema.allowed_children, entry.node.block_id)
+        ) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
 
 export function declaredBlockKeys(fields: readonly FieldSpec[]): Set<string> {
   const keys = new Set<string>();
@@ -180,16 +412,14 @@ export function declaredBlockKeys(fields: readonly FieldSpec[]): Set<string> {
   return keys;
 }
 
-/** Check the constraints that require previous_values=None in the Rust
- * BlockSchemaV1 validator: newly required fields, visible DNF conditions,
- * nested groups, responsive required values, and repeater min_items/subfields. */
-
 export function pluginValuesReadyForFreshNode(
-  values: Record<string, unknown>, schema: BlockSchemaV1,
+  values: Record<string, unknown>,
+  schema: BlockSchema,
 ): boolean {
-  if (Object.keys(values).length > 64
-      || new TextEncoder().encode(JSON.stringify(values)).byteLength > 64 * 1024) return false;
-  const readyPositiveInt = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v > 0;
+  if (Object.keys(values).length > 64 || new TextEncoder().encode(JSON.stringify(values)).byteLength > 64 * 1024) {
+    return false;
+  }
+  const readyPositiveInt = (v: unknown) => parsePositiveInt(v) !== null;
   const readyField = (
     field: FieldSpec,
     data: Record<string, unknown>,
@@ -220,9 +450,10 @@ export function pluginValuesReadyForFreshNode(
       if (!Array.isArray(value) || value.length > (field.max_items ?? 32)
           || (isVisible && value.length < (field.min_items ?? 0))) return false;
       const childFields = field.fields ?? [];
-      return value.every(item => object(item)
-        && Object.keys(item).length <= 64
-        && childFields.every(child => readyField(child, item, childFields, isVisible)));
+      return value.every(
+        item => object(item) && Object.keys(item).length <= 64
+          && childFields.every(child => readyField(child, item, childFields, isVisible)),
+      );
     }
     if (value === undefined || value === null) return !isVisible || !checkRequired || !field.required;
     if (field.responsive && object(value)) {
@@ -245,7 +476,7 @@ export function pluginValuesReadyForFreshNode(
       const allowed = new Set((field.options ?? []).map(o => o.value));
       if (field.multiple) return Array.isArray(value) && value.every(v => typeof v === 'string' && allowed.has(v));
       if (typeof value !== 'string') return false;
-      if (value === '') return Boolean(field.allow_null || (!isVisible || !checkRequired || !field.required));
+      if (value === '') return Boolean(field.allow_null || !isVisible || !checkRequired || !field.required);
       return allowed.has(value);
     }
     if (field.type === 'radio_buttons') {
@@ -285,12 +516,10 @@ export function pluginValuesReadyForFreshNode(
       }
       return readyPositiveInt(value);
     }
-    return typeof value === 'string'
-      && (!isVisible || !checkRequired || !field.required || value.trim().length > 0);
+    return typeof value === 'string' && (!isVisible || !checkRequired || !field.required || value.trim().length > 0);
   };
   return schema.fields.every(field => readyField(field, values, schema.fields, true));
 }
-
 
 export function collectPatternSourceIds(
   fields: readonly FieldSpec[],
@@ -306,30 +535,27 @@ export function collectPatternSourceIds(
     } else if (field.type === 'select' && field.options_source === 'patterns') {
       const items = Array.isArray(raw) ? raw : [raw];
       for (const item of items) {
-        if (typeof item === 'string' && /^\d+$/.test(item.trim())) {
-          const parsed = Number(item.trim());
-          if (parsed > 0) out.add(parsed);
-        }
+        const parsed = parsePositiveInt(item);
+        if (parsed !== null) out.add(parsed);
       }
     }
   }
 }
 
-
 export function distinctPatternIdCount(
   document: BuilderDocument,
-  blockCatalog: BlockCatalogItemDto[] = [],
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
 ): number {
   const ids = new Set<number>();
   for (const entry of allNodes(document)) {
-    if (entry.kind !== 'element') continue;
-    const el = entry.node as BuilderElement;
-    if (el.type === 'core/pattern_ref') {
-      const pid = el.props.pattern_id;
-      if (typeof pid === 'number' && pid > 0) ids.add(pid);
-    } else if (el.type === 'plugin/block' && object(el.props.values)) {
-      const descriptor = blockCatalog.find(item => item.block_id === el.props.block_id);
-      if (descriptor) collectPatternSourceIds(descriptor.schema.fields, el.props.values, ids);
+    const props = entry.node.props;
+    if (!object(props)) continue;
+    if (entry.node.block_id === 'core/pattern-ref') {
+      const parsed = parsePositiveInt(props.pattern_id);
+      if (parsed !== null) ids.add(parsed);
+    } else {
+      const schema = findCatalogItem(blockCatalog, entry.node.block_id)?.schema;
+      if (schema) collectPatternSourceIds(schema.fields, props, ids);
     }
   }
   return ids.size;

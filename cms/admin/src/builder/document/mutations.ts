@@ -1,205 +1,292 @@
-import type { BlockPropValue } from '../../types.ts';
-import { type NodeVisibility, type NodeMeta, type BuilderElement, type ElementBinding, type ListProps, type BuilderDocument, type ElementType, ELEMENT_TYPES, allNodes, locate, isElement, isSyntheticNode, carrierLocation, clone } from './types_and_tree.ts';
-import { validListTaxonomyFilter } from './validation.ts';
-import { childrenAt, appendNode } from './clipboard_and_insert.ts';
+import type { BlockCatalogItemDto } from '../../types.ts';
+import {
+  type BlockNode,
+  type BuilderContextTarget,
+  type BuilderDocument,
+  type NodeMeta,
+  type NodeVisibility,
+  allNodes,
+  clone,
+  locate,
+  maxSubtreeDepth,
+  newNodeId,
+  object,
+} from './types_and_tree.ts';
+import {
+  MAX_BUILDER_DEPTH,
+  canDeleteNode,
+  canParentAcceptChild,
+  hasLockedAncestor,
+  isLockedNode,
+  matchesContextTarget,
+  matchesPatternList,
+  preservesAnchors,
+  withinBuilderLimits,
+} from './validation.ts';
+import { findActiveCatalogItem } from './types_and_tree.ts';
 
-/** Homepage AST v1. The server validates every Save; this client preserves
- * unknown JSON properties so the Editor never strips historical/bound data. */
-
-export function object(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+function nodeArrayForParent(document: BuilderDocument, parentId: string | null): BlockNode[] | null {
+  if (parentId === null) return document.blocks;
+  const parentLoc = locate(document, parentId);
+  if (!parentLoc) return null;
+  if (!Array.isArray(parentLoc.node.children)) parentLoc.node.children = [];
+  return parentLoc.node.children;
 }
 
-/** Match the fields accepted by Rust's KnownElement / Props
- * #[serde(deny_unknown_fields)]. A historic element carrying an extra field
- * is Unresolved on the server and must remain an immutable anchor. */
-
-export function countElementsByType(document: BuilderDocument, elementType: string): number {
-  return allNodes(document).filter(
-    item => item.kind === 'element' && (item.node as BuilderElement).type === elementType,
-  ).length;
+export function createStarterTemplateDocument(options?: {
+  includeContentSlot?: boolean;
+  includeHeroHeading?: boolean;
+  headingText?: string;
+}): BuilderDocument {
+  const includeContentSlot = options?.includeContentSlot ?? false;
+  const includeHeroHeading = options?.includeHeroHeading ?? true;
+  const doc: BuilderDocument = { schema_version: 1, blocks: [] };
+  const colChildren: BlockNode[] = [];
+  if (includeHeroHeading) {
+    colChildren.push({
+      id: newNodeId('core/heading', doc),
+      block_id: 'core/heading',
+      props: { level: 'h1', text: options?.headingText ?? 'Page title' },
+    });
+  }
+  if (includeContentSlot) {
+    colChildren.push({
+      id: newNodeId('core/content-slot', doc),
+      block_id: 'core/content-slot',
+      props: {},
+    });
+  }
+  const colNode: BlockNode = {
+    id: newNodeId('core/column', doc),
+    block_id: 'core/column',
+    children: colChildren,
+  };
+  const rowNode: BlockNode = {
+    id: newNodeId('core/row', doc),
+    block_id: 'core/row',
+    props: { layout_mode: 'equal', columns: { desktop: 1 } },
+    children: [colNode],
+  };
+  const secNode: BlockNode = {
+    id: newNodeId('core/section', doc),
+    block_id: 'core/section',
+    props: { content_width: 'boxed', text_scheme: 'auto' },
+    children: [rowNode],
+  };
+  doc.blocks.push(secNode);
+  return doc;
 }
 
-
-export function countDescendantElementsByType(
+export function setNodeProps(
   document: BuilderDocument,
-  nodeId: string,
-  elementType: string,
-): number {
-  const target = locate(document, nodeId);
-  if (!target) return 0;
-  return allNodes(document).filter(
-    item =>
-      item.kind === 'element' &&
-      (item.node as BuilderElement).type === elementType &&
-      item.path.length >= target.path.length &&
-      target.path.every((step, idx) => item.path[idx] === step),
-  ).length;
+  id: string,
+  nextProps: Record<string, unknown>,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
+): BuilderDocument | null {
+  if (!object(nextProps)) return null;
+  const next = clone(document);
+  const target = locate(next, id);
+  if (!target || isLockedNode(target.node, blockCatalog) || hasLockedAncestor(next, id, blockCatalog)) {
+    return null;
+  }
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(clone(nextProps))) {
+    if (value !== undefined) cleaned[key] = value;
+  }
+  if (Object.keys(cleaned).length === 0) {
+    delete target.node.props;
+  } else {
+    target.node.props = cleaned;
+  }
+  return withinBuilderLimits(next) && preservesAnchors(document, next, undefined, blockCatalog)
+    ? next
+    : null;
 }
 
-/** Honors TemplateCandidate slot cardinality: never remove the last core/content_slot
- * when requiresContentSlot is true; core/template_part is always removable. */
-
-export function canDeleteElement(
+export function patchNodeProps(
   document: BuilderDocument,
-  nodeId: string,
-  options?: { requiresContentSlot?: boolean },
-): boolean {
-  const target = locate(document, nodeId);
-  if (!target) return false;
-  if (!options?.requiresContentSlot) return true;
-  const totalSlots = countElementsByType(document, 'core/content_slot');
-  const removedSlots = countDescendantElementsByType(document, nodeId, 'core/content_slot');
-  return totalSlots - removedSlots >= 1;
+  id: string,
+  patch: Record<string, unknown>,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
+): BuilderDocument | null {
+  if (!object(patch)) return null;
+  const current = locate(document, id);
+  if (!current) return null;
+  const merged = { ...(current.node.props ?? {}), ...clone(patch) };
+  return setNodeProps(document, id, merged, blockCatalog);
 }
-
-
-export function createStarterTemplateDocument(requiresContentSlot: boolean): BuilderDocument {
-  let doc: BuilderDocument = { schema_version: 1, sections: [] };
-  const sec = appendNode(doc, null, 'section', 'core/heading');
-  if (!sec) return doc;
-  doc = sec.document;
-  const row = appendNode(doc, sec.id, 'row', 'core/heading');
-  if (!row) return doc;
-  doc = row.document;
-  const col = appendNode(doc, row.id, 'column', 'core/heading');
-  if (!col) return doc;
-  doc = col.document;
-  const el = appendNode(doc, col.id, 'element', requiresContentSlot ? 'core/content_slot' : 'core/heading');
-  return el ? el.document : doc;
-}
-
-/** Typed list updates; never encode filters/booleans as static string props. */
-
-export function setListProps(document: BuilderDocument, id: string, props: ListProps): BuilderDocument | null {
-  if (!props.type_key || !/^[a-z][a-z0-9_]{0,63}$/.test(props.type_key)
-      || !Number.isInteger(props.page_size) || props.page_size < 1 || props.page_size > 20
-      || !['id_desc', 'id_asc'].includes(props.sort)
-      || !validListTaxonomyFilter(props)) return null;
-  const next = clone(document);
-  const element = locate(next, id)?.node;
-  if (!element || !isElement(element) || element.type !== 'core/list') return null;
-  element.props = { ...props };
-  return next;
-}
-
-
-export function removeNode(document: BuilderDocument, id: string): BuilderDocument | null {
-  const location = carrierLocation(document, id);
-  if (!location) return null;
-  const next = clone(document);
-  const siblings = childrenAt(next, location.parentId ? locate(next, location.parentId) : undefined);
-  if (!siblings) return null;
-  siblings.splice(location.path[location.path.length - 1], 1);
-  return next;
-}
-
-
-export function moveNode(document: BuilderDocument, id: string, direction: -1 | 1): BuilderDocument | null {
-  const location = carrierLocation(document, id);
-  if (!location) return null;
-  const next = clone(document);
-  const siblings = childrenAt(next, location.parentId ? locate(next, location.parentId) : undefined);
-  if (!siblings) return null;
-  const index = location.path[location.path.length - 1];
-  const target = index + direction;
-  if (target < 0 || target >= siblings.length) return null;
-  [siblings[index], siblings[target]] = [siblings[target], siblings[index]];
-  return next;
-}
-
 
 export function setNodeMeta(
-  document: BuilderDocument, id: string, patch: Partial<NodeMeta>,
+  document: BuilderDocument,
+  id: string,
+  patch: Partial<NodeMeta>,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
 ): BuilderDocument | null {
   const next = clone(document);
-  const location = locate(next, id);
-  if (!location || isSyntheticNode(location.node)) return null;
-  const current: NodeMeta = { ...(location.node.meta ?? {}) };
+  const target = locate(next, id);
+  if (!target || isLockedNode(target.node, blockCatalog) || hasLockedAncestor(next, id, blockCatalog)) {
+    return null;
+  }
+  const merged: NodeMeta = { ...(target.node.meta ?? {}) };
   if ('name' in patch) {
-    const val = patch.name ?? '';
-    if (val.length > 80) return null;
-    if (!val.trim()) delete current.name;
-    else current.name = val;
+    const val = (patch.name ?? '').trim();
+    if (!val) {
+      delete merged.name;
+    } else {
+      if (val.length > 80 || [...val].some(ch => ch.charCodeAt(0) < 32)) return null;
+      merged.name = val;
+    }
   }
   if ('html_id' in patch) {
     const val = (patch.html_id ?? '').trim();
-    if (!val) delete current.html_id;
-    else if (!/^[a-zA-Z0-9_-]{1,64}$/.test(val)) return null;
-    else current.html_id = val;
+    if (!val) {
+      delete merged.html_id;
+    } else if (!/^[a-zA-Z0-9_-]{1,64}$/.test(val)) {
+      return null;
+    } else {
+      merged.html_id = val;
+    }
   }
   if ('class_name' in patch) {
-    const val = patch.class_name ?? '';
-    if (!val.trim()) delete current.class_name;
-    else if (val.length > 256 || !/^[a-zA-Z0-9 _:/.\[\]%#-]{1,256}$/.test(val)) return null;
-    else current.class_name = val;
+    const val = (patch.class_name ?? '').trim();
+    if (!val) {
+      delete merged.class_name;
+    } else if (!/^[a-zA-Z0-9_ -]{1,256}$/.test(val)) {
+      return null;
+    } else {
+      merged.class_name = val;
+    }
   }
   if ('visibility' in patch) {
-    const v = patch.visibility ?? {};
+    const vis = patch.visibility;
     const normalized: NodeVisibility = {};
-    if (v.hide_desktop) normalized.hide_desktop = true;
-    if (v.hide_tablet) normalized.hide_tablet = true;
-    if (v.hide_mobile) normalized.hide_mobile = true;
-    if (Object.keys(normalized).length === 0) delete current.visibility;
-    else current.visibility = normalized;
+    if (vis?.hide_desktop) normalized.hide_desktop = true;
+    if (vis?.hide_tablet) normalized.hide_tablet = true;
+    if (vis?.hide_mobile) normalized.hide_mobile = true;
+    if (Object.keys(normalized).length === 0) delete merged.visibility;
+    else merged.visibility = normalized;
   }
-  if (Object.keys(current).length === 0) delete location.node.meta;
-  else location.node.meta = current;
-  return next;
-}
-
-
-export function setNodeField(
-  document: BuilderDocument, id: string, field: string, value: BlockPropValue | undefined,
-): BuilderDocument | null {
-  return patchNodeFields(document, id, { [field]: value });
-}
-
-
-export function patchNodeFields(
-  document: BuilderDocument, id: string, patch: Record<string, BlockPropValue | undefined>,
-): BuilderDocument | null {
-  const next = clone(document);
-  const location = locate(next, id);
-  if (!location || !isElement(location.node)) return null;
-  const element = location.node;
-  if (element.type === 'plugin/block' && Object.hasOwn(patch, 'values')) {
-    const value = patch.values;
-    if (!object(value) || !object(element.props.values)) return null;
-    element.props = { ...element.props, values: { ...value } };
-  } else if (element.type === 'legacy/block' || element.type === 'plugin/block') {
-    const values = element.props.values;
-    if (!object(values)) return null;
-    const updated = { ...values };
-    for (const [field, value] of Object.entries(patch)) {
-      if (value === undefined) delete updated[field];
-      else updated[field] = value;
-    }
-    element.props = { ...element.props, values: updated };
+  if (Object.keys(merged).length === 0) {
+    delete target.node.meta;
   } else {
-    const updated = { ...element.props };
-    for (const [field, value] of Object.entries(patch)) {
-      if (value === undefined) delete updated[field];
-      else updated[field] = value;
-    }
-    element.props = updated;
+    target.node.meta = merged;
   }
-  return next;
+  return withinBuilderLimits(next) && preservesAnchors(document, next, undefined, blockCatalog)
+    ? next
+    : null;
 }
 
-/** Typed binding updates are kept separate from editing static props.
- * Unbind removes only binding, preserving static values and responsive metadata.
- */
-
-export function setElementBinding(
-  document: BuilderDocument, id: string, binding: ElementBinding | null,
+export function removeNode(
+  document: BuilderDocument,
+  id: string,
+  options?: {
+    requiresContentSlot?: boolean;
+    blockCatalog?: readonly BlockCatalogItemDto[];
+  },
 ): BuilderDocument | null {
+  if (!canDeleteNode(document, id, options)) return null;
   const next = clone(document);
-  const item = locate(next, id);
-  if (!item || !isElement(item.node) || !ELEMENT_TYPES.includes(item.node.type as ElementType)) return null;
-  const props = { ...item.node.props };
-  if (binding === null) delete props.binding;
-  else props.binding = { ...binding, source: { ...binding.source } };
-  item.node.props = props;
-  return next;
+  const target = locate(next, id);
+  if (!target) return null;
+  const siblings = nodeArrayForParent(next, target.parentId);
+  if (!siblings) return null;
+  const index = target.path[target.path.length - 1];
+  siblings.splice(index, 1);
+  return withinBuilderLimits(next) && preservesAnchors(document, next, id, options?.blockCatalog ?? [])
+    ? next
+    : null;
 }
+
+/** Reorder or reparent a block subtree across compatible containers up to max depth 8. */
+export function moveNode(
+  document: BuilderDocument,
+  sourceId: string,
+  targetParentId: string | null,
+  targetIndex: number,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
+  contextTarget?: BuilderContextTarget | null,
+): BuilderDocument | null {
+  if (sourceId === targetParentId || !Number.isInteger(targetIndex) || targetIndex < 0) return null;
+  const source = locate(document, sourceId);
+  if (!source || hasLockedAncestor(document, sourceId, blockCatalog)) return null;
+
+  const targetParent = targetParentId ? locate(document, targetParentId) : undefined;
+  if (targetParentId !== null) {
+    if (!targetParent) return null;
+    const insideSource = targetParent.path.length >= source.path.length
+      && source.path.every((step, idx) => targetParent.path[idx] === step);
+    if (insideSource) return null;
+    if (isLockedNode(targetParent.node, blockCatalog) || hasLockedAncestor(document, targetParentId, blockCatalog)) {
+      return null;
+    }
+  }
+
+  const targetParentDepth = targetParent ? targetParent.depth : 0;
+  if (targetParentDepth + maxSubtreeDepth(source.node) > MAX_BUILDER_DEPTH) return null;
+
+  const sourceLocked = isLockedNode(source.node, blockCatalog);
+  const sourceSchema = findActiveCatalogItem(blockCatalog, source.node.block_id)?.schema;
+  const targetParentSchema = targetParent
+    ? findActiveCatalogItem(blockCatalog, targetParent.node.block_id)?.schema
+    : null;
+
+  if (!sourceLocked && sourceSchema) {
+    if (
+      !matchesContextTarget(contextTarget, sourceSchema.allowed_contexts)
+      || !canParentAcceptChild(targetParentSchema, sourceSchema, targetParentId)
+    ) {
+      return null;
+    }
+  } else if (sourceLocked && targetParentId !== null && source.parentId !== targetParentId) {
+    if (
+      !targetParentSchema
+      || !matchesPatternList(targetParentSchema.allowed_children, '*')
+      || !matchesPatternList(targetParentSchema.allowed_children, source.node.block_id)
+    ) {
+      return null;
+    }
+  }
+
+  const next = clone(document);
+  const sourceSiblings = nodeArrayForParent(next, source.parentId);
+  const targetSiblings = nodeArrayForParent(next, targetParentId);
+  if (!sourceSiblings || !targetSiblings) return null;
+
+  const sourceIndex = source.path[source.path.length - 1];
+  const [moving] = sourceSiblings.splice(sourceIndex, 1);
+  if (!moving) return null;
+
+  const rawAdjusted = source.parentId === targetParentId && targetIndex > sourceIndex
+    ? targetIndex - 1
+    : targetIndex;
+  const insertIndex = Math.max(0, Math.min(rawAdjusted, targetSiblings.length));
+  if (source.parentId === targetParentId && insertIndex === sourceIndex) return null;
+
+  targetSiblings.splice(insertIndex, 0, moving);
+  return withinBuilderLimits(next) && preservesAnchors(document, next, undefined, blockCatalog)
+    ? next
+    : null;
+}
+
+export function moveNodeSibling(
+  document: BuilderDocument,
+  id: string,
+  direction: 'up' | 'down',
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
+  contextTarget?: BuilderContextTarget | null,
+): BuilderDocument | null {
+  const source = locate(document, id);
+  if (!source) return null;
+  const siblings = source.parentId === null
+    ? document.blocks
+    : (locate(document, source.parentId)?.node.children ?? []);
+  const index = source.path[source.path.length - 1];
+  if (direction === 'up') {
+    if (index <= 0) return null;
+    return moveNode(document, id, source.parentId, index - 1, blockCatalog, contextTarget);
+  }
+  if (index >= siblings.length - 1) return null;
+  return moveNode(document, id, source.parentId, index + 2, blockCatalog, contextTarget);
+}
+
+export { allNodes };
