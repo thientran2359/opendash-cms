@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn invocation_timeout_must_not_commit_later() {
-    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     std::thread::spawn(move || {
@@ -105,19 +105,19 @@ async fn invocation_timeout_must_not_commit_later() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn timeout_during_commit_must_not_write_later() {
-    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
     assert_no_late_write_with_sqlite_lock(false).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn timeout_after_sqlite_receives_commit_must_not_write_later() {
-    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
     assert_no_late_write_with_sqlite_lock(true).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn timeout_must_not_be_reported_if_commit_succeeded() {
-    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
     use std::io::Write;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -268,7 +268,7 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn ipc_kv_get_stuck_parent_must_cancel_and_clean_up() {
-    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")

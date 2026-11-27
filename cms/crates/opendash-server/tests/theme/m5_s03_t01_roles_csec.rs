@@ -1,4 +1,4 @@
-#[path = "../src/template_sec/mod.rs"]
+#[path = "../../src/template_sec/mod.rs"]
 mod template_sec;
 
 use std::{

@@ -2,7 +2,7 @@
 //! This uses the production posix_spawn wrapper, not a mocked policy check.
 
 #[cfg(target_os = "macos")]
-#[path = "../src/operations_worker_process.rs"]
+#[path = "../../src/operations_worker_process.rs"]
 mod operations_worker_process;
 
 #[cfg(target_os = "macos")]
@@ -31,7 +31,11 @@ fn macos_jetsam_stress_limit() {
         unsafe { std::env::set_var("OPENDASH_M8_JETSAM_STRESS_MIB", mib.to_string()) };
         let child = operations_worker_process::spawn_with_args(
             &exe,
-            &["--exact", "macos_jetsam_stress_limit", "--nocapture"],
+            &[
+                "--exact",
+                "m8_macos_jetsam_stress::macos_jetsam_stress_limit",
+                "--nocapture",
+            ],
         )
         .expect("spawn Jetsam-limited child via production helper");
         let output = child.wait_with_output().expect("reap child");

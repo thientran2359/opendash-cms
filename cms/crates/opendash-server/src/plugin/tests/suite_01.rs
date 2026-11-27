@@ -209,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sample_plugin_full_execution() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let manager = PluginManager::new(db.clone(), true);
         let zip_bytes =
@@ -263,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fuel_exhaustion_infinite_loop() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -336,7 +336,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_zero_late_writes_on_guest_trap() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -412,7 +412,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_permission_denial_kv_and_loopback() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -481,7 +481,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_linear_memory_limit() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -543,7 +543,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_slow_http_timeout_and_cleanup() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         use tokio::io::AsyncReadExt;
 
         // Bind dummy slow HTTP server on loopback
@@ -664,7 +664,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_lock_timeout_and_zero_late_writes() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db_dir = std::env::temp_dir().join(format!(
             "opendash_test_lock_{}_{}",
             std::process::id(),
@@ -842,7 +842,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_complex_json_input_and_escaping() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let manager = PluginManager::new(db.clone(), true);
         let zip_bytes =
@@ -942,7 +942,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_env_abort_traps_execution() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -991,7 +991,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_host_imports_pointer_and_utf8_validation() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -1085,7 +1085,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_lifecycle_and_teardown() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
         let wasm_echo = wat::parse_str(
@@ -1154,7 +1154,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_worker_termination_and_permit_reclamation_on_timeout() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -1325,7 +1325,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_worker_termination_on_caller_cancellation() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -1698,7 +1698,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_s01_abi_v1_1_large_readback_and_binary_ipc_newline() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let manager = PluginManager::new(db.clone(), true);
 
@@ -1742,7 +1742,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_s01_v3_host_ops_secret_redaction_and_atomic_tombstone_logs() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let temp = S01TempDir::new("s01_host_ops");
         let plugins_root = temp.0.join("plugins");
@@ -2011,7 +2011,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_s01_policy_matrix_public_scope_filters_and_content_delete_cas() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let temp = S01TempDir::new("s01_policy_delete");
         let plugins_root = temp.0.join("plugins");
@@ -2334,7 +2334,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_s01_bugfixes_cache_network_loopback_actor_role_and_semaphores() {
-        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 

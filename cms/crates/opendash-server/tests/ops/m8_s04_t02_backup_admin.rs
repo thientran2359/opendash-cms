@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-#[path = "../src/operations_worker_process.rs"]
+#[path = "../../src/operations_worker_process.rs"]
 mod operations_worker_process;
 
 use reqwest::{Client, StatusCode};

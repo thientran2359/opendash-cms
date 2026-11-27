@@ -1,4 +1,4 @@
-#[path = "../src/plugin/egress.rs"]
+#[path = "../../src/plugin/egress.rs"]
 mod egress;
 
 use std::{

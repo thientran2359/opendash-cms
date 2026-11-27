@@ -1069,7 +1069,7 @@ impl PluginRuntime {
 
         let worker_args: &[&str] = if cfg!(test) {
             &[
-                "plugin::tests::tests::test_worker_entry",
+                "plugin::tests::suite_01::tests::test_worker_entry",
                 "--exact",
                 "--nocapture",
             ]

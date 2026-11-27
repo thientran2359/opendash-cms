@@ -2,8 +2,11 @@ use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
-    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
-    let temp_db = std::env::temp_dir().join(format!("staged_abort_{}.sqlite", std::process::id()));
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
+    let temp_db = std::env::temp_dir().join(format!(
+        "staged_abort_{}.sqlite",
+        crate::auth::generate_random_token()
+    ));
     let _ = std::fs::remove_file(&temp_db);
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
@@ -95,7 +98,13 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
     });
 
     // Deterministically wait until BEGIN IMMEDIATE and INSERT have executed
+    let barrier_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !runtime::TEST_STAGE_WRITE_BARRIER_HIT.load(Ordering::SeqCst) {
+        if task.is_finished() || std::time::Instant::now() >= barrier_deadline {
+            runtime::TEST_STAGE_WRITE_PAUSE.store(false, Ordering::SeqCst);
+            let res = task.await;
+            panic!("staged write barrier not hit before task finished/timed out: {res:?}");
+        }
         tokio::task::yield_now().await;
     }
 
@@ -147,7 +156,7 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn ipc_kv_get_stuck_parent_must_timeout_and_clean_up() {
-    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.acquire().await.unwrap();
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")

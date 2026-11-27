@@ -83,6 +83,34 @@ impl Drop for RunningServer {
     }
 }
 
+fn read_route_sources(routes_dir: &Path, file: &str) -> String {
+    let direct = routes_dir.join(file);
+    if direct.is_file() {
+        return fs::read_to_string(&direct).expect("read route file");
+    }
+    let stem = file.strip_suffix(".rs").unwrap_or(file);
+    let mod_dir = routes_dir.join(stem);
+    if mod_dir.is_dir() {
+        let mut files: Vec<PathBuf> = fs::read_dir(&mod_dir)
+            .expect("read route module dir")
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()) == Some("rs"))
+            .collect();
+        files.sort();
+        assert!(
+            !files.is_empty(),
+            "route module dir {} has no .rs files",
+            mod_dir.display()
+        );
+        return files
+            .into_iter()
+            .map(|p| fs::read_to_string(&p).expect("read route module file"))
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    panic!("missing route file or module dir for {file}");
+}
+
 #[test]
 fn audited_writer_inventory_covers_every_mutating_route_handler() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -224,7 +252,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
     ];
 
     for (file, handlers) in required_handlers {
-        let src = fs::read_to_string(routes_dir.join(file)).expect("read route file");
+        let src = read_route_sources(&routes_dir, file);
         for handler in *handlers {
             let needle = format!("pub async fn {handler}(");
             let pos = src

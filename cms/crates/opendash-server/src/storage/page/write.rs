@@ -42,7 +42,17 @@ pub async fn ensure_embedded_core_blocks_in_conn(conn: &mut SqliteConnection) ->
 
 pub async fn ensure_embedded_core_blocks(db: &SqlitePool) -> ApiResult<()> {
     let mut conn = db.acquire().await?;
-    ensure_embedded_core_blocks_in_conn(&mut conn).await
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    match ensure_embedded_core_blocks_in_conn(&mut conn).await {
+        Ok(()) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(())
+        }
+        Err(err) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(err)
+        }
+    }
 }
 
 pub(in crate::storage) fn parse_owner(

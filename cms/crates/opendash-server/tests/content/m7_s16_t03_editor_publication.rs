@@ -33,7 +33,7 @@ async fn core_post_defaults_and_page_absent_on_clean_install() {
         .await
         .unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../migrations/0035_page_taxonomy_default.sql"
+        "../../../../migrations/0035_page_taxonomy_default.sql"
     ))
     .execute(&db)
     .await
@@ -81,7 +81,7 @@ async fn upgrade_withdraws_only_core_page_default_and_preserves_legacy_links() {
     .unwrap();
 
     sqlx::raw_sql(include_str!(
-        "../../../migrations/0035_page_taxonomy_default.sql"
+        "../../../../migrations/0035_page_taxonomy_default.sql"
     ))
     .execute(&db)
     .await

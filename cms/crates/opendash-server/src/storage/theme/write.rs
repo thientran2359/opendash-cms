@@ -138,6 +138,27 @@ pub(in crate::storage) fn dir_matches_revision(
     true
 }
 
+fn sync_staged_file(file: &File) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::fd::AsRawFd;
+        // On macOS, std::fs::File::sync_data() calls F_FULLFSYNC per file.
+        // Flush each staged file with fsync(2); the revision's `.complete`
+        // marker in `stage_and_commit_v3_revision` still calls `sync_all()`
+        // (`F_FULLFSYNC`) as the single durable barrier after rename.
+        let rc = unsafe { libc::fsync(file.as_raw_fd()) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        file.sync_data()
+    }
+}
+
 pub(in crate::storage) fn write_files_durably(
     staging_dir: &Path,
     files: &BTreeMap<String, Vec<u8>>,
@@ -156,7 +177,7 @@ pub(in crate::storage) fn write_files_durably(
                 .map_err(|_| ApiError::internal("Không thể ghi file theme vào staging."))?;
             f.write_all(bytes)
                 .map_err(|_| ApiError::internal("Lỗi ghi nội dung file theme."))?;
-            f.sync_all()
+            sync_staged_file(&f)
                 .map_err(|_| ApiError::internal("Lỗi đồng bộ file theme xuống đĩa."))?;
             // File handle is dropped here before rename (required on Windows).
         }

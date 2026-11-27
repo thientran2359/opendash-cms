@@ -35,7 +35,7 @@ use std::{path::Path, time::Duration};
 
 use sqlx::{
     SqlitePool,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
 
 pub async fn init_db(db_path: &Path) -> Result<SqlitePool, Box<dyn std::error::Error>> {
@@ -51,6 +51,7 @@ pub async fn init_db(db_path: &Path) -> Result<SqlitePool, Box<dyn std::error::E
         .create_if_missing(true)
         .foreign_keys(true)
         .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_secs(5));
 
     let db = SqlitePoolOptions::new()

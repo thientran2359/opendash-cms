@@ -16,7 +16,7 @@ mod tests;
 /// integration tests exercise each invocation's real 5s limit (including
 /// concurrency within a test), so isolate them from unrelated test workers.
 #[cfg(test)]
-pub(crate) static PLUGIN_TEST_SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static PLUGIN_TEST_SERIAL: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
 #[allow(unused_imports)]
 pub use manager::{PluginManager, PluginSummary};

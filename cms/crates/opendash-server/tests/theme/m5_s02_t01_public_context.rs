@@ -1,4 +1,4 @@
-#[path = "../src/public_context.rs"]
+#[path = "../../src/public_context.rs"]
 mod public_context;
 
 use std::collections::BTreeMap;

@@ -344,9 +344,11 @@ async fn put_settings_collects_structured_409_conflicts_capped_at_20() {
 
 #[tokio::test]
 async fn max_redirects_prunes_oldest_orphans_fifo_before_rejecting() {
+    assert_eq!(MAX_REDIRECTS, 200_000);
+    const TEST_LIMIT: usize = 25;
     let db = site().await;
     sqlx::query(
-        "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x <= 200001)
+        "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x <= 26)
          INSERT INTO permalink_route_redirects(source_path, target_kind, target_id, locale, origin, created_at)
          SELECT '/old-orphan-' || x, 'entry', CAST(1000000 + x AS TEXT), 'vi', 'canonical',
                 strftime('%Y-%m-%dT%H:%M:%fZ', 1700000000 + x, 'unixepoch')
@@ -357,13 +359,15 @@ async fn max_redirects_prunes_oldest_orphans_fifo_before_rejecting() {
     .unwrap();
 
     let mut tx = db.begin().await.unwrap();
-    sync_claims_in_tx(&mut tx).await.unwrap();
+    sync_claims_with_options_and_swap_and_limit(&mut tx, false, None, TEST_LIMIT)
+        .await
+        .unwrap();
     tx.commit().await.unwrap();
     let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM permalink_route_redirects")
         .fetch_one(&db)
         .await
         .unwrap();
-    assert_eq!(remaining as usize, MAX_REDIRECTS);
+    assert_eq!(remaining as usize, TEST_LIMIT);
     // Oldest orphan (/old-orphan-1) pruned FIFO while newest remains.
     let oldest: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM permalink_route_redirects WHERE source_path='/old-orphan-1'",

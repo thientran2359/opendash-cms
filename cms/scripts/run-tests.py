@@ -48,23 +48,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="theme",
         description="Theme v3, Starter revisions, C-SEC templates, overrides, imports, public rendering",
-        test_patterns=(
-            "m5_s01_*",
-            "m5_s02_*",
-            "m5_s03_*",
-            "m5_s04_*",
-            "m5_s05_*",
-            "m5_s06_*",
-            "m5_s07_*",
-            "m5_s08_*",
-            "m5_s09_*",
-            "m5_s10_*",
-            "m5_s11_*",
-            "starter_*",
-            "theme_*",
-            "trusted_theme_*",
-            "reading_public_*",
-        ),
+        test_patterns=("theme",),
         unit_filters=(
             "theme::",
             "template_sec::",
@@ -83,13 +67,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="builder",
         description="Visual Builder, Studio Mode 1/2, Patterns, Page Scope & Declarative Blocks",
-        test_patterns=(
-            "m4_*",
-            "m5_s12_*",
-            "egm_cpt_builder_*",
-            "studio_*",
-            "unified_field_engine_*",
-        ),
+        test_patterns=("builder",),
         unit_filters=(
             "page::",
             "field_hydrate::",
@@ -101,16 +79,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="content",
         description="CPT schemas, Field Groups, Entries, Entry Table, Lifecycle & Taxonomy",
-        test_patterns=(
-            "content_foundation_*",
-            "m7_s09_*",
-            "m7_s10_*",
-            "m7_s11_*",
-            "m7_s12_*",
-            "m7_s15_*",
-            "m7_s16_*",
-            "entry_lifecycle_*",
-        ),
+        test_patterns=("content",),
         unit_filters=(
             "field_hydrate::",
             "storage::content",
@@ -126,13 +95,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="plugin",
         description="Plugin runtime (Wasmi/JS), Hooks, Egress SSRF, Projections, Admin Extensions & SDK",
-        test_patterns=(
-            "m6_*",
-            "plugin_*",
-            "unified_js_runtime_*",
-            "custom_routes_*",
-            "render_hooks_*",
-        ),
+        test_patterns=("plugin", "m6_s04_t01_egress_ssrf"),
         unit_filters=(
             "plugin::",
             "hooks::",
@@ -145,10 +108,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="i18n",
         description="Admin i18n, Multilingual Content, Locale Routing & Theme L10n",
-        test_patterns=(
-            "admin_i18n_*",
-            "multilingual*",
-        ),
+        test_patterns=("i18n",),
         unit_filters=(
             "i18n::",
             "field_hydrate::",
@@ -159,17 +119,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="site-media-seo",
         description="Settings, Menus, Permalinks, SEO, Sitemap, Contact, SMTP & Media/Video",
-        test_patterns=(
-            "m7_s01_*",
-            "m7_s02_*",
-            "m7_s03_*",
-            "m7_s04_*",
-            "m7_s05_*",
-            "m7_s06_*",
-            "m7_s07_*",
-            "m7_s08_*",
-            "wordpress_permalinks_*",
-        ),
+        test_patterns=("site_media_seo",),
         unit_filters=(
             "media::",
             "media_video::",
@@ -187,7 +137,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="ops",
         description="SiteCoordinator, Maintenance Barriers, Media Reconcile, Backup, Restore & Runtime Config",
-        test_patterns=("m8_*",),
+        test_patterns=("ops",),
         unit_filters=(
             "operations::",
             "paths::",
@@ -303,6 +253,21 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         return set(ALL_GROUP_NAMES), set(), True, False
 
     if path.startswith("cms/crates/opendash-server/tests/") and path.endswith(".rs"):
+        rel_test = path[len("cms/crates/opendash-server/tests/") :]
+        if "/" in rel_test:
+            top_dir = rel_test.split("/", 1)[0]
+            dir_to_group = {
+                "theme": "theme",
+                "builder": "builder",
+                "content": "content",
+                "plugin": "plugin",
+                "i18n": "i18n",
+                "site_media_seo": "site-media-seo",
+                "ops": "ops",
+            }
+            if top_dir in dir_to_group:
+                return {dir_to_group[top_dir]}, set(), False, False
+            return set(ALL_GROUP_NAMES), set(), True, False
         stem = Path(path).stem
         groups = {
             group.name
@@ -645,7 +610,7 @@ def print_group_listing(all_tests: list[str]) -> int:
 class RunTestsSelfTest(unittest.TestCase):
     def test_zero_unmapped_integration_tests(self) -> None:
         all_tests = discover_integration_tests()
-        self.assertGreater(len(all_tests), 50, "expected real integration tests")
+        self.assertGreaterEqual(len(all_tests), 7, "expected consolidated domain integration tests")
         _, unmapped = map_tests_to_groups(all_tests)
         self.assertEqual(unmapped, [], f"every tests/*.rs must belong to a group: {unmapped}")
 
@@ -675,8 +640,18 @@ class RunTestsSelfTest(unittest.TestCase):
         self.assertEqual(plan.groups, ("theme",))
         self.assertTrue(plan.run_core)
         self.assertFalse(plan.run_all_workspace)
-        self.assertIn("starter_theme_v3_test", plan.integration_tests)
-        self.assertNotIn("m8_s05_t01_restore", plan.integration_tests)
+        self.assertIn("theme", plan.integration_tests)
+        self.assertNotIn("ops", plan.integration_tests)
+
+    def test_nested_integration_test_routes_to_group(self) -> None:
+        all_tests = discover_integration_tests()
+        plan = build_plan_from_files(
+            ["cms/crates/opendash-server/tests/theme/starter_theme_v3_test.rs"],
+            all_tests,
+        )
+        self.assertEqual(plan.groups, ("theme",))
+        self.assertFalse(plan.run_all_workspace)
+        self.assertIn("theme", plan.integration_tests)
 
     def test_brand_new_integration_test_always_included(self) -> None:
         all_tests = discover_integration_tests()

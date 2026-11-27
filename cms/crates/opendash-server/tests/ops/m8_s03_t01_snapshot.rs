@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Connection as _, SqliteConnection, SqlitePool, sqlite::SqliteConnectOptions};
 
-#[path = "../src/operations_worker_process.rs"]
+#[path = "../../src/operations_worker_process.rs"]
 mod operations_worker_process;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);

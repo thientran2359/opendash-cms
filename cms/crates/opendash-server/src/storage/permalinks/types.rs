@@ -228,10 +228,11 @@ pub(in crate::storage) fn add_claim(
     Ok(())
 }
 
-pub(crate) async fn sync_claims_with_options_and_swap(
+pub(crate) async fn sync_claims_with_options_and_swap_and_limit(
     conn: &mut SqliteConnection,
     collect_conflicts: bool,
     swapped_from: Option<&str>,
+    max_redirects: usize,
 ) -> Result<(), PermalinkPutError> {
     let settings = read_effective_settings(conn).await?;
     let enabled_locales: Vec<(String, i64)> = sqlx::query_as(
@@ -1130,8 +1131,8 @@ pub(crate) async fn sync_claims_with_options_and_swap(
         historical.remove(&path);
     }
 
-    // Prune oldest deleted-target orphan redirects directly against DB tables when exceeding MAX_REDIRECTS.
-    if historical.len() > MAX_REDIRECTS {
+    // Prune oldest deleted-target orphan redirects directly against DB tables when exceeding max_redirects.
+    if historical.len() > max_redirects {
         let live_entries: HashSet<String> =
             sqlx::query_scalar::<_, String>("SELECT CAST(id AS TEXT) FROM content_entries")
                 .fetch_all(&mut *conn)
@@ -1152,33 +1153,28 @@ pub(crate) async fn sync_claims_with_options_and_swap(
             _ => false,
         };
         for path in old_redirect_order {
-            if historical.len() <= MAX_REDIRECTS {
+            if historical.len() <= max_redirects {
                 break;
             }
             if historical.get(&path).is_some_and(is_orphan) {
                 historical.remove(&path);
             }
         }
-        if historical.len() > MAX_REDIRECTS {
+        if historical.len() > max_redirects {
             let extra_orphans: Vec<String> = historical
                 .iter()
                 .filter(|(_, entry)| is_orphan(entry))
                 .map(|(path, _)| path.clone())
                 .collect();
             for path in extra_orphans {
-                if historical.len() <= MAX_REDIRECTS {
+                if historical.len() <= max_redirects {
                     break;
                 }
                 historical.remove(&path);
             }
         }
-        if historical.len() > MAX_REDIRECTS {
-            collector.record(
-                "/redirects",
-                "permalink_redirect_limit",
-                "max_redirects",
-                "permalink_redirect_limit: tối đa 200000 redirects đang hoạt động.".to_owned(),
-            )?;
+        if historical.len() > max_redirects {
+            record_redirect_limit(&mut collector, max_redirects)?;
         }
     }
 
