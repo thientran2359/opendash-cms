@@ -13,9 +13,12 @@ mod document;
 mod error;
 mod field_hydrate;
 mod hooks;
+mod http_middleware;
 mod i18n;
 #[cfg(test)]
 mod i18n_redirects;
+#[cfg(test)]
+mod i18n_revisions;
 mod l10n;
 mod media;
 mod media_lifecycle;

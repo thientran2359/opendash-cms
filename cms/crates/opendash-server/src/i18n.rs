@@ -101,7 +101,7 @@ fn empty_error_message(status: axum::http::StatusCode, guard: bool) -> &'static 
     }
 }
 
-fn localize_json_error(
+pub(crate) fn localize_json_error(
     value: &mut serde_json::Value,
     locale: &str,
     registry: Option<&CatalogRegistry>,
@@ -145,7 +145,16 @@ fn localize_json_error(
         let _ = localize_json_error(data, locale, registry);
     }
     if is_veto {
-        Some("hook.before_save_veto")
+        match obj.get("code").and_then(serde_json::Value::as_str) {
+            Some("required_field_missing") => Some("revision.required_field_missing"),
+            Some("builder_disabled") => Some("revision.builder_disabled"),
+            Some("restore_validation_failed") => Some("revision.restore_validation_failed"),
+            _ => Some("hook.before_save_veto"),
+        }
+    } else if obj.get("code").and_then(serde_json::Value::as_str) == Some("revision_missing_refs")
+        && obj.get("missing_refs").is_some()
+    {
+        Some("revision.missing_refs")
     } else if is_plugin
         && obj.get("code").and_then(serde_json::Value::as_str) == Some("confirmation_required")
         && obj

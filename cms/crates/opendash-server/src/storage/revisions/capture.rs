@@ -15,12 +15,12 @@ use crate::storage::entries::PluginActionFence;
 
 use super::types::{RevisionActor, actor_from_plugin_fence};
 
-struct LoadedEntrySnapshot {
-    entry_id: i64,
-    content_type_key: String,
-    slug: String,
-    version: i64,
-    payload: CanonicalRevisionPayload,
+pub(super) struct LoadedEntrySnapshot {
+    pub(super) entry_id: i64,
+    pub(super) content_type_key: String,
+    pub(super) slug: String,
+    pub(super) version: i64,
+    pub(super) payload: CanonicalRevisionPayload,
 }
 
 /// Computes the deterministic 64-hex SHA-256 hash of a canonical revision snapshot.
@@ -30,17 +30,17 @@ pub fn compute_revision_content_hash(payload: &CanonicalRevisionPayload) -> Stri
     format!("{digest:x}")
 }
 
-fn parse_content_mode(raw: &str) -> ApiResult<ContentMode> {
+pub(super) fn parse_content_mode(raw: &str) -> ApiResult<ContentMode> {
     match raw {
         "editor" => Ok(ContentMode::Editor),
         "builder" => Ok(ContentMode::Builder),
-        _ => Err(ApiError::conflict(format!(
-            "Chế độ nội dung không hợp lệ ({raw}); không thể tạo snapshot lịch sử."
-        ))),
+        _ => Err(ApiError::conflict(
+            "Chế độ nội dung trong DB không hợp lệ; không thể tạo snapshot lịch sử.",
+        )),
     }
 }
 
-async fn load_entry_canonical_snapshot_in_conn(
+pub(super) async fn load_entry_canonical_snapshot_in_conn(
     conn: &mut SqliteConnection,
     entry_id: i64,
 ) -> ApiResult<LoadedEntrySnapshot> {

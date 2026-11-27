@@ -18944,3 +18944,255 @@ msgstr "Dữ liệu JSON chuyển hướng không hợp lệ hoặc vượt quá
 #: server:error:redirects.csv_http_payload_too_large
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr "Nội dung yêu cầu nhập CSV vượt quá giới hạn kích thước HTTP cho phép."
+
+#: server:error:revision.pattern_admin_only
+msgid "Only Administrators may operate on Pattern revisions or autosaves."
+msgstr "Chỉ Quản trị viên mới được phép thao tác Pattern."
+
+#: server:error:revision.section_forbidden
+msgid "Section content type does not support revisions or autosaves."
+msgstr "Loại nội dung Section không hỗ trợ lịch sử phiên bản hoặc lưu tự động."
+
+#: server:error:revision.invalid_content_type_key
+msgid "Invalid content type key for revision request."
+msgstr "Mã loại nội dung không hợp lệ."
+
+#: server:error:revision.json_content_type_required
+msgid "Request must use Content-Type: application/json."
+msgstr "Yêu cầu phải có Content-Type là application/json."
+
+#: server:error:revision.invalid_revision_id
+msgid "Invalid revision ID."
+msgstr "ID phiên bản lịch sử không hợp lệ."
+
+#: server:error:revision.duplicate_limit_param
+msgid "Duplicate limit query parameter."
+msgstr "Tham số limit bị trùng lặp trong truy vấn."
+
+#: server:error:revision.limit_not_integer
+msgid "Query parameter limit must be an integer between 1 and 25."
+msgstr "Tham số limit phải là số nguyên 1..=25."
+
+#: server:error:revision.limit_out_of_range
+msgid "Query parameter limit must be between 1 and 25."
+msgstr "Tham số limit phải nằm trong khoảng 1..=25."
+
+#: server:error:revision.duplicate_offset_param
+msgid "Duplicate offset query parameter."
+msgstr "Tham số offset bị trùng lặp trong truy vấn."
+
+#: server:error:revision.offset_not_integer
+msgid "Query parameter offset must be an integer between 0 and 1000."
+msgstr "Tham số offset phải là số nguyên 0..=1000."
+
+#: server:error:revision.offset_out_of_range
+msgid "Query parameter offset must be between 0 and 1000."
+msgstr "Tham số offset phải nằm trong khoảng 0..=1000."
+
+#: server:error:revision.invalid_list_query
+msgid "Invalid revision list query parameters."
+msgstr "Tham số truy vấn lịch sử phiên bản không hợp lệ."
+
+#: server:error:revision.invalid_compare_target
+msgid "Invalid revision compare target for from/to."
+msgstr "Tham số so sánh from/to không hợp lệ."
+
+#: server:error:revision.duplicate_from_param
+msgid "Duplicate compare 'from' query parameter."
+msgstr "Tham số from bị trùng lặp."
+
+#: server:error:revision.duplicate_to_param
+msgid "Duplicate compare 'to' query parameter."
+msgstr "Tham số to bị trùng lặp."
+
+#: server:error:revision.invalid_compare_query
+msgid "Invalid revision compare query parameters."
+msgstr "Tham số truy vấn so sánh phiên bản không hợp lệ."
+
+#: server:error:revision.missing_compare_params
+msgid "Both compare query parameters 'from' and 'to' are required."
+msgstr "Cần cung cấp đầy đủ hai tham số so sánh from và to."
+
+#: server:error:revision.invalid_restore_json
+msgid "Invalid revision restore JSON payload."
+msgstr "Dữ liệu khôi phục JSON không hợp lệ."
+
+#: server:error:revision.missing_refs
+msgid "Revision snapshot contains missing or incompatible references. Confirm to sanitize them before restoring."
+msgstr "Bản lịch sử chứa tham chiếu đã bị xóa hoặc không còn hợp lệ. Hãy xác nhận để tự động dọn khi khôi phục."
+
+#: server:error:revision.not_found
+msgid "Revision snapshot not found."
+msgstr "Không tìm thấy phiên bản lịch sử."
+
+#: server:error:revision.trashed_entry
+msgid "entry_trashed: Entry is in Trash and cannot access revisions or autosave."
+msgstr "entry_trashed: Nội dung đang ở trong Thùng rác và không thể thao tác lịch sử phiên bản hoặc bản lưu tự động."
+
+#: server:error:revision.version_conflict_reload
+msgid "Content entry version changed. Reload before restoring revision."
+msgstr "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi khôi phục."
+
+#: server:error:revision.builder_disabled
+msgid "Builder support is currently disabled for this content type."
+msgstr "Trình dựng trang (Builder) hiện đang tắt cho loại nội dung này."
+
+#: server:error:revision.builder_disabled_field
+msgid "Builder support is disabled."
+msgstr "Trình dựng trang đã bị tắt."
+
+#: server:error:revision.required_field_missing
+msgid "Missing required field values after sanitizing deleted references."
+msgstr "Thiếu giá trị cho trường bắt buộc sau khi dọn dữ liệu tham chiếu đã xóa."
+
+#: server:error:revision.restore_validation_failed
+msgid "Restored content values payload exceeds 768 KiB limit."
+msgstr "Dữ liệu nội dung vượt giới hạn 768 KiB."
+
+#: server:error:revision.restore_validation_failed
+msgid "Sanitized Builder content exceeds 384 KiB limit."
+msgstr "Nội dung Builder vượt quá giới hạn 384 KiB sau khi dọn."
+
+#: server:error:revision.restore_validation_failed
+msgid "Builder content exceeds the allowed size limit."
+msgstr "Nội dung Builder vượt quá giới hạn cho phép."
+
+#: server:error:revision.restore_validation_failed
+msgid "Pattern without a Builder document only supports content_mode = 'editor'."
+msgstr "Pattern không có Builder document chỉ hỗ trợ content_mode = 'editor'."
+
+#: server:error:revision.restore_validation_failed
+msgid "Invalid content_mode for pattern restore."
+msgstr "content_mode không hợp lệ."
+
+#: server:error:revision.restore_validation_failed
+msgid "Primary category term must be included in term_ids."
+msgstr "Chuyên mục chính không nằm trong term_ids."
+
+#: server:error:revision.restore_validation_failed
+msgid "Invalid primary category term."
+msgstr "Chuyên mục chính không hợp lệ."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Invalid stored content_mode in DB; cannot capture revision snapshot."
+msgstr "Chế độ nội dung trong DB không hợp lệ; không thể tạo snapshot lịch sử."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored content field JSON is malformed; cannot capture revision snapshot."
+msgstr "Dữ liệu trường nội dung bị lỗi JSON; không thể tạo snapshot."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored Builder JSON is invalid; cannot capture revision snapshot."
+msgstr "Dữ liệu Builder JSON không hợp lệ; không thể tạo snapshot."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored Builder payload is not a JSON object; cannot capture revision snapshot."
+msgstr "Dữ liệu Builder không phải JSON object; không thể tạo snapshot."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Invalid revision source stored in DB."
+msgstr "Nguồn revision không hợp lệ trong DB."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Invalid Builder document JSON payload."
+msgstr "Dữ liệu Builder JSON không hợp lệ."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Builder JSON is not valid UTF-8."
+msgstr "Dữ liệu Builder JSON không phải UTF-8 hợp lệ."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored revision values_json is corrupted."
+msgstr "Dữ liệu values_json của revision bị hỏng."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored revision term_ids_json is corrupted."
+msgstr "Dữ liệu term_ids_json của revision bị hỏng."
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored revision seo_json is corrupted."
+msgstr "Dữ liệu seo_json của revision bị hỏng."
+
+#: server:error:autosave.invalid_version_or_seq
+msgid "Autosave base_version and client_seq must be positive integers >= 1."
+msgstr "base_version và client_seq phải là số nguyên dương lớn hơn hoặc bằng 1."
+
+#: server:error:autosave.null_title_forbidden
+msgid "Autosave title cannot be set to null."
+msgstr "Tiêu đề bản lưu tự động không được đặt là null."
+
+#: server:error:autosave.invalid_title
+msgid "Autosave title must not contain control characters or exceed 200 characters."
+msgstr "Tiêu đề bản lưu tự động không được chứa ký tự điều khiển hoặc vượt quá 200 ký tự."
+
+#: server:error:autosave.too_many_cleared_fields
+msgid "Autosave cleared_fields exceeds the maximum of 128 entries."
+msgstr "Danh sách cleared_fields vượt quá giới hạn 128 trường."
+
+#: server:error:autosave.too_many_term_ids
+msgid "Autosave term_ids exceeds the maximum of 96 entries."
+msgstr "Danh sách term_ids vượt quá giới hạn 96 mục."
+
+#: server:error:autosave.invalid_seo
+msgid "Invalid autosave SEO payload."
+msgstr "Dữ liệu SEO lưu tự động không hợp lệ."
+
+#: server:error:autosave.seo_too_large
+msgid "Autosave SEO payload exceeds 4096-byte limit."
+msgstr "Dữ liệu SEO lưu tự động vượt quá giới hạn 4096 byte."
+
+#: server:error:autosave.pattern_too_large
+msgid "Pattern autosave payload exceeds allowed size limit."
+msgstr "Dữ liệu lưu tự động Pattern vượt quá giới hạn kích thước cho phép."
+
+#: server:error:autosave.invalid_json
+msgid "Invalid autosave JSON payload."
+msgstr "Dữ liệu lưu tự động JSON không hợp lệ."
+
+#: server:error:autosave.pattern_admin_only
+msgid "Only Administrators may save Pattern autosaves."
+msgstr "Pattern chỉ cho phép Admin lưu tự động."
+
+#: server:error:autosave.builder_locked_or_disabled
+msgid "Builder is locked for your role or disabled for this content type."
+msgstr "Trình dựng trang bị khóa hoặc chưa bật cho tài khoản này."
+
+#: server:error:autosave.base_version_in_future
+msgid "Autosave base_version exceeds current entry version."
+msgstr "base_version vượt quá version hiện tại của nội dung."
+
+#: server:error:autosave.payload_too_large
+msgid "Merged autosave payload exceeds 768 KiB limit."
+msgstr "Dữ liệu bản lưu tự động vượt giới hạn 768 KiB."
+
+#: server:error:autosave.not_found
+msgid "Autosave draft not found."
+msgstr "Không tìm thấy bản lưu tự động."
+
+#: server:error:autosave.corrupt_surface
+msgid "Invalid stored autosave source_surface in DB."
+msgstr "source_surface autosave không hợp lệ."
+
+#: server:error:autosave.pattern_studio_only
+msgid "Pattern autosave only supports source_surface = 'studio' with builder_document."
+msgstr "Pattern autosave chỉ hỗ trợ source_surface = 'studio' và builder_document."
+
+#: server:error:autosave.pattern_builder_required
+msgid "Pattern autosave requires builder_document."
+msgstr "Pattern autosave yêu cầu builder_document."
+
+#: server:error:autosave.studio_builder_required
+msgid "Studio autosave requires builder_document."
+msgstr "Studio autosave yêu cầu builder_document."
+
+#: server:error:autosave.builder_doc_too_large
+msgid "Builder document exceeds 256 KiB limit."
+msgstr "Builder document vượt giới hạn 256 KiB."
+
+#: server:error:autosave.invalid_builder_json
+msgid "Invalid Builder document JSON."
+msgstr "Builder JSON không hợp lệ."
+
+#: server:error:autosave.studio_body_too_large
+msgid "Serialized Studio body exceeds 384 KiB limit."
+msgstr "Body Studio vượt quá giới hạn 384 KiB."

@@ -1,9 +1,7 @@
 use axum::{
     Extension, Router,
-    extract::{DefaultBodyLimit, Request},
-    http::{StatusCode, header},
-    middleware::{self, Next},
-    response::IntoResponse,
+    extract::DefaultBodyLimit,
+    middleware,
     routing::{delete, get, post, put},
 };
 use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
@@ -11,7 +9,7 @@ use rust_embed::RustEmbed;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    media::{MAX_MEDIA_BYTES, MediaStore},
+    media::MAX_MEDIA_BYTES,
     media_video::MAX_VIDEO_BYTES,
     package::V2_MAX_ZIP_BYTES,
     routes::{
@@ -74,8 +72,7 @@ use crate::{
 
 pub use crate::state::AppState;
 
-#[derive(Clone, Copy)]
-pub(crate) struct HostOriginRejected;
+pub(crate) use crate::http_middleware::HostOriginRejected;
 
 #[derive(RustEmbed)]
 #[folder = "../../admin/dist/"]
@@ -122,9 +119,7 @@ pub fn build_router_with_telemetry(
         state.recovery.clone(),
     );
     let recovery_for_mw = state.recovery.clone();
-    let trusted_host = state.runtime_config.trusted_host();
-    let trusted_origin = state.runtime_config.trusted_origin_normalized();
-    let trusted_is_https = state.runtime_config.trusted_origin_is_https();
+    let runtime_config_for_mw = state.runtime_config.clone();
 
     let router_without_telemetry = Router::new()
         .route("/", get(public_page))
@@ -636,6 +631,29 @@ pub fn build_router_with_telemetry(
                 .layer(DefaultBodyLimit::max(crate::routes::seo::MAX_SEO_JSON_BYTES)),
         )
         .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/revisions",
+            get(crate::routes::revisions::revisions_list),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/revisions/compare",
+            get(crate::routes::revisions::revisions_compare),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/revisions/{rev_id}",
+            get(crate::routes::revisions::revision_get),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/revisions/{rev_id}/restore",
+            post(crate::routes::revisions::revision_restore).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/autosave",
+            get(crate::routes::revisions::autosave_get)
+                .put(crate::routes::revisions::autosave_put)
+                .delete(crate::routes::revisions::autosave_delete)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/seo/home",
             get(crate::routes::seo::get_home_seo)
                 .put(crate::routes::seo::put_home_seo)
@@ -748,109 +766,25 @@ pub fn build_router_with_telemetry(
         ))
         .layer(axum::Extension(crate::routes::contact::ExpectedListenerOrigin(format!(
             "http://{expected_host}"
-        ))))
-        .layer(middleware::from_fn(move |request: Request, next: Next| {
-            let host_vals: Vec<&str> = request
-                .headers()
-                .get_all(header::HOST)
-                .iter()
-                .filter_map(|v| v.to_str().ok())
-                .collect();
-            let valid_host = host_vals.len() == 1
-                && request.headers().get_all(header::HOST).iter().count() == 1
-                && {
-                    let raw = host_vals[0];
-                    let clean = !raw.is_empty()
-                        && !raw.chars().any(|c| c.is_control() || c.is_whitespace())
-                        && !raw.contains('@')
-                        && !raw.contains('/');
-                    let normalized = if trusted_is_https {
-                        raw.strip_suffix(":443").unwrap_or(raw)
-                    } else {
-                        raw.strip_suffix(":80").unwrap_or(raw)
-                    };
-                    clean
-                        && (raw == expected_host.as_str()
-                            || trusted_host
-                                .as_deref()
-                                .is_some_and(|th| normalized.eq_ignore_ascii_case(th) || raw.eq_ignore_ascii_case(th)))
-                };
-            let is_mutation = matches!(
-                *request.method(),
-                axum::http::Method::POST
-                    | axum::http::Method::PUT
-                    | axum::http::Method::DELETE
-                    | axum::http::Method::PATCH
-            );
+        ))));
 
-            let mut origin_valid = request.headers().get_all(header::ORIGIN).iter().count() <= 1;
-            let is_public_contact_submit = *request.method() == axum::http::Method::POST
-                && (request.uri().path().starts_with("/api/public/contact/")
-                    || request.uri().path().starts_with("/api/public/p/"));
-            if origin_valid && is_mutation && !is_public_contact_submit {
-                let expected_origin = format!("http://{expected_host}");
-                let origin_present = request.headers().contains_key(header::ORIGIN);
-                let origin_hdr = request.headers().get(header::ORIGIN).and_then(|h| h.to_str().ok());
-                if origin_present && origin_hdr.is_none() {
-                    origin_valid = false;
-                }
-                if let Some(origin) = origin_hdr {
-                    let clean = !origin.is_empty()
-                        && !origin.eq_ignore_ascii_case("null")
-                        && !origin.chars().any(|c| c.is_control() || c.is_whitespace())
-                        && !origin.contains('@');
-                    let allowed = origin == expected_origin
-                        || trusted_origin.as_deref().is_some_and(|to| origin.eq_ignore_ascii_case(to));
-                    if !clean || !allowed {
-                        origin_valid = false;
-                    }
-                } else if trusted_origin.is_some() {
-                    // Remote/proxy deployment: mandatory Origin header on mutations (no missing-header or Referer loophole).
-                    origin_valid = false;
-                } else if let Some(referer) = request
-                    .headers()
-                    .get(header::REFERER)
-                    .and_then(|h| h.to_str().ok())
-                {
-                    let ref_http = format!("http://{expected_host}/");
-                    if !referer.starts_with(&ref_http) && referer != expected_origin {
-                        origin_valid = false;
-                    }
-                }
-            }
-            async move {
-                if !valid_host {
-                    let mut response = StatusCode::BAD_REQUEST.into_response();
-                    response.extensions_mut().insert(HostOriginRejected);
-                    response
-                } else if !origin_valid {
-                    let mut response = (StatusCode::FORBIDDEN, "Origin không hợp lệ.").into_response();
-                    response.extensions_mut().insert(HostOriginRejected);
-                    response
-                } else {
-                    next.run(request).await
-                }
-            }
-        }))
-        .layer(middleware::from_fn_with_state(state.clone(), crate::i18n::localize_error_response))
-        .fallback(crate::routes::seo::public_fallback)
-        .layer(middleware::from_fn(move |request: Request, next: Next| {
-            let recovery = recovery_for_mw.clone();
-            let path = request.uri().path().to_string();
-            async move {
-                let mut resp = next.run(request).await;
-                if recovery.is_safe_mode() && !path.starts_with("/api/admin/") {
-                    resp.headers_mut().insert(
-                        header::HeaderName::from_static("x-robots-tag"),
-                        header::HeaderValue::from_static("noindex, nofollow"),
-                    );
-                }
-                resp
-            }
-        }));
-    let router = router_without_telemetry
-        .layer(Extension(telemetry_buf))
-        .layer(Extension(ThemeStoreRoot(themes_root)));
+    let router_without_telemetry = crate::http_middleware::apply_host_origin_layer(
+        router_without_telemetry,
+        expected_host,
+        &runtime_config_for_mw,
+    )
+    .layer(middleware::from_fn_with_state(
+        state.clone(),
+        crate::i18n::localize_error_response,
+    ))
+    .fallback(crate::routes::seo::public_fallback);
+
+    let router = crate::http_middleware::apply_safe_mode_robots_layer(
+        router_without_telemetry,
+        recovery_for_mw,
+    )
+    .layer(Extension(telemetry_buf))
+    .layer(Extension(ThemeStoreRoot(themes_root)));
     let router = if let Some(guard) = telemetry_drop_guard {
         router.layer(Extension(guard))
     } else {

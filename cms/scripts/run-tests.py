@@ -76,6 +76,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::page",
             "storage::revisions",
             "routes::builder",
+            "routes::revisions",
         ),
     ),
     GroupSpec(
@@ -83,6 +84,7 @@ GROUPS: tuple[GroupSpec, ...] = (
         description="CPT schemas, Field Groups, Entries, Entry Table, Lifecycle & Taxonomy",
         test_patterns=("content",),
         unit_filters=(
+            "i18n_revisions::",
             "field_hydrate::",
             "storage::content",
             "storage::entries",
@@ -93,6 +95,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::taxonomy",
             "routes::entries",
             "routes::fields",
+            "routes::revisions",
             "routes::taxonomy",
         ),
     ),
@@ -118,6 +121,7 @@ GROUPS: tuple[GroupSpec, ...] = (
         unit_filters=(
             "i18n::",
             "i18n_redirects::",
+            "i18n_revisions::",
             "l10n::",
             "field_hydrate::",
             "storage::settings",
@@ -333,6 +337,8 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         sub = path[len("cms/crates/opendash-server/src/") :]
         if sub.startswith("storage/revisions/"):
             return {"builder", "content"}, set(), False, False
+        if sub == "http_middleware.rs":
+            return set(ALL_GROUP_NAMES), set(), True, False
         server_routes: dict[str, set[str]] = {
             # Theme & public rendering
             "theme.rs": {"theme"},
@@ -384,6 +390,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             # Multilingual & i18n
             "i18n.rs": {"i18n"},
             "i18n_redirects.rs": {"i18n", "site-media-seo"},
+            "i18n_revisions.rs": {"i18n", "content"},
             "routes/l10n.rs": {"i18n"},
             # Site, Media, SEO, Contact & SMTP
             "contact.rs": {"site-media-seo"},
@@ -454,6 +461,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             ("storage/fields/", {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"}),
             ("storage/taxonomy/", {"content"}),
             ("routes/entries/", {"content"}),
+            ("routes/revisions/", {"builder", "content", "ops"}),
             ("routes/extensions/", {"plugin", "content"}),
             ("hooks/", {"plugin"}),
             ("storage/plugin/", {"plugin"}),
@@ -836,12 +844,25 @@ class RunTestsSelfTest(unittest.TestCase):
             ("cms/crates/opendash-server/src/template_sec/policy/mod.rs", {"theme"}),
             ("cms/crates/opendash-server/src/storage/entries/list.rs", {"content"}),
             ("cms/crates/opendash-server/src/storage/entry_lifecycle/trash.rs", {"content", "plugin"}),
+            ("cms/crates/opendash-server/src/routes/revisions/revisions_handlers.rs", {"builder", "content", "ops"}),
             ("cms/crates/opendash-server/src/routes/operations/backup.rs", {"ops"}),
         )
         for path, expected_groups in cases:
             plan = build_plan_from_files([path], all_tests)
             self.assertFalse(plan.run_all_workspace, f"{path} should stay targeted")
             self.assertEqual(set(plan.groups), expected_groups, path)
+
+        rev_route_plan = build_plan_from_files(
+            ["cms/crates/opendash-server/src/routes/revisions/autosave_handlers.rs"],
+            all_tests,
+        )
+        self.assertIn("routes::revisions", rev_route_plan.unit_filters)
+
+        middleware_plan = build_plan_from_files(
+            ["cms/crates/opendash-server/src/http_middleware.rs"],
+            all_tests,
+        )
+        self.assertTrue(middleware_plan.run_all_workspace)
 
         shared = build_plan_from_files(["cms/crates/opendash-core/src/field_schema/spec/mod.rs"], all_tests)
         self.assertTrue(shared.run_all_workspace)

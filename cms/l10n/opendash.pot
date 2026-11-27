@@ -18947,3 +18947,255 @@ msgstr ""
 #: server:error:redirects.csv_http_payload_too_large
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr ""
+
+#: server:error:revision.pattern_admin_only
+msgid "Only Administrators may operate on Pattern revisions or autosaves."
+msgstr ""
+
+#: server:error:revision.section_forbidden
+msgid "Section content type does not support revisions or autosaves."
+msgstr ""
+
+#: server:error:revision.invalid_content_type_key
+msgid "Invalid content type key for revision request."
+msgstr ""
+
+#: server:error:revision.json_content_type_required
+msgid "Request must use Content-Type: application/json."
+msgstr ""
+
+#: server:error:revision.invalid_revision_id
+msgid "Invalid revision ID."
+msgstr ""
+
+#: server:error:revision.duplicate_limit_param
+msgid "Duplicate limit query parameter."
+msgstr ""
+
+#: server:error:revision.limit_not_integer
+msgid "Query parameter limit must be an integer between 1 and 25."
+msgstr ""
+
+#: server:error:revision.limit_out_of_range
+msgid "Query parameter limit must be between 1 and 25."
+msgstr ""
+
+#: server:error:revision.duplicate_offset_param
+msgid "Duplicate offset query parameter."
+msgstr ""
+
+#: server:error:revision.offset_not_integer
+msgid "Query parameter offset must be an integer between 0 and 1000."
+msgstr ""
+
+#: server:error:revision.offset_out_of_range
+msgid "Query parameter offset must be between 0 and 1000."
+msgstr ""
+
+#: server:error:revision.invalid_list_query
+msgid "Invalid revision list query parameters."
+msgstr ""
+
+#: server:error:revision.invalid_compare_target
+msgid "Invalid revision compare target for from/to."
+msgstr ""
+
+#: server:error:revision.duplicate_from_param
+msgid "Duplicate compare 'from' query parameter."
+msgstr ""
+
+#: server:error:revision.duplicate_to_param
+msgid "Duplicate compare 'to' query parameter."
+msgstr ""
+
+#: server:error:revision.invalid_compare_query
+msgid "Invalid revision compare query parameters."
+msgstr ""
+
+#: server:error:revision.missing_compare_params
+msgid "Both compare query parameters 'from' and 'to' are required."
+msgstr ""
+
+#: server:error:revision.invalid_restore_json
+msgid "Invalid revision restore JSON payload."
+msgstr ""
+
+#: server:error:revision.missing_refs
+msgid "Revision snapshot contains missing or incompatible references. Confirm to sanitize them before restoring."
+msgstr ""
+
+#: server:error:revision.not_found
+msgid "Revision snapshot not found."
+msgstr ""
+
+#: server:error:revision.trashed_entry
+msgid "entry_trashed: Entry is in Trash and cannot access revisions or autosave."
+msgstr ""
+
+#: server:error:revision.version_conflict_reload
+msgid "Content entry version changed. Reload before restoring revision."
+msgstr ""
+
+#: server:error:revision.builder_disabled
+msgid "Builder support is currently disabled for this content type."
+msgstr ""
+
+#: server:error:revision.builder_disabled_field
+msgid "Builder support is disabled."
+msgstr ""
+
+#: server:error:revision.required_field_missing
+msgid "Missing required field values after sanitizing deleted references."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Restored content values payload exceeds 768 KiB limit."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Sanitized Builder content exceeds 384 KiB limit."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Builder content exceeds the allowed size limit."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Pattern without a Builder document only supports content_mode = 'editor'."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Invalid content_mode for pattern restore."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Primary category term must be included in term_ids."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Invalid primary category term."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Invalid stored content_mode in DB; cannot capture revision snapshot."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored content field JSON is malformed; cannot capture revision snapshot."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored Builder JSON is invalid; cannot capture revision snapshot."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored Builder payload is not a JSON object; cannot capture revision snapshot."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Invalid revision source stored in DB."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Invalid Builder document JSON payload."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Builder JSON is not valid UTF-8."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored revision values_json is corrupted."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored revision term_ids_json is corrupted."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored revision seo_json is corrupted."
+msgstr ""
+
+#: server:error:autosave.invalid_version_or_seq
+msgid "Autosave base_version and client_seq must be positive integers >= 1."
+msgstr ""
+
+#: server:error:autosave.null_title_forbidden
+msgid "Autosave title cannot be set to null."
+msgstr ""
+
+#: server:error:autosave.invalid_title
+msgid "Autosave title must not contain control characters or exceed 200 characters."
+msgstr ""
+
+#: server:error:autosave.too_many_cleared_fields
+msgid "Autosave cleared_fields exceeds the maximum of 128 entries."
+msgstr ""
+
+#: server:error:autosave.too_many_term_ids
+msgid "Autosave term_ids exceeds the maximum of 96 entries."
+msgstr ""
+
+#: server:error:autosave.invalid_seo
+msgid "Invalid autosave SEO payload."
+msgstr ""
+
+#: server:error:autosave.seo_too_large
+msgid "Autosave SEO payload exceeds 4096-byte limit."
+msgstr ""
+
+#: server:error:autosave.pattern_too_large
+msgid "Pattern autosave payload exceeds allowed size limit."
+msgstr ""
+
+#: server:error:autosave.invalid_json
+msgid "Invalid autosave JSON payload."
+msgstr ""
+
+#: server:error:autosave.pattern_admin_only
+msgid "Only Administrators may save Pattern autosaves."
+msgstr ""
+
+#: server:error:autosave.builder_locked_or_disabled
+msgid "Builder is locked for your role or disabled for this content type."
+msgstr ""
+
+#: server:error:autosave.base_version_in_future
+msgid "Autosave base_version exceeds current entry version."
+msgstr ""
+
+#: server:error:autosave.payload_too_large
+msgid "Merged autosave payload exceeds 768 KiB limit."
+msgstr ""
+
+#: server:error:autosave.not_found
+msgid "Autosave draft not found."
+msgstr ""
+
+#: server:error:autosave.corrupt_surface
+msgid "Invalid stored autosave source_surface in DB."
+msgstr ""
+
+#: server:error:autosave.pattern_studio_only
+msgid "Pattern autosave only supports source_surface = 'studio' with builder_document."
+msgstr ""
+
+#: server:error:autosave.pattern_builder_required
+msgid "Pattern autosave requires builder_document."
+msgstr ""
+
+#: server:error:autosave.studio_builder_required
+msgid "Studio autosave requires builder_document."
+msgstr ""
+
+#: server:error:autosave.builder_doc_too_large
+msgid "Builder document exceeds 256 KiB limit."
+msgstr ""
+
+#: server:error:autosave.invalid_builder_json
+msgid "Invalid Builder document JSON."
+msgstr ""
+
+#: server:error:autosave.studio_body_too_large
+msgid "Serialized Studio body exceeds 384 KiB limit."
+msgstr ""

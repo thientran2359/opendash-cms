@@ -17,6 +17,7 @@ pub mod plugin;
 pub mod public;
 pub mod public_content;
 pub mod redirects;
+pub mod revisions;
 pub mod seo;
 pub mod settings;
 pub mod sitemap;
