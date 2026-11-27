@@ -1,0 +1,317 @@
+use super::*;
+
+impl EffectiveContentSchema {
+    /// Assembles the unified `EffectiveContentSchema` for a `type_key` and enforces `Rule COMPAT-1`
+    /// (global `field_key` uniqueness across base fields and all attached groups, including
+    /// `provider_inactive` and `withdrawn` groups, targets, and fields).
+    pub fn assemble(
+        base: OwnedDescriptor<ContentTypeDefinition>,
+        base_version: i64,
+        mut attached_groups: Vec<AttachedFieldGroupSnapshot>,
+    ) -> Result<Self, SchemaTransitionError> {
+        attached_groups.sort_by(|a, b| a.group_id.cmp(&b.group_id));
+        let is_builtin = matches!(base.descriptor.key.as_str(), "post" | "page");
+        let mut effective_fields = BTreeMap::new();
+        let base_source_id = format!("base:{}", base.descriptor.key);
+
+        for field in &base.descriptor.fields {
+            if !is_builtin && RESERVED_ENTRY_KEYS.contains(&field.key.as_str()) {
+                return Err(SchemaTransitionError::FieldKeyCollision(format!(
+                    "Trường '{}' trùng với khóa hệ thống được bảo vệ.",
+                    field.key
+                )));
+            }
+            if let Err(e) = field.validate() {
+                return Err(classify_validation_error(e));
+            }
+            let effective_status = if base.declaration_state == DeclarationState::Withdrawn
+                || field.declaration_state == DeclarationState::Withdrawn
+            {
+                EffectiveFieldStatus::Withdrawn
+            } else if base.status != ProviderStatus::Active {
+                EffectiveFieldStatus::ProviderInactive
+            } else {
+                EffectiveFieldStatus::Active
+            };
+            if effective_fields
+                .insert(
+                    field.key.clone(),
+                    EffectiveFieldEntry {
+                        definition: field.clone(),
+                        owner: base.owner.clone(),
+                        source_id: base_source_id.clone(),
+                        effective_status,
+                    },
+                )
+                .is_some()
+            {
+                return Err(SchemaTransitionError::FieldKeyCollision(format!(
+                    "Trùng khóa custom field '{}' trong loại nội dung '{}'.",
+                    field.key, base.descriptor.key
+                )));
+            }
+        }
+
+        for group in &attached_groups {
+            for field in &group.fields {
+                if RESERVED_ENTRY_KEYS.contains(&field.key.as_str()) || field.key == "status" {
+                    return Err(SchemaTransitionError::FieldKeyCollision(format!(
+                        "Trường '{}' trong nhóm '{}' trùng với khóa hệ thống được bảo vệ.",
+                        field.key, group.group_id
+                    )));
+                }
+                if let Err(e) = field.validate() {
+                    return Err(classify_validation_error(e));
+                }
+                if let Some(existing) = effective_fields.get(&field.key) {
+                    return Err(SchemaTransitionError::FieldKeyCollision(format!(
+                        "Khóa trường '{}' trong nhóm '{}' xung đột với trường đã tồn tại ở '{}'.",
+                        field.key, group.group_id, existing.source_id
+                    )));
+                }
+                let effective_status = if group.status == FieldGroupStatus::Withdrawn
+                    || group.association_state == DeclarationState::Withdrawn
+                    || field.declaration_state == DeclarationState::Withdrawn
+                {
+                    EffectiveFieldStatus::Withdrawn
+                } else if group.status == FieldGroupStatus::ProviderInactive {
+                    EffectiveFieldStatus::ProviderInactive
+                } else {
+                    EffectiveFieldStatus::Active
+                };
+                effective_fields.insert(
+                    field.key.clone(),
+                    EffectiveFieldEntry {
+                        definition: field.clone(),
+                        owner: group.owner.clone(),
+                        source_id: group.group_id.clone(),
+                        effective_status,
+                    },
+                );
+            }
+        }
+
+        if !is_builtin
+            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
+            && !effective_fields.contains_key("featured_image")
+        {
+            effective_fields.insert(
+                "featured_image".into(),
+                EffectiveFieldEntry {
+                    definition: ContentFieldDefinition {
+                        key: "featured_image".into(),
+                        label: "Ảnh đại diện".into(),
+                        field_type: ContentFieldType::Image,
+                        required: false,
+                        options: Vec::new(),
+                        min_view_role: FieldRole::Editor,
+                        min_edit_role: FieldRole::Editor,
+                        public_exposure: PublicExposure::Public,
+                        default_value: None,
+                        declaration_state: DeclarationState::Declared,
+                    },
+                    owner: ResourceOwner::Core,
+                    source_id: base_source_id.clone(),
+                    effective_status: EffectiveFieldStatus::Active,
+                },
+            );
+        }
+
+        if !is_builtin
+            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
+            && base.descriptor.settings.supports(ContentSupport::Builder)
+        {
+            if let Some(existing_body) = effective_fields.get("body") {
+                if existing_body.definition.field_type != ContentFieldType::RichText {
+                    return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
+                        "Trường 'body' trên loại nội dung '{}' phải có kiểu rich_text khi bật ContentSupport::Builder.",
+                        base.descriptor.key
+                    )));
+                }
+            } else {
+                effective_fields.insert(
+                    "body".into(),
+                    EffectiveFieldEntry {
+                        definition: ContentFieldDefinition {
+                            key: "body".into(),
+                            label: "Nội dung".into(),
+                            field_type: ContentFieldType::RichText,
+                            required: false,
+                            options: Vec::new(),
+                            min_view_role: FieldRole::Editor,
+                            min_edit_role: FieldRole::Editor,
+                            public_exposure: PublicExposure::Public,
+                            default_value: None,
+                            declaration_state: DeclarationState::Declared,
+                        },
+                        owner: ResourceOwner::Core,
+                        source_id: base_source_id.clone(),
+                        effective_status: EffectiveFieldStatus::Active,
+                    },
+                );
+            }
+        }
+
+        Ok(Self {
+            base,
+            base_version,
+            attached_groups,
+            effective_fields,
+            schema_token: String::new(),
+        })
+    }
+
+    /// Produces a deterministic canonical JSON string for computing `schema_token` (`sha256:<64-hex>`).
+    pub fn canonical_token_payload_json(
+        &self,
+        taxonomies: &[String],
+        active_theme_revision_id: Option<&str>,
+        enabled_plugins: &[(String, i64)],
+    ) -> String {
+        let mut sorted_tax = taxonomies.to_vec();
+        sorted_tax.sort();
+        sorted_tax.dedup();
+
+        let mut sorted_plugins = enabled_plugins.to_vec();
+        sorted_plugins.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let payload = serde_json::json!({
+            "base_type": {
+                "key": self.base.descriptor.key,
+                "label": self.base.descriptor.label,
+                "owner": self.base.owner,
+                "provider_status": self.base.status,
+                "declaration_state": self.base.declaration_state,
+                "version": self.base_version,
+                "taxonomies": sorted_tax,
+                "fields": self.base.descriptor.fields,
+                "settings": self.base.descriptor.settings,
+            },
+            "attached_groups": self.attached_groups.iter().map(|g| {
+                serde_json::json!({
+                    "group_id": g.group_id,
+                    "owner": g.owner,
+                    "status": g.status,
+                    "association_state": g.association_state,
+                    "version": g.version,
+                    "fields": g.fields,
+                })
+            }).collect::<Vec<_>>(),
+            "provider_generations": {
+                "active_theme_revision_id": active_theme_revision_id,
+                "enabled_plugins": sorted_plugins,
+            }
+        });
+        serde_json::to_string(&payload).expect("canonical schema token payload serializes")
+    }
+}
+
+/// Symmetric compatibility and Editor create-satisfiability verification (`Rule COMPAT-1`..`Rule COMPAT-4`, `270-R1`, `270-R8`).
+/// Runs unconditionally on every schema/group/package transition inside `BEGIN IMMEDIATE`.
+pub fn verify_effective_schema_transition(
+    old_effective: Option<&EffectiveContentSchema>,
+    new_effective: &EffectiveContentSchema,
+    has_existing_entries: bool,
+) -> Result<(), SchemaTransitionError> {
+    if let Some(old) = old_effective {
+        for (old_key, old_entry) in &old.effective_fields {
+            let Some(new_entry) = new_effective.effective_fields.get(old_key) else {
+                // Allow removing the synthetic core-injected `body` field when a custom CPT disables Builder.
+                if old_key == "body"
+                    && old_entry.owner == ResourceOwner::Core
+                    && !matches!(old.base.descriptor.key.as_str(), "post" | "page")
+                    && !new_effective
+                        .base
+                        .descriptor
+                        .settings
+                        .supports(ContentSupport::Builder)
+                {
+                    continue;
+                }
+                if has_existing_entries {
+                    return Err(SchemaTransitionError::CannotRemoveFieldWithData(format!(
+                        "Không thể xóa hẳn trường '{old_key}' khi đã có dữ liệu; hãy đặt declaration_state = withdrawn."
+                    )));
+                }
+                continue;
+            };
+
+            if old_entry.definition.field_type != new_entry.definition.field_type {
+                return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
+                    "Không thể đổi kiểu dữ liệu (type) của trường '{old_key}' đã tồn tại."
+                )));
+            }
+
+            if old_entry.definition.field_type == ContentFieldType::Select && has_existing_entries {
+                let new_opts: HashSet<&str> = new_entry
+                    .definition
+                    .options
+                    .iter()
+                    .map(|o| o.value.as_str())
+                    .collect();
+                for old_opt in &old_entry.definition.options {
+                    if !new_opts.contains(old_opt.value.as_str()) {
+                        return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
+                            "Không thể xóa phương án lựa chọn '{}' của trường '{old_key}' khi đã có dữ liệu.",
+                            old_opt.value
+                        )));
+                    }
+                }
+            }
+
+            let old_req = old_entry.effective_required();
+            let new_req = new_entry.effective_required();
+            if !old_req && new_req && has_existing_entries {
+                return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
+                    "Không thể đổi trường '{old_key}' sang bắt buộc (required) khi đã có dữ liệu."
+                )));
+            }
+        }
+
+        for (new_key, new_entry) in &new_effective.effective_fields {
+            if !old.effective_fields.contains_key(new_key)
+                && new_entry.effective_required()
+                && has_existing_entries
+            {
+                return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
+                    "Không thể thêm trường bắt buộc (required) mới '{new_key}' khi đã có dữ liệu."
+                )));
+            }
+        }
+    }
+
+    // Rule COMPAT-4 (270-R8): Unconditional Editor create-satisfiability & ACL/default checks on every transition
+    for (key, entry) in &new_effective.effective_fields {
+        if entry.definition.min_edit_role < entry.definition.min_view_role {
+            return Err(SchemaTransitionError::InvalidFieldAcl(format!(
+                "Trường '{key}' có min_edit_role thấp hơn min_view_role."
+            )));
+        }
+        if entry.definition.public_exposure == PublicExposure::Public
+            && entry.definition.min_view_role != FieldRole::Editor
+        {
+            return Err(SchemaTransitionError::InvalidFieldAcl(format!(
+                "Trường '{key}' có min_view_role = admin không được đặt public_exposure = public."
+            )));
+        }
+        if let Some(ref def_val) = entry.definition.default_value {
+            if !valid_default_value(&entry.definition, def_val) {
+                return Err(SchemaTransitionError::InvalidFieldDefault(format!(
+                    "Trường '{key}' có default_value không hợp lệ hoặc bị cấm."
+                )));
+            }
+        }
+        if entry.effective_required()
+            && entry.definition.min_edit_role == FieldRole::Admin
+            && entry.definition.default_value.is_none()
+        {
+            return Err(SchemaTransitionError::AdminRequiredFieldMissingDefault(
+                format!(
+                    "Trường bắt buộc '{key}' có min_edit_role = admin phải khai báo default_value hợp lệ để Editor có thể tạo mới bản ghi."
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
