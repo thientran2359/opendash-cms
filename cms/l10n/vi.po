@@ -19659,3 +19659,24 @@ msgstr "Đã hủy bản lưu tự động trên máy chủ."
 #: admin:revisions.singleeditworkspace
 msgid "Restored snapshot #{{value1}} as new version v{{value2}}."
 msgstr "Đã khôi phục bản lưu #{{value1}} thành phiên bản mới v{{value2}}."
+
+msgid "An autosaved draft from Content Editor ({{value1}}) has no Visual Builder layout data."
+msgstr "Bản tự động lưu từ Trình soạn thảo ({{value1}}) không có dữ liệu bố cục Visual Builder."
+
+msgid "Dismiss"
+msgstr "Bỏ qua"
+
+msgid "Loaded autosaved Visual Builder layout. Review and save to create a new revision."
+msgstr "Đã nạp bố cục Visual Builder tự động lưu. Hãy kiểm tra và lưu để tạo phiên bản mới."
+
+msgid "Open in Editor"
+msgstr "Mở trong Trình soạn thảo"
+
+msgid "Saved from Content Editor; applying here loads only Visual Builder blocks."
+msgstr "Đã lưu từ Trình soạn thảo; áp dụng tại đây chỉ nạp các khối Visual Builder."
+
+msgid "This autosave was based on version v{{value1}}."
+msgstr "Bản tự động lưu này dựa trên phiên bản v{{value1}}."
+
+msgid "This restored revision uses the standard Editor mode (editor)."
+msgstr "Phiên bản vừa khôi phục đang dùng chế độ Trình soạn thảo chuẩn (editor)."

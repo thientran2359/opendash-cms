@@ -15,6 +15,8 @@ interface Props {
   onReset?: () => void;
   conflict?: boolean;
   onReloadConflict?: () => void;
+  onOpenRevisions?: () => void;
+  revisionCount?: number | null;
 }
 
 /** Breathable Studio header with optional back arrow (Mode 1 sub-panels) and right-aligned exit button. */
@@ -22,13 +24,18 @@ export const StudioSidebarHeader: React.FC<Props> = ({
   mode, title, badge, dirty, saving, onExit, backLabel, onBack,
   canReset = false, resetLabel, onReset,
   conflict = false, onReloadConflict,
+  onOpenRevisions, revisionCount = null,
 }) => {
   const { __ } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const hasOverflowActions = Boolean((canReset && onReset) || (conflict && onReloadConflict));
+  const hasOverflowActions = Boolean(
+    (mode === 'entry' && onOpenRevisions) ||
+    (canReset && onReset) ||
+    (conflict && onReloadConflict),
+  );
 
   useEffect(() => {
     if (!hasOverflowActions && menuOpen) setMenuOpen(false);
@@ -136,6 +143,26 @@ export const StudioSidebarHeader: React.FC<Props> = ({
           style={{ right: 8, top: 52 }}
           className="absolute z-40 w-56 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg ring-1 ring-black/5"
         >
+          {mode === 'entry' && onOpenRevisions && (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={saving}
+              data-testid="studio-revisions-btn"
+              onClick={() => {
+                setMenuOpen(false);
+                onOpenRevisions();
+              }}
+              className="flex w-full items-center justify-between gap-2 rounded px-2.5 py-1.5 text-left text-xs font-medium text-zinc-800 hover:bg-zinc-100 disabled:opacity-50"
+            >
+              <span>{__("Revision History")}</span>
+              {revisionCount !== null && revisionCount !== undefined && (
+                <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700">
+                  {revisionCount}
+                </span>
+              )}
+            </button>
+          )}
           {conflict && onReloadConflict && (
             <button
               type="button"

@@ -2,7 +2,7 @@ import { useI18n } from '../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
 import * as builderApi from '../api/builder.ts';
-import { changeContentEntryPublication, getContentEntry, queryContentEntryTable } from '../api/content.ts';
+import { getContentEntry, queryContentEntryTable } from '../api/content.ts';
 import { getMenuSlots, listMenus, putMenuSlots, type MenuRecord, type MenuSlotsSnapshot } from '../api/menus.ts';
 import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../api/locales.ts';
 import { listPatterns, type PatternRecord } from '../api/patterns.ts';
@@ -18,10 +18,11 @@ import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEdi
 import { BuilderPreviewFrame } from '../builder/BuilderPreviewFrame.tsx';
 import {
   EMPTY_DOCUMENT, VALID_TEMPLATE_PART_KEY, allNodes, canDeleteElement, countElementsByType,
-  createStarterTemplateDocument, isElement, locate, visibleNodesInTree,
+  createStarterTemplateDocument, locate, visibleNodesInTree,
   type BuilderDocument, type BuilderElement, type BuilderViewport, type StudioBuilderClipboard,
 } from '../builder/document.ts';
-import { editorDraftStore } from '../features/editor/EditorDraftStore.ts';
+import { StudioMode2RevisionsOverlay } from '../features/revisions/StudioMode2RevisionsOverlay.tsx';
+import { useStudioMode2Revisions } from '../features/revisions/useStudioMode2Revisions.ts';
 import type { ParsedRoute, StudioPanelId } from '../shell/router.ts';
 import type { AuthUser } from '../types.ts';
 import { StudioCustomizerNav } from './StudioCustomizerNav.tsx';
@@ -33,6 +34,8 @@ interface Props {
   route: ParsedRoute;
   active: boolean;
   user: AuthUser | null;
+  siteInstanceId: string;
+  authGeneration: number;
   csrfToken: string | null;
   resetToken: number;
   themeRevision: number;
@@ -73,6 +76,8 @@ export const StudioWorkspace: React.FC<Props> = ({
   route,
   active,
   user,
+  siteInstanceId,
+  authGeneration,
   csrfToken,
   resetToken,
   themeRevision,
@@ -169,6 +174,8 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [entrySelectedNodeId, setEntrySelectedNodeId] = useState<string | null>(null);
   const [entryTrashedBlocked, setEntryTrashedBlocked] = useState(false);
   const [entryLocale, setEntryLocale] = useState<string | null>(null);
+  const [entryDocRevision, setEntryDocRevision] = useState(0);
+  const [entryHasRetainedDraft, setEntryHasRetainedDraft] = useState(false);
 
   const isTrashedConflict = (cause: unknown): boolean =>
     !isPatternEntry &&
@@ -249,6 +256,8 @@ export const StudioWorkspace: React.FC<Props> = ({
     setEntryHadExistingDoc(false);
     setEntryTrashedBlocked(false);
     setEntryLocale(null);
+    setEntryDocRevision(0);
+    setEntryHasRetainedDraft(false);
   };
 
   // Dirty flags
@@ -537,9 +546,11 @@ export const StudioWorkspace: React.FC<Props> = ({
           setEntrySelectedNodeId(visibleNodesInTree(serverDoc)[0]?.node.id ?? null);
           resetHistory();
           setConflict(false);
+          setEntryHasRetainedDraft(false);
           setStatus(__("Editing {{title}} (v{{version}}).", { title: entryRec.title, version: opened.version }));
         } else {
           setConflict(entryVersion !== opened.version);
+          setEntryHasRetainedDraft(true);
           setStatus(__("Restored the unsaved page builder draft from the previous session."));
         }
         mode2LoadedKeyRef.current = entryIdentity;
@@ -575,6 +586,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   const setActiveDocAndSelection = (nextDoc: BuilderDocument, nextSel?: string | null) => {
     if (isMode2) {
       setEntryDoc(nextDoc);
+      setEntryDocRevision(v => v + 1);
       if (nextSel !== undefined) setEntrySelectedNodeId(nextSel);
     } else {
       setTemplateDoc(nextDoc);
@@ -898,128 +910,61 @@ export const StudioWorkspace: React.FC<Props> = ({
     }
   };
 
-  const handleSaveMode2 = async (intent?: 'draft' | 'published') => {
-    if (!active || !user || !csrfToken || !isMode2 || entryId === null || entryVersion === null || savingRef.current || entryTrashedBlocked) return;
-
-    const refs = allNodes(entryDoc)
-      .filter(node => node.kind === 'element' && isElement(node.node) && node.node.type === 'core/pattern_ref')
-      .map(node => Number((node.node as BuilderElement).props.pattern_id));
-    if (refs.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(refs).size > 16) {
-      setStatus(__("Each reusable pattern requires a valid pattern (up to 16 patterns per page)."), true);
-      return;
-    }
-    if (patternsLoaded && refs.some(id => !patterns.some(p => p.id === id))) {
-      setStatus(__("A referenced pattern was deleted. Select another pattern before saving."), true);
-      return;
-    }
-
-    savingRef.current = true;
-    setSaving(true);
-    setConflict(false);
-    try {
-      let currentVersion = entryVersion;
-      let currentStatus = entryPublicationStatus;
-      let currentDoc = entrySavedDoc;
-      let currentDiagnostics = entryDiagnostics;
-
-      if (entryDirty || (intent !== 'published' && entryHadExistingDoc === false)) {
-        const saved = await builderApi.saveEntryBuilder(entryTypeKey, entryId, entryDoc, currentVersion, csrfToken);
-        editorDraftStore.clearDraft(entryTypeKey, entryId);
-        currentVersion = saved.version;
-        currentStatus = saved.publication_status;
-        currentDoc = saved.document ?? entryDoc;
-        currentDiagnostics = saved.diagnostics ?? [];
-        setEntryVersion(currentVersion);
-        setEntrySavedDoc(currentDoc);
-        setEntryDoc(currentDoc);
-        setEntryHadExistingDoc(true);
-        setEntryHadFreeformWrap(saved.had_freeform_wrap);
-        setEntryHadRecovery(saved.had_recovery);
-        setEntryDiagnostics(currentDiagnostics);
-      }
-
-      if (intent === 'published' && entryPublicationPolicy === 'draft_publish' && currentStatus !== 'published') {
-        const published = await changeContentEntryPublication(
-          entryTypeKey,
-          entryId,
-          currentVersion,
-          'published',
-          csrfToken,
-        );
-        editorDraftStore.clearDraft(entryTypeKey, entryId);
-        currentVersion = published.version;
-        currentStatus = published.publication_status;
-        setEntryVersion(currentVersion);
-      }
-
-      setEntryPublicationStatus(currentStatus);
-      setStatus(
-        isPatternEntry
-          ? __("Saved pattern (v{{version}}).", { version: currentVersion })
-          : entryPublicationPolicy === 'draft_publish' && currentStatus === 'draft'
-            ? __("Saved page builder draft (v{{version}}). Content remains a draft.", { version: currentVersion })
-            : __("Saved and published changes (v{{version}}).", { version: currentVersion }),
-      );
-    } catch (cause) {
-      if (isTrashedConflict(cause)) {
-        setEntryTrashedBlocked(true);
-        setStatus(__("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio."), true);
-      } else if (cause instanceof api.ApiClientError && cause.status === 412) {
-        setConflict(true);
-        setStatus(__("Content changed in another session (412). Your page builder draft is retained."), true);
-      } else {
-        setStatus(__("Could not save the page builder; your draft is retained."), true);
-        onApiError(cause, __("Cannot save the page builder."));
-      }
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
-
-  const handleReloadMode2 = () => {
-    if (!isMode2 || !entryTypeKey || entryId === null) return;
-    if (entryDirty && !window.confirm(__("Reloading the server version discards the current page builder draft. Continue?"))) return;
-    mode2LoadedKeyRef.current = null;
-    setConflict(false);
-    const seq = ++loadSeqRef.current;
-    setLoading(true);
-    void builderApi.getEntryBuilder(entryTypeKey, entryId).then(opened => {
-      if (seq !== loadSeqRef.current) return;
-      const doc = opened.document ?? EMPTY_DOCUMENT;
-      setEntryVersion(opened.version);
-      setEntryPublicationStatus(opened.publication_status);
-      setEntryPublicationPolicy(opened.publication_policy);
-      setEntrySavedDoc(doc);
-      setEntryDoc(doc);
-      setEntrySelectedNodeId(visibleNodesInTree(doc)[0]?.node.id ?? null);
-      setEntryDiagnostics(opened.diagnostics ?? []);
-      setEntryHadFreeformWrap(opened.had_freeform_wrap);
-      setEntryHadRecovery(opened.had_recovery);
-      resetHistory();
-      setBuilderView('tree');
-      setAddTargetParentId(null);
-      setClipboard(null);
-      setMenuRequest(null);
-      setStatus(__("Loaded latest version v{{version}}.", { version: opened.version }));
-    }).catch(cause => onApiError(cause, __("Cannot reload the page builder.")))
-      .finally(() => { if (seq === loadSeqRef.current) setLoading(false); });
-  };
-
-  const handleExit = () => {
-    if (isMode2 && entryId !== null) {
-      const target = entryTypeKey === 'page'
-        ? `#/pages/${entryId}/edit`
-        : entryTypeKey === 'post'
-          ? `#/posts/${entryId}/edit`
-          : entryTypeKey === 'pattern'
-            ? `#/patterns/${entryId}/edit`
-            : `#/cpt/${encodeURIComponent(entryTypeKey)}/${entryId}/edit`;
-      onNavigateHash(target);
-      return;
-    }
-    onNavigateHash('#/dashboard');
-  };
+  const mode2Revisions = useStudioMode2Revisions({
+    active,
+    isMode2,
+    isPatternEntry,
+    entryTypeKey,
+    entryId,
+    user,
+    csrfToken,
+    siteInstanceId,
+    authGeneration,
+    entryDirty,
+    entryDocRevision,
+    entryHasRetainedDraft,
+    entryVersion,
+    entryPublicationStatus,
+    entryPublicationPolicy,
+    entryHadExistingDoc,
+    entryTrashedBlocked,
+    entryDoc,
+    entrySavedDoc,
+    entryDiagnostics,
+    patterns,
+    patternsLoaded,
+    savingRef,
+    loadSeqRef,
+    mode2LoadedKeyRef,
+    isTrashedConflict,
+    resetHistory,
+    setLoading,
+    setSaving,
+    setConflict,
+    setStatus,
+    setBuilderView,
+    setAddTargetParentId,
+    setClipboard,
+    setMenuRequest,
+    setEntryTitle,
+    setEntryVersion,
+    setEntryPublicationStatus,
+    setEntryPublicationPolicy,
+    setEntryDiagnostics,
+    setEntryHadFreeformWrap,
+    setEntryHadRecovery,
+    setEntrySavedDoc,
+    setEntryHadExistingDoc,
+    setEntryDoc,
+    setEntrySelectedNodeId,
+    setEntryTrashedBlocked,
+    setEntryDocRevision,
+    setEntryHasRetainedDraft,
+    onDirtyChange,
+    onNavigateHash,
+    onApiError,
+  });
+  const { handleSaveMode2, handleReloadMode2, handleExit } = mode2Revisions;
 
   const refreshPatterns = () => {
     if (!user || !csrfToken) return;
@@ -1144,7 +1089,40 @@ export const StudioWorkspace: React.FC<Props> = ({
             onReset={() => void handleResetTemplate()}
             conflict={conflict || localeDraftBlocked}
             onReloadConflict={handleReloadConflict}
+            onOpenRevisions={
+              isMode2 && entryId !== null
+                ? () => mode2Revisions.handleOpenHistory()
+                : undefined
+            }
+            revisionCount={isMode2 ? mode2Revisions.revisionCount : null}
           />
+          {isMode2 && entryId !== null && (
+            <StudioMode2RevisionsOverlay
+              entryTypeKey={entryTypeKey}
+              entryId={entryId}
+              isPatternEntry={isPatternEntry}
+              csrfToken={csrfToken}
+              currentVersion={entryVersion ?? 0}
+              serverAutosave={mode2Revisions.serverAutosave}
+              hasNewerLocalDraft={mode2Revisions.hasNewerLocalDraft}
+              discardingAutosave={mode2Revisions.discardingAutosave}
+              historyOpen={mode2Revisions.historyOpen}
+              initialCompare={mode2Revisions.initialCompare}
+              restoredEditorModeNotice={mode2Revisions.restoredEditorModeNotice}
+              singleEditHash={mode2Revisions.singleEditHash}
+              onDismissEditorModeNotice={mode2Revisions.dismissEditorModeNotice}
+              onNavigateHash={onNavigateHash}
+              onApplyAutosave={mode2Revisions.handleApplyServerAutosave}
+              onCompareAutosave={() =>
+                mode2Revisions.handleOpenHistory({ from: 'current', to: 'autosave' })
+              }
+              onDiscardAutosave={mode2Revisions.handleDiscardServerAutosave}
+              onCloseHistory={mode2Revisions.handleCloseHistory}
+              onBeforeRestore={mode2Revisions.abortAndClearInflight}
+              onRestored={mode2Revisions.handleRevisionRestored}
+              onApiError={onApiError}
+            />
+          )}
           {!isMode2 && localeState.hasMultiplePublicLocales && (
             <div className="flex items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2" data-testid="studio-preview-locale-bar">
               <label htmlFor="studio-preview-locale" className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
@@ -1356,6 +1334,7 @@ export const StudioWorkspace: React.FC<Props> = ({
             showPatternButton={isMode2 || templateCanShowPattern}
             onOpenPatternLibrary={() => setPatternRequestSeq(s => s + 1)}
             patternDisabled={!csrfToken}
+            autosaveState={isMode2 ? mode2Revisions.autosaveState : undefined}
           />
         </aside>
 

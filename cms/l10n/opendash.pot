@@ -19663,3 +19663,24 @@ msgstr ""
 #: admin:revisions.singleeditworkspace
 msgid "Restored snapshot #{{value1}} as new version v{{value2}}."
 msgstr ""
+
+msgid "An autosaved draft from Content Editor ({{value1}}) has no Visual Builder layout data."
+msgstr ""
+
+msgid "Dismiss"
+msgstr ""
+
+msgid "Loaded autosaved Visual Builder layout. Review and save to create a new revision."
+msgstr ""
+
+msgid "Open in Editor"
+msgstr ""
+
+msgid "Saved from Content Editor; applying here loads only Visual Builder blocks."
+msgstr ""
+
+msgid "This autosave was based on version v{{value1}}."
+msgstr ""
+
+msgid "This restored revision uses the standard Editor mode (editor)."
+msgstr ""
