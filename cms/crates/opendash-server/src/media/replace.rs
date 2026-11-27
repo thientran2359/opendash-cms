@@ -367,6 +367,7 @@ pub(super) async fn execute_replace_swap_and_commit_inner(
                     "variants/{shard}/{}/v{}",
                     job.media_id, job.new_version
                 ));
+                remove_dir_best_effort(&dst_var_dir).await;
                 rename_with_parent(
                     &staged_var_dir,
                     &dst_var_dir,

@@ -204,3 +204,98 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
     assert_eq!(body_field.text, "<p>Builder Copy</p>");
     assert!(builder_nonces.is_empty());
 }
+
+#[test]
+fn b02_entry_view_with_url_pure_media_fallback_renders_default_single_and_archive() {
+    let media_hex = "d".repeat(64);
+    let gallery_hex = "e".repeat(64);
+
+    let mut featured = FieldSpec::new(FieldType::Media, "featured_image", "Ảnh đại diện");
+    featured.media_kind = Some(MediaFieldKind::Image);
+    let gallery = FieldSpec::new(FieldType::Gallery, "photos", "Bộ ảnh");
+
+    let schema_def = ContentTypeDefinition {
+        key: "article".into(),
+        label: "Article".into(),
+        fields: vec![featured, gallery],
+        settings: ContentTypeSettings::default(),
+    };
+    let mut values = BTreeMap::new();
+    values.insert("featured_image".into(), json!(media_hex));
+    values.insert("photos".into(), json!([gallery_hex]));
+
+    let record = ContentEntryRecord {
+        id: 77,
+        content_type_key: "article".into(),
+        locale: "vi".into(),
+        translation_group_id: "grp-77".into(),
+        translations: vec![],
+        slug: "pure-media-fallback".into(),
+        title: "Pure Media Fallback".into(),
+        values,
+        term_ids: vec![],
+        primary_category_term_id: None,
+        publication_status: "published".into(),
+        page_layout_key: None,
+        custom_template_key: None,
+        content_mode: ContentMode::Editor,
+        version: 1,
+        created_at: String::new(),
+        updated_at: "2026-11-27T00:00:00Z".into(),
+        published_at: Some("2026-11-27T00:00:00Z".into()),
+    };
+
+    let view = entry_view_with_url(record, &schema_def, Some("/pure-media-fallback".into()));
+    let single_html = render_single_with_context_and_nonces_for_locale(
+        &schema_def,
+        &view,
+        None,
+        &DEFAULT_SITE,
+        Some("/articles"),
+        &[],
+        &RenderFormattingConfig::default(),
+        "vi",
+        None,
+    )
+    .expect("DEFAULT_SINGLE renders pure_media_fallback without od_image provenance error");
+    assert!(
+        single_html.contains(&format!("/media/{media_hex}/file")),
+        "{single_html}"
+    );
+    assert!(
+        single_html.contains(&format!("/media/{gallery_hex}/file")),
+        "{single_html}"
+    );
+    assert!(!single_html.contains("OD_IMAGE_"));
+
+    let pagination = PaginationView {
+        page: 1,
+        per_page: 10,
+        total_items: 1,
+        total_pages: 1,
+        has_prev: false,
+        has_next: false,
+        previous_url: None,
+        next_url: None,
+        pages: Vec::new(),
+    };
+    let archive_html = render_archive_with_site_and_config_for_locale(
+        &schema_def,
+        &[view],
+        None,
+        None,
+        &pagination,
+        &[],
+        None,
+        None,
+        &DEFAULT_SITE,
+        &RenderFormattingConfig::default(),
+        "vi",
+    )
+    .expect("DEFAULT_ARCHIVE renders pure_media_fallback without od_image provenance error");
+    assert!(
+        archive_html.contains(&format!("/media/{media_hex}/file")),
+        "{archive_html}"
+    );
+    assert!(!archive_html.contains("OD_IMAGE_"));
+}

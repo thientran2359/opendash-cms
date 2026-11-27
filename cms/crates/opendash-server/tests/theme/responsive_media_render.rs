@@ -33,7 +33,7 @@ async fn responsive_picture_builder_seo_preview_and_replace_version_bump_end_to_
         .header(header::COOKIE, &cookie)
         .header("x-csrf-token", &csrf)
         .header(header::CONTENT_TYPE, "image/jpeg")
-        .header("x-media-filename", "hero-v1.jpg")
+        .header("x-file-name", "hero-v1.jpg")
         .body(encode_wide_jpeg(1600, 900, 1))
         .send()
         .await
@@ -298,7 +298,7 @@ async fn responsive_picture_builder_seo_preview_and_replace_version_bump_end_to_
         .header("x-csrf-token", &csrf)
         .header(header::IF_MATCH, &v1_etag)
         .header(header::CONTENT_TYPE, "image/jpeg")
-        .header("x-media-filename", "hero-v2.jpg")
+        .header("x-file-name", "hero-v2.jpg")
         .body(encode_wide_jpeg(1700, 960, 42))
         .send()
         .await

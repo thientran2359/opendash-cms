@@ -306,7 +306,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             (("builder", "pattern", "section", "block"), "builder"),
             (("i18n", "multilingual", "locale"), "i18n"),
             (("permalink", "redirect", "404", "seo", "menu", "media", "contact", "smtp", "option", "setting"), "site-media-seo"),
-            (("backup", "operation", "maintenance", "restore", "job"), "ops"),
+            (("backup", "operation", "maintenance", "restore", "job", "replace"), "ops"),
         )
         matched_any = False
         for keywords, target in keyword_map:
@@ -455,7 +455,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             ("storage/plugin_projections/", {"plugin"}),
             ("routes/plugin/", {"plugin"}),
             ("l10n/", {"i18n"}),
-            ("media/", {"site-media-seo"}),
+            ("media/", {"site-media-seo", "ops"}),
             ("media_lifecycle/", {"site-media-seo", "ops"}),
             ("media_video/", {"site-media-seo"}),
             ("storage/media/", {"site-media-seo", "ops"}),

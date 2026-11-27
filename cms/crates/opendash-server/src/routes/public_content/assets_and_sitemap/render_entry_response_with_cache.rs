@@ -298,16 +298,13 @@ pub(crate) async fn media_response(
     id: &str,
     thumbnail: bool,
 ) -> ApiResult<Response> {
-    if !media::valid_media_id(id) {
+    if !media::valid_media_id(id) || !public_content::media_is_referenced(db, id).await? {
         return Err(ApiError::not_found("Ảnh công khai không tồn tại."));
     }
     let read_lease = store.acquire_read_lease(id).await?;
     let asset = media::find(db, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Ảnh công khai không tồn tại."))?;
-    if !public_content::media_is_referenced(db, id).await? {
-        return Err(ApiError::not_found("Ảnh công khai không tồn tại."));
-    }
     if thumbnail && asset.kind != "image" {
         return Err(ApiError::not_found("Ảnh công khai không tồn tại."));
     }

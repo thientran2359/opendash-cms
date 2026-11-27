@@ -23,6 +23,7 @@ use crate::{
         decode_image, serve_leased_image,
     },
     media_video::{MAX_VIDEO_BYTES, inspect_mp4},
+    operations::SiteCoordinator,
     storage::media::{self as media_storage, MediaAsset},
 };
 
@@ -97,9 +98,9 @@ impl Drop for StagingCleanupGuard {
 }
 
 pub async fn media_upload(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
+    State(coordinator): State<Arc<SiteCoordinator>>,
     headers: HeaderMap,
     bytes: Bytes,
 ) -> ApiResult<Response> {
@@ -123,6 +124,9 @@ pub async fn media_upload(
     let stage_dir = store.create_upload_staging_dir().await?;
     let mut guard = StagingCleanupGuard(Some(stage_dir.clone()));
     store.stage_image_bundle(&stage_dir, &decoded).await?;
+    let _lease = coordinator.admit_mutation().map_err(|_| {
+        ApiError::service_unavailable("Hệ thống đang bảo trì; tạm dừng tải lên media.")
+    })?;
     let metadata = media_storage::allocate_or_save_with_variants(
         &db,
         &store,
@@ -137,9 +141,9 @@ pub async fn media_upload(
 }
 
 pub async fn media_video_upload(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
+    State(coordinator): State<Arc<SiteCoordinator>>,
     headers: HeaderMap,
     mut body: Body,
 ) -> ApiResult<Response> {
@@ -219,6 +223,9 @@ pub async fn media_video_upload(
             .map_err(|_| ApiError::internal("Không thể kiểm tra metadata video."))??;
 
     let filename = display_filename(&headers, "mp4");
+    let _lease = coordinator.admit_mutation().map_err(|_| {
+        ApiError::service_unavailable("Hệ thống đang bảo trì; tạm dừng tải lên video.")
+    })?;
     let metadata = media_storage::allocate_or_save_with_variants(
         &db,
         &store,

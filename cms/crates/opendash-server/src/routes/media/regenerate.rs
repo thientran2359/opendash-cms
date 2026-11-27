@@ -120,6 +120,9 @@ pub async fn media_variants_regenerate(
             if !ops_storage::is_valid_job_id(&raw_run_id) {
                 return Err(ApiError::bad_request("Tham số run_id không hợp lệ."));
             }
+            drop(coordinator.admit_mutation().map_err(|_| {
+                ApiError::service_unavailable("Hệ thống đang bảo trì; tạm dừng tái tạo biến thể.")
+            })?);
             let existing = ops_storage::get_job(&db, &raw_run_id)
                 .await?
                 .ok_or_else(|| ApiError::not_found("Không tìm thấy tác vụ regenerate."))?;
@@ -136,6 +139,9 @@ pub async fn media_variants_regenerate(
             existing
         }
         None => {
+            let _init_lease = coordinator.admit_mutation().map_err(|_| {
+                ApiError::service_unavailable("Hệ thống đang bảo trì; tạm dừng tái tạo biến thể.")
+            })?;
             let new_id = crate::auth::generate_random_token();
             let created = ops_storage::create_job(
                 &db,
@@ -182,6 +188,7 @@ pub async fn media_variants_regenerate(
     let mut batch_skipped_concurrent: i64 = 0;
     let mut failed_ids = Vec::new();
     let mut last_cursor = req.after_id.clone();
+    let mut maintenance_interrupted = false;
 
     for asset in candidates {
         if batch_processed > 0 && started.elapsed() >= max_batch_duration {
@@ -242,6 +249,7 @@ pub async fn media_variants_regenerate(
         };
 
         let Ok(_lease) = coordinator.admit_mutation() else {
+            maintenance_interrupted = true;
             break;
         };
 
@@ -297,6 +305,36 @@ pub async fn media_variants_regenerate(
     cumulative.total_skipped_concurrent += batch_skipped_concurrent;
     cumulative.last_after_id = next_after_id.clone();
 
+    let finish_lease = if maintenance_interrupted {
+        None
+    } else {
+        coordinator.admit_mutation().ok()
+    };
+    let Some(_finish_lease) = finish_lease else {
+        if batch_processed == 0 {
+            return Err(ApiError::service_unavailable(
+                "Hệ thống đang bảo trì; tạm dừng tái tạo biến thể.",
+            ));
+        }
+        return Ok((
+            StatusCode::OK,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(RegenerateVariantsResponse {
+                run_id: job.id,
+                batch_processed,
+                batch_succeeded,
+                batch_failed,
+                batch_skipped_concurrent,
+                failed_ids,
+                remaining,
+                next_after_id: last_cursor,
+                done: false,
+                cumulative,
+            }),
+        )
+            .into_response());
+    };
+
     let latest_job = ops_storage::get_job(&db, &job.id)
         .await?
         .unwrap_or_else(|| job.clone());
@@ -324,6 +362,7 @@ pub async fn media_variants_regenerate(
         },
     )
     .await?;
+    drop(_finish_lease);
 
     Ok((
         StatusCode::OK,
@@ -342,4 +381,81 @@ pub async fn media_variants_regenerate(
         }),
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::paths::SitePaths;
+    use crate::storage::{auth as auth_storage, init_db};
+
+    #[tokio::test]
+    async fn regenerate_blocked_by_active_maintenance_writes_zero_jobs() {
+        let base_tmp =
+            std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+        let root = base_tmp.join(format!("opendash-regen-maint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let site_root = root.join("site");
+        let db_path = root.join("cms.sqlite");
+        std::fs::create_dir_all(&site_root).expect("site_root");
+
+        let paths = SitePaths::from_parts(site_root, db_path);
+        std::fs::create_dir_all(paths.uploads_dir()).expect("uploads dir");
+        std::fs::create_dir_all(paths.runtime_dir()).expect("runtime dir");
+        let coordinator = Arc::new(SiteCoordinator::acquire(paths.clone()).expect("coordinator"));
+        let db = init_db(paths.db_path()).await.expect("init_db");
+        let store = Arc::new(MediaStore::new(paths.uploads_dir()));
+
+        auth_storage::setup_initial_admin(&db, "regenadmin", "$argon2id$stub")
+            .await
+            .expect("setup admin");
+        let (uid, _, _, _, ver) = auth_storage::find_user_by_username(&db, "regenadmin")
+            .await
+            .expect("find admin")
+            .expect("admin exists");
+        let sess = crate::auth::generate_random_token();
+        let csrf = crate::auth::generate_random_token();
+        assert!(
+            auth_storage::insert_session(
+                &db,
+                &crate::auth::hash_token(&sess),
+                uid,
+                &csrf,
+                crate::auth::current_time_secs() + 3600,
+                ver,
+            )
+            .await
+            .expect("insert session")
+        );
+
+        let _maint = coordinator
+            .begin_maintenance(ops_storage::OperationKind::Backup, Duration::from_secs(2))
+            .await
+            .expect("begin maintenance");
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            format!("{}={}", crate::auth::SESSION_COOKIE_NAME, sess)
+                .parse()
+                .unwrap(),
+        );
+        headers.insert("x-csrf-token", csrf.parse().unwrap());
+
+        let err = media_variants_regenerate(
+            State(db.clone()),
+            State(store),
+            State(coordinator.clone()),
+            headers,
+            Bytes::from_static(b"{}"),
+        )
+        .await
+        .expect_err("maintenance must reject regenerate with 503");
+        assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
+
+        let jobs = ops_storage::list_jobs(&db, 50).await.expect("list jobs");
+        assert!(jobs.is_empty(), "expected 0 operation_jobs rows: {jobs:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

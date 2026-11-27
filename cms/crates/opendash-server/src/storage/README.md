@@ -2,7 +2,7 @@
 
 ## Overview
 
-Owns **100% of SQLite queries (`sqlx::query*`, `sqlx::raw_sql`)** in OpenDash across 34 domain storage modules (`admin_extensions`–`theme`, `fields`, `redirects`, `entry_lifecycle`, and `contact`) wired through [`mod.rs`](mod.rs) (plus `s03_media_acl_tests.rs`, `theme_tests/`, `operations_tests.rs`, `smtp_tests.rs`, and `settings_timezones_2026f.txt`). Configures SQLite WAL mode, `foreign_keys = ON`, and `5s` `busy_timeout`, runs `preflight_builtin_key_collisions`, applies migrations `0001_builder_slice.sql` through `0057_manual_redirects_and_404_log.sql` (`0016` omitted) from `cms/migrations/`, and seeds embedded core blocks in `[mod.rs:init_db]`.
+Owns **100% of SQLite queries (`sqlx::query*`, `sqlx::raw_sql`)** in OpenDash across 34 domain storage modules (`admin_extensions`–`theme`, `fields`, `redirects`, `entry_lifecycle`, and `contact`) wired through [`mod.rs`](mod.rs) (plus `s03_media_acl_tests.rs`, `theme_tests/`, `operations_tests.rs`, `smtp_tests.rs`, and `settings_timezones_2026f.txt`). Configures SQLite WAL mode, `foreign_keys = ON`, and `5s` `busy_timeout`, runs `preflight_builtin_key_collisions`, applies migrations `0001_builder_slice.sql` through `0058_responsive_media_and_replace.sql` (`0016` omitted) from `cms/migrations/`, and seeds embedded core blocks in `[mod.rs:init_db]`.
 
 See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 Writer Inventory](../../../../../docs/contracts/M8_WRITER_INVENTORY.md) for persistence and admission rules.
 
@@ -38,12 +38,12 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
   - `[sitemap.rs:count_indexable_routes_in_tx]`, `[sitemap.rs:list_indexable_routes_in_tx]` (`SITEMAP_PART_SIZE = 5_000`, `SITEMAP_MAX_TOTAL_URLS = 1_000_000`).
   - `[settings.rs:list_locales]`, `[settings.rs:create_locale]`, `[settings.rs:update_locale]`, `[settings.rs:delete_locale]`, `[settings.rs:set_default_locale]`, `[settings.rs:set_multilingual_enabled]`, `[settings.rs:purge_orphan_locale]`, `[settings.rs:get_general_for_locale]`, `[settings.rs:save_general_for_locale]`, `[settings.rs:get_reading_for_locale]`, `[settings.rs:save_reading_for_locale]`, `[settings.rs:get_global_site_options]`, `[settings.rs:put_global_site_options]`, `[settings.rs:get_theme_options_for_locale]`, `[settings.rs:put_theme_options_for_locale]`, `[settings.rs:get_active_public_theme_options_for_locale]`, `[settings.rs:get_admin_i18n_bootstrap]`, `[settings.rs:timezone_catalog]`.
 - **Media, Contact, SMTP, Operations, Backup & Restore** ([`media.rs`](media/mod.rs), [`media_refs.rs`](media_refs.rs), [`media_lifecycle.rs`](media_lifecycle.rs), [`contact.rs`](contact.rs), [`smtp.rs`](smtp.rs), [`operations.rs`](operations.rs), [`backup.rs`](backup.rs), [`restore.rs`](restore.rs)):
-  - `[media.rs:find]`, `[media.rs:list_filtered]`, `[media.rs:save]`, `[media.rs:allocate_or_save_with_variants]`, `[media.rs:find_details]`, `[media.rs:require_existing_effective_references]`.
+  - `[media/queries.rs:find]`, `[media/queries.rs:list_filtered]`, `[media/queries.rs:allocate_or_save_with_variants]`, `[media/variants.rs:find_details]`, `[media/variants.rs:find_many_details_for_ids]`, `[media/variants.rs:find_variant]`, `[media/variants.rs:commit_regenerated_variants_cas]`, `[media/variants.rs:get_variants_status]`, `[media/replace_jobs.rs:create_replace_job_tx]`, `[media/replace_jobs.rs:commit_replace_tx]`, `[media/replace_jobs.rs:recover_pending_replace_jobs_on_startup]`, and `[media/refs.rs:require_existing_effective_references]`.
   - `[media_refs.rs:collect_pins_in_tx]`, `[media_refs.rs:ensure_media_active_in_tx]`, `[media_refs.rs:load_media_inventory_bounded]`, `[media_refs.rs:is_media_unreferenced]`.
   - `[media_lifecycle.rs:tombstone_media_in_tx]`, `[media_lifecycle.rs:finalize_delete_job]`, `[media_lifecycle.rs:list_pending_delete_jobs]`.
   - `[contact.rs:create_form]`, `[contact.rs:update_form]`, `[contact.rs:delete_form]`, `[contact.rs:list_submissions]`, rate-limit (`RATE_LIMIT_PER_MIN = 5`, `RATE_LIMIT_PER_HOUR = 20`, `RATE_LIMIT_GLOBAL_PER_MIN = 100`) and dedup (`DEDUP_TTL_SECS = 86_400`).
   - `[smtp.rs:get_smtp_settings]`, `[smtp.rs:put_smtp_settings_cas]`, `[smtp.rs:create_initial_attempt_in_conn]`, `[smtp.rs:claim_pending_attempt]`, `[smtp.rs:finish_attempt]`, `[smtp.rs:recover_inflight_notifications]`.
-  - `[operations.rs:create_job]`, `[operations.rs:transition_job_cas]`, `[operations.rs:mark_interrupted_on_startup]`, `[operations.rs:bump_maintenance_generation]`, `[operations.rs:prune_old_receipts]`.
+  - `[operations.rs:create_job]`, `[operations.rs:find_active_job_by_kind]`, `[operations.rs:transition_job_cas]`, `[operations.rs:mark_interrupted_on_startup]`, `[operations.rs:bump_maintenance_generation]`, `[operations.rs:prune_old_receipts]`.
   - `[backup.rs:vacuum_into_snapshot]`, `[backup.rs:collect_backup_inventory]`.
   - `[restore.rs:build_expected_schema_objects]`, `[restore.rs:validate_restored_db_read_only]`, `[restore.rs:validate_and_rebase_copy]`, `[restore.rs:verify_restored_db_references]`.
 
@@ -57,7 +57,7 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
 
 ## Side Effects
 
-- Creates/opens the site SQLite database in WAL mode, executes migrations `0001`–`0057`, and reads/writes all CMS tables (`[mod.rs:init_db]`).
+- Creates/opens the site SQLite database in WAL mode, executes migrations `0001`–`0058`, and reads/writes all CMS tables (`[mod.rs:init_db]`).
 - Stages and verifies immutable theme and plugin revision directories and `.complete` markers on disk under `themes_root` and `plugins_root` (`[theme.rs:stage_and_commit_v3_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[plugin.rs:stage_and_publish_plugin_revision_with_extensions]`).
 - Creates consistent SQLite snapshot files via `VACUUM INTO` during backup jobs (`[backup.rs:vacuum_into_snapshot]`).
 
