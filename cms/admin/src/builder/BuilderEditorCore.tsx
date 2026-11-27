@@ -93,7 +93,7 @@ export function BuilderEditorCore({
   onMessage,
   onApiError,
 }: BuilderEditorCoreProps) {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [mediaTargetParentId, setMediaTargetParentId] = useState<string | null | undefined>(undefined);
   const [blockSchemas, setBlockSchemas] = useState<BlockCatalogItemDto[]>([]);
@@ -123,7 +123,7 @@ export function BuilderEditorCore({
     const refresh = () => {
       void builderApi.getBlockSchemas()
         .then(items => { if (alive) setBlockSchemas(items); })
-        .catch(cause => { if (alive) onApiError(cause, t('builder.builder_workspace.catalog_error')); });
+        .catch(cause => { if (alive) onApiError(cause, __("Could not load the block catalog.")); });
     };
     refresh();
     window.addEventListener('focus', refresh);
@@ -133,11 +133,11 @@ export function BuilderEditorCore({
   const applyUpdate = (next: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
     if (!next) return false;
     if (!preservesAnchors(draft, next, removedId, blockSchemas)) {
-      onMessage?.(t('builder.builder_workspace.protected'), true);
+      onMessage?.(__("Unresolved nodes must retain their position, ancestors and content."), true);
       return false;
     }
     if (allNodes(next).length > 512 || JSON.stringify(next).length > 256 * 1024) {
-      onMessage?.(t('builder.builder_workspace.limits'), true);
+      onMessage?.(__("Builder exceeds the limit of 512 nodes or 256 KiB."), true);
       return false;
     }
     return onChangeDocument(next, nextSelected, removedId);
@@ -170,25 +170,25 @@ export function BuilderEditorCore({
     if (disabled) return;
     if (kind === 'element') {
       if (!allowPatternRef && selectedType === 'core/pattern_ref') {
-        onMessage?.(t('builder.builder_workspace.pattern_entry_only'), true);
+        onMessage?.(__("Reusable patterns are supported only in individual entry/page Builders."), true);
         return;
       }
       if (!allowList && selectedType === 'core/list') {
-        onMessage?.(t('builder.builder_workspace.pattern_no_list'), true);
+        onMessage?.(__("Patterns cannot contain content lists."), true);
         return;
       }
       if (selectedType === 'core/content_slot') {
         if (!allowContentSlot) {
-          onMessage?.(t('builder.builder_workspace.slot_target'), true);
+          onMessage?.(__("This target type does not allow core/content_slot."), true);
           return;
         }
         if (countElementsByType(draft, 'core/content_slot') >= 1) {
-          onMessage?.(t('builder.builder_workspace.slot_max'), true);
+          onMessage?.(__("A template can contain at most one core/content_slot."), true);
           return;
         }
       }
       if (selectedType === 'core/template_part' && !allowTemplatePart) {
-        onMessage?.(t('builder.builder_workspace.part_target'), true);
+        onMessage?.(__("Template Parts can only be inserted in Template Builder mode."), true);
         return;
       }
     }
@@ -198,7 +198,7 @@ export function BuilderEditorCore({
     if (kind === 'element' && (parentId === null || parentLoc?.kind === 'section' || parentLoc?.kind === 'column')) {
       const next = appendFreeformElement(draft, parentId, selectedType, { blockSchema: schema });
       if (!next) {
-        onMessage?.(t('builder.builder_workspace.insert_position'), true);
+        onMessage?.(__("Invalid node insertion position."), true);
         return;
       }
       finishInsert(next.document, next.id, true);
@@ -206,7 +206,7 @@ export function BuilderEditorCore({
     }
     const next = appendNode(draft, parentId, kind, selectedType, { blockSchema: schema });
     if (!next) {
-      onMessage?.(t('builder.builder_workspace.insert_position'), true);
+      onMessage?.(__("Invalid node insertion position."), true);
       return;
     }
     finishInsert(next.document, next.id, kind === 'element');
@@ -216,21 +216,21 @@ export function BuilderEditorCore({
     if (disabled) return;
     const next = appendRowWithColumns(draft, parentId, count);
     if (next) finishInsert(next.document, next.id);
-    else onMessage?.(t('builder.builder_workspace.row_position'), true);
+    else onMessage?.(__("Cannot add a row at this position."), true);
   };
 
   const duplicate = (id: string) => {
     if (disabled) return;
     const result = duplicateNode(draft, id, blockSchemas);
     if (result) finishInsert(result.document, result.id);
-    else onMessage?.(t('builder.builder_workspace.duplicate_error'), true);
+    else onMessage?.(__("Cannot duplicate a locked node or exceed Builder limits."), true);
   };
 
   const copyOptions = (id: string) => {
     if (disabled) return;
     const result = copyNodeOptions(draft, id, blockSchemas);
     if (result) onClipboardChange(result);
-    else onMessage?.(t('builder.builder_workspace.copy_error'), true);
+    else onMessage?.(__("This node does not allow copying properties."), true);
   };
 
   const canPaste = (id: string) => {
@@ -242,13 +242,13 @@ export function BuilderEditorCore({
   const pasteOptions = (id: string) => {
     if (disabled || !clipboard || !canPaste(id)) return;
     const next = pasteNodeOptions(draft, id, clipboard, blockSchemas);
-    if (!applyUpdate(next, id)) onMessage?.(t('builder.builder_workspace.paste_error'), true);
+    if (!applyUpdate(next, id)) onMessage?.(__("Copied properties are invalid for this node."), true);
   };
 
   const reorderSibling = (sourceId: string, targetId: string, position: 'before' | 'after') => {
     if (disabled) return;
     const next = reorderSiblingNode(draft, sourceId, targetId, position, blockSchemas);
-    if (!applyUpdate(next, sourceId)) onMessage?.(t('builder.builder_workspace.move_error'), true);
+    if (!applyUpdate(next, sourceId)) onMessage?.(__("Cannot move across a protected node."), true);
   };
 
   const reorder = (id: string, direction: -1 | 1) => {
@@ -260,7 +260,7 @@ export function BuilderEditorCore({
   const remove = (id: string) => {
     if (disabled) return;
     if (!canDeleteElement(draft, id, { requiresContentSlot })) {
-      onMessage?.(t('builder.builder_workspace.slot_min'), true);
+      onMessage?.(__("This template must retain at least one core/content_slot."), true);
       return;
     }
     const entry = locate(draft, id);
@@ -268,7 +268,7 @@ export function BuilderEditorCore({
     const next = removeNode(draft, id);
     if (!next) return;
     if (!preservesAnchors(draft, next, id, blockSchemas)) {
-      onMessage?.(t('builder.builder_workspace.delete_protected'), true);
+      onMessage?.(__("This node cannot be deleted alone because unresolved blocks would shift. Delete the entire container holding those blocks."), true);
       return;
     }
     const lockedCount = allNodes(draft).filter(node =>
@@ -277,8 +277,8 @@ export function BuilderEditorCore({
       && isLockedElement(node.node as BuilderElement, blockSchemas)
     ).length;
     const prompt = lockedCount
-      ? t('builder.builder_workspace.delete_locked', { count: lockedCount })
-      : t('builder.builder_workspace.delete_confirm');
+      ? __("This node contains {{count}} unresolved block(s). Permanently delete it from this Builder?", { count: lockedCount })
+      : __("Delete this node and all its children?");
     if (!window.confirm(prompt)) return;
     applyUpdate(next, entry.parentId, id);
   };
@@ -303,7 +303,7 @@ export function BuilderEditorCore({
     if (disabled) return;
     const next = setContainerBoxSpacing(draft, id, target, kind, spacing);
     if (!next) {
-      onMessage?.(t('builder.builder_workspace.spacing_invalid'), true);
+      onMessage?.(__("Invalid spacing properties (padding/margin)."), true);
       return;
     }
     applyUpdate(next, id);
@@ -313,7 +313,7 @@ export function BuilderEditorCore({
     if (disabled) return;
     const next = setSectionStyle(draft, id, patch);
     if (!next) {
-      onMessage?.(t('builder.builder_workspace.section_invalid'), true);
+      onMessage?.(__("Invalid section properties."), true);
       return;
     }
     applyUpdate(next, id);
@@ -339,7 +339,7 @@ export function BuilderEditorCore({
     if (disabled) return;
     const next = setResponsiveField(draft, id, target, field, value);
     if (!next) {
-      onMessage?.(t('builder.builder_workspace.responsive_invalid'), true);
+      onMessage?.(__("Invalid responsive properties."), true);
       return;
     }
     applyUpdate(next, id);
@@ -354,20 +354,20 @@ export function BuilderEditorCore({
   const insertThemePattern = (sourceDocument: BuilderDocument, title: string, appendAtEnd = false): boolean => {
     if (!csrfToken || disabled) return false;
     if (sourceDocument.schema_version !== draft.schema_version || !sourceDocument.sections.length) {
-      onMessage?.(t('builder.builder_workspace.theme_pattern_invalid'), true);
+      onMessage?.(__("The theme pattern has no compatible Builder layout."), true);
       return false;
     }
     const sourceNodes = allNodes(sourceDocument);
     if (!allowList && sourceNodes.some(node => node.kind === 'element'
         && (node.node as BuilderElement).type === 'core/list')) {
-      onMessage?.(t('builder.builder_workspace.list_target'), true);
+      onMessage?.(__("This target does not allow content lists."), true);
       return false;
     }
     const existingNodes = allNodes(draft);
     const combinedListCount = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
       && (node.node as BuilderElement).type === 'core/list').length;
     if (combinedListCount > 8) {
-      onMessage?.(t('builder.builder_workspace.list_limit'), true);
+      onMessage?.(__("Builder supports at most eight content lists."), true);
       return false;
     }
     const refs = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
@@ -375,7 +375,7 @@ export function BuilderEditorCore({
       .map(node => Number((node.node as BuilderElement).props.pattern_id));
     if ((!allowPatternRef && refs.length > 0) || refs.some(id => !Number.isSafeInteger(id) || id <= 0)
         || new Set(refs).size > 16) {
-      onMessage?.(t('builder.builder_workspace.pattern_limit'), true);
+      onMessage?.(__("The pattern is incompatible with this target or the limit of 16 reusable patterns."), true);
       return false;
     }
     const copy = cloneWithFreshNodeIds(sourceDocument, draft);
@@ -390,7 +390,7 @@ export function BuilderEditorCore({
       ],
     };
     if (!finishInsert(next, copy.sections[0].id)) return false;
-    onMessage?.(t('builder.builder_workspace.copy_inserted', { title }));
+    onMessage?.(__("Inserted a copy of “{{title}}”. The website has not been updated.", { title }));
     return true;
   };
 
@@ -417,7 +417,7 @@ export function BuilderEditorCore({
     }
     setShowMediaPicker(false);
     setMediaTargetParentId(undefined);
-    onMessage?.(t('builder.builder_workspace.media_inserted'));
+    onMessage?.(__("Image inserted from Media Library into the draft. The website has not been updated."));
   };
 
   const openMedia = (parentId: string | null | undefined = undefined) => {
@@ -428,8 +428,8 @@ export function BuilderEditorCore({
   const selectedLoc = locate(draft, selectedId);
   const addParentLoc = locate(draft, addTargetParentId);
   const inTreeHeaderTitle = builderView === 'properties'
-    ? (selectedLoc ? nodeTitle(selectedLoc, blockSchemas) : t('builder.builder_workspace.edit_block'))
-    : (addParentLoc ? t('builder.builder_workspace.add_to', { title: nodeTitle(addParentLoc, blockSchemas) }) : t('builder.builder_workspace.add_block'));
+    ? (selectedLoc ? nodeTitle(selectedLoc, blockSchemas) : __("Edit block"))
+    : (addParentLoc ? __("Add to {{title}}", { title: nodeTitle(addParentLoc, blockSchemas) }) : _x("Add block", "builder.builder_workspace"));
 
   return (
     <div className="od-studio-builder-core space-y-3" data-testid="studio-builder-core">
@@ -453,14 +453,14 @@ export function BuilderEditorCore({
 
       {(hadFreeformWrap || hadRecovery) && (
         <div role="status" className="rounded-lg border border-sky-200 bg-sky-50 p-2.5 text-xs text-sky-900" data-testid="studio-block-notice">
-          {hadFreeformWrap && <p>{t('builder.builder_workspace.freeform_wrap')}</p>}
-          {hadRecovery && <p>{t('builder.builder_workspace.recovered')}</p>}
+          {hadFreeformWrap && <p>{__("Previous plain-text content was automatically wrapped as a Builder block for editing.")}</p>}
+          {hadRecovery && <p>{__("Malformed legacy block comments were safely recovered as text blocks.")}</p>}
         </div>
       )}
 
       {diagnostics.length > 0 && (
         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900" data-testid="studio-diagnostics-banner">
-          <strong>{t('builder.builder_workspace.block_diagnostics')}</strong>
+          <strong>{__("Block diagnostics:")}</strong>
           <ul className="mt-1 list-disc pl-4 space-y-0.5">
             {diagnostics.map((d, idx) => (
               <li key={`${d.node_id}-${idx}`}>{d.node_id}: {d.message ?? d.code}</li>

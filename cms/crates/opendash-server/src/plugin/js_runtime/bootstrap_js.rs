@@ -170,6 +170,27 @@ pub(super) const OD_BOOTSTRAP_JS: &str = r#"
         return resp.data || { items: [] };
       },
     }),
+    i18n: Object.freeze({
+      __(msgid, domain) {
+        const req = { op: "l10n_translate", msgid: String(msgid) };
+        if (domain !== undefined && domain !== null) req.text_domain = String(domain);
+        const resp = _invoke(req);
+        return (resp && resp.data && typeof resp.data.text === "string") ? resp.data.text : String(msgid);
+      },
+      _x(msgid, context, domain) {
+        const req = { op: "l10n_translate", msgid: String(msgid), context: String(context) };
+        if (domain !== undefined && domain !== null) req.text_domain = String(domain);
+        const resp = _invoke(req);
+        return (resp && resp.data && typeof resp.data.text === "string") ? resp.data.text : String(msgid);
+      },
+      _n(singular, plural, count, domain) {
+        const n = Number(count);
+        const req = { op: "l10n_translate", msgid: String(singular), msgid_plural: String(plural), count: n };
+        if (domain !== undefined && domain !== null) req.text_domain = String(domain);
+        const resp = _invoke(req);
+        return (resp && resp.data && typeof resp.data.text === "string") ? resp.data.text : (n === 1 ? String(singular) : String(plural));
+      },
+    }),
     content: Object.freeze({
       get(typeKey, entryId, locale) {
         const req = { op: "content_get", type_key: String(typeKey), entry_id: Number(entryId) };

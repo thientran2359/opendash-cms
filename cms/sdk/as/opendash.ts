@@ -582,18 +582,11 @@ export function outputPrepareSavePatch(patchObj: JSON.Obj): i32 {
   return setOutput(stringifyValue(patchObj));
 }
 
-/**
- * Kết xuất quyết định cho phép gửi form liên hệ từ filter:contact/before_submit.
- */
 export function outputContactAllow(): i32 {
   const obj = new JSON.Obj();
   obj.set("decision", "allow");
   return setOutput(stringifyValue(obj));
 }
-
-/**
- * Kết xuất quyết định từ chối form liên hệ từ filter:contact/before_submit.
- */
 export function outputContactReject(code: string, message: string): i32 {
   const obj = new JSON.Obj();
   obj.set("decision", "reject");
@@ -601,17 +594,18 @@ export function outputContactReject(code: string, message: string): i32 {
   obj.set("message", message);
   return setOutput(stringifyValue(obj));
 }
-
-/**
- * Kết xuất dữ liệu projection cho filter:seo/head.
- */
-export function outputSeoHead(seoObj: JSON.Obj): i32 {
-  return setOutput(stringifyValue(seoObj));
-}
-
-/**
- * Kết xuất dữ liệu mở rộng entry.ext.<plugin_id> cho filter:entry/view.
- */
-export function outputEntryView(extObj: JSON.Obj): i32 {
-  return setOutput(stringifyValue(extObj));
+export function outputSeoHead(seoObj: JSON.Obj): i32 { return setOutput(stringifyValue(seoObj)); }
+export function outputEntryView(extObj: JSON.Obj): i32 { return setOutput(stringifyValue(extObj)); }
+export function l10nTranslate(msgid: string, context: string | null = null, textDomain: string | null = null): string {
+  const reqObj = new JSON.Obj();
+  reqObj.set("op", "l10n_translate");
+  reqObj.set("msgid", msgid);
+  if (context !== null) reqObj.set("context", context);
+  if (textDomain !== null) reqObj.set("text_domain", textDomain);
+  const resp = callHost(reqObj);
+  if (resp === null) return msgid;
+  const data = resp.getObj("data");
+  if (data === null) return msgid;
+  const txt = data.getString("text");
+  return txt !== null ? txt.valueOf() : msgid;
 }

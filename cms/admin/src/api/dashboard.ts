@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 export interface PublicationCounts {
@@ -14,6 +14,6 @@ export interface DashboardCounts {
 export function getDashboard(signal?: AbortSignal): Promise<DashboardCounts> {
   return requestJson<DashboardCounts>('/api/admin/dashboard', {
     signal,
-    defaultErrorMessage: tStatic('api.dashboard.load_post_and_page_statistics'),
+    defaultErrorMessage: __("Could not load post and page statistics."),
   });
 }

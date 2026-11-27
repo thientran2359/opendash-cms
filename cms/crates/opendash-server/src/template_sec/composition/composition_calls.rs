@@ -67,6 +67,10 @@ pub(crate) fn parse_composition_call(
             }
             Ok(Some(CompositionCall::Part(key.to_owned())))
         }
+        Expr::Var(var) if matches!(var.id, "__" | "_x" | "_n") => {
+            validate_expr(expr)?;
+            Ok(None)
+        }
         _ => Err("C-SEC cấm lời gọi hàm Call ngoài od_part/od_content."),
     }
 }

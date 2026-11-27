@@ -249,6 +249,8 @@ pub(crate) async fn execute_snapshot_worker(req: &SnapshotWorkerRequest) -> ApiR
         inline_bytes: Some(cfg_bytes),
     });
 
+    collect_language_packs_for_snapshot(&paths, &mut planned)?;
+
     // Entry 1: DB snapshot via VACUUM INTO
     let db_entry_name = format_flat_entry_name(1).map_err(ApiError::internal)?;
     let db_dest = req.snapshot_dir.join(&db_entry_name);
@@ -345,6 +347,57 @@ pub(crate) fn collect_dir_files_recursive(
             out.push(PlannedCopy {
                 kind,
                 logical_key: key,
+                source_path: Some(path),
+                inline_bytes: None,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn collect_language_packs_for_snapshot(
+    paths: &SitePaths,
+    out: &mut Vec<PlannedCopy>,
+) -> ApiResult<()> {
+    let lang_root = paths.languages_dir();
+    if !lang_root.exists() {
+        return Ok(());
+    }
+    ensure_no_reparse_or_symlink(&lang_root)?;
+    let mut count = 0usize;
+    for scope in ["core", "themes", "plugins"] {
+        let dir = lang_root.join(scope);
+        if !dir.exists() {
+            continue;
+        }
+        ensure_no_reparse_or_symlink(&dir)?;
+        let rd = fs::read_dir(&dir).map_err(|_| {
+            ApiError::conflict(String::from(
+                "Không đọc được thư mục languages/ để snapshot.",
+            ))
+        })?;
+        for entry in rd {
+            let entry = entry.map_err(|_| {
+                ApiError::conflict(String::from("Lỗi đọc mục trong thư mục languages/."))
+            })?;
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if fname.starts_with(".tmp-") {
+                continue;
+            }
+            let path = entry.path();
+            ensure_no_reparse_or_symlink(&path)?;
+            if !path.is_file() || !(fname.ends_with(".po") || fname.ends_with(".mo")) {
+                continue;
+            }
+            count += 1;
+            if count > opendash_core::l10n::MAX_SITE_LANGUAGE_FILES {
+                return Err(ApiError::conflict(String::from(
+                    "Số lượng tệp trong languages/ vượt quá giới hạn 128.",
+                )));
+            }
+            out.push(PlannedCopy {
+                kind: BackupFileKind::LanguagePack,
+                logical_key: format!("languages/{scope}/{fname}"),
                 source_path: Some(path),
                 inline_bytes: None,
             });

@@ -1,4 +1,4 @@
-import { tStatic } from '../../i18n/index.tsx';
+import { __, _x } from '../../i18n/index.tsx';
 import type { BlockCatalogItemDto } from '../../types.ts';
 
 export interface NodeVisibility {
@@ -394,20 +394,20 @@ export function nodeTypeTitle(location: NodeLocation, blockCatalog: BlockCatalog
   if (element.type === 'core/template_part') {
     const key = typeof element.props?.part_key === 'string' && element.props.part_key
       ? element.props.part_key : 'part';
-    return tStatic('builder.document.template_part', { key });
+    return __("Template Part ({{key}})", { key });
   }
   if (element.type === 'plugin/block') {
     const blockId = typeof element.props?.block_id === 'string' ? element.props.block_id : '';
     const schema = blockCatalog.find(item => item.block_id === blockId);
-    return schema?.schema.title || (blockId ? tStatic('builder.document.block', { id: blockId }) : tStatic('builder.document.unknown'));
+    return schema?.schema.title || (blockId ? __("Block ({{id}})", { id: blockId }) : __("Unrecognized block"));
   }
   return ({
-    'core/heading': tStatic('builder.document.heading'), 'core/text': tStatic('builder.document.text'),
-    'core/image': tStatic('builder.document.image'), 'core/video': tStatic('builder.document.video'), 'core/button': tStatic('builder.document.button'), 'core/list': tStatic('builder.document.list'), 'core/contact_form': tStatic('builder.document.contact'),
-    'core/pattern_ref': tStatic('builder.document.pattern'),
-    'core/content_slot': tStatic('builder.document.content_slot'),
-    'legacy/block': tStatic('builder.document.theme'),
-  } as Record<string, string>)[element.type] || tStatic('builder.document.unknown');
+    'core/heading': __("Heading"), 'core/text': _x("Text", "builder.document"),
+    'core/image': __("Image"), 'core/video': __("Video"), 'core/button': __("Button"), 'core/list': __("List"), 'core/contact_form': __("Contact form"),
+    'core/pattern_ref': _x("Reusable Pattern", "builder.document"),
+    'core/content_slot': _x("Content Slot", "builder.document"),
+    'legacy/block': __("Theme block"),
+  } as Record<string, string>)[element.type] || __("Unrecognized block");
 }
 
 

@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import type { BuilderDocument } from '../builder/document.ts';
 import type {
   HomepagePreview,
@@ -55,7 +55,7 @@ export interface StudioPreviewInput {
 export function getStudioTargets(signal?: AbortSignal): Promise<StudioTargetsResponse> {
   return requestJson<StudioTargetsResponse>('/api/admin/studio/targets', {
     signal,
-    defaultErrorMessage: tStatic('api.studio.load_opendash_studio_targets'),
+    defaultErrorMessage: __("Could not load OpenDash Studio targets."),
   });
 }
 
@@ -97,6 +97,6 @@ export function postStudioPreview(
     contentType: 'application/json',
     signal,
     body: JSON.stringify(payload),
-    defaultErrorMessage: tStatic('api.studio.generate_the_opendash_studio_preview'),
+    defaultErrorMessage: __("Could not generate the OpenDash Studio preview."),
   });
 }

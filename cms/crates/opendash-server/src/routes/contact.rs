@@ -380,9 +380,9 @@ pub async fn public_submit(
             let html = format!(
                 "<!DOCTYPE html><html lang=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title>{}</title></head><body><main role=\"alert\" data-error-code=\"{}\"><h1>{}</h1><p>{}</p></main></body></html>",
                 escape_html(&bcp47_tag),
-                escape_html(l10n.contact_error_title),
+                escape_html(&l10n.contact_error_title),
                 escape_html(&safe_code),
-                escape_html(l10n.contact_error_heading),
+                escape_html(&l10n.contact_error_heading),
                 escape_html(&safe_message),
             );
             Ok((
@@ -422,8 +422,8 @@ pub async fn public_submit(
             let html = format!(
                 "<!DOCTYPE html><html lang=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title>{}</title></head><body><main role=\"alert\"><h1>{}</h1><ul>{items}</ul></main></body></html>",
                 escape_html(&bcp47_tag),
-                escape_html(l10n.contact_error_title),
-                escape_html(l10n.contact_error_heading),
+                escape_html(&l10n.contact_error_title),
+                escape_html(&l10n.contact_error_heading),
             );
             Ok((
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -448,9 +448,9 @@ pub async fn public_received(State(db): State<SqlitePool>) -> Response {
     let html = format!(
         "<!DOCTYPE html><html lang=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title>{}</title></head><body><main><h1>{}</h1><p>{}</p></main></body></html>",
         escape_html(&bcp47_tag),
-        escape_html(l10n.contact_received_title),
-        escape_html(l10n.contact_received_heading),
-        escape_html(l10n.contact_received_body),
+        escape_html(&l10n.contact_received_title),
+        escape_html(&l10n.contact_received_heading),
+        escape_html(&l10n.contact_received_body),
     );
     (
         StatusCode::OK,

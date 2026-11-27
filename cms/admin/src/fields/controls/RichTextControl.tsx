@@ -9,12 +9,12 @@ export const RichTextControl: React.FC<{
   disabled?: boolean;
   onChange: (nextHtml: string) => void;
 }> = ({ field, value, disabled = false, onChange }) => {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const id = useId();
   const html = typeof value === 'string' ? value : '';
   const toolbarNote = field.toolbar === 'minimal'
-    ? t('fields.richtext.toolbar_minimal')
-    : t('fields.richtext.toolbar_standard');
+    ? __("Toolbar: Minimal formatting")
+    : __("Toolbar: Standard formatting");
 
   return (
     <div className="space-y-1">

@@ -241,9 +241,9 @@ pub(super) fn build_entry_view_with_defs(
         let text = match definition.field_type {
             ContentFieldType::Image | ContentFieldType::Gallery => String::new(),
             ContentFieldType::Boolean if value.is_boolean() => if value == &Value::Bool(true) {
-                l10n.yes
+                l10n.yes.as_ref()
             } else {
-                l10n.no
+                l10n.no.as_ref()
             }
             .to_string(),
             _ => match (extracted_rich, value) {

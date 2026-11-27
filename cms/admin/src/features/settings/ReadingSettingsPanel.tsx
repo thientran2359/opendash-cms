@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { useI18n, tStatic } from '../../i18n/index.tsx';
+import { useI18n, __, _x } from '../../i18n/index.tsx';
 import { ApiClientError } from '../../api/client.ts';
 import {
   EMPTY_ADMIN_LOCALE_STATE,
@@ -58,10 +58,10 @@ function sameDraft(a: ReadingSettingsDraft, b: ReadingSettingsDraft): boolean {
 
 function statusLabel(status: ReadingPageStatus): string {
   switch (status) {
-    case 'published': return tStatic('reading.published');
-    case 'draft': return tStatic('reading.draft');
-    case 'deleted': return tStatic('reading.deleted');
-    case 'unconfigured': return tStatic('reading.unconfigured');
+    case 'published': return __("Published");
+    case 'draft': return __("Page is currently a draft (public URL returns 404)");
+    case 'deleted': return __("Page has been deleted (public URL returns 404)");
+    case 'unconfigured': return __("No page selected");
   }
 }
 
@@ -72,7 +72,7 @@ function pageId(value: string): number | null {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : tStatic('reading.network_error');
+  return error instanceof Error ? error.message : _x("Unable to connect to the server.", "reading.network_error");
 }
 
 export function ReadingSettingsPanel({
@@ -83,7 +83,7 @@ export function ReadingSettingsPanel({
   onApiError,
   onDirtyChange,
 }: Props) {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const actorId = user?.id ?? null;
   const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
   const [activeLocale, setActiveLocale] = useState<string>(defaultLocaleCode);
@@ -220,7 +220,7 @@ export function ReadingSettingsPanel({
     event.preventDefault();
     if (!draft || !saved || !csrfToken || baseVersion === null || saving || stale) return;
     if (draft.homepage_page_id !== null && draft.homepage_page_id === draft.posts_page_id) {
-      setError(tStatic('reading.same_page_error'));
+      setError(__("The homepage and posts page must be two different pages."));
       return;
     }
     setSaving(true);
@@ -233,11 +233,11 @@ export function ReadingSettingsPanel({
       setDraft(snapshot(settings));
       setBaseVersion(settings.version);
       setStale(false);
-      setNotice(tStatic('reading.saved'));
+      setNotice(__("Homepage and posts page saved in a single update."));
     } catch (reason) {
       if (reason instanceof ApiClientError && reason.status === 412) {
         setStale(true);
-        setError(tStatic('reading.stale_error'));
+        setError(__("Settings were updated in another session. Your selections are retained; load the latest version before saving again."));
       } else {
         setError(errorMessage(reason));
       }
@@ -267,21 +267,21 @@ export function ReadingSettingsPanel({
         disabled={saving || loading}
         onChange={event => updateDraft({ ...draft, [field]: pageId(event.target.value) })}
       >
-        <option value="">{t('reading.no_selection')}</option>
-        {!hasSelected && selected !== null && <option value={selected}>{t('reading.missing_page', { id: selected })}</option>}
-        {choices.map(item => <option key={item.id} value={item.id}>{item.title || t('reading.untitled')} · #{item.id}</option>)}
+        <option value="">{__("Not selected")}</option>
+        {!hasSelected && selected !== null && <option value={selected}>{__("Page #{{id}} (not in the loaded list)", { id: selected })}</option>}
+        {choices.map(item => <option key={item.id} value={item.id}>{item.title || _x("(Untitled)", "reading.untitled")} · #{item.id}</option>)}
       </select>
       <p className="text-xs text-zinc-500" role="status">
-        {t('reading.saved_status')} <strong className="text-zinc-800">{statusLabel(status)}</strong>{savedId !== null ? t('reading.saved_id', { id: savedId }) : ''}
+        {__("Saved page status:")} <strong className="text-zinc-800">{statusLabel(status)}</strong>{savedId !== null ? __(" · ID {{id}}", { id: savedId }) : ''}
       </p>
     </div>;
   }
 
   return <section className="min-w-0 space-y-5" data-testid="reading-settings" aria-labelledby="reading-heading">
     <div>
-      <h2 id="reading-heading" className="text-base font-semibold text-zinc-950">{t('reading.heading')}</h2>
+      <h2 id="reading-heading" className="text-base font-semibold text-zinc-950">{__("Homepage and posts page")}</h2>
       <p className="mt-1 text-sm text-zinc-600">
-        {t('reading.description')}
+        {__("Choose a published page to display as the homepage and another page for the blog post listing. Using a page as the posts page does not delete its existing content.")}
       </p>
     </div>
     <LocaleTabs
@@ -290,45 +290,45 @@ export function ReadingSettingsPanel({
       onSelectLocale={setActiveLocale}
       testId="reading-locale-tabs"
     />
-    {loading && <p role="status" className="text-sm text-zinc-500">{t('reading.loading_settings')}</p>}
+    {loading && <p role="status" className="text-sm text-zinc-500">{__("Loading pages and current settings…")}</p>}
     {error && <AdminAlert tone="error">{error}</AdminAlert>}
     {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
-    {!loading && (!saved || !draft) && <AdminButton variant="primary" onClick={() => void load()}>{t('reading.reload')}</AdminButton>}
+    {!loading && (!saved || !draft) && <AdminButton variant="primary" onClick={() => void load()}>{__("Reload")}</AdminButton>}
     {!loading && saved && draft && <form className="space-y-5" onSubmit={event => void handleSave(event)}>
-      {picker('homepage_page_id', t('reading.homepage'), saved.homepage_status, t('reading.homepage_help'))}
-      {picker('posts_page_id', t('reading.posts_page'), saved.posts_page_status, t('reading.posts_help'))}
+      {picker('homepage_page_id', __("Homepage"), saved.homepage_status, __("The page is displayed at /; its previous URL redirects to /."))}
+      {picker('posts_page_id', _x("Posts page", "reading.posts_page"), saved.posts_page_status, __("The page keeps its own URL for the post archive; its content remains stored in the database."))}
       {pageOffset < pageTotal && <AdminButton variant="secondary" size="sm" disabled={loadingMore} onClick={() => void loadMorePages()}>
-        {loadingMore ? t('reading.loading') : t('reading.load_more', { offset: pageOffset, total: pageTotal })}
+        {loadingMore ? __("Loading…") : __("Load more published pages ({{offset}}/{{total}})", { offset: pageOffset, total: pageTotal })}
       </AdminButton>}
       {stale && <AdminAlert tone="warning" className="max-w-xl space-y-2">
-        <p>{t('reading.stale_warning')}</p>
+        <p>{__("The server version has changed. Your draft is retained.")}</p>
         <AdminButton variant="secondary" size="sm"
           disabled={saving || saved.version === baseVersion}
           onClick={() => {
           setBaseVersion(saved.version);
           setStale(false);
           if (draftKey) pendingDrafts.set(draftKey, { baseVersion: saved.version, values: { ...draft } });
-        }}>{t('reading.use_new_version', { version: saved.version })}</AdminButton>
+        }}>{__("Use this draft with the latest server version ({{version}})", { version: saved.version })}</AdminButton>
       </AdminAlert>}
       {draft.homepage_page_id !== null && draft.homepage_page_id === draft.posts_page_id &&
-        <AdminAlert tone="error" className="max-w-xl">{t('reading.same_page_warning')}</AdminAlert>}
+        <AdminAlert tone="error" className="max-w-xl">{__("The two selections must not refer to the same page.")}</AdminAlert>}
       <div className="flex flex-wrap items-center gap-2.5 pt-1">
         <AdminButton type="submit" variant="primary"
           disabled={!dirty || !csrfToken || saving || stale || (draft.homepage_page_id !== null && draft.homepage_page_id === draft.posts_page_id)}>
-          {saving ? t('reading.saving') : t('reading.save')}
+          {saving ? __("Saving…") : __("Save reading settings")}
         </AdminButton>
-        <AdminButton variant="secondary" disabled={saving} onClick={() => void load()}>{t('reading.refresh')}</AdminButton>
+        <AdminButton variant="secondary" disabled={saving} onClick={() => void load()}>{__("Refresh status (keep draft)")}</AdminButton>
         {dirty && <AdminButton variant="ghost" size="sm" disabled={saving}
           onClick={() => {
-            if (!window.confirm(t('reading.discard_confirm'))) return;
+            if (!window.confirm(__("Discard unsaved selections and restore the server settings currently displayed?"))) return;
             if (draftKey) pendingDrafts.delete(draftKey);
             setDraft(snapshot(saved));
             setBaseVersion(saved.version);
             setStale(false);
             setError(null);
-          }}>{t('reading.discard')}</AdminButton>}
-        {dirty && <span className="text-xs font-medium text-amber-800" role="status">{t('reading.unsaved')}</span>}
-        <span className="text-xs text-zinc-500">{t('reading.version', { version: saved.version })}</span>
+          }}>{__("Discard draft")}</AdminButton>}
+        {dirty && <span className="text-xs font-medium text-amber-800" role="status">{__("Unsaved selections")}</span>}
+        <span className="text-xs text-zinc-500">{__("Version {{version}}", { version: saved.version })}</span>
       </div>
     </form>}
   </section>;

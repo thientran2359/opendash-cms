@@ -1,11 +1,21 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { requestJson } from '../api/client.ts';
 import type { AdminI18nBootstrap } from '../types.ts';
-import { en, type TranslationKey } from './locales/en.ts';
-import { vi } from './locales/vi.ts';
+import { compilePluralForms, type PluralEvaluator } from './plural.ts';
 
-export type { TranslationKey } from './locales/en.ts';
-export type UiLocale = 'en' | 'vi';
+export type UiLocale = string;
 export type TranslationParams = Readonly<Record<string, string | number>>;
+
+export interface RuntimeCatalogJson {
+  locale: string;
+  etag: string;
+  nplurals: number;
+  plural_forms: string;
+  entries: Record<string, string>;
+  context_entries: Record<string, Record<string, string>>;
+  plural_entries: Record<string, string[]>;
+  context_plural_entries: Record<string, Record<string, string[]>>;
+}
 
 const DEFAULT_BOOTSTRAP: AdminI18nBootstrap = {
   configured_locale: 'en',
@@ -15,38 +25,112 @@ const DEFAULT_BOOTSTRAP: AdminI18nBootstrap = {
   configured_installed: true,
   catalog_version: 'v1',
   available_locales: [],
+  catalog_etag: '"en-builtin"',
+  catalog_url: '/api/i18n/admin/catalog?locale=en',
 };
 
-let currentBootstrap = DEFAULT_BOOTSTRAP;
+const EMPTY_CATALOG: RuntimeCatalogJson = {
+  locale: 'en',
+  etag: '"en-builtin"',
+  nplurals: 2,
+  plural_forms: 'nplurals=2; plural=(n != 1);',
+  entries: {},
+  context_entries: {},
+  plural_entries: {},
+  context_plural_entries: {},
+};
+
+let currentBootstrap: AdminI18nBootstrap = DEFAULT_BOOTSTRAP;
+let currentCatalog: RuntimeCatalogJson = EMPTY_CATALOG;
+let currentPluralEval: PluralEvaluator = compilePluralForms(EMPTY_CATALOG.plural_forms);
 
 export function getUiLocale(): UiLocale {
-  return currentBootstrap.effective_locale === 'vi' ? 'vi' : 'en';
+  return currentBootstrap.effective_locale || 'en';
 }
 
 export function getEffectiveBcp47(): string {
   return currentBootstrap.effective_bcp47;
 }
 
-function translate(locale: UiLocale, key: TranslationKey, params?: TranslationParams): string {
-  const template = (locale === 'vi' ? vi[key] : en[key]) ?? en[key] ?? key;
+function interpolate(template: string, params?: TranslationParams): string {
+  if (!params) return template;
   return template.replace(/\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g, (match, name: string) =>
-    params && Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match);
+    Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match);
 }
 
-export function tStatic(key: TranslationKey, params?: TranslationParams): string {
-  return translate(getUiLocale(), key, params);
+export function __(msgid: string, params?: TranslationParams): string {
+  const translated = currentCatalog.entries[msgid] || msgid;
+  return interpolate(translated, params);
 }
 
-export function tCountStatic(baseKey: string, count: number, params?: TranslationParams): string {
-  const suffix = new Intl.PluralRules(getEffectiveBcp47()).select(count) === 'one' ? 'one' : 'other';
-  return tStatic(`${baseKey}_${suffix}` as TranslationKey, { ...params, count });
+export function _x(msgid: string, context: string, params?: TranslationParams): string {
+  const translated = currentCatalog.context_entries[context]?.[msgid] || currentCatalog.entries[msgid] || msgid;
+  return interpolate(translated, params);
+}
+
+export function _n(singular: string, plural: string, count: number, params?: TranslationParams): string {
+  const key = `${singular}\u0000${plural}`;
+  const forms = currentCatalog.plural_entries[key];
+  const fallback = count === 1 ? singular : plural;
+  const template = forms && forms.length > 0 ? forms[currentPluralEval(count, forms.length)] || fallback : fallback;
+  return interpolate(template, { ...params, count });
+}
+
+export function _nx(
+  singular: string,
+  plural: string,
+  count: number,
+  context: string,
+  params?: TranslationParams,
+): string {
+  const key = `${singular}\u0000${plural}`;
+  const forms = currentCatalog.context_plural_entries[context]?.[key] || currentCatalog.plural_entries[key];
+  const fallback = count === 1 ? singular : plural;
+  const template = forms && forms.length > 0 ? forms[currentPluralEval(count, forms.length)] || fallback : fallback;
+  return interpolate(template, { ...params, count });
+}
+
+async function loadCatalogForBootstrap(next: AdminI18nBootstrap, signal?: AbortSignal): Promise<RuntimeCatalogJson> {
+  const etag = next.catalog_etag || '"en-builtin"';
+  if (next.effective_locale === 'en' && etag === '"en-builtin"') {
+    return EMPTY_CATALOG;
+  }
+  const cacheKey = `od_i18n_${next.effective_locale}_${etag}`;
+  try {
+    const cachedRaw = window.localStorage.getItem(cacheKey);
+    if (cachedRaw) {
+      const parsed = JSON.parse(cachedRaw) as RuntimeCatalogJson;
+      if (parsed && parsed.locale === next.effective_locale && parsed.entries) {
+        return parsed;
+      }
+    }
+  } catch {
+    // Ignore storage errors (private browsing / quota).
+  }
+  const url = next.catalog_url || `/api/i18n/admin/catalog?locale=${encodeURIComponent(next.effective_locale)}`;
+  try {
+    const catalog = await requestJson<RuntimeCatalogJson>(url, {
+      signal,
+      defaultErrorMessage: 'Could not load catalog.',
+    });
+    try {
+      window.localStorage.setItem(cacheKey, JSON.stringify(catalog));
+    } catch {
+      // Ignore storage quota errors.
+    }
+    return catalog;
+  } catch {
+    return EMPTY_CATALOG;
+  }
 }
 
 interface I18nContextValue {
   bootstrap: AdminI18nBootstrap;
   uiLocale: UiLocale;
-  t: typeof tStatic;
-  tCount: typeof tCountStatic;
+  __: typeof __;
+  _x: typeof _x;
+  _n: typeof _n;
+  _nx: typeof _nx;
   refreshBootstrap: () => Promise<void>;
   setSection: (section: string) => void;
 }
@@ -67,55 +151,72 @@ export function I18nProvider({ children, loadBootstrap }: ProviderProps) {
   const sequence = useRef(0);
   const mounted = useRef(false);
 
-  const applyBootstrap = useCallback((next: AdminI18nBootstrap) => {
+  const applyBootstrapAndCatalog = useCallback((next: AdminI18nBootstrap, catalog: RuntimeCatalogJson) => {
     currentBootstrap = next;
+    currentCatalog = catalog;
+    currentPluralEval = compilePluralForms(catalog.plural_forms || 'nplurals=2; plural=(n != 1);');
     setBootstrap(next);
   }, []);
 
   const refreshBootstrap = useCallback(async () => {
     const serial = ++sequence.current;
     const next = await loadBootstrap();
-    if (mounted.current && serial === sequence.current) applyBootstrap(next);
-  }, [loadBootstrap, applyBootstrap]);
+    const catalog = await loadCatalogForBootstrap(next).catch(() => EMPTY_CATALOG);
+    if (mounted.current && serial === sequence.current) applyBootstrapAndCatalog(next, catalog);
+  }, [loadBootstrap, applyBootstrapAndCatalog]);
 
   useEffect(() => {
     mounted.current = true;
     const controller = new AbortController();
     const serial = ++sequence.current;
-    void loadBootstrap(controller.signal).then(next => {
-      if (!controller.signal.aborted && serial === sequence.current) applyBootstrap(next);
-    }).catch(() => {
-      if (!controller.signal.aborted && serial === sequence.current) applyBootstrap(DEFAULT_BOOTSTRAP);
-    }).finally(() => {
-      if (!controller.signal.aborted && serial === sequence.current) setReady(true);
-    });
+    void loadBootstrap(controller.signal)
+      .then(async next => {
+        const catalog = await loadCatalogForBootstrap(next, controller.signal).catch(() => EMPTY_CATALOG);
+        if (!controller.signal.aborted && serial === sequence.current) {
+          applyBootstrapAndCatalog(next, catalog);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && serial === sequence.current) {
+          applyBootstrapAndCatalog(DEFAULT_BOOTSTRAP, EMPTY_CATALOG);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted && serial === sequence.current) setReady(true);
+      });
     return () => {
       mounted.current = false;
       sequence.current += 1;
       controller.abort();
     };
-  }, [loadBootstrap, applyBootstrap]);
+  }, [loadBootstrap, applyBootstrapAndCatalog]);
 
-  const uiLocale = bootstrap.effective_locale === 'vi' ? 'vi' : 'en';
-  const t = useCallback((key: TranslationKey, params?: TranslationParams) =>
-    translate(uiLocale, key, params), [uiLocale]);
-  const tCount = useCallback((baseKey: string, count: number, params?: TranslationParams) => {
-    const suffix = new Intl.PluralRules(bootstrap.effective_bcp47).select(count) === 'one' ? 'one' : 'other';
-    return t(`${baseKey}_${suffix}` as TranslationKey, { ...params, count });
-  }, [bootstrap.effective_bcp47, t]);
+  const uiLocale = bootstrap.effective_locale || 'en';
+  const bound__: typeof __ = useCallback((msgid, params) => __(msgid, params), [bootstrap]);
+  const bound_x: typeof _x = useCallback((msgid, context, params) => _x(msgid, context, params), [bootstrap]);
+  const bound_n: typeof _n = useCallback(
+    (singular, plural, count, params) => _n(singular, plural, count, params),
+    [bootstrap],
+  );
+  const bound_nx: typeof _nx = useCallback(
+    (singular, plural, count, context, params) => _nx(singular, plural, count, context, params),
+    [bootstrap],
+  );
 
   useEffect(() => {
     document.documentElement.lang = bootstrap.effective_bcp47;
     document.documentElement.dir = bootstrap.effective_direction;
-    document.title = t('app.document_title', { section: section || t('app.default_title') });
-  }, [bootstrap, t, section]);
+    document.title = bound__('{{section}} — OpenDash CMS', { section: section || bound__('Admin') });
+  }, [bootstrap, bound__, section]);
 
-  // Avoid rendering English or Vietnamese auth text before the site preference
-  // is known. On a failed bootstrap, the built-in English fallback is safe.
   if (!ready) return null;
-  return <I18nContext.Provider value={{ bootstrap, uiLocale, t, tCount, refreshBootstrap, setSection }}>
-    {children}
-  </I18nContext.Provider>;
+  return (
+    <I18nContext.Provider
+      value={{ bootstrap, uiLocale, __: bound__, _x: bound_x, _n: bound_n, _nx: bound_nx, refreshBootstrap, setSection }}
+    >
+      {children}
+    </I18nContext.Provider>
+  );
 }
 
 export function useI18n(): I18nContextValue {

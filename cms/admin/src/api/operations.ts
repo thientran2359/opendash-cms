@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 export interface MissingCanonicalDiagnostic {
@@ -90,7 +90,7 @@ export interface OperationsDiagnostics {
 export function getOperationsDiagnostics(): Promise<OperationsDiagnostics> {
   return requestJson<OperationsDiagnostics>('/api/admin/operations/diagnostics', {
     method: 'GET',
-    defaultErrorMessage: tStatic('api.operations.load_operational_diagnostics'),
+    defaultErrorMessage: __("Could not load operational diagnostics."),
   });
 }
 
@@ -98,7 +98,7 @@ export function planReconcile(csrfToken: string): Promise<ReconcilePlan> {
   return requestJson<ReconcilePlan>('/api/admin/operations/reconcile/plan', {
     method: 'POST',
     csrfToken,
-    defaultErrorMessage: tStatic('api.operations.plan_reconciliation'),
+    defaultErrorMessage: __("Could not plan reconciliation."),
   });
 }
 
@@ -117,7 +117,7 @@ export function applyReconcile(
       digest: plan.digest,
       confirm: true,
     }),
-    defaultErrorMessage: tStatic('api.operations.apply_the_reconciliation_plan'),
+    defaultErrorMessage: __("Could not apply the reconciliation plan."),
   });
 }
 
@@ -127,7 +127,7 @@ export function purgeQuarantine(csrfToken: string): Promise<PurgeQuarantineResul
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify({ confirm: true }),
-    defaultErrorMessage: tStatic('api.operations.purge_quarantine'),
+    defaultErrorMessage: __("Could not purge quarantine."),
   });
 }
 
@@ -153,7 +153,7 @@ export interface BackupListResponse {
 export function listBackups(limit = 20): Promise<BackupListResponse> {
   return requestJson<BackupListResponse>(`/api/admin/operations/backups?limit=${limit}`, {
     method: 'GET',
-    defaultErrorMessage: tStatic('api.operations.load_backups'),
+    defaultErrorMessage: __("Could not load backups."),
   });
 }
 
@@ -166,14 +166,14 @@ export function createBackup(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.operations.start_the_backup_job'),
+    defaultErrorMessage: __("Could not start the backup job."),
   });
 }
 
 export function getOperationJob(id: string): Promise<OperationJob> {
   return requestJson<OperationJob>(`/api/admin/operations/jobs/${encodeURIComponent(id)}`, {
     method: 'GET',
-    defaultErrorMessage: tStatic('api.operations.load_the_job_status'),
+    defaultErrorMessage: __("Could not load the job status."),
   });
 }
 
@@ -187,7 +187,7 @@ export function cancelOperationJob(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(expectedVersion != null ? { expected_version: expectedVersion } : {}),
-    defaultErrorMessage: tStatic('api.operations.cancel_the_job'),
+    defaultErrorMessage: __("Could not cancel the job."),
   });
 }
 
@@ -195,7 +195,7 @@ export function deleteBackupArtifact(csrfToken: string, id: string): Promise<Ope
   return requestJson<OperationJob>(`/api/admin/operations/backups/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     csrfToken,
-    defaultErrorMessage: tStatic('api.operations.delete_the_backup'),
+    defaultErrorMessage: __("Could not delete the backup."),
   });
 }
 
@@ -241,7 +241,7 @@ export function uploadRestoreArchive(
     csrfToken,
     contentType: 'application/octet-stream',
     body: file,
-    defaultErrorMessage: tStatic('api.operations.upload_the_backup_package'),
+    defaultErrorMessage: __("Could not upload the backup package."),
   });
 }
 
@@ -254,14 +254,14 @@ export function createRestoreJob(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.operations.start_the_restore_job'),
+    defaultErrorMessage: __("Could not start the restore job."),
   });
 }
 
 export function getRecoveryStatus(): Promise<RecoveryStatus> {
   return requestJson<RecoveryStatus>('/api/admin/operations/recovery/status', {
     method: 'GET',
-    defaultErrorMessage: tStatic('api.operations.load_safe_mode_status'),
+    defaultErrorMessage: __("Could not load safe mode status."),
   });
 }
 
@@ -274,6 +274,6 @@ export function activateRecovery(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.operations.activate_the_site_after_restore'),
+    defaultErrorMessage: __("Could not activate the site after restore."),
   });
 }

@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __, _x } from '../i18n/index.tsx';
 import { ApiClientError, requestJson } from './client.ts';
 
 export type MediaKind = 'image' | 'video';
@@ -63,7 +63,7 @@ export async function deleteMedia(
       method: 'DELETE',
       csrfToken,
       ifMatch: `"gv${generation}-v${version}"`,
-      defaultErrorMessage: tStatic('api.media.delete_media'),
+      defaultErrorMessage: __("Could not delete media."),
     });
   } catch (err) {
     if (err instanceof ApiClientError && err.status === 409) {
@@ -75,11 +75,11 @@ export async function deleteMedia(
       }
       if (body?.pins) {
         throw new MediaDeleteConflictError(
-          body.error || tStatic('api.media.this_media_is_in_use_and_cannot_be_deleted'),
+          body.error || __("This media is in use and cannot be deleted."),
           body.pins,
         );
       }
-      throw new Error(body?.error || tStatic('api.media.this_media_is_busy_or_being_deleted'));
+      throw new Error(body?.error || __("This media is busy or being deleted."));
     }
     throw err;
   }
@@ -104,7 +104,7 @@ export function listMedia(
     params.set('kind', kind);
   }
   return requestJson<MediaAsset[]>(`/api/admin/media?${params.toString()}`, {
-    defaultErrorMessage: tStatic('api.media.load_the_media_library'),
+    defaultErrorMessage: __("Could not load the media library."),
   });
 }
 
@@ -115,8 +115,8 @@ export function uploadMedia(file: File, csrfToken: string): Promise<MediaAsset> 
     contentType: file.type,
     uploadFilename: file.name,
     body: file,
-    defaultErrorMessage: tStatic('api.media.upload_the_image'),
-    oversizeErrorMessage: tStatic('api.media.the_image_exceeds_8_mib'),
+    defaultErrorMessage: __("Could not upload the image."),
+    oversizeErrorMessage: __("The image exceeds 8 MiB."),
   });
 }
 
@@ -127,7 +127,7 @@ export function uploadVideo(file: File, csrfToken: string): Promise<MediaAsset> 
     contentType: file.type || 'video/mp4',
     uploadFilename: file.name,
     body: file,
-    defaultErrorMessage: tStatic('api.media.upload_the_mp4_video'),
-    oversizeErrorMessage: tStatic('api.media.the_video_exceeds_100_mib'),
+    defaultErrorMessage: __("Could not upload the MP4 video."),
+    oversizeErrorMessage: _x("The video exceeds 100 MiB.", "api.media"),
   });
 }

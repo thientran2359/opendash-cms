@@ -48,18 +48,18 @@ export function FieldLabelHeader({
   required?: boolean;
   badge?: string;
 }) {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   return (
     <div className="flex items-center justify-between gap-2">
       {htmlFor ? (
         <label htmlFor={htmlFor} className="text-xs font-semibold text-zinc-800">
           {label}
-          {required && <span className="ml-0.5 text-rose-600" aria-label={t('fields.common.required')}>*</span>}
+          {required && <span className="ml-0.5 text-rose-600" aria-label={__("Required")}>*</span>}
         </label>
       ) : (
         <span className="text-xs font-semibold text-zinc-800">
           {label}
-          {required && <span className="ml-0.5 text-rose-600" aria-label={t('fields.common.required')}>*</span>}
+          {required && <span className="ml-0.5 text-rose-600" aria-label={__("Required")}>*</span>}
         </span>
       )}
       {badge && <span className="font-mono text-[11px] text-zinc-500">{badge}</span>}

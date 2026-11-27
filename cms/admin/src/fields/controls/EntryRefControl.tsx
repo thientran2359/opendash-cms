@@ -16,7 +16,7 @@ export const EntryRefControl: React.FC<{
   onChange: (next: number | number[] | null) => void;
   onApiError: (error: unknown, fallback: string) => void;
 }> = ({ field, value, locale, disabled = false, onChange, onApiError }) => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const id = useId();
   const isWildcard = field.target_types?.length === 1 && field.target_types[0] === '*';
   const multiple = Boolean(field.multiple);
@@ -59,11 +59,11 @@ export const EntryRefControl: React.FC<{
       })
       .catch(err => {
         if (!controller.signal.aborted) {
-          onApiError(err, t('fields.errors.load_options_source'));
+          onApiError(err, __("Could not load dynamic options source."));
         }
       });
     return () => controller.abort();
-  }, [isWildcard, field.target_types, onApiError, t]);
+  }, [isWildcard, field.target_types, onApiError]);
 
   const selectedIdsKey = selectedIds.join(',');
   useEffect(() => {
@@ -107,14 +107,14 @@ export const EntryRefControl: React.FC<{
       })
       .catch(err => {
         if (!controller.signal.aborted) {
-          onApiError(err, t('fields.errors.search_entries'));
+          onApiError(err, __("Could not search entries."));
         }
       })
       .finally(() => {
         if (!controller.signal.aborted) setSearching(false);
       });
     return () => controller.abort();
-  }, [searchOpen, activeCpt, query, locale, onApiError, t]);
+  }, [searchOpen, activeCpt, query, locale, onApiError]);
 
   const cptOptions: DynamicSelectOption[] = isWildcard
     ? dynamicCpts
@@ -168,12 +168,12 @@ export const EntryRefControl: React.FC<{
           disabled={disabled}
           onClick={() => setSearchOpen(v => !v)}
         >
-          {searchOpen ? t('fields.common.close') : t('fields.entry_ref.pick')}
+          {searchOpen ? __("Close") : _x("Choose entry", "fields.entry_ref")}
         </AdminButton>
       </div>
 
       {selectedIds.length === 0 ? (
-        <p className="text-xs italic text-zinc-400">{t('fields.entry_ref.none_selected')}</p>
+        <p className="text-xs italic text-zinc-400">{__("No entry selected.")}</p>
       ) : (
         <ul className="space-y-1">
           {selectedIds.map((entryId, idx) => {
@@ -207,7 +207,7 @@ export const EntryRefControl: React.FC<{
                       <button
                         type="button"
                         disabled={disabled || idx === 0}
-                        aria-label={t('fields.common.move_up')}
+                        aria-label={_x("Move up", "fields.common")}
                         onClick={() => moveEntry(idx, -1)}
                         className="rounded px-1 text-zinc-600 hover:bg-zinc-100 disabled:opacity-35"
                       >
@@ -216,7 +216,7 @@ export const EntryRefControl: React.FC<{
                       <button
                         type="button"
                         disabled={disabled || idx === selectedIds.length - 1}
-                        aria-label={t('fields.common.move_down')}
+                        aria-label={_x("Move down", "fields.common")}
                         onClick={() => moveEntry(idx, 1)}
                         className="rounded px-1 text-zinc-600 hover:bg-zinc-100 disabled:opacity-35"
                       >
@@ -227,7 +227,7 @@ export const EntryRefControl: React.FC<{
                   <button
                     type="button"
                     disabled={disabled}
-                    aria-label={t('fields.common.remove')}
+                    aria-label={__("Remove")}
                     onClick={() => removeEntry(entryId)}
                     className="rounded px-1 text-rose-600 hover:bg-rose-50 disabled:opacity-35"
                   >
@@ -245,7 +245,7 @@ export const EntryRefControl: React.FC<{
           <div className="flex flex-wrap items-center gap-2">
             {cptOptions.length > 1 && (
               <select
-                aria-label={t('fields.entry_ref.filter_type')}
+                aria-label={__("Content type")}
                 disabled={disabled}
                 value={activeCpt}
                 onChange={e => setActiveCpt(e.target.value)}
@@ -263,16 +263,16 @@ export const EntryRefControl: React.FC<{
               type="search"
               value={query}
               disabled={disabled}
-              placeholder={t('fields.entry_ref.search_placeholder')}
+              placeholder={__("Search by title…")}
               onChange={e => setQuery(e.target.value)}
               className={`${STUDIO_INPUT_CLASS} flex-1`}
             />
           </div>
 
           {searching ? (
-            <p className="text-xs text-zinc-500">{t('fields.common.loading')}</p>
+            <p className="text-xs text-zinc-500">{__("Loading…")}</p>
           ) : searchRows.length === 0 ? (
-            <p className="text-xs italic text-zinc-400">{t('fields.entry_ref.no_results')}</p>
+            <p className="text-xs italic text-zinc-400">{__("No matching entries found.")}</p>
           ) : (
             <ul className="max-h-48 space-y-1 overflow-y-auto">
               {searchRows.map(row => {
@@ -288,7 +288,7 @@ export const EntryRefControl: React.FC<{
                     >
                       <span className="truncate font-medium text-zinc-800">{row.title}</span>
                       <span className="shrink-0 font-mono text-[10px] text-zinc-500">
-                        {picked ? t('fields.common.selected') : `#${row.id} · ${row.publication_status}`}
+                        {picked ? __("Selected") : `#${row.id} · ${row.publication_status}`}
                       </span>
                     </button>
                   </li>

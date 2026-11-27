@@ -75,6 +75,7 @@ async fn invocation_timeout_must_not_commit_later() {
         },
         filters: vec![],
         editor_panels: vec![],
+        text_domain: None,
         settings_schema: vec![],
         ..Default::default()
     };
@@ -230,6 +231,7 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
         },
         filters: vec![],
         editor_panels: vec![],
+        text_domain: None,
         settings_schema: vec![],
         ..Default::default()
     };
@@ -327,6 +329,7 @@ async fn ipc_kv_get_stuck_parent_must_cancel_and_clean_up() {
         },
         filters: vec![],
         editor_panels: vec![],
+        text_domain: None,
         settings_schema: vec![],
         ..Default::default()
     };

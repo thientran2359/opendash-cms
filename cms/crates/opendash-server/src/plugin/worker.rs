@@ -188,6 +188,8 @@ pub fn run_worker_from_stdio() {
         last_resp_bytes: None,
         host_calls_count: 0,
         http_calls_count: 0,
+        l10n_calls_count: 0,
+        default_locale: None,
         db_pool: None,
         secrets_root: None,
         read_ipc: Some(read_ipc),

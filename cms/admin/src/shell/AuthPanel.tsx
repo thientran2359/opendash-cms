@@ -36,7 +36,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   onLogin,
   onLogout,
 }) => {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   return (
     <div id="auth-bar">
       {!user ? (
@@ -51,7 +51,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
           <TextInput
             id="auth-username"
             className={AUTH_INPUT_CLASS}
-            placeholder={t('shell.auth_username')}
+            placeholder={__("Username")}
             autoComplete="username"
             value={authUsername}
             onValueChange={onUsernameChange}
@@ -61,7 +61,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             id="auth-password"
             type="password"
             className={AUTH_INPUT_CLASS}
-            placeholder={t('shell.auth_password')}
+            placeholder={__("Password")}
             autoComplete="current-password"
             value={authPassword}
             onValueChange={onPasswordChange}
@@ -75,7 +75,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
               className="h-10 w-full"
               disabled={isProcessing}
             >
-              {t('shell.auth_login')}
+              {__("Sign in")}
             </AdminButton>
             <AdminButton
               type="button"
@@ -85,14 +85,14 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
               onClick={onSetup}
               disabled={isProcessing}
             >
-              {t('shell.auth_setup')}
+              {__("Set up admin (first time)")}
             </AdminButton>
           </div>
         </form>
       ) : (
         <div id="user-panel" className="flex items-center gap-3">
           <span id="user-info" className="text-xs font-medium text-zinc-600">
-            {user.username} <span className="text-zinc-400">({user.role === 'admin' ? t('shell.role_admin') : t('shell.role_editor')})</span>
+            {user.username} <span className="text-zinc-400">({user.role === 'admin' ? __("Admin") : __("Editor")})</span>
           </span>
           <AdminButton
             id="auth-logout"
@@ -101,7 +101,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             onClick={onLogout}
             disabled={isProcessing}
           >
-            {t('shell.auth_logout')}
+            {__("Sign out")}
           </AdminButton>
         </div>
       )}

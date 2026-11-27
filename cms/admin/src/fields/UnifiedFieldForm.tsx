@@ -133,7 +133,7 @@ export const UnifiedFieldForm: React.FC<UnifiedFieldFormProps> = ({
   savedValues,
   onApiError,
 }) => {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const idPrefix = useId();
   const [activeTabKey, setActiveTabKey] = useState<string>('');
   const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({});
@@ -207,7 +207,7 @@ export const UnifiedFieldForm: React.FC<UnifiedFieldFormProps> = ({
             : mapObj.tablet !== undefined || mapObj.mobile !== undefined;
         responsiveInfo = {
           differs,
-          summary: summarizeResponsiveValue(rawValue) || t('fields.responsive.inherited'),
+          summary: summarizeResponsiveValue(rawValue) || __("Inherited value"),
           viewport,
           onReset: () => {
             if (viewport === 'desktop') {

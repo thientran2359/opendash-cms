@@ -175,8 +175,8 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
     let base_manifest = r#"{"manifest_version":3,"theme_id":"bad-l10n","name":"Bad","version":"1.0.0","default_locale":"vi","templates":[{"kind":"single","file":"single.html"},{"kind":"archive","file":"archive.html"}]}"#;
     let vi_dict = r#"{"hello":"Xin chào"}"#.as_bytes();
 
-    // 2a. Missing key in default_locale
-    let r_missing_key = upload_theme(
+    // 2a. Legacy locales/*.json is rejected under Clean-Slate V1
+    let r_legacy_json = upload_theme(
         &client,
         &srv.origin,
         &cookie,
@@ -184,36 +184,39 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         build_zip(&[
             ("theme.json", base_manifest.as_bytes()),
             ("locales/vi.json", vi_dict),
-            (
-                "single.html",
-                b"<main>{{ t.missing_key }}{{ od_content() }}</main>",
-            ),
-            ("archive.html", b"<main>{{ t.hello }}</main>"),
+            ("single.html", b"<main>{{ od_content() }}</main>"),
+            ("archive.html", b"<main>Archive</main>"),
         ]),
     )
     .await;
-    assert_eq!(r_missing_key.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(r_legacy_json.status(), StatusCode::BAD_REQUEST);
 
-    // 2b. Expr::GetItem on `t` (`t["hello"]`)
-    let r_getitem = upload_theme(
+    // 2b. Dynamic argument to __() is rejected by C-SEC
+    let r_dynamic_l10n = upload_theme(
         &client,
         &srv.origin,
         &cookie,
         &csrf,
         build_zip(&[
             ("theme.json", base_manifest.as_bytes()),
-            ("locales/vi.json", vi_dict),
+            (
+                "languages/bad-l10n-vi.po",
+                b"msgid \"Hello\"\nmsgstr \"Xin ch\xc3\xa0o\"\n",
+            ),
             (
                 "single.html",
-                b"<main>{{ t[\"hello\"] }}{{ od_content() }}</main>",
+                b"<main>{{ __(entry.title) }}{{ od_content() }}</main>",
             ),
-            ("archive.html", b"<main>{{ t.hello }}</main>"),
+            (
+                "archive.html",
+                b"<main>{{ __(\"Hello\", \"bad-l10n\") }}</main>",
+            ),
         ]),
     )
     .await;
-    assert_eq!(r_getitem.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(r_dynamic_l10n.status(), StatusCode::BAD_REQUEST);
 
-    // 2c. Rebinding `locale` or `t` or `site`
+    // 2c. Rebinding `locale` or `site`
     let r_rebind = upload_theme(
         &client,
         &srv.origin,
@@ -221,18 +224,20 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         &csrf,
         build_zip(&[
             ("theme.json", base_manifest.as_bytes()),
-            ("locales/vi.json", vi_dict),
             (
                 "single.html",
                 b"{% set locale = {'home_url':'/evil'} %}<main>{{ od_content() }}</main>",
             ),
-            ("archive.html", b"<main>{{ t.hello }}</main>"),
+            (
+                "archive.html",
+                b"<main>{{ __(\"Hello\", \"bad-l10n\") }}</main>",
+            ),
         ]),
     )
     .await;
     assert_eq!(r_rebind.status(), StatusCode::BAD_REQUEST);
 
-    // 2d. `locale.home_url` in <img src>
+    // 2d. `locale.home_url` and `__()` in <img src>
     let r_img_src = upload_theme(
         &client,
         &srv.origin,
@@ -240,16 +245,35 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         &csrf,
         build_zip(&[
             ("theme.json", base_manifest.as_bytes()),
-            ("locales/vi.json", vi_dict),
             (
                 "single.html",
                 b"<main><img src=\"{{ locale.home_url }}\">{{ od_content() }}</main>",
             ),
-            ("archive.html", b"<main>{{ t.hello }}</main>"),
+            (
+                "archive.html",
+                b"<main>{{ __(\"Hello\", \"bad-l10n\") }}</main>",
+            ),
         ]),
     )
     .await;
     assert_eq!(r_img_src.status(), StatusCode::BAD_REQUEST);
+
+    let r_l10n_url = upload_theme(
+        &client,
+        &srv.origin,
+        &cookie,
+        &csrf,
+        build_zip(&[
+            ("theme.json", base_manifest.as_bytes()),
+            (
+                "single.html",
+                b"<main><img src=\"{{ __('Hello', 'bad-l10n') }}\">{{ od_content() }}</main>",
+            ),
+            ("archive.html", b"<main>Archive</main>"),
+        ]),
+    )
+    .await;
+    assert_eq!(r_l10n_url.status(), StatusCode::BAD_REQUEST);
 
     // 3. Enable secondary locale `en` and test Starter 1.1.0 + CoreL10n + language-switcher.
     let locales_get = client
@@ -321,8 +345,10 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
     assert!(en_404_html.contains("href=\"&#x2f;\""));
     assert!(en_404_html.contains("href=\"&#x2f;en\""));
 
-    // 4. Install valid theme with partial `en.json` (missing a key present in `vi.json`) -> per-key merge 200 OK!
-    let good_manifest = r#"{"manifest_version":3,"theme_id":"good-l10n","name":"Good L10n","version":"1.0.0","default_locale":"vi","templates":[{"kind":"single","file":"single.html"},{"kind":"archive","file":"archive.html"},{"kind":"not_found","file":"404.html"}]}"#;
+    // 4. Install valid theme with gettext `languages/good-l10n-{vi,en}.po` -> 201 Created!
+    let good_manifest = r#"{"manifest_version":3,"theme_id":"good-l10n","name":"Good L10n","version":"1.0.0","default_locale":"vi","text_domain":"good-l10n","templates":[{"kind":"single","file":"single.html"},{"kind":"archive","file":"archive.html"},{"kind":"not_found","file":"404.html"}]}"#;
+    let vi_po = "msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=UTF-8\\n\"\n\nmsgid \"Greeting\"\nmsgstr \"Xin chào\"\n\nmsgid \"Fallback only\"\nmsgstr \"Chỉ có ở gốc\"\n";
+    let en_po = "msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=UTF-8\\n\"\n\nmsgid \"Greeting\"\nmsgstr \"Hello\"\n";
     let r_good = upload_theme(
         &client,
         &srv.origin,
@@ -330,11 +356,11 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         &csrf,
         build_zip(&[
             ("theme.json", good_manifest.as_bytes()),
-            ("locales/vi.json", r#"{"greeting":"Xin chào","fallback_only":"Chỉ có ở gốc"}"#.as_bytes()),
-            ("locales/en.json", br#"{"greeting":"Hello"}"#),
-            ("single.html", b"<main><a href=\"{{ locale.home_url }}\">{{ t.greeting }}</a>{{ od_content() }}</main>"),
-            ("archive.html", b"<main>{{ t.greeting }} - {{ t.fallback_only }}</main>"),
-            ("404.html", b"<main>{{ t.greeting }} - {{ t.fallback_only }}</main>"),
+            ("languages/good-l10n-vi.po", vi_po.as_bytes()),
+            ("languages/good-l10n-en.po", en_po.as_bytes()),
+            ("single.html", b"<main><a href=\"{{ locale.home_url }}\">{{ __(\"Greeting\", \"good-l10n\") }}</a>{{ od_content() }}</main>"),
+            ("archive.html", b"<main>{{ __(\"Greeting\", \"good-l10n\") }} - {{ __(\"Fallback only\", \"good-l10n\") }}</main>"),
+            ("404.html", b"<main>{{ __(\"Greeting\", \"good-l10n\") }} - {{ __(\"Fallback only\", \"good-l10n\") }}</main>"),
         ]),
     )
     .await;
@@ -365,6 +391,20 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         .unwrap();
     assert_eq!(act.status(), StatusCode::OK);
 
+    let vi_partial = client
+        .get(format!("{}/no-such-page", srv.origin))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(vi_partial.status(), StatusCode::NOT_FOUND);
+    assert!(
+        vi_partial
+            .text()
+            .await
+            .unwrap()
+            .contains("Xin chào - Chỉ có ở gốc")
+    );
+
     let en_partial = client
         .get(format!("{}/en/no-such-page", srv.origin))
         .send()
@@ -372,5 +412,5 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         .unwrap();
     assert_eq!(en_partial.status(), StatusCode::NOT_FOUND);
     let partial_html = en_partial.text().await.unwrap();
-    assert!(partial_html.contains("Hello - Chỉ có ở gốc"));
+    assert!(partial_html.contains("Hello - Fallback only"));
 }

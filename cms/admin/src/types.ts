@@ -115,10 +115,12 @@ export interface CmsLocaleOption {
 
 export interface AdminI18nBootstrap {
   configured_locale: string;
-  effective_locale: 'en' | 'vi';
+  effective_locale: string;
   effective_bcp47: string;
   effective_direction: 'ltr' | 'rtl';
   configured_installed: boolean;
   catalog_version: string;
   available_locales: CmsLocaleOption[];
+  catalog_etag?: string;
+  catalog_url?: string;
 }

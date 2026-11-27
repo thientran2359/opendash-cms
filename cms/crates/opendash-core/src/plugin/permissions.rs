@@ -148,6 +148,8 @@ pub struct PluginManifest {
     pub manifest_schema: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_host_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_domain: Option<String>,
     pub name: String,
     #[serde(default)]
     pub description: String,

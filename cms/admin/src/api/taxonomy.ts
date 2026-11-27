@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson, requestText } from './client.ts';
 import type { EffectiveTermConfig, TermExtensionValues } from '../features/extensions/AdminContributionRenderer.tsx';
 
@@ -23,33 +23,33 @@ const definitionsPath = '/api/admin/taxonomy/definitions';
 const definitionPath = (key: string): string => `${definitionsPath}/${encodeURIComponent(key)}`;
 
 export function listTaxonomyDefinitions(signal?: AbortSignal): Promise<TaxonomyDefinition[]> {
-  return requestJson(definitionsPath, { signal, defaultErrorMessage: tStatic('api.taxonomy.load_taxonomy_definitions') });
+  return requestJson(definitionsPath, { signal, defaultErrorMessage: __("Could not load taxonomy definitions.") });
 }
 
 export function getTaxonomyDefinition(key: string, signal?: AbortSignal): Promise<TaxonomyDefinition> {
-  return requestJson(definitionPath(key), { signal, defaultErrorMessage: tStatic('api.taxonomy.the_taxonomy_does_not_exist') });
+  return requestJson(definitionPath(key), { signal, defaultErrorMessage: __("The taxonomy does not exist.") });
 }
 
 export function createTaxonomyDefinition(input: TaxonomyDefinitionInput, csrfToken: string): Promise<TaxonomyDefinition> {
   return requestJson(definitionsPath, { method: 'POST', contentType: 'application/json', csrfToken,
-    body: JSON.stringify(input), defaultErrorMessage: tStatic('api.taxonomy.create_the_taxonomy') });
+    body: JSON.stringify(input), defaultErrorMessage: __("Could not create the taxonomy.") });
 }
 
 export function updateTaxonomyDefinition(key: string, version: number, changes: TaxonomyDefinitionChanges,
   csrfToken: string): Promise<TaxonomyDefinition> {
   return requestJson(definitionPath(key), { method: 'PATCH', contentType: 'application/json', csrfToken,
-    ifMatchVersion: version, body: JSON.stringify(changes), defaultErrorMessage: tStatic('api.taxonomy.update_the_taxonomy') });
+    ifMatchVersion: version, body: JSON.stringify(changes), defaultErrorMessage: __("Could not update the taxonomy.") });
 }
 
 export async function deleteTaxonomyDefinition(key: string, version: number, csrfToken: string): Promise<void> {
   await requestText(definitionPath(key), { method: 'DELETE', csrfToken, ifMatchVersion: version,
-    defaultErrorMessage: tStatic('api.taxonomy.delete_the_taxonomy') });
+    defaultErrorMessage: __("Could not delete the taxonomy.") });
 }
 
 /** The effective association resolves site overrides and inactive providers on the server. */
 export function listEffectiveTaxonomies(typeKey: string, signal?: AbortSignal): Promise<string[]> {
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/effective`, {
-    signal, defaultErrorMessage: tStatic('api.taxonomy.resolve_taxonomies_for_the_content_type'),
+    signal, defaultErrorMessage: __("Could not resolve taxonomies for the content type."),
   });
 }
 
@@ -58,7 +58,7 @@ export function updateTaxonomyEligibility(typeKey: string, version: number, taxo
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
     method: 'PUT', contentType: 'application/json', csrfToken, ifMatchVersion: version,
     body: JSON.stringify({ taxonomies: [...new Set(taxonomies)], expected_version: version }),
-    defaultErrorMessage: tStatic('api.taxonomy.save_taxonomies_assigned_to_the_content_type'),
+    defaultErrorMessage: __("Could not save taxonomies assigned to the content type."),
   });
 }
 
@@ -135,24 +135,24 @@ export function resolveTaxonomyTermLabels(
 ): Promise<TaxonomyTermLabel[]> {
   if (!ids.length || ids.length > 100 ||
     new Set(ids).size !== ids.length || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) {
-    return Promise.reject(new Error(tStatic('api.taxonomy.the_term_id_list_must_contain_1_100_unique_positive_integers')));
+    return Promise.reject(new Error(__("The term ID list must contain 1–100 unique positive integers.")));
   }
   return requestJson<TaxonomyTermLabel[]>(`${termsPath}/resolve?ids=${ids.join(',')}`, {
-    signal, defaultErrorMessage: tStatic('api.taxonomy.load_term_names_on_this_page'),
+    signal, defaultErrorMessage: __("Could not load term names on this page."),
   });
 }
 
 export function getTaxonomyTerm(id: number, signal?: AbortSignal): Promise<TaxonomyTerm> {
   return requestJson<TaxonomyTerm>(termPath(id), {
     signal,
-    defaultErrorMessage: tStatic('api.taxonomy.the_term_was_not_found'),
+    defaultErrorMessage: __("The term was not found."),
   });
 }
 
 export function getEffectiveTermConfig(id: number, signal?: AbortSignal): Promise<EffectiveTermConfig> {
   return requestJson(`${termPath(id)}/effective-editor-config`, {
     signal,
-    defaultErrorMessage: tStatic('api.taxonomy.load_the_extension_panel_configuration'),
+    defaultErrorMessage: __("Could not load the extension panel configuration."),
   });
 }
 
@@ -167,7 +167,7 @@ export function listTaxonomyTerms(
   if (locale) query.set('locale', locale);
   return requestJson<TaxonomyTermPage>(`${termsPath}?${query}`, {
     signal,
-    defaultErrorMessage: tStatic('api.taxonomy.load_terms'),
+    defaultErrorMessage: __("Could not load terms."),
   });
 }
 
@@ -194,7 +194,7 @@ export function createTaxonomyTerm(input: TaxonomyTermInput, csrfToken: string):
     contentType: 'application/json',
     csrfToken,
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.taxonomy.create_the_term'),
+    defaultErrorMessage: __("Could not create the term."),
   });
 }
 
@@ -210,7 +210,7 @@ export function updateTaxonomyTerm(
     csrfToken,
     ifMatchVersion: version,
     body: JSON.stringify(changes),
-    defaultErrorMessage: tStatic('api.taxonomy.update_the_term'),
+    defaultErrorMessage: __("Could not update the term."),
   });
 }
 
@@ -219,6 +219,6 @@ export async function deleteTaxonomyTerm(id: number, version: number, csrfToken:
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: tStatic('api.taxonomy.delete_the_term'),
+    defaultErrorMessage: __("Could not delete the term."),
   });
 }

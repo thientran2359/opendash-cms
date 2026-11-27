@@ -171,6 +171,25 @@ pub fn content_purge(type_key: &str, entry_id: i64, expected_version: i64) -> Re
     Ok(())
 }
 
+pub fn l10n_translate(
+    msgid: &str,
+    context: Option<&str>,
+    text_domain: Option<&str>,
+) -> Result<String, SdkError> {
+    let resp = call_host(&json!({
+        "op": "l10n_translate",
+        "msgid": msgid,
+        "context": context,
+        "text_domain": text_domain,
+    }))?;
+    let obj = extract_data_obj(resp)?;
+    Ok(obj
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or(msgid)
+        .to_owned())
+}
+
 pub fn content_trash_get(
     type_key: &str,
     entry_id: i64,

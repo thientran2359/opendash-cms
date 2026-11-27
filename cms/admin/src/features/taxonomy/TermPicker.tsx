@@ -1,4 +1,4 @@
-import { getEffectiveBcp47, tStatic, useI18n } from '../../i18n/index.tsx';
+import { getEffectiveBcp47, __, _x, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   listAllTaxonomyTerms,
@@ -114,8 +114,8 @@ function useTermOptions(userId: number | null, typeKey: string | undefined,
       })
       .catch(cause => {
         if (controller.signal.aborted) return;
-        setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.termpicker.could_not_load_applicable_taxonomies"));
-        onErrorRef.current(cause, tStatic("feature.taxonomy.termpicker.could_not_load_applicable_taxonomies"));
+        setError(cause instanceof Error ? cause.message : __("Could not load applicable taxonomies."));
+        onErrorRef.current(cause, __("Could not load applicable taxonomies."));
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -155,16 +155,16 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
     const term = known.get(id);
     if (checked && term) {
       if (unknownIds.length > 0) {
-        setSelectionError(tStatic("feature.taxonomy.termpicker.some_saved_terms_are_unavailable_remove_those_ids_before"));
+        setSelectionError(__("Some saved terms are unavailable. Remove those IDs before selecting additional terms."));
         return;
       }
       if (selected.size >= 96) {
-        setSelectionError(tStatic("feature.taxonomy.termpicker.content_supports_up_to_96_terms_in_total"));
+        setSelectionError(__("Content supports up to 96 terms in total."));
         return;
       }
       const count = counts[term.kind] ?? 0;
       if (count >= maxTerms(term.kind)) {
-        setSelectionError(tStatic("feature.taxonomy.termpicker.up_to_value_terms_of_taxonomy_value_per_content", { value1: maxTerms(term.kind), value2: term.kind }));
+        setSelectionError(__("Up to {{value1}} terms of taxonomy {{value2}} per content item.", { value1: maxTerms(term.kind), value2: term.kind }));
         return;
       }
     }
@@ -186,17 +186,17 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
 
   if (variant === 'cards') {
     return (
-      <div className="min-w-0 space-y-4" aria-label={tStatic("feature.taxonomy.termpicker.assign_taxonomies_to_content")}>
+      <div className="min-w-0 space-y-4" aria-label={__("Assign taxonomies to content")}>
         {loading && (
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-2xs">
-            <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.termpicker.loading_classifications")}</p>
+            <p role="status" className="text-xs text-zinc-500">{__("Loading classifications…")}</p>
           </div>
         )}
         {error && (
           <div role="alert" className="space-y-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800">
-            <p>{error} {tStatic("feature.taxonomy.termpicker.selected_ids_are_retained_in_the_draft")}</p>
+            <p>{error} {__("Selected IDs are retained in the draft.")}</p>
             <button type="button" className="inline-flex h-7 items-center rounded-md border border-rose-300 bg-white px-2.5 text-xs font-medium text-rose-800 hover:bg-rose-50" onClick={reload} disabled={disabled}>
-              {tStatic("permalink.retry")}
+              {__("Try reloading")}
             </button>
           </div>
         )}
@@ -228,7 +228,7 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
                   onClick={() => setCollapsedKinds(prev => ({ ...prev, [group.kind]: !prev[group.kind] }))}
                   className="rounded border-0 bg-transparent px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
                 >
-                  {isCollapsed ? tStatic("feature.editor.panelregionrenderer.expand") : tStatic("feature.editor.panelregionrenderer.collapse")}
+                  {isCollapsed ? __("Expand") : __("Collapse")}
                 </button>
               </div>
               {!isCollapsed && (
@@ -236,22 +236,22 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
                   {group.terms.length > 5 && (
                     <input
                       type="search"
-                      aria-label={tStatic("feature.taxonomy.termpicker.search_in_value", { value1: group.title })}
+                      aria-label={__("Search in {{value1}}", { value1: group.title })}
                       value={searchByKind[group.kind] ?? ''}
                       onChange={event => setSearchByKind(prev => ({ ...prev, [group.kind]: event.target.value }))}
-                      placeholder={tStatic("feature.taxonomy.termpicker.search_value", { value1: group.title.toLowerCase() })}
+                      placeholder={__("Search {{value1}}...", { value1: group.title.toLowerCase() })}
                       disabled={disabled}
                       className="h-8 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50"
                     />
                   )}
                   {!group.hierarchical && pickedInGroup.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5" role="list" aria-label={tStatic("feature.taxonomy.termpicker.value_selected", { value1: group.title })}>
+                    <div className="flex flex-wrap gap-1.5" role="list" aria-label={__("{{value1}} selected", { value1: group.title })}>
                       {pickedInGroup.map(({ term }) => (
                         <span key={term.id} role="listitem" className="inline-flex items-center gap-1 rounded-full bg-od-accent-soft px-2 py-0.5 text-xs font-medium text-od-accent">
                           <span>{term.name}</span>
                           <button
                             type="button"
-                            aria-label={tStatic("feature.taxonomy.termpicker.remove_value", { value1: term.name })}
+                            aria-label={__("Remove {{value1}}", { value1: term.name })}
                             disabled={disabled}
                             className="rounded-full px-0.5 font-bold hover:bg-white/60 disabled:opacity-50"
                             onClick={() => toggle(term.id, false)}
@@ -286,13 +286,13 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
                             onClick={() => onPrimaryCategoryChange(term.id)}
                             className="shrink-0 rounded-md border border-zinc-200 px-2 py-0.5 text-[11px] font-medium text-od-accent hover:bg-od-accent-soft disabled:opacity-50"
                           >
-                            {primaryCategoryTermId === term.id ? tStatic("feature.taxonomy.termpicker.primary") : tStatic("feature.taxonomy.termpicker.set_as_primary")}
+                            {primaryCategoryTermId === term.id ? _x("Primary", "feature.taxonomy") : __("Set as primary")}
                           </button>
                         )}
                       </div>
                     ))}
                     {!loading && visible.length === 0 && (
-                      <p className="py-1 text-xs text-zinc-500">{q ? tStatic("feature.taxonomy.termpicker.no_matching_items") : tStatic("feature.taxonomy.taxonomypage.no_items_yet")}</p>
+                      <p className="py-1 text-xs text-zinc-500">{q ? _x("No matching items.", "feature.taxonomy") : __("No items yet.")}</p>
                     )}
                   </div>
                 </div>
@@ -303,10 +303,10 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
         {unknownIds.length > 0 && (
           <section className="rounded-xl border border-amber-300 bg-amber-50/70 p-4 text-xs text-amber-950">
             <h3 className="font-semibold">
-              {loading ? tStatic("feature.taxonomy.termpicker.selected_id_loading_list") : tStatic("feature.taxonomy.termpicker.classification_id_not_found")}
+              {loading ? __("Selected ID (loading list)") : __("Classification ID not found")}
             </h3>
             <p className="mt-1">
-              {loading ? tStatic("feature.taxonomy.termpicker.your_selection_is_retained_while_loading") : tStatic("feature.taxonomy.termpicker.the_item_may_have_been_deleted_or_become_inaccessible")}
+              {loading ? __("Your selection is retained while loading.") : __("The item may have been deleted or become inaccessible. Clear selection to remove it.")}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {unknownIds.map(id => (
@@ -323,32 +323,32 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
   }
 
   return (
-    <section className="min-w-0 space-y-3" aria-label={tStatic("feature.taxonomy.termpicker.assign_taxonomies_to_content")}>
+    <section className="min-w-0 space-y-3" aria-label={__("Assign taxonomies to content")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-600">{tStatic("feature.taxonomy.termpicker.select_up_to_32_categories_or_64_terms_for")}</p>
+        <p className="text-xs text-slate-600">{__("Select up to 32 categories or 64 terms for each other permitted taxonomy.")}</p>
         <button type="button" className="btn-secondary" onClick={reload} disabled={disabled || loading}>
-          {tStatic("feature.taxonomy.termpicker.reload_taxonomies")}
+          {__("Reload taxonomies")}
         </button>
       </div>
       <div>
-        <label htmlFor={searchId} className="mb-1 block text-sm font-medium text-slate-700">{tStatic("feature.taxonomy.termpicker.search_terms")}</label>
+        <label htmlFor={searchId} className="mb-1 block text-sm font-medium text-slate-700">{__("Search terms")}</label>
         <input id={searchId} type="search" value={search} onChange={event => setSearch(event.target.value)}
-          placeholder={tStatic("feature.taxonomy.termpicker.search_by_name_or_slug")} disabled={disabled} className={fieldClass} />
+          placeholder={__("Search by name or slug")} disabled={disabled} className={fieldClass} />
       </div>
-      {loading && <p role="status" className="text-sm text-slate-600">{tStatic("feature.taxonomy.termpicker.loading_applicable_taxonomies")}</p>}
+      {loading && <p role="status" className="text-sm text-slate-600">{_x("Loading applicable taxonomies…", "feature.taxonomy")}</p>}
       {error && (
         <div role="alert" className="space-y-2 text-sm text-red-700">
-          <p>{error} {tStatic("feature.taxonomy.termpicker.selected_ids_are_retained_in_the_draft")}</p>
-          <button type="button" className="btn-secondary" onClick={reload} disabled={disabled}>{tStatic("permalink.retry")}</button>
+          <p>{error} {__("Selected IDs are retained in the draft.")}</p>
+          <button type="button" className="btn-secondary" onClick={reload} disabled={disabled}>{__("Try reloading")}</button>
         </div>
       )}
       {selectionError && <p role="alert" className="text-sm text-red-700">{selectionError}</p>}
       {selectedTags.length > 0 && (
-        <div className="flex flex-wrap gap-2" role="list" aria-label={tStatic("feature.taxonomy.termpicker.selected_tags")}>
+        <div className="flex flex-wrap gap-2" role="list" aria-label={__("Selected tags")}>
           {selectedTags.map(tag => (
             <div key={tag.id} role="listitem" className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-900">
               <span>{tag.name}</span>
-              <button type="button" aria-label={tStatic("feature.taxonomy.termpicker.remove_tag_value", { value1: tag.name })} disabled={disabled}
+              <button type="button" aria-label={__("Remove tag {{value1}}", { value1: tag.name })} disabled={disabled}
                 className="rounded-full px-1 font-bold hover:bg-sky-100 disabled:opacity-50"
                 onClick={() => toggle(tag.id, false)}>×</button>
             </div>
@@ -377,7 +377,7 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
                   </label>
                 ))}
                 {!loading && visible.length === 0 && (
-                  <p className="text-sm text-slate-500">{normalizedSearch ? tStatic("feature.taxonomy.termpicker.no_matching_items") : tStatic("feature.taxonomy.taxonomypage.no_items_yet")}</p>
+                  <p className="text-sm text-slate-500">{normalizedSearch ? _x("No matching items.", "feature.taxonomy") : __("No items yet.")}</p>
                 )}
               </div>
             </fieldset>
@@ -387,10 +387,10 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
       {unknownIds.length > 0 && (
         <fieldset disabled={disabled} className="min-w-0 rounded-lg border border-amber-300 p-3">
           <legend className="px-1 text-sm font-medium text-amber-900">
-            {loading ? tStatic("feature.taxonomy.termpicker.selected_id_loading_list") : tStatic("feature.taxonomy.termpicker.saved_id_not_found")}
+            {loading ? __("Selected ID (loading list)") : __("Saved ID not found")}
           </legend>
           <p className="mb-2 text-xs text-amber-900">
-            {loading ? tStatic("feature.taxonomy.termpicker.your_selection_is_retained_while_loading") : tStatic("feature.taxonomy.termpicker.the_item_may_have_been_deleted_or_become_inaccessible_2")}
+            {loading ? __("Your selection is retained while loading.") : __("The item may have been deleted or become inaccessible. Clear selection if you no longer need this association.")}
           </p>
           <div className="flex flex-wrap gap-3">
             {unknownIds.map(id => (
@@ -402,7 +402,7 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
           </div>
         </fieldset>
       )}
-      <p className="text-xs text-slate-600">{tStatic("feature.taxonomy.termpicker.only_existing_items_can_be_associated_unsaved_selections_do")}</p>
+      <p className="text-xs text-slate-600">{__("Only existing items can be associated. Unsaved selections do not change site data until you save.")}</p>
     </section>
   );
 }
@@ -424,62 +424,62 @@ export function TermFilters({ userId, typeKey, disabled, value, onChange, onApiE
   const genericRows = genericDefinition?.hierarchical
     ? termTree(genericTerms) : [...genericTerms].sort(sortTerms).map(term => ({term, depth: 0}));
   return (
-    <div className="min-w-0 space-y-2" aria-label={tStatic("feature.taxonomy.termpicker.category_and_tag_filters")}>
+    <div className="min-w-0 space-y-2" aria-label={__("Category and tag filters")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs text-slate-600">{tStatic("feature.taxonomy.termpicker.filter_results_on_the_server_before_pagination")}</span>
+        <span className="text-xs text-slate-600">{__("Filter results on the server before pagination.")}</span>
         <button type="button" className="btn-secondary" onClick={reload} disabled={disabled || loading}>
-          {tStatic("feature.taxonomy.termpicker.reload_taxonomies")}
+          {__("Reload taxonomies")}
         </button>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <label htmlFor={categoryId} className="block min-w-0 text-sm font-medium text-slate-700">
-          {tStatic("feature.content.entrylistpage.category")}
+          {_x("Category", "feature.content")}
           <select id={categoryId} className={`mt-1 ${fieldClass}`} value={value.categoryId ?? ''}
             disabled={disabled || loading} onChange={event => onChange({
               ...value, taxonomyKey: null, termId: null,
               categoryId: event.target.value ? Number(event.target.value) : null,
               includeDescendants: event.target.value ? value.includeDescendants : false,
             })}>
-            <option value="">{tStatic("feature.taxonomy.termpicker.all_categories")}</option>
-            {missingCategory && <option value={value.categoryId!}>ID #{value.categoryId} {tStatic("feature.taxonomy.termpicker.no_longer_in_list")}</option>}
+            <option value="">{_x("All categories", "feature.taxonomy")}</option>
+            {missingCategory && <option value={value.categoryId!}>ID #{value.categoryId} {__("(no longer in list)")}</option>}
             {ordered.map(({ term, depth }) => (
               <option key={term.id} value={term.id}>{'— '.repeat(Math.min(depth, 8))}{term.name} ({term.slug})</option>
             ))}
           </select>
         </label>
         <label htmlFor={tagId} className="block min-w-0 text-sm font-medium text-slate-700">
-          {tStatic("shell.tags")}
+          {__("Tags")}
           <select id={tagId} className={`mt-1 ${fieldClass}`} value={value.tagId ?? ''}
             disabled={disabled || loading} onChange={event => onChange({
               ...value, taxonomyKey: null, termId: null,
               tagId: event.target.value ? Number(event.target.value) : null,
             })}>
-            <option value="">{tStatic("feature.taxonomy.termpicker.all_tags")}</option>
-            {missingTag && <option value={value.tagId!}>ID #{value.tagId} {tStatic("feature.taxonomy.termpicker.no_longer_in_list")}</option>}
+            <option value="">{_x("All tags", "feature.taxonomy")}</option>
+            {missingTag && <option value={value.tagId!}>ID #{value.tagId} {__("(no longer in list)")}</option>}
             {[...tags].sort(sortTerms).map(term => <option key={term.id} value={term.id}>{term.name} ({term.slug})</option>)}
           </select>
         </label>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <label htmlFor={genericTaxonomyId} className="block min-w-0 text-sm font-medium text-slate-700">
-          {tStatic("shell.taxonomy_definitions")}
+          {__("Custom taxonomies")}
           <select id={genericTaxonomyId} className={`mt-1 ${fieldClass}`}
             value={value.taxonomyKey ?? ''} disabled={disabled || loading}
             onChange={event => onChange({ taxonomyKey: event.target.value || null, termId: null, includeDescendants: false })}>
-            <option value="">{tStatic("feature.taxonomy.termpicker.no_custom_filter")}</option>
+            <option value="">{__("No custom filter")}</option>
             {definitions.filter(item => item.key !== 'category' && item.key !== 'tag').map(item =>
               <option key={item.key} value={item.key}>{item.label} ({item.key})</option>)}
-            {value.taxonomyKey && !genericDefinition && <option value={value.taxonomyKey}>{tStatic("feature.taxonomy.termpicker.taxonomy_no_longer_active")}{value.taxonomyKey})</option>}
+            {value.taxonomyKey && !genericDefinition && <option value={value.taxonomyKey}>{__("Taxonomy no longer active (")}{value.taxonomyKey})</option>}
           </select>
         </label>
         {value.taxonomyKey && <label htmlFor={genericTermId} className="block min-w-0 text-sm font-medium text-slate-700">
-          {tStatic("feature.common.ui_term")}
+          {__("Term")}
           <select id={genericTermId} className={`mt-1 ${fieldClass}`}
             value={value.termId ?? ''} disabled={disabled || loading || !genericDefinition}
             onChange={event => onChange({ ...value, termId: event.target.value ? Number(event.target.value) : null })}>
-            <option value="">{tStatic("feature.content.entrylistpage.choose_term")}</option>
+            <option value="">{__("Choose term")}</option>
             {value.termId != null && !genericTerms.some(term => term.id === value.termId) &&
-              <option value={value.termId}>ID #{value.termId} {tStatic("feature.taxonomy.termpicker.no_longer_available")}</option>}
+              <option value={value.termId}>ID #{value.termId} {__("(no longer available)")}</option>}
             {genericRows.map(({ term, depth }) =>
               <option key={term.id} value={term.id}>{'— '.repeat(Math.min(depth, 8))}{term.name} ({term.slug})</option>)}
           </select>
@@ -490,12 +490,12 @@ export function TermFilters({ userId, typeKey, disabled, value, onChange, onApiE
           checked={Boolean(value.includeDescendants && (value.categoryId != null || (value.termId != null && genericDefinition?.hierarchical)))}
           disabled={disabled || (value.categoryId == null && !(value.termId != null && genericDefinition?.hierarchical))}
           onChange={event => onChange({ ...value, includeDescendants: event.target.checked })} />
-        {tStatic("feature.taxonomy.termpicker.include_child_terms_hierarchical_taxonomy")}
+        {__("Include child terms (hierarchical taxonomy)")}
       </label>
-      {loading && <p role="status" className="text-xs text-slate-500">{tStatic("feature.taxonomy.termpicker.loading_filters")}</p>}
+      {loading && <p role="status" className="text-xs text-slate-500">{__("Loading filters…")}</p>}
       {error && (
         <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-red-700">
-          {error} <button type="button" className="btn-secondary" onClick={reload} disabled={disabled}>{tStatic("permalink.retry")}</button>
+          {error} <button type="button" className="btn-secondary" onClick={reload} disabled={disabled}>{__("Try reloading")}</button>
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import type { PluginLifecycleConfirmation } from '../types.ts';
 
 export interface PermalinkConflictItem {
@@ -239,7 +239,7 @@ export async function requestJson<T>(url: string, options: ApiRequestOptions): P
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new ApiClientError(res.status, tStatic("api.client.invalid_json"));
+    throw new ApiClientError(res.status, __("The server response is not valid JSON."));
   }
 }
 
@@ -256,6 +256,6 @@ export interface HealthResponse {
 export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return requestJson<HealthResponse>('/api/health', {
     signal,
-    defaultErrorMessage: tStatic("api.client.health_failed"),
+    defaultErrorMessage: __("Could not check server status."),
   });
 }

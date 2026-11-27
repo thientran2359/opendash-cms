@@ -14,6 +14,7 @@ mod error;
 mod field_hydrate;
 mod hooks;
 mod i18n;
+mod l10n;
 mod media;
 mod media_lifecycle;
 mod media_video;
@@ -71,10 +72,10 @@ fn strip_os_prefix(arg: &OsStr, prefix: &str) -> Option<OsString> {
     }
 }
 
-fn run_check_cli_flag<T: serde::Serialize>(
+fn run_check_cli_flag<T: serde::Serialize + Send + 'static>(
     args: &[OsString],
     flag: &str,
-    check_fn: impl FnOnce(&Path) -> Result<T, String>,
+    check_fn: impl FnOnce(&Path) -> Result<T, String> + Send + 'static,
 ) {
     let eq_flag = format!("{flag}=");
     if !args
@@ -98,7 +99,16 @@ fn run_check_cli_flag<T: serde::Serialize>(
         ))
     };
 
-    match path_arg.and_then(|p| check_fn(Path::new(&p))) {
+    let result = path_arg.and_then(|p| {
+        std::thread::Builder::new()
+            .name("opendash-cli-check".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(move || check_fn(Path::new(&p)))
+            .map_err(|e| format!("Không thể khởi tạo thread kiểm tra: {e}"))?
+            .join()
+            .map_err(|_| "Thread kiểm tra kết thúc bất thường.".to_owned())?
+    });
+    match result {
         Ok(summary) => {
             if let Ok(json) = serde_json::to_string(&summary) {
                 println!("{json}");
@@ -117,11 +127,55 @@ fn run_check_cli_flag<T: serde::Serialize>(
     }
 }
 
+fn cli_flag_value<'a>(args: &'a [OsString], flag: &str) -> Option<&'a OsStr> {
+    args.windows(2)
+        .find(|w| w[0] == flag)
+        .map(|w| w[1].as_os_str())
+}
+
+fn run_l10n_cli_flags(args: &[OsString]) {
+    if let Some(src) = cli_flag_value(args, "--l10n-extract") {
+        let Some(out) = cli_flag_value(args, "--out") else {
+            eprintln!("Thiếu --out <file.pot> cho --l10n-extract.");
+            std::process::exit(1);
+        };
+        let domain = cli_flag_value(args, "--domain").and_then(|d| d.to_str());
+        match l10n::extract::run_extract_cli(Path::new(src), Path::new(out), domain) {
+            Ok(count) => {
+                println!("{}", serde_json::json!({ "ok": true, "entries": count }));
+                std::process::exit(0);
+            }
+            Err(err) => {
+                println!("{}", serde_json::json!({ "ok": false, "error": err }));
+                std::process::exit(1);
+            }
+        }
+    }
+    if let Some(po_path) = cli_flag_value(args, "--l10n-compile") {
+        let Some(out) = cli_flag_value(args, "--out") else {
+            eprintln!("Thiếu --out <file.mo> cho --l10n-compile.");
+            std::process::exit(1);
+        };
+        let pot = cli_flag_value(args, "--pot").map(Path::new);
+        match l10n::extract::run_compile_cli(Path::new(po_path), Path::new(out), pot) {
+            Ok(count) => {
+                println!("{}", serde_json::json!({ "ok": true, "entries": count }));
+                std::process::exit(0);
+            }
+            Err(err) => {
+                println!("{}", serde_json::json!({ "ok": false, "error": err }));
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
 
     run_check_cli_flag(&args, "--check-theme", theme::check_theme_path);
     run_check_cli_flag(&args, "--check-plugin", plugin::check_plugin_path);
+    run_l10n_cli_flags(&args);
 
     if args.iter().any(|a| a == "--check-config") {
         let paths = paths::SitePaths::from_env()?;
@@ -313,7 +367,7 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
     };
     let state = AppState {
         db: db.clone(),
-        ui_locale: Arc::new(std::sync::atomic::AtomicU8::new(i18n::encode_ui_locale(
+        ui_locale: Arc::new(std::sync::RwLock::new(i18n::encode_ui_locale_str(
             &configured_ui_locale,
         ))),
         plugin_manager,
@@ -329,6 +383,18 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
         block_template_cache: crate::page::BlockTemplateCache::global().clone(),
         site_cache_epoch: Arc::clone(crate::cache::SiteCacheEpoch::global()),
         render_cache: Arc::new(crate::cache::ExtensionRenderCache::new()),
+        catalog_registry: {
+            let reg = Arc::new(crate::l10n::CatalogRegistry::new_empty());
+            let mut embedded = std::collections::BTreeMap::new();
+            embedded.insert("vi".to_owned(), crate::l10n::EMBEDDED_VI_MO.to_vec());
+            let _ = reg.reload_from_site_paths(
+                &paths,
+                embedded,
+                std::collections::BTreeMap::new(),
+                std::collections::BTreeMap::new(),
+            );
+            reg
+        },
         recovery,
         runtime_config: runtime_cfg.clone(),
     };

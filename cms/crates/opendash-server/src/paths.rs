@@ -93,6 +93,26 @@ impl SitePaths {
     }
 
     #[allow(dead_code)]
+    pub fn languages_dir(&self) -> PathBuf {
+        self.site_root.join("languages")
+    }
+
+    #[allow(dead_code)]
+    pub fn core_languages_dir(&self) -> PathBuf {
+        self.languages_dir().join("core")
+    }
+
+    #[allow(dead_code)]
+    pub fn theme_languages_dir(&self) -> PathBuf {
+        self.languages_dir().join("themes")
+    }
+
+    #[allow(dead_code)]
+    pub fn plugin_languages_dir(&self) -> PathBuf {
+        self.languages_dir().join("plugins")
+    }
+
+    #[allow(dead_code)]
     pub fn uploads_dir(&self) -> PathBuf {
         self.site_root.join("uploads")
     }

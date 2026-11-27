@@ -105,6 +105,7 @@ pub enum BackupFileKind {
     ExtensionSecret,
     QuarantineObject,
     PortableConfig,
+    LanguagePack,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,6 +323,23 @@ pub fn validate_logical_key(kind: BackupFileKind, key: &str) -> Result<(), &'sta
                 Err("Plugin logical_key không hợp lệ.")
             }
         }
+        BackupFileKind::LanguagePack => {
+            let rest = key
+                .strip_prefix("languages/")
+                .ok_or("LanguagePack logical_key phải bắt đầu bằng languages/.")?;
+            let (scope, fname) = rest
+                .split_once('/')
+                .ok_or("LanguagePack logical_key thiếu thư mục scope.")?;
+            if !matches!(scope, "core" | "themes" | "plugins") || fname.contains('/') {
+                return Err(
+                    "LanguagePack logical_key chỉ hỗ trợ languages/{core,themes,plugins}/<file>.",
+                );
+            }
+            if !(fname.ends_with(".po") || fname.ends_with(".mo")) {
+                return Err("LanguagePack logical_key phải có đuôi .po hoặc .mo.");
+            }
+            Ok(())
+        }
     }
 }
 
@@ -454,6 +472,26 @@ mod tests {
         assert!(validate_logical_key(BackupFileKind::Db, "db/../main.sqlite").is_err());
         assert!(validate_logical_key(BackupFileKind::Db, "db/CON").is_err());
         assert!(validate_logical_key(BackupFileKind::MediaOriginal, "media/aa/CON.png").is_err());
+        assert!(
+            validate_logical_key(
+                BackupFileKind::LanguagePack,
+                "languages/core/opendash-vi.mo"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_logical_key(
+                BackupFileKind::LanguagePack,
+                "languages/themes/starter-fr.po"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_logical_key(BackupFileKind::LanguagePack, "languages/other/foo.mo").is_err()
+        );
+        assert!(
+            validate_logical_key(BackupFileKind::LanguagePack, "languages/core/foo.json").is_err()
+        );
     }
 
     #[test]

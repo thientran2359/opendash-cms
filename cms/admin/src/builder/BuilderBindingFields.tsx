@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../i18n/index.tsx';
+import { __, _x, useI18n } from '../i18n/index.tsx';
 import { useEffect, useRef, useState } from 'react';
 import { getContentEntry, listContentEntries, listContentTypes } from '../api/content.ts';
 import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../api/locales.ts';
@@ -53,17 +53,17 @@ export function BuilderBindingFields({
   onBindingChange,
   onError,
 }: Props) {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const TARGETS: Record<ElementType, readonly { key: BindingTarget; label: string }[]> = {
-    'core/heading': [{ key: 'text', label: t('builder.builder_binding_fields.heading_text') }],
-    'core/text': [{ key: 'text', label: t('builder.builder_binding_fields.body_text') }],
+    'core/heading': [{ key: 'text', label: __("Heading (text)") }],
+    'core/text': [{ key: 'text', label: __("Content (text)") }],
     'core/image': [
-      { key: 'media_id', label: t('builder.builder_binding_fields.image_id') },
-      { key: 'alt', label: t('builder.builder_binding_fields.image_alt') },
+      { key: 'media_id', label: __("Image ID (media_id)") },
+      { key: 'alt', label: __("Image description (alt)") },
     ],
     'core/button': [
-      { key: 'label', label: t('builder.builder_binding_fields.button_label') },
-      { key: 'url', label: t('builder.builder_binding_fields.url') },
+      { key: 'label', label: __("Button label (label)") },
+      { key: 'url', label: __("URL (url)") },
     ],
     'core/list': [],
     'core/video': [],
@@ -108,9 +108,9 @@ export function BuilderBindingFields({
       if (alive) setTypes(result);
     }).catch(cause => {
       if (!alive) return;
-      setLookupError(t('builder.builder_binding_fields.type_error'));
+      setLookupError(__("Could not load content types; saved binding is preserved."));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onError(cause, t('builder.builder_binding_fields.type_auth'));
+        onError(cause, __("Your session expired while looking up content."));
     }).finally(() => { if (alive) setTypesBusy(false); });
     return () => { alive = false; };
   }, [element.id, lookupRevision]);
@@ -128,9 +128,9 @@ export function BuilderBindingFields({
       setHasMore(result.length === PAGE_SIZE);
     }).catch(cause => {
       if (sequence !== entrySequence.current) return;
-      setLookupError(t('builder.builder_binding_fields.entry_error'));
+      setLookupError(__("Could not load entries; selection and current binding are preserved."));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onError(cause, t('builder.builder_binding_fields.entry_auth'));
+        onError(cause, __("Your session expired while looking up entries."));
     }).finally(() => {
       if (sequence === entrySequence.current) setEntriesBusy(false);
     });
@@ -168,12 +168,12 @@ export function BuilderBindingFields({
     getContentEntry(typeKey, entry.id).then(actual => {
       if (sequence !== entrySequence.current) return;
       if (actual.slug === slug && actual.content_type_key === typeKey) setSelectionChecked(true);
-      else setLookupError(t('builder.builder_binding_fields.slug_changed'));
+      else setLookupError(__("The entry slug changed; reload the list before applying."));
     }).catch(cause => {
       if (sequence !== entrySequence.current) return;
-      setLookupError(t('builder.builder_binding_fields.entry_lookup'));
+      setLookupError(__("Could not look up the entry; your selection is preserved."));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onError(cause, t('builder.builder_binding_fields.entry_read_auth'));
+        onError(cause, __("Your session expired while reading the entry."));
     });
   };
 
@@ -187,9 +187,9 @@ export function BuilderBindingFields({
       setHasMore(next.length === PAGE_SIZE);
     }).catch(cause => {
       if (sequence !== entrySequence.current) return;
-      setLookupError(t('builder.builder_binding_fields.more_error'));
+      setLookupError(__("Could not load more entries; the current binding is unchanged."));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onError(cause, t('builder.builder_binding_fields.more_auth'));
+        onError(cause, __("Your session expired while loading more entries."));
     }).finally(() => {
       if (sequence === entrySequence.current) setEntriesBusy(false);
     });
@@ -206,15 +206,15 @@ export function BuilderBindingFields({
       source,
       target,
     });
-    setSavedStatus(t('builder.builder_binding_fields.applied'));
+    setSavedStatus(__("Applied to the draft. Choose Preview or Save Builder to check."));
   };
 
   return (
-    <fieldset className="space-y-3 rounded-lg border border-indigo-200 p-3" aria-label={t('builder.builder_binding_fields.legend')}>
-      <legend className="px-1 text-sm font-semibold text-indigo-900">{t('builder.builder_binding_fields.legend')}</legend>
-      <p className="text-xs text-slate-600">{t('builder.builder_binding_fields.description')}</p>
-      <label className="block text-xs font-medium">{t('builder.builder_binding_fields.target')}
-        <select aria-label={tStatic("feature.common.ui_binding_target")} className="mt-1 w-full" value={target}
+    <fieldset className="space-y-3 rounded-lg border border-indigo-200 p-3" aria-label={__("Field Binding")}>
+      <legend className="px-1 text-sm font-semibold text-indigo-900">{__("Field Binding")}</legend>
+      <p className="text-xs text-slate-600">{__("Bindings reference entries by slug instead of copying field values. Preview can show drafts; public pages show published content only.")}</p>
+      <label className="block text-xs font-medium">{__("Target property")}
+        <select aria-label={__("Binding target")} className="mt-1 w-full" value={target}
           onChange={event => {
             setTarget(event.target.value as BindingTarget);
             setLookupError('');
@@ -222,8 +222,8 @@ export function BuilderBindingFields({
           {targets.map(option => <option value={option.key} key={option.key}>{option.label}</option>)}
         </select>
       </label>
-      <label className="block text-xs font-medium">{t('builder.builder_binding_fields.type')}
-        <select aria-label={tStatic("feature.common.ui_binding_content_type")} className="mt-1 w-full" value={typeKey}
+      <label className="block text-xs font-medium">{__("Content type")}
+        <select aria-label={__("Binding content type")} className="mt-1 w-full" value={typeKey}
           onChange={event => {
             setTypeKey(event.target.value);
             setEntrySlug('');
@@ -231,19 +231,19 @@ export function BuilderBindingFields({
             setLookupError('');
             setSavedStatus('');
           }}>
-          <option value="">{t('builder.builder_binding_fields.choose_type')}</option>
+          <option value="">{__("Choose Post / Page / CPT")}</option>
           {typeKey && !types.some(item => item.descriptor.key === typeKey)
-            && <option value={typeKey}>{typeKey}{t('builder.builder_binding_fields.missing')}</option>}
+            && <option value={typeKey}>{typeKey}{__(" (no longer exists)")}</option>}
           {types.map(item => <option key={item.descriptor.key} value={item.descriptor.key}
-            disabled={item.status !== 'active'}>{item.descriptor.label} ({item.descriptor.key}){item.status !== 'active' ? t('builder.builder_binding_fields.inactive') : ''}</option>)}
+            disabled={item.status !== 'active'}>{item.descriptor.label} ({item.descriptor.key}){item.status !== 'active' ? _x(" — inactive", "builder.builder_binding_fields") : ''}</option>)}
         </select>
       </label>
       {typeKey && !typeActive && !typesBusy &&
-        <p role="status" className="text-xs text-amber-800">{t('builder.builder_binding_fields.inactive_notice')}</p>}
+        <p role="status" className="text-xs text-amber-800">{__("The CPT does not exist or its provider is inactive. The saved binding is preserved.")}</p>}
       {localeState.hasMultipleLocales && (
-        <label className="block text-xs font-medium">{t('builder.builder_binding_fields.entry_locale')}
+        <label className="block text-xs font-medium">{__("Entry language (entry_locale)")}
           <select
-            aria-label={tStatic("feature.common.ui_binding_entry_locale")}
+            aria-label={__("Binding entry locale")}
             className="mt-1 w-full"
             value={entryLocale}
             onChange={event => {
@@ -253,7 +253,7 @@ export function BuilderBindingFields({
               setSavedStatus('');
             }}
           >
-            <option value="">{t('builder.builder_binding_fields.render_locale')}</option>
+            <option value="">{__("Use the current rendering language")}</option>
             {localeState.allLocales.map(loc => (
               <option key={loc.code} value={loc.code}>
                 {loc.label} ({loc.code})
@@ -263,54 +263,54 @@ export function BuilderBindingFields({
         </label>
       )}
       <label className="block text-xs font-medium">
-        {tStatic("feature.common.ui_entry")}
-        <select aria-label={tStatic("feature.common.ui_binding_entry")} className="mt-1 w-full" value={entrySlug}
+        {__("Entry")}
+        <select aria-label={__("Binding entry")} className="mt-1 w-full" value={entrySlug}
           disabled={!typeActive} onChange={event => chooseEntry(event.target.value)}>
-          <option value="">{t('builder.builder_binding_fields.choose_entry')}</option>
+          <option value="">{_x("Choose entry", "builder.builder_binding_fields")}</option>
           {entrySlug && !entries.some(entry => entry.slug === entrySlug)
-            && <option value={entrySlug}>{entrySlug}{t('builder.builder_binding_fields.not_loaded')}</option>}
+            && <option value={entrySlug}>{entrySlug}{__(" (not in the loaded list)")}</option>}
           {entries.map(entry => <option key={entry.id} value={entry.slug}>{entry.title} ({entry.slug})</option>)}
         </select>
       </label>
       {hasMore && <button type="button" className="btn-secondary !py-1.5 text-xs" disabled={entriesBusy}
-        onClick={loadMore}>{t('builder.builder_binding_fields.more')}</button>}
+        onClick={loadMore}>{__("Load more entries")}</button>}
       {entrySlug && !selectedEntry && !entriesBusy &&
-        <p role="status" className="text-xs text-amber-800">{t('builder.builder_binding_fields.missing_entry')}</p>}
-      <label className="block text-xs font-medium">{t('builder.builder_binding_fields.source')}
-        <select aria-label={tStatic("feature.common.ui_binding_source_field")} className="mt-1 w-full" value={sourceKey}
+        <p role="status" className="text-xs text-amber-800">{__("Entry not found in the loaded list. Its slug may have changed or it may have been deleted; the binding is preserved.")}</p>}
+      <label className="block text-xs font-medium">{__("Source")}
+        <select aria-label={__("Binding source field")} className="mt-1 w-full" value={sourceKey}
           onChange={event => { setSourceKey(event.target.value); setLookupError(''); }}>
-          <option value="">{t('builder.builder_binding_fields.choose_field')}</option>
+          <option value="">{__("Choose a compatible field")}</option>
           {sourceKey && sourceKey !== 'title' && !allowedFields.some(field => 'field:' + field.key === sourceKey)
-            && <option value={sourceKey} disabled>{sourceKey}{t('builder.builder_binding_fields.missing_field')}</option>}
-          <option value="title" disabled={!canUseTitle}>{t('builder.builder_binding_fields.entry_title')}{!canUseTitle ? t('builder.builder_binding_fields.incompatible') : ''}</option>
+            && <option value={sourceKey} disabled>{sourceKey}{__(" (missing field)")}</option>}
+          <option value="title" disabled={!canUseTitle}>{__("Entry title (title)")}{!canUseTitle ? __(" — incompatible") : ''}</option>
           {allowedFields.map(field => {
             const compatible = allowed(element, target, field.type);
             return <option key={field.key} value={'field:' + field.key} disabled={!compatible}>
-              {field.label} ({field.key}, {field.type}){!compatible ? t('builder.builder_binding_fields.incompatible') : ''}
+              {field.label} ({field.key}, {field.type}){!compatible ? __(" — incompatible") : ''}
             </option>;
           })}
         </select>
       </label>
       {sourceKey && !sourceAllowed &&
-        <p role="status" className="text-xs text-amber-800">{t('builder.builder_binding_fields.incompatible_notice')}</p>}
+        <p role="status" className="text-xs text-amber-800">{__("The field is incompatible with the target property. This configuration cannot be applied.")}</p>}
       {imageAltNeedsMedia &&
-        <p role="status" className="text-xs text-amber-800">{t('builder.builder_binding_fields.alt_notice')}</p>}
+        <p role="status" className="text-xs text-amber-800">{__("Binding alt requires a valid static Media ID first.")}</p>}
       {lookupError && <div className="space-y-2">
         <p role="alert" className="text-xs text-rose-700">{lookupError}</p>
         <button type="button" className="btn-secondary !py-1.5 text-xs" onClick={() => {
           setLookupError('');
           setLookupRevision(value => value + 1);
-        }}>{t('builder.builder_binding_fields.retry')}</button>
+        }}>{__("Try reloading sources")}</button>
       </div>}
       {savedStatus && <p role="status" className="text-xs text-emerald-800">{savedStatus}</p>}
       <div className="flex flex-wrap gap-2">
         <button type="button" className="btn-secondary !py-1.5 text-xs" disabled={!valid}
-          onClick={apply}>{t('builder.builder_binding_fields.apply')}</button>
+          onClick={apply}>{__("Apply binding")}</button>
         {existing && <button type="button" className="btn-secondary !py-1.5 text-xs"
           onClick={() => {
             onBindingChange(element.id, null);
-            setSavedStatus(t('builder.builder_binding_fields.removed'));
-          }}>{t('builder.builder_binding_fields.remove')}</button>}
+            setSavedStatus(__("Binding removed from the draft; static values are unchanged."));
+          }}>{__("Remove binding")}</button>}
       </div>
     </fieldset>
   );

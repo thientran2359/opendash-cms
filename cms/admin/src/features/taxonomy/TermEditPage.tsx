@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, _x, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { mediaThumbnailUrl } from '../../api/media.ts';
@@ -151,14 +151,14 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
             // fresh record/schema; never submit an old draft with a new token.
             setConflict(true);
             setLatest(null);
-            setError(tStatic("feature.taxonomy.termeditpage.the_term_or_schema_changed_while_signed_out_your"));
+            setError(__("The term or schema changed while signed out. Your draft is retained; review the latest version."));
           }
         }
       } catch (cause) {
         if (signal.aborted) return;
         if (cause instanceof ApiClientError && cause.status === 404) setNotFound(true);
-        else { setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.termeditpage.could_not_load_term"));
-          onErrorRef.current(cause, tStatic("feature.taxonomy.termeditpage.could_not_load_term")); }
+        else { setError(cause instanceof Error ? cause.message : __("Could not load term."));
+          onErrorRef.current(cause, __("Could not load term.")); }
       } finally {
         if (!signal.aborted) setLoading(false);
       }
@@ -195,8 +195,8 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
     } catch (cause) {
       if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 404) setNotFound(true);
-      else { setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.termeditpage.could_not_read_latest_version"));
-        onErrorRef.current(cause, tStatic("feature.taxonomy.termeditpage.could_not_read_latest_version")); }
+      else { setError(cause instanceof Error ? cause.message : __("Could not read latest version."));
+        onErrorRef.current(cause, __("Could not read latest version.")); }
     } finally { setBusy(false); }
   };
 
@@ -207,18 +207,18 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
       .filter(field => form[field] !== baseline[field]);
     const overlaps = changed.filter(field => currentServer[field] !== baseline[field]);
     if (overlaps.length && !window.confirm(
-      tStatic("feature.taxonomy.termeditpage.the_server_also_changed_value_keep_current_input_on", { value1: overlaps.join(', ') }),
+      __("The server also changed {{value1}}. Keep current input on the latest version?", { value1: overlaps.join(', ') }),
     )) return;
     const merged = { ...currentServer };
     for (const field of changed) merged[field] = form[field];
     setBaseline(currentServer); setForm(merged);
     setVersion(latest.version); setConflict(false); setLatest(null); setError('');
-    setNotice(tStatic("feature.taxonomy.termeditpage.reviewed_vvalue_edited_fields_are_retained_review_and_save", { value1: latest.version }));
+    setNotice(__("Reviewed v{{value1}}. Edited fields are retained; review and save.", { value1: latest.version }));
     recoveredRef.current = null;
   };
 
   const discardAndBack = () => {
-    if (dirty && !window.confirm(tStatic("feature.taxonomy.termeditpage.discard_unsaved_taxonomy_input_and_return_to_list"))) return;
+    if (dirty && !window.confirm(__("Discard unsaved taxonomy input and return to list?"))) return;
     if (scope) termDrafts.delete(scope);
     recoveredRef.current = null;
     setForm(baseline); setExtensions(extensionBaseline);
@@ -245,13 +245,13 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
     const slug = form.slug.trim();
     if (!name || [...name].length > 120 || /[\u0000-\u001f\u007f]/.test(name)
       || !/^[a-z][a-z0-9-]{0,63}$/.test(slug)) {
-      setError(tStatic("feature.taxonomy.termeditpage.invalid_name_or_slug_name_1_120_characters_kebab"));
+      setError(__("Invalid name or slug (name 1–120 characters, kebab-case slug up to 64)."));
       return;
     }
     const parentId = hierarchical && form.parentId ? Number(form.parentId) : null;
     if (canEditCore && parentId !== null &&
       (!Number.isSafeInteger(parentId) || !parentOptions.some(t => t.id === parentId))) {
-      setError(tStatic("feature.taxonomy.termeditpage.invalid_parent_term_or_hierarchy_exceeds_8_levels")); return;
+      setError(__("Invalid parent term or hierarchy exceeds 8 levels.")); return;
     }
     savingRef.current = true;
     setBusy(true); setError(''); setNotice('');
@@ -293,7 +293,7 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
               changes.schema_token = extensionConfig.schema_token;
             }
           }
-          if (!Object.keys(changes).length) { setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.no_changes_to_save")); return; }
+          if (!Object.keys(changes).length) { setNotice(__("No changes to save.")); return; }
           saved = await updateTaxonomyTerm(current.id, version, changes, csrfToken);
         }
         if (!mountedRef.current) return;
@@ -311,7 +311,7 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
           if (scope) termDrafts.delete(scope);
           recoveredRef.current = null;
           reportDirtyRef.current(false);
-          setNotice(tStatic("feature.taxonomy.termeditpage.saved_term_value_value_vvalue", { value1: definition?.label ?? kind, value2: saved.id, value3: saved.version }));
+          setNotice(__("Saved term {{value1}} #{{value2}} (v{{value3}}).", { value1: definition?.label ?? kind, value2: saved.id, value3: saved.version }));
           onSavedRef.current?.(saved);
         } else {
           const next = fromTerm(saved);
@@ -323,7 +323,7 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
           if (scope) termDrafts.delete(scope);
           recoveredRef.current = null;
           reportDirtyRef.current(false);
-          setNotice(tStatic("feature.taxonomy.termeditpage.saved_term_value_value_vvalue", { value1: definition?.label ?? kind, value2: saved.id, value3: saved.version }));
+          setNotice(__("Saved term {{value1}} #{{value2}} (v{{value3}}).", { value1: definition?.label ?? kind, value2: saved.id, value3: saved.version }));
           onSavedRef.current?.(saved);
           if (!embedded && mode === 'new') onNavigateHash(`${listHash}/${saved.id}/edit`);
         }
@@ -332,10 +332,10 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
         if (cause instanceof ApiClientError && (cause.status === 412 || cause.status === 409)) {
           setConflict(true);
           setError(cause.status === 412 ?
-            tStatic("feature.taxonomy.termeditpage.version_changed_412_unsaved_input_is_retained") :
-            tStatic("feature.taxonomy.termeditpage.provider_configuration_changed_409_unsaved_input_is_retained"));
-        } else { setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.termeditpage.could_not_save_term")); }
-        onErrorRef.current(cause, tStatic("feature.taxonomy.termeditpage.could_not_save_term"));
+            __("Version changed (412). Unsaved input is retained.") :
+            __("Provider configuration changed (409). Unsaved input is retained."));
+        } else { setError(cause instanceof Error ? cause.message : __("Could not save term.")); }
+        onErrorRef.current(cause, __("Could not save term."));
       } finally { savingRef.current = false; setBusy(false); }
     })();
   };
@@ -343,16 +343,16 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
   if (!user) return null;
   if (notFound) return (
     <section data-testid="term-not-found" className="space-y-3">
-      <h2 className="text-xl font-bold text-zinc-950">{tStatic("feature.taxonomy.termeditpage.404_term_not_found")}{' '}{kind}</h2>
-      <p className="text-sm text-zinc-600">{tStatic("feature.taxonomy.termeditpage.id_does_not_exist_or_belongs_to_another_taxonomy")}</p>
+      <h2 className="text-xl font-bold text-zinc-950">{__("404 Term not found")}{' '}{kind}</h2>
+      <p className="text-sm text-zinc-600">{__("ID does not exist or belongs to another taxonomy.")}</p>
       {recoveredRef.current && <AdminAlert tone="warning" className="space-y-2">
-        <p role="status">{tStatic("feature.taxonomy.termeditpage.your_previous_draft_is_retained_for_copying_but_the")}</p>
+        <p role="status">{__("Your previous draft is retained for copying, but the save target is no longer available.")}</p>
         <pre className="max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-white/80 p-2 font-mono text-xs">{JSON.stringify({ form, extensions }, null, 2)}</pre>
       </AdminAlert>}
-      <AdminButton variant="secondary" size="md" onClick={discardAndBack}>{tStatic("feature.taxonomy.termeditpage.discard_input_return_to_list")}</AdminButton>
+      <AdminButton variant="secondary" size="md" onClick={discardAndBack}>{__("Discard input / Return to list")}</AdminButton>
     </section>
   );
-  if (loading) return <p role="status" className="text-sm text-zinc-600">{tStatic("feature.taxonomy.termeditpage.loading_taxonomy_editor")}</p>;
+  if (loading) return <p role="status" className="text-sm text-zinc-600">{__("Loading taxonomy editor...")}</p>;
 
   return (
     <section
@@ -363,15 +363,15 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
     >
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{tStatic("feature.posts.postpageworkspace.content")}{' '}{definition?.label ?? kind}</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{__("Content /")}{' '}{definition?.label ?? kind}</p>
           <h2 className="mt-1 text-lg font-bold tracking-tight text-zinc-950">
-            {mode === 'new' ? tStatic("feature.taxonomy.termeditpage.add_value_term", { value1: definition?.label ?? kind }) : tStatic("feature.taxonomy.termeditpage.edit_value_term_value", { value1: definition?.label ?? kind, value2: String(current?.id) })}
+            {mode === 'new' ? __("Add {{value1}} term", { value1: definition?.label ?? kind }) : __("Edit {{value1}} term #{{value2}}", { value1: definition?.label ?? kind, value2: String(current?.id) })}
           </h2>
-          {current && <p className="mt-0.5 text-xs text-zinc-500">ID #{current.id} {tStatic("feature.taxonomy.termeditpage.version_v")}{version} · {dirty ? tStatic("feature.taxonomy.termeditpage.unsaved") : tStatic("feature.taxonomy.termeditpage.synced")}</p>}
+          {current && <p className="mt-0.5 text-xs text-zinc-500">ID #{current.id} {__("· Version v")}{version} · {dirty ? __("Unsaved") : __("Synced")}</p>}
         </div>
         {(!embedded || mode === 'edit') && (
           <AdminButton variant="secondary" size="sm" disabled={busy} onClick={discardAndBack}>
-            {embedded ? tStatic("taxonomy.back_to_create") : tStatic("feature.taxonomy.termeditpage.cancel_return_to_list")}
+            {embedded ? __("Back to create new") : __("Cancel / Return to list")}
           </AdminButton>
         )}
       </header>
@@ -379,14 +379,14 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {providerUnavailable && <AdminAlert tone="warning">
-        {tStatic("feature.taxonomy.termeditpage.this_taxonomy_is_inactive_or_its_declaration_was_withdrawn")}
+        {__("This taxonomy is inactive or its declaration was withdrawn. Existing terms can be retained/edited; new terms cannot be created.")}
       </AdminAlert>}
 
       <div data-extension-slot="term-before-core" aria-hidden="true" />
       <form onSubmit={submit} className="min-w-0 space-y-4 rounded-xl border border-zinc-200 bg-white p-5"
-        aria-label={tStatic("feature.taxonomy.termeditpage.taxonomy_edit_form")}>
+        aria-label={__("Taxonomy edit form")}>
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-name">
-          <span>{tStatic("feature.taxonomy.termeditpage.name")}</span>
+          <span>{__("Name *")}</span>
           <input id="term-name" className={fieldClass} maxLength={120} required disabled={busy || user.role !== 'admin'}
             value={form.name} onChange={event => setForm(previous => ({
               ...previous, name: event.target.value,
@@ -394,15 +394,15 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
             }))} />
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-slug">
-          <span>{tStatic("feature.common.ui_slug")}</span>
+          <span>{__("Slug *")}</span>
           <input id="term-slug" className={fieldClass} maxLength={64} required
             pattern="[a-z](?:[a-z0-9]|-)*" disabled={busy || user.role !== 'admin'} value={form.slug}
             onChange={event => { setManualSlug(true); setForm(previous => ({...previous, slug: event.target.value})); }} />
-          <span className="text-xs font-normal text-zinc-500">{tStatic("feature.taxonomy.termeditpage.slug_unique_within_the_type_starts_with_a_z")}</span>
+          <span className="text-xs font-normal text-zinc-500">{__("Slug unique within the type, starts with a-z, maximum 64 characters.")}</span>
         </label>
         {localeState.hasMultipleLocales && (
           <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-locale">
-            <span>{tStatic("feature.content.entrylistpage.language")}</span>
+            <span>{__("Language")}</span>
             <select
               id="term-locale"
               className={selectClass}
@@ -422,30 +422,30 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
             </select>
             <span className="text-xs font-normal text-zinc-500">
               {mode === 'new'
-                ? tStatic("feature.taxonomy.termeditpage.term_language_is_fixed_after_creation")
-                : tStatic("feature.taxonomy.termeditpage.language_cannot_be_changed_after_creation")}
+                ? __("Term language is fixed after creation.")
+                : __("Language cannot be changed after creation.")}
             </span>
           </label>
         )}
         {hierarchical && <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-parent">
-          <span>{tStatic("feature.common.parent_term")}</span>
+          <span>{__("Parent term")}</span>
           <select id="term-parent" className={selectClass} value={form.parentId} disabled={busy || user.role !== 'admin'}
             onChange={event => setForm(previous => ({...previous, parentId: event.target.value}))}>
-            <option value="">{tStatic("feature.taxonomy.termeditpage.none_root_term")}</option>
+            <option value="">{__("None (root term)")}</option>
             {parentOptions.map(term => <option key={term.id} value={term.id}>{term.name} (#{term.id})</option>)}
             {form.parentId && !parentOptions.some(term => String(term.id) === form.parentId) &&
-              <option value={form.parentId} disabled>{tStatic("feature.taxonomy.termeditpage.parent_no_longer_valid")}{form.parentId})</option>}
+              <option value={form.parentId} disabled>{__("Parent no longer valid (#")}{form.parentId})</option>}
           </select>
-          <span className="text-xs font-normal text-zinc-500">{tStatic("feature.taxonomy.termeditpage.cannot_select_a_descendant_or_move_a_branch_beyond")}</span>
+          <span className="text-xs font-normal text-zinc-500">{__("Cannot select a descendant or move a branch beyond 8 levels.")}</span>
         </label>}
 
         <div className="space-y-2" data-testid="term-featured-image-field">
-          <div className="text-sm font-medium text-zinc-800">{tStatic("taxonomy.featured_image")}</div>
+          <div className="text-sm font-medium text-zinc-800">{__("Featured image")}</div>
           {form.featuredImageId ? (
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50/50 p-3">
               <img
                 src={mediaThumbnailUrl(form.featuredImageId)}
-                alt={tStatic("taxonomy.featured_image")}
+                alt={__("Featured image")}
                 className="h-20 w-20 rounded-md border border-zinc-200 bg-white object-cover"
               />
               <div className="flex flex-wrap items-center gap-2">
@@ -456,7 +456,7 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
                   data-testid="term-change-featured-image"
                   onClick={() => setPickerOpen(true)}
                 >
-                  {tStatic("taxonomy.change_featured_image")}
+                  {__("Change image")}
                 </AdminButton>
                 <AdminButton
                   variant="danger"
@@ -465,7 +465,7 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
                   data-testid="term-remove-featured-image"
                   onClick={() => setForm(previous => ({ ...previous, featuredImageId: '' }))}
                 >
-                  {tStatic("taxonomy.remove_featured_image")}
+                  {_x("Remove image", "taxonomy.remove_featured_image")}
                 </AdminButton>
               </div>
             </div>
@@ -477,10 +477,10 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
               data-testid="term-choose-featured-image"
               onClick={() => setPickerOpen(true)}
             >
-              {tStatic("taxonomy.choose_featured_image")}
+              {__("Choose or upload image")}
             </AdminButton>
           )}
-          <p className="text-xs font-normal text-zinc-500">{tStatic("taxonomy.featured_image_help")}</p>
+          <p className="text-xs font-normal text-zinc-500">{__("Optional thumbnail image for this term.")}</p>
         </div>
 
         {mode === 'edit' && extensionConfig && <AdminTermPanels config={extensionConfig}
@@ -491,23 +491,23 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
           }))} />}
 
         {conflict && <AdminAlert tone="warning" className="space-y-2">
-          <p role="status">{tStatic("feature.taxonomy.termeditpage.server_data_changed_your_input_is_retained")}</p>
+          <p role="status">{__("Server data changed. Your input is retained.")}</p>
           {!latest ? <AdminButton variant="secondary" size="sm" disabled={busy}
-            onClick={() => void inspectConflict()}>{tStatic("feature.taxonomy.termeditpage.load_latest_version_to_compare")}</AdminButton> : <>
-            <p className="text-xs">{tStatic("feature.taxonomy.termeditpage.server_version_v")}{latest.version} · {latest.name} · /{latest.slug}</p>
+            onClick={() => void inspectConflict()}>{__("Load latest version to compare")}</AdminButton> : <>
+            <p className="text-xs">{__("Server version: v")}{latest.version} · {latest.name} · /{latest.slug}</p>
             <AdminButton variant="secondary" size="sm" disabled={busy} onClick={continueWithLatest}>
-              {tStatic("feature.taxonomy.termeditpage.continue_with_v")}{latest.version} {tStatic("feature.taxonomy.termeditpage.retain_edited_fields")}
+              {__("Continue with v")}{latest.version} {__("(retain edited fields)")}
             </AdminButton>
           </>}
         </AdminAlert>}
         <div className="flex flex-wrap gap-2.5 pt-1">
           <AdminButton type="submit" variant="primary" size="md"
             disabled={busy || conflict || !csrfToken || (mode === 'new' && (user.role !== 'admin' || providerUnavailable))}>
-            {busy ? tStatic("feature.users.userprofilepanel.saving") : mode === 'new' ? tStatic("feature.editor.panelregionrenderer.create_new") : tStatic("feature.users.userspanel.save_changes")}
+            {busy ? __("Saving...") : mode === 'new' ? __("Create new") : __("Save changes")}
           </AdminButton>
           {(!embedded || mode === 'edit' || dirty) && (
             <AdminButton variant="secondary" size="md" disabled={busy} onClick={discardAndBack}>
-              {tStatic("feature.taxonomy.termeditpage.cancel_edits")}
+              {__("Cancel edits")}
             </AdminButton>
           )}
         </div>

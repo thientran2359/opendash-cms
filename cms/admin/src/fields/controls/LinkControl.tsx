@@ -26,7 +26,7 @@ export const LinkControl: React.FC<{
   disabled?: boolean;
   onChange: (next: LinkValue) => void;
 }> = ({ field, value, locale, disabled = false, onChange }) => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const labelId = useId();
   const urlId = useId();
   const [showInternal, setShowInternal] = useState(false);
@@ -62,21 +62,21 @@ export const LinkControl: React.FC<{
           className="text-[11px] font-medium text-sky-700 hover:underline disabled:opacity-45"
         >
           {showInternal
-            ? t('builder.studio_field_controls.close_list')
-            : t('builder.studio_field_controls.choose_entry')}
+            ? __("Close list")
+            : __("Choose page/post…")}
         </button>
       </div>
 
       <div className="space-y-1">
         <label htmlFor={labelId} className="block text-[11px] font-medium text-zinc-600">
-          {t('fields.link.label_text')}
+          {__("Link label")}
         </label>
         <input
           id={labelId}
           type="text"
           maxLength={160}
           value={link.label ?? ''}
-          placeholder={t('fields.link.label_placeholder')}
+          placeholder={__("Button or anchor text")}
           disabled={disabled}
           onChange={e => onChange({ ...link, label: e.target.value })}
           className={STUDIO_INPUT_CLASS}
@@ -85,14 +85,14 @@ export const LinkControl: React.FC<{
 
       <div className="space-y-1">
         <label htmlFor={urlId} className="block text-[11px] font-medium text-zinc-600">
-          {t('builder.studio_field_controls.url')}
+          {_x("URL", "builder.studio_field_controls")}
         </label>
         <input
           id={urlId}
           type="text"
           maxLength={2048}
           value={link.url}
-          placeholder={field.placeholder ?? t('builder.studio_field_controls.url_placeholder')}
+          placeholder={field.placeholder ?? __("https://... or /path")}
           disabled={disabled}
           onChange={e => onChange({ ...link, url: e.target.value })}
           className={STUDIO_INPUT_CLASS}
@@ -101,7 +101,7 @@ export const LinkControl: React.FC<{
 
       {showInternal && (
         <select
-          aria-label={t('builder.studio_field_controls.choose_published')}
+          aria-label={__("Choose a published page or post")}
           disabled={disabled || loadingEntries}
           value=""
           onChange={e => {
@@ -119,10 +119,10 @@ export const LinkControl: React.FC<{
         >
           <option value="">
             {loadingEntries
-              ? t('builder.studio_field_controls.loading')
+              ? __("Loading list…")
               : entries.length
-                ? t('builder.studio_field_controls.choose_internal')
-                : t('builder.studio_field_controls.no_published')}
+                ? __("Choose internal link…")
+                : __("No published content")}
           </option>
           {entries.map(row => {
             const href = row.public_url ?? (row.type_key === 'page' ? `/${row.slug}/` : `/${row.type_key}/${row.slug}/`);
@@ -137,13 +137,13 @@ export const LinkControl: React.FC<{
 
       <div className="space-y-1 pt-0.5">
         <ToggleSwitchControl
-          label={t('builder.studio_field_controls.new_tab')}
+          label={__("Open in new tab")}
           checked={Boolean(link.new_tab)}
           disabled={disabled}
           onChange={new_tab => onChange({ ...link, new_tab })}
         />
         <ToggleSwitchControl
-          label={t('builder.studio_field_controls.nofollow')}
+          label={__("rel=\"nofollow\" attribute")}
           checked={Boolean(link.nofollow)}
           disabled={disabled}
           onChange={nofollow => onChange({ ...link, nofollow })}

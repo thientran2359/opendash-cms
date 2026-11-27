@@ -7,7 +7,7 @@ import {
   trashContentEntry,
 } from '../../api/content.ts';
 import { formatNumber } from '../../i18n/format.ts';
-import { tStatic } from '../../i18n/index.tsx';
+import { __ } from '../../i18n/index.tsx';
 import type { EntryTableRow, TaxonomyDeltaOp } from './types.ts';
 
 export const MAX_BULK_ITEMS = 100;
@@ -76,12 +76,12 @@ export function validateBulkSelection(
   rows: EntryTableRow[],
 ): { ok: true; locale: string } | { ok: false; message: string } {
   if (!rows.length) {
-    return { ok: false, message: tStatic('bulk.no_rows_selected') };
+    return { ok: false, message: __("Select at least one item on the current page first.") };
   }
   const bounded = rows.slice(0, MAX_BULK_ITEMS);
   const locales = new Set(bounded.map(row => row.locale ?? ''));
   if (locales.size > 1) {
-    return { ok: false, message: tStatic('entry_lifecycle.bulk_mixed_locale_blocked') };
+    return { ok: false, message: __("Selected entries span multiple languages. Filter by a single language or select rows from one language before running a bulk action.") };
   }
   return { ok: true, locale: bounded[0]?.locale ?? '' };
 }
@@ -89,21 +89,21 @@ export function validateBulkSelection(
 export function describeBulkAction(spec: BulkActionSpec): string {
   switch (spec.kind) {
     case 'published':
-      return tStatic('feature.content.entrylistpage.publish');
+      return __("publish");
     case 'draft':
-      return tStatic('feature.content.entrylistpage.move_to_draft');
+      return __("move to draft");
     case 'trash':
-      return tStatic('entry_lifecycle.move_to_trash');
+      return __("Move to Trash");
     case 'restore':
-      return tStatic('entry_lifecycle.restore');
+      return __("Restore");
     case 'purge':
-      return tStatic('entry_lifecycle.purge_permanently');
+      return __("Delete permanently");
     case 'taxonomy':
       return spec.operation === 'add'
-        ? tStatic('bulk.taxonomy_action_add', { value1: spec.taxonomyLabel })
+        ? __("add {{value1}} terms", { value1: spec.taxonomyLabel })
         : spec.operation === 'remove'
-          ? tStatic('bulk.taxonomy_action_remove', { value1: spec.taxonomyLabel })
-          : tStatic('bulk.taxonomy_action_replace', { value1: spec.taxonomyLabel });
+          ? __("remove {{value1}} terms", { value1: spec.taxonomyLabel })
+          : __("replace {{value1}} terms", { value1: spec.taxonomyLabel });
   }
 }
 
@@ -116,37 +116,37 @@ export function buildBulkConfirmationPrompt(
   const localeLabel = locale || 'default';
   switch (spec.kind) {
     case 'trash':
-      return tStatic('entry_lifecycle.bulk_confirm_move_to_trash', { value1: countText });
+      return __("Move {{value1}} selected item(s) to Trash? You can restore them later from Trash.", { value1: countText });
     case 'restore':
       return spec.confirmPublicRestore
-        ? tStatic('bulk.confirm_restore_public', { value1: countText, value2: localeLabel })
-        : tStatic('bulk.confirm_restore', { value1: countText, value2: localeLabel });
+        ? __("Restore {{value1}} selected item(s) in language {{value2}} from Trash? Immediate-publication entries will become public immediately.", { value1: countText, value2: localeLabel })
+        : __("Restore {{value1}} selected item(s) in language {{value2}} from Trash?", { value1: countText, value2: localeLabel });
     case 'purge':
-      return tStatic('bulk.confirm_purge', { value1: countText, value2: localeLabel });
+      return __("Permanently delete {{value1}} selected item(s) in language {{value2}}? This action cannot be undone.", { value1: countText, value2: localeLabel });
     case 'taxonomy':
       if (spec.operation === 'replace' && spec.termIds.length === 0) {
-        return tStatic('bulk.confirm_taxonomy_clear', {
+        return __("Clear all {{value1}} terms on {{value2}} selected item(s) in language {{value3}}? Other taxonomies remain untouched.", {
           value1: spec.taxonomyLabel,
           value2: countText,
           value3: localeLabel,
         });
       }
       if (spec.operation === 'replace') {
-        return tStatic('bulk.confirm_taxonomy_replace', {
+        return __("Replace all {{value1}} terms with {{value2}} selected term(s) on {{value3}} item(s) in language {{value4}}? Other taxonomies remain untouched.", {
           value1: spec.taxonomyLabel,
           value2: formatNumber(spec.termIds.length),
           value3: countText,
           value4: localeLabel,
         });
       }
-      return tStatic('bulk.confirm_taxonomy_delta', {
+      return __("Apply \"{{value1}}\" to {{value2}} selected item(s) in language {{value3}}?", {
         value1: describeBulkAction(spec),
         value2: countText,
         value3: localeLabel,
       });
     case 'published':
     case 'draft':
-      return tStatic('feature.content.entrylistpage.are_you_sure_you_want_to_value_value_selected', {
+      return __("Are you sure you want to {{value1}} {{value2}} selected items? Each item is processed separately and version conflicts may occur.", {
         value1: describeBulkAction(spec),
         value2: countText,
       });
@@ -204,7 +204,7 @@ export async function runSequentialBulk(
         id: target.id,
         status: 'unattempted',
         beforeVersion: target.version,
-        message: `#${target.id}: ${tStatic('entry_lifecycle.bulk_unattempted_message')}`,
+        message: `#${target.id}: ${__("Not attempted because the batch stopped early.")}`,
       });
     }
   };
@@ -268,7 +268,7 @@ export async function runSequentialBulk(
         id: row.id,
         status: 'succeeded',
         beforeVersion: row.version,
-        message: tStatic('feature.content.entrylistpage.value_value_succeeded', {
+        message: __("#{{value1}}: {{value2}} succeeded.", {
           value1: row.id,
           value2: noun,
         }),
@@ -297,7 +297,7 @@ export async function runSequentialBulk(
             id: row.id,
             status: 'failed',
             beforeVersion: row.version,
-            message: `#${row.id}: ${tStatic('entry_lifecycle.bulk_maintenance_stopped')}`,
+            message: `#${row.id}: ${__("System entered maintenance (503). Remaining items were not attempted.")}`,
           });
           pushUnattemptedFrom(idx + 1);
           break;
@@ -316,7 +316,7 @@ export async function runSequentialBulk(
           status: 'uncertain',
           beforeVersion: row.version,
           unresolvedUncertain: true,
-          message: `#${row.id}: ${tStatic('entry_lifecycle.bulk_uncertain_message')}`,
+          message: `#${row.id}: ${__("Commit outcome is uncertain (request interrupted or network error). Refresh and verify state before retrying.")}`,
         });
         if (isCancelled() || !isAlive() || getCurrentScope() !== startingScope) {
           pushUnattemptedFrom(idx + 1);
@@ -376,8 +376,8 @@ export function reconcileBulkResults(
           ...item,
           unresolvedUncertain: true,
           message: !fresh
-            ? tStatic('bulk.uncertain_reconciled_absent', { value1: item.id })
-            : tStatic('bulk.uncertain_reconciled_changed', {
+            ? __("#{{value1}}: Uncertain commit — item is no longer in this view after refresh. Verify its state manually; it will not be retried automatically.", { value1: item.id })
+            : __("#{{value1}}: Uncertain commit — version changed on the server (v{{value2}} → v{{value3}}). Another actor or the prior request may have modified it; verify manually before taking further action.", {
                 value1: item.id,
                 value2: item.beforeVersion,
                 value3: fresh.version,
