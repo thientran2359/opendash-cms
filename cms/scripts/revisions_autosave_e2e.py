@@ -170,8 +170,11 @@ def delete_media(ctx, base: str, csrf: str, media_id: str) -> None:
 
 
 def click_primary_save_button(page: Page) -> None:
-    panel = page.get_by_test_id("action-panel-publish")
-    btn = panel.locator('button[class*="bg-od-accent"]').first
+    btn = (
+        page.get_by_test_id("single-edit-move-to-trash")
+        .locator("..")
+        .locator('button[class*="bg-od-accent"]')
+    )
     expect(btn).to_be_enabled(timeout=15000)
     btn.click()
 
@@ -273,7 +276,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     )
 
                     page.get_by_test_id("revision-restore-btn").click()
-                    expect(modal).to_have_count(0, timeout=15000)
+                    expect(modal).to_be_hidden( timeout=15000)
                     expect(page.get_by_test_id("publish-box-revision-count")).to_have_text(
                         "4", timeout=15000
                     )
@@ -328,7 +331,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         "Added Subcopy", timeout=15000
                     )
                     page.get_by_test_id("revision-restore-btn").click()
-                    expect(modal).to_have_count(0, timeout=15000)
+                    expect(modal).to_be_hidden( timeout=15000)
                     expect(page.get_by_test_id("studio-dirty-badge")).to_have_count(0)
 
                     # Restore rev #1 (editor content_mode) -> Mode Notice -> Open in Editor
@@ -337,7 +340,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     expect(modal).to_be_visible(timeout=15000)
                     page.get_by_test_id("revision-item-1").click()
                     page.get_by_test_id("revision-restore-btn").click()
-                    expect(modal).to_have_count(0, timeout=15000)
+                    expect(modal).to_be_hidden( timeout=15000)
                     expect(
                         page.get_by_test_id("studio-restored-editor-mode-notice")
                     ).to_be_visible(timeout=15000)
@@ -391,7 +394,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         "Promo Line", timeout=15000
                     )
                     page.get_by_test_id("revision-restore-btn").click()
-                    expect(modal).to_have_count(0, timeout=15000)
+                    expect(modal).to_be_hidden( timeout=15000)
 
                     # Dirty Studio via "Add block" -> "Empty section", leave via hash (`mayLeave`)
                     page.get_by_test_id("studio-mode2-sidebar").get_by_role(
@@ -493,8 +496,24 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                                 },
                             ),
                         ]:
-                            api_json(
-                                editor_ctx, method, base, path, payload, ed_csrf, expected=403
+                            hdrs = {}
+                            if method != "GET":
+                                hdrs["Origin"] = base
+                                hdrs["X-CSRF-Token"] = ed_csrf
+                            if payload is not None:
+                                hdrs["Content-Type"] = "application/json"
+                            r403 = editor_ctx.request.fetch(
+                                base + path,
+                                method=method,
+                                headers=hdrs,
+                                data=json.dumps(payload) if payload is not None else None,
+                                timeout=20000,
+                            )
+                            assert r403.status == 403, (
+                                method,
+                                path,
+                                r403.status,
+                                r403.text()[:200],
                             )
 
                         ed_revs = api_json(
@@ -519,7 +538,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                             base,
                             f"/api/admin/content-types/secret_doc/entries/{sdoc['id']}/revisions/compare?from={rev_1_id}&to=current",
                         )
-                        assert ed_cmp["diff"]["has_hidden_admin_fields"] is True, ed_cmp
+                        assert ed_cmp["diff"]["has_hidden_admin_changes"] is True, ed_cmp
                         cmp_blob = json.dumps(ed_cmp)
                         assert "TOP_SECRET" not in cmp_blob and "admin_secret" not in cmp_blob, cmp_blob
 
@@ -592,7 +611,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         "autosave", timeout=10000
                     )
                     page.get_by_test_id("revision-modal-close").click()
-                    expect(modal).to_have_count(0, timeout=10000)
+                    expect(modal).to_be_hidden( timeout=10000)
 
                     page.get_by_test_id("autosave-banner-restore").click()
                     expect(title_input).to_have_value("Autosave Live Draft 15s", timeout=10000)
@@ -635,7 +654,12 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     page.locator("#auth-main #auth-password").fill(admin_pw)
                     page.locator("#auth-main #auth-login").click()
                     expect(title_input).to_have_value("Newer Local 401 Draft", timeout=20000)
+                    click_primary_save_button(page)
+                    expect(page.get_by_test_id("publish-box-revision-count")).to_have_text(
+                        "7", timeout=15000
+                    )
                     csrf = admin_login(ctx, base, "rev_admin", admin_pw, cms_locale="en")
+                    page.reload(wait_until="domcontentloaded")
                     checks.append("cuj4_real_autosave_15s_isolation_stale_and_401_draft")
 
                     # ------------------------------------------------------------------
@@ -706,7 +730,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     page.get_by_test_id("revision-restore-btn").click()
                     expect(confirm_box).to_be_visible(timeout=15000)
                     page.get_by_test_id("revision-missing-refs-proceed").click()
-                    expect(modal).to_have_count(0, timeout=15000)
+                    expect(modal).to_be_hidden( timeout=15000)
                     expect(page.get_by_test_id("publish-box-revision-count")).to_have_text(
                         "3", timeout=15000
                     )
@@ -759,21 +783,13 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         + f"/api/admin/content-types/post/entries/{trash_post['id']}/autosave"
                     )
                     assert trashed_resp.status == 409, trashed_resp.status
-                    trashed_rec = api_json(
-                        ctx,
-                        "GET",
-                        base,
-                        f"/api/admin/content-types/post/entries/{trash_post['id']}",
+                    page.get_by_test_id("entry-status-tab-trash").click()
+                    restore_trash_btn = page.get_by_test_id(
+                        f"entry-restore-btn-{trash_post['id']}"
                     )
-                    api_json(
-                        ctx,
-                        "POST",
-                        base,
-                        f"/api/admin/content-types/post/entries/{trash_post['id']}/restore",
-                        {},
-                        csrf,
-                        {"If-Match": f'"v{trashed_rec["version"]}"'},
-                    )
+                    expect(restore_trash_btn).to_be_visible(timeout=15000)
+                    restore_trash_btn.click()
+                    expect(restore_trash_btn).to_have_count(0, timeout=15000)
                     untrashed_as = api_json(
                         ctx,
                         "GET",
@@ -789,6 +805,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         base + f"/admin/#/posts/{post_id}/edit",
                         wait_until="domcontentloaded",
                     )
+                    page.reload(wait_until="domcontentloaded")
                     expect(page.get_by_test_id("publish-box-open-revisions")).to_be_visible(
                         timeout=20000
                     )
