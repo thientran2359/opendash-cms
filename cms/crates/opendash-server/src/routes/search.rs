@@ -15,10 +15,23 @@ use opendash_core::{content::valid_content_type_key, search::sanitize_search_que
 use sqlx::SqlitePool;
 
 use crate::{
+    app::AppState,
+    auth::{require_admin, require_admin_with_csrf},
     content_render::PaginationView,
-    error::ApiError,
+    error::{ApiError, ApiResult},
+    operations::MAX_MAINTENANCE_DRAIN,
     public_context::{MAX_SEARCH_PAGE, validate_percent_encoding},
-    storage::search::{PublicSearchFacet, PublicSearchQueryInput, query_public_search},
+    routes::operations::map_maintenance_error,
+    storage::{
+        operations::{
+            JobCreateInput, JobTransitionInput, OperationKind, OperationState, create_job,
+            latest_job_by_kind, transition_job_cas,
+        },
+        search::{
+            PublicSearchFacet, PublicSearchQueryInput, get_search_index_status,
+            query_public_search, rebuild_search_index,
+        },
+    },
 };
 
 pub const SEARCH_RATE_LIMIT_MAX_REQUESTS: usize = 60;
@@ -392,6 +405,111 @@ pub async fn public_search(
         })),
     )
         .into_response()
+}
+
+pub async fn admin_search_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    require_admin(&headers, &state.db).await?;
+    let status = get_search_index_status(&state.db).await?;
+    let last_job = latest_job_by_kind(&state.db, OperationKind::SearchReindex).await?;
+    let maintenance_active = state.coordinator.is_maintenance_active();
+    Ok((
+        StatusCode::OK,
+        api_no_store_headers(None),
+        Json(serde_json::json!({
+            "indexed_documents": status.indexed_documents,
+            "eligible_published_entries": status.eligible_published_entries,
+            "in_sync": status.in_sync,
+            "maintenance_active": maintenance_active,
+            "last_job": last_job,
+        })),
+    ))
+}
+
+pub async fn admin_search_reindex(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    let admin = require_admin_with_csrf(&headers, &state.db).await?;
+    let _maint = state
+        .coordinator
+        .begin_maintenance(OperationKind::SearchReindex, MAX_MAINTENANCE_DRAIN)
+        .await
+        .map_err(map_maintenance_error)?;
+    let job = create_job(
+        &state.db,
+        JobCreateInput {
+            id: crate::auth::generate_random_token(),
+            kind: OperationKind::SearchReindex,
+            actor_user_id: Some(admin.user.id.to_string()),
+            reason: Some("admin_search_reindex".to_owned()),
+        },
+    )
+    .await?;
+    let running_job = transition_job_cas(
+        &state.db,
+        &job.id,
+        JobTransitionInput {
+            expected_version: job.version,
+            next_state: OperationState::Running,
+            summary_json: None,
+            error_code: None,
+            error_message: None,
+        },
+    )
+    .await?;
+    let started = Instant::now();
+    match rebuild_search_index(&state.db).await {
+        Ok(stats) => {
+            state.site_cache_epoch.bump();
+            let duration_ms = started.elapsed().as_millis() as u64;
+            let summary = serde_json::json!({
+                "indexed_documents": stats.indexed_documents,
+                "eligible_published_entries": stats.eligible_published_entries,
+                "duration_ms": duration_ms,
+            });
+            let done_job = transition_job_cas(
+                &state.db,
+                &running_job.id,
+                JobTransitionInput {
+                    expected_version: running_job.version,
+                    next_state: OperationState::Succeeded,
+                    summary_json: Some(summary.to_string()),
+                    error_code: None,
+                    error_message: None,
+                },
+            )
+            .await?;
+            Ok((
+                StatusCode::OK,
+                api_no_store_headers(None),
+                Json(serde_json::json!({
+                    "job": done_job,
+                    "indexed_documents": stats.indexed_documents,
+                    "eligible_published_entries": stats.eligible_published_entries,
+                    "in_sync": true,
+                    "duration_ms": duration_ms,
+                })),
+            ))
+        }
+        Err(err) => {
+            let _ = transition_job_cas(
+                &state.db,
+                &running_job.id,
+                JobTransitionInput {
+                    expected_version: running_job.version,
+                    next_state: OperationState::Failed,
+                    summary_json: None,
+                    error_code: Some("search_reindex_failed".to_owned()),
+                    error_message: Some(err.1.to_string()),
+                },
+            )
+            .await;
+            Err(err)
+        }
+    }
 }
 
 #[cfg(test)]

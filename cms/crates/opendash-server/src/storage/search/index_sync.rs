@@ -430,7 +430,6 @@ pub async fn rebuild_search_index_in_conn(
     })
 }
 
-#[allow(dead_code)] // Consumed by S03/S04 Admin & background search_reindex job.
 pub async fn rebuild_search_index(db: &SqlitePool) -> ApiResult<SearchReindexStats> {
     let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let stats = rebuild_search_index_in_conn(&mut tx).await?;
@@ -503,7 +502,6 @@ pub async fn get_search_index_status_in_conn(
     })
 }
 
-#[allow(dead_code)] // Consumed by S03/S04 Admin Search Index status screen.
 pub async fn get_search_index_status(db: &SqlitePool) -> ApiResult<SearchIndexStatus> {
     let mut conn = db.acquire().await?;
     get_search_index_status_in_conn(&mut conn).await

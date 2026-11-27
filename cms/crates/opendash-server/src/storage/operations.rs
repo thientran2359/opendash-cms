@@ -14,6 +14,7 @@ pub enum OperationKind {
     Reconcile,
     Purge,
     MediaDelete,
+    SearchReindex,
 }
 
 impl OperationKind {
@@ -24,6 +25,7 @@ impl OperationKind {
             Self::Reconcile => "reconcile",
             Self::Purge => "purge",
             Self::MediaDelete => "media_delete",
+            Self::SearchReindex => "search_reindex",
         }
     }
 
@@ -34,6 +36,7 @@ impl OperationKind {
             "reconcile" => Ok(Self::Reconcile),
             "purge" => Ok(Self::Purge),
             "media_delete" => Ok(Self::MediaDelete),
+            "search_reindex" => Ok(Self::SearchReindex),
             _ => Err(ApiError::bad_request("Loại tác vụ vận hành không hợp lệ.")),
         }
     }
@@ -42,7 +45,7 @@ impl OperationKind {
     pub fn is_heavy(self) -> bool {
         matches!(
             self,
-            Self::Backup | Self::Restore | Self::Reconcile | Self::Purge
+            Self::Backup | Self::Restore | Self::Reconcile | Self::Purge | Self::SearchReindex
         )
     }
 }
@@ -196,6 +199,24 @@ pub async fn get_job(db: &SqlitePool, id: &str) -> ApiResult<Option<OperationJob
         "#,
     )
     .bind(id)
+    .fetch_optional(db)
+    .await?;
+
+    row.as_ref().map(map_job_row).transpose()
+}
+
+pub async fn latest_job_by_kind(db: &SqlitePool, kind: OperationKind) -> ApiResult<Option<OperationJob>> {
+    let row = sqlx::query(
+        r#"
+        SELECT id, kind, state, version, actor_user_id, reason, summary_json,
+               error_code, error_message, requested_at, started_at, finished_at, updated_at
+        FROM operation_jobs
+        WHERE kind = ?
+        ORDER BY requested_at DESC, rowid DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(kind.as_str())
     .fetch_optional(db)
     .await?;
 

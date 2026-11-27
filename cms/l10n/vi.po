@@ -18993,3 +18993,57 @@ msgstr "Danh sách kết quả tìm kiếm phân trang"
 
 msgid "Search Results blocks only display items on the search route."
 msgstr "Khối Kết quả tìm kiếm chỉ hiển thị nội dung trên trang tìm kiếm."
+
+msgid "Search index"
+msgstr "Chỉ mục tìm kiếm"
+
+msgid "Could not load search index status."
+msgstr "Không thể tải trạng thái chỉ mục tìm kiếm."
+
+msgid "Could not rebuild search index."
+msgstr "Không thể lập lại chỉ mục tìm kiếm."
+
+msgid "Admin permission is required for search index tools."
+msgstr "Cần quyền Quản trị viên để dùng công cụ chỉ mục tìm kiếm."
+
+msgid "Search index rebuilt: {{count}} indexed entries in {{ms}} ms."
+msgstr "Đã lập lại chỉ mục tìm kiếm: {{count}} mục trong {{ms}} ms."
+
+msgid "Another maintenance or backup task is currently active. Try again after it completes."
+msgstr "Một tác vụ bảo trì hoặc sao lưu khác đang chạy. Vui lòng thử lại sau khi hoàn tất."
+
+msgid "Server is busy processing active writes (503). Please retry shortly."
+msgstr "Máy chủ đang bận xử lý tác vụ ghi (503). Vui lòng thử lại sau giây lát."
+
+msgid "Inspect SQLite FTS5 coverage across published public entries and rebuild the index on demand."
+msgstr "Kiểm tra độ phủ SQLite FTS5 trên các mục đã xuất bản công khai và lập lại chỉ mục khi cần."
+
+msgid "Rebuilding search index..."
+msgstr "Đang lập lại chỉ mục tìm kiếm..."
+
+msgid "Rebuild search index"
+msgstr "Lập lại chỉ mục tìm kiếm"
+
+msgid "Maintenance mode is active on this site. Reindex will stay disabled until it finishes."
+msgstr "Chế độ bảo trì đang bật trên trang này. Nút lập lại chỉ mục được khóa cho đến khi xong."
+
+msgid "Indexed documents"
+msgstr "Tài liệu đã lập chỉ mục"
+
+msgid "Eligible published entries"
+msgstr "Mục đã xuất bản hợp lệ"
+
+msgid "In sync"
+msgstr "Đồng bộ"
+
+msgid "Out of sync"
+msgstr "Lệch chỉ mục"
+
+msgid "Last reindex job"
+msgstr "Tác vụ lập lại chỉ mục gần nhất"
+
+msgid "Finished at: {{time}}"
+msgstr "Hoàn tất lúc: {{time}}"
+
+msgid "No reindex jobs recorded yet."
+msgstr "Chưa có tác vụ lập lại chỉ mục nào."

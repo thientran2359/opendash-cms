@@ -18996,3 +18996,57 @@ msgstr ""
 
 msgid "Search Results blocks only display items on the search route."
 msgstr ""
+
+msgid "Search index"
+msgstr ""
+
+msgid "Could not load search index status."
+msgstr ""
+
+msgid "Could not rebuild search index."
+msgstr ""
+
+msgid "Admin permission is required for search index tools."
+msgstr ""
+
+msgid "Search index rebuilt: {{count}} indexed entries in {{ms}} ms."
+msgstr ""
+
+msgid "Another maintenance or backup task is currently active. Try again after it completes."
+msgstr ""
+
+msgid "Server is busy processing active writes (503). Please retry shortly."
+msgstr ""
+
+msgid "Inspect SQLite FTS5 coverage across published public entries and rebuild the index on demand."
+msgstr ""
+
+msgid "Rebuilding search index..."
+msgstr ""
+
+msgid "Rebuild search index"
+msgstr ""
+
+msgid "Maintenance mode is active on this site. Reindex will stay disabled until it finishes."
+msgstr ""
+
+msgid "Indexed documents"
+msgstr ""
+
+msgid "Eligible published entries"
+msgstr ""
+
+msgid "In sync"
+msgstr ""
+
+msgid "Out of sync"
+msgstr ""
+
+msgid "Last reindex job"
+msgstr ""
+
+msgid "Finished at: {{time}}"
+msgstr ""
+
+msgid "No reindex jobs recorded yet."
+msgstr ""

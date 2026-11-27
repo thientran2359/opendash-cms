@@ -394,6 +394,15 @@ pub fn build_router_with_telemetry(
             get(crate::routes::taxonomy::taxonomy_eligibility_configured),
         )
         .route(
+            "/api/admin/tools/search/status",
+            get(crate::routes::search::admin_search_status),
+        )
+        .route(
+            "/api/admin/tools/search/reindex",
+            post(crate::routes::search::admin_search_reindex)
+                .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/operations/diagnostics",
             get(crate::routes::operations::diagnostics),
         )
