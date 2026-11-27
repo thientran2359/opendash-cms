@@ -7,37 +7,19 @@ import { getMenuSlots, listMenus, putMenuSlots, type MenuRecord, type MenuSlotsS
 import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../api/locales.ts';
 import { listPatterns, type PatternRecord } from '../api/patterns.ts';
 import {
-  getGeneralSettings,
-  getGlobalSiteOptions,
-  getReadingSettings,
-  getTimezoneCatalog,
-  saveGeneralSettings,
-  saveGlobalSiteOptions,
-  saveReadingSettings,
-  type GeneralSettings,
-  type GeneralSettingsDraft,
-  type GlobalSiteOptionsSnapshot,
-  type ReadingSettings,
-  type ReadingSettingsDraft,
+  getGeneralSettings, getGlobalSiteOptions, getReadingSettings, getTimezoneCatalog,
+  saveGeneralSettings, saveGlobalSiteOptions, saveReadingSettings,
+  type GeneralSettings, type GeneralSettingsDraft, type GlobalSiteOptionsSnapshot,
+  type ReadingSettings, type ReadingSettingsDraft,
 } from '../api/settings.ts';
 import { getStudioTargets, postStudioPreview, type StudioTargetItem, type TransientStudioOverrides } from '../api/studio.ts';
 import { saveThemeOptions } from '../api/themes.ts';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
 import { BuilderPreviewFrame } from '../builder/BuilderPreviewFrame.tsx';
 import {
-  EMPTY_DOCUMENT,
-  VALID_TEMPLATE_PART_KEY,
-  allNodes,
-  canDeleteElement,
-  countElementsByType,
-  createStarterTemplateDocument,
-  isElement,
-  locate,
-  visibleNodesInTree,
-  type BuilderDocument,
-  type BuilderElement,
-  type BuilderViewport,
-  type StudioBuilderClipboard,
+  EMPTY_DOCUMENT, VALID_TEMPLATE_PART_KEY, allNodes, canDeleteElement, countElementsByType,
+  createStarterTemplateDocument, isElement, locate, visibleNodesInTree,
+  type BuilderDocument, type BuilderElement, type BuilderViewport, type StudioBuilderClipboard,
 } from '../builder/document.ts';
 import { editorDraftStore } from '../features/editor/EditorDraftStore.ts';
 import type { ParsedRoute, StudioPanelId } from '../shell/router.ts';
@@ -186,6 +168,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [entryDoc, setEntryDoc] = useState<BuilderDocument>(EMPTY_DOCUMENT);
   const [entrySelectedNodeId, setEntrySelectedNodeId] = useState<string | null>(null);
   const [entryTrashedBlocked, setEntryTrashedBlocked] = useState(false);
+  const [entryLocale, setEntryLocale] = useState<string | null>(null);
 
   const isTrashedConflict = (cause: unknown): boolean =>
     !isPatternEntry &&
@@ -265,6 +248,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     setEntryVersion(null);
     setEntryHadExistingDoc(false);
     setEntryTrashedBlocked(false);
+    setEntryLocale(null);
   };
 
   // Dirty flags
@@ -538,6 +522,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         setPatternsLoaded(true);
         setEntryTrashedBlocked(false);
         setEntryTitle(entryRec.title);
+        setEntryLocale(entryRec.locale ?? null);
         setEntryPublicationStatus(opened.publication_status);
         setEntryPublicationPolicy(opened.publication_policy);
         setEntryDiagnostics(opened.diagnostics ?? []);
@@ -1253,6 +1238,9 @@ export const StudioWorkspace: React.FC<Props> = ({
                 onChangeDocument={handleBuilderChange}
                 csrfToken={csrfToken}
                 viewport={viewport}
+                contextTypeKey={isPatternEntry ? null : entryTypeKey}
+                locale={entryLocale ?? effectivePreviewLocale ?? null}
+                siteTimezone={generalDraft?.timezone ?? generalSaved?.timezone}
                 themeRevision={themeRevision}
                 patterns={patterns}
                 patternsLoaded={patternsLoaded}

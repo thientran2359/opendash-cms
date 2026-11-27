@@ -234,7 +234,7 @@ fn walk_theme_ast_enforces_theme_assets_url_scopes_and_antibypass() {
 <blockquote cite="{{ entry.url }}">Quote</blockquote>
 <q cite="{{ options.cta_url }}">Short</q>
 {% for item in locale.alternates %}<a href="{{ item.url }}">{{ item.label }}</a>{% endfor %}
-{% for row in entries | batch(2) %}{% for entry in row %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% for f in entry.fields %}<img src="{{ f.image_url }}">{% for u in f.gallery_urls %}<img src="{{ u }}">{% endfor %}{% endfor %}{% endfor %}{% endfor %}
+{% for row in entries | batch(2) %}{% for entry in row %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% for f in entry.field_list %}<img src="{{ f.media.url }}">{% for u in f.gallery %}<img src="{{ u.url }}">{% endfor %}{% if f.link %}<a href="{{ f.link.url }}">{{ f.link.label }}</a>{% endif %}{% endfor %}{% endfor %}{% endfor %}
 {% if entry.primary_category %}<a href="{{ entry.primary_category.url }}">Cat</a>{% endif %}
 </body></html>"#;
 
@@ -269,7 +269,7 @@ fn walk_theme_ast_enforces_theme_assets_url_scopes_and_antibypass() {
     let rejected = [
         // Provenance & URL slots
         r#"<a href="{{ item.url }}">untrusted item outside loop</a>"#,
-        r#"<img src="{{ field.image_url }}">"#,
+        r#"<img src="{{ field.media.url }}">"#,
         r#"<img src="{{ url }}">"#,
         r#"<img src="{{ locale.home_url }}">"#,
         r#"<img src="{{ options.cta_url }}">"#,
@@ -366,6 +366,54 @@ fn untrusted_extension_html_rejects_jinja_smuggled_attributes() {
     assert!(
         validate_untrusted_extension_html_fragment(
             r#"<div class="ok"><a href="https://safe.example">safe</a></div>"#
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn f03_cpt_scoped_entry_fields_pass_in_cpt_template_and_fail_in_parts() {
+    use opendash_core::field_schema::{FieldSpec, FieldType, MediaFieldKind};
+
+    let mut hero = FieldSpec::new(FieldType::Media, "hero_img", "Ảnh chính");
+    hero.public = true;
+    hero.media_kind = Some(MediaFieldKind::Image);
+    let mut cta = FieldSpec::new(FieldType::Link, "cta", "Nút");
+    cta.public = true;
+
+    let cpt_policy = ThemeUrlPolicy::default().with_cpt_entry_fields(&[hero, cta]);
+    let tpl = r#"<img src="{{ entry.fields.hero_img.url }}"><a href="{{ entry.fields.cta.url }}">{{ entry.fields.cta.label }}</a>"#;
+    assert!(
+        validate_template_csec_with_theme_urls("single:type:product", tpl, &cpt_policy).is_ok()
+    );
+
+    let part_policy = cpt_policy.without_cpt_entry_fields();
+    assert!(validate_template_csec_with_theme_urls("part:header", tpl, &part_policy).is_err());
+}
+
+#[test]
+fn f09_block_template_allows_term_ref_kind() {
+    use opendash_core::block_schema::{BlockCategory, BlockSchemaV1};
+    use opendash_core::field_schema::{FieldSpec, FieldType};
+
+    let mut tax_ref = FieldSpec::new(FieldType::TermRef, "topic", "Chủ đề");
+    tax_ref.multiple = false;
+    let schema = BlockSchemaV1 {
+        schema_version: 1,
+        id: "demo/topic-badge".into(),
+        title: "Topic Badge".into(),
+        category: BlockCategory::Content,
+        icon: None,
+        render: "render.html".into(),
+        allowed_parents: None,
+        allowed_children: None,
+        fields: vec![tax_ref],
+    };
+    assert!(
+        validate_block_template_csec(
+            "demo/topic-badge",
+            r#"<a href="{{ topic.url }}">{{ topic.kind }}: {{ topic.name }}</a>"#,
+            &schema,
         )
         .is_ok()
     );

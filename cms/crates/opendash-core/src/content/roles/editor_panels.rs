@@ -680,15 +680,14 @@ pub fn project_effective_editor_config(
         .filter(|fk| !assigned_base.contains(fk.as_str()))
         .collect();
 
-    let group_fields_map: HashMap<&str, Vec<String>> = effective
+    let group_specs_map: HashMap<&str, &[crate::field_schema::FieldSpec]> = effective
         .attached_groups
         .iter()
-        .map(|g| {
-            (
-                g.group_id.as_str(),
-                g.fields.iter().map(|f| f.key.clone()).collect(),
-            )
-        })
+        .map(|g| (g.group_id.as_str(), g.fields.as_slice()))
+        .collect();
+    let group_fields_map: HashMap<&str, Vec<String>> = group_specs_map
+        .iter()
+        .map(|(&gid, specs)| (gid, specs.iter().map(|f| f.key.clone()).collect()))
         .collect();
 
     let project_region = |placements: &[PanelPlacementConfig]| -> Vec<EffectivePanelProjection> {
@@ -732,43 +731,24 @@ pub fn project_effective_editor_config(
                 continue;
             }
             let visible_set: HashSet<&str> = visible_keys.iter().map(String::as_str).collect();
-            let raw_subgroups = if !p.subgroups.is_empty() {
-                &p.subgroups
-            } else if let Some(slice) = layout
-                .base_field_panels
-                .iter()
-                .find(|s| s.panel_id == p.panel_id)
-            {
-                &slice.subgroups
-            } else {
-                &[][..]
-            };
-            let subgroups: Vec<LayoutFieldSubgroup> = raw_subgroups
-                .iter()
-                .filter_map(|sg| {
-                    let fks: Vec<String> = sg
-                        .field_keys
-                        .iter()
-                        .filter(|fk| visible_set.contains(fk.as_str()))
-                        .cloned()
-                        .collect();
-                    if fks.is_empty() {
-                        None
-                    } else {
-                        Some(LayoutFieldSubgroup {
-                            subgroup_id: sg.subgroup_id.clone(),
-                            title: sg.title.clone(),
-                            field_keys: fks,
-                        })
-                    }
-                })
-                .collect();
+            let panel_fields = panel_fields::collect_panel_fields(
+                def,
+                effective,
+                &group_specs_map,
+                &assigned_base,
+                &projected_fields,
+                &visible_keys,
+                &visible_set,
+            );
+            let subgroups =
+                panel_fields::collect_panel_subgroups(p, &layout.base_field_panels, &visible_set);
 
             out.push(EffectivePanelProjection {
                 panel: def.clone(),
                 placement: p.clone(),
                 field_keys: visible_keys,
                 subgroups,
+                panel_fields,
             });
         }
         out

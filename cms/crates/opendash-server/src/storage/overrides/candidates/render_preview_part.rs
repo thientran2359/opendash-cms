@@ -382,13 +382,14 @@ pub async fn inspect_public_surfaces_and_precompile(
 
     let mut shell_part_present = false;
     if !body_canvas_layout {
+        let part_url_policy = url_policy.without_cpt_entry_fields();
         let (has_header, compiled_header) = inspect_part_slot_in_tx(
             &mut tx,
             "header",
             0,
             &[],
             active,
-            url_policy,
+            &part_url_policy,
             &schemas,
             &mut uses_related_entries,
             &mut uses_recent_posts,
@@ -400,7 +401,7 @@ pub async fn inspect_public_surfaces_and_precompile(
             0,
             &[],
             active,
-            url_policy,
+            &part_url_policy,
             &schemas,
             &mut uses_related_entries,
             &mut uses_recent_posts,

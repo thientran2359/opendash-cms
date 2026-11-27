@@ -2,7 +2,7 @@
 
 ## Overview
 
-Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 backup, restore, and recovery harnesses ([m8_s08_t01_e2e.rs](../../crates/opendash-server/tests/ops/backup_restore_e2e.rs) and [operations_backup_restore_e2e.py](../../scripts/operations_backup_restore_e2e.py)). Static `.odbackup.age` archives and passphrases are never stored in Git; tests synthesize encrypted backups dynamically in disposable temporary site roots.
+Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 backup, restore, and recovery harness ([backup_restore_e2e.rs](../../crates/opendash-server/tests/ops/backup_restore_e2e.rs)). Static `.odbackup.age` archives and passphrases are never stored in Git; tests synthesize encrypted backups dynamically in disposable temporary site roots.
 
 ## Interface
 
@@ -17,8 +17,8 @@ Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 ba
   4. Active/queued `operation_jobs` at snapshot time transition to `interrupted` on restart without silent retry.
   5. External `OPENDASH_DB_PATH` values rebase to `<target_root>/database/opendash.sqlite`, applying private ACLs to `target_parent`, `stage_root`, and restored subdirectories (`database/`, `config/`, `uploads/`, `themes/`, `secrets/`).
 - **Negative Corpus & Recovery Tests (`cms/crates/opendash-server/tests/ops/backup_restore_e2e.rs`):**
-  - `[m8_s08_t01_e2e.rs:negative_corpus_preserves_source_and_never_publishes_target]` verifies fail-closed behavior (source intact, no `READY.json` published) on tampered `.odbackup.age` ciphertext, wrong passphrase, newer `schema_version` (`9999`), and `507 Insufficient Storage` at `MAX_BACKUP_ARTIFACTS = 10` (`[cms/crates/opendash-server/src/backup.rs:MAX_BACKUP_ARTIFACTS]`).
-  - `[m8_s08_t01_e2e.rs:upgrade_0031_to_0033_and_interrupted_job_recovery]` verifies `'running'` `operation_jobs` transition to `'interrupted'` on restart.
+  - `[backup_restore_e2e.rs:negative_corpus_preserves_source_and_never_publishes_target]` verifies fail-closed behavior (source intact, no `READY.json` published) on tampered `.odbackup.age` ciphertext, wrong passphrase, newer `schema_version` (`9999`), and `507 Insufficient Storage` at `MAX_BACKUP_ARTIFACTS = 10` (`[cms/crates/opendash-server/src/backup.rs:MAX_BACKUP_ARTIFACTS]`).
+  - `[backup_restore_e2e.rs:upgrade_0031_to_0033_and_interrupted_job_recovery]` verifies `'running'` `operation_jobs` transition to `'interrupted'` on restart.
 
 ## Invariants
 
@@ -28,13 +28,12 @@ Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 ba
 
 ## Side Effects
 
-- None from static files; running `m8_s08_t01_e2e.rs` or `operations_backup_restore_e2e.py` spawns isolated loopback server instances and cleans up temporary `site_root` directories and `.odbackup.age` artifacts upon completion.
+- None from static files; running `tests/ops/backup_restore_e2e.rs` spawns isolated loopback server instances and cleans up temporary `site_root` directories and `.odbackup.age` artifacts upon completion.
 
 ## Verification
 
-Run the M8 Rust integration/E2E suite and Playwright browser E2E runner:
+Run the M8 Rust integration/E2E suite:
 
 ```powershell
-cargo test --manifest-path cms/Cargo.toml --locked --test m8_s08_t01_e2e
-python cms/scripts/operations_backup_restore_e2e.py --binary cms/target/release/opendash.exe
+cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test ops backup_restore_e2e
 ```

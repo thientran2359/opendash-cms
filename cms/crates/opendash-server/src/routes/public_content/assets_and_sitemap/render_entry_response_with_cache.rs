@@ -103,37 +103,34 @@ pub(crate) async fn render_entry_response_with_cache(
         timezone: site.timezone.clone(),
         ..Default::default()
     };
-    let entry_media_ids = content_render::collect_entry_media_ids(&[&entry], &effective_schema);
-    let (archive_path, mut proj_map, entry_media_map) = {
+    let (archive_path, view) = {
         let mut conn = db.acquire().await?;
         let path =
             permalinks::canonical_archive_path_in_tx(&mut conn, &type_key, &entry_locale).await?;
-        let proj_map = crate::storage::plugin_projections::batch_load_entry_projections_in_conn(
+        let mut proj_map =
+            crate::storage::plugin_projections::batch_load_entry_projections_in_conn(
+                &mut conn,
+                &[entry.id],
+            )
+            .await?;
+        let mut view = public_content::hydrate_single_entry_view_in_conn(
             &mut conn,
-            &[entry.id],
+            &entry,
+            &effective_schema,
+            Some(canonical_path_for_seo.clone()),
+            &terms,
+            &eligible_public_taxonomies,
+            FieldRole::Editor,
+            false,
+            Some(&mut richtext_nonces),
         )
         .await?;
-        let media_map = if entry_media_ids.is_empty() {
-            std::collections::BTreeMap::new()
-        } else {
-            crate::storage::fields::load_media_hydration_map_in_conn(&mut conn, &entry_media_ids)
-                .await?
-        };
-        (path, proj_map, media_map)
+        if let Some(proj) = proj_map.remove(&entry.id) {
+            view.ext = proj.ext;
+            view.theme_ext = proj.theme_ext;
+        }
+        (path, view)
     };
-    let mut view = content_render::entry_view_with_context_and_media(
-        &entry,
-        &effective_schema,
-        Some(canonical_path_for_seo.clone()),
-        &terms,
-        &eligible_public_taxonomies,
-        FieldRole::Editor,
-        &entry_media_map,
-    );
-    if let Some(proj) = proj_map.remove(&entry.id) {
-        view.ext = proj.ext;
-        view.theme_ext = proj.theme_ext;
-    }
     let breadcrumbs = if is_home {
         content_render::home_breadcrumbs(
             content_render::DEFAULT_BREADCRUMB_HOME_LABEL,

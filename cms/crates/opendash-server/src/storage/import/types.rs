@@ -202,7 +202,7 @@ pub(crate) fn validate_sample_option_values(
                 || !setting.value.is_null()
                 || !image_keys.contains(media_ref)
             {
-                return Err("Sample media_ref chỉ dùng với image_ref, null và media có khai báo.");
+                return Err("Sample media_ref chỉ dùng với media, null và asset có khai báo.");
             }
         } else {
             let map = BTreeMap::from([(setting.option_key.clone(), setting.value.clone())]);

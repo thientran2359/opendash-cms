@@ -91,7 +91,20 @@ pub(super) async fn render_resolved_public_template_html(
     budget: &mut overrides::PublicCompositionBudget,
     cache: &crate::page::BlockTemplateCache,
 ) -> ApiResult<ResolvedPublicHtml> {
-    let url_policy = overrides::active_theme_url_policy(active)?;
+    let cpt_schema = if let (Some(act), TemplateResolution::ActiveTheme { target_key, .. }) =
+        (active, &resolution)
+        && let Some(cpt) = crate::theme::cpt_scope_for_target_key(&act.manifest, target_key)
+    {
+        content_storage::load_effective_content_schema(db, cpt).await?
+    } else {
+        None
+    };
+    let target_key_ref = match &resolution {
+        TemplateResolution::ActiveTheme { target_key, .. } => Some(target_key.as_str()),
+        _ => None,
+    };
+    let url_policy =
+        overrides::active_theme_url_policy_for_target(active, target_key_ref, cpt_schema.as_ref())?;
     let inspection =
         overrides::inspect_public_surfaces_and_precompile(db, &resolution, active, &url_policy)
             .await?;
@@ -323,66 +336,19 @@ pub(crate) async fn render_canonical_taxonomy(
             canonical_path,
         }
     };
-    let entry_urls =
-        crate::storage::seo::resolve_public_entry_paths_by_ids(db, &page.entries).await?;
-    let pairs: Vec<(i64, String)> = page
-        .entries
-        .iter()
-        .map(|r| (r.id, r.content_type_key.clone()))
-        .collect();
-    let distinct_types: Vec<String> = page
-        .entries
-        .iter()
-        .map(|r| r.content_type_key.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let mut terms_map = public_content::batch_load_public_entry_terms(db, &pairs).await?;
-    let eligible_map =
-        public_content::batch_load_eligible_public_taxonomies(db, &distinct_types).await?;
-    let mut schemas = BTreeMap::new();
-    for tk in &distinct_types {
-        let eff = content_storage::load_effective_content_schema(db, tk)
-            .await?
-            .ok_or_else(|| ApiError::internal("Không tìm thấy schema nội dung."))?;
-        schemas.insert(tk.clone(), eff);
-    }
-    let tax_entry_ids: Vec<i64> = page.entries.iter().map(|r| r.id).collect();
-    let mut proj_map =
-        crate::storage::plugin_projections::batch_load_entry_projections(db, &tax_entry_ids)
-            .await?;
-    let media_ids = content_render::collect_multi_type_entry_media_ids(&page.entries, &schemas);
-    let media_map = if media_ids.is_empty() {
-        BTreeMap::new()
-    } else {
+    let mut tax_richtext_nonces = crate::template_sec::RichTextNonceTable::default();
+    let entries = {
         let mut conn = db.acquire().await?;
-        crate::storage::fields::load_media_hydration_map_in_conn(&mut conn, &media_ids).await?
+        public_content::hydrate_entry_views_with_options_in_conn(
+            &mut conn,
+            page.entries,
+            Some(&locale),
+            false,
+            FieldRole::Editor,
+            Some(&mut tax_richtext_nonces),
+        )
+        .await?
     };
-    let mut entries = Vec::with_capacity(page.entries.len());
-    for record in page.entries {
-        if let Some(eff) = schemas.get(&record.content_type_key) {
-            let u = entry_urls.get(&record.id).cloned();
-            let terms = terms_map.remove(&record.id).unwrap_or_default();
-            let eligible = eligible_map
-                .get(&record.content_type_key)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            let mut view = content_render::entry_view_with_context_and_media(
-                &record,
-                eff,
-                u,
-                &terms,
-                eligible,
-                FieldRole::Editor,
-                &media_map,
-            );
-            if let Some(proj) = proj_map.remove(&record.id) {
-                view.ext = proj.ext;
-                view.theme_ext = proj.theme_ext;
-            }
-            entries.push(view);
-        }
-    }
     let previous = (query.page > 1)
         .then(|| {
             Some(CanonicalUrlBuilder::with_query(
@@ -488,6 +454,10 @@ pub(crate) async fn render_canonical_taxonomy(
     })?;
     let mut budget = overrides::PublicCompositionBudget::default();
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
+    budget
+        .render_budget
+        .richtext_nonces
+        .extend(tax_richtext_nonces);
     let locale_ctx = seo::build_theme_locale_context(
         db,
         Some(&locale),

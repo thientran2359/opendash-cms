@@ -42,6 +42,9 @@ export interface BuilderEditorCoreProps {
   patternsLoaded: boolean;
   onRefreshPatterns: () => void;
   allowRouteContext?: boolean;
+  contextTypeKey?: string | null;
+  locale?: string | null;
+  siteTimezone?: string;
   allowPatternRef?: boolean;
   allowList?: boolean;
   allowContentSlot?: boolean;
@@ -80,6 +83,9 @@ export function BuilderEditorCore({
   patternsLoaded,
   onRefreshPatterns,
   allowRouteContext = false,
+  contextTypeKey = null,
+  locale = null,
+  siteTimezone,
   allowPatternRef = false,
   allowList = true,
   allowContentSlot = false,
@@ -506,6 +512,9 @@ export function BuilderEditorCore({
             csrfToken={csrfToken}
             viewport={viewport}
             allowRouteContext={allowRouteContext}
+            contextTypeKey={contextTypeKey}
+            locale={locale}
+            siteTimezone={siteTimezone}
             requiresContentSlot={requiresContentSlot}
             availablePartKeys={availablePartKeys}
             patterns={patterns}

@@ -767,8 +767,8 @@ pub fn build_router_with_telemetry(
             crate::routes::extensions::ExtensionRouteRateLimiter::new(),
         ));
 
-    crate::app_origin::attach_host_origin_guards(
-        router,
+    let router_without_telemetry = crate::app_origin::attach_host_origin_guards(
+        router_without_telemetry,
         expected_host,
         trusted_host,
         trusted_origin,

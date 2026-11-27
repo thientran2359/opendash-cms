@@ -165,6 +165,101 @@ pub(super) fn truncate_excerpt(text: &str) -> String {
     format!("{prefix}...")
 }
 
+fn text_from_hydrated_value(
+    field_type: opendash_core::field_schema::FieldType,
+    hydrated: &Value,
+    l10n: &CoreL10n,
+) -> String {
+    use opendash_core::field_schema::FieldType;
+    match field_type {
+        FieldType::Media
+        | FieldType::Gallery
+        | FieldType::Link
+        | FieldType::Icon
+        | FieldType::Spacing
+        | FieldType::Group
+        | FieldType::Repeater
+        | FieldType::Secret
+        | FieldType::Tab
+        | FieldType::Accordion
+        | FieldType::Message => String::new(),
+        FieldType::Boolean if hydrated.is_boolean() => if hydrated == &Value::Bool(true) {
+            l10n.yes.as_ref()
+        } else {
+            l10n.no.as_ref()
+        }
+        .to_owned(),
+        FieldType::EntryRef => {
+            let titles: Vec<&str> = match hydrated {
+                Value::Object(obj) => obj
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .into_iter()
+                    .collect(),
+                Value::Array(arr) => arr
+                    .iter()
+                    .filter_map(|v| {
+                        v.as_object()
+                            .and_then(|o| o.get("title"))
+                            .and_then(Value::as_str)
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            titles.join(", ")
+        }
+        FieldType::TermRef => {
+            let names: Vec<&str> = match hydrated {
+                Value::Object(obj) => obj
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .into_iter()
+                    .collect(),
+                Value::Array(arr) => arr
+                    .iter()
+                    .filter_map(|v| {
+                        v.as_object()
+                            .and_then(|o| o.get("name"))
+                            .and_then(Value::as_str)
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            names.join(", ")
+        }
+        _ => match hydrated {
+            Value::Null => String::new(),
+            Value::String(text) => text.clone(),
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| match v {
+                    Value::String(s) => Some(s.clone()),
+                    Value::Null => None,
+                    other => Some(other.to_string()),
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+            other => other.to_string(),
+        },
+    }
+}
+
+fn pure_media_fallback(val: &Value) -> Option<Value> {
+    let url = media_url(val)?;
+    let id = val.as_str()?;
+    Some(serde_json::json!({
+        "id": id,
+        "kind": "image",
+        "url": url,
+        "thumbnail_url": format!("/media/{id}/thumbnail"),
+        "width": null,
+        "height": null,
+        "alt": "",
+        crate::template_sec::MEDIA_PROVENANCE_KEY: true,
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_entry_view_with_defs(
     record: &ContentEntryRecord,
     type_key: &str,
@@ -172,11 +267,16 @@ pub(super) fn build_entry_view_with_defs(
     url: Option<String>,
     terms: &[PublicTermView],
     eligible_public_taxonomies: &[String],
-    media_map: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
+    hydration_ctx: Option<&crate::field_hydrate::HydrationContext<'_>>,
+    mut richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
 ) -> EntryView {
+    use opendash_core::field_schema::{FieldType, MediaFieldKind};
+
     let l10n = core_l10n(&record.locale);
-    let mut cover_url = None;
-    let mut cover_media = None;
+    let mut featured_cover_url: Option<String> = None;
+    let mut featured_cover_media: Option<Value> = None;
+    let mut first_image_cover_url: Option<String> = None;
+    let mut first_image_cover_media: Option<Value> = None;
     let mut public_values = BTreeMap::new();
     let mut fields = Vec::with_capacity(ordered_defs.len());
 
@@ -186,24 +286,61 @@ pub(super) fn build_entry_view_with_defs(
     let mut all_plain_parts: Vec<String> = Vec::new();
 
     for &definition in ordered_defs {
-        let value = record.values.get(&definition.key).unwrap_or(&Value::Null);
-        let extracted_rich =
-            if definition.field_type == opendash_core::field_schema::FieldType::Richtext {
-                value.as_str().map(|s| {
-                    if opendash_core::builder_blocks::contains_blocks(s) {
-                        opendash_core::builder_blocks::extract_visible_text(s)
-                    } else {
-                        s.to_owned()
-                    }
-                })
-            } else {
-                None
-            };
-        if let Some(ref clean) = extracted_rich {
-            public_values.insert(definition.key.clone(), Value::String(clean.clone()));
-        } else {
-            public_values.insert(definition.key.clone(), value.clone());
+        if definition.is_ui_only() {
+            continue;
         }
+        let raw_opt = record.values.get(&definition.key);
+        let value = raw_opt.unwrap_or(&Value::Null);
+        let is_builder_body = definition.key == "body"
+            && definition.field_type == FieldType::Richtext
+            && value
+                .as_str()
+                .is_some_and(opendash_core::builder_blocks::contains_blocks);
+
+        let hydrated = if is_builder_body {
+            Value::String(opendash_core::builder_blocks::extract_visible_text(
+                value.as_str().unwrap_or(""),
+            ))
+        } else if let Some(ctx) = hydration_ctx {
+            crate::field_hydrate::hydrate_field_value(
+                definition,
+                raw_opt,
+                ctx,
+                richtext_nonces.as_deref_mut(),
+            )
+            .unwrap_or(Value::Null)
+        } else {
+            // Pure unit/fallback mode without a DB hydration snapshot:
+            // preserve Value::Null for missing fields and hydrate inline V1 shapes.
+            match definition.field_type {
+                FieldType::Media => pure_media_fallback(value).unwrap_or(Value::Null),
+                FieldType::Gallery => Value::Array(
+                    value
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(pure_media_fallback)
+                        .collect(),
+                ),
+                FieldType::Link if !value.is_null() => {
+                    let empty_media = BTreeMap::new();
+                    let empty_entries = BTreeMap::new();
+                    let empty_terms = BTreeMap::new();
+                    let empty_ctx = crate::field_hydrate::HydrationContext {
+                        media: &empty_media,
+                        entries: &empty_entries,
+                        terms: &empty_terms,
+                        is_preview: false,
+                        tag_media_provenance: false,
+                    };
+                    crate::field_hydrate::hydrate_field_value(definition, raw_opt, &empty_ctx, None)
+                        .unwrap_or(Value::Null)
+                }
+                _ => value.clone(),
+            }
+        };
+
+        public_values.insert(definition.key.clone(), hydrated.clone());
         if let Some(plain) = plain_text_from_field(definition, value) {
             all_plain_parts.push(plain.clone());
             if definition.key == "summary" && summary_plain.is_none() {
@@ -215,92 +352,49 @@ pub(super) fn build_entry_view_with_defs(
             }
         }
 
-        let kind = match definition.field_type {
-            opendash_core::field_schema::FieldType::Text => "text",
-            opendash_core::field_schema::FieldType::Textarea => "textarea",
-            opendash_core::field_schema::FieldType::Richtext => "richtext",
-            opendash_core::field_schema::FieldType::Number => "number",
-            opendash_core::field_schema::FieldType::Boolean => "boolean",
-            opendash_core::field_schema::FieldType::Date => "date",
-            opendash_core::field_schema::FieldType::Select => "select",
-            opendash_core::field_schema::FieldType::Media => "media",
-            opendash_core::field_schema::FieldType::Gallery => "gallery",
-            _ => "text",
-        };
-        let (image_url, image_media) =
-            if definition.field_type == opendash_core::field_schema::FieldType::Media {
-                if let Some(row) = value
-                    .as_str()
-                    .filter(|id| valid_media_id(id))
-                    .and_then(|id| media_map.get(id))
-                {
-                    (
-                        Some(format!("/media/{}/file?v={}", row.id, row.version.max(1))),
-                        Some(crate::field_hydrate::hydrate_media_row_for_template(
-                            row, false,
-                        )),
-                    )
-                } else {
-                    (media_url(value), None)
+        let media = if definition.field_type == FieldType::Media && !hydrated.is_null() {
+            if definition.effective_media_kind() == MediaFieldKind::Image
+                && let Some(u) = hydrated
+                    .as_object()
+                    .and_then(|o| o.get("url"))
+                    .and_then(Value::as_str)
+            {
+                if definition.key == "featured_image" {
+                    featured_cover_url = Some(u.to_owned());
+                    featured_cover_media = Some(hydrated.clone());
+                } else if first_image_cover_url.is_none() {
+                    first_image_cover_url = Some(u.to_owned());
+                    first_image_cover_media = Some(hydrated.clone());
                 }
-            } else {
-                (None, None)
-            };
-        if cover_url.is_none() {
-            cover_url = image_url.clone();
-            cover_media = image_media.clone();
-        }
-        let (gallery_urls, gallery_media) =
-            if definition.field_type == opendash_core::field_schema::FieldType::Gallery {
-                let mut urls = Vec::new();
-                let mut hydrated = Vec::new();
-                for item in value.as_array().into_iter().flatten() {
-                    if let Some(row) = item
-                        .as_str()
-                        .filter(|id| valid_media_id(id))
-                        .and_then(|id| media_map.get(id))
-                    {
-                        urls.push(format!("/media/{}/file?v={}", row.id, row.version.max(1)));
-                        hydrated.push(crate::field_hydrate::hydrate_media_row_for_template(
-                            row, false,
-                        ));
-                    } else if let Some(u) = media_url(item) {
-                        urls.push(u);
-                    }
-                }
-                (urls, hydrated)
-            } else {
-                (Vec::new(), Vec::new())
-            };
-        let text = match definition.field_type {
-            opendash_core::field_schema::FieldType::Media
-            | opendash_core::field_schema::FieldType::Gallery => String::new(),
-            opendash_core::field_schema::FieldType::Boolean if value.is_boolean() => {
-                if value == &Value::Bool(true) {
-                    l10n.yes.as_ref()
-                } else {
-                    l10n.no.as_ref()
-                }
-                .to_string()
             }
-            _ => match (extracted_rich, value) {
-                (Some(clean), _) => clean,
-                (None, Value::Null) => String::new(),
-                (None, Value::String(text)) => text.clone(),
-                (None, other) => other.to_string(),
-            },
+            Some(hydrated.clone())
+        } else {
+            None
         };
+        let gallery = if definition.field_type == FieldType::Gallery {
+            hydrated.as_array().cloned().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let link = if definition.field_type == FieldType::Link && !hydrated.is_null() {
+            Some(hydrated.clone())
+        } else {
+            None
+        };
+        let text = text_from_hydrated_value(definition.field_type, &hydrated, &l10n);
+
         fields.push(FieldView {
             key: definition.key.clone(),
             label: definition.label.clone(),
-            kind,
+            field_type: definition.field_type.as_str(),
             text,
-            image_url,
-            gallery_urls,
-            image_media,
-            gallery_media,
+            media,
+            gallery,
+            link,
         });
     }
+    let cover_url = featured_cover_url.or(first_image_cover_url);
+    let cover_media = featured_cover_media.or(first_image_cover_media);
 
     let excerpt_source = if let Some(ref summary) = summary_plain {
         summary.as_str().to_owned()
@@ -378,134 +472,14 @@ pub(super) fn build_entry_view_with_defs(
     }
 }
 
-pub(super) fn rewrite_hydrated_media_preview(val: &mut Value) {
-    let Some(obj) = val.as_object_mut() else {
-        return;
-    };
-    let rewrite_str = |s: &str| {
-        if s.starts_with("/media/") || s.contains(", /media/") {
-            s.replace("/media/", "/api/admin/media/")
-        } else {
-            s.to_owned()
-        }
-    };
-    for key in ["url", "thumbnail_url", "webp_srcset", "fallback_srcset"] {
-        if let Some(Value::String(s)) = obj.get_mut(key) {
-            *s = rewrite_str(s);
-        }
-    }
-    if let Some(Value::Array(variants)) = obj.get_mut("variants") {
-        for item in variants {
-            if let Some(Value::String(u)) = item.as_object_mut().and_then(|m| m.get_mut("url")) {
-                *u = rewrite_str(u);
-            }
-        }
-    }
-}
-
-pub fn collect_entry_media_ids(
-    records: &[&ContentEntryRecord],
-    effective_schema: &EffectiveContentSchema,
-) -> BTreeSet<String> {
-    let mut ids = BTreeSet::new();
-    for record in records {
-        for fe in effective_schema.effective_fields.values() {
-            if fe.effective_status != EffectiveFieldStatus::Active
-                || fe.definition.effective_acl().2 != PublicExposure::Public
-            {
-                continue;
-            }
-            let Some(val) = record.values.get(&fe.definition.key) else {
-                continue;
-            };
-            match fe.definition.field_type {
-                opendash_core::field_schema::FieldType::Media => {
-                    if let Some(id) = val.as_str().filter(|s| valid_media_id(s)) {
-                        ids.insert(id.to_owned());
-                    }
-                }
-                opendash_core::field_schema::FieldType::Gallery => {
-                    for item in val.as_array().into_iter().flatten() {
-                        if let Some(id) = item.as_str().filter(|s| valid_media_id(s)) {
-                            ids.insert(id.to_owned());
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    ids
-}
-
-pub fn collect_multi_type_entry_media_ids(
-    records: &[ContentEntryRecord],
-    schemas: &BTreeMap<String, EffectiveContentSchema>,
-) -> BTreeSet<String> {
-    let mut ids = BTreeSet::new();
-    for record in records {
-        if let Some(schema) = schemas.get(&record.content_type_key) {
-            ids.extend(collect_entry_media_ids(&[record], schema));
-        }
-    }
-    ids
-}
-
 pub fn entry_view(record: ContentEntryRecord, schema: &ContentTypeDefinition) -> EntryView {
     entry_view_with_url(record, schema, None)
 }
 
-pub fn entry_view_with_url(
-    record: ContentEntryRecord,
-    schema: &ContentTypeDefinition,
-    url: Option<String>,
-) -> EntryView {
-    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = schema
-        .fields
-        .iter()
-        .filter(|d| d.effective_acl().2 == PublicExposure::Public)
-        .collect();
-    let empty_media = BTreeMap::new();
-    build_entry_view_with_defs(
-        &record,
-        &schema.key,
-        &ordered_defs,
-        url,
-        &[],
-        &[],
-        &empty_media,
-    )
-}
-
-pub fn entry_view_with_context(
-    record: &ContentEntryRecord,
-    effective_schema: &EffectiveContentSchema,
-    url: Option<String>,
-    terms: &[PublicTermView],
-    eligible_public_taxonomies: &[String],
+pub fn ordered_public_field_defs<'a>(
+    effective_schema: &'a EffectiveContentSchema,
     max_view_role: FieldRole,
-) -> EntryView {
-    let empty_media = BTreeMap::new();
-    entry_view_with_context_and_media(
-        record,
-        effective_schema,
-        url,
-        terms,
-        eligible_public_taxonomies,
-        max_view_role,
-        &empty_media,
-    )
-}
-
-pub fn entry_view_with_context_and_media(
-    record: &ContentEntryRecord,
-    effective_schema: &EffectiveContentSchema,
-    url: Option<String>,
-    terms: &[PublicTermView],
-    eligible_public_taxonomies: &[String],
-    max_view_role: FieldRole,
-    media_map: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
-) -> EntryView {
+) -> Vec<&'a opendash_core::field_schema::FieldSpec> {
     let mut seen = BTreeSet::new();
     let mut ordered_keys: Vec<&str> = Vec::with_capacity(effective_schema.effective_fields.len());
     for field in &effective_schema.base.descriptor.fields {
@@ -526,17 +500,53 @@ pub fn entry_view_with_context_and_media(
         }
     }
 
-    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = ordered_keys
+    ordered_keys
         .into_iter()
         .filter_map(|key| effective_schema.effective_fields.get(key))
         .filter(|fe| {
-            fe.effective_status == EffectiveFieldStatus::Active
+            !fe.definition.is_ui_only()
+                && fe.effective_status == EffectiveFieldStatus::Active
                 && fe.definition.effective_acl().2 == PublicExposure::Public
                 && fe.definition.effective_acl().0 <= max_view_role
         })
         .map(|fe| &fe.definition)
-        .collect();
+        .collect()
+}
 
+pub fn entry_view_with_url(
+    record: ContentEntryRecord,
+    schema: &ContentTypeDefinition,
+    url: Option<String>,
+) -> EntryView {
+    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = schema
+        .fields
+        .iter()
+        .filter(|d| !d.is_ui_only() && d.effective_acl().2 == PublicExposure::Public)
+        .collect();
+    build_entry_view_with_defs(
+        &record,
+        &schema.key,
+        &ordered_defs,
+        url,
+        &[],
+        &[],
+        None,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_hydrated_entry_view_with_context(
+    record: &ContentEntryRecord,
+    effective_schema: &EffectiveContentSchema,
+    url: Option<String>,
+    terms: &[PublicTermView],
+    eligible_public_taxonomies: &[String],
+    max_view_role: FieldRole,
+    hydration_ctx: Option<&crate::field_hydrate::HydrationContext<'_>>,
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> EntryView {
+    let ordered_defs = ordered_public_field_defs(effective_schema, max_view_role);
     build_entry_view_with_defs(
         record,
         &effective_schema.base.descriptor.key,
@@ -544,7 +554,28 @@ pub fn entry_view_with_context_and_media(
         url,
         terms,
         eligible_public_taxonomies,
-        media_map,
+        hydration_ctx,
+        richtext_nonces,
+    )
+}
+
+pub fn entry_view_with_context(
+    record: &ContentEntryRecord,
+    effective_schema: &EffectiveContentSchema,
+    url: Option<String>,
+    terms: &[PublicTermView],
+    eligible_public_taxonomies: &[String],
+    max_view_role: FieldRole,
+) -> EntryView {
+    build_hydrated_entry_view_with_context(
+        record,
+        effective_schema,
+        url,
+        terms,
+        eligible_public_taxonomies,
+        max_view_role,
+        None,
+        None,
     )
 }
 
@@ -556,35 +587,13 @@ pub fn authenticated_preview_view_with_context(
     eligible_public_taxonomies: &[String],
     actor_role: FieldRole,
 ) -> EntryView {
-    let empty_media = BTreeMap::new();
-    authenticated_preview_view_with_context_and_media(
+    let view = entry_view_with_context(
         record,
         effective_schema,
         url,
         terms,
         eligible_public_taxonomies,
         actor_role,
-        &empty_media,
-    )
-}
-
-pub fn authenticated_preview_view_with_context_and_media(
-    record: &ContentEntryRecord,
-    effective_schema: &EffectiveContentSchema,
-    url: Option<String>,
-    terms: &[PublicTermView],
-    eligible_public_taxonomies: &[String],
-    actor_role: FieldRole,
-    media_map: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
-) -> EntryView {
-    let view = entry_view_with_context_and_media(
-        record,
-        effective_schema,
-        url,
-        terms,
-        eligible_public_taxonomies,
-        actor_role,
-        media_map,
     );
     rewrite_preview_media_urls(view, &effective_schema.base.descriptor.key)
 }

@@ -11938,8 +11938,8 @@ msgid "Private"
 msgstr "Riêng tư"
 
 #: admin:feature.content.fieldgroupsmanager.private_default
-msgid "Private (default)"
-msgstr "Private (mặc định)"
+msgid "Public (default)"
+msgstr "Public (mặc định)"
 
 #: admin:feature.patterns.patternspage.private_patterns_share_builder_layouts_changes_are_reflected_everywhere_they_are
 msgid "Private patterns share builder layouts. Changes are reflected everywhere they are referenced."

@@ -16,7 +16,7 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
             std::thread::spawn(move || {
                 let mut buf = [0; 4096];
                 let _ = socket.read(&mut buf);
-                std::thread::sleep(Duration::from_millis(1400));
+                std::thread::sleep(Duration::from_millis(350));
                 let _ = socket.write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 );
@@ -30,7 +30,7 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
     let mut options = sqlx::sqlite::SqliteConnectOptions::new()
         .filename(&file)
         .create_if_missing(true)
-        .busy_timeout(Duration::from_secs(5));
+        .busy_timeout(Duration::from_millis(1500));
     if reader_blocks_commit {
         options = options.journal_mode(sqlx::sqlite::SqliteJournalMode::Delete);
     }
@@ -54,7 +54,7 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
             .unwrap();
     }
     let unlock = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(5500)).await;
+        tokio::time::sleep(Duration::from_millis(1800)).await;
         lock.rollback().await.unwrap();
     });
     let req =
@@ -113,13 +113,16 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
         ..Default::default()
     };
     let result = PluginRuntime::new()
-        .run_plugin(
+        .run_plugin_with_mode(
             wat::parse_str(wat).unwrap(),
             manifest,
             json!({}),
             pool.clone(),
             "review-commit".into(),
             true,
+            None,
+            opendash_core::hooks::HookExecutionMode::Standard,
+            Some(Duration::from_millis(1500)),
         )
         .await;
     assert!(
@@ -127,7 +130,7 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
         "expected deadline, got {result:?}"
     );
     unlock.await.unwrap();
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plugin_kv WHERE key='late_commit'")
         .fetch_one(&pool)
         .await

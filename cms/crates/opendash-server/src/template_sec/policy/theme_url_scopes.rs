@@ -17,6 +17,9 @@ pub(crate) fn resolve_field_node_and_tail<'p, 'a, 's>(
         }
         other => match scopes.lookup(other) {
             Some(UrlSourceKind::FieldNode(node)) => (node, attrs),
+            Some(UrlSourceKind::TrustedEntry) if attrs.len() >= 2 && attrs[0] == "fields" => {
+                (policy.entry_field_nodes.get(attrs[1])?, &attrs[2..])
+            }
             _ => return None,
         },
     };
@@ -141,19 +144,13 @@ pub(crate) fn resolve_collection_source(
                     Some(UrlSourceKind::TrustedLink)
                 }
                 Expr::Var(v)
-                    if (g.name == "fields" || g.name == "field_list")
+                    if g.name == "field_list"
                         && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntry) =>
                 {
                     Some(UrlSourceKind::TrustedField)
                 }
                 Expr::Var(v)
-                    if g.name == "gallery_urls"
-                        && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedField) =>
-                {
-                    Some(UrlSourceKind::TrustedRawUrl)
-                }
-                Expr::Var(v)
-                    if g.name == "gallery_media"
+                    if g.name == "gallery"
                         && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedField) =>
                 {
                     Some(UrlSourceKind::FieldNode(FieldTemplateNode::Media))
@@ -230,6 +227,16 @@ pub(crate) fn is_href_only_expr(
             {
                 true
             }
+            Expr::GetAttr(link_attr)
+                if g.name == "url"
+                    && link_attr.name == "link"
+                    && matches!(
+                        &link_attr.expr,
+                        Expr::Var(v) if scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedField)
+                    ) =>
+            {
+                true
+            }
             _ => false,
         },
         _ => false,
@@ -257,9 +264,7 @@ pub(crate) fn is_src_and_href_expr(
         }
     }
     match expr {
-        Expr::Var(v) => {
-            v.id == "theme_asset_url" || scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedRawUrl)
-        }
+        Expr::Var(v) => v.id == "theme_asset_url",
         Expr::GetAttr(g) => match &g.expr {
             Expr::Var(v) if v.id == "options" => {
                 policy.allows_media_src(&format!("options.{}", g.name))
@@ -270,9 +275,13 @@ pub(crate) fn is_src_and_href_expr(
             {
                 true
             }
-            Expr::Var(v)
-                if g.name == "image_url"
-                    && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedField) =>
+            Expr::GetAttr(media_attr)
+                if matches!(g.name, "url" | "thumbnail_url")
+                    && media_attr.name == "media"
+                    && matches!(
+                        &media_attr.expr,
+                        Expr::Var(v) if scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedField)
+                    ) =>
             {
                 true
             }

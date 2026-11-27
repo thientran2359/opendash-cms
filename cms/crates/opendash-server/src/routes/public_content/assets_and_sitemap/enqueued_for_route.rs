@@ -207,49 +207,19 @@ pub(crate) async fn render_canonical_archive(
         public_content::list_published_with_total(&db, &type_key, ARCHIVE_SIZE, offset, filters)
             .await?;
     let has_more = offset.saturating_add(ARCHIVE_SIZE) < total_items;
-    let entry_urls = crate::storage::seo::resolve_public_entry_paths_by_ids(&db, &records).await?;
-    let pairs: Vec<(i64, String)> = records
-        .iter()
-        .map(|r| (r.id, r.content_type_key.clone()))
-        .collect();
-    let mut terms_map = public_content::batch_load_public_entry_terms(&db, &pairs).await?;
-    let eligible_taxonomies =
-        public_content::batch_load_eligible_public_taxonomies(&db, std::slice::from_ref(&type_key))
-            .await?
-            .remove(&type_key)
-            .unwrap_or_default();
-    let archive_ids: Vec<i64> = records.iter().map(|r| r.id).collect();
-    let mut proj_map =
-        crate::storage::plugin_projections::batch_load_entry_projections(&db, &archive_ids).await?;
-    let rec_refs: Vec<_> = records.iter().collect();
-    let media_ids = content_render::collect_entry_media_ids(&rec_refs, &effective_schema);
-    let media_map = if media_ids.is_empty() {
-        std::collections::BTreeMap::new()
-    } else {
+    let mut archive_richtext_nonces = crate::template_sec::RichTextNonceTable::default();
+    let entries = {
         let mut conn = db.acquire().await?;
-        crate::storage::fields::load_media_hydration_map_in_conn(&mut conn, &media_ids).await?
+        public_content::hydrate_entry_views_with_options_in_conn(
+            &mut conn,
+            records,
+            Some(&locale),
+            false,
+            FieldRole::Editor,
+            Some(&mut archive_richtext_nonces),
+        )
+        .await?
     };
-    let entries: Vec<_> = records
-        .into_iter()
-        .map(|record| {
-            let u = entry_urls.get(&record.id).cloned();
-            let terms = terms_map.remove(&record.id).unwrap_or_default();
-            let mut view = content_render::entry_view_with_context_and_media(
-                &record,
-                &effective_schema,
-                u,
-                &terms,
-                &eligible_taxonomies,
-                FieldRole::Editor,
-                &media_map,
-            );
-            if let Some(proj) = proj_map.remove(&record.id) {
-                view.ext = proj.ext;
-                view.theme_ext = proj.theme_ext;
-            }
-            view
-        })
-        .collect();
     let previous = (page > 1)
         .then(|| {
             Some(CanonicalUrlBuilder::with_query(
@@ -339,6 +309,10 @@ pub(crate) async fn render_canonical_archive(
     })?;
     let mut budget = overrides::PublicCompositionBudget::default();
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
+    budget
+        .render_budget
+        .richtext_nonces
+        .extend(archive_richtext_nonces);
     let locale_ctx = seo::build_theme_locale_context(
         &db,
         Some(&locale),

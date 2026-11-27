@@ -60,13 +60,6 @@ pub enum EffectiveFieldStatus {
     Withdrawn,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SelectOption {
-    pub value: String,
-    pub label: String,
-}
-
 pub(crate) const fn default_declaration_declared() -> DeclarationState {
     DeclarationState::Declared
 }
@@ -245,6 +238,8 @@ pub(crate) fn classify_validation_error(err: &str) -> SchemaTransitionError {
         SchemaTransitionError::RequiredFieldHiddenOrInaccessible(rest.trim().to_owned())
     } else if let Some(rest) = err.strip_prefix("field_key_collision:") {
         SchemaTransitionError::FieldKeyCollision(rest.trim().to_owned())
+    } else if let Some(rest) = err.strip_prefix("cannot_remove_field_with_data:") {
+        SchemaTransitionError::CannotRemoveFieldWithData(rest.trim().to_owned())
     } else {
         SchemaTransitionError::IncompatibleSchemaChange(err.to_owned())
     }

@@ -114,6 +114,7 @@ pub async fn preview_studio_with_cache_and_locale(
             &options,
             &menus,
             route_kind_for_candidate(target.kind),
+            Some(&mut shared_rb.richtext_nonces),
         )
         .await?;
         let definition = &effective_schema.base.descriptor;
@@ -371,6 +372,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     &target_key,
                     &html,
                     active.as_ref(),
+                    entry.as_ref().map(|(_, eff)| eff),
                     &theme_context,
                     slot,
                     &mut public_budget,

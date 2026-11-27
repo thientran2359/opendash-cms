@@ -368,7 +368,7 @@ pub(crate) fn is_valid_od_image_media_target(
         }
     }
     (attrs == ["cover_media"] && scopes.lookup(root) == Some(&UrlSourceKind::TrustedEntry))
-        || (attrs == ["image_media"] && scopes.lookup(root) == Some(&UrlSourceKind::TrustedField))
+        || (attrs == ["media"] && scopes.lookup(root) == Some(&UrlSourceKind::TrustedField))
 }
 
 fn extract_str_arg(

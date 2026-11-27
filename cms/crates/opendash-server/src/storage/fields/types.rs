@@ -261,8 +261,10 @@ pub async fn validate_block_dynamic_options_in_tx(
                 const CORE_CONTEXT_FIELDS: &[&str] = &["title", "slug", "url", "cover_url"];
                 for val in new_values {
                     let is_core = CORE_CONTEXT_FIELDS.contains(&val.as_str());
-                    let is_custom =
-                        allowed_context_fields.is_some_and(|list| list.iter().any(|k| k == &val));
+                    let is_custom = match allowed_context_fields {
+                        Some(list) => list.iter().any(|k| k == &val),
+                        None => opendash_core::id::valid_snake_key(&val),
+                    };
                     if !is_core && !is_custom {
                         return Err(ApiError::bad_request(
                             "Trường ngữ cảnh (context field) tham chiếu không hợp lệ.",

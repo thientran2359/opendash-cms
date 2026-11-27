@@ -269,8 +269,8 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
             value={publicExposure}
             onChange={e => setPublicExposure(e.target.value as PublicExposure)}
           >
-            <option value="private">{__("Private (default)")}</option>
-            <option value="public">{__("Public")}</option>
+            <option value="public">{__("Public (default)")}</option>
+            <option value="private">{__("Private")}</option>
           </select>
         </div>
         <AdminButton type="submit" variant="primary" size="sm" disabled={saving || !csrfToken}>

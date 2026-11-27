@@ -273,9 +273,7 @@ pub async fn collect_pins_in_tx(
         let owner_id: String = row.try_get("owner_id")?;
         let local_key: String = row.try_get("local_key")?;
         let raw_json: String = row.try_get("values_json")?;
-        if let Ok(val) = serde_json::from_str::<Value>(&raw_json)
-            && json_contains_media_pin(&val, media_id)
-        {
+        if parse_json_and_check_pin(&raw_json, media_id, "term_extension_values")? {
             push_pin(
                 &mut summary,
                 "term_extension",

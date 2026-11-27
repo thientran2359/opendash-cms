@@ -133,12 +133,12 @@ fn od_image_enforces_csec_provenance_nonce_boundaries_and_attributes() {
         );
     }
 
-    // Theme C-SEC scope checks for starter entry.cover_media & field.image_media / gallery_media
+    // Theme C-SEC scope checks for starter entry.cover_media & field.media / gallery
     let mut theme_policy = ThemeUrlPolicy::default();
     theme_policy
         .options_tree
         .insert("site_logo".into(), FieldTemplateNode::Media);
-    let theme_valid = r#"<main>{% for entry in entries %}{{ od_image(entry.cover_media, "100vw", "card-img", t.img_alt ~ entry.title) }}{% endfor %}{% for field in entry.fields %}{% if field.image_media %}{{ od_image(field.image_media, "100vw", "hero", field.label) }}{% endif %}{% for img in field.gallery_media %}{{ od_image(img, "50vw", "gal", field.label) }}{% endfor %}{% endfor %}{{ od_image(options.site_logo, "200px", "logo") }}</main>"#;
+    let theme_valid = r#"<main>{% for entry in entries %}{{ od_image(entry.cover_media, "100vw", "card-img", t.img_alt ~ entry.title) }}{% endfor %}{% for field in entry.field_list %}{% if field.media %}{{ od_image(field.media, "100vw", "hero", field.label) }}{% endif %}{% for img in field.gallery %}{{ od_image(img, "50vw", "gal", field.label) }}{% endfor %}{% endfor %}{{ od_image(options.site_logo, "200px", "logo") }}</main>"#;
     let empty_parts = BTreeMap::new();
     assert!(
         validate_template_csec_with_theme_urls("archive", theme_valid, &theme_policy).is_err(),

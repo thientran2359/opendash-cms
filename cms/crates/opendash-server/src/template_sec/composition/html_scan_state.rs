@@ -123,6 +123,17 @@ impl HtmlScanState {
                 mut quote,
                 mut prefix,
             } => {
+                if prefix == "<" {
+                    if byte == b'<' {
+                        return Self::Tag {
+                            quote: None,
+                            prefix: "<".to_owned(),
+                        };
+                    }
+                    if !(byte.is_ascii_alphabetic() || matches!(byte, b'/' | b'!' | b'?')) {
+                        return Self::Body;
+                    }
+                }
                 if prefix.len() < 8 {
                     prefix.push(char::from(byte));
                 }

@@ -1164,7 +1164,7 @@ mod tests {
                 std::thread::spawn(move || {
                     let mut buf = [0; 4096];
                     let _ = std::io::Read::read(&mut socket, &mut buf);
-                    std::thread::sleep(Duration::from_secs(6));
+                    std::thread::sleep(Duration::from_secs(2));
                 });
             }
         });
@@ -1172,7 +1172,6 @@ mod tests {
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
         assert_eq!(runtime.active_workers(), 0);
-
         let req =
             json!({"op":"http_request","method":"GET","url":format!("{origin}/slow")}).to_string();
         let esc = |s: &str| {
@@ -1226,23 +1225,23 @@ mod tests {
             settings_schema: vec![],
             ..Default::default()
         };
-
         let res = runtime
-            .run_plugin(
+            .run_plugin_with_mode(
                 wasm,
                 manifest,
                 json!({}),
                 db.clone(),
                 "corr-slow".into(),
                 true,
+                None,
+                opendash_core::hooks::HookExecutionMode::Standard,
+                Some(Duration::from_millis(1200)),
             )
             .await;
-
         assert!(
             matches!(res, Err(PluginError::Timeout)),
             "expected timeout, got {res:?}"
         );
-
         // PROOF 1: active_workers is 0 immediately after timeout
         assert_eq!(
             runtime.active_workers(),
@@ -1349,7 +1348,7 @@ mod tests {
             let active_at_request = runtime_at_request.active_workers();
             abort_handle.abort();
             let _ = request_started_tx.send(active_at_request);
-            std::thread::sleep(Duration::from_secs(6));
+            std::thread::sleep(Duration::from_secs(2));
         });
 
         let req =
