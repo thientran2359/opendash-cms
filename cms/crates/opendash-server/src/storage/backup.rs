@@ -121,6 +121,16 @@ pub async fn collect_backup_inventory(db: &SqlitePool) -> ApiResult<BackupInvent
             "Đang có media delete job chưa hoàn tất; không thể tạo snapshot.",
         ));
     }
+    let pending_replaces: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM media_replace_jobs WHERE phase IN ('staged', 'moving_old', 'promoting_new')",
+    )
+    .fetch_one(db)
+    .await?;
+    if pending_replaces > 0 {
+        return Err(ApiError::conflict(
+            "Đang có tác vụ thay thế media chưa hoàn tất; không thể tạo snapshot.",
+        ));
+    }
 
     let media_rows = sqlx::query("SELECT id, kind, extension FROM media_assets ORDER BY id ASC")
         .fetch_all(db)

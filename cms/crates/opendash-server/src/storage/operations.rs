@@ -286,19 +286,20 @@ pub async fn transition_job_cas(
 }
 
 pub async fn prune_old_receipts(db: &SqlitePool, max_retained: i64) -> ApiResult<u64> {
-    let active_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM operation_jobs WHERE state IN ('queued', 'running')",
+    let protected_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM operation_jobs WHERE state IN ('queued', 'running') OR kind = 'backup'",
     )
     .fetch_one(db)
     .await?;
 
-    let keep_terminal = (max_retained - active_count).max(0);
+    let keep_terminal = (max_retained - protected_count).max(0);
     let deleted = sqlx::query(
         r#"
         DELETE FROM operation_jobs
         WHERE id IN (
             SELECT id FROM operation_jobs
             WHERE state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
+              AND kind != 'backup'
             ORDER BY requested_at DESC, rowid DESC
             LIMIT -1 OFFSET ?
         )

@@ -29,13 +29,15 @@ impl DecodedMedia {
     }
 }
 
-/// Decode in a blocking worker. Checking dimensions and decoder allocation limits
-/// before decoding avoids decompression bombs and huge thumbnail buffers.
-pub fn decode_image(bytes: Vec<u8>, declared_type: &str) -> ApiResult<DecodedMedia> {
+/// Validates container format, MIME match, dimensions, and allocation bounds before pixel decode.
+pub(crate) fn decode_validated_image(
+    bytes: &[u8],
+    declared_type: &str,
+) -> ApiResult<(DynamicImage, ImageFormat, &'static str, &'static str)> {
     if bytes.is_empty() || bytes.len() > MAX_MEDIA_BYTES {
         return Err(ApiError::bad_request("Ảnh trống hoặc vượt quá 8 MiB."));
     }
-    let format = image::guess_format(&bytes)
+    let format = image::guess_format(bytes)
         .map_err(|_| ApiError::bad_request("Không nhận diện được định dạng ảnh."))?;
     let (extension, mime) = match format {
         ImageFormat::Jpeg => ("jpg", "image/jpeg"),
@@ -52,7 +54,7 @@ pub fn decode_image(bytes: Vec<u8>, declared_type: &str) -> ApiResult<DecodedMed
             "Content-Type không khớp với định dạng ảnh thực tế.",
         ));
     }
-    let mut reader = ImageReader::with_format(Cursor::new(&bytes), format);
+    let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
     let mut limits = Limits::default();
     limits.max_image_width = Some(MAX_DIMENSION);
     limits.max_image_height = Some(MAX_DIMENSION);
@@ -65,6 +67,14 @@ pub fn decode_image(bytes: Vec<u8>, declared_type: &str) -> ApiResult<DecodedMed
     if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_PIXELS {
         return Err(ApiError::bad_request("Kích thước ảnh vượt giới hạn."));
     }
+    Ok((image, format, extension, mime))
+}
+
+/// Decode in a blocking worker. Checking dimensions and decoder allocation limits
+/// before decoding avoids decompression bombs and huge thumbnail buffers.
+pub fn decode_image(bytes: Vec<u8>, declared_type: &str) -> ApiResult<DecodedMedia> {
+    let (image, format, extension, mime) = decode_validated_image(&bytes, declared_type)?;
+    let (width, height) = (image.width(), image.height());
     // Never enlarge a tiny upload merely to build its thumbnail.
     let thumb = image.thumbnail(width.min(320), height.min(320));
     let mut thumbnail_cur = Cursor::new(Vec::new());

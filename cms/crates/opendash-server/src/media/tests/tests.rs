@@ -198,3 +198,232 @@ async fn read_gate_wakes_readers_when_replace_finishes_and_rejects_deleting() {
     assert_eq!(err.0, axum::http::StatusCode::NOT_FOUND);
     drop(del_guard);
 }
+
+#[tokio::test]
+async fn tx2_failure_and_startup_recovery_roll_back_extension_change_cleanly() {
+    use crate::{
+        operations::SiteCoordinator,
+        paths::SitePaths,
+        storage::{
+            init_db,
+            media::{self as media_storage, MediaReplacePhase, NewReplaceJobInput},
+        },
+    };
+
+    let make_png = |width: u32, height: u32, seed: u8| -> Vec<u8> {
+        let mut rgb = image::RgbImage::new(width, height);
+        for (x, y, px) in rgb.enumerate_pixels_mut() {
+            *px = image::Rgb([
+                ((x * 13 + u32::from(seed)) % 256) as u8,
+                ((y * 19 + u32::from(seed)) % 256) as u8,
+                ((x + y + u32::from(seed)) % 256) as u8,
+            ]);
+        }
+        let mut out = Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(rgb)
+            .write_to(&mut out, ImageFormat::Png)
+            .unwrap();
+        out.into_inner()
+    };
+
+    let make_webp = |width: u32, height: u32| -> Vec<u8> {
+        let mut rgb = image::RgbImage::new(width, height);
+        for (x, y, px) in rgb.enumerate_pixels_mut() {
+            *px = image::Rgb([
+                ((x * 23 + y * 5) % 256) as u8,
+                ((x * 7 + y * 11) % 256) as u8,
+                ((x * 17 + y * 3) % 256) as u8,
+            ]);
+        }
+        let mut out = Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(rgb)
+            .write_to(&mut out, ImageFormat::WebP)
+            .unwrap();
+        out.into_inner()
+    };
+
+    let root = std::env::temp_dir().join(format!(
+        "opendash-replace-unit-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let root_canon = if let Ok(p) = std::fs::canonicalize(std::env::temp_dir()) {
+        p.join(root.file_name().unwrap())
+    } else {
+        root
+    };
+    std::fs::create_dir_all(&root_canon).unwrap();
+
+    let paths = SitePaths::from_parts(
+        root_canon.clone(),
+        root_canon.join("database").join("opendash.sqlite"),
+    )
+    .canonicalize_for_runtime()
+    .unwrap();
+    let coordinator = SiteCoordinator::acquire(paths.clone()).unwrap();
+    let db = init_db(paths.db_path()).await.unwrap();
+    let store = MediaStore::new(paths.uploads_dir());
+
+    let old_decoded = decode_image(make_png(900, 500, 7), "image/png").unwrap();
+    let stage_up = store.create_upload_staging_dir().await.unwrap();
+    store
+        .stage_image_bundle(&stage_up, &old_decoded)
+        .await
+        .unwrap();
+    let saved = media_storage::allocate_or_save_with_variants(
+        &db,
+        &store,
+        &old_decoded.metadata("orig.png".to_string()),
+        &stage_up,
+        Some(&old_decoded),
+        &old_decoded.variants,
+    )
+    .await
+    .unwrap();
+
+    // 1) Simulated Tx 2 failure replacing PNG -> WebP rolls back cleanly
+    let job_id_1 = crate::auth::generate_random_token();
+    let new_decoded = decode_image(make_webp(900, 500), "image/webp").unwrap();
+    let r_stage_1 = store.create_replace_staging_dir(&job_id_1).await.unwrap();
+    let queued_1 = store
+        .stage_replace_image_bundle(&r_stage_1, &saved.id, saved.version + 1, &new_decoded)
+        .await
+        .unwrap();
+    let err = super::replace::execute_replace_swap_and_commit_inner(
+        &db,
+        &store,
+        &coordinator,
+        &saved,
+        StagedReplacePayload {
+            job_id: job_id_1.clone(),
+            stage_guard: ReplaceStagingGuard::new(r_stage_1),
+            content: StagedReplaceContent::Image {
+                decoded: new_decoded,
+                filename: "new.webp".to_string(),
+                variants: queued_1,
+            },
+        },
+        true,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.0, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+
+    let shard = &saved.id[..2];
+    assert!(store.canonical_path(&saved.id, "png").unwrap().is_file());
+    assert!(store.thumbnail_path(&saved.id, "png").unwrap().is_file());
+    assert!(!store.canonical_path(&saved.id, "webp").unwrap().exists());
+    assert!(
+        !store
+            .uploads_root()
+            .join(format!("variants/{shard}/{}/v2", saved.id))
+            .exists()
+    );
+    assert!(
+        store
+            .uploads_root()
+            .join(format!("variants/{shard}/{}/v1", saved.id))
+            .is_dir()
+    );
+    assert_eq!(
+        media_storage::get_replace_job(&db, &job_id_1)
+            .await
+            .unwrap()
+            .unwrap()
+            .phase,
+        MediaReplacePhase::RolledBack
+    );
+    assert!(store.try_begin_replace_swap(&saved.id).is_some());
+
+    // 2) Simulate power loss in 'promoting_new' (old PNG in quarantine, partial live .webp & v2/)
+    let job_id_2 = crate::auth::generate_random_token();
+    let crash_decoded = decode_image(make_webp(900, 500), "image/webp").unwrap();
+    let crash_stage = store.create_replace_staging_dir(&job_id_2).await.unwrap();
+    let crash_variants = store
+        .stage_replace_image_bundle(&crash_stage, &saved.id, 2, &crash_decoded)
+        .await
+        .unwrap();
+    let _job_2 = media_storage::begin_replace_job_tx1(
+        &db,
+        &NewReplaceJobInput {
+            job_id: job_id_2.clone(),
+            media_id: saved.id.clone(),
+            expected_generation: 1,
+            expected_version: 1,
+            new_content_sha256: crash_decoded.id.clone(),
+            new_kind: "image".to_string(),
+            new_filename: "crash.webp".to_string(),
+            new_mime_type: "image/webp".to_string(),
+            new_extension: "webp".to_string(),
+            new_byte_size: crash_decoded.original.len() as i64,
+            new_width: 900,
+            new_height: 500,
+            new_thumb_width: Some(crash_decoded.thumb_width as i64),
+            new_thumb_height: Some(crash_decoded.thumb_height as i64),
+            new_duration_ms: None,
+            new_video_codec: None,
+            new_audio_codec: None,
+            new_variants_json: serde_json::to_string(&crash_variants).unwrap(),
+            staging_rel_dir: format!(".staging/replace-{job_id_2}"),
+            quarantine_rel_dir: format!(".quarantine/{job_id_2}"),
+        },
+    )
+    .await
+    .unwrap();
+    let q2 = store.quarantine_job_dir(&job_id_2);
+    std::fs::create_dir_all(&q2).unwrap();
+    std::fs::rename(
+        store.canonical_path(&saved.id, "png").unwrap(),
+        q2.join(format!("{}.png", saved.id)),
+    )
+    .unwrap();
+    std::fs::rename(
+        store.thumbnail_path(&saved.id, "png").unwrap(),
+        q2.join(format!("{}.thumb.png", saved.id)),
+    )
+    .unwrap();
+    std::fs::rename(
+        crash_stage.join("canonical"),
+        store.canonical_path(&saved.id, "webp").unwrap(),
+    )
+    .unwrap();
+    if crash_stage.join("v2").is_dir() {
+        std::fs::rename(
+            crash_stage.join("v2"),
+            store
+                .uploads_root()
+                .join(format!("variants/{shard}/{}/v2", saved.id)),
+        )
+        .unwrap();
+    }
+
+    let recovered = recover_pending_replace_jobs_on_startup(&db, &store)
+        .await
+        .unwrap();
+    assert_eq!(recovered, 1);
+    store.cleanup_staging().await;
+    assert!(store.canonical_path(&saved.id, "png").unwrap().is_file());
+    assert!(store.thumbnail_path(&saved.id, "png").unwrap().is_file());
+    assert!(!store.canonical_path(&saved.id, "webp").unwrap().exists());
+    assert!(
+        !store
+            .uploads_root()
+            .join(format!("variants/{shard}/{}/v2", saved.id))
+            .exists()
+    );
+    assert_eq!(
+        media_storage::get_replace_job(&db, &job_id_2)
+            .await
+            .unwrap()
+            .unwrap()
+            .phase,
+        MediaReplacePhase::RolledBack
+    );
+
+    db.close().await;
+    drop(coordinator);
+    let _ = std::fs::remove_dir_all(&root_canon);
+}

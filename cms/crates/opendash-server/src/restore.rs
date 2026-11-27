@@ -262,6 +262,8 @@ pub async fn restore_to_new_root(
         return Err(ApiError::internal("Simulated failpoint: AfterExtract"));
     }
 
+    let _ = fs::remove_dir_all(stage_root.join("uploads").join("variants"));
+    let _ = fs::remove_dir_all(stage_root.join("uploads").join(".staging"));
     let stage_db_path = stage_root.join("database").join("opendash.sqlite");
     let final_schema_version =
         crate::storage::restore::validate_and_rebase_copy(&stage_db_path).await?;

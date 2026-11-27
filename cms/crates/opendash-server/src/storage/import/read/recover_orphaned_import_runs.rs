@@ -34,6 +34,13 @@ pub async fn recover_orphaned_import_runs(
                             dir.join(format!("{}.thumb.png", entry.media_id)),
                         )
                         .await;
+                        let _ = tokio::fs::remove_dir_all(
+                            uploads_root
+                                .join("variants")
+                                .join(&entry.media_id[..2])
+                                .join(&entry.media_id),
+                        )
+                        .await;
                     }
                 }
             }

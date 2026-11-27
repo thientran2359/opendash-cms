@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 pub use opendash_core::media::{
-    MediaVariantFormat, MediaVariantSpec, MediaVariantView, build_responsive_srcsets,
-    format_media_etag,
+    MediaVariantFormat, MediaVariantSpec, MediaVariantView, QueuedMediaVariant,
+    build_responsive_srcsets, format_media_etag,
 };
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]

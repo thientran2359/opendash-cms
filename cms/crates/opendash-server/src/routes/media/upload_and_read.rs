@@ -57,7 +57,7 @@ pub async fn media_list(
     ))
 }
 
-fn display_filename(headers: &HeaderMap, extension: &str) -> String {
+pub(super) fn display_filename(headers: &HeaderMap, extension: &str) -> String {
     let fallback = format!("upload.{extension}");
     let Some(raw) = headers
         .get("x-file-name")
@@ -336,7 +336,7 @@ pub async fn media_delete(
     require_admin_with_csrf(&headers, &db).await?;
     let (expected_gen, expected_ver) = crate::media_lifecycle::parse_media_if_match(&headers)?;
 
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let job = match crate::media_lifecycle::tombstone_media_in_tx(
         &mut tx,
         &id,

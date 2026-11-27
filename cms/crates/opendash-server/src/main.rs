@@ -1,4 +1,5 @@
 mod app;
+mod app_origin;
 mod auth;
 mod backup;
 mod backup_archive;
@@ -264,6 +265,9 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
         dev_mode::DevOverlayConfig::init_global(Arc::new(dev_cfg));
     }
     let db = storage::init_db(paths.db_path()).await?;
+    storage::operations::mark_interrupted_on_startup(&db)
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
     storage::theme::ensure_default_starter_theme(&db, &paths.themes_dir())
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
@@ -276,9 +280,14 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
     storage::smtp::recover_inflight_notifications(&db)
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
-    storage::operations::mark_interrupted_on_startup(&db)
+    let media_store = Arc::new(MediaStore::new(paths.uploads_dir()));
+    media_lifecycle::recover_pending_delete_jobs_on_startup(&db, &media_store)
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
+    media::recover_pending_replace_jobs_on_startup(&db, &media_store)
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
+    media_store.cleanup_staging().await;
     let _ = storage::plugin::ensure_plugins_layout_and_quarantine_stale(&paths.plugins_dir());
 
     let allow_loopback = env::var("OPENDASH_PLUGIN_ALLOW_LOOPBACK")
@@ -318,11 +327,7 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
         ))),
         plugin_manager,
         hooks,
-        media_store: {
-            let store = Arc::new(MediaStore::new(paths.uploads_dir()));
-            store.cleanup_staging().await;
-            store
-        },
+        media_store,
         content_registry,
         coordinator,
         backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
@@ -332,12 +337,6 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
         recovery,
         runtime_config: runtime_cfg.clone(),
     };
-    storage::operations::mark_interrupted_on_startup(&db)
-        .await
-        .map_err(|e| format!("{}: {}", e.0, e.1))?;
-    media_lifecycle::recover_pending_delete_jobs_on_startup(&db, &state.media_store)
-        .await
-        .map_err(|e| format!("{}: {}", e.0, e.1))?;
 
     let port = runtime_cfg.portable.port;
     /* OPENDASH_PORT precedence handled in RuntimeConfigV1::load */

@@ -38,8 +38,9 @@ use crate::{
         },
         import::{import_dry_run, import_execute},
         media::{
-            media_delete, media_get, media_list, media_original, media_thumbnail, media_upload,
-            media_variant as admin_media_variant, media_video_upload,
+            media_delete, media_get, media_list, media_original, media_replace, media_thumbnail,
+            media_upload, media_variant as admin_media_variant, media_variants_regenerate,
+            media_variants_status, media_video_upload,
         },
         menu::{
             MAX_MENU_JSON_BYTES, menu_slots_get, menu_slots_put, menus_create, menus_delete,
@@ -189,7 +190,7 @@ pub fn build_router_with_themes_root(
     let trusted_origin = state.runtime_config.trusted_origin_normalized();
     let trusted_is_https = state.runtime_config.trusted_origin_is_https();
 
-    Router::new()
+    let router = Router::new()
         .route("/", get(public_page))
         .route("/media/{id}/file", get(media_file))
         .route("/media/{id}/thumbnail", get(media_thumb))
@@ -719,10 +720,26 @@ pub fn build_router_with_themes_root(
                 .post(media_upload)
                 .layer(DefaultBodyLimit::max(MAX_MEDIA_BYTES)),
         )
+        .route(
+            "/api/admin/media/variants/status",
+            get(media_variants_status),
+        )
+        .route(
+            "/api/admin/media/variants/regenerate",
+            post(media_variants_regenerate).layer(DefaultBodyLimit::max(4096)),
+        )
         .route("/api/admin/media/{id}", get(media_get).delete(media_delete))
-        .route("/api/admin/media/{id}/file", get(media_original))
+        .route(
+            "/api/admin/media/{id}/file",
+            get(media_original)
+                .put(media_replace)
+                .layer(DefaultBodyLimit::max(MAX_VIDEO_BYTES)),
+        )
         .route("/api/admin/media/{id}/thumbnail", get(media_thumbnail))
-        .route("/api/admin/media/{id}/variant/{spec_ext}", get(admin_media_variant))
+        .route(
+            "/api/admin/media/{id}/variant/{spec_ext}",
+            get(admin_media_variant),
+        )
         .route(
             "/api/admin/plugins",
             get(plugin_list)
@@ -755,7 +772,9 @@ pub fn build_router_with_themes_root(
             "/api/admin/settings/smtp",
             get(crate::routes::smtp::get_smtp_settings)
                 .put(crate::routes::smtp::put_smtp_settings)
-                .layer(DefaultBodyLimit::max(crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES)),
+                .layer(DefaultBodyLimit::max(
+                    crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES,
+                )),
         )
         .route(
             "/api/admin/settings/smtp/test",
@@ -764,7 +783,9 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/contact/submissions/{id}/notify",
             post(crate::routes::smtp::notify_submission)
-                .layer(DefaultBodyLimit::max(crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES)),
+                .layer(DefaultBodyLimit::max(
+                    crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES,
+                )),
         )
         .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES))
         .layer(axum::Extension(secret_store))
@@ -774,109 +795,34 @@ pub fn build_router_with_themes_root(
         .layer(axum::Extension(crate::contact::ContactAdmissionLimiter::new()))
         .layer(axum::Extension(
             crate::routes::extensions::ExtensionRouteRateLimiter::new(),
-        ))
-        .layer(axum::Extension(crate::routes::contact::ExpectedListenerOrigin(format!(
-            "http://{expected_host}"
-        ))))
-        .layer(middleware::from_fn(move |request: Request, next: Next| {
-            let host_vals: Vec<&str> = request
-                .headers()
-                .get_all(header::HOST)
-                .iter()
-                .filter_map(|v| v.to_str().ok())
-                .collect();
-            let valid_host = host_vals.len() == 1
-                && request.headers().get_all(header::HOST).iter().count() == 1
-                && {
-                    let raw = host_vals[0];
-                    let clean = !raw.is_empty()
-                        && !raw.chars().any(|c| c.is_control() || c.is_whitespace())
-                        && !raw.contains('@')
-                        && !raw.contains('/');
-                    let normalized = if trusted_is_https {
-                        raw.strip_suffix(":443").unwrap_or(raw)
-                    } else {
-                        raw.strip_suffix(":80").unwrap_or(raw)
-                    };
-                    clean
-                        && (raw == expected_host.as_str()
-                            || trusted_host
-                                .as_deref()
-                                .is_some_and(|th| normalized.eq_ignore_ascii_case(th) || raw.eq_ignore_ascii_case(th)))
-                };
-            let is_mutation = matches!(
-                *request.method(),
-                axum::http::Method::POST
-                    | axum::http::Method::PUT
-                    | axum::http::Method::DELETE
-                    | axum::http::Method::PATCH
-            );
+        ));
 
-            let mut origin_valid = request.headers().get_all(header::ORIGIN).iter().count() <= 1;
-            let is_public_contact_submit = *request.method() == axum::http::Method::POST
-                && (request.uri().path().starts_with("/api/public/contact/")
-                    || request.uri().path().starts_with("/api/public/p/"));
-            if origin_valid && is_mutation && !is_public_contact_submit {
-                let expected_origin = format!("http://{expected_host}");
-                let origin_present = request.headers().contains_key(header::ORIGIN);
-                let origin_hdr = request.headers().get(header::ORIGIN).and_then(|h| h.to_str().ok());
-                if origin_present && origin_hdr.is_none() {
-                    origin_valid = false;
-                }
-                if let Some(origin) = origin_hdr {
-                    let clean = !origin.is_empty()
-                        && !origin.eq_ignore_ascii_case("null")
-                        && !origin.chars().any(|c| c.is_control() || c.is_whitespace())
-                        && !origin.contains('@');
-                    let allowed = origin == expected_origin
-                        || trusted_origin.as_deref().is_some_and(|to| origin.eq_ignore_ascii_case(to));
-                    if !clean || !allowed {
-                        origin_valid = false;
-                    }
-                } else if trusted_origin.is_some() {
-                    // Remote/proxy deployment: mandatory Origin header on mutations (no missing-header or Referer loophole).
-                    origin_valid = false;
-                } else if let Some(referer) = request
-                    .headers()
-                    .get(header::REFERER)
-                    .and_then(|h| h.to_str().ok())
-                {
-                    let ref_http = format!("http://{expected_host}/");
-                    if !referer.starts_with(&ref_http) && referer != expected_origin {
-                        origin_valid = false;
-                    }
-                }
+    crate::app_origin::attach_host_origin_guards(
+        router,
+        expected_host,
+        trusted_host,
+        trusted_origin,
+        trusted_is_https,
+    )
+    .layer(middleware::from_fn_with_state(
+        state.clone(),
+        crate::i18n::localize_error_response,
+    ))
+    .fallback(crate::routes::seo::public_fallback)
+    .layer(middleware::from_fn(move |request: Request, next: Next| {
+        let recovery = recovery_for_mw.clone();
+        let path = request.uri().path().to_string();
+        async move {
+            let mut resp = next.run(request).await;
+            if recovery.is_safe_mode() && !path.starts_with("/api/admin/") {
+                resp.headers_mut().insert(
+                    header::HeaderName::from_static("x-robots-tag"),
+                    header::HeaderValue::from_static("noindex, nofollow"),
+                );
             }
-            async move {
-                if !valid_host {
-                    let mut response = StatusCode::BAD_REQUEST.into_response();
-                    response.extensions_mut().insert(HostOriginRejected);
-                    response
-                } else if !origin_valid {
-                    let mut response = (StatusCode::FORBIDDEN, "Origin không hợp lệ.").into_response();
-                    response.extensions_mut().insert(HostOriginRejected);
-                    response
-                } else {
-                    next.run(request).await
-                }
-            }
-        }))
-        .layer(middleware::from_fn_with_state(state.clone(), crate::i18n::localize_error_response))
-        .fallback(crate::routes::seo::public_fallback)
-        .layer(middleware::from_fn(move |request: Request, next: Next| {
-            let recovery = recovery_for_mw.clone();
-            let path = request.uri().path().to_string();
-            async move {
-                let mut resp = next.run(request).await;
-                if recovery.is_safe_mode() && !path.starts_with("/api/admin/") {
-                    resp.headers_mut().insert(
-                        header::HeaderName::from_static("x-robots-tag"),
-                        header::HeaderValue::from_static("noindex, nofollow"),
-                    );
-                }
-                resp
-            }
-        }))
-        .layer(Extension(ThemeStoreRoot(themes_root)))
-        .with_state(state)
+            resp
+        }
+    }))
+    .layer(Extension(ThemeStoreRoot(themes_root)))
+    .with_state(state)
 }

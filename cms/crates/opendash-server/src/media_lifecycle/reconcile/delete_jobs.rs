@@ -114,6 +114,16 @@ pub(crate) async fn execute_delete_job_inner(
     )
     .await?;
 
+    if job.media_id.len() >= 2 {
+        let _ = fs::remove_dir_all(
+            media_store
+                .variants_root()
+                .join(&job.media_id[..2])
+                .join(&job.media_id),
+        )
+        .await;
+    }
+
     get_delete_job(db, &job.job_id)
         .await?
         .ok_or_else(|| ApiError::internal("Không đọc lại được delete job sau khi hoàn tất."))
