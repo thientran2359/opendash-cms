@@ -123,14 +123,17 @@ GROUPS: tuple[GroupSpec, ...] = (
         unit_filters=(
             "media::",
             "media_video::",
+            "redirects::",
             "smtp::",
             "field_hydrate::",
             "storage::menu",
             "storage::permalinks",
+            "storage::redirects",
             "storage::seo",
             "storage::settings",
             "storage::s03_media_acl",
             "routes::media",
+            "routes::redirects",
             "routes::settings",
         ),
     ),
@@ -232,6 +235,9 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         return {"plugin"}, set(), False, False
 
     if path.startswith("cms/crates/opendash-core/src/"):
+        sub_core = path[len("cms/crates/opendash-core/src/") :]
+        if sub_core.startswith("redirects/"):
+            return {"site-media-seo"}, set(), False, False
         filename = path.rsplit("/", 1)[-1]
         core_routes: dict[str, set[str]] = {
             "theme.rs": {"theme"},
@@ -285,7 +291,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             (("entry", "content", "taxonomy", "field", "lifecycle", "trash"), "content"),
             (("builder", "pattern", "section", "block"), "builder"),
             (("i18n", "multilingual", "locale"), "i18n"),
-            (("permalink", "seo", "menu", "media", "contact", "smtp", "option", "setting"), "site-media-seo"),
+            (("permalink", "redirect", "404", "seo", "menu", "media", "contact", "smtp", "option", "setting"), "site-media-seo"),
             (("backup", "operation", "maintenance", "restore", "job"), "ops"),
         )
         matched_any = False
@@ -355,11 +361,13 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "routes/plugin.rs": {"plugin"},
             # Multilingual & i18n
             "i18n.rs": {"i18n"},
+            "i18n_redirects.rs": {"i18n", "site-media-seo"},
             # Site, Media, SEO, Contact & SMTP
             "contact.rs": {"site-media-seo"},
             "media.rs": {"site-media-seo"},
             "media_lifecycle.rs": {"site-media-seo", "ops"},
             "media_video.rs": {"site-media-seo"},
+            "redirects.rs": {"site-media-seo"},
             "seo.rs": {"site-media-seo"},
             "smtp.rs": {"site-media-seo"},
             "storage/contact.rs": {"site-media-seo"},
@@ -397,7 +405,15 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         }
         if sub in server_routes:
             return server_routes[sub], set(), False, False
-        # Shared runtime entrypoints (main.rs, app.rs, auth.rs, error.rs, storage/mod.rs, etc.)
+        server_prefixes: tuple[tuple[str, set[str]], ...] = (
+            ("storage/permalinks/", {"site-media-seo", "content"}),
+            ("storage/redirects/", {"site-media-seo"}),
+            ("routes/redirects/", {"site-media-seo"}),
+        )
+        for prefix, groups in server_prefixes:
+            if sub.startswith(prefix):
+                return groups, set(), False, False
+        # Shared runtime entrypoints (main.rs, app.rs, state.rs, auth.rs, error.rs, storage/mod.rs, etc.)
         return set(ALL_GROUP_NAMES), set(), True, False
 
     # Any other unrecognized file inside cms/crates/ escalates safely.

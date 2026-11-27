@@ -24,7 +24,7 @@ Thanh điều hướng Admin (desktop sidebar thu gọn được + mobile drawer
 | **Hệ thống** | **Cấu trúc nội dung** | Loại nội dung & Trường (`#/appearance/content-types`) · Taxonomy tùy chỉnh (`#/taxonomy/definitions`) | Admin |
 | **Hệ thống** | **Plugins** | Plugins đã cài (`#/plugins`) · Cài plugin (`#/plugins/install`) | Admin |
 | **Hệ thống** | **Người dùng** | Tất cả người dùng (`#/users`) · Thêm người dùng (`#/users/new`) · Hồ sơ của tôi (`#/users/profile`) | Admin; Editor chỉ thấy Hồ sơ của tôi |
-| **Hệ thống** | **Công cụ** | Sao lưu & Phục hồi (`#/tools/backup`) · Đối soát Media (`#/tools/media-reconcile`) · Tình trạng hệ thống (`#/tools/health`) | Admin |
+| **Hệ thống** | **Công cụ** | Sao lưu & Phục hồi (`#/tools/backup`) · Đối soát Media (`#/tools/media-reconcile`) · Chuyển hướng & 404 (`#/tools/redirects`, alias `#/tools/404-log`) · Tình trạng hệ thống (`#/tools/health`) | Admin |
 | **Hệ thống** | **Cài đặt** | Tổng quát (`#/settings/general`) · Đa ngôn ngữ (`#/settings/multilingual`) · Trang chủ & Bài viết (`#/settings/reading`) · Đường dẫn tĩnh (`#/settings/permalinks`) · SEO (`#/settings/seo`) · Thông báo Email (SMTP) (`#/settings/smtp`) | Admin |
 
 - Mỗi màn hình có URL riêng hỗ trợ reload, back/forward; ẩn menu không thay thế kiểm quyền server.

@@ -12,6 +12,7 @@ pub mod icons;
 pub mod id;
 pub mod l10n;
 pub mod plugin;
+pub mod redirects;
 pub mod registry;
 pub mod richtext;
 pub mod theme;

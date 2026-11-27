@@ -8,10 +8,10 @@ Application frame, authentication surface, RBAC enforcement, and hash URL router
 
 - **Shell Layout (`AdminShell.tsx`):**
   - `[AdminShell.tsx:AdminShell]`: Renders guest login/setup view (`#auth-main`), fullscreen Studio container (`[data-testid="studio-shell"]`), or standard sidebar + topbar + workspace (`[data-testid="admin-layout"]`), along with mobile drawer, breadcrumbs, unsaved indicator, and RBAC forbidden notice (`[data-testid="rbac-forbidden"]`).
-  - `[AdminShell.tsx:buildMenuTree]` (internal): Builds top-level and nested sidebar links dynamically from `cptTypes`, `cptTaxonomies`, and `user.role === 'admin'`.
+  - `[AdminShellMenu.tsx:buildMenuTree]`: Builds top-level and nested sidebar links dynamically from `cptTypes`, `cptTaxonomies`, and `user.role === 'admin'` (including `#/tools/redirects` under System → Tools).
   - Re-exports router symbols: `[router.ts:isRouteAllowed]`, `[router.ts:isViewAllowed]`, `[router.ts:parseAdminRoute]`, `[router.ts:parseAdminView]`, `[router.ts:AdminView]`, `[router.ts:ParsedRoute]`.
 - **Hash Router & RBAC (`router.ts`):**
-  - `[router.ts:parseAdminRoute]`: Parses `window.location.hash` and `pathname` (`/builder` -> `#/studio`) into `[router.ts:ParsedRoute]`, mapping legacy aliases (`#/content`, `#/sections/*`, `#/appearance/options`, `#/appearance/menus`, `#/contact/*`, `#/tools/restore`, `#/builder?...`) to canonical views or `redirectHash`.
+  - `[router.ts:parseAdminRoute]`: Parses `window.location.hash` and `pathname` (`/builder` -> `#/studio`) into `[router.ts:ParsedRoute]`, mapping legacy aliases (`#/content`, `#/sections/*`, `#/appearance/options`, `#/appearance/menus`, `#/contact/*`, `#/tools/restore`, `#/tools/404-log`, `#/builder?...`) to canonical views or `redirectHash`.
   - `[router.ts:parseAdminView]`, `[router.ts:isRouteAllowed]`, `[router.ts:isViewAllowed]`: Role-based (`'admin' | 'editor'`) and parameter-validity route guards.
   - Types: `[router.ts:AdminView]`, `[router.ts:StudioPanelId]`, `[router.ts:ParsedRoute]`.
 - **Authentication & Media Seam (`AuthPanel.tsx`, `MediaRoute.tsx`):**

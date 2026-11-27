@@ -36,6 +36,9 @@ import { ContactPanel } from './features/contact/ContactPanel.tsx';
 import { SmtpSettingsPanel } from './features/contact/SmtpSettingsPanel.tsx';
 import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
 import { BackupToolsPanel } from './features/operations/BackupToolsPanel.tsx';
+import { RedirectsToolsPanel } from './features/operations/RedirectsToolsPanel.tsx';
+import { clearRedirectsDrafts, discardRedirectsDraft } from './features/operations/redirectsDraftStore.ts';
+import { useAdminPlugins } from './features/plugins/useAdminPlugins.ts';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 import { TaxonomyDefinitionsPage } from './features/taxonomy/TaxonomyDefinitionsPage.tsx';
 import { PatternsPage } from './features/patterns/PatternsPage.tsx';
@@ -113,6 +116,12 @@ const AppContent: React.FC = () => {
   const markReadingDirty = useCallback((value: boolean) => {
     readingDirtyRef.current = value;
     setReadingDirty(value);
+  }, []);
+  const [toolsDirty, setToolsDirty] = useState(false);
+  const toolsDirtyRef = useRef(false);
+  const markToolsDirty = useCallback((value: boolean) => {
+    toolsDirtyRef.current = value;
+    setToolsDirty(value);
   }, []);
   const [studioDirty, setStudioDirty] = useState(false);
   const studioDirtyRef = useRef(false);
@@ -249,15 +258,17 @@ const AppContent: React.FC = () => {
       && acceptedHashRef.current !== destination && permalinkDirtyRef.current;
     const leavingReading = current.view === 'settings' && current.sub === 'reading'
       && acceptedHashRef.current !== destination && readingDirtyRef.current;
+    const leavingTools = current.view === 'tools' && (current.sub === 'redirects' || current.sub === '404-log')
+      && acceptedHashRef.current !== destination && toolsDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    const hasDirty = leavingDirtyEditor || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading;
+    const hasDirty = leavingDirtyEditor || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading || leavingTools;
     if (!hasDirty) return true;
     const approved = window.confirm(leavingStudio
           ? __("Studio customization has unsaved changes. Discard changes and exit?")
         : leavingTerm
           ? __("Taxonomy has unsaved changes. Leaving will discard your draft. Continue?")
-          : leavingSchema || leavingPattern || leavingPermalinks || leavingReading
+          : leavingSchema || leavingPattern || leavingPermalinks || leavingReading || leavingTools
             ? __("There are unsaved changes. Leaving may discard your draft. Continue?")
             : __("There are unsaved changes. Leave this screen? The draft will be kept for this session."));
     if (approved && leavingPermalinks && userRef.current) {
@@ -267,6 +278,10 @@ const AppContent: React.FC = () => {
     if (approved && leavingReading && userRef.current) {
       discardReadingDraft(siteInstanceIdRef.current, userRef.current.id);
       markReadingDirty(false);
+    }
+    if (approved && leavingTools && userRef.current) {
+      discardRedirectsDraft(siteInstanceIdRef.current, userRef.current.id);
+      markToolsDirty(false);
     }
     return approved;
   };
@@ -332,13 +347,13 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(studioDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(studioDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || toolsDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, postsDirty, pagesDirty, termDirty, patternsDirty]);
+  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, toolsDirty, postsDirty, pagesDirty, termDirty, patternsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -470,6 +485,8 @@ const AppContent: React.FC = () => {
       const nextSiteId = res.site_instance_id ?? 'default-site';
       if (nextSiteId !== siteInstanceId) {
         editorDraftStore.clear();
+        clearRedirectsDrafts();
+        markToolsDirty(false);
         setSiteInstanceId(nextSiteId);
         setLocaleState(EMPTY_ADMIN_LOCALE_STATE);
         setBuilderReset(value => value + 1);
@@ -479,6 +496,8 @@ const AppContent: React.FC = () => {
       } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
         editorDraftStore.clear();
+        clearRedirectsDrafts();
+        markToolsDirty(false);
         setBuilderReset(value => value + 1);
         markStudioDirty(false);
         lastStudioRouteRef.current = null;
@@ -505,7 +524,7 @@ const AppContent: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || studioDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm(__("There are unsaved changes. Signing out will discard the current draft. Continue?"))) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || toolsDirtyRef.current || studioDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm(__("There are unsaved changes. Signing out will discard the current draft. Continue?"))) {
       return;
     }
     setIsProcessing(true);
@@ -515,6 +534,7 @@ const AppContent: React.FC = () => {
       editorDraftStore.clear();
       clearPermalinkDrafts();
       clearReadingDrafts();
+      clearRedirectsDrafts();
       setUser(null);
       setCsrfToken(null);
       setLocaleState(EMPTY_ADMIN_LOCALE_STATE);
@@ -530,6 +550,7 @@ const AppContent: React.FC = () => {
       setContentDirty(false);
       markPermalinkDirty(false);
       markReadingDirty(false);
+      markToolsDirty(false);
       markStudioDirty(false);
       lastStudioRouteRef.current = null;
       setPostsDirty(false);
@@ -552,89 +573,26 @@ const AppContent: React.FC = () => {
   const handleOwnAccountChanged = () => {
     authSessionEpochRef.current += 1;
     editorDraftStore.quarantineAll();
+    clearRedirectsDrafts();
+    markToolsDirty(false);
     setUser(null);
     setCsrfToken(null);
     setAuthPassword('');
     setStatus(() => __("Your account session has been revoked. Please sign in again."), false);
   };
-  const handlePluginUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !csrfToken) return;
-    setIsProcessing(true);
-    setStatus(() => __("Installing plugin…"), false);
-    try {
-      const summary = await api.installPlugin(file, csrfToken);
-      setStatus(() => __("Installed plugin {{name}} ({{id}}).", { name: summary.name, id: summary.id }), false);
-      setSelectedPluginId(summary.id);
-      await loadPlugins();
-    } catch (err) {
-      handleApiError(err, _x("Could not install the plugin.", "app.install_error"));
-    } finally {
-      setIsProcessing(false);
-      e.target.value = '';
-    }
-  };
-
-  const handleDisablePlugin = async (id: string) => {
-    if (!csrfToken) return;
-    setIsProcessing(true);
-    try {
-      await api.disablePlugin(id, csrfToken);
-      setStatus(() => __("Disabled plugin {{id}}.", { id }), false);
-      await loadPlugins();
-    } catch (err) {
-      handleApiError(err, __("Could not disable the plugin."));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleEnablePlugin = async (id: string) => {
-    if (!csrfToken) return;
-    setIsProcessing(true);
-    try {
-      await api.enablePlugin(id, csrfToken);
-      setStatus(() => __("Enabled plugin {{id}}.", { id }), false);
-      await loadPlugins();
-    } catch (err) {
-      handleApiError(err, __("Could not enable the plugin."));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleRunPlugin = async () => {
-    if (!selectedPluginId || !csrfToken) return;
-    setIsProcessing(true);
-    setStatus(() => __("Running plugin {{id}}…", { id: selectedPluginId }), false);
-    setPluginRunOutput('');
-    try {
-      const res = await api.runPlugin(selectedPluginId, pluginInputJson, csrfToken);
-      setPluginRunOutput(JSON.stringify(res, null, 2));
-      if (res.success) {
-        setStatus(() => __("Execution succeeded [correlation: {{id}}]", { id: res.correlation_id }), false);
-      } else {
-        setStatus(() => __("Plugin error: {{error}} [correlation: {{id}}]", { error: res.error || res.code || "", id: res.correlation_id }), true);
-      }
-      await loadPlugins();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : _x("Could not run the plugin.", "app.run_error");
-      setPluginRunOutput(
-        JSON.stringify(
-          {
-            success: false,
-            error: msg,
-            status: err instanceof api.ApiClientError ? err.status : undefined,
-          },
-          null,
-          2,
-        ),
-      );
-      handleApiError(err, _x("Could not run the plugin.", "app.run_error"));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+  const { handlePluginUpload, handleDisablePlugin, handleEnablePlugin, handleRunPlugin } =
+    useAdminPlugins({
+      csrfToken,
+      selectedPluginId,
+      pluginInputJson,
+      setSelectedPluginId,
+      setPluginRunOutput,
+      setPlugins,
+      setIsProcessing,
+      setStatus,
+      handleApiError,
+      loadPlugins,
+    });
 
   const requestEpoch = authSessionEpochRef.current;
   const requestActorId = user?.id;
@@ -675,7 +633,7 @@ const AppContent: React.FC = () => {
       ]))}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
+      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || toolsDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
       devMode={devMode}
       devTheme={devTheme}
       devPlugins={devPlugins}
@@ -746,7 +704,9 @@ const AppContent: React.FC = () => {
         )
         : route.sub === 'media-reconcile'
           ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("Media reconciliation or quarantine cleanup failed."))} />
-          : route.sub === 'health' ? <SystemStatus /> : null}
+          : (route.sub === 'redirects' || route.sub === '404-log')
+            ? <RedirectsToolsPanel key={`${siteInstanceId}:${user?.id ?? 'guest'}`} initialTab={route.sub === '404-log' ? 'not-found' : 'redirects'} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={(error) => scopedTaxonomyApiError(error, __("Redirects & 404 operation failed"))} onDirtyChange={markToolsDirty} onNavigateHash={navigateHash} />
+            : route.sub === 'health' ? <SystemStatus /> : null}
       settingsContent={route.sub === 'general'
         ? <GeneralSettingsPanel key={`general:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, __("Site settings failed."))} />
         : route.sub === 'multilingual'

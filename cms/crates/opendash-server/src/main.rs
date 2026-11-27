@@ -14,6 +14,8 @@ mod error;
 mod field_hydrate;
 mod hooks;
 mod i18n;
+#[cfg(test)]
+mod i18n_redirects;
 mod l10n;
 mod media;
 mod media_lifecycle;
@@ -25,12 +27,14 @@ mod page;
 mod paths;
 mod plugin;
 mod public_context;
+mod redirects;
 #[allow(dead_code)]
 mod restore;
 mod routes;
 mod secrets;
 mod seo;
 mod smtp;
+mod state;
 mod storage;
 mod template_sec;
 mod theme;
@@ -42,10 +46,11 @@ use std::{
     sync::Arc,
 };
 
-use app::{AppState, build_router};
+use app::{AppState, build_router_with_telemetry};
 use hooks::HookDispatcher;
 use media::MediaStore;
 use plugin::PluginManager;
+use redirects::RedirectTelemetryBuffer;
 
 fn strip_os_prefix(arg: &OsStr, prefix: &str) -> Option<OsString> {
     #[cfg(unix)]
@@ -407,7 +412,19 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
     let state_for_shutdown = state.clone();
     let listener = tokio::net::TcpListener::bind((listen_ip, port)).await?;
     let address = listener.local_addr()?;
-    let app = build_router(state, address.to_string());
+    let themes_root = crate::paths::SitePaths::from_env()
+        .map(|p| p.themes_dir())
+        .unwrap_or_else(|_| std::path::PathBuf::from("themes"));
+    let (telemetry, telemetry_drop_guard) = RedirectTelemetryBuffer::spawn_with_coordinator(
+        state.db.clone(),
+        state.coordinator.clone(),
+    );
+    let app = build_router_with_telemetry(
+        state,
+        address.to_string(),
+        themes_root,
+        Some(telemetry.clone()),
+    );
 
     println!("OpenDash: http://{address}/builder");
     let coordinator_for_signal = state_for_shutdown.coordinator.clone();
@@ -450,6 +467,9 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
         .backup_registry
         .cancel_and_drain_all(std::time::Duration::from_secs(30))
         .await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), telemetry.flush_now()).await;
+    drop(telemetry_drop_guard);
+    drop(telemetry);
     let writer_drain = state_for_shutdown
         .coordinator
         .drain_for_shutdown(std::time::Duration::from_secs(15))

@@ -23,6 +23,7 @@ pub mod plugin;
 pub mod plugin_kv;
 pub mod plugin_projections;
 pub mod public_content;
+pub mod redirects;
 pub mod restore;
 pub mod seo;
 pub mod settings;
