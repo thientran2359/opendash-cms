@@ -10,6 +10,7 @@ pub mod hooks;
 pub mod i18n;
 pub mod icons;
 pub mod id;
+pub mod media;
 pub mod plugin;
 pub mod registry;
 pub mod richtext;

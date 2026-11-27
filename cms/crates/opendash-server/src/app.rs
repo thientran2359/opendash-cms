@@ -39,7 +39,7 @@ use crate::{
         import::{import_dry_run, import_execute},
         media::{
             media_delete, media_get, media_list, media_original, media_thumbnail, media_upload,
-            media_video_upload,
+            media_variant as admin_media_variant, media_video_upload,
         },
         menu::{
             MAX_MENU_JSON_BYTES, menu_slots_get, menu_slots_put, menus_create, menus_delete,
@@ -51,7 +51,7 @@ use crate::{
             plugin_list, plugin_put_settings, plugin_run, plugin_ui_schema,
         },
         public::public_page,
-        public_content::{media_file, media_thumb},
+        public_content::{media_file, media_thumb, media_variant},
         settings::{
             general_get, general_put, locales_create, locales_delete, locales_get,
             locales_multilingual_put, locales_orphans_get, locales_orphans_purge,
@@ -193,6 +193,7 @@ pub fn build_router_with_themes_root(
         .route("/", get(public_page))
         .route("/media/{id}/file", get(media_file))
         .route("/media/{id}/thumbnail", get(media_thumb))
+        .route("/media/{id}/variant/{spec_ext}", get(media_variant))
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))
         .route("/api/health", get(crate::routes::health::status))
         .route("/api/i18n/admin", get(crate::routes::settings::admin_i18n_bootstrap))
@@ -718,12 +719,10 @@ pub fn build_router_with_themes_root(
                 .post(media_upload)
                 .layer(DefaultBodyLimit::max(MAX_MEDIA_BYTES)),
         )
-        .route(
-            "/api/admin/media/{id}",
-            get(media_get).delete(media_delete),
-        )
+        .route("/api/admin/media/{id}", get(media_get).delete(media_delete))
         .route("/api/admin/media/{id}/file", get(media_original))
         .route("/api/admin/media/{id}/thumbnail", get(media_thumbnail))
+        .route("/api/admin/media/{id}/variant/{spec_ext}", get(admin_media_variant))
         .route(
             "/api/admin/plugins",
             get(plugin_list)

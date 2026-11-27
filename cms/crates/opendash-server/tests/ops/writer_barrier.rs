@@ -83,6 +83,17 @@ impl Drop for RunningServer {
     }
 }
 
+fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).expect("read route module dir") {
+        let path = entry.expect("route dir entry").path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+}
+
 fn read_route_sources(routes_dir: &Path, file: &str) -> String {
     let direct = routes_dir.join(file);
     if direct.is_file() {
@@ -91,11 +102,8 @@ fn read_route_sources(routes_dir: &Path, file: &str) -> String {
     let stem = file.strip_suffix(".rs").unwrap_or(file);
     let mod_dir = routes_dir.join(stem);
     if mod_dir.is_dir() {
-        let mut files: Vec<PathBuf> = fs::read_dir(&mod_dir)
-            .expect("read route module dir")
-            .filter_map(|entry| entry.ok().map(|e| e.path()))
-            .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()) == Some("rs"))
-            .collect();
+        let mut files = Vec::new();
+        collect_rs_files(&mod_dir, &mut files);
         files.sort();
         assert!(
             !files.is_empty(),

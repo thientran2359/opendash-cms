@@ -8,6 +8,8 @@ mod menus;
 mod public_routes;
 #[path = "site_media_seo/public_settings.rs"]
 mod public_settings;
+#[path = "site_media_seo/responsive_media_variants.rs"]
+mod responsive_media_variants;
 #[path = "site_media_seo/seo_metadata.rs"]
 mod seo_metadata;
 #[path = "site_media_seo/site_features_e2e.rs"]

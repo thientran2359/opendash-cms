@@ -1771,25 +1771,7 @@ mod tests {
         for (id, filename) in [(&med_pub, "hero.png"), (&med_priv, "priv.png")] {
             crate::storage::media::save(
                 &db,
-                &crate::storage::media::MediaAsset {
-                    id: id.clone(),
-                    kind: "image".into(),
-                    filename: filename.into(),
-                    mime_type: "image/png".into(),
-                    extension: "png".into(),
-                    byte_size: 123,
-                    width: 100,
-                    height: 100,
-                    thumb_width: Some(50),
-                    thumb_height: Some(50),
-                    duration_ms: None,
-                    video_codec: None,
-                    audio_codec: None,
-                    lifecycle_state: "active".into(),
-                    generation: 1,
-                    version: 1,
-                    created_at: String::new(),
-                },
+                &crate::storage::media::MediaAsset::test_image_stub(id.clone(), filename.into()),
             )
             .await
             .unwrap();
@@ -2033,25 +2015,7 @@ mod tests {
         for (id, filename) in [(&med_pub, "a.png"), (&med_unpub, "b.png")] {
             crate::storage::media::save(
                 &db,
-                &crate::storage::media::MediaAsset {
-                    id: id.clone(),
-                    kind: "image".into(),
-                    filename: filename.into(),
-                    mime_type: "image/png".into(),
-                    extension: "png".into(),
-                    byte_size: 100,
-                    width: 100,
-                    height: 100,
-                    thumb_width: Some(50),
-                    thumb_height: Some(50),
-                    duration_ms: None,
-                    video_codec: None,
-                    audio_codec: None,
-                    lifecycle_state: "active".into(),
-                    generation: 1,
-                    version: 1,
-                    created_at: String::new(),
-                },
+                &crate::storage::media::MediaAsset::test_image_stub(id.clone(), filename.into()),
             )
             .await
             .unwrap();

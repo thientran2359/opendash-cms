@@ -14,6 +14,7 @@ pub enum OperationKind {
     Reconcile,
     Purge,
     MediaDelete,
+    MediaRegenerate,
 }
 
 impl OperationKind {
@@ -24,6 +25,7 @@ impl OperationKind {
             Self::Reconcile => "reconcile",
             Self::Purge => "purge",
             Self::MediaDelete => "media_delete",
+            Self::MediaRegenerate => "media_regenerate",
         }
     }
 
@@ -34,6 +36,7 @@ impl OperationKind {
             "reconcile" => Ok(Self::Reconcile),
             "purge" => Ok(Self::Purge),
             "media_delete" => Ok(Self::MediaDelete),
+            "media_regenerate" => Ok(Self::MediaRegenerate),
             _ => Err(ApiError::bad_request("Loại tác vụ vận hành không hợp lệ.")),
         }
     }

@@ -144,6 +144,9 @@ pub(crate) async fn scan_uploads_tree(
                 }
                 quarantine_dirs.push((qname, qpath, newest_mtime));
             }
+        } else if (name == ".staging" || name == "variants") && meta.is_dir() {
+            // Staging holds ephemeral upload/replace bundles; variants holds rebuildable cached crops.
+            continue;
         } else {
             return Err(ApiError::conflict(
                 "Phát hiện tệp hoặc thư mục không xác định trong uploads.",

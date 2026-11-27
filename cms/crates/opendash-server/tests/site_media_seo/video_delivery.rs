@@ -584,7 +584,7 @@ async fn video_range_head_conditional_csp_and_public_acl() {
 
     let r_304 = client
         .get(format!("{}/media/{}/file", server.base_url, video_id))
-        .header(header::IF_NONE_MATCH, format!("\"{video_id}\""))
+        .header(header::IF_NONE_MATCH, "\"gv1-v1\"")
         .send()
         .await
         .unwrap();
