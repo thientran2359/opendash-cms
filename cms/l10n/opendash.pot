@@ -18947,3 +18947,19 @@ msgstr ""
 #: server:error:redirects.csv_http_payload_too_large
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr ""
+
+#: server:core_l10n.search_placeholder
+msgid "Search the site..."
+msgstr ""
+
+#: server:core_l10n.search_empty_prompt
+msgid "Enter keywords to search published content."
+msgstr ""
+
+#: server:core_l10n.search_no_results
+msgid "No matching results found."
+msgstr ""
+
+#: server:core_l10n.search_clear_type
+msgid "Show all types"
+msgstr ""

@@ -134,6 +134,10 @@ pub fn build_router_with_telemetry(
         .route("/api/health", get(crate::routes::health::status))
         .route("/api/i18n/admin", get(crate::routes::settings::admin_i18n_bootstrap))
         .route("/api/i18n/admin/catalog", get(crate::routes::l10n::admin_i18n_catalog))
+        .route(
+            "/api/public/search",
+            get(crate::routes::search::public_search),
+        )
         .route("/api/public/contact/received", get(crate::routes::contact::public_received))
         .route(
             "/api/public/contact/{id}",
@@ -745,6 +749,9 @@ pub fn build_router_with_telemetry(
         .layer(axum::Extension(crate::contact::ContactAdmissionLimiter::new()))
         .layer(axum::Extension(
             crate::routes::extensions::ExtensionRouteRateLimiter::new(),
+        ))
+        .layer(axum::Extension(
+            crate::routes::search::SearchRateLimiter::new(),
         ))
         .layer(axum::Extension(crate::routes::contact::ExpectedListenerOrigin(format!(
             "http://{expected_host}"

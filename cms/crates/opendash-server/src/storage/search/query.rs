@@ -36,7 +36,7 @@ pub struct PublicSearchHit {
     pub rank: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PublicSearchFacet {
     pub type_key: String,
     pub label: String,
@@ -382,6 +382,8 @@ async fn hydrate_search_hits_in_conn(
             view.ext = proj.ext;
             view.theme_ext = proj.theme_ext;
         }
+        view.snippet_segments = snippet_segments.clone();
+        view.type_label = row.type_label.clone();
         hits.push(PublicSearchHit {
             view,
             type_label: row.type_label,

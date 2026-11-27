@@ -11,6 +11,7 @@ pub enum EnqueueCondition {
     Archive,
     Taxonomy,
     NotFound,
+    Search,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -23,6 +23,7 @@ pub fn build_public_theme_context(input: PublicThemeContextInput<'_>) -> ApiResu
         taxonomy: input.taxonomy,
         content_type: input.content_type,
         entry: input.entry,
+        search: input.search,
     };
     serde_json::to_value(payload).map_err(|err| ApiError::internal(err.to_string()))
 }

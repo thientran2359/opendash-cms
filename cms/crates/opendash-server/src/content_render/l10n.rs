@@ -51,6 +51,14 @@ pub struct CoreL10n {
     pub contact_received_title: Cow<'static, str>,
     pub contact_received_heading: Cow<'static, str>,
     pub contact_received_body: Cow<'static, str>,
+    pub search_title: Cow<'static, str>,
+    pub search_placeholder: Cow<'static, str>,
+    pub search_submit: Cow<'static, str>,
+    pub search_empty_prompt: Cow<'static, str>,
+    pub search_no_results: Cow<'static, str>,
+    pub search_results_summary: Cow<'static, str>,
+    pub search_all_types: Cow<'static, str>,
+    pub search_clear_type: Cow<'static, str>,
 }
 
 fn embedded_vi_catalog() -> &'static opendash_core::l10n::Catalog {
@@ -118,6 +126,14 @@ pub fn core_l10n_with_registry(
         contact_received_title: tr("Message received"),
         contact_received_heading: tr("Thank you for contacting us"),
         contact_received_body: tr("Your message has been received."),
+        search_title: tr("Search"),
+        search_placeholder: tr("Search the site..."),
+        search_submit: tr("Search"),
+        search_empty_prompt: tr("Enter keywords to search published content."),
+        search_no_results: tr("No matching results found."),
+        search_results_summary: tr("Results:"),
+        search_all_types: tr("All"),
+        search_clear_type: tr("Show all types"),
     }
 }
 

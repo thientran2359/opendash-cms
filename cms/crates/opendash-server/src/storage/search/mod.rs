@@ -1,12 +1,10 @@
 //! SQLite FTS5 transactional index synchronization and public search queries.
 
 mod index_sync;
-#[allow(dead_code)] // Consumed by Slice S02 public SSR/JSON search routes.
 mod query;
 
 #[allow(unused_imports)]
 pub use index_sync::*;
-#[allow(unused_imports)] // Consumed by Slice S02 public SSR/JSON search routes.
 pub use query::*;
 
 #[cfg(test)]

@@ -56,6 +56,7 @@ pub(crate) async fn render_not_found_response_for_locale(
     let locale_ctx =
         seo::build_theme_locale_context(db, Some(&resolved_locale), seo::ThemeLocaleTarget::None)
             .await?;
+    let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active.as_ref(), &resolved_locale, locale_ctx);
     let l10n = content_render::core_l10n(&resolved_locale);
     let breadcrumbs = content_render::not_found_breadcrumbs(
@@ -90,6 +91,7 @@ pub(crate) async fn render_not_found_response_for_locale(
             taxonomy: None,
             content_type: None,
             entry: None,
+            search: &inactive_search,
         },
         &mut budget,
         cache,
@@ -320,6 +322,7 @@ pub(crate) async fn render_canonical_archive(
         },
     )
     .await?;
+    let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active_v3.as_ref(), &locale, locale_ctx);
     // Do not export ContentTypeDefinition fields/settings/defaults to a
     // public theme: field-level access is represented exclusively by
@@ -350,6 +353,7 @@ pub(crate) async fn render_canonical_archive(
             taxonomy: None,
             content_type: Some(&ct_value),
             entry: None,
+            search: &inactive_search,
         },
         &mut budget,
         cache,

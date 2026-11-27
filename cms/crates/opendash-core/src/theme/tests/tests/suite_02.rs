@@ -12,9 +12,13 @@ fn candidate_keys_cover_all_dimensions_and_reject_ambiguous_targets() {
         (Kind::Singular, "singular"),
         (Kind::Index, "index"),
         (Kind::NotFound, "not_found"),
+        (Kind::Search, "search"),
     ] {
         assert_eq!(TemplateCandidate::new(kind).canonical_key().unwrap(), key);
     }
+    let mut bad_search = TemplateCandidate::new(Kind::Search);
+    bad_search.content_type = Some("post".into());
+    assert!(bad_search.canonical_key().is_err());
     let mut candidate = TemplateCandidate::new(Kind::Single);
     candidate.content_type = Some("post".into());
     assert_eq!(candidate.canonical_key().unwrap(), "single:type:post");

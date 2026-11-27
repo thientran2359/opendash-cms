@@ -18944,3 +18944,19 @@ msgstr "Dữ liệu JSON chuyển hướng không hợp lệ hoặc vượt quá
 #: server:error:redirects.csv_http_payload_too_large
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr "Nội dung yêu cầu nhập CSV vượt quá giới hạn kích thước HTTP cho phép."
+
+#: server:core_l10n.search_placeholder
+msgid "Search the site..."
+msgstr "Tìm kiếm trên trang..."
+
+#: server:core_l10n.search_empty_prompt
+msgid "Enter keywords to search published content."
+msgstr "Nhập từ khóa để tìm kiếm nội dung đã xuất bản."
+
+#: server:core_l10n.search_no_results
+msgid "No matching results found."
+msgstr "Không tìm thấy kết quả phù hợp."
+
+#: server:core_l10n.search_clear_type
+msgid "Show all types"
+msgstr "Xem tất cả loại nội dung"

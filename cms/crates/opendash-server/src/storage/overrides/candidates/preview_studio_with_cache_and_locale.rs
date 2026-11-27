@@ -205,9 +205,7 @@ pub async fn preview_studio_with_cache_and_locale(
         crate::storage::seo::ThemeLocaleTarget::None,
     )
     .await?;
-    if let Some(obj) = theme_context.as_object_mut() {
-        obj.insert("locale".to_owned(), preview_locale_ctx.clone());
-    }
+    content_render::sync_preview_locale_and_search(&mut theme_context, &preview_locale_ctx);
     public_budget.set_locale_context(active.as_ref(), &effective_locale, preview_locale_ctx);
     let mut canvas_layout = is_canvas_target(active.as_ref(), target);
     let main_scope = if target.kind == K::Part {

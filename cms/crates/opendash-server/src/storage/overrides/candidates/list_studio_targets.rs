@@ -53,6 +53,7 @@ pub async fn list_studio_targets(
         (K::Page, "Trang mặc định (Page)"),
         (K::Single, "Chi tiết bài viết (Single)"),
         (K::Archive, "Danh sách lưu trữ (Archive)"),
+        (K::Search, "Trang tìm kiếm (Search)"),
         (K::Index, "Index dự phòng (Index)"),
     ] {
         push_studio_target_item(

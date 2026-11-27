@@ -111,7 +111,9 @@ pub(in crate::storage) fn row_to_record(row: OverrideRow) -> ApiResult<TemplateO
         TemplateCandidateKind::Archive => "archive",
         TemplateCandidateKind::Taxonomy => "taxonomy_archive",
         TemplateCandidateKind::Part => target.part_key.as_deref().unwrap_or("part"),
-        TemplateCandidateKind::Index | TemplateCandidateKind::NotFound => "index",
+        TemplateCandidateKind::Index
+        | TemplateCandidateKind::NotFound
+        | TemplateCandidateKind::Search => "index",
     };
     Ok(TemplateOverrideRecord {
         id: row.0,
@@ -411,6 +413,7 @@ pub(in crate::storage) fn route_kind_for_candidate(kind: TemplateCandidateKind) 
         TemplateCandidateKind::Taxonomy => "taxonomy",
         TemplateCandidateKind::Index => "index",
         TemplateCandidateKind::NotFound => "not_found",
+        TemplateCandidateKind::Search => "search",
         TemplateCandidateKind::Part => "part",
     }
 }
@@ -440,6 +443,7 @@ pub(in crate::storage) fn preview_condition(kind: TemplateCandidateKind) -> Enqu
         TemplateCandidateKind::Archive => EnqueueCondition::Archive,
         TemplateCandidateKind::Taxonomy => EnqueueCondition::Taxonomy,
         TemplateCandidateKind::NotFound => EnqueueCondition::NotFound,
+        TemplateCandidateKind::Search => EnqueueCondition::Search,
         TemplateCandidateKind::Index | TemplateCandidateKind::Part => EnqueueCondition::All,
     }
 }

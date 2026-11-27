@@ -40,6 +40,8 @@ pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> Ent
         primary_category: None,
         ext: BTreeMap::new(),
         theme_ext: BTreeMap::new(),
+        snippet_segments: Vec::new(),
+        type_label: String::new(),
     }
 }
 
@@ -102,6 +104,10 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
     let empty_entries = Vec::new();
     let pagination = PaginationView::empty();
+    let search_url =
+        crate::storage::seo::resolve_locale_search_url_in_conn(&mut **tx, Some(&record.locale))
+            .await?;
+    let search_view = content_render::SearchView::inactive(&search_url);
     let theme_context = content_render::build_public_theme_context(PublicThemeContextInput {
         site,
         site_options,
@@ -121,6 +127,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
         taxonomy: None,
         content_type: Some(&ct_value),
         entry: Some(&view),
+        search: &search_view,
     })?;
     Ok(BuiltEntryPreviewContext {
         view,
@@ -225,7 +232,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
     };
     let mut body_diagnostics = Vec::new();
     let mut route = None;
-    let (theme_context, body) = if let Some((record, effective_schema)) = &entry {
+    let (mut theme_context, body) = if let Some((record, effective_schema)) = &entry {
         route = Some((record.content_type_key.as_str(), record.slug.as_str()));
         let built = build_entry_preview_context_in_tx(
             &mut tx,
@@ -308,6 +315,13 @@ pub async fn preview_typed_override_with_cache_and_locale(
     if body.len() > template_sec::MAX_RENDERED_HTML_BYTES {
         return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
     }
+    let preview_locale_ctx = crate::storage::seo::build_theme_locale_context_in_conn(
+        &mut tx,
+        Some(&effective_locale),
+        crate::storage::seo::ThemeLocaleTarget::None,
+    )
+    .await?;
+    content_render::sync_preview_locale_and_search(&mut theme_context, &preview_locale_ctx);
     collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[document], true).await?;
     let ctx = PreviewRenderContext {
         state: &state,
