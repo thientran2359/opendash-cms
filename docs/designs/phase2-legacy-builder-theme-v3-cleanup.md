@@ -34,7 +34,7 @@ Phase 2 completes OpenDash CMS's transition to **OpenDash Studio** and **Theme F
 * Split `HomeState`/`read_home_tx` into a clean `BuilderRenderContext` (`declared_blocks`, `site_options`, `timezone`), remove `active_content_templates`, `resync_plugin_block_acls_in_tx` legacy homepage writes, `builder_homepage*` ACL leaks in `public_content::media_is_referenced`, and inert table pin checks in `media_refs::collect_pins_in_tx`.
 * Remove `items`, `active_id`, `homepage_compatible`, and `selection.legacy_block_id` from `GET /api/admin/themes` (`ThemeList` / `ThemesSummary`, `D2`), remove v1/v2 ZIP parsers/corpus from `src/theme.rs`, treat pre-`0042` `'v1_legacy'`/`'v2'` rows in `theme_packages`/`theme_revisions` safely as read-only non-activatable legacy records (preventing HTTP `500` on upgraded DBs), and fix `storage/restore.rs:337` `.complete` check for `"v3"`.
 * Treat historical `legacy/block` (`KnownElement::Legacy`) AST nodes in saved documents as permanently locked read-only anchors (`D3`) without querying `/registry`, forbidding new `legacy/block` inserts or edits.
-* Upgrade `cms/fixtures/admin-review/theme/theme.json` to `manifest_version: 3`, extract `theme_zip` helper out of `m5_beta_theme_v2_e2e.py`, migrate active Rust/E2E tests (`admin_i18n_s01_test.rs`, `m8_s01_t02_writer_barrier.rs`, `s03_media_acl_tests.rs`, `m6_s10_t01`, `m5_s12_t01`, `egm_pattern_library_s03`, `m7_s16_t02`, `m8_browser_e2e.py`), and remove dead M1–M5 legacy-only tests.
+* Upgrade `cms/fixtures/admin-review/theme/theme.json` to `manifest_version: 3`, extract `theme_zip` helper out of `m5_beta_theme_v2_e2e.py`, migrate active Rust/E2E tests (`admin_i18n_s01_test.rs`, `m8_s01_t02_writer_barrier.rs`, `s03_media_acl_tests.rs`, `m6_s10_t01`, `m5_s12_t01`, `egm_pattern_library_s03`, `m7_s16_t02`, `operations_backup_restore_e2e.py`), and remove dead M1–M5 legacy-only tests.
 * Synchronize `docs/product/PRODUCT_REQUIREMENTS.md` §2–§5, `docs/contracts/CORE_FOUNDATION.md`, `docs/contracts/M8_WRITER_INVENTORY.md`, and affected `README.md` contracts.
 
 ## Non-Goals
@@ -126,9 +126,9 @@ Fixed M8 Restore Gate: restore.rs:337 verifies themes/revisions/<digest>/.comple
 
 - **PRD & Contracts (`docs/`):** Sync [`docs/product/PRODUCT_REQUIREMENTS.md`](../product/PRODUCT_REQUIREMENTS.md) §2–§5 (`Studio` workflows, `immediate` vs `draft_publish`, Pattern Library, Theme v3, Plugin `manifest_schema: 3` & Dual SDK); update [`docs/contracts/CORE_FOUNDATION.md`](../contracts/CORE_FOUNDATION.md), [`docs/contracts/M8_WRITER_INVENTORY.md`](../contracts/M8_WRITER_INVENTORY.md) (remove `routes::builder::save`), and affected `cms/**/README.md` contracts.
 - **Fixtures, Rust Tests & Scripts (`cms/`):**
-  - Extract shared `theme_zip` builder into `cms/scripts/m7_beta_menu_picker_e2e.py` before removing `m5_beta_theme_v2_e2e.py` (`m7_s16_t02_navigation_e2e.py` continues passing).
-  - Upgrade `cms/fixtures/admin-review/theme/theme.json` to `manifest_version: 3` (`m6_s10_t01_admin_extensions_e2e.py`).
-  - Update `m8_s01_t02_writer_barrier.rs`, `admin_i18n_s01_test.rs`, `storage/s03_media_acl_tests.rs`, `egm_pattern_library_s03_e2e.py`, `m5_s12_t01_library_e2e.py`, `m7_s16_t02_navigation_e2e.py`, `m8_browser_e2e.py` to Studio Mode 2 / `/api/admin/builder/blocks` / Theme v3; prune dead M1–M5 legacy-only tests (`public_content_smoke.py`, `m5_beta_theme_v2_e2e.py`, `m4_s11_t02_sections_e2e.py` after extracting `create_ui_section`).
+  - Extract shared `theme_zip` builder into `cms/scripts/menu_picker_e2e.py` before removing `m5_beta_theme_v2_e2e.py` (`admin_navigation_e2e.py` continues passing).
+  - Upgrade `cms/fixtures/admin-review/theme/theme.json` to `manifest_version: 3` (`admin_extensions_e2e.py`).
+  - Update `m8_s01_t02_writer_barrier.rs`, `admin_i18n_s01_test.rs`, `storage/s03_media_acl_tests.rs`, `pattern_library_studio_e2e.py`, `template_library_e2e.py`, `admin_navigation_e2e.py`, `operations_backup_restore_e2e.py` to Studio Mode 2 / `/api/admin/builder/blocks` / Theme v3; prune dead M1–M5 legacy-only tests (`public_content_smoke.py`, `m5_beta_theme_v2_e2e.py`, `m4_s11_t02_sections_e2e.py` after extracting `create_ui_section`).
 
 --------------------------------------------------------------------------------
 
@@ -278,17 +278,17 @@ Implementation is organized into **4 sequential/partially-parallel slices** (`S0
   - `cms/crates/opendash-server/tests/m5_s11_t01_revision_discovery.rs`
   - `cms/crates/opendash-server/tests/m8_s01_t02_writer_barrier.rs`
   - `cms/crates/opendash-server/tests/m8_s08_t01_e2e.rs`
-  - `cms/scripts/m7_beta_menu_picker_e2e.py`
+  - `cms/scripts/menu_picker_e2e.py`
   - `cms/scripts/admin_i18n_multilingual_e2e.py`
-  - `cms/scripts/egm_cpt_builder_s01_e2e.py`
-  - `cms/scripts/egm_pattern_library_s03_e2e.py`
-  - `cms/scripts/m4_s11_t01_page_builder_e2e.py`
+  - `cms/scripts/cpt_builder_e2e.py`
+  - `cms/scripts/pattern_library_studio_e2e.py`
+  - `cms/scripts/page_builder_scope_e2e.py`
   - `cms/scripts/m4_s11_t02_sections_e2e.py` (Delete after moving `create_ui_section` & Pattern/Admin checks)
   - `cms/scripts/m5_beta_theme_v2_e2e.py` (Delete after moving `theme_zip`)
-  - `cms/scripts/m5_s12_t01_library_e2e.py`
-  - `cms/scripts/m6_s10_t01_admin_extensions_e2e.py`
-  - `cms/scripts/m7_s16_t02_navigation_e2e.py`
-  - `cms/scripts/m8_browser_e2e.py`
+  - `cms/scripts/template_library_e2e.py`
+  - `cms/scripts/admin_extensions_e2e.py`
+  - `cms/scripts/admin_navigation_e2e.py`
+  - `cms/scripts/operations_backup_restore_e2e.py`
   - `cms/scripts/public_content_smoke.py` (Delete dead M3–M5 legacy `/save`/`/page` script)
   - `cms/scripts/windows_auth_smoke.py`
   - `cms/scripts/windows_smoke.py`
@@ -297,10 +297,10 @@ Implementation is organized into **4 sequential/partially-parallel slices** (`S0
   - `cms/fixtures/demo-website/README.md`
   - `cms/crates/opendash-server/README.md`
 * **Acceptance Criteria:**
-  - [ ] `cms/fixtures/admin-review/theme/theme.json` is valid Theme Format v3 (`manifest_version: 3`, `single.html` declared) and passes `--check-theme` and `m6_s10_t01_admin_extensions_e2e.py`.
-  - [ ] `m7_beta_menu_picker_e2e.py` exports a clean v3 `theme_zip` helper; `m5_beta_theme_v2_e2e.py`, `m4_s11_t02_sections_e2e.py`, and `public_content_smoke.py` are removed and `cms/scripts/README.md` + `cms/fixtures/demo-website/README.md` updated accordingly.
+  - [ ] `cms/fixtures/admin-review/theme/theme.json` is valid Theme Format v3 (`manifest_version: 3`, `single.html` declared) and passes `--check-theme` and `admin_extensions_e2e.py`.
+  - [ ] `menu_picker_e2e.py` exports a clean v3 `theme_zip` helper; `m5_beta_theme_v2_e2e.py`, `m4_s11_t02_sections_e2e.py`, and `public_content_smoke.py` are removed and `cms/scripts/README.md` + `cms/fixtures/demo-website/README.md` updated accordingly.
   - [ ] `m8_s01_t02_writer_barrier.rs` drops `"save"` from `"builder.rs"`; `admin_i18n_s01_test.rs` & `admin_i18n_multilingual_e2e.py` replace `/registry` & `/page` probes with active protected Admin endpoints; `m5_s11_t01_revision_discovery.rs` asserts the clean v3 `ThemeList` shape without `active_id`/`items`/`homepage_compatible`; `m8_s08_t01_e2e.rs` verifies `restore.rs` fails closed when a v3 revision's `.complete` marker is removed.
-  - [ ] `egm_cpt_builder_s01_e2e.py`, `egm_pattern_library_s03_e2e.py`, `m4_s11_t01_page_builder_e2e.py`, `m5_s12_t01_library_e2e.py`, `m7_s16_t02_navigation_e2e.py`, `m8_browser_e2e.py`, and `windows_auth_smoke.py` run cleanly against Studio Mode 2 (`#/studio/entry/...`, `studio-workspace`), Theme v3, and RBAC guards (`Editor` denied on `#/studio/entry/pattern/:id`).
+  - [ ] `cpt_builder_e2e.py`, `pattern_library_studio_e2e.py`, `page_builder_scope_e2e.py`, `template_library_e2e.py`, `admin_navigation_e2e.py`, `operations_backup_restore_e2e.py`, and `windows_auth_smoke.py` run cleanly against Studio Mode 2 (`#/studio/entry/...`, `studio-workspace`), Theme v3, and RBAC guards (`Editor` denied on `#/studio/entry/pattern/:id`).
   - [ ] All checks in Verification Plan pass (`0` failures).
 * **Rollback:** `git revert <S04_merge_sha>`.
 
@@ -317,7 +317,7 @@ Implementation is organized into **4 sequential/partially-parallel slices** (`S0
 9. **`cms/crates/opendash-server/src/routes/{builder,content,entries,public_content,themes}.rs` (`S03`, Modify):** Remove `registry`/`page`/`preview`/`save`, drop `active_content_templates(&db)` calls, align `themes.rs` with updated `ThemeList`.
 10. **`cms/crates/opendash-server/src/storage/{builder,page,plugin,public_content,media_refs,overrides,theme,import,restore}.rs` (`S03`, Modify):** Replace `HomeState`/`read_home_tx` with `BuilderRenderContext`/`read_render_context_tx`; delete legacy readers/syncs; remove `builder_homepage*` ACL leaks in `media_is_referenced` and dead pins in `collect_pins_in_tx`; clean `ThemeList` & keep tolerant historical `ThemeSourceFormat::from_db`; fix `restore.rs:337` `"v3"` `.complete` verification.
 11. **`cms/crates/opendash-server/src/storage/{theme_tests,s03_media_acl_tests}.rs` & `tests/{admin_i18n_s01_test,m5_s11_t01_revision_discovery,m8_s01_t02_writer_barrier,m8_s08_t01_e2e}.rs` (`S03`/`S04`, Modify):** Update assertions for Theme v3 DTOs, ACL isolation, writer inventory, and restore v3 `.complete` test coverage.
-12. **`cms/fixtures/admin-review/theme/theme.json` & `cms/scripts/*.py` & affected `cms/**/README.md` (`S04`, Modify/Delete):** Convert `admin-review/theme` to v3; extract `theme_zip` into `m7_beta_menu_picker_e2e.py`; update active Python smoke/Playwright runners to `#/studio`; delete `m5_beta_theme_v2_e2e.py`, `public_content_smoke.py`, and stale `m4_s11_t02_sections_e2e.py` (preserving unique Pattern coverage); update READMEs.
+12. **`cms/fixtures/admin-review/theme/theme.json` & `cms/scripts/*.py` & affected `cms/**/README.md` (`S04`, Modify/Delete):** Convert `admin-review/theme` to v3; extract `theme_zip` into `menu_picker_e2e.py`; update active Python smoke/Playwright runners to `#/studio`; delete `m5_beta_theme_v2_e2e.py`, `public_content_smoke.py`, and stale `m4_s11_t02_sections_e2e.py` (preserving unique Pattern coverage); update READMEs.
 
 ### Verification Plan
 
@@ -338,7 +338,7 @@ Implementation is organized into **4 sequential/partially-parallel slices** (`S0
 * **E2E / Integration (Live Chrome & Upgrade Smoke)**:
   - `cms/target/release/opendash.exe --check-theme cms/fixtures/admin-review/theme`
   - `python cms/scripts/windows_auth_smoke.py --binary cms/target/release/opendash.exe --baseline-db cms/fixtures/baseline_0001.sqlite`
-  - `python cms/scripts/egm_pattern_library_s03_e2e.py --binary cms/target/release/opendash.exe` (covering Pattern Mode 2 `#/studio/entry/pattern/:id`, Admin-only RBAC, exit to `#/patterns/:id/edit`, and legacy `#/builder` Pattern redirect)
-  - `python cms/scripts/m6_s10_t01_admin_extensions_e2e.py --binary cms/target/release/opendash.exe` (using v3 `admin-review/theme`)
-  - `python cms/scripts/m7_s16_t02_navigation_e2e.py --binary cms/target/release/opendash.exe`
-  - `python cms/scripts/m8_browser_e2e.py --binary cms/target/release/opendash.exe`
+  - `python cms/scripts/pattern_library_studio_e2e.py --binary cms/target/release/opendash.exe` (covering Pattern Mode 2 `#/studio/entry/pattern/:id`, Admin-only RBAC, exit to `#/patterns/:id/edit`, and legacy `#/builder` Pattern redirect)
+  - `python cms/scripts/admin_extensions_e2e.py --binary cms/target/release/opendash.exe` (using v3 `admin-review/theme`)
+  - `python cms/scripts/admin_navigation_e2e.py --binary cms/target/release/opendash.exe`
+  - `python cms/scripts/operations_backup_restore_e2e.py --binary cms/target/release/opendash.exe`

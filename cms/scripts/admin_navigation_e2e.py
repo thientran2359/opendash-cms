@@ -17,7 +17,7 @@ import tempfile
 import traceback
 
 from playwright.sync_api import expect, sync_playwright
-from m7_beta_menu_picker_e2e import admin_login, api_json, launch_server, stop_server, theme_zip
+from menu_picker_e2e import admin_login, api_json, launch_server, stop_server, theme_zip
 
 
 def digest(path: pathlib.Path) -> str:

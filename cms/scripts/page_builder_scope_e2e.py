@@ -2,7 +2,7 @@
 """M4-S11-T01: native macOS Chrome acceptance on one disposable site.
 
 Never connects to the owner's 18964 process/site. Usage:
-  python3 cms/scripts/m4_s11_t01_page_builder_e2e.py \
+  python3 cms/scripts/page_builder_scope_e2e.py \
     --binary /path/to/pinned/opendash --artifact-dir /path/to/private/results
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ import tempfile
 import traceback
 
 from playwright.sync_api import expect, sync_playwright
-from m7_beta_menu_picker_e2e import api_json, admin_login, launch_server, stop_server
+from menu_picker_e2e import api_json, admin_login, launch_server, stop_server
 from media_smoke import make_png
 
 

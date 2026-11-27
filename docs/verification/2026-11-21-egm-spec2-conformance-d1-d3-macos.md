@@ -28,7 +28,7 @@ Host: native macOS 15.8.2 Intel (`x86_64`); Node 24.22.2, Python 3.13.18, Rust/C
 Native Chrome command:
 
 ```sh
-.g5-checkouts/egm451-venv/bin/python cms/scripts/egm_pattern_library_s03_e2e.py \
+.g5-checkouts/egm451-venv/bin/python cms/scripts/pattern_library_studio_e2e.py \
   --binary cms/target/debug/opendash \
   --artifact-dir .g5-checkouts/evidence/egm451-chrome
 ```

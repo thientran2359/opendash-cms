@@ -129,7 +129,7 @@ Rebaseline Page integration/browser tests to entry version tokens and new paths,
 | `cms/crates/opendash-server/tests/m6_s05_t01_domain_bridge.rs` | Modify | Target selection helper/table owner separation and inactive AST regression. |
 | `cms/crates/opendash-server/tests/m6_s08_t01_plugin_e2e.rs` | Modify | Target-version selection/settings/content persistence, disable/restart/reinstall and matching-binary restore. |
 | `cms/crates/opendash-server/tests/m7_s12_t01_navigation_and_schema_ui.rs` | Modify | Retired shared override reads become typed template reads with unchanged auth/navigation assertions. |
-| `cms/scripts/m4_s11_t01_page_builder_e2e.py` and `cms/scripts/m5_s12_t01_library_e2e.py` | Modify | Browser callers use target Page and typed shared-template APIs; target v3 fixtures and shared entry CAS. |
+| `cms/scripts/page_builder_scope_e2e.py` and `cms/scripts/template_library_e2e.py` | Modify | Browser callers use target Page and typed shared-template APIs; target v3 fixtures and shared entry CAS. |
 | `docs/contracts/M8_WRITER_INVENTORY.md` | Modify | List Page save/reset writers and Page document/ref mutation boundaries. |
 | `docs/contracts/M6_PLUGIN_EXTENSIONS.md` | Modify | Describe current owner selection store, separate from shared templates; no old schema guarantee. |
 | `docs/designs/theme-format-and-template-resolver.md` and `docs/designs/cpt-content-builder-and-pattern-library.md` | Modify | Link overriding D02; update S02 and later S01 creation/extension ownership. |

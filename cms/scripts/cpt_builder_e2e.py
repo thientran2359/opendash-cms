@@ -5,7 +5,7 @@ Uses the existing random-loopback-port launcher and a fresh temporary site root.
 Never targets the owner's running port 18964 or any existing site database.
 
 Usage:
-  python3 cms/scripts/egm_cpt_builder_s01_e2e.py \
+  python3 cms/scripts/cpt_builder_e2e.py \
     --binary /path/to/pinned/opendash --artifact-dir /path/to/private/results
 """
 from __future__ import annotations
@@ -20,8 +20,8 @@ import tempfile
 import traceback
 
 from playwright.sync_api import expect, sync_playwright
-from m4_s11_t01_page_builder_e2e import new_heading
-from m7_beta_menu_picker_e2e import api_json, admin_login, launch_server, stop_server
+from page_builder_scope_e2e import new_heading
+from menu_picker_e2e import api_json, admin_login, launch_server, stop_server
 
 
 TYPE_KEY = "project"

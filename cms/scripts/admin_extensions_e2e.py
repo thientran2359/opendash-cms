@@ -20,7 +20,7 @@ import traceback
 import zipfile
 
 from playwright.sync_api import expect, sync_playwright
-from m7_beta_menu_picker_e2e import api_json, admin_login, launch_server, stop_server
+from menu_picker_e2e import api_json, admin_login, launch_server, stop_server
 
 
 CMS = pathlib.Path(__file__).resolve().parents[1]

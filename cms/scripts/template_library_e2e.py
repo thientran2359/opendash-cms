@@ -20,8 +20,8 @@ import traceback
 import zipfile
 
 from playwright.sync_api import expect, sync_playwright
-from m7_beta_menu_picker_e2e import admin_login, api_json, launch_server, stop_server
-from m4_s11_t01_page_builder_e2e import ui_create_page, new_heading, change_heading, page_scope
+from menu_picker_e2e import admin_login, api_json, launch_server, stop_server
+from page_builder_scope_e2e import ui_create_page, new_heading, change_heading, page_scope
 from media_smoke import make_png
 
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 backup, restore, and recovery harnesses ([m8_s08_t01_e2e.rs](../../crates/opendash-server/tests/ops/backup_restore_e2e.rs) and [m8_browser_e2e.py](../../scripts/m8_browser_e2e.py)). Static `.odbackup.age` archives and passphrases are never stored in Git; tests synthesize encrypted backups dynamically in disposable temporary site roots.
+Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 backup, restore, and recovery harnesses ([m8_s08_t01_e2e.rs](../../crates/opendash-server/tests/ops/backup_restore_e2e.rs) and [operations_backup_restore_e2e.py](../../scripts/operations_backup_restore_e2e.py)). Static `.odbackup.age` archives and passphrases are never stored in Git; tests synthesize encrypted backups dynamically in disposable temporary site roots.
 
 ## Interface
 
@@ -28,7 +28,7 @@ Deterministic schema-fingerprint fixture and E2E contract baseline for the M8 ba
 
 ## Side Effects
 
-- None from static files; running `m8_s08_t01_e2e.rs` or `m8_browser_e2e.py` spawns isolated loopback server instances and cleans up temporary `site_root` directories and `.odbackup.age` artifacts upon completion.
+- None from static files; running `m8_s08_t01_e2e.rs` or `operations_backup_restore_e2e.py` spawns isolated loopback server instances and cleans up temporary `site_root` directories and `.odbackup.age` artifacts upon completion.
 
 ## Verification
 
@@ -36,5 +36,5 @@ Run the M8 Rust integration/E2E suite and Playwright browser E2E runner:
 
 ```powershell
 cargo test --manifest-path cms/Cargo.toml --locked --test m8_s08_t01_e2e
-python cms/scripts/m8_browser_e2e.py --binary cms/target/release/opendash.exe
+python cms/scripts/operations_backup_restore_e2e.py --binary cms/target/release/opendash.exe
 ```

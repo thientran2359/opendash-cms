@@ -6,7 +6,7 @@ Deterministic, synthetic, and baseline fixtures supporting migration upgrade tes
 
 Directory index:
 - `baseline_0001.sqlite` (`24576` bytes): Pre-M1.1 baseline SQLite database (`git` origin `1fba9ac`) containing legacy `theme_blocks` and `home_page` tables; managed by [make_baseline_fixture.py](../scripts/make_baseline_fixture.py) and consumed by upgrade/smoke tests (`cms/scripts/windows_auth_smoke.py`, `cms/scripts/content_types_smoke.py`, `cms/scripts/content_entries_smoke.py`, and `cms/crates/opendash-server/tests/m7_s09_t01_schema_field_groups.rs`).
-- `admin-review/`: Isolated deterministic `admin_extensions` manifests (`plugin/plugin.json` for `review-provider` and `theme/theme.json` for `review-theme`) exercised by [m6_s10_t01_admin_extensions_e2e.py](../scripts/m6_s10_t01_admin_extensions_e2e.py); never installed on a live owner site.
+- `admin-review/`: Isolated deterministic `admin_extensions` manifests (`plugin/plugin.json` for `review-provider` and `theme/theme.json` for `review-theme`) exercised by [admin_extensions_e2e.py](../scripts/admin_extensions_e2e.py); never installed on a live owner site.
 - [demo-website](./demo-website/README.md): Mộc Studio isolated demo site fixture (`theme-moc-studio/` + [screen-inventory.md](./demo-website/screen-inventory.md)) driven by [demo-website-runner.py](../scripts/demo-website-runner.py) and `dev.py`.
 - [m7](./m7/README.md): Synthetic MP4 (`video-avc-aac.mp4`) and localhost TLS test keypair (`smtp-test-cert.pem`, `smtp-test-key.pem`) for M7 media/SMTP E2E tests.
 - [m8](./m8/README.md): Schema fingerprint baseline ([schema_fingerprints.json](./m8/schema_fingerprints.json)) and OPS-01 restore contract/negative-corpus definitions for M8 E2E harnesses.

@@ -47,19 +47,19 @@ Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-sp
 
 - [`admin_i18n_multilingual_e2e.py`](admin_i18n_multilingual_e2e.py) — Admin i18n and multilingual settings (`0051`) browser journeys.
 - [`admin_nav_single_edit_e2e.py`](admin_nav_single_edit_e2e.py) — Bounded Chrome Admin navigation, RBAC, and single-edit acceptance.
-- [`egm_cpt_builder_s01_e2e.py`](egm_cpt_builder_s01_e2e.py) — CPT builder browser smoke on an isolated site.
-- [`egm_pattern_library_s03_e2e.py`](egm_pattern_library_s03_e2e.py) — Pattern library, Studio Mode 2 Pattern (`#/studio/entry/pattern/:id`), and RBAC Chrome + API E2E suite.
-- [`entry_lifecycle_s02_e2e.py`](entry_lifecycle_s02_e2e.py) — Entry Trash/Restore/Purge, Reading guard, dormant retained-Trash maintenance, Editor vs Admin RBAC, Studio/Editor trashed guards, and plugin host confirmation Chrome E2E suite.
-- [`entry_lifecycle_s03_e2e.py`](entry_lifecycle_s03_e2e.py) — Inline Quick Edit, site-timezone `published_at`, single-taxonomy delta, 412 diff + explicit rebase, simultaneous Single Edit + Quick Edit 401/Cancel isolation, trashed-target 409 guard, and 390px mobile Chrome E2E suite.
-- [`entry_lifecycle_s04_e2e.py`](entry_lifecycle_s04_e2e.py) — Bounded current-page Bulk Actions (broadened `draft_publish` CPT publication, single-taxonomy add/remove/replace, mixed-locale block, Trash/Restore/Admin-only Purge, mixed 200/412 + uncertain reconciliation without replaying successes, EN/VI, 390px mobile) Chrome E2E suite.
+- [`cpt_builder_e2e.py`](cpt_builder_e2e.py) — CPT builder browser smoke on an isolated site.
+- [`pattern_library_studio_e2e.py`](pattern_library_studio_e2e.py) — Pattern library, Studio Mode 2 Pattern (`#/studio/entry/pattern/:id`), and RBAC Chrome + API E2E suite.
+- [`entry_lifecycle_trash_e2e.py`](entry_lifecycle_trash_e2e.py) — Entry Trash/Restore/Purge, Reading guard, dormant retained-Trash maintenance, Editor vs Admin RBAC, Studio/Editor trashed guards, and plugin host confirmation Chrome E2E suite.
+- [`entry_lifecycle_quick_edit_e2e.py`](entry_lifecycle_quick_edit_e2e.py) — Inline Quick Edit, site-timezone `published_at`, single-taxonomy delta, 412 diff + explicit rebase, simultaneous Single Edit + Quick Edit 401/Cancel isolation, trashed-target 409 guard, and 390px mobile Chrome E2E suite.
+- [`entry_lifecycle_bulk_actions_e2e.py`](entry_lifecycle_bulk_actions_e2e.py) — Bounded current-page Bulk Actions (broadened `draft_publish` CPT publication, single-taxonomy add/remove/replace, mixed-locale block, Trash/Restore/Admin-only Purge, mixed 200/412 + uncertain reconciliation without replaying successes, EN/VI, 390px mobile) Chrome E2E suite.
 - [`general_settings_browser.py`](general_settings_browser.py) — General Settings (`SITE-01`) embedded Admin browser test.
-- [`m4_s11_t01_page_builder_e2e.py`](m4_s11_t01_page_builder_e2e.py) — Page builder Studio Mode 2 E2E acceptance (`ui_create_page`, `new_heading`, `change_heading`).
-- [`m5_s12_t01_library_e2e.py`](m5_s12_t01_library_e2e.py) — Local template library, Pattern CRUD (`create_ui_pattern`), and Studio override E2E test.
-- [`m6_s10_t01_admin_extensions_e2e.py`](m6_s10_t01_admin_extensions_e2e.py) — Plugin provider Admin columns, actions, and term panels E2E.
-- [`m7_beta_menu_picker_e2e.py`](m7_beta_menu_picker_e2e.py) — Admin menu picker E2E and shared launcher/theme helpers (`launch_server`, `stop_server`, `admin_login`, `api_json`, `set_cms_locale`, `theme_zip`).
-- [`m7_s16_t02_navigation_e2e.py`](m7_s16_t02_navigation_e2e.py) — Grouped Admin routes and one-screen-per-destination E2E.
-- [`m7_s16_t06_entry_table_e2e.py`](m7_s16_t06_entry_table_e2e.py) — Entry tables, bulk CAS, URL redirect history, and mobile viewport E2E.
-- [`m8_browser_e2e.py`](m8_browser_e2e.py) — Backup → restore → re-auth → activate → re-edit → Save → public E2E.
+- [`page_builder_scope_e2e.py`](page_builder_scope_e2e.py) — Page builder Studio Mode 2 E2E acceptance (`ui_create_page`, `new_heading`, `change_heading`).
+- [`template_library_e2e.py`](template_library_e2e.py) — Local template library, Pattern CRUD (`create_ui_pattern`), and Studio override E2E test.
+- [`admin_extensions_e2e.py`](admin_extensions_e2e.py) — Plugin provider Admin columns, actions, and term panels E2E.
+- [`menu_picker_e2e.py`](menu_picker_e2e.py) — Admin menu picker E2E and shared launcher/theme helpers (`launch_server`, `stop_server`, `admin_login`, `api_json`, `set_cms_locale`, `theme_zip`).
+- [`admin_navigation_e2e.py`](admin_navigation_e2e.py) — Grouped Admin routes and one-screen-per-destination E2E.
+- [`entry_table_e2e.py`](entry_table_e2e.py) — Entry tables, bulk CAS, URL redirect history, and mobile viewport E2E.
+- [`operations_backup_restore_e2e.py`](operations_backup_restore_e2e.py) — Backup → restore → re-auth → activate → re-edit → Save → public E2E.
 - [`windows_users_browser.py`](windows_users_browser.py) — Embedded Admin Users UI test at desktop and 390px viewports.
 
 ## Invariants

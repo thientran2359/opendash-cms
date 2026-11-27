@@ -2,7 +2,7 @@
 """EGM Spec 2 S03: native Chrome + API proof on a disposable site.
 
 Uses a random loopback port and a fresh temporary site. Never touches port 18964.
-Usage: python3 cms/scripts/egm_pattern_library_s03_e2e.py --binary cms/target/debug/opendash
+Usage: python3 cms/scripts/pattern_library_studio_e2e.py --binary cms/target/debug/opendash
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import tempfile
 import zipfile
 
 from playwright.sync_api import expect, sync_playwright
-from m7_beta_menu_picker_e2e import admin_login, api_json, launch_server, stop_server
+from menu_picker_e2e import admin_login, api_json, launch_server, stop_server
 from media_smoke import make_png
 
 

@@ -20,7 +20,7 @@ import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
-from m7_beta_menu_picker_e2e import login_legacy_vi
+from menu_picker_e2e import login_legacy_vi
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WATCHDOG = 180

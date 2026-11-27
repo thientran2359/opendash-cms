@@ -928,7 +928,7 @@ Toàn bộ thay đổi mã nguồn, migration, tài nguyên nhúng và kiểm th
   - `cms/fixtures/admin-review/{theme/theme.json,plugin/plugin.json}`
   - `cms/admin/src/builder/BuilderBindingFields.tsx` *(chỉ đổi tối thiểu `ContentFieldType` → `FieldType` giữ `tsc` xanh; Spec A1 xóa theo D1=1B)*
   - `cms/admin/src/features/{content/{types.ts,ContentTypeForm.tsx,ContentTypeSchemaSettings.tsx,FieldGroupsManager.tsx,EditorLayoutConfigurator.tsx},editor/{EditorDraftStore.ts,PanelRegionRenderer.tsx,SingleEditWorkspace.tsx},extensions/AdminContributionRenderer.tsx,taxonomy/TermEditPage.tsx}`
-  - `cms/scripts/{demo-website-runner.py,content_types_smoke.py,content_entries_smoke.py,entry_lifecycle_s04_e2e.py}`
+  - `cms/scripts/{demo-website-runner.py,content_types_smoke.py,content_entries_smoke.py,entry_lifecycle_bulk_actions_e2e.py}`
   - `cms/crates/opendash-server/tests/{egm_cpt_builder_s01.rs,entry_lifecycle_s02.rs,entry_lifecycle_s03.rs,entry_lifecycle_s04.rs,m5_s06_t01_preservation.rs,m5_s08_t01_e2e_delivery.rs,m5_s10_t01_theme_cnt_declarations.rs,m6_s02_t01_plugin_cnt_bridge.rs,m6_s08_t01_plugin_e2e.rs,m6_s10_t01_admin_extensions.rs,m7_s03_t01_routes.rs,m7_s08_t01_e2e.rs,m7_s09_t01_schema_field_groups.rs,m7_s09_t02_exposure_and_plugin_grants.rs,m7_s10_t01_panel_registry_and_layout.rs,m7_s11_t01_composite_save_and_profile.rs,m7_s12_t02_single_edit_and_draft_recovery.rs,m7_s16_t05_entry_table.rs,m8_s08_t01_e2e.rs,multilingual_s01_test.rs,multilingual_s03_test.rs,theme_ergonomics_test.rs,unified_field_engine_test.rs}`
 - **Delete:**
   - `cms/admin/src/features/content/FieldValueInput.tsx`

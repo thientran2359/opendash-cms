@@ -79,7 +79,7 @@ No drift detected.
 - `fixtures/m7/README.md:12-13`: Bảng kích thước byte của `smtp-test-cert.pem` và `smtp-test-key.pem` trước đó ghi `1166`/`1732` (CRLF checkout Windows) ghép với SHA256 của bản LF trong Git (`1147`/`1704`). → **Đã đồng bộ ghi rõ `1147`/`1704` (Git LF) và chú thích `1166`/`1732` trên Windows CRLF.** (`video-avc-aac.mp4` `1027` bytes và SHA256 `82130ff8...` khớp chính xác.)
 
 ## `cms/fixtures/m8/README.md`
-- `fixtures/m8/README.md:16,18,19-20,38`: Sai chi tiết SMTP secret khi restore (`enabled = 0` nhưng `BackupFileKind::SmtpSecret` vẫn khôi phục và kiểm chứng sự tồn tại của secret file); nêu `<target_root>/private/` không tồn tại; gộp test `upgrade_0031_to_0033_and_interrupted_job_recovery` vào `negative_corpus_preserves_source_and_never_publishes_target` và gán nhầm `MAX_BACKUP_ARTIFACTS` cho `routes/operations.rs` thay vì `src/backup.rs`; lệnh `m8_browser_e2e.py` thiếu `--binary`. → **Đã sửa đầy đủ.**
+- `fixtures/m8/README.md:16,18,19-20,38`: Sai chi tiết SMTP secret khi restore (`enabled = 0` nhưng `BackupFileKind::SmtpSecret` vẫn khôi phục và kiểm chứng sự tồn tại của secret file); nêu `<target_root>/private/` không tồn tại; gộp test `upgrade_0031_to_0033_and_interrupted_job_recovery` vào `negative_corpus_preserves_source_and_never_publishes_target` và gán nhầm `MAX_BACKUP_ARTIFACTS` cho `routes/operations.rs` thay vì `src/backup.rs`; lệnh `operations_backup_restore_e2e.py` thiếu `--binary`. → **Đã sửa đầy đủ.**
 
 ## `cms/fixtures/README.md`
 No drift detected.

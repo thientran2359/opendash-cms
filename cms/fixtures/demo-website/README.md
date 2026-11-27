@@ -6,7 +6,7 @@ Isolated demo website fixture (**“Mộc Studio — Thiết kế không gian s�
 
 Directory layout and reused assets:
 - [screen-inventory.md](screen-inventory.md): Screen checklist covering public viewports (`PUB-01`–`PUB-14` across `1440x900`, `768x1024`, `390x844`), Admin/RBAC screens (`ADM-01`–`ADM-13`), and error routes (`ERR-01`–`ERR-02`).
-- `theme-moc-studio/`: Self-contained Theme Format v3 package (`theme_id: "moc-studio"`, `manifest_version: 3`, `version: "1.0.0"`) with `theme.json`, `header.html`, `footer.html`, `home.html`, `page.html`, `archive.html`, `single.html`, `taxonomy.html`, and `assets/style.css` (referenced by `cms/scripts/m7_beta_menu_picker_e2e.py` and `cms/scripts/windows_auth_smoke.py`).
+- `theme-moc-studio/`: Self-contained Theme Format v3 package (`theme_id: "moc-studio"`, `manifest_version: 3`, `version: "1.0.0"`) with `theme.json`, `header.html`, `footer.html`, `home.html`, `page.html`, `archive.html`, `single.html`, `taxonomy.html`, and `assets/style.css` (referenced by `cms/scripts/menu_picker_e2e.py` and `cms/scripts/windows_auth_smoke.py`).
 - Synthesized media (`12` `1200x800` PNGs generated locally via `[cms/scripts/demo-website-runner.py:make_arch_png]`), MP4 fixture [video-avc-aac.mp4](../m7/video-avc-aac.mp4), and [sample-plugin](../../examples/plugins/sample-plugin/README.md) (`sample-plugin.zip`).
 
 ## Interface

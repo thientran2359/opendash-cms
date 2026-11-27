@@ -83,7 +83,7 @@ Reject the alternatives of saving temporarily, restoring old role/scope aliases,
 | `cms/admin/src/api/builder.ts` | Modify | Typed read-only client and PreviewEntry DTO, optional If-Match and AbortSignal via client.ts only. |
 | `cms/admin/src/builder/BuilderWorkspace.tsx` | Modify | Shared target preview calls the new client, no old alias or Save; keep entry/Section/homepage separation and draft/account/request race guards. |
 | `cms/crates/opendash-server/tests/m5_s03_t02_overrides.rs` | Modify | Auth, exact target/context/slot/part/CAS/side-effect/private media regressions below using isolated v3 sites. |
-| `cms/scripts/m5_s12_t01_library_e2e.py` | Modify | Browser shared-template dirty preview before Save, new unsaved target, unchanged persisted/public state, target switch/401/412 draft retention and sandbox/private raster behavior. |
+| `cms/scripts/template_library_e2e.py` | Modify | Browser shared-template dirty preview before Save, new unsaved target, unchanged persisted/public state, target switch/401/412 draft retention and sandbox/private raster behavior. |
 | `docs/contracts/M8_WRITER_INVENTORY.md` | Modify | Explicitly classify new POST as authenticated read-only preview; no admission lease or mutation registration. |
 | `docs/designs/theme-format-and-template-resolver.md`, `docs/designs/s02-target-only-page-builder.md`, `docs/designs/SITEMAP.md` | Modify | Register and link the overriding shared-preview D03, retain truthful implementation status. |
 | `docs/designs/typed-template-draft-preview.md` | Create | This exact contract, approval provenance and review disposition. |
