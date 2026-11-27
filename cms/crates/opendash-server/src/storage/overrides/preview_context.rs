@@ -27,6 +27,8 @@ pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> Ent
         title: "Nội dung xem trước".to_owned(),
         slug: "preview".to_owned(),
         url: Some("/".to_owned()),
+        parent: None,
+        menu_order: 0,
         created_at: String::new(),
         updated_at: String::new(),
         published_at: None,
@@ -56,7 +58,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     options: &BTreeMap<String, serde_json::Value>,
     menus: &BTreeMap<String, menu::MenuViewModel>,
     route_kind: &str,
-    richtext_nonces: Option<&mut template_sec::RichTextNonceTable>,
+    mut richtext_nonces: Option<&mut template_sec::RichTextNonceTable>,
 ) -> ApiResult<BuiltEntryPreviewContext> {
     let definition = &effective_schema.base.descriptor;
     let eligible = public_content::load_eligible_public_taxonomies_in_conn(
@@ -79,7 +81,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
         &eligible,
         actor_role,
         true,
-        richtext_nonces,
+        richtext_nonces.as_deref_mut(),
     )
     .await?;
     let archive_url = permalinks::canonical_archive_path_in_tx(
@@ -100,6 +102,13 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
         view.url.clone(),
     );
     let ct_value = serde_json::to_value(definition)?;
+    let custom_options = crate::storage::options_pages::load_active_custom_options_public_in_conn(
+        &mut **tx,
+        Some(&record.locale),
+        true,
+        richtext_nonces,
+    )
+    .await?;
     let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
     let empty_entries = Vec::new();
     let pagination = PaginationView::empty();
@@ -107,6 +116,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
         site,
         site_options,
         options,
+        custom_options: &custom_options,
         theme_assets: &theme_assets,
         menus,
         route_kind,
@@ -120,6 +130,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
         related_entries: &empty_entries,
         recent_posts: &empty_entries,
         taxonomy: None,
+        term: None,
         content_type: Some(&ct_value),
         entry: Some(&view),
     })?;
@@ -159,8 +170,9 @@ pub async fn preview_typed_override_with_cache_and_locale(
     )
     .await?;
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
-    let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut budget = PreviewCompositionBudget::new();
+    let url_policy =
+        active_theme_url_policy_in_conn(&mut tx, active.as_ref(), Some(&key), None, None).await?;
     let graph = preview_part_graph(&mut tx, target, document, active.as_ref(), &mut budget).await?;
     let actor_role = actor_field_role(actor);
     let entry = resolve_preview_entry(
@@ -299,12 +311,21 @@ pub async fn preview_typed_override_with_cache_and_locale(
         })?;
         (built.theme_context, body)
     } else {
+        let custom_options =
+            crate::storage::options_pages::load_active_custom_options_public_in_conn(
+                &mut tx,
+                Some(&effective_locale),
+                true,
+                Some(&mut budget.richtext_nonces),
+            )
+            .await?;
         let theme_context = build_placeholder_preview_theme_context(
             target,
             active.as_ref(),
             &site,
             &site_options,
             &options,
+            &custom_options,
             &menus,
         )?;
         (
@@ -476,7 +497,7 @@ pub(in crate::storage) async fn render_preview_named_part_in_tx(
     budget: &mut PreviewCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<Option<RenderedLayout>> {
-    let url_policy = active_theme_url_policy(active)?;
+    let url_policy = active_theme_url_policy_in_conn(&mut **tx, active, None, None, None).await?;
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
         ..Default::default()

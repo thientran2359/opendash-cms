@@ -97,13 +97,11 @@ pub async fn put_site_taxonomy_eligibility(
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải schema CPT."))?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    let item =
+        super::contenttypeapiitem::build_content_type_api_item_in_tx(&mut tx, effective).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
-    Ok(ContentTypeApiItem {
-        base: effective.base,
-        version: effective.base_version,
-        schema_token: effective.schema_token,
-    })
+    Ok(item)
 }
 
 pub async fn put_editor_layout(

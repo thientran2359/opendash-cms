@@ -1,3 +1,7 @@
+#[path = "content/acf_content_structure.rs"]
+mod acf_content_structure;
+#[path = "content/acf_migration_0063.rs"]
+mod acf_migration_0063;
 #[path = "content/admin_navigation_schema.rs"]
 mod admin_navigation_schema;
 #[path = "content/admin_view_url_preview.rs"]

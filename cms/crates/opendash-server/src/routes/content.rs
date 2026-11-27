@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use axum::{
     Json,
-    extract::{Path, State},
+    body::Bytes,
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
 };
@@ -80,6 +81,34 @@ pub async fn content_type_update(
         content_storage::update_user_content_type(&db, &type_key, expected_version, &input).await?;
     *content_registry.write().await = content_storage::load_content_type_catalog(&db).await?;
     Ok((no_store_headers(Some(result.version)), Json(result)))
+}
+
+pub async fn content_type_delete(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(content_registry): State<
+        Arc<tokio::sync::RwLock<RegistryCatalog<ContentTypeDefinition>>>,
+    >,
+    headers: HeaderMap,
+    Path(type_key): Path<String>,
+    body: Bytes,
+) -> ApiResult<impl IntoResponse> {
+    require_admin_with_csrf(&headers, &db).await?;
+    if !body.is_empty() {
+        return Err(ApiError::bad_request(
+            "Body của DELETE content-type phải rỗng.",
+        ));
+    }
+    if !valid_content_type_key(&type_key) {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    }
+    let expected_version = parse_if_match(&headers)?;
+    content_storage::delete_user_content_type(&db, &type_key, expected_version, false).await?;
+    *content_registry.write().await = content_storage::load_content_type_catalog(&db).await?;
+    Ok((
+        no_store_headers(None),
+        Json(serde_json::json!({ "deleted_key": type_key })),
+    ))
 }
 
 #[derive(serde::Serialize)]
@@ -248,17 +277,55 @@ pub async fn field_group_update(
     Ok((no_store_headers(Some(updated.version)), Json(updated)))
 }
 
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteFieldGroupQuery {
+    #[serde(default)]
+    pub purge: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldGroupActiveInput {
+    pub active: bool,
+}
+
+pub async fn field_group_set_active(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(group_id): Path<String>,
+    Json(input): Json<FieldGroupActiveInput>,
+) -> ApiResult<impl IntoResponse> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let expected_version = parse_if_match(&headers)?;
+    let updated = content_storage::set_user_field_group_active(
+        &db,
+        &group_id,
+        expected_version,
+        input.active,
+    )
+    .await?;
+    Ok((no_store_headers(Some(updated.version)), Json(updated)))
+}
+
 pub async fn field_group_delete(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(group_id): Path<String>,
-) -> ApiResult<impl IntoResponse> {
+    Query(query): Query<DeleteFieldGroupQuery>,
+) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
     let expected_version = parse_if_match(&headers)?;
-    let withdrawn =
-        content_storage::withdraw_user_field_group(&db, &group_id, expected_version).await?;
-    Ok((no_store_headers(Some(withdrawn.version)), Json(withdrawn)))
+    if query.purge {
+        content_storage::delete_user_field_group(&db, &group_id, expected_version, true).await?;
+        Ok((StatusCode::NO_CONTENT, no_store_headers(None)).into_response())
+    } else {
+        let withdrawn =
+            content_storage::withdraw_user_field_group(&db, &group_id, expected_version).await?;
+        Ok((no_store_headers(Some(withdrawn.version)), Json(withdrawn)).into_response())
+    }
 }
 
 fn parse_if_match_allow_zero(headers: &HeaderMap) -> ApiResult<i64> {

@@ -562,7 +562,6 @@ async fn auto_injected_cpt_body_without_declared_fields_syncs_media_refs_and_acl
         .json(&json!({
             "key": "case_study",
             "label": "Case Studies",
-            "fields": [],
             "settings": {
                 "public": true,
                 "has_archive": true,

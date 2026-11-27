@@ -10,7 +10,20 @@ async fn c1_visibility_hides_single_archive_taxonomy_media_seo_and_sitemap() {
     crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key,definition_json,owner_kind)
-           VALUES('news', '{"key":"news","label":"News","fields":[{"key":"hero","label":"Hero","type":"media"}],"settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":["editor","featured_image"]}}', 'user')"#,
+           VALUES('news', '{"key":"news","label":"News","settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":["editor","featured_image"]}}', 'user')"#,
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO content_field_groups(group_id,owner_kind,owner_id,local_key,title,description,fields_json,domain,location_rules_json,presentation_json,active,status,version)
+           VALUES('user:news_fields','user',NULL,'news_fields','News Fields','','[{"key":"hero","label":"Hero","type":"media","acl":{"min_view_role":"editor","min_edit_role":"editor","public_exposure":"public"}}]','content','[[{"param":"content_type","op":"eq","value":"news"}]]','{"region":"main_bottom","order":10,"collapsible":true,"collapsed_by_default":false,"style":"card","label_placement":"top"}',1,'active',1)"#,
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO content_field_group_targets(group_id,target_kind,target_key,association_state) VALUES('user:news_fields','content_type','news','declared')",
     )
     .execute(&db)
     .await

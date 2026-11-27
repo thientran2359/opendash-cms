@@ -31,7 +31,9 @@ pub(in crate::storage) async fn validate_entry_parent_in_conn(
         ));
     }
     if parent_id <= 0 {
-        return Err(ApiError::unprocessable("parent_id phải là ID nguyên dương."));
+        return Err(ApiError::unprocessable(
+            "parent_id phải là ID nguyên dương.",
+        ));
     }
     if entry_id == Some(parent_id) {
         return Err(ApiError::conflict(
@@ -125,15 +127,17 @@ pub(in crate::storage) async fn resolve_entry_hierarchy_patch_in_conn(
     menu_order_patch: Option<i32>,
 ) -> ApiResult<(Option<i64>, i32)> {
     let existing: (Option<i64>, i32) = match entry_id {
-        Some(id) => sqlx::query_as(
-            "SELECT parent_id, menu_order
+        Some(id) => {
+            sqlx::query_as(
+                "SELECT parent_id, menu_order
                FROM content_entries
               WHERE id = ? AND content_type_key = ?",
-        )
-        .bind(id)
-        .bind(type_key)
-        .fetch_one(&mut *conn)
-        .await?,
+            )
+            .bind(id)
+            .bind(type_key)
+            .fetch_one(&mut *conn)
+            .await?
+        }
         None => (None, 0),
     };
     let next_parent = match *parent_patch {

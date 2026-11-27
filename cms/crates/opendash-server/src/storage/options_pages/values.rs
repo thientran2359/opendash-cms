@@ -61,12 +61,11 @@ pub(in crate::storage) async fn verify_options_page_target_exists_in_conn(
         if !opendash_core::id::valid_package_id(theme_id) {
             return Err(ApiError::bad_request("theme:<id> không hợp lệ."));
         }
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM theme_packages WHERE theme_id = ?)",
-        )
-        .bind(theme_id)
-        .fetch_one(&mut *conn)
-        .await?;
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM theme_packages WHERE theme_id = ?)")
+                .bind(theme_id)
+                .fetch_one(&mut *conn)
+                .await?;
         if !exists {
             return Err(ApiError::not_found("Theme mục tiêu không tồn tại."));
         }
@@ -434,7 +433,7 @@ pub async fn put_options_page_values(
         && tok != current_token
     {
         return Err(ApiError::conflict(
-            "schema_token đã thay đổi, giữ bản nhập và tải lại cấu hình.",
+            "options_page_schema_token_mismatch: Cấu trúc trường của trang tùy chọn đã thay đổi, vui lòng tải lại.",
         ));
     }
 
@@ -462,7 +461,7 @@ pub async fn put_options_page_values(
         }
         if is_secondary && !spec.translatable {
             return Err(ApiError::bad_request(
-                "Không thể lưu trường không hỗ trợ dịch ở ngôn ngữ phụ.",
+                "options_page_non_translatable_field: Trường này không bật đa ngôn ngữ và chỉ được chỉnh sửa ở ngôn ngữ mặc định.",
             ));
         }
     }
@@ -544,8 +543,16 @@ pub async fn put_options_page_values(
     let ref_locale = sec_loc.unwrap_or("");
     for (k, v) in &submitted {
         let v_json = serde_json::to_string(v)?;
-        upsert_owner_option_value_in_conn(&mut tx, "options_page", page_ref, "", sec_loc, k, &v_json)
-            .await?;
+        upsert_owner_option_value_in_conn(
+            &mut tx,
+            "options_page",
+            page_ref,
+            "",
+            sec_loc,
+            k,
+            &v_json,
+        )
+        .await?;
         let spec = spec_map[k.as_str()];
         if matches!(
             spec.field_type,

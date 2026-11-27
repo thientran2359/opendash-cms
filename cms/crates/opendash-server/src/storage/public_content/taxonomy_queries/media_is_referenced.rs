@@ -1,8 +1,17 @@
 use super::*;
 
+use opendash_core::{
+    content::{
+        FieldGroupDomain, FieldRole, LocationEvalContext, evaluate_location_rules,
+        is_restricted_to_admin_only,
+    },
+    field_schema::HydrationVisibility,
+    registry::{DeclarationState, ProviderStatus},
+};
+
 /// Images become public only while referenced by an image/gallery custom field
-/// of an existing CPT entry. A private unreferenced upload remains 404 publicly.
-/// JSON paths are derived from validated field keys persisted in CPT schemas.
+/// of an existing CPT entry, published term, or public options page.
+/// A private unreferenced upload remains 404 publicly.
 pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     let result: i64 = sqlx::query_scalar(
         r#"SELECT EXISTS (
@@ -21,6 +30,16 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              AND t.provider_status = 'active'
              AND e.content_type_key != 'pattern'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+         ) OR EXISTS (
+           SELECT 1
+           FROM seo_public_media_refs AS sm
+           JOIN taxonomy_terms AS term ON sm.source_kind = 'term_seo' AND term.id = sm.source_id
+           JOIN taxonomy_definitions AS td ON td.key = term.kind
+           JOIN site_locales AS sl ON sl.code = term.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+           WHERE sm.media_id = ?
+             AND td.public = 1
+             AND td.provider_status = 'active'
+             AND td.declaration_state = 'declared'
          ) OR EXISTS (
            SELECT 1
            FROM site_home_seo AS h
@@ -116,6 +135,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     .bind(id)
     .bind(id)
     .bind(id)
+    .bind(id)
     .fetch_one(db)
     .await?;
     if result != 0 {
@@ -127,17 +147,13 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            FROM theme_option_media_refs AS tom
            JOIN theme_revisions AS r ON r.theme_id = tom.owner_id
            JOIN theme_active_selection AS a ON a.revision_id = r.revision_id AND a.id = 1
-           LEFT JOIN site_locales AS sl
-             ON sl.code = tom.locale
-            AND tom.locale != ''
+           LEFT JOIN site_locales AS sl ON sl.code = tom.locale AND tom.locale != ''
           WHERE tom.owner_kind = 'theme'
             AND tom.media_id = ?
             AND (
               tom.locale = ''
               OR (
-                sl.code IS NOT NULL
-                AND sl.enabled = 1
-                AND sl.deleted_at IS NULL
+                sl.code IS NOT NULL AND sl.enabled = 1 AND sl.deleted_at IS NULL
                 AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
               )
             )",
@@ -151,7 +167,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     {
         let public_keys: std::collections::BTreeSet<&str> = specs
             .iter()
-            .filter(|s| !s.is_ui_only() && s.public)
+            .filter(|s| HydrationVisibility::OptionsPublicOnly.allows(s))
             .map(|s| s.key.as_str())
             .collect();
         if theme_option_candidates
@@ -162,11 +178,155 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
         }
     }
 
-    // Builder + one-hop Pattern ACL projections are only candidates: a change
-    // in Content Type / Field Group visibility can revoke body access without
-    // rewriting old entry_pattern_refs (which intentionally preserve content).
-    // Re-evaluate the effective schema at the public read boundary so stale
-    // projections cannot serve a private body or an inactive provider.
+    let options_page_candidates: Vec<(String, String)> = sqlx::query_as(
+        "SELECT tom.owner_id, tom.option_key
+           FROM theme_option_media_refs AS tom
+           LEFT JOIN site_locales AS sl ON sl.code = tom.locale AND tom.locale != ''
+          WHERE tom.owner_kind = 'options_page'
+            AND tom.media_id = ?
+            AND (
+              tom.locale = ''
+              OR (
+                sl.code IS NOT NULL AND sl.enabled = 1 AND sl.deleted_at IS NULL
+                AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+              )
+            )",
+    )
+    .bind(id)
+    .fetch_all(db)
+    .await?;
+    if !options_page_candidates.is_empty() {
+        let mut conn = db.acquire().await?;
+        let active_theme_id: Option<String> = sqlx::query_scalar(
+            "SELECT r.theme_id FROM theme_active_selection a
+               JOIN theme_revisions r ON r.revision_id = a.revision_id
+              WHERE a.id = 1 AND r.source_format = 'v3'",
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        let mut checked_refs: std::collections::BTreeMap<
+            String,
+            std::collections::BTreeSet<String>,
+        > = std::collections::BTreeMap::new();
+        for (owner_id, opt_key) in options_page_candidates {
+            let allowed_keys = if let Some(existing) = checked_refs.get(&owner_id) {
+                existing
+            } else {
+                let is_owner_active = if owner_id == "site_global" {
+                    true
+                } else if let Some(tid) = owner_id.strip_prefix("theme:") {
+                    active_theme_id.as_deref() == Some(tid)
+                } else if let Some(page_key) = owner_id.strip_prefix("custom:") {
+                    crate::storage::options_pages::get_options_page_in_conn(&mut conn, page_key)
+                        .await?
+                        .is_some_and(|p| {
+                            p.provider_status == ProviderStatus::Active
+                                && p.declaration_state == DeclarationState::Declared
+                        })
+                } else {
+                    false
+                };
+                let mut set = std::collections::BTreeSet::new();
+                if is_owner_active {
+                    let groups = crate::storage::content::load_attached_groups_in_tx(
+                        &mut conn,
+                        "options_page",
+                        &owner_id,
+                        FieldGroupDomain::OptionsPage,
+                    )
+                    .await?;
+                    let eval_ctx = LocationEvalContext {
+                        options_page: Some(owner_id.clone()),
+                        user_role: FieldRole::Editor,
+                        ..Default::default()
+                    };
+                    for grp in groups {
+                        if grp.is_runtime_active()
+                            && !is_restricted_to_admin_only(&grp.location)
+                            && evaluate_location_rules(&grp.location, &eval_ctx)
+                        {
+                            for spec in grp.fields {
+                                if HydrationVisibility::OptionsPublicOnly.allows(&spec) {
+                                    set.insert(spec.key);
+                                }
+                            }
+                        }
+                    }
+                }
+                checked_refs.insert(owner_id.clone(), set);
+                &checked_refs[&owner_id]
+            };
+            if allowed_keys.contains(&opt_key) {
+                return Ok(true);
+            }
+        }
+    }
+
+    let term_candidates: Vec<(String, String)> = sqlx::query_as(
+        "SELECT DISTINCT tm.kind, tm.values_json
+           FROM term_field_media_refs AS r
+           JOIN taxonomy_terms AS tm ON tm.id = r.term_id
+           JOIN taxonomy_definitions AS td ON td.key = tm.kind
+           JOIN site_locales AS sl ON sl.code = tm.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL
+            AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+          WHERE r.media_id = ?
+            AND td.public = 1
+            AND td.provider_status = 'active'
+            AND td.declaration_state = 'declared'",
+    )
+    .bind(id)
+    .fetch_all(db)
+    .await?;
+    if !term_candidates.is_empty() {
+        let mut conn = db.acquire().await?;
+        for (kind, values_json) in term_candidates {
+            let Some(eff) =
+                crate::storage::taxonomy::load_effective_term_schema_in_tx(&mut conn, &kind)
+                    .await?
+            else {
+                continue;
+            };
+            if !eff.taxonomy.public
+                || eff.taxonomy.provider_status != ProviderStatus::Active
+                || eff.taxonomy.declaration_state != DeclarationState::Declared
+            {
+                continue;
+            }
+            let Ok(values) = serde_json::from_str::<
+                std::collections::BTreeMap<String, serde_json::Value>,
+            >(&values_json) else {
+                continue;
+            };
+            let eval_ctx = LocationEvalContext {
+                taxonomy_term: Some(kind),
+                user_role: FieldRole::Editor,
+                ..Default::default()
+            };
+            let specs: Vec<opendash_core::field_schema::FieldSpec> = eff
+                .attached_groups
+                .iter()
+                .filter(|grp| {
+                    grp.is_runtime_active()
+                        && !is_restricted_to_admin_only(&grp.location)
+                        && evaluate_location_rules(&grp.location, &eval_ctx)
+                })
+                .flat_map(|grp| grp.fields.iter().cloned())
+                .filter(|spec| {
+                    !spec.is_ui_only()
+                        && eff.effective_fields.get(&spec.key).is_some_and(|fe| {
+                            fe.effective_status
+                                == opendash_core::content::EffectiveFieldStatus::Active
+                        })
+                })
+                .collect();
+            let collected =
+                opendash_core::field_schema::collect_public_media_ids(&specs, &values, false);
+            if collected.all_ids().contains(id) {
+                return Ok(true);
+            }
+        }
+    }
+
     let builder_type_keys: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT e.content_type_key FROM content_entries AS e
          JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
@@ -200,8 +360,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
         }
     }
 
-    let field_candidates: Vec<(String, String)> = sqlx::query_as(
-        "SELECT DISTINCT e.content_type_key, e.values_json
+    let field_candidates: Vec<(i64, String, Option<String>, Option<String>, String)> = sqlx::query_as(
+        "SELECT DISTINCT e.id, e.content_type_key, e.page_layout_key, e.custom_template_key, e.values_json
          FROM entry_builder_media_refs AS r
          JOIN content_entries AS e ON e.id = r.entry_id
          JOIN content_types AS t ON t.key = e.content_type_key
@@ -221,16 +381,25 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     .await?;
     if !field_candidates.is_empty() {
         let mut conn = db.acquire().await?;
-        for (type_key, values_json) in field_candidates {
+        let meta: Vec<(i64, String, Option<String>, Option<String>)> = field_candidates
+            .iter()
+            .map(|(eid, tk, pl, ct, _)| (*eid, tk.clone(), pl.clone(), ct.clone()))
+            .collect();
+        let eval_map = super::super::batch_load_entry_eval_contexts_in_conn(
+            &mut conn,
+            &meta,
+            FieldRole::Editor,
+        )
+        .await?;
+        for (eid, type_key, _, _, values_json) in field_candidates {
             let Some(schema) =
                 crate::storage::content::load_effective_content_schema_in_tx(&mut conn, &type_key)
                     .await?
             else {
                 continue;
             };
-            if schema.base.status != opendash_core::registry::ProviderStatus::Active
-                || schema.base.declaration_state
-                    != opendash_core::registry::DeclarationState::Declared
+            if schema.base.status != ProviderStatus::Active
+                || schema.base.declaration_state != DeclarationState::Declared
                 || !schema.base.descriptor.settings.public
             {
                 continue;
@@ -240,15 +409,16 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
             >(&values_json) else {
                 continue;
             };
-            let specs: Vec<opendash_core::field_schema::FieldSpec> = schema
-                .effective_fields
-                .iter()
-                .filter(|(k, entry)| {
-                    k.as_str() != "body"
-                        && entry.effective_status
-                            == opendash_core::content::EffectiveFieldStatus::Active
-                })
-                .map(|(_, entry)| entry.definition.clone())
+            let eval_ctx = eval_map.get(&eid).cloned().unwrap_or_default();
+            let specs: Vec<opendash_core::field_schema::FieldSpec> =
+                crate::content_render::ordered_public_field_defs_for_entry(
+                    &schema,
+                    FieldRole::Editor,
+                    &eval_ctx,
+                )
+                .into_iter()
+                .filter(|spec| spec.key != "body")
+                .cloned()
                 .collect();
             let collected =
                 opendash_core::field_schema::collect_public_media_ids(&specs, &values, false);

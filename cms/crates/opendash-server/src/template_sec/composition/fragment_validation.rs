@@ -239,6 +239,7 @@ pub(crate) fn is_forbidden_block_shadow_name(id: &str) -> bool {
         "options"
             | "site_options"
             | "theme_options"
+            | "custom_options"
             | "menus"
             | "od_is_preview"
             | "od_icon"

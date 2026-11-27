@@ -302,11 +302,18 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
                 {
                     "key": "job_posting",
                     "label": "Job Posting",
+                    "taxonomies": ["category", "tag"]
+                }
+            ],
+            "field_groups": [
+                {
+                    "local_key": "job_posting_fields",
+                    "title": "Job Posting Fields",
+                    "target_types": ["job_posting"],
                     "fields": [
                         { "key": "company", "label": "Company", "type": "text", "required": true },
                         { "key": "salary", "label": "Salary", "type": "number", "required": false }
-                    ],
-                    "taxonomies": ["category", "tag"]
+                    ]
                 }
             ]
         },

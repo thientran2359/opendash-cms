@@ -386,20 +386,74 @@ pub async fn build_term_seo_view_for_locale(
     canonical_path: &str,
     query: &PublicQuery,
 ) -> ApiResult<SeoView> {
-    let mut view =
-        build_simple_seo_view_for_locale(db, Some(locale), page_title, Some(canonical_path), false)
-            .await?;
+    let general = settings::get_general_for_locale(db, Some(locale)).await?;
+    let pub_settings = settings::get_public(db).await?;
+    let (_resolved_locale, lang, dir) =
+        settings::get_locale_bcp47_and_dir(db, Some(locale)).await?;
+    let row: Option<(
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+    )> = sqlx::query_as(
+        "SELECT seo_title, seo_description, seo_og_image_id, seo_canonical_url, seo_noindex
+           FROM taxonomy_terms WHERE id = ?",
+    )
+    .bind(term_id)
+    .fetch_optional(db)
+    .await?;
+    let (custom_title, description, og_image_id, custom_canonical, term_noindex) =
+        row.unwrap_or((None, None, None, None, 0));
+    let title = custom_title.unwrap_or_else(|| format!("{page_title} — {}", general.site_title));
+    let canonical_url = custom_canonical
+        .clone()
+        .or_else(|| absolute_public_url(&pub_settings, canonical_path));
+    let og_image_url = if og_image_id.is_some() {
+        let public_mid: Option<String> = sqlx::query_scalar(
+            "SELECT media_id FROM seo_public_media_refs
+              WHERE source_kind = 'term_seo' AND source_id = ? LIMIT 1",
+        )
+        .bind(term_id)
+        .fetch_optional(db)
+        .await?;
+        project_og_image_url_versioned(db, &pub_settings, public_mid).await?
+    } else {
+        None
+    };
+    let noindex = term_noindex != 0;
+    let robots = if !pub_settings.indexing_enabled || noindex {
+        "noindex,nofollow".to_string()
+    } else {
+        "index,follow".to_string()
+    };
+    let mut view = SeoView {
+        lang,
+        dir,
+        title: title.clone(),
+        description: description.clone(),
+        canonical_url: canonical_url.clone(),
+        alternates: Vec::new(),
+        robots,
+        og_title: title,
+        og_description: description,
+        og_url: canonical_url,
+        og_image_url,
+        json_ld: Vec::new(),
+    };
     if query.page > 1 || query.filters != PublicFilters::default() {
         return Ok(view);
     }
-    let pub_settings = settings::get_public(db).await?;
     let mut tx = db.begin().await?;
-    let Some(origin) = has_multilingual_alternates_prereq(&mut tx, &pub_settings, false).await?
+    let Some(origin) = has_multilingual_alternates_prereq(&mut tx, &pub_settings, noindex).await?
     else {
         return Ok(view);
     };
-    let rows: Vec<(String, String, i64, String)> = sqlx::query_as(
-        "SELECT sib.locale, sib_sl.bcp47_tag, sib_sl.is_default, claims.path
+    if !is_self_canonical_for_origin(custom_canonical.as_deref(), &origin, canonical_path) {
+        return Ok(view);
+    }
+    let rows: Vec<(String, String, i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT sib.locale, sib_sl.bcp47_tag, sib_sl.is_default, claims.path, sib.seo_canonical_url
            FROM taxonomy_terms cur
            JOIN taxonomy_terms sib
              ON sib.kind = cur.kind
@@ -414,6 +468,7 @@ pub async fn build_term_seo_view_for_locale(
             AND td.public = 1
             AND td.provider_status = 'active'
             AND td.declaration_state = 'declared'
+            AND sib.seo_noindex = 0
             AND EXISTS (
               SELECT 1
                 FROM entry_terms et
@@ -454,12 +509,19 @@ pub async fn build_term_seo_view_for_locale(
     .fetch_all(&mut *tx)
     .await?;
     tx.commit().await?;
-    if rows.iter().any(|(loc, _, _, _)| loc == locale) {
-        let members: Vec<(String, bool, String)> = rows
+    let members: Vec<(String, String, bool, String)> = rows
+        .into_iter()
+        .filter(|(_, _, _, path, sib_canonical)| {
+            is_self_canonical_for_origin(sib_canonical.as_deref(), &origin, path)
+        })
+        .map(|(loc, bcp47, is_def, path, _)| (loc, bcp47, is_def != 0, path))
+        .collect();
+    if members.iter().any(|(loc, ..)| loc == locale) {
+        let finalized_input: Vec<(String, bool, String)> = members
             .into_iter()
-            .map(|(_, bcp47, is_def, path)| (bcp47, is_def != 0, path))
+            .map(|(_, bcp47, is_def, path)| (bcp47, is_def, path))
             .collect();
-        view.alternates = finalize_alternates_for_origin(&origin, &members);
+        view.alternates = finalize_alternates_for_origin(&origin, &finalized_input);
     }
     Ok(view)
 }

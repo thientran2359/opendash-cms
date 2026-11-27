@@ -65,6 +65,10 @@ ALTER TABLE taxonomy_terms
 ALTER TABLE taxonomy_terms
     ADD COLUMN seo_noindex INTEGER NOT NULL DEFAULT 0
     CHECK (seo_noindex IN (0, 1));
+ALTER TABLE taxonomy_terms
+    ADD COLUMN description TEXT NOT NULL DEFAULT '';
+ALTER TABLE taxonomy_terms
+    ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
 
 -- 2. Backfill existing Field Groups (location_rules_json & presentation_json)
 UPDATE content_field_groups

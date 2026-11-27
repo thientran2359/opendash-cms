@@ -149,12 +149,14 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
     .await;
     let db = site.database().await;
 
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('admin_extensions','term_extension_values')",
-    ).fetch_one(&db).await.unwrap();
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'admin_extensions'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
     assert_eq!(
-        count, 2,
-        "migration 0036 must install before runtime routes"
+        count, 1,
+        "migration 0036 + 0063 must keep admin_extensions without legacy term_extension_values"
     );
     let baseline = get(
         &client,
@@ -183,17 +185,27 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
     // fixture isolates the schema-token/CAS code path with deterministic data.
     sqlx::query("INSERT INTO plugins(id,version,name,manifest_json,wasm_blob) VALUES ('case-provider','1.0.0','Case','{}',X'00')")
         .execute(&db).await.unwrap();
-    let definition = json!({
-      "kind":"term_panel",
-      "config":{"local_key":"internal_note","label":"Internal Note","kind":"category","order":1,
-        "fields":[
-          {"key":"secret","label":"Admin secret","type":"text","required":true,"acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}},
-          {"key":"shared","label":"Shared","type":"boolean","required":false,"acl":{"min_view_role":"editor","min_edit_role":"editor","public_exposure":"private"}}
-        ]
-      }
-    });
-    sqlx::query("INSERT INTO admin_extensions(owner_kind,owner_id,local_key,declaration_json) VALUES ('plugin','case-provider','internal_note',?)")
-        .bind(definition.to_string()).execute(&db).await.unwrap();
+    let group_id = "plugin:case-provider:internal_note";
+    let fields_json = json!([
+        {"key":"secret","label":"Admin secret","type":"text","required":true,"acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}},
+        {"key":"shared","label":"Shared","type":"boolean","required":false,"acl":{"min_view_role":"editor","min_edit_role":"editor","public_exposure":"private"}}
+    ]);
+    let loc_json = json!([[{"param":"taxonomy_term","op":"eq","value":"category"}]]);
+    let pres_json = json!({"region":"main_bottom","order":1,"collapsible":true,"collapsed_by_default":false,"style":"card","label_placement":"top"});
+    sqlx::query(
+        "INSERT INTO content_field_groups(group_id,owner_kind,owner_id,local_key,title,description,fields_json,domain,location_rules_json,presentation_json,active,status,version)
+         VALUES (?,'plugin','case-provider','internal_note','Internal Note','',?,'term',?,?,1,'active',1)",
+    )
+    .bind(group_id)
+    .bind(fields_json.to_string())
+    .bind(loc_json.to_string())
+    .bind(pres_json.to_string())
+    .execute(&db).await.unwrap();
+    sqlx::query(
+        "INSERT INTO content_field_group_targets(group_id,target_kind,target_key,association_state) VALUES (?,'taxonomy_term','category','declared')",
+    )
+    .bind(group_id)
+    .execute(&db).await.unwrap();
     let scope = format!("/api/admin/taxonomy/terms/{id}");
     let config = get(
         &client,
@@ -202,10 +214,9 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         &format!("{scope}/effective-editor-config"),
     )
     .await;
-    let key = "plugin/case-provider/internal_note";
-    assert_eq!(config["panels"][0]["key"], key);
+    assert_eq!(config["groups"][0]["group_id"], group_id);
     let token = config["schema_token"].as_str().unwrap();
-    assert_eq!(token.len(), 64);
+    assert!(token.starts_with("sha256:") && token.len() == 71);
 
     let updated = patch(
         &client,
@@ -215,14 +226,14 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         id,
         first_version,
         json!({"name":"Admin ext changed",
-          "extensions":{key:{"secret":"Original","shared":true}},
+          "values":{"secret":"Original","shared":true},
           "schema_token":token}),
     )
     .await;
     assert_eq!(updated.status(), StatusCode::OK);
     let saved: Value = updated.json().await.unwrap();
     assert_eq!(saved["name"], "Admin ext changed");
-    assert_eq!(saved["extensions"][key]["secret"], "Original");
+    assert_eq!(saved["values"]["secret"], "Original");
     let current = saved["version"].as_i64().unwrap();
 
     let stale = patch(
@@ -232,7 +243,7 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         &csrf,
         id,
         first_version,
-        json!({"extensions":{key:{"secret":"Stale"}},"schema_token":token}),
+        json!({"values":{"secret":"Stale"},"schema_token":token}),
     )
     .await;
     assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
@@ -243,7 +254,7 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         &csrf,
         id,
         current,
-        json!({"extensions":{key:{"secret":"Bypass"}},"schema_token":"0".repeat(64)}),
+        json!({"values":{"secret":"Bypass"},"schema_token":format!("sha256:{}", "0".repeat(64))}),
     )
     .await;
     assert_eq!(changed_token.status(), StatusCode::CONFLICT);
@@ -254,7 +265,7 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         &csrf,
         id,
         current,
-        json!({"extensions":{key:{"undeclared":"Oops"}},"schema_token":token}),
+        json!({"values":{"undeclared":"Oops"},"schema_token":token}),
     )
     .await;
     assert_eq!(invalid_field.status(), StatusCode::FORBIDDEN);
@@ -266,7 +277,7 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         id,
         current,
         json!({"name":"Core field must not save",
-            "extensions":{key:{"shared":"yes"}},"schema_token":token}),
+            "values":{"shared":"yes"},"schema_token":token}),
     )
     .await;
     assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
@@ -277,7 +288,7 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         &csrf,
         id,
         current,
-        json!({"extensions":{key:{"secret":null}},"schema_token":token}),
+        json!({"values":{"secret":null},"schema_token":token}),
     )
     .await;
     assert_eq!(forbidden_null.status(), StatusCode::BAD_REQUEST);
@@ -288,27 +299,33 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         &csrf,
         id,
         current,
-        json!({"extensions":{key:{"shared":true}}}),
+        json!({"values":{"shared":true}}),
     )
     .await;
     assert_eq!(absent_token.status(), StatusCode::BAD_REQUEST);
     let current_term = get(&client, &site, &admin, &scope).await;
     assert_eq!(current_term["version"], current);
     assert_eq!(current_term["name"], "Admin ext changed");
-    assert_eq!(current_term["extensions"][key]["secret"], "Original");
+    assert_eq!(current_term["values"]["secret"], "Original");
 
     // Even a maliciously registered provider column may not project a
     // private field into server table config or authenticated row DTOs.
-    let private_schema = json!({
-      "key":"private_cpt","label":"Private CPT",
-      "fields":[{"key":"admin_note","label":"Admin note",
-        "type":"text","required":false,
-        "acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}}],
-    });
+    let private_schema = json!({"key":"private_cpt","label":"Private CPT"});
     sqlx::query(
         "INSERT INTO content_types(key,definition_json,owner_kind,provider_status,declaration_state,version)
          VALUES('private_cpt',?,'user','active','declared',1)",
     ).bind(private_schema.to_string()).execute(&db).await.unwrap();
+    let private_fg = json!([{
+        "key":"admin_note","label":"Admin note","type":"text","required":false,
+        "acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}
+    }]);
+    sqlx::query(
+        "INSERT INTO content_field_groups(group_id,owner_kind,owner_id,local_key,title,description,fields_json,domain,location_rules_json,presentation_json,active,status,version)
+         VALUES('user:private_cpt_fields','user',NULL,'private_cpt_fields','Private CPT Fields','',?,'content','[[{\"param\":\"content_type\",\"op\":\"eq\",\"value\":\"private_cpt\"}]]','{\"region\":\"main_bottom\",\"order\":10,\"collapsible\":true,\"collapsed_by_default\":false,\"style\":\"card\",\"label_placement\":\"top\"}',1,'active',1)",
+    ).bind(private_fg.to_string()).execute(&db).await.unwrap();
+    sqlx::query(
+        "INSERT INTO content_field_group_targets(group_id,target_kind,target_key,association_state) VALUES('user:private_cpt_fields','content_type','private_cpt','declared')",
+    ).execute(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
          VALUES('private_cpt','private-entry','Private entry','{"admin_note":"NO-LEAK"}','draft','vi','eg-' || lower(hex(randomblob(8))))"#,
@@ -374,11 +391,11 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
     .await;
     assert_ne!(editor_cfg["schema_token"], token);
     assert_eq!(
-        editor_cfg["panels"][0]["fields"].as_array().unwrap().len(),
+        editor_cfg["groups"][0]["fields"].as_array().unwrap().len(),
         1
     );
     let editor_term = get(&client, &site, &editor, &scope).await;
-    assert!(editor_term["extensions"][key].get("secret").is_none());
+    assert!(editor_term["values"].get("secret").is_none());
     let forged = patch(
         &client,
         &site,
@@ -386,7 +403,7 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         &editor_csrf,
         id,
         current,
-        json!({"extensions":{key:{"secret":"Forged"}},"schema_token":token}),
+        json!({"values":{"secret":"Forged"},"schema_token":token}),
     )
     .await;
     assert_eq!(forged.status(), StatusCode::FORBIDDEN);
@@ -397,7 +414,7 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         &editor_csrf,
         id,
         current,
-        json!({"extensions":{key:{"shared":false}},
+        json!({"values":{"shared":false},
             "schema_token":editor_cfg["schema_token"]}),
     )
     .await;
@@ -407,12 +424,16 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         "editor may edit only explicitly permitted provider field"
     );
     let editor_saved: Value = editor_saved.json().await.unwrap();
-    assert_eq!(editor_saved["extensions"][key]["shared"], false);
-    assert!(editor_saved["extensions"][key].get("secret").is_none());
+    assert_eq!(editor_saved["values"]["shared"], false);
+    assert!(editor_saved["values"].get("secret").is_none());
     let unchanged_secret = get(&client, &site, &admin, &scope).await;
-    assert_eq!(unchanged_secret["extensions"][key]["secret"], "Original");
+    assert_eq!(unchanged_secret["values"]["secret"], "Original");
 
     sqlx::query("UPDATE plugins SET enabled=0 WHERE id='case-provider'")
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE content_field_groups SET status='provider_inactive' WHERE owner_kind='plugin' AND owner_id='case-provider'")
         .execute(&db)
         .await
         .unwrap();
@@ -423,10 +444,12 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         &format!("{scope}/effective-editor-config"),
     )
     .await;
-    assert!(withdrawn["panels"].as_array().unwrap().is_empty());
-    let stored:String=sqlx::query_scalar(
-        "SELECT values_json FROM term_extension_values WHERE term_id=? AND owner_kind='plugin' AND owner_id='case-provider' AND local_key='internal_note'",
-    ).bind(id).fetch_one(&db).await.unwrap();
+    assert!(withdrawn["groups"].as_array().unwrap().is_empty());
+    let stored: String = sqlx::query_scalar("SELECT values_json FROM taxonomy_terms WHERE id=?")
+        .bind(id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&stored).unwrap()["secret"],
         "Original"
@@ -436,8 +459,12 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         .execute(&db)
         .await
         .unwrap();
+    sqlx::query("UPDATE content_field_groups SET status='active' WHERE owner_kind='plugin' AND owner_id='case-provider'")
+        .execute(&db)
+        .await
+        .unwrap();
     let revived = get(&client, &site, &admin, &scope).await;
-    assert_eq!(revived["extensions"][key]["secret"], "Original");
+    assert_eq!(revived["values"]["secret"], "Original");
 
     let fk: Vec<(i64, String, i64, i64)> = sqlx::query_as("PRAGMA foreign_key_check")
         .fetch_all(&db)

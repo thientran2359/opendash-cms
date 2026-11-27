@@ -265,7 +265,6 @@ async fn studio_s04_unified_body_roundtrip_and_cpt_builder() {
         .json(&json!({
             "key": "service",
             "label": "Dịch vụ",
-            "fields": [],
             "settings": {
                 "public": true,
                 "has_archive": true,

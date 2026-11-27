@@ -93,6 +93,7 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
     site: &SiteContext<'_>,
     site_options: &BTreeMap<String, serde_json::Value>,
     options: &BTreeMap<String, serde_json::Value>,
+    custom_options: &BTreeMap<String, serde_json::Value>,
     menus: &BTreeMap<String, menu::MenuViewModel>,
 ) -> ApiResult<serde_json::Value> {
     use TemplateCandidateKind as K;
@@ -157,6 +158,19 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         None
     };
 
+    let placeholder_term =
+        (target.kind == K::Taxonomy).then(|| content_render::PublicTermDetailView {
+            id: 0,
+            kind: target.taxonomy.as_deref().unwrap_or("category").to_owned(),
+            name: "Chuyên mục mẫu".to_owned(),
+            slug: "sample-term".to_owned(),
+            description: String::new(),
+            sort_order: 0,
+            url: Some("/".to_owned()),
+            featured_image: None,
+            fields: BTreeMap::new(),
+        });
+
     let breadcrumbs = match target.kind {
         K::Home => content_render::home_breadcrumbs(
             content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
@@ -211,6 +225,7 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         site,
         site_options,
         options,
+        custom_options,
         theme_assets: &theme_assets,
         menus,
         route_kind,
@@ -224,6 +239,7 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         related_entries: &empty_entries,
         recent_posts: &empty_entries,
         taxonomy: taxonomy_value.as_ref(),
+        term: placeholder_term.as_ref(),
         content_type: ct_value.as_ref(),
         entry: placeholder_entry.as_ref(),
     })

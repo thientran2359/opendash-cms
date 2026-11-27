@@ -15,10 +15,20 @@ pub(crate) fn resolve_field_node_and_tail<'p, 'a, 's>(
             let first = *attrs.first()?;
             (policy.site_options_tree.get(first)?, &attrs[1..])
         }
+        "custom_options" => {
+            if attrs.len() < 2 {
+                return None;
+            }
+            let page_nodes = policy.custom_options_nodes.get(attrs[0])?;
+            (page_nodes.get(attrs[1])?, &attrs[2..])
+        }
         other => match scopes.lookup(other) {
             Some(UrlSourceKind::FieldNode(node)) => (node, attrs),
             Some(UrlSourceKind::TrustedEntry) if attrs.len() >= 2 && attrs[0] == "fields" => {
                 (policy.entry_field_nodes.get(attrs[1])?, &attrs[2..])
+            }
+            Some(UrlSourceKind::TrustedTerm) if attrs.len() >= 2 && attrs[0] == "fields" => {
+                (policy.taxonomy_term_nodes.get(attrs[1])?, &attrs[2..])
             }
             _ => return None,
         },
@@ -212,7 +222,21 @@ pub(crate) fn is_href_only_expr(
                 if g.name == "url"
                     && matches!(
                         scopes.lookup(v.id),
-                        Some(UrlSourceKind::TrustedEntry | UrlSourceKind::TrustedLink)
+                        Some(
+                            UrlSourceKind::TrustedEntry
+                                | UrlSourceKind::TrustedLink
+                                | UrlSourceKind::TrustedTerm
+                        )
+                    ) =>
+            {
+                true
+            }
+            Expr::GetAttr(parent_attr)
+                if g.name == "url"
+                    && parent_attr.name == "parent"
+                    && matches!(
+                        &parent_attr.expr,
+                        Expr::Var(v) if scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntry)
                     ) =>
             {
                 true
@@ -275,6 +299,16 @@ pub(crate) fn is_src_and_href_expr(
             {
                 true
             }
+            Expr::GetAttr(fi_attr)
+                if matches!(g.name, "url" | "thumbnail_url")
+                    && fi_attr.name == "featured_image"
+                    && matches!(
+                        &fi_attr.expr,
+                        Expr::Var(v) if scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedTerm)
+                    ) =>
+            {
+                true
+            }
             Expr::GetAttr(media_attr)
                 if matches!(g.name, "url" | "thumbnail_url")
                     && media_attr.name == "media"
@@ -333,6 +367,24 @@ pub(crate) fn walk_theme_ast_with_url_scopes(
     policy: &ThemeUrlPolicy,
     allow_trusted_theme_markup: bool,
 ) -> Result<ThemeTemplateUsageFlags, &'static str> {
+    walk_theme_ast_with_url_scopes_for(
+        stmt,
+        is_part,
+        is_full_doctype_doc,
+        false,
+        policy,
+        allow_trusted_theme_markup,
+    )
+}
+
+pub(crate) fn walk_theme_ast_with_url_scopes_for(
+    stmt: &Stmt<'_>,
+    is_part: bool,
+    is_full_doctype_doc: bool,
+    is_taxonomy_template: bool,
+    policy: &ThemeUrlPolicy,
+    allow_trusted_theme_markup: bool,
+) -> Result<ThemeTemplateUsageFlags, &'static str> {
     let mut usage = ThemeTemplateUsageFlags::default();
     let (final_states, _) = walk_theme_stmt_with_url_scopes(
         stmt,
@@ -341,9 +393,10 @@ pub(crate) fn walk_theme_ast_with_url_scopes(
             allow_trusted_theme_markup,
             0,
         )]),
-        UrlScopeStack::root(),
+        UrlScopeStack::root_with_context(is_taxonomy_template),
         is_part,
         is_full_doctype_doc,
+        is_taxonomy_template,
         policy,
         allow_trusted_theme_markup,
         &mut usage,
@@ -359,12 +412,14 @@ pub(crate) fn walk_theme_ast_with_url_scopes(
     Ok(usage)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn walk_theme_stmts_with_url_scopes(
     stmts: &[Stmt<'_>],
     mut states: BTreeSet<ThemeHtmlState>,
     mut scopes: UrlScopeStack,
     is_part: bool,
     is_full_doctype_doc: bool,
+    is_taxonomy_template: bool,
     policy: &ThemeUrlPolicy,
     allow_trusted_theme_markup: bool,
     usage: &mut ThemeTemplateUsageFlags,
@@ -376,6 +431,7 @@ pub(crate) fn walk_theme_stmts_with_url_scopes(
             scopes,
             is_part,
             is_full_doctype_doc,
+            is_taxonomy_template,
             policy,
             allow_trusted_theme_markup,
             usage,

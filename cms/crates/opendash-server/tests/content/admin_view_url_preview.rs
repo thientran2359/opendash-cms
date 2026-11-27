@@ -317,11 +317,9 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
         .post(format!("{}/api/admin/content-types", srv.base))
         .header(header::COOKIE, &cookie)
         .header("x-csrf-token", &csrf)
-        .json(
-            &json!({"key":"t02_private","label":"Private T02","fields":[],
+        .json(&json!({"key":"t02_private","label":"Private T02",
             "settings":{"public":false,"has_archive":false,
-            "publication":"immediate","supports":["editor"]}}),
-        )
+            "publication":"immediate","supports":["editor"]}}))
         .send()
         .await
         .unwrap();
@@ -415,7 +413,7 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
         .post(format!("{}/api/admin/content-types", srv.base))
         .header(header::COOKIE, &cookie)
         .header("x-csrf-token", &csrf)
-        .json(&json!({"key":"t02_provider","label":"Provider Visibility","fields":[]}))
+        .json(&json!({"key":"t02_provider","label":"Provider Visibility"}))
         .send()
         .await
         .unwrap();

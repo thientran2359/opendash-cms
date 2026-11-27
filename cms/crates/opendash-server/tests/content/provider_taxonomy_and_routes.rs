@@ -171,7 +171,7 @@ fn theme_zip(theme_id: &str, version: &str, with_declarations: bool) -> Vec<u8> 
             }],
             "content_types": [{
                 "key":"theme_listing_c4","label":"C4 theme listing",
-                "fields":[],"taxonomies":["theme_genre_c4"],
+                "taxonomies":["theme_genre_c4"],
                 "settings":{
                     "public":true,"has_archive":true,
                     "publication":"draft_publish","supports":["editor"]
@@ -346,7 +346,7 @@ fn provider_manifest() -> Value {
         "declarations":{
             "taxonomy_definitions":[{"key":TAX, "label":"C4 genre",
                 "hierarchical":false, "public":true, "rewrite_base":"genres-c4"}],
-            "content_types":[{"key":CPT,"label":"C4 listing","fields":[],
+            "content_types":[{"key":CPT,"label":"C4 listing",
                 "taxonomies":[TAX],"rewrite_base":"listings-c4",
                 "settings":{"public":true,"has_archive":true,
                     "publication":"draft_publish","supports":["editor"]}}]

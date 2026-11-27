@@ -218,6 +218,138 @@ pub fn declared_fields_for_cpt(
     fields
 }
 
+pub fn taxonomy_scope_for_target_key<'a>(target_key: &'a str) -> Option<&'a str> {
+    if let Some(rest) = target_key.strip_prefix("taxonomy:key:") {
+        return rest.split(':').next().filter(|s| !s.is_empty());
+    }
+    None
+}
+
+pub fn declared_fields_for_taxonomy(
+    declarations: &ThemeDeclarations,
+    tax_key: Option<&str>,
+) -> Vec<opendash_core::field_schema::FieldSpec> {
+    use opendash_core::content::{
+        FieldGroupDomain, FieldRole, LocationEvalContext, evaluate_location_rules,
+        is_restricted_to_admin_only,
+    };
+    use opendash_core::field_schema::FieldScopeKind;
+
+    let mut fields = Vec::new();
+    for fg in &declarations.field_groups {
+        let Ok(norm) = fg.validate_and_normalize_full(FieldScopeKind::ExtensionGroupField) else {
+            continue;
+        };
+        if norm.domain != FieldGroupDomain::Term || is_restricted_to_admin_only(&norm.location) {
+            continue;
+        }
+        let matches = match tax_key {
+            Some(key) => evaluate_location_rules(
+                &norm.location,
+                &LocationEvalContext {
+                    taxonomy_term: Some(key.to_owned()),
+                    user_role: FieldRole::Editor,
+                    ..Default::default()
+                },
+            ),
+            None => true,
+        };
+        if matches {
+            fields.extend(norm.fields);
+        }
+    }
+    fields
+}
+
+pub fn declared_custom_options_pages_fields(
+    declarations: &ThemeDeclarations,
+) -> BTreeMap<String, Vec<opendash_core::field_schema::FieldSpec>> {
+    use opendash_core::content::{
+        FieldGroupDomain, FieldRole, LocationEvalContext, evaluate_location_rules,
+        is_restricted_to_admin_only,
+    };
+    use opendash_core::field_schema::FieldScopeKind;
+
+    let mut out = BTreeMap::new();
+    for page in &declarations.options_pages {
+        out.entry(page.page_key.clone()).or_insert_with(Vec::new);
+    }
+    for fg in &declarations.field_groups {
+        let Ok(norm) = fg.validate_and_normalize_full(FieldScopeKind::ExtensionGroupField) else {
+            continue;
+        };
+        if norm.domain != FieldGroupDomain::OptionsPage
+            || is_restricted_to_admin_only(&norm.location)
+        {
+            continue;
+        }
+        for page in &declarations.options_pages {
+            let page_ref = format!("custom:{}", page.page_key);
+            if evaluate_location_rules(
+                &norm.location,
+                &LocationEvalContext {
+                    options_page: Some(page_ref),
+                    user_role: FieldRole::Editor,
+                    ..Default::default()
+                },
+            ) && let Some(list) = out.get_mut(&page.page_key)
+            {
+                list.extend(norm.fields.clone());
+            }
+        }
+    }
+    out
+}
+
+pub fn declared_extra_site_and_theme_options_fields(
+    declarations: &ThemeDeclarations,
+    theme_id: &str,
+) -> (
+    Vec<opendash_core::field_schema::FieldSpec>,
+    Vec<opendash_core::field_schema::FieldSpec>,
+) {
+    use opendash_core::content::{
+        FieldGroupDomain, FieldRole, LocationEvalContext, evaluate_location_rules,
+        is_restricted_to_admin_only,
+    };
+    use opendash_core::field_schema::FieldScopeKind;
+
+    let mut site_fields = Vec::new();
+    let mut theme_fields = Vec::new();
+    let theme_ref = format!("theme:{theme_id}");
+    for fg in &declarations.field_groups {
+        let Ok(norm) = fg.validate_and_normalize_full(FieldScopeKind::ExtensionGroupField) else {
+            continue;
+        };
+        if norm.domain != FieldGroupDomain::OptionsPage
+            || is_restricted_to_admin_only(&norm.location)
+        {
+            continue;
+        }
+        if evaluate_location_rules(
+            &norm.location,
+            &LocationEvalContext {
+                options_page: Some("site_global".to_owned()),
+                user_role: FieldRole::Editor,
+                ..Default::default()
+            },
+        ) {
+            site_fields.extend(norm.fields.clone());
+        }
+        if evaluate_location_rules(
+            &norm.location,
+            &LocationEvalContext {
+                options_page: Some(theme_ref.clone()),
+                user_role: FieldRole::Editor,
+                ..Default::default()
+            },
+        ) {
+            theme_fields.extend(norm.fields);
+        }
+    }
+    (site_fields, theme_fields)
+}
+
 pub fn theme_asset_mime(rel_path: &str) -> Option<&'static str> {
     let ext = rel_path
         .rsplit_once('.')

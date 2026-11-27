@@ -90,6 +90,7 @@ WITH indexable AS (
        )
        AND t.provider_status = 'active'
        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+       AND COALESCE(json_extract(t.definition_json, '$.settings.exclude_from_sitemap'), 0) = 0
        AND COALESCE(s.noindex, 0) = 0
        AND (
          s.canonical_url IS NULL
@@ -114,6 +115,7 @@ WITH indexable AS (
        AND t.key != 'pattern'
        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
        AND COALESCE(json_extract(t.definition_json, '$.settings.has_archive'), 1) = 1
+       AND COALESCE(json_extract(t.definition_json, '$.settings.exclude_from_sitemap'), 0) = 0
        -- A posts archive claimed by Reading Settings is not indexable when
        -- its assigned Page was withdrawn/deleted. That URL serves 404 noindex.
        AND NOT (t.key = 'post' AND EXISTS (
@@ -155,6 +157,11 @@ WITH indexable AS (
      WHERE td.public = 1
        AND td.provider_status = 'active'
        AND td.declaration_state = 'declared'
+       AND tm.seo_noindex = 0
+       AND (
+         tm.seo_canonical_url IS NULL
+         OR (claims.path IS NOT NULL AND tm.seo_canonical_url = (rtrim(?1, '/') || claims.path))
+       )
        AND EXISTS (
          SELECT 1
            FROM entry_terms et
@@ -381,6 +388,8 @@ pub async fn list_indexable_routes_in_tx(
                     AND td.public = 1
                     AND td.provider_status = 'active'
                     AND td.declaration_state = 'declared'
+                    AND sib.seo_noindex = 0
+                    AND (sib.seo_canonical_url IS NULL OR sib.seo_canonical_url = (rtrim(?2, '/') || claims.path))
                     AND EXISTS (
                       SELECT 1
                         FROM entry_terms et
@@ -418,6 +427,7 @@ pub async fn list_indexable_routes_in_tx(
                   ORDER BY cur.id ASC, sib_sl.is_default DESC, sib_sl.position ASC, sib_sl.code ASC",
             )
             .bind(ids_json)
+            .bind(public_origin)
             .fetch_all(&mut *conn)
             .await?;
             let mut grouped = BTreeMap::<i64, Vec<(String, bool, String)>>::new();

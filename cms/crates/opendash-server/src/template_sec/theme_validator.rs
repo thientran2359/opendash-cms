@@ -66,12 +66,15 @@ pub(super) struct UrlScopeStack {
 
 impl UrlScopeStack {
     pub(super) fn root() -> Self {
-        Self {
-            frames: vec![BTreeMap::from([(
-                "entry".to_owned(),
-                Some(UrlSourceKind::TrustedEntry),
-            )])],
+        Self::root_with_context(false)
+    }
+
+    pub(super) fn root_with_context(has_term: bool) -> Self {
+        let mut root = BTreeMap::from([("entry".to_owned(), Some(UrlSourceKind::TrustedEntry))]);
+        if has_term {
+            root.insert("term".to_owned(), Some(UrlSourceKind::TrustedTerm));
         }
+        Self { frames: vec![root] }
     }
 
     pub(super) fn from_root_map(root: BTreeMap<String, Option<UrlSourceKind>>) -> Self {

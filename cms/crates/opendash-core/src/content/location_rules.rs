@@ -29,6 +29,16 @@ pub struct LocationRule {
     pub value: String,
 }
 
+impl LocationRule {
+    pub fn content_type_eq(value: impl Into<String>) -> Self {
+        Self {
+            param: LocationParam::ContentType,
+            op: LocationOp::Eq,
+            value: value.into(),
+        }
+    }
+}
+
 pub type LocationRuleGroups = Vec<Vec<LocationRule>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

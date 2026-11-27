@@ -190,14 +190,9 @@ pub async fn get_theme_options_in_conn_for_locale(
     let (global_map, locale_map) =
         load_theme_option_maps_in_conn(conn, theme_id, &default_locale, &target_locale).await?;
 
-    let version: i64 = load_owner_option_version_in_conn(
-        conn,
-        "theme",
-        theme_id,
-        &default_locale,
-        &target_locale,
-    )
-    .await?;
+    let version: i64 =
+        load_owner_option_version_in_conn(conn, "theme", theme_id, &default_locale, &target_locale)
+            .await?;
 
     let mut values = BTreeMap::new();
     for spec in &fields {
@@ -360,13 +355,7 @@ pub async fn put_theme_options_in_conn_for_locale(
             let single_map = BTreeMap::from([(k.clone(), v.clone())]);
             let media_ids = collect_media_ids(std::slice::from_ref(spec), &single_map).all_ids();
             sync_theme_option_media_refs_in_conn(
-                conn,
-                theme_id,
-                "theme",
-                theme_id,
-                ref_locale,
-                k,
-                &media_ids,
+                conn, theme_id, "theme", theme_id, ref_locale, k, &media_ids,
             )
             .await?;
         }

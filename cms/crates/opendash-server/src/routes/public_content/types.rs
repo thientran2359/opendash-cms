@@ -55,6 +55,7 @@ pub(super) struct PublicRouteContext<'a> {
     pub(super) route_path: Option<&'a str>,
     pub(super) entry_id: Option<i64>,
     pub(super) entry_type_key: Option<&'a str>,
+    pub(super) custom_options: &'a BTreeMap<String, serde_json::Value>,
     pub(super) breadcrumbs: &'a [content_render::BreadcrumbItem],
     pub(super) pagination: &'a content_render::PaginationView,
     pub(super) archive_url: Option<&'a str>,
@@ -62,6 +63,8 @@ pub(super) struct PublicRouteContext<'a> {
     pub(super) next_url: Option<&'a str>,
     pub(super) entries: &'a [content_render::EntryView],
     pub(super) taxonomy: Option<&'a serde_json::Value>,
+    pub(super) term: Option<&'a content_render::PublicTermDetailView>,
+    pub(super) term_schema: Option<&'a opendash_core::content::EffectiveTermSchema>,
     pub(super) content_type: Option<&'a serde_json::Value>,
     pub(super) entry: Option<&'a content_render::EntryView>,
 }
@@ -103,8 +106,14 @@ pub(super) async fn render_resolved_public_template_html(
         TemplateResolution::ActiveTheme { target_key, .. } => Some(target_key.as_str()),
         _ => None,
     };
-    let url_policy =
-        overrides::active_theme_url_policy_for_target(active, target_key_ref, cpt_schema.as_ref())?;
+    let url_policy = overrides::active_theme_url_policy_for_route(
+        db,
+        active,
+        target_key_ref,
+        cpt_schema.as_ref(),
+        route_ctx.term_schema,
+    )
+    .await?;
     let inspection =
         overrides::inspect_public_surfaces_and_precompile(db, &resolution, active, &url_policy)
             .await?;
@@ -144,6 +153,7 @@ pub(super) async fn render_resolved_public_template_html(
         site: site_ctx,
         site_options: site_opts,
         options: theme_opts,
+        custom_options: route_ctx.custom_options,
         theme_assets: &theme_assets,
         menus: &menus,
         route_kind: route_ctx.route_kind,
@@ -157,6 +167,7 @@ pub(super) async fn render_resolved_public_template_html(
         related_entries: &related_entries,
         recent_posts: &recent_posts,
         taxonomy: route_ctx.taxonomy,
+        term: route_ctx.term,
         content_type: route_ctx.content_type,
         entry: route_ctx.entry,
     })?;
@@ -302,15 +313,16 @@ pub(crate) async fn render_canonical_taxonomy(
     let query =
         parse_query(raw_query, QueryScope::TaxonomyArchive(kind)).map_err(ApiError::bad_request)?;
     let offset = (query.page - 1) * ARCHIVE_SIZE;
-    let (confirmed_kind, term, page) = public_content::taxonomy_public_page_by_id(
-        db,
-        term_id,
-        query.filters.clone(),
-        ARCHIVE_SIZE,
-        offset,
-    )
-    .await?
-    .ok_or_else(|| ApiError::not_found("Không tìm thấy taxonomy."))?;
+    let (confirmed_kind, term, page, term_detail, term_richtext_nonces) =
+        public_content::taxonomy_public_page_and_detail_by_id(
+            db,
+            term_id,
+            query.filters.clone(),
+            ARCHIVE_SIZE,
+            offset,
+        )
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy taxonomy."))?;
     if confirmed_kind != kind_key {
         return Err(ApiError::not_found("Không tìm thấy taxonomy."));
     }
@@ -459,6 +471,18 @@ pub(crate) async fn render_canonical_taxonomy(
         .render_budget
         .richtext_nonces
         .extend(tax_richtext_nonces);
+    budget
+        .render_budget
+        .richtext_nonces
+        .extend(term_richtext_nonces);
+    let custom_opts = crate::storage::options_pages::load_active_custom_options_public(
+        db,
+        Some(&locale),
+        false,
+        Some(&mut budget.render_budget.richtext_nonces),
+    )
+    .await?;
+    let term_schema = crate::storage::taxonomy::load_effective_term_schema(db, &schema.key).await?;
     let locale_ctx = seo::build_theme_locale_context(
         db,
         Some(&locale),
@@ -483,6 +507,7 @@ pub(crate) async fn render_canonical_taxonomy(
             route_path: Some(&canonical_base),
             entry_id: None,
             entry_type_key: None,
+            custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
             archive_url: None,
@@ -490,6 +515,8 @@ pub(crate) async fn render_canonical_taxonomy(
             next_url: next.as_deref(),
             entries: &entries,
             taxonomy: Some(&tax_value),
+            term: Some(&term_detail),
+            term_schema: term_schema.as_ref(),
             content_type: Some(&ct_value),
             entry: None,
         },

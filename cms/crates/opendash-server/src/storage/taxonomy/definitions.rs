@@ -98,7 +98,9 @@ pub(in crate::storage) async fn definition_in_write(
 pub async fn list_definitions(db: &SqlitePool) -> ApiResult<Vec<TaxonomyDefinition>> {
     let mut conn = db.acquire().await?;
     let sql = format!("{DEF_SELECT} ORDER BY key");
-    let rows: Vec<DefinitionRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).fetch_all(&mut *conn).await?;
+    let rows: Vec<DefinitionRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .fetch_all(&mut *conn)
+        .await?;
     let mut cpts_map = super::meta::load_taxonomy_content_types_map_in_conn(&mut conn).await?;
     rows.into_iter()
         .map(|r| {
@@ -277,8 +279,12 @@ pub async fn create_definition(
         .map_err(ApiError::bad_request)?;
     let settings_json = serde_json::to_string(&settings)?;
     let rw_col: Option<String> = match &input.rewrite_base {
-        opendash_core::content::PatchField::Set(s) => Some(s.trim().to_owned()).filter(|x| !x.is_empty()),
-        opendash_core::content::PatchField::Clear | opendash_core::content::PatchField::Omitted => None,
+        opendash_core::content::PatchField::Set(s) => {
+            Some(s.trim().to_owned()).filter(|x| !x.is_empty())
+        }
+        opendash_core::content::PatchField::Clear | opendash_core::content::PatchField::Omitted => {
+            None
+        }
     };
     let mut tx = begin_admin_write(db, actor, false).await?;
     ensure_non_reserved_taxonomy_key_in_tx(&mut tx, &input.key).await?;
@@ -370,7 +376,10 @@ pub async fn patch_definition(
         }
         super::meta::sync_taxonomy_content_types_in_tx(&mut tx, key, cpts).await?;
     }
-    let mut next_settings = input.settings.clone().unwrap_or_else(|| current.settings.clone());
+    let mut next_settings = input
+        .settings
+        .clone()
+        .unwrap_or_else(|| current.settings.clone());
     next_settings
         .validate_and_normalize()
         .map_err(ApiError::bad_request)?;
@@ -427,6 +436,26 @@ pub async fn patch_definition(
         &input.rewrite_base,
     )
     .await?;
+    if current.public && !public {
+        sqlx::query(
+            "DELETE FROM seo_public_media_refs
+              WHERE source_kind = 'term_seo'
+                AND source_id IN (SELECT id FROM taxonomy_terms WHERE kind = ?)",
+        )
+        .bind(key)
+        .execute(&mut *tx)
+        .await?;
+    } else if !current.public && public {
+        sqlx::query(
+            "INSERT OR IGNORE INTO seo_public_media_refs (source_kind, source_id, media_id)
+             SELECT 'term_seo', id, seo_og_image_id
+               FROM taxonomy_terms
+              WHERE kind = ? AND seo_og_image_id IS NOT NULL",
+        )
+        .bind(key)
+        .execute(&mut *tx)
+        .await?;
+    }
     let updated = definition_in_write(&mut tx, key)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải taxonomy vừa sửa."))?;
@@ -471,6 +500,21 @@ pub async fn delete_definition(
             "Taxonomy đang được dùng bởi term hoặc content type.",
         ));
     }
+    if crate::storage::content::table_exists_in_tx(&mut tx, "content_field_group_targets").await? {
+        sqlx::query(
+            "DELETE FROM content_field_group_targets WHERE target_kind = 'taxonomy_term' AND target_key = ?",
+        )
+        .bind(key)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let _ = crate::storage::permalinks::set_site_rewrite_override_in_tx(
+        &mut tx,
+        "taxonomy",
+        key,
+        &opendash_core::content::PatchField::Clear,
+    )
+    .await;
     sqlx::query("DELETE FROM taxonomy_definitions WHERE key=? AND version=?")
         .bind(key)
         .bind(expected_version)
@@ -521,67 +565,4 @@ pub(in crate::storage) async fn begin_admin_write<'a>(
         }
         Some(_) => Ok(tx),
     }
-}
-
-pub async fn delete_term(
-    db: &SqlitePool,
-    actor: &SessionContext,
-    id: i64,
-    expected_version: i64,
-) -> ApiResult<()> {
-    let mut tx = begin_admin_write(db, actor, false).await?;
-    current_term(&mut tx, id, expected_version).await?;
-    let children: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM taxonomy_terms WHERE parent_id = ?")
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(mutation_error)?;
-    if children != 0 {
-        return Err(ApiError::conflict(
-            "Category còn mục con. Hãy chuyển mục con trước.",
-        ));
-    }
-    // P10 creates entry_terms in its own migration. After that migration the
-    // same deletion path checks dependencies explicitly, while FK RESTRICT
-    // remains the database's final guard against concurrent entry updates.
-    let has_memberships: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'entry_terms'",
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(mutation_error)?;
-    if has_memberships != 0 {
-        let linked_entries: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM entry_terms WHERE term_id = ?")
-                .bind(id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(mutation_error)?;
-        if linked_entries != 0 {
-            return Err(ApiError::conflict(
-                "Term đang được gắn vào nội dung. Hãy gỡ liên kết trước.",
-            ));
-        }
-    }
-    let affected = sqlx::query("DELETE FROM taxonomy_terms WHERE id = ? AND version = ?")
-        .bind(id)
-        .bind(expected_version)
-        .execute(&mut *tx)
-        .await
-        .map_err(mutation_error)?
-        .rows_affected();
-    if affected != 1 {
-        return Err(ApiError::precondition_failed(
-            "Term đã thay đổi, hãy tải lại.",
-        ));
-    }
-    sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'term_seo' AND source_id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
-    tx.commit().await.map_err(mutation_error)?;
-    crate::cache::SiteCacheEpoch::global().bump();
-    Ok(())
 }

@@ -6,6 +6,30 @@ pub struct ContentTypeApiItem {
     pub base: OwnedDescriptor<ContentTypeDefinition>,
     pub version: i64,
     pub schema_token: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub taxonomies: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewrite_base: Option<String>,
+}
+
+pub(super) async fn build_content_type_api_item_in_tx(
+    conn: &mut SqliteConnection,
+    effective: EffectiveContentSchema,
+) -> ApiResult<ContentTypeApiItem> {
+    let taxonomies = load_effective_taxonomies_in_tx(conn, &effective.base.descriptor.key).await?;
+    let rewrite_base = crate::storage::permalinks::read_settings(conn)
+        .await?
+        .content_type_bases
+        .get(&effective.base.descriptor.key)
+        .cloned()
+        .flatten();
+    Ok(ContentTypeApiItem {
+        base: effective.base,
+        version: effective.base_version,
+        schema_token: effective.schema_token,
+        taxonomies,
+        rewrite_base,
+    })
 }
 
 pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
@@ -240,13 +264,10 @@ pub async fn insert_user_content_type(
             verify_effective_schema_transition(None, &effective, false)
                 .map_err(|e| map_transition_error(e, true))?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+            let item = build_content_type_api_item_in_tx(&mut tx, effective).await?;
             tx.commit().await?;
             crate::cache::SiteCacheEpoch::global().bump();
-            Ok(ContentTypeApiItem {
-                base: effective.base,
-                version: effective.base_version,
-                schema_token: effective.schema_token,
-            })
+            Ok(item)
         }
     }
 }
@@ -324,7 +345,8 @@ pub async fn update_user_content_type(
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     };
     let is_builtin = matches!(type_key, "post" | "page");
-    if owner_kind != "user" && !(is_builtin && owner_kind == "core") {
+    let is_provider = matches!(owner_kind.as_str(), "theme" | "plugin");
+    if owner_kind != "user" && !(is_builtin && owner_kind == "core") && !is_provider {
         return Err(ApiError::forbidden(
             "Chỉ có thể cập nhật loại nội dung thuộc quyền sở hữu của User.",
         ));
@@ -338,6 +360,18 @@ pub async fn update_user_content_type(
     let old_effective = load_effective_content_schema_in_tx(&mut tx, type_key)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải schema hiện tại."))?;
+    if is_provider {
+        let mut compare = incoming.clone();
+        if input.settings.is_none() {
+            compare.settings = old_effective.base.descriptor.settings.clone();
+        }
+        if compare != old_effective.base.descriptor {
+            return Err(ApiError::forbidden(
+                "Loại nội dung thuộc provider chỉ cho phép chỉnh sửa taxonomies và rewrite_base.",
+            ));
+        }
+        incoming = old_effective.base.descriptor.clone();
+    }
     if is_builtin
         && (incoming.key != old_effective.base.descriptor.key
             || incoming.label != old_effective.base.descriptor.label)
@@ -363,7 +397,7 @@ pub async fn update_user_content_type(
         .await?;
         if has_children {
             return Err(ApiError::conflict(
-                "incompatible_schema_change: Không thể tắt phân cấp khi đang có bài viết con (parent_id).",
+                "cannot_disable_hierarchy_with_parents: Không thể tắt phân cấp khi vẫn còn bài viết có bài cha.",
             ));
         }
     }
@@ -409,13 +443,10 @@ pub async fn update_user_content_type(
         .map_err(|e| map_transition_error(e, true))?;
 
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    let item = build_content_type_api_item_in_tx(&mut tx, new_effective).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
-    Ok(ContentTypeApiItem {
-        base: new_effective.base,
-        version: new_effective.base_version,
-        schema_token: new_effective.schema_token,
-    })
+    Ok(item)
 }
 
 pub async fn delete_user_content_type(
@@ -428,7 +459,9 @@ pub async fn delete_user_content_type(
         return Err(ApiError::bad_request("Khóa loại nội dung không hợp lệ."));
     }
     if matches!(type_key, "post" | "page" | "pattern" | "section") {
-        return Err(ApiError::forbidden("Không thể xóa loại nội dung hệ thống Core."));
+        return Err(ApiError::forbidden(
+            "Không thể xóa loại nội dung hệ thống Core.",
+        ));
     }
     let mut tx = begin_content_write_tx(db).await?;
     let row: Option<(String, i64)> =
@@ -457,7 +490,7 @@ pub async fn delete_user_content_type(
             .await?;
     if entry_count > 0 && !purge {
         return Err(ApiError::conflict(
-            "cannot_delete_cpt_with_entries: Loại nội dung còn dữ liệu; hãy xóa bài viết trước hoặc thêm ?purge=true.",
+            "cannot_delete_content_type_with_entries: Không thể xóa loại nội dung khi vẫn còn bản ghi.",
         ));
     }
     if entry_count > 0 && purge {
@@ -533,11 +566,7 @@ pub async fn list_content_types_with_meta(db: &SqlitePool) -> ApiResult<Vec<Cont
     let mut conn = db.acquire().await?;
     for key in keys {
         if let Some(effective) = load_effective_content_schema_in_tx(&mut conn, &key).await? {
-            items.push(ContentTypeApiItem {
-                base: effective.base,
-                version: effective.base_version,
-                schema_token: effective.schema_token,
-            });
+            items.push(build_content_type_api_item_in_tx(&mut conn, effective).await?);
         }
     }
     Ok(items)

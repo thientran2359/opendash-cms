@@ -179,12 +179,38 @@ pub fn validate_template_csec_with_theme_urls(
     validate_template_csec_with_usage_flags(name, source, policy, false, false).map(|_| ())
 }
 
+pub(crate) fn is_taxonomy_target_name(name: &str) -> bool {
+    let clean = name.strip_prefix("templates/").unwrap_or(name);
+    name == "taxonomy"
+        || name.starts_with("taxonomy:")
+        || clean == "taxonomy.html"
+        || clean.starts_with("taxonomy-")
+}
+
 pub(crate) fn validate_template_csec_with_usage_flags(
     name: &str,
     source: &str,
     policy: &ThemeUrlPolicy,
     allow_od_icon: bool,
     allow_trusted_theme_markup: bool,
+) -> Result<ThemeTemplateUsageFlags, &'static str> {
+    validate_template_csec_for_taxonomy_and_usage(
+        name,
+        source,
+        policy,
+        allow_od_icon,
+        allow_trusted_theme_markup,
+        is_taxonomy_target_name(name),
+    )
+}
+
+pub(crate) fn validate_template_csec_for_taxonomy_and_usage(
+    name: &str,
+    source: &str,
+    policy: &ThemeUrlPolicy,
+    allow_od_icon: bool,
+    allow_trusted_theme_markup: bool,
+    is_taxonomy_template: bool,
 ) -> Result<ThemeTemplateUsageFlags, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
@@ -200,15 +226,16 @@ pub(crate) fn validate_template_csec_with_usage_flags(
         .map_err(|_| "Cú pháp template MiniJinja không hợp lệ.")?;
 
     validate_stmt_with_icons_ext(&ast, allow_od_icon, allow_od_icon, false)?;
-    reject_reserved_context_rebinding(&ast)?;
+    reject_reserved_context_rebinding_for(&ast, is_taxonomy_template)?;
     let is_full_doctype_doc = source
         .trim_start()
         .to_ascii_lowercase()
         .starts_with("<!doctype");
-    let usage = walk_theme_ast_with_url_scopes(
+    let usage = walk_theme_ast_with_url_scopes_for(
         &ast,
         false,
         is_full_doctype_doc,
+        is_taxonomy_template,
         policy,
         allow_trusted_theme_markup,
     )?;
@@ -313,6 +340,24 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
     kind: CsecContentKind,
     policy: &ThemeUrlPolicy,
 ) -> Result<CompiledCsecComposition, &'static str> {
+    validate_and_compile_csec_composition_with_context(
+        root_name,
+        root_source,
+        parts,
+        kind,
+        policy,
+        is_taxonomy_target_name(root_name),
+    )
+}
+
+pub fn validate_and_compile_csec_composition_with_context(
+    root_name: &str,
+    root_source: &str,
+    parts: &BTreeMap<String, String>,
+    kind: CsecContentKind,
+    policy: &ThemeUrlPolicy,
+    is_taxonomy_template: bool,
+) -> Result<CompiledCsecComposition, &'static str> {
     // Each resource is bounded independently. A theme can declare many safe
     // parts which are not all rendered in one request; the flattened reachable
     // program and rendered output have their own 512 KiB checks below.
@@ -323,7 +368,13 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
     {
         return Err("Template hoặc part vượt giới hạn 512 KiB.");
     }
-    let root_sites = composition_sites(root_name, root_source, false, policy)?;
+    let root_sites = composition_sites_with_context(
+        root_name,
+        root_source,
+        false,
+        is_taxonomy_template,
+        policy,
+    )?;
     let part_policy = policy.without_cpt_entry_fields();
     let mut part_sites = BTreeMap::new();
     for (key, source) in parts {
@@ -332,7 +383,7 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
         }
         part_sites.insert(
             key.clone(),
-            composition_sites(key, source, true, &part_policy)?,
+            composition_sites_with_context(key, source, true, false, &part_policy)?,
         );
     }
 
@@ -375,8 +426,14 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
     }
     // This last check catches dangerous markup introduced across part boundaries,
     // in addition to the independent source checks before expansion.
-    let usage =
-        validate_template_csec_with_usage_flags(root_name, &compiled_source, policy, true, true)?;
+    let usage = validate_template_csec_for_taxonomy_and_usage(
+        root_name,
+        &compiled_source,
+        policy,
+        true,
+        true,
+        is_taxonomy_template,
+    )?;
     Ok(CompiledCsecComposition {
         source: compiled_source,
         name: root_name.to_owned(),
@@ -458,6 +515,22 @@ pub(crate) fn composition_sites(
     is_part: bool,
     policy: &ThemeUrlPolicy,
 ) -> Result<Vec<CompositionSite>, &'static str> {
+    composition_sites_with_context(
+        name,
+        source,
+        is_part,
+        !is_part && is_taxonomy_target_name(name),
+        policy,
+    )
+}
+
+pub(crate) fn composition_sites_with_context(
+    name: &str,
+    source: &str,
+    is_part: bool,
+    is_taxonomy_template: bool,
+    policy: &ThemeUrlPolicy,
+) -> Result<Vec<CompositionSite>, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
@@ -471,13 +544,20 @@ pub(crate) fn composition_sites(
     }
     let ast = parse(source, name, SyntaxConfig::default())
         .map_err(|_| "Cú pháp theme MiniJinja không hợp lệ.")?;
-    reject_reserved_context_rebinding(&ast)?;
+    reject_reserved_context_rebinding_for(&ast, is_taxonomy_template)?;
     let is_full_doctype_doc = !is_part
         && source
             .trim_start()
             .to_ascii_lowercase()
             .starts_with("<!doctype");
-    let _ = walk_theme_ast_with_url_scopes(&ast, is_part, is_full_doctype_doc, policy, true)?;
+    let _ = walk_theme_ast_with_url_scopes_for(
+        &ast,
+        is_part,
+        is_full_doctype_doc,
+        is_taxonomy_template,
+        policy,
+        true,
+    )?;
     let mut sites = Vec::new();
     collect_composition_sites(&ast, source, false, &mut sites)?;
     sites.sort_by_key(|site| site.start);

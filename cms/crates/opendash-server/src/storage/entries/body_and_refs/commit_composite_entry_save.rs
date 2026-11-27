@@ -480,8 +480,15 @@ pub async fn commit_entry_translation(
         replace_term_ids(&mut tx, new_id, &plan.term_ids).await?;
     }
     if status == "published" {
-        enforce_taxonomy_publish_rules_in_tx(&mut tx, type_key, new_id, &plan.target_locale, None, None)
-            .await?;
+        enforce_taxonomy_publish_rules_in_tx(
+            &mut tx,
+            type_key,
+            new_id,
+            &plan.target_locale,
+            None,
+            None,
+        )
+        .await?;
     }
 
     let source_seo: Option<(String, String, Option<String>, i64)> = sqlx::query_as(

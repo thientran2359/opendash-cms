@@ -40,7 +40,9 @@ impl SiteCacheEpoch {
     }
 
     pub fn bump(&self) -> u64 {
-        self.epoch.fetch_add(1, Ordering::AcqRel) + 1
+        let next = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        crate::template_sec::ThemeCompositionCache::global().clear();
+        next
     }
 }
 

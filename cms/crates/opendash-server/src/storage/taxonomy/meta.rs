@@ -19,7 +19,9 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 use super::definitions::definition_in_conn;
 use super::terms::mutation_error;
 use crate::error::{ApiError, ApiResult};
-use crate::storage::content::{load_attached_groups_in_tx, map_transition_error, table_exists_in_tx};
+use crate::storage::content::{
+    load_attached_groups_in_tx, map_transition_error, table_exists_in_tx,
+};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TermFieldGroupView {
@@ -41,6 +43,14 @@ pub struct EffectiveTermEditorConfig {
     pub seo: TermSeoInput,
 }
 
+pub async fn load_effective_term_schema(
+    db: &SqlitePool,
+    kind: &str,
+) -> ApiResult<Option<EffectiveTermSchema>> {
+    let mut conn = db.acquire().await?;
+    load_effective_term_schema_in_tx(&mut conn, kind).await
+}
+
 pub(in crate::storage) async fn load_effective_term_schema_in_tx(
     conn: &mut SqliteConnection,
     kind: &str,
@@ -50,8 +60,8 @@ pub(in crate::storage) async fn load_effective_term_schema_in_tx(
     };
     let groups =
         load_attached_groups_in_tx(conn, "taxonomy_term", kind, FieldGroupDomain::Term).await?;
-    let eff = EffectiveTermSchema::assemble(base, groups)
-        .map_err(|e| map_transition_error(e, true))?;
+    let eff =
+        EffectiveTermSchema::assemble(base, groups).map_err(|e| map_transition_error(e, true))?;
     Ok(Some(eff))
 }
 
@@ -253,6 +263,23 @@ pub(in crate::storage) fn project_term_editor_config(
     }
 }
 
+pub async fn new_term_editor_config(
+    db: &SqlitePool,
+    kind: &str,
+    role: FieldRole,
+) -> ApiResult<EffectiveTermEditorConfig> {
+    let mut conn = db.acquire().await?;
+    let eff = load_effective_term_schema_in_tx(&mut conn, kind)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy taxonomy."))?;
+    Ok(project_term_editor_config(
+        &eff,
+        &BTreeMap::new(),
+        TermSeoInput::default(),
+        role,
+    ))
+}
+
 pub async fn effective_term_editor_config(
     db: &SqlitePool,
     term_id: i64,
@@ -285,7 +312,7 @@ pub(in crate::storage) async fn write_term_meta_and_seo_in_tx(
     actor_role: FieldRole,
     schema_token: Option<&str>,
     values_patch: Option<&BTreeMap<String, Value>>,
-    seo_patch: Option<&TermSeoInput>,
+    seo_patch: &opendash_core::content::PatchField<TermSeoInput>,
 ) -> ApiResult<()> {
     let Some(eff) = load_effective_term_schema_in_tx(conn, kind).await? else {
         return Err(ApiError::not_found("Không tìm thấy taxonomy."));
@@ -310,7 +337,7 @@ pub(in crate::storage) async fn write_term_meta_and_seo_in_tx(
             else {
                 return Err(ApiError::forbidden("Nhóm trường không tồn tại."));
             };
-            if !evaluate_location_rules(&grp.location, &eval_ctx) {
+            if !grp.is_runtime_active() || !evaluate_location_rules(&grp.location, &eval_ctx) {
                 return Err(ApiError::forbidden(
                     "Không có quyền chỉnh sửa trường trong ngữ cảnh này.",
                 ));
@@ -424,64 +451,94 @@ pub(in crate::storage) async fn write_term_meta_and_seo_in_tx(
         }
     }
 
-    if let Some(seo) = seo_patch {
-        if actor_role != FieldRole::Admin {
-            return Err(ApiError::forbidden(
-                "Editor không được chỉnh sửa SEO của term.",
-            ));
-        }
-        let seo = crate::seo::validate_seo_input(&crate::seo::SeoMetadataInput {
-            title: seo.title.clone(),
-            description: seo.description.clone(),
-            og_image_id: seo.og_image_id.clone(),
-            canonical_url: seo.canonical_url.clone(),
-            noindex: seo.noindex,
-        })
-        .map_err(|ApiError(_, msg)| ApiError::bad_request(msg))?;
-        if let Some(og_id) = seo.og_image_id.as_deref() {
-            let row = sqlx::query(
-                "SELECT kind FROM media_assets WHERE id = ? AND lifecycle_state = 'active'",
-            )
-            .bind(og_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-            let Some(r) = row else {
-                return Err(ApiError::bad_request("Ảnh SEO og_image_id không tồn tại hoặc đang ở thùng rác."));
-            };
-            let kind_str: String = r.try_get("kind")?;
-            if kind_str != "image" {
-                return Err(ApiError::bad_request("og_image_id của term SEO phải là ảnh."));
+    match seo_patch {
+        opendash_core::content::PatchField::Omitted => {}
+        opendash_core::content::PatchField::Clear => {
+            if actor_role != FieldRole::Admin {
+                return Err(ApiError::forbidden(
+                    "Editor không được chỉnh sửa SEO của term.",
+                ));
             }
-        }
-        sqlx::query(
-            "UPDATE taxonomy_terms
-                SET seo_title = ?, seo_description = ?, seo_og_image_id = ?,
-                    seo_canonical_url = ?, seo_noindex = ?
-              WHERE id = ?",
-        )
-        .bind(&seo.title)
-        .bind(&seo.description)
-        .bind(&seo.og_image_id)
-        .bind(&seo.canonical_url)
-        .bind(i64::from(seo.noindex))
-        .bind(term_id)
-        .execute(&mut *conn)
-        .await
-        .map_err(mutation_error)?;
-
-        sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'term_seo' AND source_id = ?")
-            .bind(term_id)
-            .execute(&mut *conn)
-            .await?;
-        if let Some(og_id) = seo.og_image_id.as_deref() {
             sqlx::query(
-                "INSERT OR IGNORE INTO seo_public_media_refs (source_kind, source_id, media_id)
-                 VALUES ('term_seo', ?, ?)",
+                "UPDATE taxonomy_terms
+                    SET seo_title = NULL, seo_description = NULL, seo_og_image_id = NULL,
+                        seo_canonical_url = NULL, seo_noindex = 0
+                  WHERE id = ?",
             )
             .bind(term_id)
-            .bind(og_id)
             .execute(&mut *conn)
-            .await?;
+            .await
+            .map_err(mutation_error)?;
+            sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'term_seo' AND source_id = ?")
+                .bind(term_id)
+                .execute(&mut *conn)
+                .await?;
+        }
+        opendash_core::content::PatchField::Set(seo) => {
+            if actor_role != FieldRole::Admin {
+                return Err(ApiError::forbidden(
+                    "Editor không được chỉnh sửa SEO của term.",
+                ));
+            }
+            let seo = crate::seo::validate_seo_input(&crate::seo::SeoMetadataInput {
+                title: seo.title.clone(),
+                description: seo.description.clone(),
+                og_image_id: seo.og_image_id.clone(),
+                canonical_url: seo.canonical_url.clone(),
+                noindex: seo.noindex,
+            })
+            .map_err(|ApiError(_, msg)| ApiError::bad_request(msg))?;
+            if let Some(og_id) = seo.og_image_id.as_deref() {
+                let row = sqlx::query(
+                    "SELECT kind FROM media_assets WHERE id = ? AND lifecycle_state = 'active'",
+                )
+                .bind(og_id)
+                .fetch_optional(&mut *conn)
+                .await?;
+                let Some(r) = row else {
+                    return Err(ApiError::bad_request(
+                        "Ảnh SEO og_image_id không tồn tại hoặc đang ở thùng rác.",
+                    ));
+                };
+                let kind_str: String = r.try_get("kind")?;
+                if kind_str != "image" {
+                    return Err(ApiError::bad_request(
+                        "og_image_id của term SEO phải là ảnh.",
+                    ));
+                }
+            }
+            sqlx::query(
+                "UPDATE taxonomy_terms
+                    SET seo_title = ?, seo_description = ?, seo_og_image_id = ?,
+                        seo_canonical_url = ?, seo_noindex = ?
+                  WHERE id = ?",
+            )
+            .bind(&seo.title)
+            .bind(&seo.description)
+            .bind(&seo.og_image_id)
+            .bind(&seo.canonical_url)
+            .bind(i64::from(seo.noindex))
+            .bind(term_id)
+            .execute(&mut *conn)
+            .await
+            .map_err(mutation_error)?;
+
+            sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'term_seo' AND source_id = ?")
+                .bind(term_id)
+                .execute(&mut *conn)
+                .await?;
+            if eff.taxonomy.public
+                && let Some(og_id) = seo.og_image_id.as_deref()
+            {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO seo_public_media_refs (source_kind, source_id, media_id)
+                     VALUES ('term_seo', ?, ?)",
+                )
+                .bind(term_id)
+                .bind(og_id)
+                .execute(&mut *conn)
+                .await?;
+            }
         }
     }
 

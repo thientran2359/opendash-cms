@@ -95,12 +95,7 @@ pub(crate) async fn load_single_active_row_in_tx(
     let admin_col_keys =
         crate::storage::admin_extensions::active_column_field_keys_in_conn(&mut **tx, type_key)
             .await?;
-    filter_entry_table_fields_for_role(
-        &mut record.values,
-        effective,
-        &admin_col_keys,
-        caller_role,
-    );
+    filter_entry_table_fields_for_role(&mut record.values, effective, &admin_col_keys, caller_role);
     let is_reading_assigned = assigned_reading_pages.contains(&record.id);
     let mut blocked_reasons = BTreeMap::new();
     if is_reading_assigned {

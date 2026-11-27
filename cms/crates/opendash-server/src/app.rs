@@ -3,7 +3,7 @@ use axum::{
     extract::{DefaultBodyLimit, Request},
     http::header,
     middleware::{self, Next},
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
 };
 use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
 use rust_embed::RustEmbed;
@@ -21,9 +21,9 @@ use crate::{
         },
         content::{
             MAX_CONTENT_TYPE_JSON_BYTES, content_entry_preview, content_entry_publication,
-            content_type_create, content_type_list, content_type_update, editor_layout_get,
-            editor_layout_put, effective_editor_config_get, field_group_create, field_group_delete,
-            field_group_list, field_group_update,
+            content_type_create, content_type_delete, content_type_list, content_type_update,
+            editor_layout_get, editor_layout_put, effective_editor_config_get, field_group_create,
+            field_group_delete, field_group_list, field_group_set_active, field_group_update,
         },
         dashboard::dashboard_get,
         entries::{
@@ -40,6 +40,11 @@ use crate::{
         menu::{
             MAX_MENU_JSON_BYTES, menu_slots_get, menu_slots_put, menus_create, menus_delete,
             menus_get, menus_list, menus_preview, menus_put,
+        },
+        options_pages::{
+            MAX_OPTIONS_PAGE_CONFIG_JSON_BYTES, MAX_OPTIONS_PAGE_VALUES_JSON_BYTES,
+            options_page_create, options_page_delete, options_page_update, options_page_values_get,
+            options_page_values_put, options_pages_list,
         },
         plugin::{
             MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_SETTINGS_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES,
@@ -356,6 +361,10 @@ pub fn build_router_with_telemetry(
                 .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
         )
         .route(
+            "/api/admin/taxonomy/definitions/{key}/effective-editor-config",
+            get(crate::routes::taxonomy::taxonomy_definitions_effective_editor_config),
+        )
+        .route(
             "/api/admin/taxonomy/terms",
             get(taxonomy_list)
                 .post(taxonomy_create)
@@ -489,6 +498,24 @@ pub fn build_router_with_telemetry(
                 .layer(DefaultBodyLimit::max(256 * 1024)),
         )
         .route(
+            "/api/admin/options-pages",
+            get(options_pages_list)
+                .post(options_page_create)
+                .layer(DefaultBodyLimit::max(MAX_OPTIONS_PAGE_CONFIG_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/options-pages/{page_key}",
+            put(options_page_update)
+                .delete(options_page_delete)
+                .layer(DefaultBodyLimit::max(MAX_OPTIONS_PAGE_CONFIG_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/options-pages/{key}/values",
+            get(options_page_values_get)
+                .put(options_page_values_put)
+                .layer(DefaultBodyLimit::max(MAX_OPTIONS_PAGE_VALUES_JSON_BYTES)),
+        )
+        .route(
             "/api/themes/{theme_id}/import/dry-run",
             post(import_dry_run).layer(DefaultBodyLimit::max(64 * 1024)),
         )
@@ -520,7 +547,9 @@ pub fn build_router_with_telemetry(
         )
         .route(
             "/api/admin/content-types/{type_key}",
-            put(content_type_update).layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
+            put(content_type_update)
+                .delete(content_type_delete)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
         )
         .route(
             "/api/admin/content-types/{type_key}/editor-layout",
@@ -551,6 +580,10 @@ pub fn build_router_with_telemetry(
             put(field_group_update)
                 .delete(field_group_delete)
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-field-groups/{group_id}/active",
+            patch(field_group_set_active).layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
         )
         .route(
             "/api/admin/content-types/{type_key}/entries",

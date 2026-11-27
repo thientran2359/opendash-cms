@@ -120,17 +120,19 @@ pub async fn list_field_groups_by_domain(
     domain: Option<opendash_core::content::FieldGroupDomain>,
 ) -> ApiResult<Vec<FieldGroupRecord>> {
     let ids: Vec<String> = match domain {
-        Some(dom) => sqlx::query_scalar(
-            "SELECT group_id FROM content_field_groups WHERE domain = ? ORDER BY group_id ASC",
-        )
-        .bind(domain_to_db(dom))
-        .fetch_all(db)
-        .await?,
-        None => sqlx::query_scalar(
-            "SELECT group_id FROM content_field_groups ORDER BY group_id ASC",
-        )
-        .fetch_all(db)
-        .await?,
+        Some(dom) => {
+            sqlx::query_scalar(
+                "SELECT group_id FROM content_field_groups WHERE domain = ? ORDER BY group_id ASC",
+            )
+            .bind(domain_to_db(dom))
+            .fetch_all(db)
+            .await?
+        }
+        None => {
+            sqlx::query_scalar("SELECT group_id FROM content_field_groups ORDER BY group_id ASC")
+                .fetch_all(db)
+                .await?
+        }
     };
     let mut conn = db.acquire().await?;
     let mut out = Vec::with_capacity(ids.len());

@@ -150,9 +150,11 @@ pub(in crate::storage) async fn has_persisted_group_values_for_target_in_tx(
         }
         "taxonomy_term" => {
             if target_key == "*" {
-                sqlx::query_scalar("SELECT values_json FROM taxonomy_terms WHERE values_json != '{}'")
-                    .fetch_all(&mut *conn)
-                    .await?
+                sqlx::query_scalar(
+                    "SELECT values_json FROM taxonomy_terms WHERE values_json != '{}'",
+                )
+                .fetch_all(&mut *conn)
+                .await?
             } else {
                 sqlx::query_scalar(
                     "SELECT values_json FROM taxonomy_terms WHERE kind = ? AND values_json != '{}'",

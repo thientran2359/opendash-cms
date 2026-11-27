@@ -168,7 +168,7 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
         "name": "Bad Tax",
         "declarations": {
             "content_types": [
-                { "key": "book", "label": "Book", "fields": [], "taxonomies": ["genre"] }
+                { "key": "book", "label": "Book", "taxonomies": ["genre"] }
             ]
         }
     })
@@ -223,7 +223,6 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
                 {
                     "key": "listing",
                     "label": "Listing",
-                    "fields": [],
                     "taxonomies": ["category", "tag"]
                 }
             ]
@@ -464,7 +463,6 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
                 {
                     "key": "listing",
                     "label": "Listing",
-                    "fields": [],
                     "taxonomies": ["category"]
                 }
             ]

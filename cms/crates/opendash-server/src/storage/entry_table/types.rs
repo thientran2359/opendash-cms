@@ -269,8 +269,14 @@ pub async fn query(
         std::collections::HashSet::new()
     };
 
-    let (translations_by_group, mut terms_by_entry, public_urls, admin_col_keys) = if is_trash_view {
-        (BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), std::collections::BTreeSet::new())
+    let (translations_by_group, mut terms_by_entry, public_urls, admin_col_keys) = if is_trash_view
+    {
+        (
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            std::collections::BTreeSet::new(),
+        )
     } else {
         let group_ids: Vec<String> = selected
             .iter()

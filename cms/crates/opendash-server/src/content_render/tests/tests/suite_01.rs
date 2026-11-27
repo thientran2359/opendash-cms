@@ -302,7 +302,9 @@ fn entry_view_with_context_enforces_acl_declaration_order_nulls_and_excerpt() {
                 title: "Base".into(),
                 description: String::new(),
                 domain: opendash_core::content::FieldGroupDomain::Content,
-                location: vec![vec![opendash_core::content::LocationRule::content_type_eq("product")]],
+                location: vec![vec![opendash_core::content::LocationRule::content_type_eq(
+                    "product",
+                )]],
                 presentation: opendash_core::content::FieldGroupPresentation {
                     region: EditorRegion::MainPrimary,
                     order: -1,
@@ -322,7 +324,9 @@ fn entry_view_with_context_enforces_acl_declaration_order_nulls_and_excerpt() {
                 title: "Group".into(),
                 description: String::new(),
                 domain: opendash_core::content::FieldGroupDomain::Content,
-                location: vec![vec![opendash_core::content::LocationRule::content_type_eq("product")]],
+                location: vec![vec![opendash_core::content::LocationRule::content_type_eq(
+                    "product",
+                )]],
                 presentation: opendash_core::content::FieldGroupPresentation {
                     region: EditorRegion::MainPrimary,
                     order: 0,

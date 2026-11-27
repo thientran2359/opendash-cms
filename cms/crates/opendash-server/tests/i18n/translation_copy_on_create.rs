@@ -815,7 +815,21 @@ async fn s03_copy_on_create_rbac_and_immediate_cpt() {
         .json(&json!({
             "key": "faq_req",
             "label": "FAQ Req",
-            "settings": { "public": true, "has_archive": false, "publication": "immediate", "supports": ["editor"] },
+            "settings": { "public": true, "has_archive": false, "publication": "immediate", "supports": ["editor"] }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ct_req.status(), StatusCode::CREATED);
+    let fg_req = c
+        .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+        .header(header::COOKIE, &admin_cookie)
+        .header("Origin", &srv.base_url)
+        .header("x-csrf-token", &admin_csrf)
+        .json(&json!({
+            "local_key": "faq_req_fields",
+            "title": "FAQ Req Fields",
+            "target_types": ["faq_req"],
             "fields": [
                 { "key": "answer", "label": "Answer", "type": "text", "required": true },
                 {
@@ -835,7 +849,7 @@ async fn s03_copy_on_create_rbac_and_immediate_cpt() {
         .send()
         .await
         .unwrap();
-    assert_eq!(ct_req.status(), StatusCode::CREATED);
+    assert_eq!(fg_req.status(), StatusCode::CREATED);
 
     let faq_req_vi: Value = c
         .post(format!(

@@ -12,6 +12,7 @@ pub mod l10n;
 pub mod media;
 pub mod menu;
 pub mod operations;
+pub mod options_pages;
 pub mod patterns;
 pub mod plugin;
 pub mod public;

@@ -12,8 +12,8 @@ pub async fn create_user_field_group(
         .validate_and_normalize(None)
         .map_err(map_input_validation_error)?;
     let group_id = scoped_id.to_canonical();
-    let targets = extract_materialized_targets(&norm.location)
-        .map_err(|e| map_transition_error(e, true))?;
+    let targets =
+        extract_materialized_targets(&norm.location).map_err(|e| map_transition_error(e, true))?;
     let fields_json = serde_json::to_string(&norm.fields)?;
     let location_json = serde_json::to_string(&norm.location)?;
     let presentation_json = serde_json::to_string(&norm.presentation)?;
@@ -76,8 +76,8 @@ pub async fn update_user_field_group(
         .validate_and_normalize(Some(group_id_param))
         .map_err(map_input_validation_error)?;
     let group_id = scoped_id.to_canonical();
-    let incoming_targets = extract_materialized_targets(&norm.location)
-        .map_err(|e| map_transition_error(e, true))?;
+    let incoming_targets =
+        extract_materialized_targets(&norm.location).map_err(|e| map_transition_error(e, true))?;
     let fields_json = serde_json::to_string(&norm.fields)?;
     let location_json = serde_json::to_string(&norm.location)?;
     let presentation_json = serde_json::to_string(&norm.presentation)?;
@@ -131,7 +131,8 @@ pub async fn update_user_field_group(
             .map(|t| (t.target_kind.clone(), t.target_key.clone()))
             .collect();
         combined.extend(incoming_targets.iter().cloned());
-        old_snapshots = collect_target_snapshots_in_tx(&mut tx, norm.domain, &combined, false).await?;
+        old_snapshots =
+            collect_target_snapshots_in_tx(&mut tx, norm.domain, &combined, false).await?;
     } else {
         old_snapshots =
             collect_target_snapshots_in_tx(&mut tx, norm.domain, &incoming_targets, false).await?;
@@ -147,7 +148,8 @@ pub async fn update_user_field_group(
         .map(|f| f.key.as_str())
         .collect();
     for old_f in &existing.fields {
-        if !old_f.is_ui_only() && !incoming_keys.contains(old_f.key.as_str()) && any_target_has_data {
+        if !old_f.is_ui_only() && !incoming_keys.contains(old_f.key.as_str()) && any_target_has_data
+        {
             return Err(ApiError::conflict(format!(
                 "cannot_remove_field_with_data: Không thể xóa hẳn trường '{}' khi đã có dữ liệu; hãy tắt nhóm trường hoặc thu hồi.",
                 old_f.key
@@ -243,7 +245,8 @@ pub async fn set_user_field_group_active(
         .iter()
         .map(|t| (t.target_kind.clone(), t.target_key.clone()))
         .collect();
-    let snapshots = collect_target_snapshots_in_tx(&mut tx, existing.domain, &targets, false).await?;
+    let snapshots =
+        collect_target_snapshots_in_tx(&mut tx, existing.domain, &targets, false).await?;
 
     sqlx::query(
         "UPDATE content_field_groups
@@ -376,9 +379,9 @@ pub async fn delete_user_field_group(
             break;
         }
     }
-    if !purge && has_data {
+    if has_data {
         return Err(ApiError::conflict(
-            "cannot_delete_field_group_with_data: Nhóm trường đã có dữ liệu; hãy thu hồi hoặc thêm ?purge=true.",
+            "cannot_purge_field_group_with_data: Không thể xóa vĩnh viễn nhóm trường đang có dữ liệu đã lưu.",
         ));
     }
     if purge {

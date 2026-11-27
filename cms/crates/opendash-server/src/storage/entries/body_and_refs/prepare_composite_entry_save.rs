@@ -205,13 +205,8 @@ pub async fn prepare_composite_entry_save(
                 ctx_terms,
             )
             .await?;
-            let mut out = apply_location_aware_value_merge(
-                &effective,
-                &loc_ctx,
-                &input.values,
-                None,
-                true,
-            );
+            let mut out =
+                apply_location_aware_value_merge(&effective, &loc_ctx, &input.values, None, true);
             if let Some(ref tids) = synced_terms {
                 sync_term_ref_fields_from_entry_terms_in_conn(
                     &mut conn,

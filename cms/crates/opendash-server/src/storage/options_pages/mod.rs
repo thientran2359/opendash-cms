@@ -38,9 +38,8 @@ type PageRow = (
 );
 
 fn parse_parent_menu(raw: &str) -> ApiResult<OptionsPageParentMenu> {
-    OptionsPageParentMenu::from_db(raw).ok_or_else(|| {
-        ApiError::internal("parent_menu của custom_options_pages không hợp lệ.")
-    })
+    OptionsPageParentMenu::from_db(raw)
+        .ok_or_else(|| ApiError::internal("parent_menu của custom_options_pages không hợp lệ."))
 }
 
 fn parent_menu_db(menu: OptionsPageParentMenu) -> &'static str {
@@ -130,6 +129,40 @@ pub async fn list_options_pages(db: &SqlitePool) -> ApiResult<Vec<CustomOptionsP
     rows.into_iter().map(row_to_def).collect()
 }
 
+pub async fn list_visible_options_pages(
+    db: &SqlitePool,
+    actor_role: FieldRole,
+) -> ApiResult<Vec<CustomOptionsPageDefinition>> {
+    let all = list_options_pages(db).await?;
+    if actor_role == FieldRole::Admin {
+        return Ok(all);
+    }
+    let mut conn = db.acquire().await?;
+    let mut out = Vec::new();
+    for page in all {
+        if page.provider_status != ProviderStatus::Active
+            || page.declaration_state != DeclarationState::Declared
+            || page.min_edit_role != FieldRole::Editor
+        {
+            continue;
+        }
+        let page_ref = format!("custom:{}", page.page_key);
+        let groups = values::load_attached_options_groups_in_conn(&mut conn, &page_ref).await?;
+        let active_groups: Vec<_> = groups
+            .into_iter()
+            .filter(|g| g.is_runtime_active())
+            .collect();
+        let visible = active_groups.is_empty()
+            || active_groups
+                .iter()
+                .any(|g| !opendash_core::content::is_restricted_to_admin_only(&g.location));
+        if visible {
+            out.push(page);
+        }
+    }
+    Ok(out)
+}
+
 pub async fn get_options_page(
     db: &SqlitePool,
     page_key: &str,
@@ -153,7 +186,7 @@ pub async fn create_user_options_page(
         .await?;
     if total as usize >= MAX_CUSTOM_OPTIONS_PAGES_PER_SITE {
         return Err(ApiError::conflict(
-            "Website đạt giới hạn tối đa 64 trang tùy chọn.",
+            "options_page_limit_reached: Website đã đạt giới hạn tối đa 64 Custom Options Pages.",
         ));
     }
     let exists: Option<i64> =
@@ -162,7 +195,9 @@ pub async fn create_user_options_page(
             .fetch_optional(&mut *tx)
             .await?;
     if exists.is_some() {
-        return Err(ApiError::conflict("page_key của trang tùy chọn đã tồn tại."));
+        return Err(ApiError::conflict(
+            "options_page_key_conflict: Khóa trang tùy chọn đã được sở hữu bởi một thành phần khác.",
+        ));
     }
     sqlx::query(
         "INSERT INTO custom_options_pages
@@ -284,7 +319,7 @@ pub async fn delete_user_options_page(
     .await?;
     if !purge && (has_data || has_groups) {
         return Err(ApiError::conflict(
-            "cannot_delete_options_page_with_data: Trang tùy chọn còn nhóm trường hoặc dữ liệu; hãy gỡ gắn hoặc thêm ?purge=true.",
+            "options_page_cannot_delete_with_values: Không thể xóa trang tùy chọn khi vẫn còn dữ liệu hoặc liên kết nhóm trường.",
         ));
     }
     if purge {
@@ -295,8 +330,12 @@ pub async fn delete_user_options_page(
             "theme_option_locale_versions",
             "theme_option_media_refs",
         ] {
-            let sql = format!("DELETE FROM {tbl} WHERE owner_kind = 'options_page' AND owner_id = ?");
-            sqlx::query(sqlx::AssertSqlSafe(sql)).bind(&page_ref).execute(&mut *tx).await?;
+            let sql =
+                format!("DELETE FROM {tbl} WHERE owner_kind = 'options_page' AND owner_id = ?");
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(&page_ref)
+                .execute(&mut *tx)
+                .await?;
         }
         sqlx::query(
             "DELETE FROM content_field_group_targets
@@ -339,7 +378,7 @@ pub async fn sync_provider_options_pages_in_tx(
             let expected_owner = parse_owner(owner_kind, Some(owner_id.to_owned()))?;
             if existing.owner != expected_owner {
                 return Err(ApiError::conflict(
-                    "page_key của trang tùy chọn thuộc chủ sở hữu khác (409).",
+                    "options_page_key_conflict: Khóa trang tùy chọn đã được sở hữu bởi một thành phần khác.",
                 ));
             }
             sqlx::query(
@@ -366,7 +405,7 @@ pub async fn sync_provider_options_pages_in_tx(
                 .await?;
             if total as usize >= MAX_CUSTOM_OPTIONS_PAGES_PER_SITE {
                 return Err(ApiError::conflict(
-                    "Website đạt giới hạn tối đa 64 trang tùy chọn.",
+                    "options_page_limit_reached: Website đã đạt giới hạn tối đa 64 Custom Options Pages.",
                 ));
             }
             sqlx::query(

@@ -46,7 +46,8 @@ pub(super) async fn collect_target_snapshots_in_tx(
                     .await?;
                     for cpt in all_cpts {
                         if !out.content.contains_key(&cpt)
-                            && let Some(eff) = load_effective_content_schema_in_tx(conn, &cpt).await?
+                            && let Some(eff) =
+                                load_effective_content_schema_in_tx(conn, &cpt).await?
                         {
                             let has_entries: bool = sqlx::query_scalar(
                                 "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ?)",
@@ -77,11 +78,10 @@ pub(super) async fn collect_target_snapshots_in_tx(
                     ));
                 }
                 if key == "*" {
-                    let all_tax: Vec<String> = sqlx::query_scalar(
-                        "SELECT key FROM taxonomy_definitions ORDER BY key ASC",
-                    )
-                    .fetch_all(&mut *conn)
-                    .await?;
+                    let all_tax: Vec<String> =
+                        sqlx::query_scalar("SELECT key FROM taxonomy_definitions ORDER BY key ASC")
+                            .fetch_all(&mut *conn)
+                            .await?;
                     for tax in all_tax {
                         if !out.term.contains_key(&tax)
                             && let Some(eff) =
@@ -121,17 +121,17 @@ pub(super) async fn collect_target_snapshots_in_tx(
                         "invalid_location_rules_domain: Nhóm trường OptionsPage chỉ gắn với options_page.",
                     ));
                 }
-                crate::storage::options_pages::verify_options_page_target_exists_in_conn(
-                    conn, key,
-                )
-                .await
-                .map_err(|err| {
-                    if missing_target_as_unprocessable && err.0 == axum::http::StatusCode::NOT_FOUND {
-                        ApiError::unprocessable("Trang tùy chọn mục tiêu không tồn tại.")
-                    } else {
-                        err
-                    }
-                })?;
+                crate::storage::options_pages::verify_options_page_target_exists_in_conn(conn, key)
+                    .await
+                    .map_err(|err| {
+                        if missing_target_as_unprocessable
+                            && err.0 == axum::http::StatusCode::NOT_FOUND
+                        {
+                            ApiError::unprocessable("Trang tùy chọn mục tiêu không tồn tại.")
+                        } else {
+                            err
+                        }
+                    })?;
                 out.options_pages.insert(key.clone());
             }
         }
@@ -230,8 +230,8 @@ pub(super) async fn upsert_group_targets_in_tx(
                      WHERE group_id = ? AND target_kind = ? AND target_key = ?",
                 )
                 .bind(group_id)
-                .bind(&old.target_key)
                 .bind(&old.target_kind)
+                .bind(&old.target_key)
                 .execute(&mut *conn)
                 .await?;
             } else {
@@ -257,9 +257,14 @@ pub(super) async fn sync_owner_field_groups_in_tx(
     field_groups: &[ManifestFieldGroupInput],
     incompat_as_conflict: bool,
 ) -> ApiResult<()> {
-    let mut normalized_groups: Vec<(String, ManifestFieldGroupInput, NormalizedFieldGroup, Vec<(String, String)>)> =
-        Vec::with_capacity(field_groups.len());
-    let mut all_targets_by_domain: BTreeMap<FieldGroupDomain, Vec<(String, String)>> = BTreeMap::new();
+    let mut normalized_groups: Vec<(
+        String,
+        ManifestFieldGroupInput,
+        NormalizedFieldGroup,
+        Vec<(String, String)>,
+    )> = Vec::with_capacity(field_groups.len());
+    let mut all_targets_by_domain: BTreeMap<FieldGroupDomain, Vec<(String, String)>> =
+        BTreeMap::new();
 
     for fg in field_groups {
         let group_id = format!("{owner_kind_str}:{owner_id_str}:{}", fg.local_key);
@@ -288,7 +293,10 @@ pub(super) async fn sync_owner_field_groups_in_tx(
     .await?;
     for (dom_str, t_kind, t_key) in existing_target_rows {
         let dom = parse_domain(&dom_str)?;
-        all_targets_by_domain.entry(dom).or_default().push((t_kind, t_key));
+        all_targets_by_domain
+            .entry(dom)
+            .or_default()
+            .push((t_kind, t_key));
     }
 
     let mut snapshots = TargetDomainSnapshots::default();

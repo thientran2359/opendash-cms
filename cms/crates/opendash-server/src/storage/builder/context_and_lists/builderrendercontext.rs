@@ -451,11 +451,8 @@ pub(in crate::storage) async fn validate_entry_builder_document(
                     match &binding.source {
                         BindingSource::RouteContext { field_key } if field_key == "cover_url" => {
                             // The existing resolver picks the first public base image.
-                            if let Some(entry) = current
-                                .schema
-                                .effective_fields
-                                .values()
-                                .find(|e| {
+                            if let Some(entry) =
+                                current.schema.effective_fields.values().find(|e| {
                                     e.definition.field_type
                                         == opendash_core::field_schema::FieldType::Media
                                         && e.definition.effective_acl().2 == PublicExposure::Public

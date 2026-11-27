@@ -197,7 +197,7 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         let part_refs: Vec<&BuilderDocument> = part_docs.iter().collect();
         collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &part_refs, false).await?;
     }
-    let url_policy = active_theme_url_policy(active_v3)?;
+    let url_policy = active_theme_url_policy_in_conn(&mut tx, active_v3, None, None, None).await?;
     let context = PublicBuilderContext {
         state: &state,
         active: active_v3,

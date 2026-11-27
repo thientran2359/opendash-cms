@@ -350,7 +350,7 @@ async fn default_root_cpt_taxonomy_archive_private_and_trailing_slash_routes() {
             .header(header::COOKIE, &admin.cookie)
             .header(header::ORIGIN, &site.base)
             .header("X-CSRF-Token", &admin.csrf)
-            .json(&json!({"key":"project","label":"Projects","fields":[],
+            .json(&json!({"key":"project","label":"Projects",
                 "settings":{"public":true,"has_archive":true,
                             "publication":"draft_publish","supports":["editor"]}}))
             .send()
@@ -367,11 +367,9 @@ async fn default_root_cpt_taxonomy_archive_private_and_trailing_slash_routes() {
             .header(header::COOKIE, &admin.cookie)
             .header(header::ORIGIN, &site.base)
             .header("X-CSRF-Token", &admin.csrf)
-            .json(
-                &json!({"key":"private_note","label":"Private note","fields":[],
+            .json(&json!({"key":"private_note","label":"Private note",
                 "settings":{"public":false,"has_archive":false,
-                            "publication":"immediate","supports":["editor"]}}),
-            )
+                            "publication":"immediate","supports":["editor"]}}))
             .send()
             .await
             .unwrap(),
@@ -622,7 +620,7 @@ async fn auto_unique_slug_reserved_roots_noncomposite_conflict_and_post_id() {
         .header(header::COOKIE, &admin.cookie)
         .header(header::ORIGIN, &site.base)
         .header("X-CSRF-Token", &admin.csrf)
-        .json(&json!({"key":"project","label":"Projects","fields":[],
+        .json(&json!({"key":"project","label":"Projects",
             "settings":{"public":true,"has_archive":true,
                         "publication":"draft_publish","supports":["editor"]}}))
         .send()

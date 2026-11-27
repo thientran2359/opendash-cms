@@ -368,6 +368,7 @@ pub(crate) fn is_valid_od_image_media_target(
         }
     }
     (attrs == ["cover_media"] && scopes.lookup(root) == Some(&UrlSourceKind::TrustedEntry))
+        || (attrs == ["featured_image"] && scopes.lookup(root) == Some(&UrlSourceKind::TrustedTerm))
         || (attrs == ["media"] && scopes.lookup(root) == Some(&UrlSourceKind::TrustedField))
 }
 

@@ -4,6 +4,7 @@ use super::*;
 pub(crate) enum UrlSourceKind {
     TrustedEntry,
     TrustedEntryBatch,
+    TrustedTerm,
     TrustedLink,
     TrustedField,
     FieldNode(FieldTemplateNode),

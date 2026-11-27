@@ -339,7 +339,9 @@ async fn f05_media_validation_rejects_wrong_kind_and_preserves_409_for_quarantin
             title: "Gallery FG".into(),
             description: String::new(),
             domain: opendash_core::content::FieldGroupDomain::Content,
-            location: vec![vec![opendash_core::content::LocationRule::content_type_eq("gallery_item")]],
+            location: vec![vec![opendash_core::content::LocationRule::content_type_eq(
+                "gallery_item",
+            )]],
             presentation: opendash_core::content::FieldGroupPresentation::default(),
             active: true,
             fields: vec![photo],

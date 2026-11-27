@@ -21,6 +21,8 @@ pub struct TaxonomyTerm {
     pub parent_id: Option<i64>,
     pub version: i64,
     pub featured_image_media_id: Option<String>,
+    pub description: String,
+    pub sort_order: i32,
     pub translations: Vec<TermTranslationSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub values: Option<BTreeMap<String, Value>>,
@@ -56,6 +58,8 @@ pub(in crate::storage) type TermRow = (
     String,
     String,
     Option<String>,
+    String,
+    i32,
 );
 
 pub(in crate::storage) fn term(row: TermRow) -> TaxonomyTerm {
@@ -69,6 +73,8 @@ pub(in crate::storage) fn term(row: TermRow) -> TaxonomyTerm {
         parent_id: row.4,
         version: row.5,
         featured_image_media_id: row.8,
+        description: row.9,
+        sort_order: row.10,
         translations: Vec::new(),
         values: None,
         seo: None,
@@ -113,7 +119,7 @@ pub(in crate::storage) async fn term_in_write(
     id: i64,
 ) -> ApiResult<Option<TaxonomyTerm>> {
     let row: Option<TermRow> = sqlx::query_as(
-        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id, featured_image_media_id
+        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id, featured_image_media_id, description, sort_order
          FROM taxonomy_terms WHERE id = ?",
     )
     .bind(id)
@@ -275,7 +281,7 @@ pub(crate) async fn list_terms_for_host(
     .fetch_one(&mut *tx)
     .await?;
     let rows: Vec<TermRow> = sqlx::query_as(
-        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id, featured_image_media_id
+        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id, featured_image_media_id, description, sort_order
            FROM taxonomy_terms
           WHERE (? IS NULL OR kind = ?)
             AND (? IS NULL OR locale = ?)
@@ -283,7 +289,7 @@ pub(crate) async fn list_terms_for_host(
                 AND sl.deleted_at IS NULL AND (? = 0 OR
                     (sl.enabled = 1 AND (sl.is_default = 1 OR
                       (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))))
-          ORDER BY name COLLATE BINARY ASC, id ASC
+          ORDER BY sort_order ASC, name COLLATE BINARY ASC, id ASC
           LIMIT ? OFFSET ?",
     )
     .bind(kind)
@@ -351,7 +357,7 @@ pub async fn resolve_term_labels(
 pub async fn get_term(db: &SqlitePool, id: i64) -> ApiResult<Option<TaxonomyTerm>> {
     let mut tx = db.begin().await?;
     let row: Option<TermRow> = sqlx::query_as(
-        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id, featured_image_media_id
+        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id, featured_image_media_id, description, sort_order
            FROM taxonomy_terms WHERE id = ?",
     )
     .bind(id)
@@ -386,13 +392,9 @@ pub async fn term_with_effective_extensions(
     } else {
         FieldRole::Editor
     };
-    let config = super::super::meta::effective_term_editor_config(
-        db,
-        record.id,
-        &record.kind,
-        field_role,
-    )
-    .await?;
+    let config =
+        super::super::meta::effective_term_editor_config(db, record.id, &record.kind, field_role)
+            .await?;
     record.values = Some(config.values);
     record.seo = Some(config.seo);
     record.schema_token = Some(config.schema_token);
@@ -407,8 +409,5 @@ pub async fn create_term(
     slug: &str,
     parent_id: Option<i64>,
 ) -> ApiResult<TaxonomyTerm> {
-    create_term_with_locale(
-        db, actor, kind, name, slug, parent_id, None, None, None, None, None, None,
-    )
-    .await
+    create_term_with_locale(db, actor, kind, name, slug, parent_id, None, None, None).await
 }

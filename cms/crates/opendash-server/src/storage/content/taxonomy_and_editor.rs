@@ -67,9 +67,8 @@ pub(in crate::storage) fn domain_to_db(
 pub(in crate::storage) fn parse_location_rules(
     raw: &str,
 ) -> ApiResult<opendash_core::content::LocationRuleGroups> {
-    serde_json::from_str(raw).map_err(|_| {
-        ApiError::internal("location_rules_json của field group không hợp lệ.")
-    })
+    serde_json::from_str(raw)
+        .map_err(|_| ApiError::internal("location_rules_json của field group không hợp lệ."))
 }
 
 pub(in crate::storage) fn parse_presentation(

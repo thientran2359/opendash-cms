@@ -297,9 +297,7 @@ pub(in crate::storage) async fn enforce_taxonomy_publish_rules_in_tx(
         }
     }
 
-    if assigned_any
-        && let (Some(eff), Some(ctx)) = (effective, loc_ctx)
-    {
+    if assigned_any && let (Some(eff), Some(ctx)) = (effective, loc_ctx) {
         sync_entry_values_json_with_terms_in_tx(tx, entry_id, eff, ctx, &final_term_ids).await?;
     }
     Ok(assigned_any)

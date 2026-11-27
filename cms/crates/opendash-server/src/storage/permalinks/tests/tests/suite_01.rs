@@ -376,7 +376,8 @@ async fn provider_default_respects_site_choice_and_c3_version() {
     let schema = serde_json::to_string(&opendash_core::content::ContentTypeDefinition {
         key: "books".to_owned(),
         label: "Books".to_owned(),
-        fields: vec![],
+        singular_label: None,
+        description: None,
         settings: Default::default(),
     })
     .unwrap();

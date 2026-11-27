@@ -248,7 +248,7 @@ pub(in crate::storage) async fn preview_part_graph_from_edges(
     active: Option<&ActiveThemeV3>,
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
-    let url_policy = active_theme_url_policy(active)?;
+    let url_policy = active_theme_url_policy_in_conn(tx, active, None, None, None).await?;
     let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut **tx).await?;
     let mut pending = vec![(edges, 0_usize, vec![root_key.to_owned()])];
     let mut graph = BTreeMap::new();

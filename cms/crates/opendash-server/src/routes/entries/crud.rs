@@ -96,7 +96,12 @@ pub async fn entry_create(
     let candidate_locale =
         crate::storage::settings::resolve_requested_locale(&db, input.locale.as_deref()).await?;
     if let Some(eff) = &effective {
-        entry_storage::check_entry_role_gate_before_lookup(eff, &type_key, actor_role, &input.values)?;
+        entry_storage::check_entry_role_gate_before_lookup(
+            eff,
+            &type_key,
+            actor_role,
+            &input.values,
+        )?;
         let mut conn = db.acquire().await?;
         let loc_ctx = entry_storage::build_entry_location_ctx_in_conn(
             &mut conn,
@@ -245,7 +250,12 @@ pub async fn entry_update(
     let preflight_schema_token = effective.as_ref().map(|e| e.schema_token.clone());
     let actor_role = actor_field_role(&actor);
     if let Some(eff) = &effective {
-        entry_storage::check_entry_role_gate_before_lookup(eff, &type_key, actor_role, &input.values)?;
+        entry_storage::check_entry_role_gate_before_lookup(
+            eff,
+            &type_key,
+            actor_role,
+            &input.values,
+        )?;
     }
     let preflight =
         crate::storage::entry_lifecycle::ensure_active_entry_version(&db, &type_key, id, version)
@@ -276,8 +286,12 @@ pub async fn entry_update(
             Some(id),
             entry_locale,
             actor_role,
-            existing_record.as_ref().and_then(|r| r.page_layout_key.clone()),
-            existing_record.as_ref().and_then(|r| r.custom_template_key.clone()),
+            existing_record
+                .as_ref()
+                .and_then(|r| r.page_layout_key.clone()),
+            existing_record
+                .as_ref()
+                .and_then(|r| r.custom_template_key.clone()),
             ctx_terms,
         )
         .await?;
@@ -317,8 +331,12 @@ pub async fn entry_update(
                 Some(id),
                 entry_locale,
                 actor_role,
-                existing_record.as_ref().and_then(|r| r.page_layout_key.clone()),
-                existing_record.as_ref().and_then(|r| r.custom_template_key.clone()),
+                existing_record
+                    .as_ref()
+                    .and_then(|r| r.page_layout_key.clone()),
+                existing_record
+                    .as_ref()
+                    .and_then(|r| r.custom_template_key.clone()),
                 ctx_terms2,
             )
             .await?;

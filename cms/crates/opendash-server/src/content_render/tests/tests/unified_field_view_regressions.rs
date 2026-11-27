@@ -43,7 +43,9 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
         title: "Product Fields".into(),
         description: String::new(),
         domain: opendash_core::content::FieldGroupDomain::Content,
-        location: vec![vec![opendash_core::content::LocationRule::content_type_eq("product")]],
+        location: vec![vec![opendash_core::content::LocationRule::content_type_eq(
+            "product",
+        )]],
         presentation: opendash_core::content::FieldGroupPresentation::default(),
         active: true,
         fields: vec![doc_file, extra_img, gallery, link],
@@ -380,7 +382,9 @@ fn r2_01_entry_view_strips_private_children_inside_public_group_and_repeater() {
         title: "Case R2 FG".into(),
         description: String::new(),
         domain: opendash_core::content::FieldGroupDomain::Content,
-        location: vec![vec![opendash_core::content::LocationRule::content_type_eq("case_r2")]],
+        location: vec![vec![opendash_core::content::LocationRule::content_type_eq(
+            "case_r2",
+        )]],
         presentation: opendash_core::content::FieldGroupPresentation::default(),
         active: true,
         fields: group_fields,

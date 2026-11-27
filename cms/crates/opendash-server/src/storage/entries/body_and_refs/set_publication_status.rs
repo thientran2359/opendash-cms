@@ -61,8 +61,9 @@ pub async fn set_publication_status(
     if status == "draft" {
         crate::storage::plugin_projections::delete_entry_projections_in_tx(&mut tx, id).await?;
     } else if status == "published" {
-        let effective = crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
-            .await?;
+        let effective =
+            crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
+                .await?;
         if let Some(ref eff) = effective {
             let term_ids = read_term_ids(&mut tx, id).await?;
             let (layout, custom): (Option<String>, Option<String>) = sqlx::query_as(
@@ -92,7 +93,8 @@ pub async fn set_publication_status(
             )
             .await?;
         } else {
-            enforce_taxonomy_publish_rules_in_tx(&mut tx, type_key, id, &locale, None, None).await?;
+            enforce_taxonomy_publish_rules_in_tx(&mut tx, type_key, id, &locale, None, None)
+                .await?;
         }
     }
     crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
