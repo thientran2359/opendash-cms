@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "core/accordion-item",
+  "title": "Mục Accordion",
+  "category": "interactive",
+  "icon": "chevron-down",
+  "render": "render.html",
+  "supports_children": true,
+  "allowed_parents": ["core/accordion"],
+  "allowed_children": ["*", "!core/section"],
+  "default_children": [
+    {
+      "block_id": "core/text",
+      "props": { "content": "<p>Nội dung mục câu hỏi.</p>" }
+    }
+  ],
+  "fields": [
+    {
+      "type": "text",
+      "key": "title",
+      "label": "Tiêu đề mục",
+      "required": true,
+      "max_chars": 200,
+      "default": "Mục câu hỏi"
+    },
+    {
+      "type": "boolean",
+      "key": "open_by_default",
+      "label": "Mở sẵn mục này",
+      "default": false
+    }
+  ]
+}

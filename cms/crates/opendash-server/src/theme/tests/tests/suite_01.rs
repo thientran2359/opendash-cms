@@ -38,7 +38,7 @@ fn parses_v3_theme_templates_parts_layouts_and_pattern_document() {
         ),
         (
             "patterns/hero.json",
-            br#"{"schema_version":1,"sections":[]}"#,
+            br#"{"schema_version":1,"blocks":[]}"#,
             CompressionMethod::Stored,
         ),
         (
@@ -66,10 +66,7 @@ fn v3_d01_accepts_exact_declared_assets_and_raster_preview() {
         "file": "patterns/hero.json", "preview_asset": "assets/images/hero.webp"
     }]);
     let entries: &[(&str, &[u8])] = &[
-        (
-            "patterns/hero.json",
-            br#"{"schema_version":1,"sections":[]}"#,
-        ),
+        ("patterns/hero.json", br#"{"schema_version":1,"blocks":[]}"#),
         ("assets/styles.css", b"body { color: #123; }"),
         ("assets/images/hero.webp", b"RIFFdemoWEBP"),
         ("assets/fonts/body.woff2", b"woff2"),
@@ -142,10 +139,7 @@ fn v3_s01_rejects_svg_pattern_preview_and_undeclared_active_assets() {
         parse_theme_zip_v3(&build_v3_zip(
             manifest,
             &[
-                (
-                    "patterns/hero.json",
-                    br#"{"schema_version":1,"sections":[]}"#
-                ),
+                ("patterns/hero.json", br#"{"schema_version":1,"blocks":[]}"#),
                 ("assets/icon.svg", svg),
             ],
         )),
@@ -282,10 +276,7 @@ fn v3_d01_rejects_invalid_preview_css_and_oversized_assets() {
         "file": "patterns/hero.json", "preview_asset": "assets/styles.css"
     }]);
     let entries: &[(&str, &[u8])] = &[
-        (
-            "patterns/hero.json",
-            br#"{"schema_version":1,"sections":[]}"#,
-        ),
+        ("patterns/hero.json", br#"{"schema_version":1,"blocks":[]}"#),
         ("assets/styles.css", b"body{}"),
     ];
     assert!(matches!(
@@ -388,7 +379,7 @@ fn rejects_v3_untrusted_template_and_pattern_content() {
     }"#;
     let zip = build_zip(&[
         ("theme.json", manifest_with_pattern, CompressionMethod::Stored),
-        ("patterns/hero.json", br#"{"schema_version":1,"sections":[{"id":"broken","children":[{"id":"broken","children":[]}]}]}"#, CompressionMethod::Stored),
+        ("patterns/hero.json", br#"{"schema_version":1,"blocks":[{"id":"broken","type":"core/section","children":[{"id":"broken","type":"core/row","children":[]}]}]}"#, CompressionMethod::Stored),
     ]);
     assert!(matches!(
         parse_theme_zip_v3(&zip),

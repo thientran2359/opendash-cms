@@ -253,6 +253,22 @@ pub async fn validate_and_rebase_copy(db_path: &Path) -> ApiResult<i64> {
         .map_err(|_| ApiError::internal("Không chạy được migrations trên bản sao khôi phục."))?;
     crate::storage::page::ensure_embedded_core_blocks_in_conn(&mut conn).await?;
 
+    let override_asts: Vec<String> = sqlx::query_scalar("SELECT ast_json FROM template_overrides")
+        .fetch_all(&mut conn)
+        .await?;
+    for raw in override_asts {
+        opendash_core::builder::BuilderDocument::from_json(raw.as_bytes())
+            .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    }
+    let entry_docs: Vec<String> =
+        sqlx::query_scalar("SELECT document_json FROM entry_builder_documents")
+            .fetch_all(&mut conn)
+            .await?;
+    for raw in entry_docs {
+        opendash_core::builder::BuilderDocument::from_json(raw.as_bytes())
+            .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    }
+
     // Clear stale auth sessions, active operation leases/queues, and disable SMTP auto-sending.
     sqlx::query("DELETE FROM sessions")
         .execute(&mut conn)

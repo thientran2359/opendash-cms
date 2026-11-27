@@ -21,16 +21,21 @@ impl BlockTemplateCache {
     pub fn get_or_validate(
         &self,
         block_id: &str,
-        schema: &opendash_core::block_schema::BlockSchemaV1,
+        schema: &opendash_core::block_schema::BlockSchema,
         template_source: &str,
     ) -> Result<std::sync::Arc<ValidatedBlockTemplate>, &'static str> {
-        self.get_or_validate_with_children(block_id, schema, template_source, false)
+        self.get_or_validate_with_children(
+            block_id,
+            schema,
+            template_source,
+            schema.supports_children,
+        )
     }
 
     pub fn get_or_validate_with_children(
         &self,
         block_id: &str,
-        schema: &opendash_core::block_schema::BlockSchemaV1,
+        schema: &opendash_core::block_schema::BlockSchema,
         template_source: &str,
         supports_children: bool,
     ) -> Result<std::sync::Arc<ValidatedBlockTemplate>, &'static str> {
@@ -77,9 +82,9 @@ impl BlockTemplateCache {
 pub type ContactFormResults =
     std::collections::BTreeMap<String, Option<crate::storage::contact::ContactFormRecord>>;
 
-/// Pattern documents are resolved from one SQLite snapshot before rendering.
-/// A missing target is deliberately absent, never client-provided HTML.
-pub type PatternResults = std::collections::BTreeMap<i64, RenderedLayout>;
+/// Pattern documents are resolved from one SQLite snapshot before rendering,
+/// keyed by each `core/pattern-ref` node's unique ID for per-instance isolation.
+pub type PatternResults = std::collections::BTreeMap<String, RenderedLayout>;
 
 pub(super) fn escape_html(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -96,28 +101,6 @@ pub(super) fn escape_html(value: &str) -> String {
     out
 }
 
-pub(super) fn box_or_legacy_px(style: Option<&ResponsiveStyle>) -> Option<BoxSpacing> {
-    let style = style?;
-    if let Some(pad) = style.padding.filter(|b| !b.is_empty()) {
-        return Some(pad);
-    }
-    style.padding_px.map(|px| BoxSpacing {
-        top: Some(i16::from(px)),
-        right: Some(i16::from(px)),
-        bottom: Some(i16::from(px)),
-        left: Some(i16::from(px)),
-    })
-}
-
-pub(super) fn align_tailwind_class(align: TextAlign) -> &'static str {
-    match align {
-        TextAlign::Start => "text-left",
-        TextAlign::Center => "text-center",
-        TextAlign::End => "text-right",
-        TextAlign::Justify => "text-justify",
-    }
-}
-
 pub(super) fn push_visibility_rule(target: &mut String, id: &str) {
     if valid_package_id(id) {
         target.push_str(&format!(
@@ -126,66 +109,26 @@ pub(super) fn push_visibility_rule(target: &mut String, id: &str) {
     }
 }
 
-pub(super) fn meta_id_attr(meta: Option<&NodeMeta>) -> String {
-    match meta
-        .and_then(|m| m.html_id.as_deref())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        Some(id) => format!(" id=\"{}\"", escape_html(id)),
-        None => String::new(),
-    }
-}
-
-pub(super) fn merge_class_attr(
-    base_class: Option<&str>,
-    tw_classes: &[String],
-    meta: Option<&NodeMeta>,
-) -> String {
-    let mut tokens: Vec<String> = Vec::new();
-    if let Some(base) = base_class.filter(|s| !s.is_empty()) {
-        tokens.push(base.to_owned());
-    }
-    tokens.extend(tw_classes.iter().cloned());
-    if let Some(extra) = meta
-        .and_then(|m| m.class_name.as_deref())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        tokens.push(escape_html(extra));
-    }
-    if tokens.is_empty() {
-        String::new()
-    } else {
-        format!(" class=\"{}\"", tokens.join(" "))
-    }
-}
-
-/// All bound values are obtained by the storage layer under Preview/public ACL.
-/// The renderer never reads SQL or treats rich text as raw markup.
+/// Query-free renderer: storage has already resolved lists, forms, and patterns
+/// against the same SQLite snapshot.
 pub fn render_builder_resolved(
     state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
-    bindings: &BindingResults,
 ) -> ApiResult<RenderedLayout> {
-    render_builder_with_lists(state, document, is_preview, bindings, &ListResults::new())
+    render_builder_with_lists(state, document, is_preview, &ListResults::new())
 }
 
-/// Query-free renderer: storage has already resolved every list against the
-/// same SQLite snapshot as the document/Field Binding sources.
 pub fn render_builder_with_lists(
     state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
-    bindings: &BindingResults,
     lists: &ListResults,
 ) -> ApiResult<RenderedLayout> {
     render_builder_with_lists_and_forms(
         state,
         document,
         is_preview,
-        bindings,
         lists,
         &ContactFormResults::new(),
     )
@@ -195,18 +138,16 @@ pub fn render_builder_with_lists_and_forms(
     state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
-    bindings: &BindingResults,
     lists: &ListResults,
     forms: &ContactFormResults,
 ) -> ApiResult<RenderedLayout> {
-    render_builder_with_template_context(state, document, is_preview, bindings, lists, forms, None)
+    render_builder_with_template_context(state, document, is_preview, lists, forms, None)
 }
 
 pub fn render_builder_with_template_context(
     state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
-    bindings: &BindingResults,
     lists: &ListResults,
     forms: &ContactFormResults,
     context: Option<&BuilderTemplateContext<'_>>,
@@ -215,7 +156,6 @@ pub fn render_builder_with_template_context(
         state,
         document,
         is_preview,
-        bindings,
         lists,
         forms,
         context,
@@ -224,25 +164,13 @@ pub fn render_builder_with_template_context(
     )
 }
 
-pub(super) fn editable_attrs(
-    scope: RenderAnnotationScope,
-    is_preview: bool,
-    pattern_document: bool,
-    kind: &str,
-) -> String {
-    if !is_preview || pattern_document || scope == RenderAnnotationScope::None {
-        return String::new();
-    }
-    format!(" data-od-editable=\"1\" data-od-kind=\"{kind}\"")
-}
-
 /// Render an entry or a trusted, one-hop Pattern body. Only the storage layer
 /// can populate `patterns`, so incoming AST never carries referenced markup.
+#[allow(clippy::too_many_arguments)]
 pub fn render_builder_with_patterns(
     state: &BuilderRenderContext,
     document: &BuilderDocument,
     is_preview: bool,
-    bindings: &BindingResults,
     lists: &ListResults,
     forms: &ContactFormResults,
     context: Option<&BuilderTemplateContext<'_>>,
@@ -253,7 +181,6 @@ pub fn render_builder_with_patterns(
         state,
         document,
         is_preview,
-        bindings,
         lists,
         forms,
         context,

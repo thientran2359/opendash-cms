@@ -6,12 +6,12 @@ pub(crate) struct BlockSchemaTemplateContext {
 }
 
 impl BlockSchemaTemplateContext {
-    pub(crate) fn from_schema(schema: &opendash_core::block_schema::BlockSchemaV1) -> Self {
-        Self::from_schema_with_children(schema, false)
+    pub(crate) fn from_schema(schema: &opendash_core::block_schema::BlockSchema) -> Self {
+        Self::from_schema_with_children(schema, schema.supports_children)
     }
 
     pub(crate) fn from_schema_with_children(
-        schema: &opendash_core::block_schema::BlockSchemaV1,
+        schema: &opendash_core::block_schema::BlockSchema,
         supports_children: bool,
     ) -> Self {
         let policy = ThemeUrlPolicy::from_option_specs(&[], BTreeSet::new());

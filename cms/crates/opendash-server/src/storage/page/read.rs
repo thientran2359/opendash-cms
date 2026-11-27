@@ -4,18 +4,47 @@ pub fn embedded_core_block_defs() -> &'static BTreeMap<String, RegisteredBlockDe
     static DEFS: OnceLock<BTreeMap<String, RegisteredBlockDef>> = OnceLock::new();
     DEFS.get_or_init(|| {
         let mut map = BTreeMap::new();
-        for (raw_schema, raw_tpl) in EMBEDDED_CORE_BLOCK_SOURCES {
-            let schema: BlockSchemaV1 =
+        let mut catalog = RegistryCatalog::new();
+        for (raw_schema, raw_tpl_opt) in EMBEDDED_CORE_BLOCK_SOURCES {
+            let schema: BlockSchema =
                 serde_json::from_str(raw_schema).expect("valid embedded core block.json");
             schema
                 .validate("core")
                 .expect("embedded core block.json must validate");
-            crate::template_sec::validate_block_template_csec(&schema.id, raw_tpl, &schema)
-                .expect("embedded core render.html must pass C-SEC");
+            let template = match raw_tpl_opt {
+                Some(raw_tpl) => {
+                    assert_eq!(
+                        schema.render, "render.html",
+                        "C-SEC core block {} must declare render == \"render.html\"",
+                        schema.id
+                    );
+                    crate::template_sec::validate_block_template_csec(&schema.id, raw_tpl, &schema)
+                        .expect("embedded core render.html must pass C-SEC");
+                    (*raw_tpl).to_owned()
+                }
+                None => {
+                    assert_eq!(
+                        schema.render, "native",
+                        "Native core block {} must declare render == \"native\"",
+                        schema.id
+                    );
+                    String::new()
+                }
+            };
             let canonical_json =
                 serde_json::to_string(&schema).expect("serialize embedded core block.json");
-            let digest = compute_block_definition_digest(&canonical_json, raw_tpl);
+            let digest = compute_block_definition_digest(&canonical_json, &template);
             let block_id = schema.id.clone();
+            let reg_schema = RegisteredBlockSchema { schema };
+            catalog.insert_loaded(
+                block_id.clone(),
+                OwnedDescriptor {
+                    owner: ResourceOwner::Core,
+                    status: ProviderStatus::Active,
+                    declaration_state: DeclarationState::Declared,
+                    descriptor: reg_schema.clone(),
+                },
+            );
             map.insert(
                 block_id.clone(),
                 RegisteredBlockDef {
@@ -23,12 +52,14 @@ pub fn embedded_core_block_defs() -> &'static BTreeMap<String, RegisteredBlockDe
                     owner: ResourceOwner::Core,
                     status: ProviderStatus::Active,
                     declaration_state: DeclarationState::Declared,
-                    schema: RegisteredBlockSchema { schema },
-                    template: (*raw_tpl).to_owned(),
+                    schema: reg_schema,
+                    template,
                     revision_digest: digest,
                 },
             );
         }
+        validate_block_catalog_templates(&catalog)
+            .expect("embedded core catalog templates must validate");
         map
     })
 }
@@ -64,7 +95,7 @@ pub async fn load_declared_blocks_in_conn(
             ResourceOwner::Core | ResourceOwner::User => "core",
             ResourceOwner::Theme(id) | ResourceOwner::Plugin(id) => id.as_str(),
         };
-        let schema: BlockSchemaV1 = match serde_json::from_str(&schema_json) {
+        let schema: BlockSchema = match serde_json::from_str(&schema_json) {
             Ok(schema) => schema,
             Err(err) => {
                 if owner_kind != "core" {
@@ -160,15 +191,17 @@ pub async fn sync_owner_blocks_in_tx(
     owner_id: &str,
     provider_status: ProviderStatus,
     revision_digest: &str,
-    blocks: &[(BlockSchemaV1, String)],
+    blocks: &[(BlockSchema, String)],
 ) -> ApiResult<()> {
     if !matches!(owner_kind, "core" | "theme" | "plugin") {
         return Err(ApiError::bad_request("owner_kind không hợp lệ."));
     }
     for (schema, template) in blocks {
         schema.validate(owner_id).map_err(ApiError::bad_request)?;
-        crate::template_sec::validate_block_template_csec(&schema.id, template, schema)
-            .map_err(ApiError::bad_request)?;
+        if !(owner_kind == "core" && schema.render == "native") {
+            crate::template_sec::validate_block_template_csec(&schema.id, template, schema)
+                .map_err(ApiError::bad_request)?;
+        }
 
         let existing: Option<(String, String)> = sqlx::query_as(
             "SELECT owner_kind, owner_id FROM builder_block_definitions WHERE block_id = ?",
@@ -334,21 +367,50 @@ pub async fn resync_plugin_block_acls_in_tx(conn: &mut SqliteConnection) -> ApiR
         let refs = if allowed {
             let values: serde_json::Value = serde_json::from_str(&values_json)?;
             let raw_body = values.get("body").and_then(serde_json::Value::as_str);
-            if let Some(body) =
-                raw_body.filter(|body| opendash_core::builder_blocks::contains_blocks(body))
+            if type_key != "pattern"
+                && let Some(body) =
+                    raw_body.filter(|body| opendash_core::builder_blocks::contains_blocks(body))
             {
                 extract_block_refs_lenient_with_schemas(body, &catalog)
-            } else if let Some(doc) = doc_json
-                .as_deref()
-                .and_then(|raw| BuilderDocument::from_json(raw.as_bytes()).ok())
-            {
-                active_document_refs(&doc, &catalog)
+            } else if let Some(raw) = doc_json.as_deref() {
+                match BuilderDocument::from_json(raw.as_bytes()) {
+                    Ok(doc) => active_document_refs(&doc, &catalog),
+                    Err(err) => {
+                        eprintln!(
+                            "[opendash] error: fail-closed ACL revoke for entry {entry_id} ({type_key}) invalid Builder AST: {err}"
+                        );
+                        ExtractedBlockRefs::default()
+                    }
+                }
             } else {
                 ExtractedBlockRefs::default()
             }
         } else {
             ExtractedBlockRefs::default()
         };
+        if type_key != "pattern" {
+            sqlx::query("DELETE FROM entry_pattern_refs WHERE source_entry_id = ?")
+                .bind(entry_id)
+                .execute(&mut *conn)
+                .await?;
+            for pattern_id in &refs.pattern_ids {
+                let exists: i64 = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM content_entries WHERE id = ? AND content_type_key = 'pattern')",
+                )
+                .bind(pattern_id)
+                .fetch_one(&mut *conn)
+                .await?;
+                if exists != 0 {
+                    sqlx::query(
+                        "INSERT OR IGNORE INTO entry_pattern_refs(source_entry_id, target_pattern_id) VALUES (?, ?)",
+                    )
+                    .bind(entry_id)
+                    .bind(pattern_id)
+                    .execute(&mut *conn)
+                    .await?;
+                }
+            }
+        }
         let roles = active_media_roles_in_conn(&mut *conn, &refs).await?;
         sqlx::query(
             "DELETE FROM entry_builder_media_refs WHERE entry_id = ? AND source_kind = 'builder'",
@@ -371,10 +433,15 @@ pub async fn resync_plugin_block_acls_in_tx(conn: &mut SqliteConnection) -> ApiR
             .fetch_all(&mut *conn)
             .await?;
     for (override_id, ast_json) in overrides {
-        let refs = BuilderDocument::from_json(ast_json.as_bytes())
-            .ok()
-            .map(|doc| active_document_refs(&doc, &catalog))
-            .unwrap_or_default();
+        let refs = match BuilderDocument::from_json(ast_json.as_bytes()) {
+            Ok(doc) => active_document_refs(&doc, &catalog),
+            Err(err) => {
+                eprintln!(
+                    "[opendash] error: fail-closed ACL revoke for template_override {override_id} invalid Builder AST: {err}"
+                );
+                ExtractedBlockRefs::default()
+            }
+        };
         let roles = active_media_roles_in_conn(&mut *conn, &refs).await?;
         sqlx::query("DELETE FROM template_override_media_refs WHERE override_id = ?")
             .bind(override_id)

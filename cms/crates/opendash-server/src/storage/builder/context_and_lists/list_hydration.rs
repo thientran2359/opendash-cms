@@ -38,7 +38,8 @@ pub async fn batch_canonical_entry_paths_in_conn(
 
 /// Resolves a term ID to its active translation in `active_locale` via `translation_group_id`.
 /// Fails closed (`Ok(None)`) when the source term, taxonomy definition, locale, or target
-/// translation is missing, private, inactive, or undeclared.
+/// translation is missing, private, inactive, or undeclared (without requiring the source
+/// term's own locale to remain enabled on shared template overrides).
 pub async fn resolve_term_id_for_locale_in_conn(
     conn: &mut SqliteConnection,
     term_id: i64,
@@ -48,29 +49,23 @@ pub async fn resolve_term_id_for_locale_in_conn(
     if term_id <= 0 {
         return Ok(None);
     }
-    let source: Option<(String, String)> = sqlx::query_as(
-        "SELECT term.locale, term.translation_group_id
+    let group_id: Option<String> = sqlx::query_scalar(
+        "SELECT term.translation_group_id
            FROM taxonomy_terms term
            JOIN taxonomy_definitions d ON d.key = term.kind
-           JOIN site_locales sl ON sl.code = term.locale AND sl.deleted_at IS NULL
           WHERE term.id = ?
             AND term.kind = ?
             AND d.public = 1
             AND d.provider_status = 'active'
-            AND d.declaration_state = 'declared'
-            AND sl.enabled = 1
-            AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)",
+            AND d.declaration_state = 'declared'",
     )
     .bind(term_id)
     .bind(expected_kind)
     .fetch_optional(&mut *conn)
     .await?;
-    let Some((source_locale, group_id)) = source else {
+    let Some(group_id) = group_id else {
         return Ok(None);
     };
-    if source_locale == active_locale {
-        return Ok(Some(term_id));
-    }
     let target_id: Option<i64> = sqlx::query_scalar(
         "SELECT target.id
            FROM taxonomy_terms target

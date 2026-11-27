@@ -3,17 +3,12 @@ use super::*;
 #[test]
 fn renders_section_style_box_spacing_rich_text_button_flags_and_new_schema_fields() {
     use opendash_core::{
-        block_schema::BlockSchemaV1,
-        builder::{
-            BoxSpacing, ButtonProps, ColumnNode, ElementContent, ElementNode, KnownElement,
-            PluginBlockProps, Responsive, ResponsiveStyle, RowNode, SectionNode, SectionStyle,
-            SectionWidth, TextAlign, TextProps,
-        },
+        block_schema::BlockSchema,
         registry::{DeclarationState, ProviderStatus, ResourceOwner},
     };
 
     let bg_id = "f".repeat(64);
-    let schema: BlockSchemaV1 = serde_json::from_value(json!({
+    let schema: BlockSchema = serde_json::from_value(json!({
         "schema_version": 1,
         "id": "demo/ux-card",
         "title": "UX Card",
@@ -66,136 +61,88 @@ fn renders_section_style_box_spacing_rich_text_button_flags_and_new_schema_field
 
     let doc = BuilderDocument {
         schema_version: 1,
-        sections: vec![
-            SectionNode {
-                id: "sec-ux".into(),
-                meta: None,
-                responsive: Some(Responsive {
-                    desktop: Some(ResponsiveStyle {
-                        padding: Some(BoxSpacing {
-                            top: Some(40),
-                            right: Some(16),
-                            bottom: Some(40),
-                            left: Some(16),
-                        }),
-                        margin: Some(BoxSpacing {
-                            top: Some(0),
-                            bottom: Some(24),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
+        blocks: vec![
+            node(
+                "sec-ux",
+                "core/section",
+                json!({
+                    "content_width": "boxed",
+                    "bg_color": "#0f172a",
+                    "bg_image": bg_id,
+                    "padding": {
+                        "desktop": { "top": 40, "right": 16, "bottom": 40, "left": 16 }
+                    },
+                    "margin": {
+                        "desktop": { "top": 0, "bottom": 24 }
+                    }
                 }),
-                style: Some(SectionStyle {
-                    background_color: Some("#0f172a".into()),
-                    background_media_id: Some(bg_id.clone()),
-                    content_width: Some(SectionWidth::Boxed),
-                }),
-                children: vec![RowNode {
-                    id: "row-ux".into(),
-                    meta: None,
-                    responsive: Some(Responsive {
-                        desktop: Some(ResponsiveStyle {
-                            columns_per_row: Some(3),
-                            gap_px: Some(24),
-                            ..Default::default()
-                        }),
-                        mobile: Some(ResponsiveStyle {
-                            columns_per_row: Some(1),
-                            gap_px: Some(16),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
+                vec![node(
+                    "row-ux",
+                    "core/row",
+                    json!({
+                        "layout_mode": "equal",
+                        "columns": { "desktop": 3, "mobile": 1 },
+                        "gap": { "desktop": 24, "mobile": 16 }
                     }),
-                    children: vec![ColumnNode {
-                        id: "col-ux".into(),
-                        meta: None,
-                        responsive: Some(Responsive {
-                            desktop: Some(ResponsiveStyle {
-                                text_align: Some(TextAlign::Justify),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
+                    vec![node(
+                        "col-ux",
+                        "core/column",
+                        json!({
+                            "text_align": { "desktop": "justify" }
                         }),
-                        children: vec![
-                            ElementNode {
-                                id: "el-rich".into(),
-                                meta: None,
-                                content: ElementContent::Known(KnownElement::Text(TextProps {
-                                    text:
-                                        "<p>Hello <strong>Rich</strong><script>bad()</script></p>"
-                                            .into(),
-                                    rich: true,
-                                    binding: None,
-                                })),
-                            },
-                            ElementNode {
-                                id: "el-btn".into(),
-                                meta: None,
-                                content: ElementContent::Known(KnownElement::Button(ButtonProps {
-                                    label: "Visit".into(),
-                                    url: "https://opendash.vn".into(),
-                                    new_tab: true,
-                                    nofollow: true,
-                                    binding: None,
-                                })),
-                            },
-                            ElementNode {
-                                id: "el-ux".into(),
-                                meta: None,
-                                content: ElementContent::Known(KnownElement::PluginBlock(
-                                    PluginBlockProps {
-                                        block_id: "demo/ux-card".into(),
-                                        values: BTreeMap::from([
-                                            (
-                                                "align".into(),
-                                                json!({ "desktop": "center", "mobile": "left" }),
-                                            ),
-                                            (
-                                                "pad".into(),
-                                                json!({ "desktop": { "top": 20, "right": 12, "bottom": 20, "left": 12 } }),
-                                            ),
-                                            (
-                                                "cta".into(),
-                                                json!({ "label": "Go", "url": "https://opendash.vn/docs", "new_tab": true, "nofollow": false }),
-                                            ),
-                                        ]),
-                                    },
-                                )),
-                            },
+                        vec![
+                            node(
+                                "el-rich",
+                                "core/text",
+                                json!({
+                                    "content": "<p>Hello <strong>Rich</strong><script>bad()</script></p>"
+                                }),
+                                vec![],
+                            ),
+                            node(
+                                "el-btn",
+                                "core/button",
+                                json!({
+                                    "cta": {
+                                        "label": "Visit",
+                                        "url": "https://opendash.vn",
+                                        "new_tab": true,
+                                        "nofollow": true
+                                    }
+                                }),
+                                vec![],
+                            ),
+                            node(
+                                "el-ux",
+                                "demo/ux-card",
+                                json!({
+                                    "align": { "desktop": "center", "mobile": "left" },
+                                    "pad": { "desktop": { "top": 20, "right": 12, "bottom": 20, "left": 12 } },
+                                    "cta": { "label": "Go", "url": "https://opendash.vn/docs", "new_tab": true, "nofollow": false }
+                                }),
+                                vec![],
+                            ),
                         ],
-                    }],
-                }],
-            },
-            SectionNode {
-                id: "sec-custom".into(),
-                meta: None,
-                responsive: Some(Responsive {
-                    desktop: Some(ResponsiveStyle {
-                        padding: Some(BoxSpacing {
-                            top: Some(37),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
+                    )],
+                )],
+            ),
+            node(
+                "sec-custom",
+                "core/section",
+                json!({
+                    "padding": { "desktop": { "top": 37 } }
                 }),
-                style: None,
-                children: vec![RowNode {
-                    id: "row-custom".into(),
-                    meta: None,
-                    responsive: Some(Responsive {
-                        desktop: Some(ResponsiveStyle {
-                            columns_per_row: Some(2),
-                            gap_px: Some(19),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
+                vec![node(
+                    "row-custom",
+                    "core/row",
+                    json!({
+                        "layout_mode": "equal",
+                        "columns": { "desktop": 2, "mobile": 2 },
+                        "gap": 19
                     }),
-                    children: vec![],
-                }],
-            },
+                    vec![],
+                )],
+            ),
         ],
     };
 
@@ -205,7 +152,6 @@ fn renders_section_style_box_spacing_rich_text_button_flags_and_new_schema_field
         &state,
         &doc,
         true,
-        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         None,
@@ -218,35 +164,30 @@ fn renders_section_style_box_spacing_rich_text_button_flags_and_new_schema_field
     )
     .unwrap();
 
-    assert!(preview.html.contains("background-color:#0f172a;"));
+    assert!(preview.html.contains("--od-sec-bg:#0f172a;"));
     assert!(preview.html.contains(&format!(
-        "background-image:url(\"/api/admin/media/{bg_id}/file\");"
+        "--od-sec-bg-img:url(\"/api/admin/media/{bg_id}/file\");"
     )));
-    assert!(preview.html.contains("class=\"px-4 py-10 mt-0 mb-6\""));
+    assert!(preview.html.contains("mt-0 mb-6"));
+    assert!(preview.html.contains("max-w-7xl mx-auto px-4 py-10"));
     assert!(
         preview
             .html
-            .contains("class=\"builder-row w-full max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6\"")
+            .contains("od-row builder-row grid grid-cols-1 md:grid-cols-3 items-stretch justify-start gap-4 md:gap-6")
     );
     assert!(
         preview
             .html
-            .contains("class=\"builder-column text-justify\"")
+            .contains("od-column builder-column flex flex-col text-justify justify-start")
     );
     assert!(!preview.html.contains("padding-top:40px;"));
     assert!(!preview.html.contains("text-align:justify;"));
     assert!(preview.html.contains("padding-top:37px;"));
-    assert!(preview.html.contains("gap:19px;"));
-    assert!(
-        preview
-            .html
-            .contains("class=\"builder-row grid grid-cols-2\"")
-    );
-    assert!(
-        preview
-            .html
-            .contains("<div class=\"od-rich-text\"><p>Hello <strong>Rich</strong></p></div>")
-    );
+    assert!(preview.html.contains("style=\"gap:19px;\""));
+    assert!(preview.html.contains("od-row builder-row grid grid-cols-2"));
+    assert!(preview.html.contains(
+        "<div class=\"od-rich-text od-prose text-base\"><p>Hello <strong>Rich</strong></p></div>"
+    ));
     assert!(!preview.html.contains("<script>"));
     assert!(
         preview
@@ -264,46 +205,23 @@ fn renders_section_style_box_spacing_rich_text_button_flags_and_new_schema_field
 
 #[test]
 fn renders_social_follow_block_from_site_options_for_public_and_preview() {
-    use opendash_core::builder::{
-        ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps, RowNode,
-        SectionNode,
-    };
-
-    let doc = BuilderDocument {
-        schema_version: 1,
-        sections: vec![SectionNode {
-            id: "sec-sf".into(),
-            meta: None,
-            responsive: None,
-            style: None,
-            children: vec![RowNode {
-                id: "row-sf".into(),
-                meta: None,
-                responsive: None,
-                children: vec![ColumnNode {
-                    id: "col-sf".into(),
-                    meta: None,
-                    responsive: None,
-                    children: vec![ElementNode {
-                        id: "sf-1".into(),
-                        meta: None,
-                        content: ElementContent::Known(KnownElement::PluginBlock(
-                            PluginBlockProps {
-                                block_id: "core/social-follow".into(),
-                                values: BTreeMap::from([
-                                    ("heading".into(), json!("Theo dõi")),
-                                    ("show_facebook".into(), json!(true)),
-                                    ("show_youtube".into(), json!(false)),
-                                    ("display_style".into(), json!("pill")),
-                                    ("open_new_tab".into(), json!(true)),
-                                ]),
-                            },
-                        )),
-                    }],
-                }],
-            }],
-        }],
-    };
+    let doc = doc_in_section(
+        "sec-sf",
+        "row-sf",
+        "col-sf",
+        vec![node(
+            "sf-1",
+            "core/social-follow",
+            json!({
+                "heading": "Theo dõi",
+                "show_facebook": true,
+                "show_youtube": false,
+                "display_style": "pill",
+                "open_new_tab": true
+            }),
+            vec![],
+        )],
+    );
 
     let cache = BlockTemplateCache::new();
     let state_with_links = BuilderRenderContext {
@@ -325,7 +243,6 @@ fn renders_social_follow_block_from_site_options_for_public_and_preview() {
         &state_with_links,
         &doc,
         false,
-        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         None,
@@ -362,7 +279,6 @@ fn renders_social_follow_block_from_site_options_for_public_and_preview() {
         false,
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &BTreeMap::new(),
         None,
         &BTreeMap::new(),
         false,
@@ -379,7 +295,6 @@ fn renders_social_follow_block_from_site_options_for_public_and_preview() {
         &state_empty,
         &doc,
         true,
-        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         None,

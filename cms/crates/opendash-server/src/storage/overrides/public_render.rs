@@ -135,6 +135,8 @@ pub(in crate::storage) struct PublicBuilderContext<'a> {
     pub(in crate::storage) theme_context: &'a serde_json::Value,
     pub(in crate::storage) route_entry: Option<(&'a str, &'a str)>,
     pub(in crate::storage) render_locale: &'a str,
+    pub(in crate::storage) list_pages: &'a BTreeMap<String, i64>,
+    pub(in crate::storage) list_base_path: &'a str,
     pub(in crate::storage) cache: &'a page::BlockTemplateCache,
     pub(in crate::storage) url_policy: &'a template_sec::ThemeUrlPolicy,
     pub(in crate::storage) fmt_cfg: &'a template_sec::RenderFormattingConfig,
@@ -152,11 +154,46 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
     budget: &mut PublicCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
+    let empty_pages = BTreeMap::new();
+    render_resolved_public_builder_with_query_for_locale(
+        db,
+        record,
+        active,
+        theme_context,
+        route_entry,
+        locale,
+        slot,
+        &empty_pages,
+        "/",
+        budget,
+        cache,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn render_resolved_public_builder_with_query_for_locale(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    active: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    route_entry: Option<(&str, &str)>,
+    locale: Option<&str>,
+    slot: Option<&str>,
+    list_pages: &BTreeMap<String, i64>,
+    list_base_path: &str,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
     let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
-    let mut state =
-        builder::read_render_context_for_locale_tx(&mut tx, Some(&effective_locale), false, None)
-            .await?;
+    let mut state = builder::read_render_context_for_locale_tx(
+        &mut tx,
+        Some(&effective_locale),
+        false,
+        Some(list_base_path),
+    )
+    .await?;
     collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[&record.document], false)
         .await?;
     let url_policy = active_theme_url_policy(active)?;
@@ -187,6 +224,8 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
         theme_context,
         route_entry,
         render_locale: &effective_locale,
+        list_pages,
+        list_base_path,
         cache,
         url_policy: &url_policy,
         fmt_cfg: &fmt_cfg,

@@ -1,66 +1,142 @@
 {
   "schema_version": 1,
-  "sections": [
+  "blocks": [
     {
       "id": "pricing-sec-1",
+      "block_id": "core/section",
       "children": [
         {
           "id": "pricing-row-1",
+          "block_id": "core/row",
+          "props": {
+            "layout_mode": "equal",
+            "columns": 3
+          },
           "children": [
             {
               "id": "pricing-col-1-1",
+              "block_id": "core/column",
               "children": [
                 {
                   "id": "pricing-card-1",
-                  "type": "plugin/block",
-                  "props": {
-                    "block_id": "core/card",
-                    "values": {
-                      "title": "Starter",
-                      "body": "<p>Dành cho website khởi đầu và nội dung cốt lõi.</p>",
-                      "show_cta": true,
-                      "cta_label": "Khám phá gói",
-                      "cta_url": "/lien-he"
+                  "block_id": "core/card",
+                  "children": [
+                    {
+                      "id": "pricing-card-1-heading",
+                      "block_id": "core/heading",
+                      "props": {
+                        "level": "h3",
+                        "text": "Starter",
+                        "size": "xl"
+                      }
+                    },
+                    {
+                      "id": "pricing-card-1-text",
+                      "block_id": "core/text",
+                      "props": {
+                        "content": "<p>Dành cho website khởi đầu và nội dung cốt lõi.</p>"
+                      }
+                    },
+                    {
+                      "id": "pricing-card-1-btn",
+                      "block_id": "core/button",
+                      "props": {
+                        "cta": {
+                          "url": "/lien-he",
+                          "label": "Khám phá gói",
+                          "new_tab": false,
+                          "nofollow": false
+                        },
+                        "variant": "outline"
+                      }
                     }
-                  }
+                  ]
                 }
               ]
             },
             {
               "id": "pricing-col-1-2",
+              "block_id": "core/column",
               "children": [
                 {
                   "id": "pricing-card-2",
-                  "type": "plugin/block",
+                  "block_id": "core/card",
                   "props": {
-                    "block_id": "core/card",
-                    "values": {
-                      "title": "Pro",
-                      "body": "<p>Dành cho nhóm đang phát triển nhanh.</p>",
-                      "show_cta": true,
-                      "cta_label": "Khám phá gói",
-                      "cta_url": "/lien-he"
+                    "surface_style": "elevated",
+                    "tone": "brand"
+                  },
+                  "children": [
+                    {
+                      "id": "pricing-card-2-heading",
+                      "block_id": "core/heading",
+                      "props": {
+                        "level": "h3",
+                        "text": "Pro",
+                        "size": "xl"
+                      }
+                    },
+                    {
+                      "id": "pricing-card-2-text",
+                      "block_id": "core/text",
+                      "props": {
+                        "content": "<p>Dành cho nhóm đang phát triển nhanh.</p>"
+                      }
+                    },
+                    {
+                      "id": "pricing-card-2-btn",
+                      "block_id": "core/button",
+                      "props": {
+                        "cta": {
+                          "url": "/lien-he",
+                          "label": "Khám phá gói",
+                          "new_tab": false,
+                          "nofollow": false
+                        },
+                        "variant": "primary"
+                      }
                     }
-                  }
+                  ]
                 }
               ]
             },
             {
               "id": "pricing-col-1-3",
+              "block_id": "core/column",
               "children": [
                 {
                   "id": "pricing-card-3",
-                  "type": "plugin/block",
-                  "props": {
-                    "block_id": "core/card",
-                    "values": {
-                      "title": "Enterprise",
-                      "body": "<p>Hạ tầng và hỗ trợ cho doanh nghiệp lớn.</p>",
-                      "show_cta": true,
-                      "cta_label": "Khám phá gói",
-                      "cta_url": "/lien-he"
+                  "block_id": "core/card",
+                  "children": [
+                    {
+                      "id": "pricing-card-3-heading",
+                      "block_id": "core/heading",
+                      "props": {
+                        "level": "h3",
+                        "text": "Enterprise",
+                        "size": "xl"
+                      }
+                    },
+                    {
+                      "id": "pricing-card-3-text",
+                      "block_id": "core/text",
+                      "props": {
+                        "content": "<p>Hạ tầng và hỗ trợ cho doanh nghiệp lớn.</p>"
+                      }
+                    },
+                    {
+                      "id": "pricing-card-3-btn",
+                      "block_id": "core/button",
+                      "props": {
+                        "cta": {
+                          "url": "/lien-he",
+                          "label": "Khám phá gói",
+                          "new_tab": false,
+                          "nofollow": false
+                        },
+                        "variant": "outline"
+                      }
                     }
-                  }
+                  ]
                 }
               ]
             }

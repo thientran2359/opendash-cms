@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "core/pattern-ref",
+  "title": "Khối mẫu (Pattern)",
+  "category": "content",
+  "icon": "bookmark",
+  "render": "native",
+  "allowed_contexts": ["entry_body"],
+  "fields": [
+    {
+      "type": "select",
+      "key": "pattern_id",
+      "label": "Chọn Pattern",
+      "options_source": "patterns",
+      "required": true
+    }
+  ]
+}

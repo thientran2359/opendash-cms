@@ -393,22 +393,21 @@ fn f03_cpt_scoped_entry_fields_pass_in_cpt_template_and_fail_in_parts() {
 
 #[test]
 fn f09_block_template_allows_term_ref_kind() {
-    use opendash_core::block_schema::{BlockCategory, BlockSchemaV1};
+    use opendash_core::block_schema::BlockSchema;
     use opendash_core::field_schema::{FieldSpec, FieldType};
 
     let mut tax_ref = FieldSpec::new(FieldType::TermRef, "topic", "Chủ đề");
     tax_ref.multiple = false;
-    let schema = BlockSchemaV1 {
-        schema_version: 1,
-        id: "demo/topic-badge".into(),
-        title: "Topic Badge".into(),
-        category: BlockCategory::Content,
-        icon: None,
-        render: "render.html".into(),
-        allowed_parents: None,
-        allowed_children: None,
-        fields: vec![tax_ref],
-    };
+    let mut schema: BlockSchema = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "id": "demo/topic-badge",
+        "title": "Topic Badge",
+        "category": "content",
+        "render": "render.html",
+        "fields": []
+    }))
+    .unwrap();
+    schema.fields = vec![tax_ref];
     assert!(
         validate_block_template_csec(
             "demo/topic-badge",

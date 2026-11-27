@@ -206,6 +206,7 @@ pub(crate) async fn render_entry_response_with_cache(
             taxonomy: None,
             content_type: Some(&ct_value),
             entry: Some(&view),
+            list_pages: Some(&list_pages),
         },
         &mut budget,
         cache,

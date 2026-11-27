@@ -409,18 +409,21 @@ async fn video_range_head_conditional_csp_and_public_acl() {
 
     let doc_with_video = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "type": "core/section",
             "children": [{
                 "id": "row1",
+                "type": "core/row",
                 "children": [{
                     "id": "col1",
+                    "type": "core/column",
                     "children": [{
                         "id": "vid1",
                         "type": "core/video",
                         "props": {
-                            "media_id": video_id,
-                            "poster_image_id": poster_id,
+                            "video": video_id,
+                            "poster": poster_id,
                             "controls": true,
                             "muted": false
                         }
@@ -619,16 +622,19 @@ async fn video_range_head_conditional_csp_and_public_acl() {
     // 4. Re-saving homepage without video revokes ACL immediately
     let doc_without_video = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "type": "core/section",
             "children": [{
                 "id": "row1",
+                "type": "core/row",
                 "children": [{
                     "id": "col1",
+                    "type": "core/column",
                     "children": [{
                         "id": "txt1",
                         "type": "core/text",
-                        "props": { "text": "No video" }
+                        "props": { "content": "No video" }
                     }]
                 }]
             }]

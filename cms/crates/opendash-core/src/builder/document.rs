@@ -1,5 +1,9 @@
 use super::*;
 
+pub(crate) fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeVisibility {
@@ -21,7 +25,6 @@ pub(super) fn empty_visibility_option(value: &Option<NodeVisibility>) -> bool {
     value.as_ref().is_none_or(NodeVisibility::is_empty)
 }
 
-/// Optional common UX Builder metadata on any Section, Row, Column, or Element.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeMeta {
@@ -33,8 +36,6 @@ pub struct NodeMeta {
     pub class_name: Option<String>,
     #[serde(default, skip_serializing_if = "empty_visibility_option")]
     pub visibility: Option<NodeVisibility>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub synthetic: bool,
 }
 
 impl NodeMeta {
@@ -43,7 +44,6 @@ impl NodeMeta {
             && self.html_id.as_deref().is_none_or(str::is_empty)
             && self.class_name.as_deref().is_none_or(str::is_empty)
             && empty_visibility_option(&self.visibility)
-            && !self.synthetic
     }
 }
 
@@ -51,34 +51,17 @@ pub fn empty_node_meta_option(value: &Option<NodeMeta>) -> bool {
     value.as_ref().is_none_or(NodeMeta::is_empty)
 }
 
-pub(super) fn validate_node_meta(
-    meta: Option<&NodeMeta>,
-    has_responsive: bool,
-    is_element: bool,
-) -> Result<(), BuilderError> {
+pub(super) fn validate_node_meta(meta: Option<&NodeMeta>) -> Result<(), BuilderError> {
     let Some(meta) = meta else {
         return Ok(());
     };
-    if is_element && meta.synthetic {
-        return Err(BuilderError::Invalid("Element cannot be synthetic"));
-    }
-    if meta.synthetic
-        && (has_responsive
-            || meta.html_id.as_deref().is_some_and(|s| !s.is_empty())
-            || meta.class_name.as_deref().is_some_and(|s| !s.is_empty())
-            || !empty_visibility_option(&meta.visibility))
-    {
-        return Err(BuilderError::Invalid(
-            "Synthetic wrapper cannot carry responsive or custom HTML attributes",
-        ));
-    }
     if let Some(name) = meta.name.as_deref()
         && !name.is_empty()
+        && (name.trim().is_empty()
+            || name.chars().count() > 80
+            || name.chars().any(char::is_control))
     {
-        if name.trim().is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control)
-        {
-            return Err(BuilderError::Invalid("Invalid Builder node name"));
-        }
+        return Err(BuilderError::Invalid("Invalid Builder node name"));
     }
     if let Some(html_id) = meta.html_id.as_deref()
         && !html_id.is_empty()
@@ -109,124 +92,117 @@ pub(super) fn validate_node_meta(
     Ok(())
 }
 
-/// Children preserve render order, while IDs remain independent of position.
+/// Recursive unified Studio AST node (`<owner>/<slug>` + schema-driven props + children).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlockNode {
+    pub id: String,
+    pub block_id: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub props: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "empty_node_meta_option")]
+    pub meta: Option<NodeMeta>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<BlockNode>,
+}
+
+/// Clean-Slate V1 unified recursive Builder AST (`schema_version: 1`, `blocks: Vec<BlockNode>`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuilderDocument {
     pub schema_version: u32,
-    pub sections: Vec<SectionNode>,
+    #[serde(default)]
+    pub blocks: Vec<BlockNode>,
 }
 
-impl SectionNode {
-    pub fn is_synthetic(&self) -> bool {
-        self.meta.as_ref().is_some_and(|m| m.synthetic)
+impl Default for BuilderDocument {
+    fn default() -> Self {
+        Self::empty()
     }
-}
-
-impl RowNode {
-    pub fn is_synthetic(&self) -> bool {
-        self.meta.as_ref().is_some_and(|m| m.synthetic)
-    }
-}
-
-impl ColumnNode {
-    pub fn is_synthetic(&self) -> bool {
-        self.meta.as_ref().is_some_and(|m| m.synthetic)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ElementNode {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "empty_node_meta_option")]
-    pub meta: Option<NodeMeta>,
-    #[serde(flatten)]
-    pub content: ElementContent,
-}
-
-pub(super) fn index_previous_plugin_values<'a>(
-    previous: Option<&'a BuilderDocument>,
-) -> HashMap<(&'a str, &'a str), &'a BTreeMap<String, Value>> {
-    let mut map = HashMap::new();
-    let Some(prev) = previous else {
-        return map;
-    };
-    for section in &prev.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if let ElementContent::Known(KnownElement::PluginBlock(props)) =
-                        &element.content
-                    {
-                        map.insert(
-                            (element.id.as_str(), props.block_id.as_str()),
-                            &props.values,
-                        );
-                    }
-                }
-            }
-        }
-    }
-    map
-}
-
-pub(super) fn is_preserved(
-    previous: Option<&BuilderDocument>,
-    (s, r, c, e): (usize, usize, usize, usize),
-    section: &SectionNode,
-    row: &RowNode,
-    column: &ColumnNode,
-    element: &ElementNode,
-) -> bool {
-    previous
-        .and_then(|old| old.sections.get(s))
-        .filter(|old| old.id == section.id)
-        .and_then(|old| old.children.get(r))
-        .filter(|old| old.id == row.id)
-        .and_then(|old| old.children.get(c))
-        .filter(|old| old.id == column.id)
-        .and_then(|old| old.children.get(e))
-        .is_some_and(|old| old == element)
 }
 
 impl BuilderDocument {
-    /// RouteContext bindings are valid only on `single` or `page` role overrides,
-    /// and custom field keys must belong to the scoped CPT when provided.
-    pub fn validate_route_context_for_role(
-        &self,
-        role: Option<&str>,
-        scoped_cpt_fields: Option<&[String]>,
-    ) -> Result<(), BuilderError> {
-        let role_allows_route_context = matches!(role, Some("single") | Some("page"));
-        for section in &self.sections {
-            for row in &section.children {
-                for column in &row.children {
-                    for element in &column.children {
-                        let ElementContent::Known(known) = &element.content else {
-                            continue;
-                        };
-                        let Some(binding) = known.binding() else {
-                            continue;
-                        };
-                        if let BindingSource::RouteContext { field_key } = &binding.source {
-                            if !role_allows_route_context {
-                                return Err(BuilderError::Invalid(
-                                    "RouteContext binding is only valid on single/page role overrides",
-                                ));
-                            }
-                            if !matches!(field_key.as_str(), "title" | "slug" | "url" | "cover_url")
-                                && let Some(allowed) = scoped_cpt_fields
-                                && !allowed.iter().any(|k| k == field_key)
-                            {
-                                return Err(BuilderError::Invalid(
-                                    "RouteContext field_key is not in scoped CPT fields",
-                                ));
-                            }
-                        }
-                    }
+    pub fn empty() -> Self {
+        Self {
+            schema_version: BUILDER_SCHEMA_VERSION,
+            blocks: Vec::new(),
+        }
+    }
+
+    /// Decodes Clean-Slate V1 JSON, rejecting pre-V1 `sections` payloads or wrong `schema_version`.
+    pub fn from_json(bytes: &[u8]) -> Result<Self, BuilderError> {
+        if bytes.len() > MAX_BUILDER_JSON_BYTES {
+            return Err(BuilderError::Invalid("Builder JSON exceeds 256 KiB"));
+        }
+        match serde_json::from_slice::<Self>(bytes) {
+            Ok(doc) => {
+                if doc.schema_version != BUILDER_SCHEMA_VERSION {
+                    return Err(BuilderError::Invalid(
+                        "Builder AST tiền-V1 (cấu trúc sections cũ hoặc schema_version != 1) không được hỗ trợ ở Clean-Slate V1.",
+                    ));
                 }
+                Ok(doc)
+            }
+            Err(err) => {
+                if let Ok(Value::Object(obj)) = serde_json::from_slice::<Value>(bytes)
+                    && (obj.contains_key("sections")
+                        || obj
+                            .get("schema_version")
+                            .and_then(Value::as_u64)
+                            .is_some_and(|v| v != u64::from(BUILDER_SCHEMA_VERSION)))
+                {
+                    return Err(BuilderError::Invalid(
+                        "Builder AST tiền-V1 (cấu trúc sections cũ hoặc schema_version != 1) không được hỗ trợ ở Clean-Slate V1.",
+                    ));
+                }
+                Err(BuilderError::Json(err))
             }
         }
-        Ok(())
+    }
+
+    pub fn to_json(&self) -> Result<Vec<u8>, BuilderError> {
+        let bytes = serde_json::to_vec(self)?;
+        if bytes.len() > MAX_BUILDER_JSON_BYTES {
+            return Err(BuilderError::Invalid("Builder JSON exceeds 256 KiB"));
+        }
+        Ok(bytes)
+    }
+
+    /// Visits every node in pre-order depth-first sequence with its 1-based depth.
+    pub fn walk_blocks(&self, mut f: impl FnMut(&BlockNode, usize)) {
+        fn walk_rec(nodes: &[BlockNode], depth: usize, f: &mut impl FnMut(&BlockNode, usize)) {
+            for node in nodes {
+                f(node, depth);
+                walk_rec(&node.children, depth + 1, f);
+            }
+        }
+        walk_rec(&self.blocks, 1, &mut f);
+    }
+
+    /// Mutably visits every node in pre-order depth-first sequence with its 1-based depth.
+    pub fn walk_blocks_mut(&mut self, mut f: impl FnMut(&mut BlockNode, usize)) {
+        fn walk_rec(
+            nodes: &mut [BlockNode],
+            depth: usize,
+            f: &mut impl FnMut(&mut BlockNode, usize),
+        ) {
+            for node in nodes {
+                f(node, depth);
+                walk_rec(&mut node.children, depth + 1, f);
+            }
+        }
+        walk_rec(&mut self.blocks, 1, &mut f);
+    }
+
+    /// Strips top-level props that strictly equal (`==`) `field.default` for Active+Declared blocks.
+    pub fn strip_default_props(&mut self, catalog: &RegistryCatalog<RegisteredBlockSchema>) {
+        self.walk_blocks_mut(|node, _| {
+            if let Some(entry) = catalog.get(&node.block_id)
+                && entry.status == ProviderStatus::Active
+                && entry.declaration_state == DeclarationState::Declared
+            {
+                entry.descriptor.schema.strip_default_props(&mut node.props);
+            }
+        });
     }
 }

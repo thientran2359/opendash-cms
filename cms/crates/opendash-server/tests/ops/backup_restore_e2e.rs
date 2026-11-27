@@ -575,17 +575,20 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
     let home_id = create_s03_home(&client, &srv.base_url, &cookie, &csrf).await;
     let hero_doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "type": "core/section",
             "children": [{
                 "id": "row1",
+                "type": "core/row",
                 "children": [{
                     "id": "col1",
+                    "type": "core/column",
                     "children": [{
                         "id": "el1",
                         "type": "core/text",
                         "props": {
-                            "text": "M8_E2E_BASELINE_HERO"
+                            "content": "M8_E2E_BASELINE_HERO"
                         }
                     }]
                 }]
@@ -910,17 +913,20 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
     // 13. Re-edit & Save on restored target -> verify public reflects edit
     let reedit_doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "type": "core/section",
             "children": [{
                 "id": "row1",
+                "type": "core/row",
                 "children": [{
                     "id": "col1",
+                    "type": "core/column",
                     "children": [{
                         "id": "el1",
                         "type": "core/text",
                         "props": {
-                            "text": "M8_E2E_REEDITED_HERO"
+                            "content": "M8_E2E_REEDITED_HERO"
                         }
                     }]
                 }]

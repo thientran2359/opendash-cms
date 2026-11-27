@@ -73,3 +73,14 @@ body {
 .od-prose th { background: var(--od-token-color-surface-alt); font-weight: 600; }
 .od-prose dt { margin-top: .75rem; font-weight: 600; }
 .od-prose dd { margin: .2rem 0 1rem; }
+
+/* Stretched card link keeps inner links, buttons, summaries and controls clickable above the overlay */
+.od-block-card .od-card-body a,
+.od-block-card .od-card-body button,
+.od-block-card .od-card-body summary,
+.od-block-card .od-card-body input,
+.od-block-card .od-card-body select,
+.od-block-card .od-card-body textarea {
+  position: relative;
+  z-index: 20;
+}

@@ -458,27 +458,13 @@ pub(in crate::storage) fn collect_builder_list_term_ids(
     doc: &opendash_core::builder::BuilderDocument,
 ) -> Vec<i64> {
     let mut out = Vec::new();
-    for section in &doc.sections {
-        for row in &section.children {
-            for col in &row.children {
-                for el in &col.children {
-                    if let opendash_core::builder::ElementContent::Known(
-                        opendash_core::builder::KnownElement::List(props),
-                    ) = &el.content
-                    {
-                        if let Some(id) = props.category_id {
-                            out.push(id);
-                        }
-                        if let Some(id) = props.tag_id {
-                            out.push(id);
-                        }
-                        if let Some(id) = props.term_id {
-                            out.push(id);
-                        }
-                    }
-                }
-            }
+    doc.walk_blocks(|node, _| {
+        if node.block_id == "core/list"
+            && let Some(id) =
+                opendash_core::builder::parse_positive_i64_prop(node.props.get("term_id"))
+        {
+            out.push(id);
         }
-    }
+    });
     out
 }

@@ -16,31 +16,31 @@ const target = join(repoRoot, 'cms/crates/opendash-server/src/builtin_themes/ope
 const scanRoots = [
   'cms/crates/opendash-server/src/builtin_blocks',
   'cms/crates/opendash-server/src/builtin_themes/opendash-starter',
-  'cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.0.1',
-  'cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.1.0',
-  'cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.1.1',
   'cms/fixtures/demo-website',
 ];
+const rustDirs = [
+  'cms/crates/opendash-server/src/content_render',
+  'cms/crates/opendash-server/src/page',
+  'cms/crates/opendash-server/src/routes/public_content',
+];
 const rustSources = [
-  'cms/crates/opendash-server/src/content_render.rs',
-  'cms/crates/opendash-server/src/page.rs',
   'cms/crates/opendash-server/src/routes/public.rs',
-  'cms/crates/opendash-server/src/routes/public_content.rs',
 ];
 
-async function scanDir(relative, files) {
+async function scanDir(relative, files, extensions = /\.(html|json)$/, skipTests = false) {
   const location = join(repoRoot, relative);
   let entries;
   try {
     entries = await readdir(location, { withFileTypes: true });
   } catch (error) {
-    if (error.code === 'ENOENT') return; // S02's starter theme is added after S01.
+    if (error.code === 'ENOENT') return;
     throw error;
   }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
+    if (skipTests && entry.isDirectory() && entry.name === 'tests') continue;
     const path = join(relative, entry.name);
-    if (entry.isDirectory()) await scanDir(path, files);
-    else if (entry.isFile() && /\.(html|json)$/.test(entry.name)) files.push(join(repoRoot, path));
+    if (entry.isDirectory()) await scanDir(path, files, extensions, skipTests);
+    else if (entry.isFile() && extensions.test(entry.name)) files.push(join(repoRoot, path));
   }
 }
 
@@ -57,6 +57,7 @@ async function loadStylesheet(id, base) {
 async function main() {
   const files = [];
   for (const root of scanRoots) await scanDir(root, files);
+  for (const dir of rustDirs) await scanDir(dir, files, /\.rs$/, true);
   files.push(...rustSources.map(path => join(repoRoot, path)));
   files.push(join(adminDir, 'src/tailwind-public-safelist.txt'));
   const scanner = new Scanner({ sources: [] });

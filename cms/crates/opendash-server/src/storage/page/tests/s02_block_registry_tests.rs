@@ -29,7 +29,7 @@ async fn migration_0045_seeds_five_core_blocks_enforces_409_conflict_and_preserv
     assert_eq!(core_cnt, EMBEDDED_CORE_BLOCK_SOURCES.len() as i64);
 
     let mut conn = db.acquire().await.unwrap();
-    let b1: BlockSchemaV1 = serde_json::from_value(json!({
+    let b1: BlockSchema = serde_json::from_value(json!({
         "schema_version": 1,
         "id": "acme-plugin/cta",
         "title": "CTA",
@@ -40,7 +40,7 @@ async fn migration_0045_seeds_five_core_blocks_enforces_409_conflict_and_preserv
         ]
     }))
     .unwrap();
-    let b2: BlockSchemaV1 = serde_json::from_value(json!({
+    let b2: BlockSchema = serde_json::from_value(json!({
         "schema_version": 1,
         "id": "acme-plugin/old",
         "title": "Old",
@@ -133,7 +133,7 @@ async fn provider_toggle_resyncs_media_acl_without_erasing_saved_homepage() {
     .await
     .unwrap();
 
-    let schema: BlockSchemaV1 = serde_json::from_value(json!({
+    let schema: BlockSchema = serde_json::from_value(json!({
         "schema_version": 1,
         "id": "acme-blocks/banner",
         "title": "Banner",
@@ -146,12 +146,12 @@ async fn provider_toggle_resyncs_media_acl_without_erasing_saved_homepage() {
     .unwrap();
     let document: BuilderDocument = serde_json::from_value(json!({
         "schema_version": opendash_core::builder::BUILDER_SCHEMA_VERSION,
-        "sections": [{
-            "id": "s1", "children": [{
-                "id": "r1", "children": [{
-                    "id": "c1", "children": [{
-                        "id": "e1", "type": "plugin/block",
-                        "props": { "block_id": "acme-blocks/banner", "values": { "photo": image_id } }
+        "blocks": [{
+            "id": "s1", "type": "core/section", "children": [{
+                "id": "r1", "type": "core/row", "children": [{
+                    "id": "c1", "type": "core/column", "children": [{
+                        "id": "e1", "type": "acme-blocks/banner",
+                        "props": { "photo": image_id }
                     }]
                 }]
             }]
@@ -288,10 +288,7 @@ async fn provider_toggle_resyncs_media_acl_without_erasing_saved_homepage() {
 
 #[tokio::test]
 async fn s01_core_sync_cleanup_list_offset_and_fail_closed_locale_filters() {
-    use opendash_core::builder::{
-        BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, ListProps, RowNode,
-        SectionNode,
-    };
+    use opendash_core::builder::BuilderDocument;
 
     let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
     crate::storage::content::preflight_builtin_key_collisions(&db)
@@ -372,34 +369,25 @@ async fn s01_core_sync_cleanup_list_offset_and_fail_closed_locale_filters() {
     drop(conn);
 
     let list_doc = |cat_id: i64| -> BuilderDocument {
-        let props: ListProps = serde_json::from_value(
-            json!({ "type_key": "post", "page_size": 5, "category_id": cat_id }),
-        )
-        .unwrap();
-        BuilderDocument {
-            schema_version: 1,
-            sections: vec![SectionNode {
-                id: "s1".into(),
-                meta: None,
-                responsive: None,
-                style: None,
-                children: vec![RowNode {
-                    id: "r1".into(),
-                    meta: None,
-                    responsive: None,
-                    children: vec![ColumnNode {
-                        id: "c1".into(),
-                        meta: None,
-                        responsive: None,
-                        children: vec![ElementNode {
-                            id: "list-1".into(),
-                            meta: None,
-                            content: ElementContent::Known(KnownElement::List(props)),
-                        }],
-                    }],
-                }],
-            }],
-        }
+        serde_json::from_value(json!({
+            "schema_version": 1,
+            "blocks": [{
+                "id": "s1", "type": "core/section", "children": [{
+                    "id": "r1", "type": "core/row", "children": [{
+                        "id": "c1", "type": "core/column", "children": [{
+                            "id": "list-1", "type": "core/list",
+                            "props": {
+                                "type_key": "post",
+                                "page_size": 5,
+                                "taxonomy_key": "category",
+                                "term_id": cat_id
+                            }
+                        }]
+                    }]
+                }]
+            }]
+        }))
+        .unwrap()
     };
 
     let mut tx = db.begin().await.unwrap();

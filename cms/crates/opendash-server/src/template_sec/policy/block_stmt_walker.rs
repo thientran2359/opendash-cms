@@ -520,15 +520,15 @@ pub(crate) fn block_stmt_touches_sensitive(
 pub fn validate_block_template_csec(
     block_id: &str,
     source: &str,
-    schema: &opendash_core::block_schema::BlockSchemaV1,
+    schema: &opendash_core::block_schema::BlockSchema,
 ) -> Result<(), &'static str> {
-    validate_block_template_csec_with_children(block_id, source, schema, false)
+    validate_block_template_csec_with_children(block_id, source, schema, schema.supports_children)
 }
 
 pub fn validate_block_template_csec_with_children(
     block_id: &str,
     source: &str,
-    schema: &opendash_core::block_schema::BlockSchemaV1,
+    schema: &opendash_core::block_schema::BlockSchema,
     supports_children: bool,
 ) -> Result<(), &'static str> {
     if source.trim().is_empty() {

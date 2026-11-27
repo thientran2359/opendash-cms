@@ -450,30 +450,33 @@ async fn m7_s08_t01_deterministic_e2e_and_adversarial_corpus() {
         StatusCode::NOT_FOUND
     );
 
-    // Save homepage with core/video + core/contact_form
+    // Save homepage with core/video + core/contact-form
     let doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "type": "core/section",
             "children": [{
                 "id": "row1",
+                "type": "core/row",
                 "children": [{
                     "id": "col1",
+                    "type": "core/column",
                     "children": [
                         {
                             "id": "vid1",
                             "type": "core/video",
                             "props": {
-                                "media_id": expected_sha,
+                                "video": expected_sha,
                                 "controls": true,
                                 "muted": false
                             }
                         },
                         {
                             "id": "frm1",
-                            "type": "core/contact_form",
+                            "type": "core/contact-form",
                             "props": {
-                                "form_id": form_id,
+                                "form_id": form_id.to_string(),
                                 "submit_label": "Gui"
                             }
                         }

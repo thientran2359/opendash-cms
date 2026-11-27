@@ -87,10 +87,10 @@ fn preview_nonce_replacement_is_single_pass_and_checks_multiplicity_context_and_
 
 #[test]
 fn block_csec_blocks_html5_comment_smuggling_duplicate_attrs_entity_urls_and_richtext_aliasing() {
-    use opendash_core::block_schema::BlockSchemaV1;
+    use opendash_core::block_schema::BlockSchema;
     use serde_json::json;
 
-    let schema: BlockSchemaV1 = serde_json::from_value(json!({
+    let schema: BlockSchema = serde_json::from_value(json!({
         "schema_version": 1,
         "id": "core/test-card",
         "title": "Test Card",
@@ -256,10 +256,10 @@ fn block_csec_blocks_html5_comment_smuggling_duplicate_attrs_entity_urls_and_ric
 
 #[test]
 fn block_csec_supports_nested_group_icon_link_spacing_and_dynamic_menus() {
-    use opendash_core::block_schema::BlockSchemaV1;
+    use opendash_core::block_schema::BlockSchema;
     use serde_json::json;
 
-    let schema: BlockSchemaV1 = serde_json::from_value(json!({
+    let schema: BlockSchema = serde_json::from_value(json!({
         "schema_version": 1,
         "id": "core/showcase-test",
         "title": "Showcase",
@@ -371,9 +371,9 @@ fn block_csec_supports_nested_group_icon_link_spacing_and_dynamic_menus() {
 
 #[test]
 fn container_block_csec_enforces_safe_body_nesting_balanced_if_and_budget() {
-    use opendash_core::block_schema::BlockSchemaV1;
+    use opendash_core::block_schema::BlockSchema;
 
-    let schema: BlockSchemaV1 = serde_json::from_value(serde_json::json!({
+    let schema: BlockSchema = serde_json::from_value(serde_json::json!({
         "schema_version": 1,
         "id": "demo/box",
         "title": "Box",

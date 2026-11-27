@@ -1,11 +1,10 @@
 use super::*;
 
-pub(super) struct ParserState {
+pub(super) struct ParserState<'a> {
     pub(super) strict: bool,
-    pub(super) sections: Vec<SectionNode>,
-    pub(super) cur_section: Option<SectionNode>,
-    pub(super) cur_row: Option<RowNode>,
-    pub(super) cur_col: Option<ColumnNode>,
+    pub(super) catalog: &'a RegistryCatalog<RegisteredBlockSchema>,
+    pub(super) roots: Vec<BlockNode>,
+    pub(super) stack: Vec<BlockNode>,
     pub(super) diagnostics: Vec<BlockDiagnostic>,
     pub(super) had_freeform_wrap: bool,
     pub(super) had_recovery: bool,
@@ -14,14 +13,13 @@ pub(super) struct ParserState {
     pub(super) used_ids: HashSet<String>,
 }
 
-impl ParserState {
-    pub(super) fn new(strict: bool) -> Self {
+impl<'a> ParserState<'a> {
+    pub(super) fn new(strict: bool, catalog: &'a RegistryCatalog<RegisteredBlockSchema>) -> Self {
         Self {
             strict,
-            sections: Vec::new(),
-            cur_section: None,
-            cur_row: None,
-            cur_col: None,
+            catalog,
+            roots: Vec::new(),
+            stack: Vec::new(),
             diagnostics: Vec::new(),
             had_freeform_wrap: false,
             had_recovery: false,
@@ -31,82 +29,17 @@ impl ParserState {
         }
     }
 
-    pub(super) fn alloc_wrap_ids(&mut self) -> (String, String, String, usize) {
-        self.wrap_seq += 1;
-        let n = self.wrap_seq;
-        let sec = self.unique_prefixed(&format!("sec-wrap-{n}"));
-        let row = self.unique_prefixed(&format!("row-wrap-{n}"));
-        let col = self.unique_prefixed(&format!("col-wrap-{n}"));
-        (sec, row, col, n)
-    }
-
     pub(super) fn unique_prefixed(&mut self, base: &str) -> String {
         if valid_package_id(base) && self.used_ids.insert(base.to_owned()) {
             return base.to_owned();
         }
-        let mut suffix = 2usize;
+        let mut suffix = 2_usize;
         loop {
             let candidate = format!("{base}-{suffix}");
             if valid_package_id(&candidate) && self.used_ids.insert(candidate.clone()) {
                 return candidate;
             }
             suffix += 1;
-        }
-    }
-
-    pub(super) fn close_column(&mut self) {
-        if let Some(col) = self.cur_col.take() {
-            if let Some(row) = self.cur_row.as_mut() {
-                row.children.push(col);
-            } else {
-                self.rec_seq += 1;
-                let row_id = self.unique_prefixed(&format!("row-rec-{}", self.rec_seq));
-                let row = RowNode {
-                    id: row_id,
-                    meta: None,
-                    responsive: None,
-                    children: vec![col],
-                };
-                if let Some(sec) = self.cur_section.as_mut() {
-                    sec.children.push(row);
-                } else {
-                    self.rec_seq += 1;
-                    let sec_id = self.unique_prefixed(&format!("sec-rec-{}", self.rec_seq));
-                    self.sections.push(SectionNode {
-                        id: sec_id,
-                        meta: None,
-                        responsive: None,
-                        style: None,
-                        children: vec![row],
-                    });
-                }
-            }
-        }
-    }
-
-    pub(super) fn close_row(&mut self) {
-        self.close_column();
-        if let Some(row) = self.cur_row.take() {
-            if let Some(sec) = self.cur_section.as_mut() {
-                sec.children.push(row);
-            } else {
-                self.rec_seq += 1;
-                let sec_id = self.unique_prefixed(&format!("sec-rec-{}", self.rec_seq));
-                self.sections.push(SectionNode {
-                    id: sec_id,
-                    meta: None,
-                    responsive: None,
-                    style: None,
-                    children: vec![row],
-                });
-            }
-        }
-    }
-
-    pub(super) fn close_section(&mut self) {
-        self.close_row();
-        if let Some(sec) = self.cur_section.take() {
-            self.sections.push(sec);
         }
     }
 
@@ -119,57 +52,73 @@ impl ParserState {
         });
     }
 
-    pub(super) fn push_element(&mut self, element: ElementNode) -> Result<(), BuilderBlockError> {
-        if self.cur_col.is_some() {
-            self.cur_col.as_mut().unwrap().children.push(element);
-            return Ok(());
+    fn container_accepts_text(&self, block_id: &str) -> bool {
+        if self.catalog.is_empty() {
+            return true;
         }
-        if self.strict {
-            return Err(BuilderBlockError::Invalid(
-                "Builder element found outside open column",
-            ));
-        }
-        self.ensure_open_column_for_recovery(&element.id.clone(), "Element found outside column");
-        self.cur_col.as_mut().unwrap().children.push(element);
-        Ok(())
+        let Some(entry) = self.catalog.get(block_id) else {
+            return false;
+        };
+        entry.status == ProviderStatus::Active
+            && entry.declaration_state == DeclarationState::Declared
+            && entry.descriptor.schema.supports_children
+            && matches_pattern_list(
+                entry.descriptor.schema.allowed_children.as_deref(),
+                "core/text",
+            )
     }
 
-    pub(super) fn ensure_open_column_for_recovery(&mut self, diag_node_id: &str, reason: &str) {
-        if self.cur_section.is_none() {
-            self.rec_seq += 1;
-            let n = self.rec_seq;
-            let id = self.unique_prefixed(&format!("sec-rec-{n}"));
-            self.cur_section = Some(SectionNode {
-                id,
-                meta: None,
-                responsive: None,
-                style: None,
-                children: Vec::new(),
-            });
+    pub(super) fn attach_leaf(&mut self, node: BlockNode) {
+        if let Some(parent) = self.stack.last_mut() {
+            parent.children.push(node);
+        } else {
+            self.roots.push(node);
         }
-        if self.cur_row.is_none() {
-            self.rec_seq += 1;
-            let n = self.rec_seq;
-            let id = self.unique_prefixed(&format!("row-rec-{n}"));
-            self.cur_row = Some(RowNode {
-                id,
-                meta: None,
-                responsive: None,
-                children: Vec::new(),
-            });
+    }
+
+    pub(super) fn attach_text_with_hoist(&mut self, text_nodes: Vec<BlockNode>) {
+        if self.stack.is_empty() {
+            self.roots.extend(text_nodes);
+            return;
         }
-        if self.cur_col.is_none() {
-            self.rec_seq += 1;
-            let n = self.rec_seq;
-            let id = self.unique_prefixed(&format!("col-rec-{n}"));
-            self.cur_col = Some(ColumnNode {
-                id,
-                meta: None,
-                responsive: None,
-                children: Vec::new(),
-            });
+        let top_idx = self.stack.len() - 1;
+        if let Some(target_idx) = self
+            .stack
+            .iter()
+            .rposition(|c| self.container_accepts_text(&c.block_id))
+        {
+            if target_idx < top_idx
+                && let Some(first) = text_nodes.first()
+            {
+                self.diagnostics.push(BlockDiagnostic {
+                    node_id: first.id.clone(),
+                    code: "hoisted_freeform_html".to_owned(),
+                    message: "Freeform HTML inside restricted container was hoisted to nearest valid ancestor.".to_owned(),
+                });
+            }
+            self.stack[target_idx].children.extend(text_nodes);
+        } else {
+            if let Some(first) = text_nodes.first() {
+                self.diagnostics.push(BlockDiagnostic {
+                    node_id: first.id.clone(),
+                    code: "hoisted_freeform_html".to_owned(),
+                    message:
+                        "Freeform HTML inside restricted container was hoisted to document root."
+                            .to_owned(),
+                });
+            }
+            self.roots.extend(text_nodes);
         }
-        self.record_recovery(diag_node_id, reason);
+    }
+
+    fn make_text_node(id: String, content: String) -> BlockNode {
+        BlockNode {
+            id,
+            block_id: "core/text".to_owned(),
+            props: BTreeMap::from([("content".to_owned(), Value::String(content))]),
+            meta: None,
+            children: Vec::new(),
+        }
     }
 
     pub(super) fn push_freeform(&mut self, raw: &str, trim_outer_newlines: bool) {
@@ -186,64 +135,14 @@ impl ParserState {
             return;
         }
         self.had_freeform_wrap = true;
-        if self.cur_col.is_some() {
-            self.wrap_seq += 1;
-            let wrap_idx = self.wrap_seq;
-            let mut elements = Vec::with_capacity(chunks.len());
-            for (i, chunk) in chunks.into_iter().enumerate() {
-                let id = self.unique_prefixed(&format!("el-wrap-{wrap_idx}-{}", i + 1));
-                elements.push(ElementNode {
-                    id,
-                    meta: None,
-                    content: ElementContent::Known(KnownElement::Text(TextProps {
-                        text: chunk,
-                        ..Default::default()
-                    })),
-                });
-            }
-            self.cur_col.as_mut().unwrap().children.extend(elements);
-            return;
-        }
-        let (sec_id, row_id, col_id, wrap_idx) = self.alloc_wrap_ids();
-        let mut elements = Vec::with_capacity(chunks.len());
+        self.wrap_seq += 1;
+        let wrap_idx = self.wrap_seq;
+        let mut nodes = Vec::with_capacity(chunks.len());
         for (i, chunk) in chunks.into_iter().enumerate() {
-            let id = self.unique_prefixed(&format!("el-wrap-{wrap_idx}-{}", i + 1));
-            elements.push(ElementNode {
-                id,
-                meta: None,
-                content: ElementContent::Known(KnownElement::Text(TextProps {
-                    text: chunk,
-                    ..Default::default()
-                })),
-            });
+            let id = self.unique_prefixed(&format!("txt-wrap-{wrap_idx}-{}", i + 1));
+            nodes.push(Self::make_text_node(id, chunk));
         }
-        let col = ColumnNode {
-            id: col_id,
-            meta: None,
-            responsive: None,
-            children: elements,
-        };
-        if let Some(row) = self.cur_row.as_mut() {
-            row.children.push(col);
-            return;
-        }
-        let row = RowNode {
-            id: row_id,
-            meta: None,
-            responsive: None,
-            children: vec![col],
-        };
-        if let Some(sec) = self.cur_section.as_mut() {
-            sec.children.push(row);
-            return;
-        }
-        self.sections.push(SectionNode {
-            id: sec_id,
-            meta: None,
-            responsive: None,
-            style: None,
-            children: vec![row],
-        });
+        self.attach_text_with_hoist(nodes);
     }
 
     pub(super) fn push_recovered_region(&mut self, raw: &str, reason: &str) {
@@ -257,123 +156,68 @@ impl ParserState {
             return;
         }
         let mut first_id = None;
-        let mut elements = Vec::with_capacity(chunks.len());
+        let mut nodes = Vec::with_capacity(chunks.len());
         for chunk in chunks {
             self.rec_seq += 1;
-            let id = self.unique_prefixed(&format!("el-rec-{}", self.rec_seq));
+            let id = self.unique_prefixed(&format!("txt-rec-{}", self.rec_seq));
             if first_id.is_none() {
                 first_id = Some(id.clone());
             }
-            elements.push(ElementNode {
-                id,
-                meta: None,
-                content: ElementContent::Known(KnownElement::Text(TextProps {
-                    text: chunk,
-                    ..Default::default()
-                })),
-            });
+            nodes.push(Self::make_text_node(id, chunk));
         }
-        let diag_id = first_id.unwrap_or_else(|| "el-rec-0".to_owned());
+        let diag_id = first_id.unwrap_or_else(|| "txt-rec-0".to_owned());
         self.record_recovery(&diag_id, reason);
+        self.attach_text_with_hoist(nodes);
+    }
 
-        if let Some(col) = self.cur_col.as_mut() {
-            col.children.extend(elements);
-            return;
+    pub(super) fn close_container(&mut self, tag: &str) -> Result<bool, BuilderBlockError> {
+        if self.strict {
+            let Some(top) = self.stack.last() else {
+                return Err(BuilderBlockError::Invalid("Unexpected closing block tag"));
+            };
+            if top.block_id != tag {
+                return Err(BuilderBlockError::Invalid("Mismatched closing block tag"));
+            }
+            let popped = self.stack.pop().unwrap();
+            self.attach_leaf(popped);
+            return Ok(true);
         }
-        self.rec_seq += 1;
-        let n = self.rec_seq;
-        let col = ColumnNode {
-            id: self.unique_prefixed(&format!("col-rec-{n}")),
-            meta: None,
-            responsive: None,
-            children: elements,
+        let Some(found_idx) = self.stack.iter().rposition(|n| n.block_id == tag) else {
+            return Ok(false);
         };
-        if let Some(row) = self.cur_row.as_mut() {
-            row.children.push(col);
-            return;
+        while self.stack.len() - 1 > found_idx {
+            let unclosed = self.stack.pop().unwrap();
+            let unclosed_id = unclosed.id.clone();
+            self.attach_leaf(unclosed);
+            self.record_recovery(&unclosed_id, "Auto-closed unclosed inner container block");
         }
-        let row = RowNode {
-            id: self.unique_prefixed(&format!("row-rec-{n}")),
-            meta: None,
-            responsive: None,
-            children: vec![col],
-        };
-        if let Some(sec) = self.cur_section.as_mut() {
-            sec.children.push(row);
-            return;
-        }
-        let sec_id = self.unique_prefixed(&format!("sec-rec-{n}"));
-        self.sections.push(SectionNode {
-            id: sec_id,
-            meta: None,
-            responsive: None,
-            style: None,
-            children: vec![row],
-        });
+        let matched = self.stack.pop().unwrap();
+        self.attach_leaf(matched);
+        Ok(true)
     }
 
     pub(super) fn finish(mut self) -> Result<ParsedBlockDocument, BuilderBlockError> {
-        if self.cur_col.is_some() || self.cur_row.is_some() || self.cur_section.is_some() {
+        if !self.stack.is_empty() {
             if self.strict {
                 return Err(BuilderBlockError::Invalid(
                     "Unclosed Builder container block",
                 ));
             }
-            let open_id = self
-                .cur_col
-                .as_ref()
-                .map(|c| c.id.clone())
-                .or_else(|| self.cur_row.as_ref().map(|r| r.id.clone()))
-                .or_else(|| self.cur_section.as_ref().map(|s| s.id.clone()))
-                .unwrap_or_else(|| "sec-rec-eof".to_owned());
-            self.close_section();
-            self.record_recovery(&open_id, "Auto-closed unclosed Builder container at EOF");
+            while let Some(unclosed) = self.stack.pop() {
+                let id = unclosed.id.clone();
+                self.attach_leaf(unclosed);
+                self.record_recovery(&id, "Auto-closed unclosed Builder container at EOF");
+            }
         }
-        // Ensure no earlier synthetic wrapper/recovery ID collides with a later explicit ID.
         if self.had_freeform_wrap || self.had_recovery {
             let mut seen = HashSet::new();
-            let mut dedup_seq = 0usize;
-            for sec in &mut self.sections {
-                if !seen.insert(sec.id.clone()) {
-                    while {
-                        dedup_seq += 1;
-                        !seen.insert(format!("sec-wrap-u{dedup_seq}"))
-                    } {}
-                    sec.id = format!("sec-wrap-u{dedup_seq}");
-                }
-                for row in &mut sec.children {
-                    if !seen.insert(row.id.clone()) {
-                        while {
-                            dedup_seq += 1;
-                            !seen.insert(format!("row-wrap-u{dedup_seq}"))
-                        } {}
-                        row.id = format!("row-wrap-u{dedup_seq}");
-                    }
-                    for col in &mut row.children {
-                        if !seen.insert(col.id.clone()) {
-                            while {
-                                dedup_seq += 1;
-                                !seen.insert(format!("col-wrap-u{dedup_seq}"))
-                            } {}
-                            col.id = format!("col-wrap-u{dedup_seq}");
-                        }
-                        for el in &mut col.children {
-                            if !seen.insert(el.id.clone()) {
-                                while {
-                                    dedup_seq += 1;
-                                    !seen.insert(format!("el-wrap-u{dedup_seq}"))
-                                } {}
-                                el.id = format!("el-wrap-u{dedup_seq}");
-                            }
-                        }
-                    }
-                }
-            }
+            let mut seq = 0_usize;
+            dedup_ids_rec(&mut self.roots, &mut seen, &mut seq);
         }
         Ok(ParsedBlockDocument {
             document: BuilderDocument {
                 schema_version: BUILDER_SCHEMA_VERSION,
-                sections: self.sections,
+                blocks: self.roots,
             },
             diagnostics: self.diagnostics,
             had_freeform_wrap: self.had_freeform_wrap,
@@ -382,120 +226,25 @@ impl ParserState {
     }
 }
 
-pub(super) fn parse_leaf_content(tag: &str, json_str: &str) -> Result<ElementNode, &'static str> {
-    match tag {
-        "heading" => {
-            let (id, meta, props) = decode_props_with_id::<HeadingProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::Heading(props)),
-            })
+fn dedup_ids_rec(nodes: &mut [BlockNode], seen: &mut HashSet<String>, seq: &mut usize) {
+    for node in nodes {
+        if !seen.insert(node.id.clone()) {
+            loop {
+                *seq += 1;
+                let candidate = format!("blk-wrap-u{}", *seq);
+                if seen.insert(candidate.clone()) {
+                    node.id = candidate;
+                    break;
+                }
+            }
         }
-        "text" => {
-            let (id, meta, props) = decode_props_with_id::<TextProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::Text(props)),
-            })
-        }
-        "image" => {
-            let (id, meta, props) = decode_props_with_id::<ImageProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::Image(props)),
-            })
-        }
-        "video" => {
-            let (id, meta, props) = decode_props_with_id::<VideoProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::Video(props)),
-            })
-        }
-        "button" => {
-            let (id, meta, props) = decode_props_with_id::<ButtonProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::Button(props)),
-            })
-        }
-        "list" => {
-            let (id, meta, props) = decode_props_with_id::<ListProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::List(props)),
-            })
-        }
-        "contact_form" => {
-            let (id, meta, props) = decode_props_with_id::<ContactFormProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::ContactForm(props)),
-            })
-        }
-        "content_slot" => {
-            let (id, meta, props) = decode_props_with_id::<ContentSlotProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::ContentSlot(props)),
-            })
-        }
-        "pattern_ref" => {
-            let (id, meta, props) = decode_props_with_id::<PatternRefProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::PatternRef(props)),
-            })
-        }
-        "template_part" => {
-            let (id, meta, props) = decode_props_with_id::<TemplatePartProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::TemplatePart(props)),
-            })
-        }
-        "plugin_block" => {
-            let (id, meta, props) = decode_props_with_id::<PluginBlockProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::PluginBlock(props)),
-            })
-        }
-        "legacy" => {
-            let (id, meta, props) = decode_props_with_id::<LegacyBlockProps>(json_str)?;
-            Ok(ElementNode {
-                id,
-                meta,
-                content: ElementContent::Known(KnownElement::Legacy(props)),
-            })
-        }
-        "unresolved" => {
-            let payload: UnresolvedPayload =
-                serde_json::from_str(json_str).map_err(|_| "Invalid unresolved block JSON")?;
-            Ok(ElementNode {
-                id: payload.id,
-                meta: payload.meta,
-                content: ElementContent::Unresolved(payload.raw),
-            })
-        }
-        _ => Err("Unknown OpenDash comment block tag"),
+        dedup_ids_rec(&mut node.children, seen, seq);
     }
 }
 
 pub(super) fn split_tag_and_json(inner: &str) -> Result<(&str, &str), &'static str> {
     let trimmed = inner.trim();
-    match trimmed.find(|c: char| c.is_whitespace()) {
+    match trimmed.find(char::is_whitespace) {
         Some(idx) => Ok((&trimmed[..idx], trimmed[idx..].trim())),
         None => Err("Missing JSON payload in comment block"),
     }

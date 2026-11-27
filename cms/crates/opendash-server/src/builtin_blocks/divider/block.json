@@ -4,7 +4,7 @@
   "title": "Đường phân cách",
   "category": "layout",
   "icon": "minus",
-  "render": "render.html",
+  "render": "native",
   "fields": [
     {
       "type": "select",
@@ -42,11 +42,32 @@
       "css_var": "--od-divider-w"
     },
     {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn lề",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" }
+      ],
+      "default": "center"
+    },
+    {
       "type": "color",
       "key": "color",
       "label": "Màu sắc",
       "default": "#e4e4e7",
       "css_var": "--od-divider-c"
+    },
+    {
+      "type": "spacing",
+      "key": "margin",
+      "label": "Lề ngoài (Margin)",
+      "property": "margin",
+      "min": -64,
+      "max": 128,
+      "unit": "px",
+      "responsive": true
     }
   ]
 }

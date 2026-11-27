@@ -48,56 +48,60 @@ pub async fn list_overrides(db: &SqlitePool) -> ApiResult<Vec<TemplateOverrideRe
     rows.into_iter().map(row_to_record).collect()
 }
 
-pub(in crate::storage) async fn validate_cpt_target_fields_in_tx(
+pub(in crate::storage) async fn validate_typed_target_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
-    type_key: &str,
-    entry_id: Option<i64>,
-) -> ApiResult<Option<Vec<String>>> {
-    let type_key = type_key.trim();
-    if type_key.is_empty() {
-        return Ok(None);
+    target: &TemplateCandidate,
+) -> ApiResult<()> {
+    target.canonical_key().map_err(ApiError::bad_request)?;
+    if let Some(type_key) = target.content_type.as_deref() {
+        let type_key = type_key.trim();
+        if !type_key.is_empty() {
+            if !valid_content_type_key(type_key) {
+                return Err(ApiError::bad_request("scope_type_key không hợp lệ."));
+            }
+            if let Some(eid) = target.entry_id
+                && eid <= 0
+            {
+                return Err(ApiError::bad_request("scope_entry_id không hợp lệ."));
+            }
+            if crate::storage::content::load_effective_content_schema_in_tx(&mut **tx, type_key)
+                .await?
+                .is_none()
+            {
+                return Err(ApiError::not_found(
+                    "Không tìm thấy loại nội dung cho scope.",
+                ));
+            }
+            if let Some(eid) = target.entry_id {
+                let exists: Option<i64> = sqlx::query_scalar(
+                    "SELECT id FROM content_entries WHERE id = ? AND content_type_key = ? AND trashed_at IS NULL",
+                )
+                .bind(eid)
+                .bind(type_key)
+                .fetch_optional(&mut **tx)
+                .await?;
+                if exists.is_none() {
+                    return Err(ApiError::not_found("Không tìm thấy entry cho scope."));
+                }
+            }
+        }
+        return Ok(());
     }
-    if !valid_content_type_key(type_key) {
-        return Err(ApiError::bad_request("scope_type_key không hợp lệ."));
-    }
-    if let Some(eid) = entry_id
-        && eid <= 0
-    {
-        return Err(ApiError::bad_request("scope_entry_id không hợp lệ."));
-    }
-    let Some(eff) =
-        crate::storage::content::load_effective_content_schema_in_tx(&mut **tx, type_key).await?
-    else {
-        return Err(ApiError::not_found(
-            "Không tìm thấy loại nội dung cho scope.",
-        ));
-    };
-    let field_keys: Vec<String> = eff
-        .effective_fields
-        .into_iter()
-        .filter(|(_, fe)| {
-            fe.effective_status == opendash_core::content::EffectiveFieldStatus::Active
-                && !fe.definition.is_ui_only()
-                && fe.definition.effective_acl().2 == opendash_core::content::PublicExposure::Public
-                && fe.definition.effective_acl().0 <= opendash_core::content::FieldRole::Editor
-        })
-        .map(|(k, _)| k)
-        .collect();
-
-    if let Some(eid) = entry_id {
-        let exists: Option<i64> = sqlx::query_scalar(
-            "SELECT id FROM content_entries WHERE id = ? AND content_type_key = ? AND trashed_at IS NULL",
+    if let Some(term_id) = target.term_id {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM taxonomy_terms WHERE id = ? AND kind = ?)",
         )
-        .bind(eid)
-        .bind(type_key)
-        .fetch_optional(&mut **tx)
+        .bind(term_id)
+        .bind(target.taxonomy.as_deref())
+        .fetch_one(&mut **tx)
         .await?;
-        if exists.is_none() {
-            return Err(ApiError::not_found("Không tìm thấy entry cho scope."));
+        if exists == 0 {
+            return Err(ApiError::not_found(
+                "Taxonomy term for template target not found.",
+            ));
         }
     }
-
-    Ok(Some(field_keys))
+    Ok(())
 }
 
 /// Check site-owned part edges in the final post-save graph, not only the
@@ -152,31 +156,6 @@ pub(in crate::storage) async fn validate_part_graph_in_tx(
         }
     }
     Ok(())
-}
-
-pub(in crate::storage) async fn validate_typed_target_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
-    target: &TemplateCandidate,
-) -> ApiResult<Option<Vec<String>>> {
-    target.canonical_key().map_err(ApiError::bad_request)?;
-    if let Some(kind) = target.content_type.as_deref() {
-        return validate_cpt_target_fields_in_tx(tx, kind, target.entry_id).await;
-    }
-    if let Some(term_id) = target.term_id {
-        let exists: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM taxonomy_terms WHERE id = ? AND kind = ?)",
-        )
-        .bind(term_id)
-        .bind(target.taxonomy.as_deref())
-        .fetch_one(&mut **tx)
-        .await?;
-        if exists == 0 {
-            return Err(ApiError::not_found(
-                "Taxonomy term for template target not found.",
-            ));
-        }
-    }
-    Ok(None)
 }
 
 pub async fn reset_typed_override(
@@ -383,29 +362,21 @@ pub(in crate::storage) async fn render_preview_builder(
             parts.insert(key, part.html);
         }
     }
-    let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
-        tx,
-        document,
-        true,
-        ctx.route,
-        Some(ctx.render_locale),
-    )
-    .await?;
-    let lists = builder::resolve_lists_in_tx_for_locale(
+    let mut rb = budget.as_render_budget();
+    let lists = builder::resolve_lists_in_tx_for_locale_with_budget(
         tx,
         document,
         &BTreeMap::new(),
         Some(ctx.render_locale),
+        &mut rb,
     )
     .await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
     let empty_patterns = page::PatternResults::new();
-    let mut rb = budget.as_render_budget();
     let mut rendered = page::render_builder_with_budget(
         ctx.state,
         document,
         true,
-        &bindings,
         &lists,
         &forms,
         Some(&page::BuilderTemplateContext {

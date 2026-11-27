@@ -1,6 +1,10 @@
+mod blocks_layout;
+mod blocks_leaf;
+mod blocks_runtime;
 mod budget_render;
 mod cache_types;
 mod html_helpers;
+mod node_renderer;
 mod render;
 mod root_wrapper;
 mod scoped_css;

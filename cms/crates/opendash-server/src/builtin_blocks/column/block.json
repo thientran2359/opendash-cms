@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "id": "core/column",
+  "title": "Cột (Column)",
+  "category": "layout",
+  "icon": "square",
+  "render": "native",
+  "supports_children": true,
+  "allowed_parents": ["core/row"],
+  "allowed_children": ["*", "!core/section"],
+  "fields": [
+    {
+      "type": "range",
+      "key": "span",
+      "label": "Độ rộng cột (lưới 12)",
+      "min": 1,
+      "max": 12,
+      "step": 1,
+      "default": 6,
+      "responsive": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "text_align",
+      "label": "Căn chữ",
+      "options": [
+        { "value": "start", "label": "Đầu" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "end", "label": "Cuối" },
+        { "value": "justify", "label": "Đều" }
+      ],
+      "default": "start",
+      "responsive": true
+    },
+    {
+      "type": "select",
+      "key": "v_align",
+      "label": "Căn dọc",
+      "options": [
+        { "value": "start", "label": "Trên" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "end", "label": "Dưới" },
+        { "value": "stretch", "label": "Kéo đều" }
+      ],
+      "default": "start"
+    },
+    {
+      "type": "color",
+      "key": "bg_color",
+      "label": "Màu nền",
+      "css_var": "--od-col-bg"
+    },
+    {
+      "type": "select",
+      "key": "radius",
+      "label": "Bo góc",
+      "options": [
+        { "value": "none", "label": "Không" },
+        { "value": "sm", "label": "Nhỏ" },
+        { "value": "md", "label": "Vừa" },
+        { "value": "lg", "label": "Lớn" },
+        { "value": "xl", "label": "Rất lớn" },
+        { "value": "2xl", "label": "Cực lớn" }
+      ],
+      "default": "none"
+    },
+    {
+      "type": "boolean",
+      "key": "sticky",
+      "label": "Ghim cuộn (Sticky)",
+      "default": false
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true
+    },
+    {
+      "type": "spacing",
+      "key": "margin",
+      "label": "Lề ngoài (Margin)",
+      "property": "margin",
+      "min": -128,
+      "max": 256,
+      "unit": "px",
+      "responsive": true
+    }
+  ]
+}

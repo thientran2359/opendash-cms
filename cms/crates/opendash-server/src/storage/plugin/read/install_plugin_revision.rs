@@ -7,7 +7,7 @@ pub async fn install_plugin_revision(
     manifest_json: &str,
     wasm_bytes: &[u8],
     extensions: Option<&opendash_core::admin_extensions::AdminExtensions>,
-    blocks: &[(BlockSchemaV1, String)],
+    blocks: &[(BlockSchema, String)],
 ) -> Result<i64, PluginStorageError> {
     let blocks_json = canonical_blocks_json(&manifest.id, blocks)?;
     // Fail combined-cap checks before publishing a durable ZIP revision.

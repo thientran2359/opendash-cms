@@ -21,18 +21,23 @@ pub(in crate::storage) async fn mutate_entry_builder(
         check_entry_body_edit_acl(&before.schema, actor)?;
     }
     check_entry_builder_cas(&before, expected_version, &mutation)?;
+    let mut normalized_candidate = None;
     if let EntryBuilderMutation::Save(document) = &mutation {
         let mut state =
             validate_entry_builder_document(&mut read_tx, &before, role, document).await?;
-        render_entry_builder_preview(&mut read_tx, &before, &mut state, document, false).await?;
+        let schemas = state.unified_block_schemas()?;
+        let normalized = strip_document_default_props(document, &schemas);
+        render_entry_builder_preview(&mut read_tx, &before, &mut state, &normalized, false).await?;
+        normalized_candidate = Some(normalized);
     }
     read_tx.commit().await?;
     let mut candidate_values = before.values.clone();
     if type_key != "pattern" {
         match &mutation {
             EntryBuilderMutation::Save(document) => {
+                let doc_ref = normalized_candidate.as_ref().unwrap_or(document);
                 let candidate_blocks =
-                    opendash_core::builder_blocks::serialize_builder_document_to_blocks(document)
+                    opendash_core::builder_blocks::serialize_builder_document_to_blocks(doc_ref)
                         .map_err(|err| ApiError::bad_request(err.to_string()))?;
                 candidate_values.insert("body".to_owned(), Value::String(candidate_blocks));
             }
@@ -86,14 +91,17 @@ pub(in crate::storage) async fn mutate_entry_builder(
     }
 
     if type_key == "pattern" {
+        let normalized_doc: Option<BuilderDocument>;
         let (mode, document) = match mutation {
             EntryBuilderMutation::Save(document) => {
                 let mut state =
                     validate_entry_builder_document(&mut tx, &current, role, document).await?;
-                render_entry_builder_preview(&mut tx, &current, &mut state, document, false)
+                let schemas = state.unified_block_schemas()?;
+                let normalized = strip_document_default_props(document, &schemas);
+                render_entry_builder_preview(&mut tx, &current, &mut state, &normalized, false)
                     .await?;
                 let raw = String::from_utf8(
-                    document
+                    normalized
                         .to_json()
                         .map_err(|err| ApiError::bad_request(err.to_string()))?,
                 )
@@ -107,7 +115,8 @@ pub(in crate::storage) async fn mutate_entry_builder(
                 .bind(raw)
                 .execute(&mut *tx)
                 .await?;
-                (ContentMode::Builder, Some(document))
+                normalized_doc = Some(normalized);
+                (ContentMode::Builder, normalized_doc.as_ref())
             }
             EntryBuilderMutation::Reset => {
                 sqlx::query("DELETE FROM entry_builder_documents WHERE entry_id = ?")
@@ -140,17 +149,22 @@ pub(in crate::storage) async fn mutate_entry_builder(
             );
         }
     } else {
+        let normalized_doc: Option<BuilderDocument>;
         let (mode_db, next_values, ref_doc) = match mutation {
             EntryBuilderMutation::Save(document) => {
                 let mut state =
                     validate_entry_builder_document(&mut tx, &current, role, document).await?;
+                let schemas = state.unified_block_schemas()?;
+                let normalized = strip_document_default_props(document, &schemas);
                 // Enforce the same renderer output/node/list/form limits even when
                 // the caller saves directly without ever requesting Preview.
-                render_entry_builder_preview(&mut tx, &current, &mut state, document, false)
+                render_entry_builder_preview(&mut tx, &current, &mut state, &normalized, false)
                     .await?;
                 let body_blocks =
-                    opendash_core::builder_blocks::serialize_builder_document_to_blocks(document)
-                        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+                    opendash_core::builder_blocks::serialize_builder_document_to_blocks(
+                        &normalized,
+                    )
+                    .map_err(|err| ApiError::bad_request(err.to_string()))?;
                 let body_val = Value::String(body_blocks);
                 if let Some(body_field) = current.schema.effective_fields.get("body")
                     && !opendash_core::content::valid_field_value(&body_field.definition, &body_val)
@@ -162,8 +176,9 @@ pub(in crate::storage) async fn mutate_entry_builder(
                 }
                 let mut values = current.values.clone();
                 values.insert("body".to_owned(), body_val);
+                normalized_doc = Some(normalized);
                 let ref_doc = if body_allows_public_refs(&current.schema) {
-                    Some(document)
+                    normalized_doc.as_ref()
                 } else {
                     None
                 };

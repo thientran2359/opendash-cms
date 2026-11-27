@@ -344,11 +344,11 @@ async fn http_renders_trusted_theme_with_conditional_enqueues_and_untrusted_body
     assert_eq!(activate.status(), StatusCode::OK);
 
     let builder_body = concat!(
-        "<!-- od:section {\"id\":\"sec-1\"} -->\n",
-        "<!-- od:row {\"id\":\"row-1\"} -->\n",
-        "<!-- od:column {\"id\":\"col-1\"} -->\n",
-        "<!-- od:plugin_block {\"id\":\"blk-1\",\"block_id\":\"trusted-html-e2e/badge\",\"values\":{\"label\":\"Passed\"}} /-->\n",
-        "<!-- /od:column -->\n<!-- /od:row -->\n<!-- /od:section -->"
+        "<!-- od:core/section {\"id\":\"sec-1\"} -->\n",
+        "<!-- od:core/row {\"id\":\"row-1\"} -->\n",
+        "<!-- od:core/column {\"id\":\"col-1\"} -->\n",
+        "<!-- od:trusted-html-e2e/badge {\"id\":\"blk-1\",\"props\":{\"label\":\"Passed\"}} /-->\n",
+        "<!-- /od:core/column -->\n<!-- /od:core/row -->\n<!-- /od:core/section -->"
     );
     let home_id = create_published_page(&http, &site, &admin, "trusted-home", builder_body).await;
     create_published_page(

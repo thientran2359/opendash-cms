@@ -3,15 +3,11 @@ use super::*;
 #[test]
 fn scoped_css_emits_negative_margin_fallback_and_nested_group_paths_and_contact_csp_flag() {
     use opendash_core::{
-        block_schema::BlockSchemaV1,
-        builder::{
-            ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps, RowNode,
-            SectionNode,
-        },
+        block_schema::BlockSchema,
         registry::{DeclarationState, ProviderStatus, ResourceOwner},
     };
 
-    let schema: BlockSchemaV1 = serde_json::from_value(json!({
+    let schema: BlockSchema = serde_json::from_value(json!({
         "schema_version": 1,
         "id": "demo/group-margin-form",
         "title": "Group Margin Form",
@@ -83,47 +79,26 @@ fn scoped_css_emits_negative_margin_fallback_and_nested_group_paths_and_contact_
         ..Default::default()
     };
 
-    let doc = BuilderDocument {
-        schema_version: 1,
-        sections: vec![SectionNode {
-            id: "sec-gmf".into(),
-            meta: None,
-            responsive: None,
-            style: None,
-            children: vec![RowNode {
-                id: "row-gmf".into(),
-                meta: None,
-                responsive: None,
-                children: vec![ColumnNode {
-                    id: "col-gmf".into(),
-                    meta: None,
-                    responsive: None,
-                    children: vec![ElementNode {
-                        id: "el-gmf".into(),
-                        meta: None,
-                        content: ElementContent::Known(KnownElement::PluginBlock(
-                            PluginBlockProps {
-                                block_id: "demo/group-margin-form".into(),
-                                values: std::collections::BTreeMap::from([
-                                    (
-                                        "layout".into(),
-                                        json!({
-                                            "outer_margin": {
-                                                "desktop": { "top": -1.5, "right": 0, "bottom": 2, "left": 0 },
-                                                "mobile": { "top": -1, "right": 0, "bottom": 1, "left": 0 }
-                                            }
-                                        }),
-                                    ),
-                                    ("form_id".into(), json!("7")),
-                                    ("menu_key".into(), json!("main")),
-                                ]),
-                            },
-                        )),
-                    }],
-                }],
-            }],
-        }],
-    };
+    let doc = doc_in_section(
+        "sec-gmf",
+        "row-gmf",
+        "col-gmf",
+        vec![node(
+            "el-gmf",
+            "demo/group-margin-form",
+            json!({
+                "layout": {
+                    "outer_margin": {
+                        "desktop": { "top": -1.5, "right": 0, "bottom": 2, "left": 0 },
+                        "mobile": { "top": -1, "right": 0, "bottom": 1, "left": 0 }
+                    }
+                },
+                "form_id": "7",
+                "menu_key": "main"
+            }),
+            vec![],
+        )],
+    );
 
     let cache = BlockTemplateCache::new();
     let mut pub_budget = RenderBudget::new();
@@ -131,7 +106,6 @@ fn scoped_css_emits_negative_margin_fallback_and_nested_group_paths_and_contact_
         &state,
         &doc,
         false,
-        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         None,
@@ -157,7 +131,6 @@ fn scoped_css_emits_negative_margin_fallback_and_nested_group_paths_and_contact_
         &state,
         &doc,
         true,
-        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         None,

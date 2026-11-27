@@ -483,16 +483,19 @@ async fn theme_ergonomics_cuj_all_helpers_rich_context_zero_n_plus_1_and_withdra
         Some("\"v1\""),
         Some(json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "tr-sec-1",
+                "type": "core/section",
                 "children": [{
                     "id": "tr-row-1",
+                    "type": "core/row",
                     "children": [{
                         "id": "tr-col-1",
+                        "type": "core/column",
                         "children": [{
                             "id": "tr-blk-1",
                             "type": "core/heading",
-                            "props": { "level": 2, "text": "Body Transient" }
+                            "props": { "level": "h2", "text": "Body Transient" }
                         }]
                     }]
                 }]

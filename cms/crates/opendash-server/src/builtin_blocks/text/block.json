@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "id": "core/text",
+  "title": "Văn bản (Text)",
+  "category": "content",
+  "icon": "file-text",
+  "render": "native",
+  "fields": [
+    {
+      "type": "richtext",
+      "key": "content",
+      "label": "Nội dung",
+      "default": "<p>Nhập nội dung văn bản...</p>"
+    },
+    {
+      "type": "select",
+      "key": "font_size",
+      "label": "Cỡ chữ",
+      "options": [
+        { "value": "sm", "label": "Nhỏ" },
+        { "value": "base", "label": "Chuẩn" },
+        { "value": "lg", "label": "Lớn" },
+        { "value": "xl", "label": "Rất lớn" }
+      ],
+      "default": "base",
+      "responsive": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn chữ",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" },
+        { "value": "justify", "label": "Đều" }
+      ],
+      "default": "left",
+      "responsive": true
+    },
+    {
+      "type": "color",
+      "key": "color",
+      "label": "Màu chữ",
+      "css_var": "--od-text-color"
+    },
+    {
+      "type": "select",
+      "key": "max_width",
+      "label": "Độ rộng tối đa",
+      "options": [
+        { "value": "none", "label": "Không giới hạn" },
+        { "value": "prose", "label": "Đọc tiêu chuẩn (65ch)" },
+        { "value": "2xl", "label": "Trung bình (2XL)" },
+        { "value": "4xl", "label": "Rộng (4XL)" }
+      ],
+      "default": "none"
+    }
+  ]
+}

@@ -1,36 +1,48 @@
 {
   "schema_version": 1,
-  "sections": [
+  "blocks": [
     {
       "id": "faq-sec-1",
+      "block_id": "core/section",
       "children": [
         {
-          "id": "faq-row-1",
+          "id": "faq-main",
+          "block_id": "core/accordion",
+          "props": {
+            "style": "bordered",
+            "open_first": true
+          },
           "children": [
             {
-              "id": "faq-col-1-1",
+              "id": "faq-item-1",
+              "block_id": "core/accordion-item",
+              "props": {
+                "title": "OpenDash là gì?",
+                "open_by_default": true
+              },
               "children": [
                 {
-                  "id": "faq-main",
-                  "type": "plugin/block",
+                  "id": "faq-item-1-text",
+                  "block_id": "core/text",
                   "props": {
-                    "block_id": "core/accordion",
-                    "values": {
-                      "style": "bordered",
-                      "open_first": true,
-                      "items": [
-                        {
-                          "title": "OpenDash là gì?",
-                          "content": "<p>OpenDash là CMS một binary Rust + SQLite.</p>",
-                          "open": true
-                        },
-                        {
-                          "title": "Có thể tùy chỉnh giao diện không?",
-                          "content": "<p>Có, qua Studio và các Pattern.</p>",
-                          "open": false
-                        }
-                      ]
-                    }
+                    "content": "<p>OpenDash là CMS một binary Rust + SQLite.</p>"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "faq-item-2",
+              "block_id": "core/accordion-item",
+              "props": {
+                "title": "Có thể tùy chỉnh giao diện không?",
+                "open_by_default": false
+              },
+              "children": [
+                {
+                  "id": "faq-item-2-text",
+                  "block_id": "core/text",
+                  "props": {
+                    "content": "<p>Có, qua Studio và các Pattern.</p>"
                   }
                 }
               ]

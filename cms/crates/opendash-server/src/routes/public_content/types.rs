@@ -64,6 +64,7 @@ pub(super) struct PublicRouteContext<'a> {
     pub(super) taxonomy: Option<&'a serde_json::Value>,
     pub(super) content_type: Option<&'a serde_json::Value>,
     pub(super) entry: Option<&'a content_render::EntryView>,
+    pub(super) list_pages: Option<&'a BTreeMap<String, i64>>,
 }
 
 pub struct ResolvedPublicHtml {
@@ -202,7 +203,8 @@ pub(super) async fn render_resolved_public_template_html(
             let canvas_layout = record.target.kind
                 == opendash_core::theme::TemplateCandidateKind::PageLayout
                 && overrides::is_canvas_page_layout(active, record.target.layout_key.as_deref());
-            let rendered = overrides::render_resolved_public_builder_with_cache_for_locale(
+            let empty_pages = BTreeMap::new();
+            let rendered = overrides::render_resolved_public_builder_with_query_for_locale(
                 db,
                 &record,
                 active,
@@ -210,6 +212,8 @@ pub(super) async fn render_resolved_public_template_html(
                 route_entry,
                 locale,
                 Some(&slot_html),
+                route_ctx.list_pages.unwrap_or(&empty_pages),
+                route_ctx.route_path.unwrap_or("/"),
                 budget,
                 cache,
             )
@@ -491,6 +495,7 @@ pub(crate) async fn render_canonical_taxonomy(
             taxonomy: Some(&tax_value),
             content_type: Some(&ct_value),
             entry: None,
+            list_pages: None,
         },
         &mut budget,
         cache,

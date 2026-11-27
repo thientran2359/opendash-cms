@@ -52,19 +52,12 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_budget(
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
     hydrate_render_context_for_documents_in_conn(&mut **tx, state, &[document], true).await?;
-    let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
-        tx,
-        document,
-        true,
-        Some((&current.opened.type_key, &current.slug)),
-        Some(current.locale.as_str()),
-    )
-    .await?;
-    let lists = resolve_lists_in_tx_for_locale(
+    let lists = resolve_lists_in_tx_for_locale_with_budget(
         tx,
         document,
         &BTreeMap::new(),
         Some(current.locale.as_str()),
+        budget,
     )
     .await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
@@ -84,7 +77,6 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_budget(
         state,
         document,
         true,
-        &bindings,
         &lists,
         &forms,
         context.as_ref(),
@@ -123,7 +115,13 @@ impl BuilderRenderContext {
     #[cfg(test)]
     pub fn validate(&self, document: &BuilderDocument) -> ApiResult<()> {
         document
-            .validate_for_save_with_schemas(&self.unified_block_schemas()?, None)
+            .validate_for_save(
+                &self.unified_block_schemas()?,
+                &BuilderContextTarget::EntryBody {
+                    content_type: "page".to_owned(),
+                },
+                None,
+            )
             .map_err(|error| ApiError::bad_request(error.to_string()))
     }
 }

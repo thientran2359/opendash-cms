@@ -720,12 +720,15 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
         dev_theme_dir.join("patterns/dev-hero.json"),
         json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "sec-pat-1",
+                "type": "core/section",
                 "children": [{
                     "id": "row-pat-1",
+                    "type": "core/row",
                     "children": [{
                         "id": "col-pat-1",
+                        "type": "core/column",
                         "children": []
                     }]
                 }]
@@ -1000,19 +1003,19 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
         .header(header::IF_MATCH, format!("\"v{page_ver}\""))
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "sec-1",
+                "type": "core/section",
                 "children": [{
                     "id": "row-1",
+                    "type": "core/row",
                     "children": [{
                         "id": "col-1",
+                        "type": "core/column",
                         "children": [{
                             "id": "el-1",
-                            "type": "plugin/block",
-                            "props": {
-                                "block_id": "dev-live-theme/promo",
-                                "values": { "heading": "HelloLive" }
-                            }
+                            "type": "dev-live-theme/promo",
+                            "props": { "heading": "HelloLive" }
                         }]
                     }]
                 }]

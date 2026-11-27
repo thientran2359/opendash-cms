@@ -1,55 +1,59 @@
 use super::*;
 
+fn remap_nodes(
+    nodes: &mut [opendash_core::builder::BlockNode],
+    remap: &BTreeMap<i64, i64>,
+) -> bool {
+    let mut changed = false;
+    for node in nodes {
+        if node.block_id == "core/list" {
+            if let Some(old) =
+                opendash_core::builder::parse_positive_i64_prop(node.props.get("term_id"))
+            {
+                match remap.get(&old).copied() {
+                    Some(next) if next != old => {
+                        node.props
+                            .insert("term_id".to_owned(), serde_json::Value::from(next));
+                        changed = true;
+                    }
+                    None => {
+                        node.props.remove("term_id");
+                        node.props.remove("taxonomy_key");
+                        changed = true;
+                    }
+                    _ => {}
+                }
+            }
+            if node
+                .props
+                .get("include_descendants")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+                && node
+                    .props
+                    .get("taxonomy_key")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|s| s.trim().is_empty())
+            {
+                node.props.insert(
+                    "include_descendants".to_owned(),
+                    serde_json::Value::Bool(false),
+                );
+                changed = true;
+            }
+        }
+        if remap_nodes(&mut node.children, remap) {
+            changed = true;
+        }
+    }
+    changed
+}
+
 pub(in crate::storage) fn apply_builder_list_term_remap(
     doc: &mut opendash_core::builder::BuilderDocument,
     remap: &BTreeMap<i64, i64>,
 ) -> bool {
-    let mut changed = false;
-    for section in &mut doc.sections {
-        for row in &mut section.children {
-            for col in &mut row.children {
-                for el in &mut col.children {
-                    if let opendash_core::builder::ElementContent::Known(
-                        opendash_core::builder::KnownElement::List(props),
-                    ) = &mut el.content
-                    {
-                        if let Some(old) = props.category_id {
-                            let next = remap.get(&old).copied();
-                            if next != props.category_id {
-                                props.category_id = next;
-                                changed = true;
-                            }
-                        }
-                        if let Some(old) = props.tag_id {
-                            let next = remap.get(&old).copied();
-                            if next != props.tag_id {
-                                props.tag_id = next;
-                                changed = true;
-                            }
-                        }
-                        if let Some(old) = props.term_id {
-                            let next = remap.get(&old).copied();
-                            if next != props.term_id {
-                                props.term_id = next;
-                                if next.is_none() {
-                                    props.taxonomy_key = None;
-                                }
-                                changed = true;
-                            }
-                        }
-                        if props.include_descendants
-                            && props.category_id.is_none()
-                            && props.taxonomy_key.is_none()
-                        {
-                            props.include_descendants = false;
-                            changed = true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    changed
+    remap_nodes(&mut doc.blocks, remap)
 }
 
 pub(in crate::storage) async fn missing_or_stale(

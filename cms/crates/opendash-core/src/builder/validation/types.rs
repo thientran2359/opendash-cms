@@ -13,11 +13,7 @@ pub(crate) fn px_to_tw_step(px: i16, steps: &[i16], allow_negative: bool) -> Opt
         return None;
     }
     let step = px / 4;
-    if steps.contains(&step) {
-        Some(step)
-    } else {
-        None
-    }
+    steps.contains(&step).then_some(step)
 }
 
 pub fn gap_px_to_tw_step(gap_px: u8) -> Option<u16> {
@@ -36,318 +32,198 @@ pub(crate) fn fmt_tw_spacing(bp: &str, prop: &str, axis: &str, step: i16) -> Str
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TextAlign {
-    Start,
-    Center,
-    End,
-    Justify,
+#[derive(Debug)]
+pub enum BuilderError {
+    Json(serde_json::Error),
+    Invalid(&'static str),
 }
 
-pub(crate) fn is_false(value: &bool) -> bool {
-    !*value
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum LayoutKind {
-    Section,
-    Row,
-    Column,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SectionWidth {
-    Full,
-    Boxed,
-    Wide,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SectionStyle {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub background_color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub background_media_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content_width: Option<SectionWidth>,
-}
-
-impl SectionStyle {
-    pub fn is_empty(&self) -> bool {
-        self.background_color.as_deref().is_none_or(str::is_empty)
-            && self
-                .background_media_id
-                .as_deref()
-                .is_none_or(str::is_empty)
-            && self.content_width.is_none()
-    }
-}
-
-pub fn empty_section_style_option(value: &Option<SectionStyle>) -> bool {
-    value.as_ref().is_none_or(SectionStyle::is_empty)
-}
-
-pub(crate) fn validate_section_style(
-    style: Option<&SectionStyle>,
-    is_synthetic: bool,
-) -> Result<(), BuilderError> {
-    let Some(style) = style else {
-        return Ok(());
-    };
-    if style.is_empty() {
-        return Ok(());
-    }
-    if is_synthetic {
-        return Err(BuilderError::Invalid(
-            "Synthetic section cannot carry custom styling",
-        ));
-    }
-    if let Some(color) = style.background_color.as_deref()
-        && !color.is_empty()
-        && !crate::field_schema::valid_color_value(color)
-    {
-        return Err(BuilderError::Invalid("Invalid Section background color"));
-    }
-    if let Some(media_id) = style.background_media_id.as_deref()
-        && !media_id.is_empty()
-        && !valid_media_id(media_id)
-    {
-        return Err(BuilderError::Invalid("Invalid Section background media ID"));
-    }
-    Ok(())
-}
-
-/// Known v1 elements have typed props. Unknown or malformed saved elements
-/// retain their original JSON map, but are only accepted by validation when
-/// proven to be unchanged from the trusted previous saved document.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ElementContent {
-    Known(KnownElement),
-    Unresolved(BTreeMap<String, Value>),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "props", deny_unknown_fields)]
-pub enum KnownElement {
-    #[serde(rename = "core/heading")]
-    Heading(HeadingProps),
-    #[serde(rename = "core/text")]
-    Text(TextProps),
-    #[serde(rename = "core/image")]
-    Image(ImageProps),
-    #[serde(rename = "core/video")]
-    Video(VideoProps),
-    #[serde(rename = "core/button")]
-    Button(ButtonProps),
-    #[serde(rename = "core/list")]
-    List(ListProps),
-    #[serde(rename = "core/contact_form")]
-    ContactForm(ContactFormProps),
-    #[serde(rename = "core/content_slot")]
-    ContentSlot(ContentSlotProps),
-    #[serde(rename = "core/pattern_ref")]
-    PatternRef(PatternRefProps),
-    #[serde(rename = "core/template_part")]
-    TemplatePart(TemplatePartProps),
-    #[serde(rename = "legacy/block")]
-    Legacy(LegacyBlockProps),
-    #[serde(rename = "plugin/block")]
-    PluginBlock(PluginBlockProps),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PluginBlockProps {
-    pub block_id: String,
-    #[serde(default)]
-    pub values: BTreeMap<String, Value>,
-}
-
-/// Typed insertion point for the current entry's sanitized content.
-/// Context-specific slot-count rules belong to the template override layer.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ContentSlotProps {}
-
-/// A one-hop reference to a private Pattern CPT entry. The server resolves
-/// this ID from a trusted SQLite snapshot; client-provided markup is ignored.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PatternRefProps {
-    pub pattern_id: i64,
-}
-
-/// A named theme/template part resolved by the server in the render context.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TemplatePartProps {
-    pub part_key: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HeadingProps {
-    pub level: u8,
-    pub text: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<ElementBinding>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TextProps {
-    pub text: String,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub rich: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<ElementBinding>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ImageProps {
-    pub media_id: String,
-    pub alt: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<ElementBinding>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ButtonProps {
-    pub label: String,
-    pub url: String,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub new_tab: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub nofollow: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<ElementBinding>,
-}
-
-/// Published-only collection reference; never embeds entry values in the AST.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ListProps {
-    pub type_key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category_id: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tag_id: Option<i64>,
-    /// C2 generic taxonomy filter; both fields must be present together.
-    /// Legacy category/tag aliases remain readable for existing documents.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub taxonomy_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub term_id: Option<i64>,
-    #[serde(default)]
-    pub include_descendants: bool,
-    #[serde(default)]
-    pub sort: ListSort,
-    #[serde(default = "default_list_size")]
-    pub page_size: u8,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ListSort {
-    #[default]
-    IdDesc,
-    IdAsc,
-}
-
-pub(crate) fn default_list_size() -> u8 {
-    6
-}
-
-pub(crate) fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct VideoProps {
-    pub media_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub poster_image_id: Option<String>,
-    #[serde(default = "default_true")]
-    pub controls: bool,
-    #[serde(default)]
-    pub muted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ContactFormProps {
-    pub form_id: i64,
-    #[serde(default = "default_submit_label")]
-    pub submit_label: String,
-}
-
-pub(crate) fn default_submit_label() -> String {
-    "Gửi liên hệ".to_string()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ElementBinding {
-    #[serde(default)]
-    pub type_key: String,
-    #[serde(default)]
-    pub entry_slug: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry_locale: Option<String>,
-    pub source: BindingSource,
-    pub target: BindingTarget,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum BindingSource {
-    Title,
-    Field { key: String },
-    RouteContext { field_key: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BindingTarget {
-    Text,
-    MediaId,
-    Alt,
-    Label,
-    Url,
-}
-
-impl KnownElement {
-    pub fn binding(&self) -> Option<&ElementBinding> {
+impl std::fmt::Display for BuilderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Heading(p) => p.binding.as_ref(),
-            Self::Text(p) => p.binding.as_ref(),
-            Self::Image(p) => p.binding.as_ref(),
-            Self::Button(p) => p.binding.as_ref(),
-            Self::Legacy(_)
-            | Self::List(_)
-            | Self::ContactForm(_)
-            | Self::ContentSlot(_)
-            | Self::PatternRef(_)
-            | Self::TemplatePart(_)
-            | Self::Video(_)
-            | Self::PluginBlock(_) => None,
+            Self::Json(error) => write!(f, "Invalid Builder JSON: {error}"),
+            Self::Invalid(message) => f.write_str(message),
         }
     }
 }
 
-/// Preserves the exact legacy M3 block ID and field-value map for pre-existing
-/// saved documents. Per Phase 2 Decision D3, new inserts or edits are rejected;
-/// existing nodes survive only when unchanged at their exact tree path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LegacyBlockProps {
-    pub block_id: String,
-    pub values: BTreeMap<String, String>,
+impl std::error::Error for BuilderError {}
+
+impl From<serde_json::Error> for BuilderError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
+}
+
+/// Target surface context evaluated against each block's `allowed_contexts` allow/deny patterns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuilderContextTarget {
+    EntryBody {
+        content_type: String,
+    },
+    Pattern,
+    ThemePattern,
+    Template {
+        kind: crate::theme::TemplateCandidateKind,
+        content_type: Option<String>,
+        taxonomy: Option<String>,
+        part_key: Option<String>,
+    },
+}
+
+impl BuilderContextTarget {
+    pub fn matches_token(&self, token: &str) -> bool {
+        use crate::theme::TemplateCandidateKind as K;
+
+        match token {
+            "*" => true,
+            "entry_body" => matches!(self, Self::EntryBody { .. }),
+            "pattern" => matches!(self, Self::Pattern),
+            "theme_pattern" => matches!(self, Self::ThemePattern),
+            "template" => matches!(self, Self::Template { .. }),
+            "part" => matches!(self, Self::Template { kind: K::Part, .. }),
+            "single" => matches!(
+                self,
+                Self::Template {
+                    kind: K::Single | K::SingleCustom | K::Singular,
+                    ..
+                }
+            ),
+            "single_custom" => matches!(
+                self,
+                Self::Template {
+                    kind: K::SingleCustom,
+                    ..
+                }
+            ),
+            "singular" => matches!(
+                self,
+                Self::Template {
+                    kind: K::Singular,
+                    ..
+                }
+            ),
+            "page" => matches!(self, Self::Template { kind: K::Page, .. }),
+            "page_layout" => matches!(
+                self,
+                Self::Template {
+                    kind: K::PageLayout,
+                    ..
+                }
+            ),
+            "home" => matches!(self, Self::Template { kind: K::Home, .. }),
+            "index" => matches!(self, Self::Template { kind: K::Index, .. }),
+            "archive" => matches!(
+                self,
+                Self::Template {
+                    kind: K::Archive,
+                    ..
+                }
+            ),
+            "taxonomy" => matches!(
+                self,
+                Self::Template {
+                    kind: K::Taxonomy,
+                    ..
+                }
+            ),
+            "not_found" => matches!(
+                self,
+                Self::Template {
+                    kind: K::NotFound,
+                    ..
+                }
+            ),
+            "loop_item" => false,
+            other => {
+                if let Some(cpt) = other.strip_prefix("entry_body:") {
+                    matches!(self, Self::EntryBody { content_type } if content_type == cpt)
+                } else if let Some(key) = other.strip_prefix("part:") {
+                    matches!(
+                        self,
+                        Self::Template {
+                            kind: K::Part,
+                            part_key: Some(pk),
+                            ..
+                        } if pk == key
+                    )
+                } else if let Some(cpt) = other.strip_prefix("single:") {
+                    matches!(
+                        self,
+                        Self::Template {
+                            kind: K::Single | K::SingleCustom | K::Singular,
+                            content_type: Some(ct),
+                            ..
+                        } if ct == cpt
+                    )
+                } else if let Some(cpt) = other.strip_prefix("archive:") {
+                    matches!(
+                        self,
+                        Self::Template {
+                            kind: K::Archive,
+                            content_type: Some(ct),
+                            ..
+                        } if ct == cpt
+                    )
+                } else if let Some(tax) = other.strip_prefix("taxonomy:") {
+                    matches!(
+                        self,
+                        Self::Template {
+                            kind: K::Taxonomy,
+                            taxonomy: Some(tx),
+                            ..
+                        } if tx == tax
+                    )
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    pub fn allows_contexts(&self, allowed: Option<&[String]>) -> bool {
+        let Some(tokens) = allowed else {
+            return true;
+        };
+        let mut has_positive = false;
+        let mut matched_positive = false;
+        for token in tokens {
+            if let Some(neg) = token.strip_prefix('!') {
+                if self.matches_token(neg) {
+                    return false;
+                }
+            } else {
+                has_positive = true;
+                if self.matches_token(token) {
+                    matched_positive = true;
+                }
+            }
+        }
+        if has_positive { matched_positive } else { true }
+    }
+}
+
+/// URL policy from ADR-0007: local path or absolute HTTP(S), no credentials.
+pub fn valid_button_url(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 2048
+        || value
+            .chars()
+            .any(|ch| ch.is_whitespace() || ch.is_control())
+        || value
+            .chars()
+            .any(|ch| matches!(ch, '\\' | '<' | '>' | '"' | '\''))
+    {
+        return false;
+    }
+    if value.starts_with('/') {
+        return !value.starts_with("//")
+            && Url::parse(&format!("https://builder.invalid{value}")).is_ok();
+    }
+    Url::parse(value).is_ok_and(|url| {
+        matches!(url.scheme(), "http" | "https")
+            && url.host_str().is_some()
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
 }

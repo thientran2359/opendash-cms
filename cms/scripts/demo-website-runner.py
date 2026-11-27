@@ -727,25 +727,29 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
     )
     homepage_doc = {
         "schema_version": 1,
-        "sections": [
+        "blocks": [
             {
                 "id": "sec-hero",
+                "type": "core/section",
                 "children": [
                     {
                         "id": "row-hero",
+                        "type": "core/row",
                         "children": [
                             {
                                 "id": "col-hero-text",
+                                "type": "core/column",
                                 "children": [
-                                    {"id": "h-hero", "type": "core/heading", "props": {"level": 1, "text": "Không gian sống mộc mạc, thoáng sáng và bền vững theo năm tháng"}},
-                                    {"id": "t-hero", "type": "core/text", "props": {"text": "Mộc Studio thiết kế và thi công trọn gói nhà phố, căn hộ và biệt thự vườn với vật liệu tự nhiên bản địa."}},
-                                    {"id": "b-hero", "type": "core/button", "props": {"label": "Khám phá hồ sơ dự án", "url": "/du_an"}},
+                                    {"id": "h-hero", "type": "core/heading", "props": {"level": "h1", "text": "Không gian sống mộc mạc, thoáng sáng và bền vững theo năm tháng"}},
+                                    {"id": "t-hero", "type": "core/text", "props": {"content": "<p>Mộc Studio thiết kế và thi công trọn gói nhà phố, căn hộ và biệt thự vườn với vật liệu tự nhiên bản địa.</p>"}},
+                                    {"id": "b-hero", "type": "core/button", "props": {"cta": {"label": "Khám phá hồ sơ dự án", "url": "/du_an", "new_tab": False, "nofollow": False}}},
                                 ],
                             },
                             {
                                 "id": "col-hero-img",
+                                "type": "core/column",
                                 "children": [
-                                    {"id": "img-hero", "type": "core/image", "props": {"media_id": media_ids[0], "alt": "Không gian phòng khách tràn ngập ánh sáng tự nhiên tại Mộc Studio"}},
+                                    {"id": "img-hero", "type": "core/image", "props": {"image": media_ids[0], "alt": "Không gian phòng khách tràn ngập ánh sáng tự nhiên tại Mộc Studio"}},
                                 ],
                             },
                         ],
@@ -754,15 +758,18 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-services",
+                "type": "core/section",
                 "children": [
                     {
                         "id": "row-services",
+                        "type": "core/row",
                         "children": [
                             {
                                 "id": "col-services",
+                                "type": "core/column",
                                 "children": [
-                                    {"id": "h-services", "type": "core/heading", "props": {"level": 2, "text": "Dịch vụ thiết kế & thi công"}},
-                                    {"id": "list-services", "type": "core/list", "props": {"type_key": "dich_vu", "sort": "id_desc", "page_size": 6, "include_descendants": False}},
+                                    {"id": "h-services", "type": "core/heading", "props": {"level": "h2", "text": "Dịch vụ thiết kế & thi công"}},
+                                    {"id": "list-services", "type": "core/list", "props": {"type_key": "dich_vu", "sort": "id_desc", "page_size": 6}},
                                 ],
                             }
                         ],
@@ -771,15 +778,18 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-projects",
+                "type": "core/section",
                 "children": [
                     {
                         "id": "row-projects",
+                        "type": "core/row",
                         "children": [
                             {
                                 "id": "col-projects",
+                                "type": "core/column",
                                 "children": [
-                                    {"id": "h-projects", "type": "core/heading", "props": {"level": 2, "text": "Dự án tiêu biểu"}},
-                                    {"id": "list-projects", "type": "core/list", "props": {"type_key": "du_an", "sort": "id_desc", "page_size": 6, "include_descendants": False}},
+                                    {"id": "h-projects", "type": "core/heading", "props": {"level": "h2", "text": "Dự án tiêu biểu"}},
+                                    {"id": "list-projects", "type": "core/list", "props": {"type_key": "du_an", "sort": "id_desc", "page_size": 6}},
                                 ],
                             }
                         ],
@@ -788,16 +798,19 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-video",
+                "type": "core/section",
                 "children": [
                     {
                         "id": "row-video",
+                        "type": "core/row",
                         "children": [
                             {
                                 "id": "col-video",
+                                "type": "core/column",
                                 "children": [
-                                    {"id": "h-video", "type": "core/heading", "props": {"level": 2, "text": "Nhịp xưởng mộc & quy trình hoàn thiện"}},
-                                    {"id": "t-video", "type": "core/text", "props": {"text": "Thước phim ngắn ghi lại quy trình chọn gỗ, đánh mộng và kiểm tra ánh sáng tự nhiên trước khi bàn giao."}},
-                                    {"id": "vid-studio", "type": "core/video", "props": {"media_id": video_id, "poster_image_id": media_ids[3], "controls": True, "muted": False}},
+                                    {"id": "h-video", "type": "core/heading", "props": {"level": "h2", "text": "Nhịp xưởng mộc & quy trình hoàn thiện"}},
+                                    {"id": "t-video", "type": "core/text", "props": {"content": "<p>Thước phim ngắn ghi lại quy trình chọn gỗ, đánh mộng và kiểm tra ánh sáng tự nhiên trước khi bàn giao.</p>"}},
+                                    {"id": "vid-studio", "type": "core/video", "props": {"video": video_id, "poster": media_ids[3], "controls": True, "muted": False}},
                                 ],
                             }
                         ],
@@ -806,15 +819,18 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-posts",
+                "type": "core/section",
                 "children": [
                     {
                         "id": "row-posts",
+                        "type": "core/row",
                         "children": [
                             {
                                 "id": "col-posts",
+                                "type": "core/column",
                                 "children": [
-                                    {"id": "h-posts", "type": "core/heading", "props": {"level": 2, "text": "Bài viết mới từ nhật ký kiến trúc"}},
-                                    {"id": "list-posts", "type": "core/list", "props": {"type_key": "post", "sort": "id_desc", "page_size": 6, "include_descendants": False}},
+                                    {"id": "h-posts", "type": "core/heading", "props": {"level": "h2", "text": "Bài viết mới từ nhật ký kiến trúc"}},
+                                    {"id": "list-posts", "type": "core/list", "props": {"type_key": "post", "sort": "id_desc", "page_size": 6}},
                                 ],
                             }
                         ],
@@ -823,16 +839,19 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-contact",
+                "type": "core/section",
                 "children": [
                     {
                         "id": "row-contact",
+                        "type": "core/row",
                         "children": [
                             {
                                 "id": "col-contact",
+                                "type": "core/column",
                                 "children": [
-                                    {"id": "h-contact", "type": "core/heading", "props": {"level": 2, "text": "Đặt lịch tư vấn thiết kế"}},
-                                    {"id": "t-contact", "type": "core/text", "props": {"text": "Chia sẻ diện tích khu đất hoặc căn hộ của bạn, kiến trúc sư Mộc Studio sẽ phản hồi trong 24 giờ làm việc."}},
-                                    {"id": "form-contact", "type": "core/contact_form", "props": {"form_id": form_rec["id"], "submit_label": "Gửi yêu cầu tư vấn"}},
+                                    {"id": "h-contact", "type": "core/heading", "props": {"level": "h2", "text": "Đặt lịch tư vấn thiết kế"}},
+                                    {"id": "t-contact", "type": "core/text", "props": {"content": "<p>Chia sẻ diện tích khu đất hoặc căn hộ của bạn, kiến trúc sư Mộc Studio sẽ phản hồi trong 24 giờ làm việc.</p>"}},
+                                    {"id": "form-contact", "type": "core/contact-form", "props": {"form_id": str(form_rec["id"]), "submit_label": "Gửi yêu cầu tư vấn"}},
                                 ],
                             }
                         ],
@@ -959,7 +978,7 @@ def run_smoke_and_capture(base: str, meta: dict, out_dir: Path | None) -> dict:
         "get page builder",
     )
     preview_doc = json.loads(json.dumps(cur_b["document"]))
-    preview_doc["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["text"] = "BẢN XEM TRƯỚC CHƯA LƯU"
+    preview_doc["blocks"][0]["children"][0]["children"][0]["children"][0]["props"]["text"] = "BẢN XEM TRƯỚC CHƯA LƯU"
     _, prev_res, _ = must(
         json_http(base, "POST", f"/api/admin/entries/page/{home_page_id}/builder/preview", preview_doc, admin),
         200,

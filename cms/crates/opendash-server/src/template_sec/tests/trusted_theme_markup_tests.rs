@@ -9,7 +9,7 @@ fn theme(source: &str) -> Result<CompiledCsecComposition, &'static str> {
     )
 }
 
-fn block_schema() -> opendash_core::block_schema::BlockSchemaV1 {
+fn block_schema() -> opendash_core::block_schema::BlockSchema {
     serde_json::from_value(serde_json::json!({
         "schema_version": 1,
         "id": "trusted/markup",

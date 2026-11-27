@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "id": "core/section",
+  "title": "Khung Section",
+  "category": "layout",
+  "icon": "layout",
+  "render": "native",
+  "supports_children": true,
+  "allowed_parents": ["root"],
+  "allowed_children": ["*", "!core/section"],
+  "fields": [
+    {
+      "type": "radio_buttons",
+      "key": "content_width",
+      "label": "Độ rộng nội dung",
+      "options": [
+        { "value": "boxed", "label": "Khung vừa" },
+        { "value": "wide", "label": "Khung rộng" },
+        { "value": "full", "label": "Tràn viền" }
+      ],
+      "default": "boxed"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "text_scheme",
+      "label": "Tông chữ",
+      "options": [
+        { "value": "auto", "label": "Tự động" },
+        { "value": "dark", "label": "Chữ tối" },
+        { "value": "light", "label": "Chữ sáng" }
+      ],
+      "default": "auto"
+    },
+    {
+      "type": "range",
+      "key": "min_height",
+      "label": "Chiều cao tối thiểu",
+      "min": 0,
+      "max": 960,
+      "step": 8,
+      "default": 0,
+      "unit": "px",
+      "responsive": true,
+      "css_var": "--od-sec-min-h"
+    },
+    {
+      "type": "accordion",
+      "key": "bg_section",
+      "label": "Nền & Lớp phủ",
+      "open_by_default": false,
+      "multi_expand": true
+    },
+    {
+      "type": "color",
+      "key": "bg_color",
+      "label": "Màu nền",
+      "css_var": "--od-sec-bg"
+    },
+    {
+      "type": "media",
+      "key": "bg_image",
+      "label": "Ảnh nền",
+      "media_kind": "image",
+      "css_var": "--od-sec-bg-img"
+    },
+    {
+      "type": "color",
+      "key": "bg_overlay",
+      "label": "Lớp phủ",
+      "default": "transparent",
+      "css_var": "--od-sec-overlay"
+    },
+    {
+      "type": "range",
+      "key": "bg_focal_x",
+      "label": "Tâm ngang ảnh (%)",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 50,
+      "unit": "%",
+      "css_var": "--od-sec-fx"
+    },
+    {
+      "type": "range",
+      "key": "bg_focal_y",
+      "label": "Tâm dọc ảnh (%)",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 50,
+      "unit": "%",
+      "css_var": "--od-sec-fy"
+    },
+    {
+      "type": "accordion",
+      "key": "spacing_section",
+      "label": "Khoảng cách",
+      "open_by_default": true,
+      "multi_expand": true
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true
+    },
+    {
+      "type": "spacing",
+      "key": "margin",
+      "label": "Lề ngoài (Margin)",
+      "property": "margin",
+      "min": -128,
+      "max": 256,
+      "unit": "px",
+      "responsive": true
+    }
+  ]
+}

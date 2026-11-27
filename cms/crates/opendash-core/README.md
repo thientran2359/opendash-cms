@@ -26,8 +26,8 @@ See [Core Foundation](../../../docs/contracts/CORE_FOUNDATION.md) and [CMS Archi
   - `[builder_blocks.rs:serialize_builder_document_to_blocks]`, `[builder_blocks.rs:parse_blocks_to_builder_document]`, `[builder_blocks.rs:parse_blocks_lenient_or_recover]`, `[builder_blocks.rs:extract_visible_text]`, `[builder_blocks.rs:extract_visible_text_with_schemas]`, `[builder_blocks.rs:extract_block_refs_lenient_with_schemas]`, `[builder_blocks.rs:encode_comment_json]`, `[builder_blocks.rs:ParsedBlockDocument]`, and `[builder_blocks.rs:ExtractedBlockRefs]`.
 - **Unified Field Schema** ([`src/field_schema.rs`](src/field_schema/mod.rs)):
   - `[field_schema.rs:FieldSpec]`, `[field_schema.rs:FieldType]`, `[field_schema.rs:FieldContext]`, `[field_schema.rs:validate_field_specs]`, `[field_schema.rs:validate_field_values]`, `[field_schema.rs:collect_media_ids]`, `[field_schema.rs:collect_public_media_ids]`, `[field_schema.rs:collect_relational_refs]`, `[field_schema.rs:collect_options_source_values]`, `[field_schema.rs:global_site_option_fields]`, `[field_schema.rs:global_site_option_defaults]`, `[field_schema.rs:valid_safe_url]`, and `[field_schema.rs:valid_color_value]`.
-- **Declarative Block Schemas** ([`src/block_schema.rs`](src/block_schema.rs)):
-  - `[block_schema.rs:BlockCategory]`, `[block_schema.rs:BlockSchemaV1]`, `[block_schema.rs:RegisteredBlockSchema]`, `[block_schema.rs:MAX_NODE_VALUES_KEYS]`, and `[block_schema.rs:MAX_NODE_VALUES_BYTES]`.
+- **Declarative Block Schemas** ([`src/block_schema.rs`](src/block_schema/mod.rs)):
+  - `[block_schema.rs:BlockCategory]`, `[block_schema.rs:BlockSchema]`, `[block_schema.rs:RegisteredBlockSchema]`, `[block_schema.rs:MAX_NODE_VALUES_KEYS]`, and `[block_schema.rs:MAX_NODE_VALUES_BYTES]`.
 - **RichText Sanitizer** ([`src/richtext.rs`](src/richtext/mod.rs)):
   - `[richtext.rs:sanitize_richtext]`, `[richtext.rs:strip_richtext_to_plain]`, and `[richtext.rs:decode_html5_entities]`.
 - **Theme & Plugin Manifests** ([`src/theme.rs`](src/theme/mod.rs), [`src/plugin.rs`](src/plugin/mod.rs)):

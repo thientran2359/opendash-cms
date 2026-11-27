@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "core/video",
+  "title": "Video",
+  "category": "media",
+  "icon": "video",
+  "render": "native",
+  "fields": [
+    {
+      "type": "media",
+      "key": "video",
+      "label": "Tệp Video",
+      "media_kind": "video"
+    },
+    {
+      "type": "media",
+      "key": "poster",
+      "label": "Ảnh bìa (Poster)",
+      "media_kind": "image"
+    },
+    {
+      "type": "boolean",
+      "key": "controls",
+      "label": "Hiện điều khiển",
+      "default": true
+    },
+    {
+      "type": "boolean",
+      "key": "muted",
+      "label": "Tắt tiếng mặc định",
+      "default": false
+    },
+    {
+      "type": "boolean",
+      "key": "loop",
+      "label": "Lặp lại",
+      "default": false
+    }
+  ]
+}

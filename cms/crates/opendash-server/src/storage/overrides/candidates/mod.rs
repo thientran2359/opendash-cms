@@ -10,7 +10,7 @@ pub(super) use std::{
 };
 
 pub(super) use opendash_core::{
-    builder::{BuilderDocument, ElementContent, KnownElement},
+    builder::{BuilderContextTarget, BuilderDocument},
     content::{
         ContentSupport, ContentTypeDefinition, EffectiveContentSchema, FieldRole,
         valid_content_type_key,
@@ -33,7 +33,7 @@ pub(super) use crate::{
     page::{self, RenderAnnotationScope, RenderedLayout},
     storage::{
         builder::{self, BuilderRenderContext, check_preview_images, resolve_contact_forms_in_tx},
-        builder_binding, content, entries, menu, permalinks, public_content, settings, theme,
+        content, entries, menu, permalinks, public_content, settings, theme,
         theme::ActiveThemeV3,
     },
     template_sec::{self, PreviewCompositionBudget},

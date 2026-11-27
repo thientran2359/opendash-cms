@@ -12,7 +12,7 @@ pub(in crate::storage) fn map_cnt_err(err: crate::error::ApiError) -> PluginStor
 
 pub(in crate::storage) fn canonical_blocks_json(
     owner_id: &str,
-    blocks: &[(BlockSchemaV1, String)],
+    blocks: &[(BlockSchema, String)],
 ) -> Result<Option<String>, PluginStorageError> {
     if blocks.is_empty() {
         return Ok(None);

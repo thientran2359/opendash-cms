@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "id": "core/stack",
+  "title": "Nhóm Flex (Stack)",
+  "category": "layout",
+  "icon": "layers",
+  "render": "native",
+  "supports_children": true,
+  "allowed_children": ["*", "!core/section"],
+  "fields": [
+    {
+      "type": "radio_buttons",
+      "key": "direction",
+      "label": "Hướng xếp",
+      "options": [
+        { "value": "column", "label": "Dọc" },
+        { "value": "row", "label": "Ngang" }
+      ],
+      "default": "column",
+      "responsive": true
+    },
+    {
+      "type": "boolean",
+      "key": "wrap",
+      "label": "Tự xuống dòng",
+      "default": true
+    },
+    {
+      "type": "select",
+      "key": "justify",
+      "label": "Phân bổ trục chính",
+      "options": [
+        { "value": "start", "label": "Đầu" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "end", "label": "Cuối" },
+        { "value": "between", "label": "Giãn đều" }
+      ],
+      "default": "start"
+    },
+    {
+      "type": "select",
+      "key": "align",
+      "label": "Căn trục phụ",
+      "options": [
+        { "value": "stretch", "label": "Kéo đều" },
+        { "value": "start", "label": "Đầu" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "end", "label": "Cuối" }
+      ],
+      "default": "stretch"
+    },
+    {
+      "type": "range",
+      "key": "gap",
+      "label": "Khoảng cách",
+      "min": 0,
+      "max": 64,
+      "step": 4,
+      "default": 16,
+      "unit": "px",
+      "responsive": true
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true
+    },
+    {
+      "type": "spacing",
+      "key": "margin",
+      "label": "Lề ngoài (Margin)",
+      "property": "margin",
+      "min": -128,
+      "max": 256,
+      "unit": "px",
+      "responsive": true
+    }
+  ]
+}

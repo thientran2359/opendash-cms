@@ -471,9 +471,9 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
     let home_id = create_s03_home(&client, &srv.base_url, &admin_cookie, &admin_csrf).await;
     let home_doc = json!({
         "schema_version": 1,
-        "sections": [{"id":"sec-1","children":[{"id":"row-1","children":[
-            {"id":"col-1","children":[
-                {"id":"img-1","type":"core/image","props":{"media_id":img_home_builder,"alt":"Home Banner"}}
+        "blocks": [{"id":"sec-1","type":"core/section","children":[{"id":"row-1","type":"core/row","children":[
+            {"id":"col-1","type":"core/column","children":[
+                {"id":"img-1","type":"core/image","props":{"image":img_home_builder,"alt":"Home Banner"}}
             ]}
         ]}]}]
     });

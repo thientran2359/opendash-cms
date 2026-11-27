@@ -472,15 +472,23 @@ async fn f11_cpt_target_fields_excludes_private_and_includes_public_field_groups
         .unwrap();
 
     let mut tx = db.begin().await.unwrap();
-    let allowed =
-        crate::storage::overrides::validate_cpt_target_fields_in_tx(&mut tx, "guide", None)
-            .await
-            .unwrap()
-            .unwrap();
-    assert!(allowed.contains(&"pub_sub".to_owned()));
-    assert!(allowed.contains(&"fg_badge".to_owned()));
-    assert!(!allowed.contains(&"tab_info".to_owned()));
-    assert!(!allowed.contains(&"secret_note".to_owned()));
-    assert!(!allowed.contains(&"admin_only".to_owned()));
-    assert!(!allowed.contains(&"fg_secret".to_owned()));
+    let schema = crate::storage::content::load_effective_content_schema_in_tx(&mut tx, "guide")
+        .await
+        .unwrap()
+        .unwrap();
+    let allowed: BTreeSet<String> = schema
+        .effective_fields
+        .iter()
+        .filter(|(_, entry)| {
+            !entry.definition.is_ui_only()
+                && entry.definition.effective_acl().2 == PublicExposure::Public
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+    assert!(allowed.contains("pub_sub"));
+    assert!(allowed.contains("fg_badge"));
+    assert!(!allowed.contains("tab_info"));
+    assert!(!allowed.contains("secret_note"));
+    assert!(!allowed.contains("admin_only"));
+    assert!(!allowed.contains("fg_secret"));
 }

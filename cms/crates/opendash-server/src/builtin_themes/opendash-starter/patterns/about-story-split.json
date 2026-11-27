@@ -1,41 +1,57 @@
 {
   "schema_version": 1,
-  "sections": [
+  "blocks": [
     {
       "id": "story-sec-1",
+      "block_id": "core/section",
       "children": [
         {
           "id": "story-row-1",
+          "block_id": "core/row",
+          "props": {
+            "layout_mode": "equal",
+            "columns": 2
+          },
           "children": [
             {
               "id": "story-col-1-1",
+              "block_id": "core/column",
               "children": [
                 {
                   "id": "story-card",
-                  "type": "plugin/block",
-                  "props": {
-                    "block_id": "core/card",
-                    "values": {
-                      "title": "Câu chuyện thương hiệu",
-                      "body": "<p>Chúng tôi tạo ra công cụ cho những ý tưởng lớn.</p>"
+                  "block_id": "core/card",
+                  "children": [
+                    {
+                      "id": "story-card-heading",
+                      "block_id": "core/heading",
+                      "props": {
+                        "level": "h3",
+                        "text": "Câu chuyện thương hiệu",
+                        "size": "xl"
+                      }
+                    },
+                    {
+                      "id": "story-card-text",
+                      "block_id": "core/text",
+                      "props": {
+                        "content": "<p>Chúng tôi tạo ra công cụ cho những ý tưởng lớn.</p>"
+                      }
                     }
-                  }
+                  ]
                 }
               ]
             },
             {
               "id": "story-col-1-2",
+              "block_id": "core/column",
               "children": [
                 {
                   "id": "story-quote",
-                  "type": "plugin/block",
+                  "block_id": "opendash-starter/quote-box",
                   "props": {
-                    "block_id": "opendash-starter/quote-box",
-                    "values": {
-                      "quote": "Sự đơn giản là nền tảng của trải nghiệm đáng nhớ.",
-                      "author": "Đội ngũ OpenDash",
-                      "role": "Sản phẩm"
-                    }
+                    "quote": "Sự đơn giản là nền tảng của trải nghiệm đáng nhớ.",
+                    "author": "Đội ngũ OpenDash",
+                    "role": "Sản phẩm"
                   }
                 }
               ]

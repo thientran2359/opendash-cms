@@ -396,7 +396,7 @@ Tất cả endpoint ghi dưới đây dùng `AdmittedMutation`, `require_admin_w
    - `create_term_with_locale` (`L948-949`): nếu `multilingual_enabled == 0` và (`target_locale != default_code` hoặc `source_term_id.is_some()`), trả `409 multilingual.disabled`.
 9. **[`storage/dashboard.rs`](../../cms/crates/opendash-server/src/storage/dashboard.rs#L19-L35):**
    - `get_counts`: lọc `EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = content_entries.locale AND sl.deleted_at IS NULL)`.
-10. **[`storage/builder_binding.rs`](../../cms/crates/opendash-server/src/storage/builder_binding.rs#L113) & [`storage/media_refs.rs`](../../cms/crates/opendash-server/src/storage/media_refs.rs#L319):**
+10. **`storage/builder_binding.rs`** *(đã gỡ trong Spec A1)* & [`storage/media_refs.rs`](../../cms/crates/opendash-server/src/storage/media_refs.rs#L319):
     - `builder_binding.rs#L113`: lọc `sl.deleted_at IS NULL` và trên public (`authenticated_preview == 0`) lọc thêm `(sl.is_default = 1 OR multilingual_enabled = 1)`. `media_refs.rs#L319`: `AND deleted_at IS NULL`.
 11. **[`storage/plugin.rs`](../../cms/crates/opendash-server/src/storage/plugin/mod.rs) & [`plugin/runtime.rs`](../../cms/crates/opendash-server/src/plugin/runtime/mod.rs):**
     - `plugin::count_entries_for_host_list` (`storage/plugin.rs#L1040-L1058`) bổ sung tham số `enforce_public_locale: bool` (hoặc join `site_locales sl ON sl.code = content_entries.locale AND sl.deleted_at IS NULL` và khi public: `sl.enabled = 1 AND (sl.is_default = 1 OR multilingual_enabled = 1)`), đồng bộ hoàn toàn giữa `items` và `total`.

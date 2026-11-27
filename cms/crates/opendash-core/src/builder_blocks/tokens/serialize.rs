@@ -1,16 +1,11 @@
 use super::*;
 
 pub const MAX_BUILDER_BLOCK_BODY_BYTES: usize = 384 * 1024;
-
 pub(crate) const MAX_TEXT_NODE_CHARS: usize = 16_384;
-
 pub(crate) const OPEN_PREFIX: &str = "<!-- od:";
-
 pub(crate) const CLOSE_PREFIX: &str = "<!-- /od:";
-
 pub(crate) const COMMENT_END: &str = "-->";
-
-pub(crate) const TEXT_CLOSE_TAG: &str = "<!-- /od:text -->";
+pub(crate) const TEXT_CLOSE_TAG: &str = "<!-- /od:core/text -->";
 
 impl fmt::Display for BuilderBlockError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -30,8 +25,71 @@ pub fn contains_blocks(raw_body: &str) -> bool {
     raw_body.contains(OPEN_PREFIX)
 }
 
-/// Serializes `BuilderDocument` into clean Gutenberg-style comment blocks
-/// (`<!-- od:... -->`) without inserting redundant wrapper `<div>` elements.
+#[derive(Serialize)]
+struct CommentHeaderRef<'a> {
+    id: &'a str,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    props: &'a BTreeMap<String, Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta: Option<&'a NodeMeta>,
+}
+
+fn serialize_node_rec(
+    node: &BlockNode,
+    out: &mut String,
+    depth: usize,
+) -> Result<(), BuilderBlockError> {
+    if depth > MAX_BUILDER_DEPTH {
+        return Err(BuilderBlockError::Invalid("Builder exceeds max depth 8"));
+    }
+    if !valid_namespaced_block_id(&node.block_id) {
+        return Err(BuilderBlockError::Invalid("Invalid Builder block_id"));
+    }
+    let meta = node
+        .meta
+        .as_ref()
+        .filter(|m| !empty_node_meta_option(&Some((*m).clone())));
+
+    if node.block_id == "core/text"
+        && node.children.is_empty()
+        && let Some(Value::String(content)) = node.props.get("content")
+        && !text_has_comment_boundary(content)
+    {
+        let mut header_props = node.props.clone();
+        header_props.remove("content");
+        let payload = encode_comment_json(&CommentHeaderRef {
+            id: &node.id,
+            props: &header_props,
+            meta,
+        })?;
+        push_line(out, &format!("<!-- od:core/text {payload} -->"));
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(content);
+        out.push('\n');
+        out.push_str(TEXT_CLOSE_TAG);
+        return Ok(());
+    }
+
+    let payload = encode_comment_json(&CommentHeaderRef {
+        id: &node.id,
+        props: &node.props,
+        meta,
+    })?;
+    if node.children.is_empty() {
+        push_line(out, &format!("<!-- od:{} {payload} /-->", node.block_id));
+    } else {
+        push_line(out, &format!("<!-- od:{} {payload} -->", node.block_id));
+        for child in &node.children {
+            serialize_node_rec(child, out, depth + 1)?;
+        }
+        push_line(out, &format!("<!-- /od:{} -->", node.block_id));
+    }
+    Ok(())
+}
+
+/// Serializes `BuilderDocument` into recursive Gutenberg-style comment blocks (`<!-- od:<block_id> ... -->`).
 pub fn serialize_builder_document_to_blocks(
     doc: &BuilderDocument,
 ) -> Result<String, BuilderBlockError> {
@@ -41,188 +99,9 @@ pub fn serialize_builder_document_to_blocks(
         ));
     }
     let mut out = String::new();
-    for section in &doc.sections {
-        let sec_meta = encode_comment_json(&ContainerMetaRef {
-            id: &section.id,
-            responsive: section.responsive.as_ref().filter(|r| !r.is_empty()),
-            style: section
-                .style
-                .as_ref()
-                .filter(|s| !empty_section_style_option(&Some((*s).clone()))),
-            meta: section
-                .meta
-                .as_ref()
-                .filter(|m| !empty_node_meta_option(&Some((*m).clone()))),
-        })?;
-        push_line(&mut out, &format!("<!-- od:section {sec_meta} -->"));
-
-        for row in &section.children {
-            let row_meta = encode_comment_json(&ContainerMetaRef {
-                id: &row.id,
-                responsive: row.responsive.as_ref().filter(|r| !r.is_empty()),
-                style: None,
-                meta: row.meta.as_ref().filter(|m| !m.is_empty()),
-            })?;
-            push_line(&mut out, &format!("<!-- od:row {row_meta} -->"));
-
-            for col in &row.children {
-                let col_meta = encode_comment_json(&ContainerMetaRef {
-                    id: &col.id,
-                    responsive: col.responsive.as_ref().filter(|r| !r.is_empty()),
-                    style: None,
-                    meta: col.meta.as_ref().filter(|m| !m.is_empty()),
-                })?;
-                push_line(&mut out, &format!("<!-- od:column {col_meta} -->"));
-
-                for element in &col.children {
-                    let el_meta = element.meta.as_ref().filter(|m| !m.is_empty());
-                    match &element.content {
-                        ElementContent::Known(known) => match known {
-                            KnownElement::Heading(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "heading",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::Text(props) => {
-                                if text_has_comment_boundary(&props.text) {
-                                    serialize_self_closing(
-                                        &mut out,
-                                        "text",
-                                        &element.id,
-                                        el_meta,
-                                        props,
-                                    )?;
-                                } else {
-                                    let meta = encode_comment_json(&PairedTextMetaRef {
-                                        id: &element.id,
-                                        rich: props.rich,
-                                        meta: el_meta,
-                                        binding: props.binding.as_ref(),
-                                    })?;
-                                    push_line(&mut out, &format!("<!-- od:text {meta} -->"));
-                                    if !out.is_empty() {
-                                        out.push('\n');
-                                    }
-                                    out.push_str(&props.text);
-                                    out.push('\n');
-                                    out.push_str(TEXT_CLOSE_TAG);
-                                }
-                            }
-                            KnownElement::Image(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "image",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::Video(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "video",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::Button(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "button",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::List(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "list",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::ContactForm(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "contact_form",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::ContentSlot(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "content_slot",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::PatternRef(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "pattern_ref",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::TemplatePart(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "template_part",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::PluginBlock(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "plugin_block",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                            KnownElement::Legacy(props) => {
-                                serialize_self_closing(
-                                    &mut out,
-                                    "legacy",
-                                    &element.id,
-                                    el_meta,
-                                    props,
-                                )?;
-                            }
-                        },
-                        ElementContent::Unresolved(raw) => {
-                            let payload = encode_comment_json(&UnresolvedRef {
-                                id: &element.id,
-                                meta: el_meta,
-                                raw,
-                            })?;
-                            push_line(&mut out, &format!("<!-- od:unresolved {payload} /-->"));
-                        }
-                    }
-                }
-
-                push_line(&mut out, "<!-- /od:column -->");
-            }
-
-            push_line(&mut out, "<!-- /od:row -->");
-        }
-
-        push_line(&mut out, "<!-- /od:section -->");
+    for block in &doc.blocks {
+        serialize_node_rec(block, &mut out, 1)?;
     }
-
     if out.len() > MAX_BUILDER_BLOCK_BODY_BYTES {
         return Err(BuilderBlockError::TooLarge);
     }

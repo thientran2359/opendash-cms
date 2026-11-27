@@ -29,38 +29,21 @@ fn plugin_block_csec_escapes_values_blocks_xss_and_falls_back_safely() {
     assert!(ok_html.contains("Hello"));
 
     // 3. Builder render with active plugin block vs disabled plugin block fallback
-    let doc = BuilderDocument {
-        schema_version: 1,
-        sections: vec![SectionNode {
-            id: "sec-1".into(),
+    let doc = doc_in_section(
+        "sec-1",
+        "row-1",
+        "col-1",
+        vec![BlockNode {
+            id: "el-1".into(),
+            block_id: "acme-plugin/hero".into(),
+            props: vals,
+            children: vec![],
             meta: None,
-            responsive: None,
-            style: None,
-            children: vec![RowNode {
-                id: "row-1".into(),
-                meta: None,
-                responsive: None,
-                children: vec![ColumnNode {
-                    id: "col-1".into(),
-                    meta: None,
-                    responsive: None,
-                    children: vec![ElementNode {
-                        id: "el-1".into(),
-                        meta: None,
-                        content: ElementContent::Known(KnownElement::PluginBlock(
-                            PluginBlockProps {
-                                block_id: "acme-plugin/hero".into(),
-                                values: vals,
-                            },
-                        )),
-                    }],
-                }],
-            }],
         }],
-    };
+    );
 
-    let mut declared = BTreeMap::new();
-    let schema: opendash_core::block_schema::BlockSchemaV1 =
+    let mut declared = crate::storage::page::embedded_core_block_defs().clone();
+    let schema: opendash_core::block_schema::BlockSchema =
         serde_json::from_value(serde_json::json!({
             "schema_version": 1,
             "id": "acme-plugin/hero",
@@ -89,14 +72,8 @@ fn plugin_block_csec_escapes_values_blocks_xss_and_falls_back_safely() {
         ..Default::default()
     };
 
-    let rendered_active = render_builder_with_lists(
-        &active_state,
-        &doc,
-        false,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-    )
-    .expect("active render");
+    let rendered_active = render_builder_with_lists(&active_state, &doc, false, &BTreeMap::new())
+        .expect("active render");
     assert!(
         rendered_active
             .html
@@ -107,15 +84,13 @@ fn plugin_block_csec_escapes_values_blocks_xss_and_falls_back_safely() {
     assert!(rendered_active.diagnostics.is_empty());
 
     // Disabled plugin: block absent from declared_blocks -> safe fallback without error
-    let disabled_state = BuilderRenderContext::default();
-    let rendered_disabled = render_builder_with_lists(
-        &disabled_state,
-        &doc,
-        false,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-    )
-    .expect("disabled fallback render must not fail");
+    let disabled_state = BuilderRenderContext {
+        declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
+        ..Default::default()
+    };
+    let rendered_disabled =
+        render_builder_with_lists(&disabled_state, &doc, false, &BTreeMap::new())
+            .expect("disabled fallback render must not fail");
     assert!(rendered_disabled.html.contains("builder-block-unavailable"));
     assert_eq!(
         rendered_disabled.diagnostics[0].code,
@@ -125,33 +100,21 @@ fn plugin_block_csec_escapes_values_blocks_xss_and_falls_back_safely() {
 
 #[test]
 fn builder_list_uses_snapshot_canonical_href_not_legacy_slug() {
-    let props: opendash_core::builder::ListProps =
-        serde_json::from_value(serde_json::json!({"type_key": "post"})).unwrap();
-    let doc = BuilderDocument {
-        schema_version: 1,
-        sections: vec![SectionNode {
-            id: "sec-1".into(),
-            meta: None,
-            responsive: None,
-            style: None,
-            children: vec![RowNode {
-                id: "row-1".into(),
-                meta: None,
-                responsive: None,
-                children: vec![ColumnNode {
-                    id: "col-1".into(),
-                    meta: None,
-                    responsive: None,
-                    children: vec![ElementNode {
-                        id: "list-1".into(),
-                        meta: None,
-                        content: ElementContent::Known(KnownElement::List(props)),
-                    }],
-                }],
-            }],
-        }],
+    let doc = doc_in_section(
+        "sec-1",
+        "row-1",
+        "col-1",
+        vec![node(
+            "list-1",
+            "core/list",
+            json!({"type_key": "post"}),
+            vec![],
+        )],
+    );
+    let state = BuilderRenderContext {
+        declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
+        ..Default::default()
     };
-    let state = BuilderRenderContext::default();
     let mut lists = ListResults::new();
     lists.insert(
         "list-1".into(),
@@ -177,8 +140,7 @@ fn builder_list_uses_snapshot_canonical_href_not_legacy_slug() {
             out_of_range: false,
         },
     );
-    let rendered =
-        render_builder_with_lists(&state, &doc, false, &BTreeMap::new(), &lists).unwrap();
+    let rendered = render_builder_with_lists(&state, &doc, false, &lists).unwrap();
     assert!(rendered.html.contains("/blog/new-slug"));
     assert!(!rendered.html.contains("/old-slug"));
     assert!(!rendered.html.contains("href=\"/hidden\""));
@@ -189,45 +151,26 @@ fn builder_list_uses_snapshot_canonical_href_not_legacy_slug() {
 
 #[test]
 fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
-    use opendash_core::builder::{
-        ColumnNode, ContentSlotProps, ElementNode, HeadingProps, PatternRefProps, RowNode,
-        SectionNode, TemplatePartProps,
+    let state = BuilderRenderContext {
+        declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
+        ..Default::default()
     };
-    let state = BuilderRenderContext::default();
-    let pattern_doc = BuilderDocument {
-        schema_version: 1,
-        sections: vec![SectionNode {
-            id: "psec-1".into(),
-            meta: None,
-            responsive: None,
-            style: None,
-            children: vec![RowNode {
-                id: "prow-1".into(),
-                meta: None,
-                responsive: None,
-                children: vec![ColumnNode {
-                    id: "pcol-1".into(),
-                    meta: None,
-                    responsive: None,
-                    children: vec![ElementNode {
-                        id: "phead-1".into(),
-                        meta: None,
-                        content: ElementContent::Known(KnownElement::Heading(HeadingProps {
-                            level: 3,
-                            text: "Inner pattern".into(),
-                            binding: None,
-                        })),
-                    }],
-                }],
-            }],
-        }],
-    };
+    let pattern_doc = doc_in_section(
+        "psec-1",
+        "prow-1",
+        "pcol-1",
+        vec![node(
+            "phead-1",
+            "core/heading",
+            json!({"level": "h3", "text": "Inner pattern"}),
+            vec![],
+        )],
+    );
     // Pattern AST is always rendered with pattern_document = true and scope None.
     let inner_pattern = render_builder_with_annotations(
         &state,
         &pattern_doc,
         true,
-        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         None,
@@ -239,52 +182,28 @@ fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
     assert!(!inner_pattern.html.contains("data-od-editable"));
     assert!(!inner_pattern.html.contains("data-od-kind"));
 
-    let outer_doc = BuilderDocument {
-        schema_version: 1,
-        sections: vec![SectionNode {
-            id: "sec-1".into(),
-            meta: None,
-            responsive: None,
-            style: None,
-            children: vec![RowNode {
-                id: "row-1".into(),
-                meta: None,
-                responsive: None,
-                children: vec![ColumnNode {
-                    id: "col-1".into(),
-                    meta: None,
-                    responsive: None,
-                    children: vec![
-                        ElementNode {
-                            id: "part-1".into(),
-                            meta: None,
-                            content: ElementContent::Known(KnownElement::TemplatePart(
-                                TemplatePartProps {
-                                    part_key: "header".into(),
-                                },
-                            )),
-                        },
-                        ElementNode {
-                            id: "pat-1".into(),
-                            meta: None,
-                            content: ElementContent::Known(KnownElement::PatternRef(
-                                PatternRefProps { pattern_id: 7 },
-                            )),
-                        },
-                        ElementNode {
-                            id: "slot-1".into(),
-                            meta: None,
-                            content: ElementContent::Known(KnownElement::ContentSlot(
-                                ContentSlotProps {},
-                            )),
-                        },
-                    ],
-                }],
-            }],
-        }],
-    };
+    let outer_doc = doc_in_section(
+        "sec-1",
+        "row-1",
+        "col-1",
+        vec![
+            node(
+                "part-1",
+                "core/template-part",
+                json!({"part_key": "header"}),
+                vec![],
+            ),
+            node(
+                "pat-1",
+                "core/pattern-ref",
+                json!({"pattern_id": "7"}),
+                vec![],
+            ),
+            node("slot-1", "core/content-slot", json!({}), vec![]),
+        ],
+    );
     let mut patterns = PatternResults::new();
-    patterns.insert(7, inner_pattern);
+    patterns.insert("pat-1".into(), inner_pattern);
     let mut parts = BTreeMap::new();
     parts.insert(
         "header".into(),
@@ -302,7 +221,6 @@ fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
         false,
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &BTreeMap::new(),
         Some(&ctx),
         &patterns,
         false,
@@ -316,7 +234,6 @@ fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
         &state,
         &outer_doc,
         true,
-        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         Some(&ctx),
@@ -333,7 +250,6 @@ fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
         true,
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &BTreeMap::new(),
         Some(&ctx),
         &patterns,
         false,
@@ -341,19 +257,22 @@ fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
     )
     .unwrap();
     assert!(scoped.html.contains(
-        "<section data-node-id=\"sec-1\" data-od-editable=\"1\" data-od-kind=\"section\">"
+        "data-node-id=\"sec-1\" data-block-id=\"core/section\" data-od-node-scope=\"entry-sec-1\" data-od-editable=\"1\" data-od-kind=\"section\""
     ));
     assert!(scoped.html.contains(
-        "<div class=\"builder-row\" data-node-id=\"row-1\" data-od-editable=\"1\" data-od-kind=\"row\">"
+        "data-node-id=\"row-1\" data-block-id=\"core/row\" data-od-node-scope=\"entry-row-1\" data-od-editable=\"1\" data-od-kind=\"container\""
     ));
     assert!(scoped.html.contains(
-        "<div class=\"builder-column\" data-node-id=\"col-1\" data-od-editable=\"1\" data-od-kind=\"column\">"
+        "data-node-id=\"col-1\" data-block-id=\"core/column\" data-od-node-scope=\"entry-col-1\" data-od-editable=\"1\" data-od-kind=\"container\""
     ));
     assert!(scoped.html.contains(
-        "<div class=\"builder-element\" data-node-id=\"pat-1\" data-od-editable=\"1\" data-od-kind=\"element\">"
+        "data-node-id=\"pat-1\" data-block-id=\"core/pattern-ref\" data-od-node-scope=\"entry-pat-1\" data-od-editable=\"1\" data-od-kind=\"block\""
     ));
     assert!(scoped.html.contains(
-        "<section data-node-id=\"psec-1\"><div class=\"builder-row\" data-node-id=\"prow-1\">"
+        "data-node-id=\"psec-1\" data-block-id=\"core/section\" data-od-node-scope=\"pat_0-psec-1\">"
+    ));
+    assert!(scoped.html.contains(
+        "data-node-id=\"prow-1\" data-block-id=\"core/row\" data-od-node-scope=\"pat_0-prow-1\">"
     ));
     assert!(scoped.html.contains("<section data-node-id=\"hdr-sec\">"));
     assert!(scoped.html.contains("<p data-node-id=\"entry-inner\">"));
