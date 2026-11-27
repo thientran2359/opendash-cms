@@ -182,9 +182,9 @@ pub struct EntryView {
     pub ext: BTreeMap<String, Value>,
     #[serde(default)]
     pub theme_ext: BTreeMap<String, Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub snippet_segments: Vec<opendash_core::search::SnippetSegment>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub type_label: String,
 }
 

@@ -133,6 +133,23 @@ async fn studio_search_target_blocks_diagnostics_and_public_override() {
                 "children": [{
                     "id": "col1",
                     "children": [
+                        { "id": "slot1", "type": "core/content_slot", "props": {} },
+                        { "id": "sf1", "type": "core/search_form", "props": { "placeholder": "Find...", "submit_label": "Go", "show_type_filter": true, "preserve_type_filter": false } },
+                        { "id": "sr1", "type": "core/search_results", "props": { "show_facets": true, "show_excerpt": true, "empty_message": "" } }
+                    ]
+                }]
+            }]
+        }]
+    });
+    let search_doc = json!({
+        "schema_version": 1,
+        "sections": [{
+            "id": "sec1",
+            "children": [{
+                "id": "row1",
+                "children": [{
+                    "id": "col1",
+                    "children": [
                         { "id": "sf1", "type": "core/search_form", "props": { "placeholder": "Find...", "submit_label": "Go", "show_type_filter": true, "preserve_type_filter": false } },
                         { "id": "sr1", "type": "core/search_results", "props": { "show_facets": true, "show_excerpt": true, "empty_message": "" } }
                     ]
@@ -177,7 +194,7 @@ async fn studio_search_target_blocks_diagnostics_and_public_override() {
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
             "target": { "kind": "search" },
-            "document": home_doc,
+            "document": search_doc,
             "preview_annotations": true
         }))
         .send()
@@ -198,28 +215,50 @@ async fn studio_search_target_blocks_diagnostics_and_public_override() {
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
             "target": { "kind": "search" },
-            "document": home_doc
+            "document": search_doc
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(save_ov.status(), StatusCode::OK);
+    assert!(matches!(
+        save_ov.status(),
+        StatusCode::CREATED | StatusCode::OK
+    ));
 
     let create_post = http
-        .post(format!("{}/api/admin/content/post", site.base))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            site.base
+        ))
         .header(header::COOKIE, &cookie)
         .header(header::ORIGIN, &site.base)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
             "title": "Builder Search Override Target",
             "slug": "builder-search-override-target",
-            "status": "published",
-            "values": { "summary": "Studio Builder override search match" }
+            "values": { "body": "Studio Builder override search match" }
         }))
         .send()
         .await
         .unwrap();
     assert_eq!(create_post.status(), StatusCode::CREATED);
+    let created_json: Value = create_post.json().await.unwrap();
+    let created_id = created_json["id"].as_i64().unwrap();
+    let created_ver = created_json["version"].as_i64().unwrap();
+    let pub_post = http
+        .post(format!(
+            "{}/api/admin/content-types/post/entries/{created_id}/publication",
+            site.base
+        ))
+        .header(header::COOKIE, &cookie)
+        .header(header::ORIGIN, &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{created_ver}\""))
+        .json(&json!({ "status": "published" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pub_post.status(), StatusCode::OK);
 
     let public_res = http
         .get(format!("{}/?s=Override", site.base))

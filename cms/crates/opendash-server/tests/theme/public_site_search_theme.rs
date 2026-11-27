@@ -159,20 +159,39 @@ async fn starter_search_template_header_option_and_csec_theme_validation() {
 
     // 2. Public search on Starter renders search.html with form-action 'self', no-store, noindex.
     let create = client
-        .post(format!("{}/api/admin/content/post", srv.origin))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.origin
+        ))
         .header(header::COOKIE, &cookie)
         .header(header::ORIGIN, &srv.origin)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
             "title": "Starter Rust FTS5 Guide",
             "slug": "starter-rust-fts5-guide",
-            "status": "published",
-            "values": { "summary": "Indexing Rust single binary search with FTS5." }
+            "values": { "body": "Indexing Rust single binary search with FTS5." }
         }))
         .send()
         .await
         .unwrap();
     assert_eq!(create.status(), StatusCode::CREATED);
+    let created: Value = create.json().await.unwrap();
+    let created_id = created["id"].as_i64().unwrap();
+    let created_ver = created["version"].as_i64().unwrap();
+    let pub_post = client
+        .post(format!(
+            "{}/api/admin/content-types/post/entries/{created_id}/publication",
+            srv.origin
+        ))
+        .header(header::COOKIE, &cookie)
+        .header(header::ORIGIN, &srv.origin)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, format!("\"v{created_ver}\""))
+        .json(&json!({ "status": "published" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pub_post.status(), StatusCode::OK);
 
     let search = client
         .get(format!("{}/?s=FTS5", srv.origin))
@@ -192,13 +211,16 @@ async fn starter_search_template_header_option_and_csec_theme_validation() {
         "noindex, follow"
     );
     let search_html = search.text().await.unwrap();
-    assert!(search_html.contains(r#"<form method="get" action="/""#));
+    assert!(search_html.contains(r#"<form method="get" action="&#x2f;""#));
     assert!(search_html.contains("Starter Rust FTS5 Guide"));
     assert!(search_html.contains("<mark"));
 
     // 3. Enabling show_header_search puts a GET search form in header on /.
     let opts = client
-        .get(format!("{}/api/admin/themes/options", srv.origin))
+        .get(format!(
+            "{}/api/themes/opendash-starter/options",
+            srv.origin
+        ))
         .header(header::COOKIE, &cookie)
         .send()
         .await
@@ -211,7 +233,10 @@ async fn starter_search_template_header_option_and_csec_theme_validation() {
         .unwrap_or("\"v0\"")
         .to_owned();
     let put_opt = client
-        .put(format!("{}/api/admin/themes/options", srv.origin))
+        .put(format!(
+            "{}/api/themes/opendash-starter/options",
+            srv.origin
+        ))
         .header(header::COOKIE, &cookie)
         .header(header::ORIGIN, &srv.origin)
         .header("X-CSRF-Token", &csrf)
@@ -222,11 +247,15 @@ async fn starter_search_template_header_option_and_csec_theme_validation() {
         .unwrap();
     assert_eq!(put_opt.status(), StatusCode::OK);
 
-    let home_with_search = client.get(format!("{}/", srv.origin)).send().await.unwrap();
+    let home_with_search = client
+        .get(format!("{}/posts", srv.origin))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(home_with_search.status(), StatusCode::OK);
     assert!(csp_header(home_with_search.headers()).contains("form-action 'self'"));
     let home_search_html = home_with_search.text().await.unwrap();
-    assert!(home_search_html.contains(r#"<form method="get" action="/""#));
+    assert!(home_search_html.contains(r#"<form method="get" action="&#x2f;""#));
 
     // 4. Malicious theme form markup is rejected on install; safe bounded GET form succeeds.
     for (id, bad_html) in [

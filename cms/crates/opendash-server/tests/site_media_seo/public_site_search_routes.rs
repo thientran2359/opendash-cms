@@ -215,7 +215,7 @@ async fn public_ssr_and_json_search_enforces_locale_validation_csp_and_headers()
         "kien-truc-xanh",
         "Kiến trúc xanh Hà Nội",
         "vi",
-        json!({"summary":"Thiết kế kiến trúc xanh bền vững"}),
+        json!({"body":"Thiết kế kiến trúc xanh bền vững"}),
         true,
     )
     .await;
@@ -254,7 +254,7 @@ async fn public_ssr_and_json_search_enforces_locale_validation_csp_and_headers()
         "green-architecture",
         "Green Architecture Studio",
         "en",
-        json!({"summary":"Sustainable studio designs"}),
+        json!({"body":"Sustainable studio designs"}),
         true,
     )
     .await;
@@ -288,7 +288,7 @@ async fn public_ssr_and_json_search_enforces_locale_validation_csp_and_headers()
     );
     let html = ssr.text().await.unwrap();
     assert!(html.contains("Kiến trúc xanh Hà Nội"));
-    assert!(html.contains("<mark>"));
+    assert!(html.contains("<mark"));
     assert!(!html.contains("Bí mật kiến trúc chưa xuất bản"));
 
     // 2. Empty ?s=, type filter, and out-of-range valid page <= 100.

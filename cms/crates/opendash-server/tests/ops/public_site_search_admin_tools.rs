@@ -155,31 +155,52 @@ async fn admin_search_tools_rbac_csrf_drift_recovery_and_job_audit() {
 
     // 2. Create published post + draft post.
     let create_pub = http
-        .post(format!("{}/api/admin/content/post", srv.origin))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.origin
+        ))
         .header(header::COOKIE, &admin_cookie)
         .header(header::ORIGIN, &srv.origin)
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
             "title": "Reindex Telemetry Article",
             "slug": "reindex-telemetry-article",
-            "status": "published",
-            "values": { "summary": "Unique ReindexableKeyword token" }
+            "values": { "body": "Unique ReindexableKeyword token" }
         }))
         .send()
         .await
         .unwrap();
     assert_eq!(create_pub.status(), StatusCode::CREATED);
+    let pub_json: Value = create_pub.json().await.unwrap();
+    let pub_id = pub_json["id"].as_i64().unwrap();
+    let pub_ver = pub_json["version"].as_i64().unwrap();
+    let pub_res = http
+        .post(format!(
+            "{}/api/admin/content-types/post/entries/{pub_id}/publication",
+            srv.origin
+        ))
+        .header(header::COOKIE, &admin_cookie)
+        .header(header::ORIGIN, &srv.origin)
+        .header("X-CSRF-Token", &admin_csrf)
+        .header(header::IF_MATCH, format!("\"v{pub_ver}\""))
+        .json(&json!({ "status": "published" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pub_res.status(), StatusCode::OK);
 
     let create_draft = http
-        .post(format!("{}/api/admin/content/post", srv.origin))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.origin
+        ))
         .header(header::COOKIE, &admin_cookie)
         .header(header::ORIGIN, &srv.origin)
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
             "title": "Draft Secret Article",
             "slug": "draft-secret-article",
-            "status": "draft",
-            "values": { "summary": "Should never appear for ReindexableKeyword" }
+            "values": { "body": "Should never appear for ReindexableKeyword" }
         }))
         .send()
         .await
