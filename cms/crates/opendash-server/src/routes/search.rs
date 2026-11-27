@@ -564,7 +564,16 @@ mod tests {
         let v6 = Extension(ConnectInfo(
             "[2001:db8:abcd:12::99]:9000".parse::<SocketAddr>().unwrap(),
         ));
-        assert_eq!(peer_rate_limit_key(Some(&v6)), "2001:db8:abcd:12::/64");
+        let v6_same_subnet = Extension(ConnectInfo(
+            "[2001:db8:abcd:12:ff::1]:9001"
+                .parse::<SocketAddr>()
+                .unwrap(),
+        ));
+        assert_eq!(peer_rate_limit_key(Some(&v6)), "2001:db8:abcd:12::");
+        assert_eq!(
+            peer_rate_limit_key(Some(&v6_same_subnet)),
+            "2001:db8:abcd:12::"
+        );
         assert_eq!(peer_rate_limit_key(None), "local");
     }
 

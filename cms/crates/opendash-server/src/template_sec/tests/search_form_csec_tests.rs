@@ -18,19 +18,19 @@ fn bounded_get_search_form_in_theme_compiles_and_renders() {
         .render(
             minijinja::context! {
                 locale => minijinja::context! {
-                    home_url => "/vi/",
-                    search_url => "/vi/",
+                    home_url => "/vi",
+                    search_url => "/vi",
                 },
                 search => minijinja::context! {
                     query => "rust fts5",
-                    action_url => "/vi/",
+                    action_url => "/vi",
                     facets => vec![minijinja::context! { slug => "post", label => "Posts" }],
                 },
             },
             None,
         )
         .unwrap();
-    assert!(rendered.contains(r#"<form method="get" action="/vi/" role="search">"#));
+    assert!(rendered.contains(r#"<form method="get" action="&#x2f;vi" role="search">"#));
     assert!(rendered.contains(r#"<option value="post">Posts</option>"#));
     assert!(rendered.contains(r#"value="rust fts5""#));
 }
