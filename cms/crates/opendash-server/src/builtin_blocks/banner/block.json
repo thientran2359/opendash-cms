@@ -47,7 +47,7 @@
       "type": "color",
       "key": "bg_overlay",
       "label": "Lớp phủ",
-      "default": "rgba(15, 23, 42, 0.35)",
+      "default": "#0f172a59",
       "css_var": "--od-banner-overlay"
     },
     {

@@ -73,7 +73,7 @@ fn context_target_truth_table_enforces_all_allowed_context_rules() {
     let list_doc = BuilderDocument {
         schema_version: 1,
         blocks: vec![node(
-            "l1",
+            "list-1",
             "core/list",
             json!({ "type_key": "post" }),
             vec![],
@@ -91,7 +91,7 @@ fn context_target_truth_table_enforces_all_allowed_context_rules() {
     let form_doc = BuilderDocument {
         schema_version: 1,
         blocks: vec![node(
-            "f1",
+            "form-1",
             "core/contact-form",
             json!({ "form_id": "2" }),
             vec![],
@@ -109,7 +109,7 @@ fn context_target_truth_table_enforces_all_allowed_context_rules() {
     let pat_doc = BuilderDocument {
         schema_version: 1,
         blocks: vec![node(
-            "p1",
+            "pat-1",
             "core/pattern-ref",
             json!({ "pattern_id": "3" }),
             vec![],
@@ -127,7 +127,7 @@ fn context_target_truth_table_enforces_all_allowed_context_rules() {
     let part_doc = BuilderDocument {
         schema_version: 1,
         blocks: vec![node(
-            "tp1",
+            "part-1",
             "core/template-part",
             json!({ "part_key": "hero" }),
             vec![],
@@ -156,7 +156,7 @@ fn list_cross_fields_and_positive_i64_parser_enforce_validity() {
         blocks: vec![node(
             "bad-list",
             "core/list",
-            json!({ "type_key": "post", "term_id": "7" }),
+            json!({ "type_key": "post", "term_id": 7 }),
             vec![],
         )],
     };
@@ -171,7 +171,7 @@ fn list_cross_fields_and_positive_i64_parser_enforce_validity() {
         blocks: vec![node(
             "ok-list",
             "core/list",
-            json!({ "type_key": "post", "taxonomy_key": "category", "term_id": "7", "include_descendants": true }),
+            json!({ "type_key": "post", "taxonomy_key": "category", "term_id": 7, "include_descendants": true }),
             vec![],
         )],
     };

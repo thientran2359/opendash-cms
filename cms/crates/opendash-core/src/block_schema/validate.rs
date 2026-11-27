@@ -129,6 +129,9 @@ fn validate_default_children_local(
     depth: usize,
     total_nodes: &mut usize,
 ) -> Result<(), &'static str> {
+    if children.is_empty() {
+        return Ok(());
+    }
     if depth > MAX_DEFAULT_CHILDREN_DEPTH {
         return Err("default_children chỉ hỗ trợ độ sâu tối đa 2 tầng.");
     }

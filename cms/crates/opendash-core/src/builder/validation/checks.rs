@@ -86,6 +86,9 @@ impl<'a> ValidationWalk<'a> {
         parent_schema: Option<&'a BlockSchema>,
         inactive_ancestor_subtree: Option<&'a HashSet<&'a str>>,
     ) -> Result<(), BuilderError> {
+        if nodes.is_empty() {
+            return Ok(());
+        }
         if depth > MAX_BUILDER_DEPTH {
             return Err(BuilderError::Invalid("Builder exceeds max depth 8"));
         }

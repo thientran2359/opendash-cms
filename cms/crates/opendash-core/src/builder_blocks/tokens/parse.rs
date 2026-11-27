@@ -197,7 +197,7 @@ pub(crate) fn parse_blocks_internal(
                     "Comment block nesting exceeds safety limit",
                 ));
             }
-            state.stack.push(node);
+            state.push_container(node);
         }
         cursor = comment_end;
     }

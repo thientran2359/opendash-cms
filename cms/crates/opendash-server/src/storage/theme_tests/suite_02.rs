@@ -86,17 +86,27 @@ async fn override_atomic_cas_reset_source_and_part_cycle_and_slot_contract() {
     );
     let mut footer = target(Kind::Part);
     footer.part_key = Some("footer".into());
+    let footer_base = save_typed_override(&db, &footer, &empty, None)
+        .await
+        .unwrap();
     save_typed_override(&db, &header, &one_part("footer"), None)
         .await
         .unwrap();
     assert_eq!(
-        save_typed_override(&db, &footer, &one_part("header"), None)
+        save_typed_override(&db, &footer, &one_part("header"), Some(footer_base.version))
             .await
             .unwrap_err()
             .0,
         axum::http::StatusCode::BAD_REQUEST
     );
-    assert!(get_typed_override(&db, &footer).await.unwrap().is_none());
+    assert_eq!(
+        get_typed_override(&db, &footer)
+            .await
+            .unwrap()
+            .unwrap()
+            .version,
+        1
+    );
     db.close().await;
 }
 

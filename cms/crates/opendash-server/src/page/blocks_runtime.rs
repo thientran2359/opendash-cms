@@ -320,7 +320,11 @@ pub(super) fn render_native_runtime(
                 .unwrap_or("");
             match context.and_then(|ctx| ctx.parts.get(key)) {
                 Some(part_html) => Some(RuntimeBlockOutput {
-                    html: Some(part_html.clone()),
+                    html: Some(format!(
+                        "<div class=\"od-template-part\" data-part-key=\"{}\">{}</div>",
+                        escape_html(key),
+                        part_html
+                    )),
                     already_charged: part_html.len(),
                 }),
                 None => {

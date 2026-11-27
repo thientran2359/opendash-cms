@@ -5,6 +5,7 @@ pub(super) struct ParserState<'a> {
     pub(super) catalog: &'a RegistryCatalog<RegisteredBlockSchema>,
     pub(super) roots: Vec<BlockNode>,
     pub(super) stack: Vec<BlockNode>,
+    pub(super) pending_hoists: Vec<Vec<BlockNode>>,
     pub(super) diagnostics: Vec<BlockDiagnostic>,
     pub(super) had_freeform_wrap: bool,
     pub(super) had_recovery: bool,
@@ -20,6 +21,7 @@ impl<'a> ParserState<'a> {
             catalog,
             roots: Vec::new(),
             stack: Vec::new(),
+            pending_hoists: Vec::new(),
             diagnostics: Vec::new(),
             had_freeform_wrap: false,
             had_recovery: false,
@@ -27,6 +29,26 @@ impl<'a> ParserState<'a> {
             rec_seq: 0,
             used_ids: HashSet::new(),
         }
+    }
+
+    pub(super) fn push_container(&mut self, node: BlockNode) {
+        self.stack.push(node);
+        self.pending_hoists.push(Vec::new());
+    }
+
+    fn pop_and_attach(&mut self) -> Option<String> {
+        let node = self.stack.pop()?;
+        let hoists = self.pending_hoists.pop().unwrap_or_default();
+        let id = node.id.clone();
+        self.attach_leaf(node);
+        if !hoists.is_empty() {
+            if let Some(parent) = self.stack.last_mut() {
+                parent.children.extend(hoists);
+            } else {
+                self.roots.extend(hoists);
+            }
+        }
+        Some(id)
     }
 
     pub(super) fn unique_prefixed(&mut self, base: &str) -> String {
@@ -87,16 +109,18 @@ impl<'a> ParserState<'a> {
             .iter()
             .rposition(|c| self.container_accepts_text(&c.block_id))
         {
-            if target_idx < top_idx
-                && let Some(first) = text_nodes.first()
-            {
-                self.diagnostics.push(BlockDiagnostic {
-                    node_id: first.id.clone(),
-                    code: "hoisted_freeform_html".to_owned(),
-                    message: "Freeform HTML inside restricted container was hoisted to nearest valid ancestor.".to_owned(),
-                });
+            if target_idx < top_idx {
+                if let Some(first) = text_nodes.first() {
+                    self.diagnostics.push(BlockDiagnostic {
+                        node_id: first.id.clone(),
+                        code: "hoisted_freeform_html".to_owned(),
+                        message: "Freeform HTML inside restricted container was hoisted to nearest valid ancestor.".to_owned(),
+                    });
+                }
+                self.pending_hoists[target_idx + 1].extend(text_nodes);
+            } else {
+                self.stack[target_idx].children.extend(text_nodes);
             }
-            self.stack[target_idx].children.extend(text_nodes);
         } else {
             if let Some(first) = text_nodes.first() {
                 self.diagnostics.push(BlockDiagnostic {
@@ -107,7 +131,7 @@ impl<'a> ParserState<'a> {
                             .to_owned(),
                 });
             }
-            self.roots.extend(text_nodes);
+            self.pending_hoists[0].extend(text_nodes);
         }
     }
 
@@ -178,21 +202,18 @@ impl<'a> ParserState<'a> {
             if top.block_id != tag {
                 return Err(BuilderBlockError::Invalid("Mismatched closing block tag"));
             }
-            let popped = self.stack.pop().unwrap();
-            self.attach_leaf(popped);
+            self.pop_and_attach();
             return Ok(true);
         }
         let Some(found_idx) = self.stack.iter().rposition(|n| n.block_id == tag) else {
             return Ok(false);
         };
         while self.stack.len() - 1 > found_idx {
-            let unclosed = self.stack.pop().unwrap();
-            let unclosed_id = unclosed.id.clone();
-            self.attach_leaf(unclosed);
-            self.record_recovery(&unclosed_id, "Auto-closed unclosed inner container block");
+            if let Some(unclosed_id) = self.pop_and_attach() {
+                self.record_recovery(&unclosed_id, "Auto-closed unclosed inner container block");
+            }
         }
-        let matched = self.stack.pop().unwrap();
-        self.attach_leaf(matched);
+        self.pop_and_attach();
         Ok(true)
     }
 
@@ -203,9 +224,7 @@ impl<'a> ParserState<'a> {
                     "Unclosed Builder container block",
                 ));
             }
-            while let Some(unclosed) = self.stack.pop() {
-                let id = unclosed.id.clone();
-                self.attach_leaf(unclosed);
+            while let Some(id) = self.pop_and_attach() {
                 self.record_recovery(&id, "Auto-closed unclosed Builder container at EOF");
             }
         }

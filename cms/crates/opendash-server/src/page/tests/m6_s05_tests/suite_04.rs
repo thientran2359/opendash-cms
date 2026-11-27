@@ -166,7 +166,7 @@ fn slot_table_and_single_root_wrapper_behave_linearly_and_safely() {
     );
     assert!(merged.starts_with("<section "));
     assert_eq!(merged.matches("class=").count(), 1);
-    assert_eq!(merged.matches("id=").count(), 1);
+    assert_eq!(merged.matches(" id=").count(), 1);
     assert_eq!(merged.matches("data-node-id=").count(), 1);
     assert!(merged.contains("class=\"hero px-4 py-2\""));
     assert!(merged.contains("id=\"hero-id\""));

@@ -182,12 +182,20 @@ fn renders_section_style_box_spacing_rich_text_button_flags_and_new_schema_field
     );
     assert!(!preview.html.contains("padding-top:40px;"));
     assert!(!preview.html.contains("text-align:justify;"));
-    assert!(preview.html.contains("padding-top:37px;"));
+    assert!(preview.html.contains("padding:37px 0px 0px 0px;"));
     assert!(preview.html.contains("style=\"gap:19px;\""));
     assert!(preview.html.contains("od-row builder-row grid grid-cols-2"));
-    assert!(preview.html.contains(
-        "<div class=\"od-rich-text od-prose text-base\"><p>Hello <strong>Rich</strong></p></div>"
-    ));
+    assert!(
+        preview
+            .html
+            .contains("class=\"od-rich-text od-prose text-base\"")
+    );
+    assert!(preview.html.contains("data-node-id=\"el-rich\""));
+    assert!(
+        preview
+            .html
+            .contains("<p>Hello <strong>Rich</strong></p></div>")
+    );
     assert!(!preview.html.contains("<script>"));
     assert!(
         preview

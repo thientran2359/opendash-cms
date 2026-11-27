@@ -436,7 +436,7 @@ fn container_block_csec_enforces_safe_body_nesting_balanced_if_and_budget() {
     assert!(scanner.is_safe_container_body());
 
     let nonce = generate_children_nonce().unwrap();
-    let rich_container = "<section data-parent=\"{{ parent_ctx.parent_id }}\" data-multi=\"{{ parent_ctx.parent_props.allow_multiple }}\">{% for item in children_meta %}<span>{{ od_icon(item.icon.name) }}{{ item.title }}</span>{% endfor %}<div class=\"inner\">{{ children_html }}</div></section>";
+    let rich_container = "<section data-parent=\"{{ parent_ctx.parent_id }}\" data-multi=\"{% if parent_ctx.parent_props.allow_multiple %}true{% else %}false{% endif %}\">{% for item in children_meta %}<span>{{ od_icon(item.icon.name) }}{{ item.title }}</span>{% endfor %}<div class=\"inner\">{{ children_html }}</div></section>";
     validate_block_template_csec_with_children("demo/box", rich_container, &schema, true).unwrap();
     for bad_shadow in [
         "{% set children_meta = 1 %}<div>{{ children_html }}</div>",
