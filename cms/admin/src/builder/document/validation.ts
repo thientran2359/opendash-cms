@@ -260,7 +260,7 @@ export function pluginValuesReadyForFreshNode(
     }
     if (field.type === 'spacing') {
       if (!object(value)) return false;
-      const lo = field.min ?? (field.property === 'margin' ? -128 : 0);
+      const lo = field.min ?? (field.property === 'margin' ? -256 : 0);
       const hi = field.max ?? 256;
       return Object.entries(value).every(([k, v]) =>
         ['top', 'right', 'bottom', 'left'].includes(k)

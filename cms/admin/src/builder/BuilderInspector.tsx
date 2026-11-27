@@ -427,7 +427,7 @@ export function BuilderInspector({
                 label={__("Margin")}
                 propPrefix="m"
                 unit="px"
-                min={-128}
+                min={-256}
                 max={256}
                 allowTailwind
                 value={curMar}

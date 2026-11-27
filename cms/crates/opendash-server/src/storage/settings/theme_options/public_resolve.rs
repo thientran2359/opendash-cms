@@ -159,7 +159,7 @@ pub(in crate::storage) async fn resolve_merged_public_options_with_overrides_in_
     crate::field_hydrate::collect_hydration_ids(
         &global_fields,
         &global_raw,
-        true,
+        crate::field_hydrate::HydrationVisibility::OptionsPublicOnly,
         &mut media_ids,
         &mut entry_ids,
         &mut term_ids,
@@ -167,7 +167,7 @@ pub(in crate::storage) async fn resolve_merged_public_options_with_overrides_in_
     crate::field_hydrate::collect_hydration_ids(
         &theme_specs,
         &theme_raw,
-        true,
+        crate::field_hydrate::HydrationVisibility::OptionsPublicOnly,
         &mut media_ids,
         &mut entry_ids,
         &mut term_ids,
@@ -205,7 +205,7 @@ pub(in crate::storage) async fn resolve_merged_public_options_with_overrides_in_
         &global_raw,
         &ctx,
         richtext_nonces.as_deref_mut(),
-        true,
+        crate::field_hydrate::HydrationVisibility::OptionsPublicOnly,
     )
     .map_err(ApiError::internal)?;
 
@@ -216,7 +216,7 @@ pub(in crate::storage) async fn resolve_merged_public_options_with_overrides_in_
             &theme_raw,
             &ctx,
             richtext_nonces,
-            true,
+            crate::field_hydrate::HydrationVisibility::OptionsPublicOnly,
         )
         .map_err(ApiError::internal)?;
         merged.extend(theme_hydrated);

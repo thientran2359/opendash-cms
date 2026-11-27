@@ -11,6 +11,7 @@ import {
 import { MediaPicker } from '../media/MediaPicker.tsx';
 import { AdminTermPanels, type EffectiveTermConfig, type TermExtensionValues } from '../extensions/AdminContributionRenderer.tsx';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { isUiOnlyFieldType } from '../../fields/helpers.ts';
 import { useSiteTimezone } from '../../fields/useSiteTimezone.ts';
 
 import {
@@ -182,15 +183,22 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
         // actually edited locally; otherwise take the newest server value.
         // Withdrawn fields are not submitted or revived by a stale draft.
         setExtensionConfig(config);
-        setExtensions(prev => Object.fromEntries(config.panels.map(panel => [
-          panel.key,
-          Object.fromEntries(panel.fields.map(field => [
-            field.key,
-            prev[panel.key]?.[field.key] !== extensionBaseline[panel.key]?.[field.key]
-              ? (prev[panel.key]?.[field.key] ?? null)
-              : (config.extensions[panel.key]?.[field.key] ?? null),
-          ])),
-        ])) as TermExtensionValues);
+        setExtensions(prev => Object.fromEntries(config.panels.map(panel => {
+          const readOnlySet = new Set(panel.read_only_keys ?? []);
+          return [
+            panel.key,
+            Object.fromEntries(
+              panel.fields
+                .filter(field => !isUiOnlyFieldType(field.type) && !readOnlySet.has(field.key))
+                .map(field => [
+                  field.key,
+                  prev[panel.key]?.[field.key] !== extensionBaseline[panel.key]?.[field.key]
+                    ? (prev[panel.key]?.[field.key] ?? null)
+                    : (config.extensions[panel.key]?.[field.key] ?? null),
+                ]),
+            ),
+          ];
+        })) as TermExtensionValues);
         setExtensionBaseline(config.extensions);
       }
       if (fresh.kind !== kind) setNotFound(true);
@@ -282,8 +290,10 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
           if (extensionConfig) {
             const altered: TermExtensionValues = {};
             for (const panel of extensionConfig.panels) {
+              const readOnlySet = new Set(panel.read_only_keys ?? []);
               const patch: TermExtensionValues[string] = {};
               for (const field of panel.fields) {
+                if (isUiOnlyFieldType(field.type) || readOnlySet.has(field.key)) continue;
                 const currentValue = extensions[panel.key]?.[field.key];
                 const oldValue = extensionBaseline[panel.key]?.[field.key];
                 if (currentValue !== oldValue) patch[field.key] = currentValue ?? null;

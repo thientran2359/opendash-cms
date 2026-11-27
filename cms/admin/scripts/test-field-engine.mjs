@@ -142,6 +142,10 @@ describe('helpers.ts pure logic', () => {
       helpers.normalizeSpacingValue({ top: -64, right: 32, bottom: -300 }, 'margin', -256, 256),
       { top: -64, right: 32, bottom: -256 },
     );
+    assert.deepEqual(
+      helpers.normalizeSpacingValue({ top: -200, bottom: -300 }, 'margin'),
+      { top: -200, bottom: -256 },
+    );
   });
 
   it('formats and parses datetime across UTC, +07:00, and DST timezones', () => {

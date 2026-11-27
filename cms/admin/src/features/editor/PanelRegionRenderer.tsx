@@ -344,10 +344,10 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
         case 'base_fields':
           return (
             <div className="space-y-3">
-              {proj.field_keys.length === 0 ? (
+              {(proj.panel_fields?.length ?? 0) === 0 && proj.field_keys.length === 0 ? (
                 <p className="text-xs text-slate-500">{__("No unassigned base fields.")}</p>
               ) : (
-                renderSlice(proj.field_keys)
+                renderSlice(proj.field_keys, true)
               )}
             </div>
           );

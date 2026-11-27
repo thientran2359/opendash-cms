@@ -340,6 +340,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 savedValues={globalOptionsSnapshot.values}
                 onChange={onGlobalOptionsChange}
                 viewport={viewport}
+                siteTimezone={generalDraft?.timezone}
                 csrfToken={csrfToken}
                 onApiError={onApiError}
                 disabled={disabled}
