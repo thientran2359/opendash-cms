@@ -41,8 +41,10 @@ pub(super) fn validate_provider_rewrite_base(base: Option<&str>) -> Result<(), &
 pub struct ContentTypeDeclaration {
     pub key: String,
     pub label: String,
-    #[serde(default)]
-    pub fields: Vec<crate::field_schema::FieldSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singular_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
     /// Omission preserves existing provider-owned settings on package re-install.

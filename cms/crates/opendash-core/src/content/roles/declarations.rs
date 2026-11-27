@@ -6,6 +6,7 @@ impl CntDeclarations {
             && self.taxonomy_definitions.is_empty()
             && self.taxonomy_eligibility.is_empty()
             && self.field_groups.is_empty()
+            && self.options_pages.is_empty()
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -35,7 +36,8 @@ impl CntDeclarations {
             let def = ContentTypeDefinition {
                 key: ct.key.clone(),
                 label: ct.label.clone(),
-                fields: ct.fields.clone(),
+                singular_label: ct.singular_label.clone(),
+                description: ct.description.clone(),
                 settings,
             };
             def.validate()?;
@@ -62,6 +64,17 @@ impl CntDeclarations {
                 return Err("duplicate_panel_id: Trùng local_key trong danh sách field_groups.");
             }
             fg.validate_and_normalize()?;
+        }
+        if self.options_pages.len() > MAX_CUSTOM_OPTIONS_PAGES_PER_PACKAGE {
+            return Err("Mỗi gói hỗ trợ tối đa 16 options_pages trong declarations.");
+        }
+        let mut seen_pages = HashSet::new();
+        for page in &self.options_pages {
+            let mut copy = page.clone();
+            copy.validate_and_normalize()?;
+            if !seen_pages.insert(page.page_key.as_str()) {
+                return Err("Khóa page_key trong options_pages bị trùng lặp.");
+            }
         }
         Ok(())
     }
@@ -99,6 +112,17 @@ impl TaxonomyDefinitionInput {
         }
         if !valid_label(&self.label) {
             return Err("Tên taxonomy không hợp lệ (tối đa 100 ký tự).");
+        }
+        if let Some(mut settings) = self.settings.clone() {
+            settings.validate_and_normalize()?;
+        }
+        if let Some(cts) = &self.content_types {
+            validate_taxonomy_target_cpts(cts)?;
+        }
+        if let PatchField::Set(base) = &self.rewrite_base
+            && !base.trim().is_empty()
+        {
+            validate_provider_rewrite_base(Some(base.trim()))?;
         }
         Ok(())
     }

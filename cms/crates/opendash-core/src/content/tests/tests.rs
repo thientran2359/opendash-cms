@@ -181,7 +181,44 @@ fn rejects_unstable_or_invalid_keys() {
     assert!(!valid_content_type_key("post/type"));
 }
 
-fn sample_schema() -> ContentTypeDefinition {
+fn sample_schema_with_fields(
+    fields: Vec<crate::field_schema::FieldSpec>,
+) -> EffectiveContentSchema {
+    let base = OwnedDescriptor {
+        owner: ResourceOwner::User,
+        status: ProviderStatus::Active,
+        declaration_state: DeclarationState::Declared,
+        descriptor: ContentTypeDefinition {
+            key: "portfolio_item".into(),
+            label: "Dự án".into(),
+            singular_label: None,
+            description: None,
+            settings: ContentTypeSettings::default(),
+        },
+    };
+    let group = AttachedFieldGroupSnapshot {
+        group_id: "user:portfolio_fields".into(),
+        owner: ResourceOwner::User,
+        local_key: "portfolio_fields".into(),
+        title: "Thông tin dự án".into(),
+        description: String::new(),
+        domain: FieldGroupDomain::Content,
+        location: vec![vec![LocationRule {
+            param: LocationParam::ContentType,
+            op: LocationOp::Eq,
+            value: "portfolio_item".into(),
+        }]],
+        presentation: FieldGroupPresentation::default(),
+        active: true,
+        fields,
+        status: FieldGroupStatus::Active,
+        association_state: DeclarationState::Declared,
+        version: 1,
+    };
+    EffectiveContentSchema::assemble(base, 1, vec![group]).unwrap()
+}
+
+fn sample_fields() -> Vec<crate::field_schema::FieldSpec> {
     let summary = crate::field_schema::FieldSpec::new(
         crate::field_schema::FieldType::Textarea,
         "summary",
@@ -189,7 +226,7 @@ fn sample_schema() -> ContentTypeDefinition {
     );
     let mut status = crate::field_schema::FieldSpec::new(
         crate::field_schema::FieldType::Select,
-        "status",
+        "status_code",
         "Trạng thái",
     );
     status.required = true;
@@ -205,22 +242,20 @@ fn sample_schema() -> ContentTypeDefinition {
             icon: None,
         },
     ];
-    ContentTypeDefinition {
-        key: "portfolio_item".into(),
-        label: "Dự án".into(),
-        fields: vec![summary, status],
-        settings: ContentTypeSettings::default(),
-    }
+    vec![summary, status]
+}
+
+fn sample_schema() -> EffectiveContentSchema {
+    sample_schema_with_fields(sample_fields())
 }
 
 #[test]
 fn content_schema_round_trips_and_validates() {
     let schema = sample_schema();
-    assert!(schema.validate().is_ok());
-    let json = serde_json::to_string(&schema).unwrap();
-    assert!(json.contains("\"type\":\"textarea\""));
+    assert!(schema.base.descriptor.validate().is_ok());
+    let json = serde_json::to_string(&schema.base.descriptor).unwrap();
     let decoded: ContentTypeDefinition = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded, schema);
+    assert_eq!(decoded, schema.base.descriptor);
     assert!(decoded.validate().is_ok());
 }
 
@@ -257,11 +292,12 @@ fn supports_all_nine_v1_field_kinds() {
         crate::field_schema::FieldType::Media,
         crate::field_schema::FieldType::Gallery,
     ];
+    let fields = sample_fields();
     for kind in kinds {
-        let mut field = sample_schema().fields[0].clone();
+        let mut field = fields[0].clone();
         field.field_type = kind;
         if kind == crate::field_schema::FieldType::Select {
-            field.options = sample_schema().fields[1].options.clone();
+            field.options = fields[1].options.clone();
         }
         assert!(
             crate::field_schema::validate_field_specs(
@@ -275,40 +311,73 @@ fn supports_all_nine_v1_field_kinds() {
 
 #[test]
 fn rejects_duplicate_keys_and_invalid_select_options() {
-    let mut schema = sample_schema();
-    schema.fields.push(schema.fields[0].clone());
-    assert!(schema.validate().is_err());
+    let mut fields = sample_fields();
+    fields.push(fields[0].clone());
+    assert!(
+        crate::field_schema::validate_field_specs(
+            &fields,
+            crate::field_schema::FieldContext::Content
+        )
+        .is_err()
+    );
 
-    let mut schema = sample_schema();
-    schema.fields[1].options[1].value = "planned".into();
-    assert!(schema.validate().is_err());
+    let mut fields = sample_fields();
+    fields[1].options[1].value = "planned".into();
+    assert!(
+        crate::field_schema::validate_field_specs(
+            &fields,
+            crate::field_schema::FieldContext::Content
+        )
+        .is_err()
+    );
 
-    schema.fields[1].options.clear();
-    assert!(schema.validate().is_err());
+    fields[1].options.clear();
+    assert!(
+        crate::field_schema::validate_field_specs(
+            &fields,
+            crate::field_schema::FieldContext::Content
+        )
+        .is_err()
+    );
 
-    schema.fields[0]
-        .options
-        .push(crate::field_schema::SelectOption {
-            value: "wrong".into(),
-            label: "Sai loại".into(),
-            icon: None,
-        });
-    assert!(schema.validate().is_err());
+    fields[0].options.push(crate::field_schema::SelectOption {
+        value: "wrong".into(),
+        label: "Sai loại".into(),
+        icon: None,
+    });
+    assert!(
+        crate::field_schema::validate_field_specs(
+            &fields,
+            crate::field_schema::FieldContext::Content
+        )
+        .is_err()
+    );
 }
 
 #[test]
 fn rejects_invalid_identifiers_and_labels() {
-    let mut schema = sample_schema();
-    schema.key = "Invalid-Type".into();
-    assert!(schema.validate().is_err());
+    let mut def = ContentTypeDefinition {
+        key: "Invalid-Type".into(),
+        label: "Bài viết".into(),
+        singular_label: None,
+        description: None,
+        settings: ContentTypeSettings::default(),
+    };
+    assert!(def.validate().is_err());
 
-    schema.key = "post".into();
-    schema.label = "   ".into();
-    assert!(schema.validate().is_err());
+    def.key = "post".into();
+    def.label = "   ".into();
+    assert!(def.validate().is_err());
 
-    schema.label = "Bài viết".into();
-    schema.fields[0].key = "bad-name".into();
-    assert!(schema.validate().is_err());
+    let mut fields = sample_fields();
+    fields[0].key = "bad-name".into();
+    assert!(
+        crate::field_schema::validate_field_specs(
+            &fields,
+            crate::field_schema::FieldContext::Content
+        )
+        .is_err()
+    );
 }
 
 fn entry() -> ContentEntryInput {
@@ -318,15 +387,22 @@ fn entry() -> ContentEntryInput {
         locale: None,
         values: BTreeMap::from([
             ("summary".into(), json!("Nội dung")),
-            ("status".into(), json!("planned")),
+            ("status_code".into(), json!("planned")),
         ]),
         term_ids: None,
     }
 }
 
+fn entry_ctx() -> LocationEvalContext {
+    LocationEvalContext {
+        content_type: Some("portfolio_item".into()),
+        ..Default::default()
+    }
+}
+
 #[test]
 fn validates_entry_and_all_nine_field_types() {
-    let mut schema = sample_schema();
+    let mut fields = sample_fields();
     let cases = [
         (
             "headline",
@@ -334,7 +410,7 @@ fn validates_entry_and_all_nine_field_types() {
             json!("Hello"),
         ),
         (
-            "body",
+            "details",
             crate::field_schema::FieldType::Richtext,
             json!("<b>Text</b>"),
         ),
@@ -369,12 +445,15 @@ fn validates_entry_and_all_nine_field_types() {
     ];
     let mut entry = entry();
     for (key, kind, value) in cases {
-        schema
-            .fields
-            .push(crate::field_schema::FieldSpec::new(kind, key, "Trường thử"));
+        fields.push(crate::field_schema::FieldSpec::new(kind, key, "Trường thử"));
         entry.values.insert(key.into(), value);
     }
-    assert!(entry.validate_against(&schema).is_ok());
+    let schema = sample_schema_with_fields(fields);
+    assert!(
+        entry
+            .validate_against_effective(&schema, &entry_ctx())
+            .is_ok()
+    );
     let encoded = serde_json::to_string(&entry).unwrap();
     assert_eq!(
         serde_json::from_str::<ContentEntryInput>(&encoded).unwrap(),
@@ -385,38 +464,44 @@ fn validates_entry_and_all_nine_field_types() {
 #[test]
 fn rejects_invalid_custom_field_values_and_missing_required() {
     let schema = sample_schema();
+    let ctx = entry_ctx();
     let mut entry = entry();
-    entry.values.remove("status");
-    assert!(entry.validate_against(&schema).is_err());
-    entry.values.insert("status".into(), json!("unknown"));
-    assert!(entry.validate_against(&schema).is_err());
-    entry.values.insert("status".into(), json!("planned"));
+    entry.values.remove("status_code");
+    assert!(entry.validate_against_effective(&schema, &ctx).is_err());
+    entry.values.insert("status_code".into(), json!("unknown"));
+    assert!(entry.validate_against_effective(&schema, &ctx).is_err());
+    entry.values.insert("status_code".into(), json!("planned"));
     entry.values.insert("unregistered".into(), json!("bad"));
-    assert!(entry.validate_against(&schema).is_err());
+    assert!(entry.validate_against_effective(&schema, &ctx).is_err());
     entry.values.remove("unregistered");
     entry.slug = "Invalid_Slug".into();
-    assert!(entry.validate_against(&schema).is_err());
+    assert!(entry.validate_against_effective(&schema, &ctx).is_err());
     entry.slug = "valid-slug".into();
     entry.values.insert("summary".into(), json!(true));
-    assert!(entry.validate_against(&schema).is_err());
+    assert!(entry.validate_against_effective(&schema, &ctx).is_err());
 }
 
 #[test]
 fn rejects_invalid_dates_galleries_and_media_ids() {
-    let mut schema = sample_schema();
+    let mut fields = sample_fields();
     let mut date_spec =
         crate::field_schema::FieldSpec::new(crate::field_schema::FieldType::Date, "date", "Ngày");
     date_spec.required = true;
-    schema.fields.push(date_spec);
-    schema.fields.push(crate::field_schema::FieldSpec::new(
+    fields.push(date_spec);
+    fields.push(crate::field_schema::FieldSpec::new(
         crate::field_schema::FieldType::Gallery,
         "photos",
         "Album",
     ));
+    let schema = sample_schema_with_fields(fields);
+    let ctx = entry_ctx();
     let mut entry = entry();
     for bad in ["2025-02-29", "2024-13-01", "2024-02-30", "0000-01-01"] {
         entry.values.insert("date".into(), json!(bad));
-        assert!(entry.validate_against(&schema).is_err(), "{bad}");
+        assert!(
+            entry.validate_against_effective(&schema, &ctx).is_err(),
+            "{bad}"
+        );
     }
     entry.values.insert("date".into(), json!("2000-02-29"));
     entry.values.insert(
@@ -426,9 +511,9 @@ fn rejects_invalid_dates_galleries_and_media_ids() {
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         ]),
     );
-    assert!(entry.validate_against(&schema).is_err());
+    assert!(entry.validate_against_effective(&schema, &ctx).is_err());
     entry.values.insert("photos".into(), json!(["../asset"]));
-    assert!(entry.validate_against(&schema).is_err());
+    assert!(entry.validate_against_effective(&schema, &ctx).is_err());
     entry.values.insert(
         "photos".into(),
         json!([
@@ -436,7 +521,7 @@ fn rejects_invalid_dates_galleries_and_media_ids() {
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         ]),
     );
-    assert!(entry.validate_against(&schema).is_ok());
+    assert!(entry.validate_against_effective(&schema, &ctx).is_ok());
 }
 
 #[test]
@@ -477,66 +562,4 @@ fn richtext_allows_384kib_when_containing_blocks_and_keeps_200k_for_plain() {
         "a".repeat(crate::builder_blocks::MAX_BUILDER_BLOCK_BODY_BYTES)
     );
     assert!(!valid_field_value(&field, &json!(block_over_384k)));
-}
-
-#[test]
-fn cpt_builder_auto_injects_body_rejects_non_richtext_and_emits_body_panel() {
-    let builder_settings = ContentTypeSettings {
-        public: true,
-        has_archive: true,
-        publication: ContentPublication::DraftPublish,
-        supports: vec![ContentSupport::Builder, ContentSupport::FeaturedImage],
-    };
-    let base_no_body = OwnedDescriptor {
-        owner: ResourceOwner::User,
-        status: ProviderStatus::Active,
-        declaration_state: DeclarationState::Declared,
-        descriptor: ContentTypeDefinition {
-            key: "service".into(),
-            label: "Dịch vụ".into(),
-            fields: vec![],
-            settings: builder_settings.clone(),
-        },
-    };
-    let eff = EffectiveContentSchema::assemble(base_no_body.clone(), 1, vec![]).unwrap();
-    let injected = eff.effective_fields.get("body").expect("body injected");
-    assert_eq!(
-        injected.definition.field_type,
-        crate::field_schema::FieldType::Richtext
-    );
-    assert_eq!(injected.owner, ResourceOwner::Core);
-    assert!(
-        build_core_and_group_panels(&eff, false, &[])
-            .iter()
-            .any(|p| p.panel_id == "core:body_editor")
-    );
-
-    // Disabling Builder on the custom CPT allows removing the synthetic Core `body`
-    // even when entries already exist.
-    let mut disabled_base = base_no_body;
-    disabled_base.descriptor.settings.supports = vec![ContentSupport::FeaturedImage];
-    let eff_disabled = EffectiveContentSchema::assemble(disabled_base, 2, vec![]).unwrap();
-    assert!(!eff_disabled.effective_fields.contains_key("body"));
-    verify_effective_schema_transition(Some(&eff), &eff_disabled, true).unwrap();
-
-    // Non-RichText `body` is rejected when ContentSupport::Builder is enabled.
-    let bad_base = OwnedDescriptor {
-        owner: ResourceOwner::User,
-        status: ProviderStatus::Active,
-        declaration_state: DeclarationState::Declared,
-        descriptor: ContentTypeDefinition {
-            key: "bad_cpt".into(),
-            label: "Bad".into(),
-            fields: vec![crate::field_schema::FieldSpec::new(
-                crate::field_schema::FieldType::Text,
-                "body",
-                "Short body",
-            )],
-            settings: builder_settings,
-        },
-    };
-    assert!(matches!(
-        EffectiveContentSchema::assemble(bad_base, 1, vec![]),
-        Err(SchemaTransitionError::IncompatibleSchemaChange(_))
-    ));
 }

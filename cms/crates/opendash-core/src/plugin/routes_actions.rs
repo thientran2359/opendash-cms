@@ -197,6 +197,7 @@ impl PluginManifest {
             || self.permissions.plugin_settings_read
             || !self.permissions.plugin_secrets_read.is_empty()
             || !self.permissions.content_delete.is_empty()
+            || !self.declarations.options_pages.is_empty()
             || self.hooks.iter().any(|h| {
                 !matches!(
                     h,
@@ -207,7 +208,7 @@ impl PluginManifest {
             });
         if uses_v3_features && (self.manifest_schema < 3 || self.min_host_version.is_none()) {
             return Err(
-                "Tính năng mở rộng v3 (plugin.js, filters, settings_schema, quyền v3, lifecycle hooks v3) yêu cầu manifest_schema >= 3 và khai báo min_host_version.",
+                "Tính năng mở rộng v3 (plugin.js, filters, settings_schema, options_pages, quyền v3, lifecycle hooks v3) yêu cầu manifest_schema >= 3 và khai báo min_host_version.",
             );
         }
         validate_min_host_version(self.min_host_version.as_deref())?;

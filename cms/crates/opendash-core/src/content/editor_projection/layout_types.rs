@@ -28,10 +28,6 @@ pub enum PanelKind {
     CoreBuiltIn {
         core_key: String,
     },
-    BaseFieldsSlice {
-        slice_key: String,
-        field_keys: Vec<String>,
-    },
     ContentFields {
         field_group_id: ScopedResourceId,
     },
@@ -49,18 +45,6 @@ pub struct LayoutFieldSubgroup {
     pub subgroup_id: String,
     pub title: String,
     pub field_keys: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BaseFieldSlicePanelConfig {
-    pub panel_id: String,
-    pub title: String,
-    #[serde(default = "default_true")]
-    pub collapsible: bool,
-    pub field_keys: Vec<String>,
-    #[serde(default)]
-    pub subgroups: Vec<LayoutFieldSubgroup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,8 +79,6 @@ pub struct EditorLayoutConfigV1 {
     pub type_key: String,
     #[serde(default)]
     pub version: u64,
-    #[serde(default)]
-    pub base_field_panels: Vec<BaseFieldSlicePanelConfig>,
     pub regions: EditorRegionsConfig,
 }
 
@@ -118,6 +100,10 @@ pub struct EffectivePanelProjection {
     pub subgroups: Vec<LayoutFieldSubgroup>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub panel_fields: Vec<crate::field_schema::FieldSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<LocationRuleGroups>,
+    #[serde(default = "default_true")]
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -132,6 +118,10 @@ pub struct EffectiveEditorRegionsProjection {
 pub struct EffectiveEditorConfigProjection {
     pub type_key: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singular_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub settings: ContentTypeSettings,
     pub owner: ResourceOwner,
     pub provider_status: ProviderStatus,
@@ -157,42 +147,22 @@ pub(crate) fn panel_sort_key(
     def: &PanelDefinition,
     placement: &PanelPlacementConfig,
 ) -> (i32, u8, String) {
-    let rank = match def.kind {
-        PanelKind::BaseFieldsSlice { .. } => 1,
-        _ => owner_rank(&def.owner),
-    };
-    (placement.order, rank, def.panel_id.clone())
+    (
+        placement.order,
+        owner_rank(&def.owner),
+        def.panel_id.clone(),
+    )
 }
 
 pub(crate) fn has_core_body_panel(effective: &EffectiveContentSchema) -> bool {
     let type_key = effective.base.descriptor.key.as_str();
-    let is_builtin = matches!(type_key, "post" | "page");
     let settings = &effective.base.descriptor.settings;
     !matches!(type_key, "section" | "pattern")
-        && (is_builtin
-            || settings.supports(ContentSupport::Editor)
-            || settings.supports(ContentSupport::Builder))
+        && (settings.supports(ContentSupport::Editor) || settings.supports(ContentSupport::Builder))
         && effective
             .effective_fields
             .get("body")
             .is_some_and(|fe| fe.definition.field_type == crate::field_schema::FieldType::Richtext)
-}
-
-pub fn eligible_base_field_keys(effective: &EffectiveContentSchema) -> Vec<String> {
-    let type_key = effective.base.descriptor.key.as_str();
-    let use_body_panel = has_core_body_panel(effective);
-    let is_private_reusable = matches!(type_key, "section" | "pattern");
-    effective
-        .base
-        .descriptor
-        .fields
-        .iter()
-        .filter(|f| {
-            !(use_body_panel && f.key == "body")
-                && !(!is_private_reusable && f.key == "featured_image")
-        })
-        .map(|f| f.key.clone())
-        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
