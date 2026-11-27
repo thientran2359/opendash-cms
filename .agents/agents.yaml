@@ -1,35 +1,43 @@
+# Owner Directive 2026-11-27: Ngừng giao task/Slice cho Harbor & Forge.
+# Các tính năng mới chạy trên Feature Worktree cô lập (nhánh `feat/<slug>`) trực tiếp với Owner.
 version: 1
 repository: https://github.com/thientran2359/opendash-cms.git
-task_ledger: github-issues-and-pull-requests
-muse_dispatch: proposed-requires-verified-adapters
+task_ledger: docs/designs/SITEMAP.md-and-feature-prs
+muse_dispatch: retired-2026-11-27
 agents:
   atlas:
     product: Codex
     host: windows
     branch: agent/atlas
     role: coordinator
+    status: active
   nova:
     product: Antigravity
     host: windows
     branch: agent/nova
     role: coordinator
+    status: active
   forge:
     product: Chat on Steroids
     host: windows
     branch: agent/forge
     role: implementer
+    status: retired
   harbor:
     product: Chat on Steroids
     host: macos
     branch: agent/harbor
     role: implementer
+    status: retired
   orion:
     product: Antigravity
     host: macos
     branch: agent/orion
     role: coordinator
+    status: active
   aster:
     product: Codex
     host: macos
     branch: agent/aster
     role: coordinator
+    status: active

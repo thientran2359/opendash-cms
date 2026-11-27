@@ -266,6 +266,7 @@ pub(super) fn build_entry_view_with_defs(
     url: Option<String>,
     terms: &[PublicTermView],
     eligible_public_taxonomies: &[String],
+    max_view_role: FieldRole,
     hydration_ctx: Option<&crate::field_hydrate::HydrationContext<'_>>,
     mut richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
 ) -> EntryView {
@@ -294,6 +295,7 @@ pub(super) fn build_entry_view_with_defs(
                 .as_str()
                 .is_some_and(opendash_core::builder_blocks::contains_blocks);
 
+        let vis = crate::field_hydrate::HydrationVisibility::ContentPublic { max_view_role };
         let hydrated = if is_builder_body {
             Value::String(opendash_core::builder_blocks::extract_visible_text(
                 value.as_str().unwrap_or(""),
@@ -304,6 +306,7 @@ pub(super) fn build_entry_view_with_defs(
                 raw_opt,
                 ctx,
                 richtext_nonces.as_deref_mut(),
+                vis,
             )
             .unwrap_or(Value::Null)
         } else {
@@ -319,17 +322,8 @@ pub(super) fn build_entry_view_with_defs(
                         .filter_map(pure_media_fallback)
                         .collect(),
                 ),
-                FieldType::Link if !value.is_null() => {
-                    let empty_media = BTreeMap::new();
-                    let empty_entries = BTreeMap::new();
-                    let empty_terms = BTreeMap::new();
-                    let empty_ctx = crate::field_hydrate::HydrationContext {
-                        media: &empty_media,
-                        entries: &empty_entries,
-                        terms: &empty_terms,
-                        is_preview: false,
-                    };
-                    crate::field_hydrate::hydrate_field_value(definition, raw_opt, &empty_ctx, None)
+                FieldType::Link | FieldType::Group | FieldType::Repeater if !value.is_null() => {
+                    crate::field_hydrate::hydrate_field_value_stateless(definition, raw_opt, vis)
                         .unwrap_or(Value::Null)
                 }
                 _ => value.clone(),
@@ -510,11 +504,11 @@ pub fn entry_view_with_url(
     schema: &ContentTypeDefinition,
     url: Option<String>,
 ) -> EntryView {
-    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = schema
-        .fields
-        .iter()
-        .filter(|d| !d.is_ui_only() && d.effective_acl().2 == PublicExposure::Public)
-        .collect();
+    let vis = opendash_core::field_schema::HydrationVisibility::ContentPublic {
+        max_view_role: FieldRole::Editor,
+    };
+    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> =
+        schema.fields.iter().filter(|d| vis.allows(d)).collect();
     build_entry_view_with_defs(
         &record,
         &schema.key,
@@ -522,6 +516,7 @@ pub fn entry_view_with_url(
         url,
         &[],
         &[],
+        FieldRole::Editor,
         None,
         None,
     )
@@ -546,6 +541,7 @@ pub fn build_hydrated_entry_view_with_context(
         url,
         terms,
         eligible_public_taxonomies,
+        max_view_role,
         hydration_ctx,
         richtext_nonces,
     )

@@ -418,3 +418,66 @@ fn f09_block_template_allows_term_ref_kind() {
         .is_ok()
     );
 }
+
+#[test]
+fn r2_01_cpt_csec_excludes_private_children_inside_public_group_and_repeater() {
+    use opendash_core::field_schema::{
+        FieldAcl, FieldRole, FieldSpec, FieldType, MediaFieldKind, PublicExposure,
+    };
+
+    let mut pub_img = FieldSpec::new(FieldType::Media, "pub_img", "Ảnh công khai");
+    pub_img.media_kind = Some(MediaFieldKind::Image);
+    let mut priv_img = FieldSpec::new(FieldType::Media, "priv_img", "Ảnh riêng tư");
+    priv_img.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        min_edit_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Private),
+    });
+    let mut grp = FieldSpec::new(FieldType::Group, "pub_group", "Nhóm");
+    grp.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        min_edit_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Public),
+    });
+    grp.fields = vec![pub_img, priv_img];
+
+    let mut priv_link = FieldSpec::new(FieldType::Link, "priv_link", "Liên kết Admin");
+    priv_link.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Admin),
+        min_edit_role: Some(FieldRole::Admin),
+        public_exposure: Some(PublicExposure::Public),
+    });
+    let mut rep = FieldSpec::new(FieldType::Repeater, "pub_rep", "Lặp");
+    rep.acl = Some(FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        min_edit_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Public),
+    });
+    rep.fields = vec![priv_link];
+
+    let policy = ThemeUrlPolicy::default().with_cpt_entry_fields(&[grp, rep]);
+    assert!(
+        validate_template_csec_with_theme_urls(
+            "single:type:case",
+            r#"<img src="{{ entry.fields.pub_group.pub_img.url }}">"#,
+            &policy,
+        )
+        .is_ok()
+    );
+    assert!(
+        validate_template_csec_with_theme_urls(
+            "single:type:case",
+            r#"<img src="{{ entry.fields.pub_group.priv_img.url }}">"#,
+            &policy,
+        )
+        .is_err()
+    );
+    assert!(
+        validate_template_csec_with_theme_urls(
+            "single:type:case",
+            r#"{% for row in entry.fields.pub_rep %}<a href="{{ row.priv_link.url }}">x</a>{% endfor %}"#,
+            &policy,
+        )
+        .is_err()
+    );
+}

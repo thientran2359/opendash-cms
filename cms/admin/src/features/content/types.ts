@@ -1,6 +1,55 @@
 import type { FieldAcl, FieldRole, FieldSpec, FieldType, PublicExposure } from '../../fields/types';
 
 export type { FieldAcl, FieldRole, FieldSpec, FieldType, PublicExposure };
+
+export const CONTENT_CREATOR_FIELD_TYPES: FieldType[] = [
+  'text', 'textarea', 'richtext', 'number', 'range', 'email', 'url',
+  'boolean', 'color', 'icon', 'date', 'datetime', 'time',
+  'select', 'checkbox', 'radio_buttons',
+  'media', 'gallery', 'link', 'entry_ref', 'term_ref',
+];
+
+export const OPTION_BEARING_CREATOR_TYPES: ReadonlyArray<FieldType> = [
+  'select', 'checkbox', 'radio_buttons',
+];
+
+export function parseCreatorFieldOptions(
+  optionsText: string,
+  formatErr: {
+    count: () => string;
+    format: (line: string) => string;
+    bounds: (line: string) => string;
+    duplicate: () => string;
+  },
+  fieldType?: FieldType,
+): SelectOption[] {
+  const maxOptions = fieldType === 'radio_buttons' ? 12 : 100;
+  const lines = optionsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length || lines.length > maxOptions) throw new Error(formatErr.count());
+  const options = lines.map(line => {
+    const separator = line.indexOf('|');
+    if (separator < 1) throw new Error(formatErr.format(line));
+    const value = line.slice(0, separator).trim();
+    const label = line.slice(separator + 1).trim();
+    if (!value || value.length > 64 || !label || label.length > 100) {
+      throw new Error(formatErr.bounds(line));
+    }
+    return { value, label };
+  });
+  if (new Set(options.map(option => option.value)).size !== options.length) {
+    throw new Error(formatErr.duplicate());
+  }
+  return options;
+}
+
+export function withCreatorFieldDefaults(spec: FieldSpec): FieldSpec {
+  return {
+    ...spec,
+    ...(spec.type === 'range' ? { min: spec.min ?? 0, max: spec.max ?? 100, step: spec.step ?? 1 } : {}),
+    ...(spec.type === 'entry_ref' ? { target_types: spec.target_types?.length ? spec.target_types : ['post'] } : {}),
+    ...(spec.type === 'term_ref' ? { taxonomy: spec.taxonomy ?? 'category' } : {}),
+  };
+}
 export type DeclarationState = 'active' | 'withdrawn';
 export type ProviderStatus = 'active' | 'provider_inactive';
 export type EditorRegion = 'header_bar' | 'main_top' | 'main_primary' | 'main_bottom' | 'sidebar';
