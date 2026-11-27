@@ -38,6 +38,7 @@ OpenDash áp dụng **EGM (Elephant soạn spec → Goldfish review độc lập
   - **100% truy vấn SQLite (`sqlx::query*`, `sqlx::raw_sql`) đặt trong `cms/crates/opendash-server/src/storage/`**; không viết SQL trong `routes/`.
   - React Admin gọi HTTP qua `cms/admin/src/api/client.ts`.
   - Tái sử dụng base APIs (`id`, `registry`, `HookDispatcher`, `package`, `SiteCoordinator`/`AdmittedMutation`, `auth`, `ApiError`) và giữ nguyên phiên bản dependency đã pin.
+- **Giới hạn độ dài & Tổ chức Module (`Feature-First`):** Mọi file nguồn mới (`.rs`, `.ts`, `.tsx` trong `cms/`) **không vượt quá 600 dòng (LOC)**; các file cũ trong `cms/scripts/loc-baseline.json` bị khóa theo cơ chế ratchet (kiểm tra tự động qua `cms/scripts/check-standards.py`). Luôn gom nhóm theo tính năng; khi một tính năng lớn vượt ngưỡng mới tách thành các module con đặt tên theo đúng tính năng/trách nhiệm thực tế, **cấm đặt tên chung chung kiểu `part_*`**.
 
 ---
 
