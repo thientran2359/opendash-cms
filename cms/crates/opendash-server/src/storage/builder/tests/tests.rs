@@ -7,7 +7,7 @@ async fn migrate_demo_entry_builder_docs_on_startup_cleans_non_pattern_and_keeps
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
 
     let media_id = "5".repeat(64);
     sqlx::query(
@@ -126,11 +126,11 @@ async fn entry_builder_enforces_body_min_edit_role_and_private_exposure_media_ac
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
 
     sqlx::query(
         r#"INSERT INTO content_types(key, definition_json, owner_kind)
-           VALUES('secret_doc', '{"key":"secret_doc","label":"Secret","fields":[{"key":"body","label":"Body","type":"rich_text","required":false,"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}],"settings":{"public":true,"has_archive":false,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
+           VALUES('secret_doc', '{"key":"secret_doc","label":"Secret","fields":[{"key":"body","label":"Body","type":"richtext","required":false,"acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}}],"settings":{"public":true,"has_archive":false,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
     )
     .execute(&db)
     .await

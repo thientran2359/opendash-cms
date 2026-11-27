@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 export type LocaleDirection = 'ltr' | 'rtl';
@@ -82,7 +82,7 @@ export const EMPTY_ADMIN_LOCALE_STATE: AdminLocaleState = {
 export function listLocales(signal?: AbortSignal): Promise<SiteLocalesSnapshot> {
   return requestJson<SiteLocalesSnapshot>('/api/admin/locales', {
     signal,
-    defaultErrorMessage: tStatic("api.locales.list_failed"),
+    defaultErrorMessage: __("Could not load content languages."),
   });
 }
 
@@ -97,7 +97,7 @@ export function createLocale(
     ifMatchVersion: expectedVersion,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic("api.locales.create_failed"),
+    defaultErrorMessage: __("Could not add the language."),
   });
 }
 
@@ -113,7 +113,7 @@ export function updateLocale(
     ifMatchVersion: expectedVersion,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic("api.locales.update_failed"),
+    defaultErrorMessage: __("Could not update the language."),
   });
 }
 
@@ -130,7 +130,7 @@ export function setDefaultLocale(
       ifMatchVersion: expectedVersion,
       contentType: 'application/json',
       body: JSON.stringify({}),
-      defaultErrorMessage: tStatic("api.locales.default_failed"),
+      defaultErrorMessage: __("Could not set the default language."),
     },
   );
 }
@@ -178,7 +178,7 @@ export function setMultilingualEnabled(
   return requestJson<SiteLocalesSnapshot>('/api/admin/locales/multilingual', {
     method: 'PUT', csrfToken, ifMatchVersion: expectedVersion,
     contentType: 'application/json', body: JSON.stringify({ enabled }),
-    defaultErrorMessage: tStatic("api.locales.toggle_failed"),
+    defaultErrorMessage: __("Could not change multilingual support."),
   });
 }
 
@@ -187,13 +187,13 @@ export function deleteLocale(
 ): Promise<DeleteLocaleResponse> {
   return requestJson<DeleteLocaleResponse>(`/api/admin/locales/${encodeURIComponent(code)}`, {
     method: 'DELETE', csrfToken, ifMatchVersion: expectedVersion,
-    defaultErrorMessage: tStatic("api.locales.delete_failed"),
+    defaultErrorMessage: __("Could not delete the language."),
   });
 }
 
 export function listOrphanedLocales(signal?: AbortSignal): Promise<OrphanedLocalesSnapshot> {
   return requestJson<OrphanedLocalesSnapshot>('/api/admin/locales/orphans', {
-    signal, defaultErrorMessage: tStatic("api.locales.orphans_failed"),
+    signal, defaultErrorMessage: __("Could not load orphaned language data."),
   });
 }
 
@@ -203,6 +203,73 @@ export function purgeOrphanedLocale(
   return requestJson<PurgeOrphanLocaleResult>(`/api/admin/locales/orphans/${encodeURIComponent(code)}/purge`, {
     method: 'POST', csrfToken, ifMatchVersion: expectedVersion,
     contentType: 'application/json', body: JSON.stringify({ confirm_code: confirmCode }),
-    defaultErrorMessage: tStatic("api.locales.purge_failed"),
+    defaultErrorMessage: __("Could not purge orphaned language data."),
   });
+}
+
+export type L10nPackScope = 'core' | 'theme' | 'plugin';
+
+export interface LanguagePackSummary {
+  locale: string;
+  source: string;
+  entries: number;
+  coverage_pct: number;
+  has_override: boolean;
+  etag: string;
+}
+
+export interface LanguageDomainSummary {
+  scope: L10nPackScope;
+  domain: string;
+  name: string;
+  reference_count: number | null;
+  packs: LanguagePackSummary[];
+}
+
+export interface LanguagePacksListResponse {
+  domains: LanguageDomainSummary[];
+}
+
+export interface UploadLanguagePackInput {
+  scope: L10nPackScope;
+  domain: string;
+  locale: string;
+  filename: string;
+  content_base64: string;
+}
+
+export function listLanguagePacks(signal?: AbortSignal): Promise<LanguagePacksListResponse> {
+  return requestJson<LanguagePacksListResponse>('/api/admin/l10n/packs', {
+    signal,
+    defaultErrorMessage: __("Could not load language packs."),
+  });
+}
+
+export function uploadLanguagePack(
+  input: UploadLanguagePackInput,
+  csrfToken: string,
+): Promise<{ ok: boolean; scope: string; domain: string; locale: string; entries: number }> {
+  return requestJson('/api/admin/l10n/packs/upload', {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: __("Could not upload language pack."),
+  });
+}
+
+export function deleteLanguagePack(
+  scope: L10nPackScope,
+  domain: string,
+  locale: string,
+  csrfToken: string,
+): Promise<{ ok: boolean }> {
+  return requestJson(
+    `/api/admin/l10n/packs/${encodeURIComponent(scope)}/${encodeURIComponent(domain)}/${encodeURIComponent(locale)}`,
+    {
+      method: 'DELETE',
+      csrfToken,
+      defaultErrorMessage: __("Could not delete language pack."),
+    },
+  );
 }

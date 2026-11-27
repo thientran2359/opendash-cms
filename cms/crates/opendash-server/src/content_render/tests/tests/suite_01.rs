@@ -77,14 +77,11 @@ fn escapes_untrusted_title_rich_text_and_template_tokens() {
         key: "post".into(),
         label: "Bài viết".into(),
         settings: opendash_core::content::ContentTypeSettings::builtin_publication(),
-        fields: vec![ContentFieldDefinition {
-            key: "body".into(),
-            label: "Nội dung".into(),
-            field_type: ContentFieldType::RichText,
-            required: false,
-            options: vec![],
-            ..Default::default()
-        }],
+        fields: vec![opendash_core::field_schema::FieldSpec::new(
+            opendash_core::field_schema::FieldType::Richtext,
+            "body",
+            "Nội dung",
+        )],
     };
     let record = ContentEntryRecord {
         id: 1,
@@ -219,54 +216,66 @@ fn entry_view_with_context_enforces_acl_declaration_order_nulls_and_excerpt() {
         DeclarationState, OwnedDescriptor, ProviderStatus, ResourceOwner,
     };
 
-    let base_price = ContentFieldDefinition {
-        key: "price".into(),
-        label: "Giá".into(),
-        field_type: ContentFieldType::Number,
-        min_view_role: FieldRole::Editor,
-        public_exposure: PublicExposure::Public,
+    let mut base_price = opendash_core::field_schema::FieldSpec::new(
+        opendash_core::field_schema::FieldType::Number,
+        "price",
+        "Giá",
+    );
+    base_price.acl = Some(opendash_core::field_schema::FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Public),
         ..Default::default()
-    };
-    let group_summary = ContentFieldDefinition {
-        key: "summary".into(),
-        label: "Tóm tắt".into(),
-        field_type: ContentFieldType::ShortText,
-        min_view_role: FieldRole::Editor,
-        public_exposure: PublicExposure::Public,
+    });
+    let mut group_summary = opendash_core::field_schema::FieldSpec::new(
+        opendash_core::field_schema::FieldType::Text,
+        "summary",
+        "Tóm tắt",
+    );
+    group_summary.acl = Some(opendash_core::field_schema::FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Public),
         ..Default::default()
-    };
-    let admin_note = ContentFieldDefinition {
-        key: "secret_note".into(),
-        label: "Ghi chú Admin".into(),
-        field_type: ContentFieldType::ShortText,
-        min_view_role: FieldRole::Admin,
-        public_exposure: PublicExposure::Public,
+    });
+    let mut admin_note = opendash_core::field_schema::FieldSpec::new(
+        opendash_core::field_schema::FieldType::Text,
+        "secret_note",
+        "Ghi chú Admin",
+    );
+    admin_note.acl = Some(opendash_core::field_schema::FieldAcl {
+        min_view_role: Some(FieldRole::Admin),
+        public_exposure: Some(PublicExposure::Public),
         ..Default::default()
-    };
-    let private_field = ContentFieldDefinition {
-        key: "internal".into(),
-        label: "Nội bộ".into(),
-        field_type: ContentFieldType::ShortText,
-        min_view_role: FieldRole::Editor,
-        public_exposure: PublicExposure::Private,
+    });
+    let mut private_field = opendash_core::field_schema::FieldSpec::new(
+        opendash_core::field_schema::FieldType::Text,
+        "internal",
+        "Nội bộ",
+    );
+    private_field.acl = Some(opendash_core::field_schema::FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Private),
         ..Default::default()
-    };
-    let missing_public = ContentFieldDefinition {
-        key: "subtitle".into(),
-        label: "Phụ đề".into(),
-        field_type: ContentFieldType::ShortText,
-        min_view_role: FieldRole::Editor,
-        public_exposure: PublicExposure::Public,
+    });
+    let mut missing_public = opendash_core::field_schema::FieldSpec::new(
+        opendash_core::field_schema::FieldType::Text,
+        "subtitle",
+        "Phụ đề",
+    );
+    missing_public.acl = Some(opendash_core::field_schema::FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Public),
         ..Default::default()
-    };
-    let extra_body = ContentFieldDefinition {
-        key: "body".into(),
-        label: "Nội dung".into(),
-        field_type: ContentFieldType::RichText,
-        min_view_role: FieldRole::Editor,
-        public_exposure: PublicExposure::Public,
+    });
+    let mut extra_body = opendash_core::field_schema::FieldSpec::new(
+        opendash_core::field_schema::FieldType::Richtext,
+        "body",
+        "Nội dung",
+    );
+    extra_body.acl = Some(opendash_core::field_schema::FieldAcl {
+        min_view_role: Some(FieldRole::Editor),
+        public_exposure: Some(PublicExposure::Public),
         ..Default::default()
-    };
+    });
 
     let schema = EffectiveContentSchema {
         base: OwnedDescriptor {
@@ -320,6 +329,7 @@ fn entry_view_with_context_enforces_acl_declaration_order_nulls_and_excerpt() {
             )
         })
         .collect(),
+        ui_fields: Vec::new(),
         schema_token: "tok".into(),
     };
 
@@ -376,11 +386,15 @@ fn entry_view_with_context_enforces_acl_declaration_order_nulls_and_excerpt() {
         &eligible,
         FieldRole::Editor,
     );
-    let keys: Vec<&str> = public_view.fields.iter().map(|f| f.key.as_str()).collect();
+    let keys: Vec<&str> = public_view
+        .field_list
+        .iter()
+        .map(|f| f.key.as_str())
+        .collect();
     assert_eq!(keys, vec!["price", "subtitle", "summary", "body"]);
-    assert_eq!(public_view.values.get("subtitle"), Some(&Value::Null));
-    assert!(!public_view.values.contains_key("secret_note"));
-    assert!(!public_view.values.contains_key("internal"));
+    assert_eq!(public_view.fields.get("subtitle"), Some(&Value::Null));
+    assert!(!public_view.fields.contains_key("secret_note"));
+    assert!(!public_view.fields.contains_key("internal"));
     assert!(public_view.excerpt.chars().count() <= 200);
     assert!(public_view.excerpt.ends_with("..."));
     assert_eq!(public_view.reading_time_minutes, 2);
@@ -403,7 +417,7 @@ fn entry_view_with_context_enforces_acl_declaration_order_nulls_and_excerpt() {
         &eligible,
         FieldRole::Admin,
     );
-    assert!(num_only_view.values.contains_key("secret_note"));
+    assert!(num_only_view.fields.contains_key("secret_note"));
     assert_eq!(num_only_view.excerpt, "");
     assert_eq!(num_only_view.reading_time_minutes, 0);
     assert_eq!(

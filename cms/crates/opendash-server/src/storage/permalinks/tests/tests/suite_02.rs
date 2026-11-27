@@ -7,7 +7,7 @@ async fn upgrade_0039_custom_page_keeps_default_slug_redirect_without_blanket_al
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    let migrator = sqlx::migrate!("../../migrations");
+    let migrator = &crate::storage::MIGRATOR;
     migrator.run_to(39, &db).await.unwrap();
 
     let page_id = sqlx::query(
@@ -117,7 +117,7 @@ async fn upgrade_0039_custom_page_alias_collision_fails_closed_without_partial_m
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    let migrator = sqlx::migrate!("../../migrations");
+    let migrator = &crate::storage::MIGRATOR;
     migrator.run_to(39, &db).await.unwrap();
 
     let page_id = sqlx::query(
@@ -187,7 +187,7 @@ async fn upgrade_0039_reuses_same_owner_redirect_preserving_original_timestamp()
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    let migrator = sqlx::migrate!("../../migrations");
+    let migrator = &crate::storage::MIGRATOR;
     migrator.run_to(39, &db).await.unwrap();
     let page_id = sqlx::query(
         "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)

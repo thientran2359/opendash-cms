@@ -2,13 +2,13 @@
 
 ## Overview
 
-Axum HTTP presentation and request-validation layer for OpenDash, exporting 23 handler modules via [`mod.rs`](mod.rs) and mounted by [`../app.rs`](../app.rs) (`build_router_with_themes_root`). Handlers enforce authentication, RBAC, CSRF tokens, `If-Match` / ETag optimistic concurrency, body size limits, and `AdmittedMutation` maintenance leases while delegating all SQLite queries to [`../storage/README.md`](../storage/README.md).
+Axum HTTP presentation and request-validation layer for OpenDash, exporting 25 handler modules via [`mod.rs`](mod.rs) and mounted by [`../app.rs`](../app.rs) (`build_router_with_telemetry`). Handlers enforce authentication, RBAC, CSRF tokens, `If-Match` / ETag optimistic concurrency, body size limits, and `AdmittedMutation` maintenance leases while delegating all SQLite queries to [`../storage/README.md`](../storage/README.md).
 
 See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 Writer Inventory](../../../../../docs/contracts/M8_WRITER_INVENTORY.md) for writer admission and boundary rules.
 
 ## Interface
 
-- **Module Index** ([`mod.rs`](mod.rs)): exports 23 submodules (`auth`, `builder`, `contact`, `content`, `dashboard`, `entries`, `extensions`, `health`, `import`, `media`, `menu`, `operations`, `patterns`, `plugin`, `public`, `public_content`, `seo`, `settings`, `sitemap`, `smtp`, `taxonomy`, `themes`, `users`).
+- **Module Index** ([`mod.rs`](mod.rs)): exports 25 submodules (`auth`, `builder`, `contact`, `content`, `dashboard`, `entries`, `extensions`, `fields`, `health`, `import`, `media`, `menu`, `operations`, `patterns`, `plugin`, `public`, `public_content`, `redirects`, `seo`, `settings`, `sitemap`, `smtp`, `taxonomy`, `themes`, `users`).
 - **Auth, Users & Dashboard** ([`auth.rs`](auth.rs), [`users.rs`](users.rs), [`dashboard.rs`](dashboard.rs)):
   - `[auth.rs:auth_setup]`, `[auth.rs:auth_login]`, `[auth.rs:auth_me]`, `[auth.rs:auth_logout]` (`/auth/*`).
   - `[users.rs:user_list]`, `[users.rs:user_create]`, `[users.rs:user_patch]`, `[users.rs:user_reset_password]`, `[users.rs:user_delete]`, `[users.rs:profile_get]`, `[users.rs:profile_put]` (`/api/admin/users/*`, `/api/admin/profile`).
@@ -30,6 +30,7 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
 - **Settings, Locales, SEO, Sitemap, Contact, SMTP & Operations** ([`settings.rs`](settings.rs), [`seo.rs`](seo.rs), [`sitemap.rs`](sitemap.rs), [`contact.rs`](contact.rs), [`smtp.rs`](smtp.rs), [`operations.rs`](operations/mod.rs)):
   - `[settings.rs:admin_i18n_bootstrap]`, `[settings.rs:general_get]`, `[settings.rs:general_put]`, `[settings.rs:public_get]`, `[settings.rs:public_put]`, `[settings.rs:reading_get]`, `[settings.rs:reading_put]`, `[settings.rs:site_options_get]`, `[settings.rs:site_options_put]`, `[settings.rs:theme_options_get]`, `[settings.rs:theme_options_put]`, `[settings.rs:permalinks_get]`, `[settings.rs:permalinks_put]`, `[settings.rs:timezones_get]`, and locale management `[settings.rs:locales_get]`, `[settings.rs:locales_create]`, `[settings.rs:locales_update]`, `[settings.rs:locales_delete]`, `[settings.rs:locales_set_default]`, `[settings.rs:locales_multilingual_put]`, `[settings.rs:locales_orphans_get]`, `[settings.rs:locales_orphans_purge]` (`/api/admin/locales*`).
   - `[seo.rs:get_entry_route]`, `[seo.rs:put_entry_route]`, `[seo.rs:get_entry_seo]`, `[seo.rs:put_entry_seo]`, `[seo.rs:get_home_seo]`, `[seo.rs:put_home_seo]`, `[seo.rs:public_fallback]`.
+  - `[redirects/rules.rs:list_redirects]`, `[redirects/rules.rs:get_redirect]`, `[redirects/rules.rs:create_redirect]`, `[redirects/rules.rs:update_redirect]`, `[redirects/rules.rs:delete_redirect]`, `[redirects/csv.rs:import_redirects]`, `[redirects/csv.rs:export_redirects]`, `[redirects/not_found_logs.rs:list_not_found_logs_handler]`, `[redirects/not_found_logs.rs:delete_not_found_log_handler]`, `[redirects/not_found_logs.rs:bulk_delete_not_found_logs_handler]`, `[redirects/not_found_logs.rs:clear_not_found_logs_handler]`.
   - `[sitemap.rs:robots_txt]`, `[sitemap.rs:sitemap_index]`, `[sitemap.rs:sitemap_part]`.
   - `[contact.rs:public_submit]`, `[contact.rs:public_received]`, `[contact.rs:admin_list_forms]`, `[contact.rs:admin_get_form]`, `[contact.rs:admin_create_form]`, `[contact.rs:admin_update_form]`, `[contact.rs:admin_delete_form]`, `[contact.rs:admin_list_submissions]`, `[contact.rs:admin_get_submission]`, `[contact.rs:admin_delete_submission]`.
   - `[smtp.rs:get_smtp_settings]`, `[smtp.rs:put_smtp_settings]`, `[smtp.rs:test_smtp_settings]`, `[smtp.rs:notify_submission]`.

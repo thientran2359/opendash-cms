@@ -23,6 +23,7 @@ pub mod plugin;
 pub mod plugin_kv;
 pub mod plugin_projections;
 pub mod public_content;
+pub mod redirects;
 pub mod restore;
 pub mod seo;
 pub mod settings;
@@ -37,6 +38,8 @@ use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
+
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
 pub async fn init_db(db_path: &Path) -> Result<SqlitePool, Box<dyn std::error::Error>> {
     if let Some(parent) = db_path
@@ -62,7 +65,7 @@ pub async fn init_db(db_path: &Path) -> Result<SqlitePool, Box<dyn std::error::E
     // Must run before SQLx migration 0008: never overwrite an existing
     // user/theme/plugin post/page descriptor during bootstrap.
     content::preflight_builtin_key_collisions(&db).await?;
-    sqlx::migrate!("../../migrations").run(&db).await?;
+    MIGRATOR.run(&db).await?;
     page::ensure_embedded_core_blocks(&db)
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;

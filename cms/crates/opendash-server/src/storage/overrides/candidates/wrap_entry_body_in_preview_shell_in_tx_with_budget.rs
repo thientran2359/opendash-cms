@@ -43,6 +43,7 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
     state.timezone = general.timezone.clone();
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
+        ..Default::default()
     };
     let site = SiteContext {
         title: &general.site_title,
@@ -116,15 +117,7 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         },
     )
     .await?;
-    let preview_t_map = active
-        .as_ref()
-        .map(|a| a.merged_translations(&record.locale))
-        .unwrap_or_default();
     if let Some(obj) = theme_context.as_object_mut() {
-        obj.insert(
-            "t".to_owned(),
-            serde_json::to_value(&preview_t_map).unwrap_or_else(|_| serde_json::json!({})),
-        );
         obj.insert("locale".to_owned(), preview_locale_ctx.clone());
     }
     public_budget.set_locale_context(active.as_ref(), &record.locale, preview_locale_ctx);

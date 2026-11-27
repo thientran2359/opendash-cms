@@ -37,7 +37,7 @@ impl PluginManager {
                     (Some(manifest), Some(effective)) => {
                         map.retain(|k, _| {
                             effective.effective_fields.get(k).is_some_and(|fe| {
-                                fe.definition.public_exposure
+                                fe.definition.effective_acl().2
                                     == opendash_core::content::PublicExposure::Public
                                     && opendash_core::plugin::plugin_can_read_field_for_owner(
                                         owner.kind,

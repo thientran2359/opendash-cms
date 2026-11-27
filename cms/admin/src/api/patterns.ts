@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __, _x } from '../i18n/index.tsx';
 import { requestJson, requestText } from './client.ts';
 import type { BuilderDocument } from '../builder/document.ts';
 
@@ -25,26 +25,26 @@ const root = '/api/admin/patterns';
 const itemUrl = (id: number) => `${root}/${id}`;
 
 export const listPatterns = () => requestJson<PatternList>(root, {
-  defaultErrorMessage: tStatic('api.patterns.load_patterns'),
+  defaultErrorMessage: __("Could not load patterns."),
 });
 export const getPattern = (id: number) => requestJson<PatternRecord>(itemUrl(id), {
-  defaultErrorMessage: tStatic('api.patterns.load_the_pattern'),
+  defaultErrorMessage: __("Could not load the pattern."),
 });
 export const createPattern = (input: PatternInput, csrfToken: string) => requestJson<PatternRecord>(root, {
   method: 'POST', csrfToken, contentType: 'application/json', body: JSON.stringify(input),
-  defaultErrorMessage: tStatic('api.patterns.create_the_pattern'),
+  defaultErrorMessage: __("Could not create the pattern."),
 });
 export const updatePattern = (id: number, input: PatternInput, version: number, csrfToken: string) =>
   requestJson<PatternRecord>(itemUrl(id), {
     method: 'PUT', csrfToken, contentType: 'application/json', ifMatchVersion: version,
-    body: JSON.stringify(input), defaultErrorMessage: tStatic('api.patterns.update_the_pattern'),
+    body: JSON.stringify(input), defaultErrorMessage: __("Could not update the pattern."),
   });
 /** requestText preserves the conflict JSON in ApiClientError.message for a
  * precise confirmation of all pages affected by a forced deletion. */
 export const deletePattern = (id: number, version: number, csrfToken: string, force = false) =>
   requestText(itemUrl(id) + (force ? '?force=true' : ''), {
     method: 'DELETE', csrfToken, ifMatchVersion: version,
-    defaultErrorMessage: tStatic('api.patterns.delete_the_pattern'),
+    defaultErrorMessage: _x("Could not delete the pattern.", "api.patterns"),
   });
 
 /** Theme patterns are immutable COPY sources; they are distinct from the
@@ -72,12 +72,12 @@ export function listThemePatterns(category = 'all', q = '', signal?: AbortSignal
   if (q.trim()) params.set('q', q.trim());
   const query = params.toString();
   return requestJson(root + '/library' + (query ? '?' + query : ''), {
-    signal, defaultErrorMessage: tStatic('api.patterns.load_the_theme_pattern_library'),
+    signal, defaultErrorMessage: __("Could not load the theme pattern library."),
   });
 }
 
 export function getThemePattern(key: string, signal?: AbortSignal): Promise<ThemePatternDocument> {
   return requestJson(root + '/library/theme/' + encodeURIComponent(key), {
-    signal, defaultErrorMessage: tStatic('api.patterns.load_the_theme_pattern_content'),
+    signal, defaultErrorMessage: __("Could not load the theme pattern content."),
   });
 }

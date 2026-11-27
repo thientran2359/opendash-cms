@@ -107,7 +107,7 @@ export function stripRichHtmlToPreview(html: string): string {
 export function StudioRichTextLightbox({
   open, title, value, maxBytes, disabled = false, onChange, onClose,
 }: StudioRichTextLightboxProps) {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const headingId = useId();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
@@ -175,7 +175,7 @@ export function StudioRichTextLightbox({
   const applyLink = () => {
     const clean = linkUrl.trim();
     if (!isSafeLinkHref(clean)) {
-      setLinkError(t('builder.studio_rich_text_lightbox.invalid_url'));
+      setLinkError(__("Invalid URL (use /..., https://..., http://..., #..., mailto: or tel:)."));
       return;
     }
     const el = editorRef.current;
@@ -220,7 +220,7 @@ export function StudioRichTextLightbox({
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-4 py-2.5">
           <div className="min-w-0">
             <h2 id={headingId} className="!m-0 truncate text-sm font-semibold text-zinc-900">
-              {t('builder.studio_rich_text_lightbox.heading', { title })}
+              {__("Text Editor · {{title}}", { title })}
             </h2>
           </div>
           <div className="flex items-center gap-2">
@@ -230,14 +230,14 @@ export function StudioRichTextLightbox({
                 onClick={() => setMode('visual')}
                 className={'rounded px-2.5 py-1 font-medium ' +
                   (mode === 'visual' ? 'bg-sky-600 text-white' : 'text-zinc-600 hover:text-zinc-900')}
-              >{t('builder.studio_rich_text_lightbox.visual')}
+              >{__("Visual")}
               </button>
               <button
                 type="button"
                 onClick={() => setMode('html')}
                 className={'rounded px-2.5 py-1 font-medium ' +
                   (mode === 'html' ? 'bg-sky-600 text-white' : 'text-zinc-600 hover:text-zinc-900')}
-              >{t('builder.studio_rich_text_lightbox.html')}
+              >{__("HTML source")}
               </button>
             </div>
             <button
@@ -245,25 +245,25 @@ export function StudioRichTextLightbox({
               onClick={onClose}
               data-testid="studio-richtext-done"
               className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700"
-            >{t('builder.studio_rich_text_lightbox.done')}
+            >{__("Done")}
             </button>
           </div>
         </header>
 
         {mode === 'visual' ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex flex-wrap items-center gap-1.5 border-b border-zinc-200 bg-zinc-50/70 px-3 py-2" role="toolbar" aria-label={t('builder.studio_rich_text_lightbox.toolbar')}>
-              {toolBtn('B', t('builder.studio_rich_text_lightbox.bold'), () => execCmd('bold'))}
-              {toolBtn('I', t('builder.studio_rich_text_lightbox.italic'), () => execCmd('italic'))}
-              {toolBtn('U', t('builder.studio_rich_text_lightbox.underline'), () => execCmd('underline'))}
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-zinc-200 bg-zinc-50/70 px-3 py-2" role="toolbar" aria-label={__("Text formatting tools")}>
+              {toolBtn('B', __("Bold (Ctrl/Cmd+B)"), () => execCmd('bold'))}
+              {toolBtn('I', __("Italic (Ctrl/Cmd+I)"), () => execCmd('italic'))}
+              {toolBtn('U', __("Underline (Ctrl/Cmd+U)"), () => execCmd('underline'))}
               <span className="mx-0.5 h-4 w-px bg-zinc-300" aria-hidden="true" />
-              {toolBtn(t('builder.studio_rich_text_lightbox.paragraph_button'), t('builder.studio_rich_text_lightbox.paragraph'), () => execCmd('formatBlock', 'p'))}
-              {toolBtn(t('builder.studio_rich_text_lightbox.quote_button'), t('builder.studio_rich_text_lightbox.quote'), () => execCmd('formatBlock', 'blockquote'))}
-              {toolBtn(t('builder.studio_rich_text_lightbox.bullet_button'), t('builder.studio_rich_text_lightbox.bullet'), () => execCmd('insertUnorderedList'))}
-              {toolBtn(t('builder.studio_rich_text_lightbox.numbered_button'), t('builder.studio_rich_text_lightbox.numbered'), () => execCmd('insertOrderedList'))}
+              {toolBtn(__("¶ Paragraph"), __("Paragraph"), () => execCmd('formatBlock', 'p'))}
+              {toolBtn(__("❝ Quote"), __("Block quote"), () => execCmd('formatBlock', 'blockquote'))}
+              {toolBtn(__("• List"), __("Bulleted list"), () => execCmd('insertUnorderedList'))}
+              {toolBtn(__("1. List"), __("Numbered list"), () => execCmd('insertOrderedList'))}
               <span className="mx-0.5 h-4 w-px bg-zinc-300" aria-hidden="true" />
-              {toolBtn(t('builder.studio_rich_text_lightbox.link_button'), t('builder.studio_rich_text_lightbox.insert_link'), openLinkBar, showLinkInput)}
-              {toolBtn(t('builder.studio_rich_text_lightbox.clear_button'), t('builder.studio_rich_text_lightbox.clear'), () => execCmd('removeFormat'))}
+              {toolBtn(__("🔗 Link"), _x("Insert link", "builder.studio_rich_text_lightbox"), openLinkBar, showLinkInput)}
+              {toolBtn(__("✕ Clear formatting"), __("Clear selected formatting"), () => execCmd('removeFormat'))}
             </div>
 
             {showLinkInput && (
@@ -272,20 +272,20 @@ export function StudioRichTextLightbox({
                   type="text"
                   value={linkUrl}
                   onChange={e => setLinkUrl(e.target.value)}
-                  placeholder={t('builder.studio_rich_text_lightbox.placeholder')}
+                  placeholder={__("https://... or /path")}
                   className="h-7 min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 text-xs"
                 />
                 <button
                   type="button"
                   onClick={applyLink}
                   className="rounded bg-sky-600 px-2.5 py-1 font-semibold text-white hover:bg-sky-700"
-                >{t('builder.studio_rich_text_lightbox.insert')}
+                >{_x("Insert link", "builder.studio_rich_text_lightbox")}
                 </button>
                 <button
                   type="button"
                   onClick={() => execCmd('unlink')}
                   className="rounded border border-zinc-300 bg-white px-2 py-1 text-zinc-700 hover:bg-zinc-100"
-                >{t('builder.studio_rich_text_lightbox.remove')}
+                >{__("Remove link")}
                 </button>
                 {linkError && <p className="w-full text-[11px] text-rose-700">{linkError}</p>}
               </div>
@@ -315,7 +315,7 @@ export function StudioRichTextLightbox({
         )}
 
         <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200 bg-zinc-50 px-4 py-2 text-[11px] text-zinc-500">
-          <span>{t('builder.studio_rich_text_lightbox.supported')}</span>
+          <span>{__("Supported: p, br, strong, em, u, ul, ol, li, blockquote, a")}</span>
           <span className={overLimit ? 'font-semibold text-amber-700' : ''}>
             {byteCount} bytes{maxBytes ? ` / ${maxBytes} bytes` : ''}
           </span>

@@ -171,8 +171,8 @@ pub async fn list_dynamic_options_in_conn(
                             continue;
                         }
                         if entry.effective_status == EffectiveFieldStatus::Active
-                            && entry.definition.public_exposure == PublicExposure::Public
-                            && entry.definition.min_view_role <= actor_role
+                            && entry.definition.effective_acl().2 == PublicExposure::Public
+                            && entry.definition.effective_acl().0 <= actor_role
                         {
                             items.push(DynamicSelectOption {
                                 value: key.clone(),
@@ -416,9 +416,9 @@ pub async fn load_entry_ref_hydration_map_in_conn(
             .and_then(|schema| {
                 schema.effective_fields.into_iter().find_map(|(k, fe)| {
                     if fe.effective_status == EffectiveFieldStatus::Active
-                        && fe.definition.public_exposure == PublicExposure::Public
-                        && fe.definition.min_view_role == FieldRole::Editor
-                        && fe.definition.field_type == ContentFieldType::Image
+                        && fe.definition.effective_acl().2 == PublicExposure::Public
+                        && fe.definition.effective_acl().0 == FieldRole::Editor
+                        && fe.definition.field_type == opendash_core::field_schema::FieldType::Media
                     {
                         Some(k)
                     } else {

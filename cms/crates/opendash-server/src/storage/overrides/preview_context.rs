@@ -32,8 +32,8 @@ pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> Ent
         published_at: None,
         excerpt: String::new(),
         reading_time_minutes: 0,
-        values: BTreeMap::new(),
-        fields: Vec::new(),
+        fields: BTreeMap::new(),
+        field_list: Vec::new(),
         cover_url: None,
         cover_media: None,
         terms,
@@ -180,6 +180,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
     state.timezone = general.timezone.clone();
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
+        ..Default::default()
     };
     let site = SiteContext {
         title: &general.site_title,
@@ -479,6 +480,7 @@ pub(in crate::storage) async fn render_preview_named_part_in_tx(
     let url_policy = active_theme_url_policy(active)?;
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
+        ..Default::default()
     };
     let part_target = TemplateCandidate {
         part_key: Some(key.to_owned()),

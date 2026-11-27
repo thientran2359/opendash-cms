@@ -8,7 +8,7 @@ async fn published_private_cpt_remains_in_admin_without_view_url() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key,definition_json,owner_kind)
            VALUES('news','{"key":"news","label":"News","fields":[],"settings":{"public":false,"has_archive":true,"publication":"immediate","supports":["editor","featured_image"]}}','user')"#,

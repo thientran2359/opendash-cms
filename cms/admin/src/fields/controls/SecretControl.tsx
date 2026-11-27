@@ -30,7 +30,7 @@ export const SecretControl: React.FC<{
   disabled?: boolean;
   onChange: (next: unknown) => void;
 }> = ({ field, value, savedValue, disabled = false, onChange }) => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const id = useId();
   const [replacing, setReplacing] = useState(false);
 
@@ -44,7 +44,7 @@ export const SecretControl: React.FC<{
       <FieldLabelHeader htmlFor={id} label={field.label} required={field.required && !savedConfigured} />
       {markedClear ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
-          <span>{t('fields.secret.pending_clear')}</span>
+          <span>{__("Marked to clear secret on save.")}</span>
           <AdminButton
             size="sm"
             variant="secondary"
@@ -54,12 +54,12 @@ export const SecretControl: React.FC<{
               onChange(savedValue ?? null);
             }}
           >
-            {t('fields.secret.cancel_clear')}
+            {__("Keep existing")}
           </AdminButton>
         </div>
       ) : savedConfigured && !effectiveReplacing ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs">
-          <span className="font-mono text-zinc-700">{t('fields.secret.configured_masked')}</span>
+          <span className="font-mono text-zinc-700">{__("Configured (write-only)")}</span>
           <div className="flex items-center gap-1.5">
             <AdminButton
               size="sm"
@@ -70,7 +70,7 @@ export const SecretControl: React.FC<{
                 onChange('');
               }}
             >
-              {t('fields.secret.replace')}
+              {__("Replace")}
             </AdminButton>
             {!field.required && (
               <AdminButton
@@ -82,7 +82,7 @@ export const SecretControl: React.FC<{
                   onChange({ clear: true });
                 }}
               >
-                {t('fields.secret.clear')}
+                {__("Clear secret")}
               </AdminButton>
             )}
           </div>
@@ -94,7 +94,7 @@ export const SecretControl: React.FC<{
             type="password"
             autoComplete="new-password"
             value={draftPlain}
-            placeholder={field.placeholder ?? t('fields.secret.placeholder')}
+            placeholder={field.placeholder ?? __("Enter new secret value…")}
             disabled={disabled}
             onChange={e => onChange(e.target.value)}
             className={`${STUDIO_INPUT_CLASS} flex-1`}
@@ -109,7 +109,7 @@ export const SecretControl: React.FC<{
                 onChange(savedValue ?? null);
               }}
             >
-              {t('fields.common.cancel')}
+              {_x("Cancel", "fields.common")}
             </AdminButton>
           )}
         </div>

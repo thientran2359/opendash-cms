@@ -7,7 +7,7 @@ async fn c2_archive_root_eligibility_gates_count_rows_and_cross_filters() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         "INSERT INTO taxonomy_definitions(key,label,owner_kind) VALUES('brand','Brand','user')",
     )
@@ -161,7 +161,7 @@ async fn taxonomy_cross_cpt_publication_and_filters_apply_before_count_and_page(
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         "INSERT INTO content_types(key,definition_json,owner_kind)
          VALUES('news','{\"key\":\"news\",\"label\":\"News\",\"fields\":[]}', 'user')",
@@ -367,7 +367,7 @@ async fn category_pagination_deduplicates_memberships_and_excludes_newer_drafts(
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     let root =
         sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','A','a','vi','tg-' || lower(hex(randomblob(8))))")
             .execute(&db)

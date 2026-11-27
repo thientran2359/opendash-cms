@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, _x, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import type { PluginSettingsSnapshot, PluginSummary } from '../../types.ts';
 import { ApiClientError } from '../../api/client.ts';
@@ -42,17 +42,17 @@ function permissionDetails(plugin: PluginSummary): string[] {
   return [
     ...(permissions?.sqlite ?? []).map(value => 'SQLite: ' + value),
     ...(permissions?.http ?? []).map(value => 'HTTP: ' + value),
-    ...(permissions?.content_read ?? []).map(value => tStatic('plugin_lifecycle.perm_content_read', { value1: value })),
-    ...(permissions?.content_write ?? []).map(value => tStatic('plugin_lifecycle.perm_content_write', { value1: value })),
-    ...(permissions?.content_delete ?? []).map(value => tStatic('plugin_lifecycle.perm_content_delete_trash', { value1: value })),
-    ...(permissions?.content_trash_read ?? []).map(value => tStatic('plugin_lifecycle.perm_content_trash_read', { value1: value })),
-    ...(permissions?.content_restore ?? []).map(value => tStatic('plugin_lifecycle.perm_content_restore', { value1: value })),
-    ...(permissions?.content_purge ?? []).map(value => tStatic('plugin_lifecycle.perm_content_purge_permanent', { value1: value })),
+    ...(permissions?.content_read ?? []).map(value => __("Read content: {{value1}}", { value1: value })),
+    ...(permissions?.content_write ?? []).map(value => __("Write content: {{value1}}", { value1: value })),
+    ...(permissions?.content_delete ?? []).map(value => __("Move content to Trash (recoverable): {{value1}}", { value1: value })),
+    ...(permissions?.content_trash_read ?? []).map(value => __("Read Trash metadata: {{value1}}", { value1: value })),
+    ...(permissions?.content_restore ?? []).map(value => __("Restore from Trash: {{value1}}", { value1: value })),
+    ...(permissions?.content_purge ?? []).map(value => __("Permanently delete from Trash (Admin, irreversible): {{value1}}", { value1: value })),
   ];
 }
 
 function readableError(error: unknown): string {
-  return error instanceof Error ? error.message : tStatic('api.plugins.load_plugins');
+  return error instanceof Error ? error.message : _x("Could not load plugins.", "api.plugins");
 }
 
 /**
@@ -77,7 +77,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   csrfToken,
   onUnauthorized,
 }) => {
-  const { t: translate } = useI18n();
+  const { __, _x } = useI18n();
   const [visiblePlugins, setVisiblePlugins] = useState<PluginSummary[]>(plugins);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -159,7 +159,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
         }
         setSettingsSnapshot(null);
         setSettingsError(
-          cause instanceof Error ? cause.message : tStatic('api.plugins.load_plugin_settings'),
+          cause instanceof Error ? cause.message : __("Could not load plugin settings."),
         );
       })
       .finally(() => {
@@ -209,34 +209,34 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
     const file = event.currentTarget.files?.[0];
     if (!file || pendingRef.current || isProcessing) return;
     if (!file.name.toLowerCase().endsWith('.zip')) {
-      setNotice(tStatic('feature.plugins.pluginspanel.only_plugin_zip_files_are_accepted'));
+      setNotice(__("Only plugin .zip files are accepted."));
       event.currentTarget.value = '';
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      setNotice(tStatic('feature.plugins.pluginspanel.the_plugin_package_exceeds_the_5_mib_upload_limit'));
+      setNotice(__("The plugin package exceeds the 5 MiB upload limit."));
       event.currentTarget.value = '';
       return;
     }
     // The install endpoint is replace-and-enable, not a dry-run. Warn before
     // submitting whenever an existing plugin might be replaced.
     if (visiblePlugins.length > 0 &&
-        !window.confirm(tStatic('feature.plugins.pluginspanel.installing_a_zip_automatically_enables_the_plugin_if_its_id_matches_an_installed'))) {
+        !window.confirm(__("Installing a ZIP automatically enables the plugin. If its ID matches an installed plugin, the current version will be REPLACED and RE-ENABLED. Continue?"))) {
       event.currentTarget.value = '';
       return;
     }
-    void invoke(tStatic('feature.plugins.pluginspanel.installing_the_plugin_zip'), () => onPluginUpload(event));
+    void invoke(__("Installing the plugin ZIP..."), () => onPluginUpload(event));
   };
 
   const enable = (plugin: PluginSummary) => {
     const grants = permissionDetails(plugin);
-    const permissionText = grants.length > 0 ? grants.join('\n') : tStatic('feature.plugins.pluginspanel.no_sqlite_or_http_permissions_declared');
-    if (!window.confirm(tStatic('feature.plugins.pluginspanel.enable_confirm', { name: plugin.name, id: plugin.id, permissions: permissionText }))) return;
-    void invoke(tStatic('feature.plugins.pluginspanel.enabling', { name: plugin.name }), () => onEnablePlugin(plugin.id));
+    const permissionText = grants.length > 0 ? grants.join('\n') : __("No SQLite or HTTP permissions declared.");
+    if (!window.confirm(__("Enable plugin {{name}} ({{id}})?\n\nManifest permissions:\n{{permissions}}", { name: plugin.name, id: plugin.id, permissions: permissionText }))) return;
+    void invoke(__("Enabling {{name}}...", { name: plugin.name }), () => onEnablePlugin(plugin.id));
   };
 
   const disable = (plugin: PluginSummary) => {
-    void invoke(tStatic('feature.plugins.pluginspanel.disabling', { name: plugin.name }), () => onDisablePlugin(plugin.id));
+    void invoke(__("Disabling {{name}}...", { name: plugin.name }), () => onDisablePlugin(plugin.id));
   };
 
   const handleSaveSettings = async () => {
@@ -254,20 +254,20 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       );
       setSettingsSnapshot(saved);
       setSettingsDraft(saved.values);
-      setSettingsNotice(tStatic('feature.plugins.pluginspanel.plugin_settings_saved'));
+      setSettingsNotice(__("Plugin settings saved."));
     } catch (cause) {
       if (cause instanceof ApiClientError && cause.status === 401) {
         onUnauthorized?.();
         setSettingsError(
-          tStatic('feature.plugins.pluginspanel.your_session_has_expired_401_unsaved_changes_have_been_retained'),
+          __("Your session has expired (401). Unsaved changes have been retained."),
         );
       } else if (cause instanceof ApiClientError && cause.status === 412) {
         setSettingsError(
-          tStatic('feature.plugins.pluginspanel.plugin_settings_changed_in_another_session_412_your_changes_have_been_retained'),
+          __("Plugin settings changed in another session (412). Your changes have been retained."),
         );
       } else {
         setSettingsError(
-          cause instanceof Error ? cause.message : tStatic('api.plugins.save_plugin_settings'),
+          cause instanceof Error ? cause.message : __("Could not save plugin settings."),
         );
       }
     } finally {
@@ -290,23 +290,23 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
     <div id="plugin-management-section" className="min-w-0 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">{mode === 'install' ? translate('feature.plugins.pluginspanel.install_plugin') : translate('feature.plugins.pluginspanel.manage_plugins')}</h2>
+          <h2 className="text-base font-semibold text-zinc-950">{mode === 'install' ? _x("Install plugin", "feature.plugins") : __("Manage plugins")}</h2>
           <p className="mt-0.5 text-sm text-zinc-600">
             {mode === 'install'
-              ? translate('feature.plugins.pluginspanel.install_a_plugin_zip_package_the_installed_package_is_automatically_enabled_afte')
-              : translate('feature.plugins.pluginspanel.review_permissions_configure_settings_and_enable_or_disable_plugins_running_in_t')}
+              ? __("Install a plugin ZIP package. The installed package is automatically enabled after validation.")
+              : __("Review permissions, configure settings and enable or disable plugins running in the Wasmi sandbox.")}
           </p>
         </div>
         <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>
-          {loading ? translate('feature.dashboard.dashboardpage.loading') : translate('feature.plugins.pluginspanel.reload_list')}
+          {loading ? __("Loading...") : __("Reload list")}
         </AdminButton>
       </div>
 
       {mode === 'install' && <section className="max-w-2xl rounded-xl border border-zinc-200 bg-zinc-50 p-4 sm:p-5" aria-labelledby="plugin-upload-heading">
-        <h3 id="plugin-upload-heading" className="mb-2 text-sm font-semibold text-zinc-950">{translate('feature.plugins.pluginspanel.install_plugin')}</h3>
-        <ZipUploadField id="plugin-zip" label={translate('feature.plugins.pluginspanel.select_plugin_zip_up_to_5_mib')} onChange={upload}
+        <h3 id="plugin-upload-heading" className="mb-2 text-sm font-semibold text-zinc-950">{_x("Install plugin", "feature.plugins")}</h3>
+        <ZipUploadField id="plugin-zip" label={__("Select plugin ZIP (up to 5 MiB)")} onChange={upload}
           disabled={busy || loading || Boolean(loadError)} />
-        <p className="mt-2.5 text-xs leading-5 text-amber-800">{translate('feature.plugins.pluginspanel.uploading_a_zip_automatically_enables_the_plugin_if_the_id_already_exists_the_pa')}</p>
+        <p className="mt-2.5 text-xs leading-5 text-amber-800">{__("Uploading a ZIP automatically enables the plugin. If the ID already exists, the package is replaced and the plugin re-enabled. Check its permissions before enabling a disabled plugin.")}</p>
       </section>}
 
       {pendingAction && <AdminAlert tone="info" aria-live="polite">{pendingAction}</AdminAlert>}
@@ -315,13 +315,13 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       {mode === 'list' && <>
         <AdminTabs
           tabs={[
-            { id: 'installed', label: translate('plugins.tab_installed'), badge: visiblePlugins.length },
-            { id: 'settings', label: translate('plugins.tab_settings') },
-            { id: 'run', label: translate('plugins.tab_run') },
+            { id: 'installed', label: _x("Installed plugins", "plugins.tab_installed"), badge: visiblePlugins.length },
+            { id: 'settings', label: __("Plugin settings") },
+            { id: 'run', label: __("Test execution") },
           ]}
           activeId={activeTab}
           onChange={setActiveTab}
-          ariaLabel={translate('plugins.tabs_label')}
+          ariaLabel={__("Plugin management sections")}
           testId="plugins-tabs"
           idPrefix="plugins"
         />
@@ -333,18 +333,18 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
         >
       <section className="space-y-3" aria-labelledby="plugin-list-heading">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id="plugin-list-heading" className="text-sm font-semibold text-zinc-900">{translate('feature.plugins.pluginspanel.installed_plugins')}{visiblePlugins.length})
+          <h3 id="plugin-list-heading" className="text-sm font-semibold text-zinc-900">{__("Installed plugins (")}{visiblePlugins.length})
           </h3>
-          {loading && <span role="status" className="text-xs text-zinc-500">{translate('feature.plugins.pluginspanel.synchronizing_with_the_server')}</span>}
+          {loading && <span role="status" className="text-xs text-zinc-500">{__("Synchronizing with the server...")}</span>}
         </div>
         {loadError && (
           <AdminAlert tone="error" className="space-y-2">
-            <p>{translate('feature.plugins.pluginspanel.could_not_refresh_the_list')}{' '}{loadError}</p>
-            <AdminButton variant="secondary" size="sm" disabled={busy || loading} onClick={() => void refresh()}>{translate('general.retry')}</AdminButton>
+            <p>{__("Could not refresh the list:")}{' '}{loadError}</p>
+            <AdminButton variant="secondary" size="sm" disabled={busy || loading} onClick={() => void refresh()}>{_x("Retry", "general.retry")}</AdminButton>
           </AdminAlert>
         )}
         {!loading && visiblePlugins.length === 0 && !loadError && (
-          <p className="rounded-xl border border-dashed border-zinc-300 p-5 text-sm text-zinc-500">{translate('feature.plugins.pluginspanel.no_plugins_yet_select_a_zip_package_to_install')}</p>
+          <p className="rounded-xl border border-dashed border-zinc-300 p-5 text-sm text-zinc-500">{__("No plugins yet. Select a ZIP package to install.")}</p>
         )}
         <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
           {visiblePlugins.map(plugin => {
@@ -359,32 +359,32 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {devPlugins.includes(plugin.id) && (
-                      <AdminBadge tone="warning">{translate('shell.dev_mode_badge')}</AdminBadge>
+                      <AdminBadge tone="warning">{__("DEV MODE")}</AdminBadge>
                     )}
                     <AdminBadge tone={plugin.enabled ? 'success' : 'neutral'}>
-                      {plugin.enabled ? translate('multilingual.active') : translate('multilingual.inactive')}
+                      {plugin.enabled ? __("Enabled") : _x("Disabled", "multilingual.inactive")}
                     </AdminBadge>
                   </div>
                 </div>
                 {plugin.description && <p className="mt-2.5 break-words text-sm text-zinc-600">{plugin.description}</p>}
                 <div className="mt-3 rounded-lg border border-zinc-100 bg-zinc-50 p-3">
-                  <h5 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{translate('feature.plugins.pluginspanel.manifest_permissions_2')}</h5>
+                  <h5 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{__("Manifest permissions")}</h5>
                   {grants.length === 0
-                    ? <p className="mt-1 text-xs text-zinc-500">{translate('feature.plugins.pluginspanel.no_sqlite_or_http_permissions_required')}</p>
+                    ? <p className="mt-1 text-xs text-zinc-500">{__("No SQLite or HTTP permissions required.")}</p>
                     : <ul className="mt-1.5 space-y-1 text-xs text-zinc-700">
                         {grants.map((grant, index) => <li key={index} className="break-all">{grant}</li>)}
                       </ul>}
                 </div>
                 {plugin.last_error && (
-                  <AdminAlert tone="error" role="status" className="mt-3 break-words text-xs">{translate('feature.plugins.pluginspanel.last_error')}{' '}{plugin.last_error}
+                  <AdminAlert tone="error" role="status" className="mt-3 break-words text-xs">{__("Last error:")}{' '}{plugin.last_error}
                   </AdminAlert>
                 )}
                 <div className="mt-3.5 flex flex-wrap gap-2">
                   {plugin.enabled
                     ? <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => disable(plugin)}
-                        aria-label={translate('feature.plugins.pluginspanel.disable_plugin', { name: plugin.name })}>{translate('multilingual.disable')}</AdminButton>
+                        aria-label={__("Disable plugin {{name}}", { name: plugin.name })}>{__("Disable")}</AdminButton>
                     : <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => enable(plugin)}
-                        aria-label={translate('feature.plugins.pluginspanel.enable_plugin', { name: plugin.name })}>{translate('feature.plugins.pluginspanel.enable_retry')}</AdminButton>}
+                        aria-label={__("Enable plugin {{name}}", { name: plugin.name })}>{__("Enable / Retry")}</AdminButton>}
                   <AdminButton
                     variant={isSettingsOpen ? 'primary' : 'secondary'}
                     size="sm"
@@ -394,9 +394,9 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
                       setActiveTab('settings');
                     }}
                     aria-pressed={isSettingsOpen}
-                    aria-label={translate('feature.plugins.pluginspanel.plugin_settings_2', { name: plugin.name })}
+                    aria-label={__("Plugin settings: {{name}}", { name: plugin.name })}
                   >
-                    {isSettingsOpen ? translate('feature.plugins.pluginspanel.configuring') : translate('multilingual.settings')}
+                    {isSettingsOpen ? __("Configuring") : __("Settings")}
                   </AdminButton>
                   <AdminButton variant={selectedPluginId === plugin.id ? 'primary' : 'secondary'} size="sm" disabled={busy || !plugin.enabled}
                     onClick={() => {
@@ -404,7 +404,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
                       onSelectPlugin(plugin.id);
                     }}
                     aria-pressed={selectedPluginId === plugin.id}>
-                    {selectedPluginId === plugin.id ? translate('feature.plugins.pluginspanel.selected_to_run') : translate('feature.plugins.pluginspanel.select_to_run')}
+                    {selectedPluginId === plugin.id ? __("Selected to run") : __("Select to run")}
                   </AdminButton>
                 </div>
               </article>
@@ -422,29 +422,29 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       {settingsTargetPlugin ? (
         <section className="min-w-0 max-w-2xl space-y-3" aria-labelledby="plugin-settings-heading">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 id="plugin-settings-heading" className="text-sm font-semibold text-zinc-950">{translate('feature.plugins.pluginspanel.plugin_settings_3')}{' '}{settingsTargetPlugin.name} ({settingsTargetPlugin.id})
+            <h3 id="plugin-settings-heading" className="text-sm font-semibold text-zinc-950">{__("Plugin settings:")}{' '}{settingsTargetPlugin.name} ({settingsTargetPlugin.id})
             </h3>
             <AdminButton
               variant="secondary"
               size="sm"
               disabled={settingsLoading || settingsSaving}
               onClick={() => setSettingsReloadTick(n => n + 1)}
-            >{translate('general.reload')}</AdminButton>
+            >{__("Reload from server")}</AdminButton>
           </div>
           {settingsLoading && (
-            <p role="status" className="text-sm text-zinc-600">{translate('feature.plugins.pluginspanel.loading_plugin_settings')}</p>
+            <p role="status" className="text-sm text-zinc-600">{__("Loading plugin settings…")}</p>
           )}
           {!settingsLoading && !settingsSnapshot && settingsError && (
             <AdminAlert tone="error">{settingsError}</AdminAlert>
           )}
           {!settingsLoading && settingsSnapshot && settingsSnapshot.fields.length === 0 && (
-            <p className="text-xs text-zinc-500">{translate('feature.plugins.pluginspanel.this_plugin_does_not_declare_a_settings_schema_settings_schema')}</p>
+            <p className="text-xs text-zinc-500">{__("This plugin does not declare a settings schema (settings_schema).")}</p>
           )}
           {!settingsLoading && settingsSnapshot && settingsSnapshot.fields.length > 0 && (
             <OwnerOptionsForm
               ownerKind="plugin"
               ownerId={settingsSnapshot.plugin_id}
-              title={translate('feature.plugins.pluginspanel.plugin_settings_value1', { value1: settingsTargetPlugin.name })}
+              title={__("Plugin settings ({{value1}})", { value1: settingsTargetPlugin.name })}
               fields={settingsSnapshot.fields}
               values={settingsDraft}
               savedValues={settingsSnapshot.values}
@@ -453,7 +453,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
               saving={settingsSaving}
               notice={settingsNotice}
               error={settingsError}
-              submitLabel={settingsSaving ? translate('general.saving') : translate('general.save')}
+              submitLabel={settingsSaving ? __("Saving…") : __("Save settings")}
               testId="plugin-settings-form"
               onChange={(next) => {
                 setSettingsDraft(next);
@@ -467,7 +467,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
         </section>
       ) : (
         <AdminAlert tone="info" className="max-w-2xl">
-          {translate('plugins.select_plugin_for_settings')}
+          {__("Select \"Settings\" on an installed plugin in the Installed plugins tab to configure its options.")}
         </AdminAlert>
       )}
         </AdminTabPanel>
@@ -479,24 +479,24 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           className="space-y-4"
         >
       <section className="min-w-0 max-w-2xl space-y-3" aria-labelledby="plugin-run-heading">
-        <h3 id="plugin-run-heading" className="text-sm font-semibold text-zinc-950">{translate('feature.plugins.pluginspanel.test_plugin_execution')}</h3>
+        <h3 id="plugin-run-heading" className="text-sm font-semibold text-zinc-950">{__("Test plugin execution")}</h3>
         {selected
-          ? <p className="break-all text-xs text-zinc-600">{translate('feature.plugins.pluginspanel.selected_plugin')}{' '}<strong className="text-zinc-900">{selected.name}</strong> ({selected.id})</p>
-          : <p className="text-xs text-zinc-500">{translate('feature.plugins.pluginspanel.no_plugin_selected_to_run')}</p>}
+          ? <p className="break-all text-xs text-zinc-600">{__("Selected plugin:")}{' '}<strong className="text-zinc-900">{selected.name}</strong> ({selected.id})</p>
+          : <p className="text-xs text-zinc-500">{__("No plugin selected to run.")}</p>}
         {selected && !selected.enabled && (
-          <p role="status" className="text-xs text-amber-800">{translate('feature.plugins.pluginspanel.the_plugin_is_disabled_you_can_re_enable_it_after_reviewing_its_permissions')}</p>
+          <p role="status" className="text-xs text-amber-800">{__("The plugin is disabled. You can re-enable it after reviewing its permissions.")}</p>
         )}
         <label htmlFor="plugin-input-json" className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-          <span>{translate('feature.plugins.pluginspanel.json_payload')}</span>
+          <span>{__("JSON payload")}</span>
           <textarea id="plugin-input-json" rows={4} className="w-full min-w-0 rounded-md border border-zinc-300 bg-white p-2.5 font-mono text-xs text-zinc-900"
             value={pluginInputJson} onChange={event => onPluginInputChange(event.target.value)}
-            disabled={busy} placeholder={translate('feature.plugins.pluginspanel.text_sample_data')} />
+            disabled={busy} placeholder={__("{\"text\": \"Sample data\"}")} />
         </label>
-        <AdminButton id="btn-run-plugin" variant="primary" onClick={() => void invoke(translate('feature.plugins.pluginspanel.running_plugin'), onRunPlugin)}
-          disabled={!canRun}>{translate('feature.plugins.pluginspanel.run_plugin')}</AdminButton>
+        <AdminButton id="btn-run-plugin" variant="primary" onClick={() => void invoke(__("Running plugin..."), onRunPlugin)}
+          disabled={!canRun}>{__("Run plugin")}</AdminButton>
         {pluginRunOutput && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold text-zinc-700">{translate('feature.plugins.pluginspanel.result')}</p>
+            <p className="mb-1.5 text-xs font-semibold text-zinc-700">{__("Result")}</p>
             <pre id="plugin-output" className="max-h-48 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-800">{pluginRunOutput}</pre>
           </div>
         )}

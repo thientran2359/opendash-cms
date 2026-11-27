@@ -1,4 +1,4 @@
-import { tStatic } from '../../../i18n/index.tsx';
+import { __, _x } from '../../../i18n/index.tsx';
 const ACCEPTED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_DIMENSION = 6000;
@@ -15,13 +15,13 @@ export class MediaUploadValidationError extends Error {
 /** Friendly browser preflight only. Rust still validates actual bytes and dimensions. */
 export async function validateImageUpload(file: File): Promise<void> {
   if (!ACCEPTED_MIME_TYPES.has(file.type)) {
-    throw new MediaUploadValidationError(tStatic('feature.media.filevalidation.only_jpeg_png_or_webp_images_are_supported'));
+    throw new MediaUploadValidationError(__("Only JPEG, PNG or WebP images are supported."));
   }
   if (file.size === 0) {
-    throw new MediaUploadValidationError(tStatic('feature.media.filevalidation.the_image_is_empty_0_bytes_select_another_image'));
+    throw new MediaUploadValidationError(__("The image is empty (0 bytes). Select another image."));
   }
   if (file.size > MAX_FILE_BYTES) {
-    throw new MediaUploadValidationError(tStatic('feature.media.filevalidation.the_image_exceeds_8_mib_reduce_its_size_before_uploading'));
+    throw new MediaUploadValidationError(__("The image exceeds 8 MiB. Reduce its size before uploading."));
   }
 
   // createImageBitmap verifies that the browser can decode the selected file.
@@ -30,12 +30,12 @@ export async function validateImageUpload(file: File): Promise<void> {
   try {
     bitmap = await createImageBitmap(file);
   } catch {
-    throw new MediaUploadValidationError(tStatic('feature.media.filevalidation.could_not_read_the_image_the_file_may_be_corrupted_or_have_an_invalid_format'));
+    throw new MediaUploadValidationError(__("Could not read the image. The file may be corrupted or have an invalid format."));
   }
   try {
     if (!bitmap.width || !bitmap.height || bitmap.width > MAX_DIMENSION
       || bitmap.height > MAX_DIMENSION || bitmap.width * bitmap.height > MAX_PIXELS) {
-      throw new MediaUploadValidationError(tStatic('feature.media.filevalidation.the_image_exceeds_6000_px_on_either_side_or_20_million_pixels'));
+      throw new MediaUploadValidationError(__("The image exceeds 6000 px on either side or 20 million pixels."));
     }
   } finally {
     bitmap.close();
@@ -46,12 +46,12 @@ export async function validateImageUpload(file: File): Promise<void> {
 export function validateVideoUpload(file: File): void {
   const isMp4Type = file.type === 'video/mp4' || file.name.toLowerCase().endsWith('.mp4');
   if (!isMp4Type) {
-    throw new MediaUploadValidationError(tStatic('feature.media.filevalidation.only_mp4_video_video_mp4_is_supported'));
+    throw new MediaUploadValidationError(__("Only MP4 video (video/mp4) is supported."));
   }
   if (file.size === 0) {
-    throw new MediaUploadValidationError(tStatic('feature.media.filevalidation.the_video_is_empty_0_bytes_select_another_file'));
+    throw new MediaUploadValidationError(__("The video is empty (0 bytes). Select another file."));
   }
   if (file.size > MAX_VIDEO_BYTES) {
-    throw new MediaUploadValidationError(tStatic('feature.media.filevalidation.the_video_exceeds_100_mib'));
+    throw new MediaUploadValidationError(_x("The video exceeds 100 MiB.", "feature.media"));
   }
 }

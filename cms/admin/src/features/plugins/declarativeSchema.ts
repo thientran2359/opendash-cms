@@ -1,4 +1,4 @@
-import { tStatic } from '../../i18n/index.tsx';
+import { __ } from '../../i18n/index.tsx';
 export const UI_SCHEMA_VERSION = 1;
 export const MAX_UI_SCREENS = 20;
 export const MAX_UI_DEPTH = 8;
@@ -42,34 +42,34 @@ function containsDisallowedMarkup(text: string): boolean {
 
 function validateNode(node: UiNode, depth: number, counter: { count: number }): void {
   if (depth > MAX_UI_DEPTH) {
-    throw new Error(tStatic('feature.plugins.declarativeschema.the_declarative_ui_schema_exceeds_the_maximum_depth_8'));
+    throw new Error(__("The declarative UI schema exceeds the maximum depth (8)."));
   }
   counter.count += 1;
   if (counter.count > MAX_UI_NODES) {
-    throw new Error(tStatic('feature.plugins.declarativeschema.the_declarative_ui_schema_exceeds_the_maximum_node_count_200'));
+    throw new Error(__("The declarative UI schema exceeds the maximum node count (200)."));
   }
   if (!node.id || containsDisallowedMarkup(node.id)) {
-    throw new Error(tStatic('feature.plugins.declarativeschema.invalid_node_id'));
+    throw new Error(__("Invalid node ID."));
   }
   if (node.label && containsDisallowedMarkup(node.label)) {
-    throw new Error(tStatic('feature.plugins.declarativeschema.labels_must_not_contain_html_javascript'));
+    throw new Error(__("Labels must not contain HTML/JavaScript."));
   }
   if (!ALLOWED_KINDS.has(node.kind)) {
-    throw new Error(tStatic('feature.plugins.declarativeschema.node_kind_value1_is_not_part_of_schema_v1', { value1: node.kind }));
+    throw new Error(__("Node kind '{{value1}}' is not part of schema v1.", { value1: node.kind }));
   }
   if ((node.kind === 'table' || node.kind === 'list') && node.page_size != null) {
     if (node.page_size <= 0 || node.page_size > MAX_UI_PAGE_SIZE) {
-      throw new Error(tStatic('feature.plugins.declarativeschema.page_size_exceeds_the_limit_of_100'));
+      throw new Error(__("page_size exceeds the limit of 100."));
     }
   }
   if (node.kind === 'field') {
     const ft = node.field_type ?? 'text';
     if (!ALLOWED_FIELD_TYPES.has(ft)) {
-      throw new Error(tStatic('feature.plugins.declarativeschema.field_type_value1_is_prohibited_or_unsupported', { value1: ft }));
+      throw new Error(__("Field type '{{value1}}' is prohibited or unsupported.", { value1: ft }));
     }
   }
   if (node.kind === 'button' && !node.action_id) {
-    throw new Error(tStatic('feature.plugins.declarativeschema.buttons_must_have_an_action_id'));
+    throw new Error(__("Buttons must have an action_id."));
   }
   for (const child of node.children ?? []) {
     validateNode(child, depth + 1, counter);
@@ -78,19 +78,19 @@ function validateNode(node: UiNode, depth: number, counter: { count: number }): 
 
 export function validateDeclarativeSchemaV1(raw: unknown): DeclarativeUiSchemaV1 {
   if (!raw || typeof raw !== 'object') {
-    throw new Error(tStatic('feature.plugins.declarativeschema.invalid_schema'));
+    throw new Error(__("Invalid schema."));
   }
   const schema = raw as DeclarativeUiSchemaV1;
   if (schema.schema_version !== UI_SCHEMA_VERSION) {
-    throw new Error(tStatic('feature.plugins.declarativeschema.only_declarative_ui_schema_version_1_is_supported'));
+    throw new Error(__("Only declarative UI schema_version 1 is supported."));
   }
   if (!Array.isArray(schema.screens) || schema.screens.length > MAX_UI_SCREENS) {
-    throw new Error(tStatic('feature.plugins.declarativeschema.invalid_screen_list_or_more_than_20_screens'));
+    throw new Error(__("Invalid screen list or more than 20 screens."));
   }
   const counter = { count: 0 };
   for (const screen of schema.screens) {
     if (!screen.id || containsDisallowedMarkup(screen.title ?? '')) {
-      throw new Error(tStatic('feature.plugins.declarativeschema.invalid_screen'));
+      throw new Error(__("Invalid screen."));
     }
     for (const node of screen.nodes ?? []) {
       validateNode(node, 1, counter);

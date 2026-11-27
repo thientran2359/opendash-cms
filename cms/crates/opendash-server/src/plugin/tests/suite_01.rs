@@ -19,7 +19,7 @@ mod tests {
             .await
             .expect("Failed to connect to in-memory SQLite");
 
-        sqlx::migrate!("../../migrations")
+        crate::storage::MIGRATOR
             .run(&pool)
             .await
             .expect("Failed to run migrations");
@@ -686,7 +686,7 @@ mod tests {
         // Use the actual schema; plugin installation now consults the theme,
         // extension and content registries as well as the original plugin
         // tables, so a partial hand-built schema is no longer representative.
-        sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
+        crate::storage::MIGRATOR.run(&pool).await.unwrap();
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS plugins (
                 id TEXT PRIMARY KEY,

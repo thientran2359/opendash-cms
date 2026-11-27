@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn projection_locale_gate_preserves_parked_rows_and_rejects_stale_writes() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
+    crate::storage::MIGRATOR.run(&pool).await.unwrap();
     sqlx::query("INSERT INTO site_locales(code,bcp47_tag,label) VALUES('en','en','English')")
         .execute(&pool)
         .await
@@ -169,7 +169,7 @@ async fn projection_locale_gate_preserves_parked_rows_and_rejects_stale_writes()
 #[tokio::test]
 async fn stale_projection_cannot_reinsert_during_trash_or_overwrite_after_restore() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
+    crate::storage::MIGRATOR.run(&pool).await.unwrap();
     sqlx::query(
         "INSERT INTO plugins (id,name,version,manifest_json,wasm_blob,enabled,revision_generation)
          VALUES('projection-race','Projection Race','1.0.0','{}',X'00',1,1)",
@@ -359,7 +359,7 @@ async fn stale_projection_cannot_reinsert_during_trash_or_overwrite_after_restor
 #[tokio::test]
 async fn public_seo_read_uses_projections_with_zero_wasm_and_monotonic_noindex() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
+    crate::storage::MIGRATOR.run(&pool).await.unwrap();
 
     let trap_wasm = wat::parse_str(
         r#"(module

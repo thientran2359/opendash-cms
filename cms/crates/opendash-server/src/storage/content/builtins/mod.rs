@@ -6,14 +6,14 @@ pub(super) use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub(super) use opendash_core::{
     content::{
-        AttachedFieldGroupSnapshot, ContentFieldDefinition, ContentFieldType, ContentPublication,
-        ContentTypeDefinition, ContentTypeDefinitionInput, ContentTypeSettings,
-        EditorLayoutConfigV1, EditorRegion, EffectiveContentSchema,
-        EffectiveEditorConfigProjection, EffectiveFieldStatus, FieldGroupRecord, FieldGroupStatus,
-        FieldGroupTargetBinding, FieldRole, PanelDefinition, PanelKind, SchemaTransitionError,
-        UserFieldGroupInput, build_core_and_group_panels, merge_package_redeclared_fields,
-        project_effective_editor_config, resolve_and_validate_editor_layout,
-        valid_content_type_key, verify_effective_schema_transition,
+        AttachedFieldGroupSnapshot, ContentPublication, ContentTypeDefinition,
+        ContentTypeDefinitionInput, ContentTypeSettings, EditorLayoutConfigV1, EditorRegion,
+        EffectiveContentSchema, EffectiveEditorConfigProjection, EffectiveFieldStatus,
+        FieldGroupRecord, FieldGroupStatus, FieldGroupTargetBinding, FieldRole, PanelDefinition,
+        PanelKind, SchemaTransitionError, UserFieldGroupInput, build_core_and_group_panels,
+        merge_package_redeclared_fields, project_effective_editor_config,
+        resolve_and_validate_editor_layout, valid_content_type_key,
+        verify_effective_schema_transition,
     },
     id::ScopedResourceId,
     plugin::PluginManifest,

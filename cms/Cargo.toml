@@ -34,8 +34,14 @@ zip = { version = "=9.3.0", default-features = false, features = ["deflate"] }
 # Keep workspace crates fast to compile in dev/test while optimizing heavy
 # dependencies (argon2, ring, sqlx, image, minijinja, boa_engine) so grouped test
 # runs execute near release speed without waiting for full -O3 recompilation.
+# Line-tables-only preserves file/line panic backtraces while shrinking dev/test
+# binaries and accelerating linking + sccache.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 opt-level = 2
+debug = 0
 
 # Wasmi 2.0 selects its tail-call dispatch backend at opt-level >= 2, but Cargo's
 # dev profile keeps debug-assertions = true, which blocks LLVM sibling-call

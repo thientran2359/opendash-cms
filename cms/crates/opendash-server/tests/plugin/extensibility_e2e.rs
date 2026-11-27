@@ -1301,18 +1301,22 @@ async fn cuj2_prepare_save_editor_acl_and_contact_before_submit_pre_db_gate() {
                 {
                     "key": "sku_normalized",
                     "label": "SKU Normalized",
-                    "type": "short_text",
-                    "min_view_role": "editor",
-                    "min_edit_role": "editor",
-                    "public_exposure": "public"
+                    "type": "text",
+                    "acl": {
+                        "min_view_role": "editor",
+                        "min_edit_role": "editor",
+                        "public_exposure": "public"
+                    }
                 },
                 {
                     "key": "audit_code",
                     "label": "Audit Code",
-                    "type": "short_text",
-                    "min_view_role": "admin",
-                    "min_edit_role": "admin",
-                    "public_exposure": "private"
+                    "type": "text",
+                    "acl": {
+                        "min_view_role": "admin",
+                        "min_edit_role": "admin",
+                        "public_exposure": "private"
+                    }
                 }
             ],
             "settings": {

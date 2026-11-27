@@ -12,7 +12,7 @@ pub(super) use opendash_core::{
     builder::{BindingSource, BuilderDocument, ElementContent, KnownElement},
     builder_blocks::BlockDiagnostic,
     content::{
-        ContentFieldType, ContentMode, ContentPublication, ContentSupport, EffectiveContentSchema,
+        ContentMode, ContentPublication, ContentSupport, EffectiveContentSchema,
         EffectiveFieldStatus, FieldRole, PublicExposure,
     },
     id::valid_namespaced_block_id,

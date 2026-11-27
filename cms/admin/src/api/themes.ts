@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __, _x } from '../i18n/index.tsx';
 import type { FieldSpec } from '../fields/types.ts';
 import type { PluginRunResult } from '../types.ts';
 import { requestJson } from './client.ts';
@@ -49,7 +49,7 @@ export interface ThemeOptionsSnapshot {
 
 export function getThemes(): Promise<ThemesSummary> {
   return requestJson('/api/admin/themes', {
-    defaultErrorMessage: tStatic('api.themes.load_themes'),
+    defaultErrorMessage: _x("Could not load themes.", "api.themes"),
   });
 }
 
@@ -59,7 +59,7 @@ export function installTheme(file: File, csrfToken: string): Promise<ThemeInstal
     body: file,
     contentType: 'application/zip',
     csrfToken,
-    defaultErrorMessage: tStatic('api.themes.install_the_theme_zip'),
+    defaultErrorMessage: __("Could not install the theme ZIP."),
   });
 }
 
@@ -71,7 +71,7 @@ export interface ThemeLayoutCatalog {
 
 export function getActiveThemeLayouts(): Promise<ThemeLayoutCatalog> {
   return requestJson('/api/admin/themes/active/layouts', {
-    defaultErrorMessage: tStatic('api.themes.load_page_layouts_and_custom_single_templates'),
+    defaultErrorMessage: __("Could not load page layouts and custom single templates."),
   });
 }
 
@@ -82,7 +82,7 @@ export function activateThemeRevision(revisionId: string, selectionVersion: numb
     ifMatchVersion: selectionVersion,
     contentType: 'application/json',
     body: JSON.stringify({ revision_id: revisionId }),
-    defaultErrorMessage: tStatic('api.themes.activate_the_theme_revision'),
+    defaultErrorMessage: __("Could not activate the theme revision."),
   });
 }
 
@@ -92,7 +92,7 @@ export function getThemeOptions(
 ): Promise<ThemeOptionsSnapshot> {
   const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
   return requestJson(`/api/themes/${encodeURIComponent(themeId)}/options${query}`, {
-    defaultErrorMessage: tStatic('api.themes.load_theme_options'),
+    defaultErrorMessage: __("Could not load theme options."),
   });
 }
 
@@ -110,7 +110,7 @@ export function saveThemeOptions(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify({ values }),
-    defaultErrorMessage: tStatic('api.themes.save_theme_options'),
+    defaultErrorMessage: __("Could not save theme options."),
   });
 }
 
@@ -171,7 +171,7 @@ export function dryRunSampleImport(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify({ groups }),
-    defaultErrorMessage: tStatic('api.themes.preview_the_sample_data_import_plan'),
+    defaultErrorMessage: __("Could not preview the sample data import plan."),
   });
 }
 
@@ -192,7 +192,7 @@ export function executeSampleImport(
       expected_versions: plan.expected_versions,
       acknowledge_public_changes: acknowledgePublicChanges,
     }),
-    defaultErrorMessage: tStatic('api.themes.import_sample_data'),
+    defaultErrorMessage: __("Could not import sample data."),
   });
 }
 
@@ -237,7 +237,7 @@ export function getActiveThemeFunctionsSettings(
 ): Promise<ThemeFunctionsSettingsSnapshot> {
   return requestJson('/api/admin/themes/active/functions/settings', {
     signal,
-    defaultErrorMessage: tStatic('api.themes.load_theme_functions_settings'),
+    defaultErrorMessage: __("Could not load Theme Functions settings."),
   });
 }
 
@@ -252,7 +252,7 @@ export function saveActiveThemeFunctionsSettings(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify({ values }),
-    defaultErrorMessage: tStatic('api.themes.save_theme_functions_settings'),
+    defaultErrorMessage: __("Could not save Theme Functions settings."),
   });
 }
 
@@ -266,7 +266,7 @@ export function runActiveThemeAction(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(payload),
-    defaultErrorMessage: tStatic('api.themes.run_theme_action'),
+    defaultErrorMessage: __("Could not execute theme action."),
   });
 }
 
@@ -276,7 +276,7 @@ export function getActiveThemeFunctionsLogs(
 ): Promise<ThemeFunctionsLogsResponse> {
   return requestJson(`/api/admin/themes/active/functions/logs?limit=${encodeURIComponent(String(limit))}`, {
     signal,
-    defaultErrorMessage: tStatic('api.themes.load_theme_functions_logs'),
+    defaultErrorMessage: __("Could not load Theme Functions logs."),
   });
 }
 
@@ -286,6 +286,6 @@ export function syncDevManifest(csrfToken: string): Promise<DevSyncResponse> {
     csrfToken,
     contentType: 'application/json',
     body: '{}',
-    defaultErrorMessage: tStatic('api.themes.sync_dev_manifest'),
+    defaultErrorMessage: __("Could not sync Dev Manifest."),
   });
 }

@@ -49,6 +49,7 @@ pub(crate) async fn render_not_found_response_for_locale(
     };
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: site.timezone.clone(),
+        ..Default::default()
     };
     let mut budget = overrides::PublicCompositionBudget::default();
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
@@ -58,7 +59,7 @@ pub(crate) async fn render_not_found_response_for_locale(
     budget.set_locale_context(active.as_ref(), &resolved_locale, locale_ctx);
     let l10n = content_render::core_l10n(&resolved_locale);
     let breadcrumbs = content_render::not_found_breadcrumbs(
-        content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+        &l10n.home_label,
         Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
         content_render::DEFAULT_BREADCRUMB_NOT_FOUND_LABEL,
     );
@@ -111,7 +112,7 @@ pub(crate) async fn render_not_found_response_for_locale(
             .await?
         };
     let view =
-        crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, l10n.not_found_title);
+        crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &l10n.not_found_title);
     let enqueued = enqueued_for_route(active.as_ref(), EnqueueCondition::NotFound);
     let html = content_render::compose_document_with_seo_with_assets(
         header_html.as_deref(),
@@ -318,6 +319,7 @@ pub(crate) async fn render_canonical_archive(
     };
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: site.timezone.clone(),
+        ..Default::default()
     };
     let fallback_html = content_render::render_archive_with_site_and_config_for_locale(
         schema,

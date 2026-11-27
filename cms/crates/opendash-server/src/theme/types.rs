@@ -37,10 +37,6 @@ pub(super) const V3_MAX_ACTIVE_ASSET_BYTES: usize = 512 * 1024;
 
 pub(crate) const MAX_THEME_LOCALE_FILES: usize = 32;
 
-pub(crate) const MAX_THEME_LOCALE_KEYS: usize = 512;
-
-pub(crate) const MAX_THEME_LOCALE_VALUE_CHARS: usize = 500;
-
 /// Revalidate direct storage callers with the same manifest, path and
 /// composition guarantees as the bounded ZIP parser.
 pub(crate) fn validate_theme_v3_files(
@@ -170,10 +166,12 @@ pub(crate) fn validate_theme_v3_files(
     }
 
     use crate::template_sec::{
-        CsecContentKind, collect_theme_translation_keys,
-        validate_and_compile_csec_composition_with_theme_urls,
+        CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
     };
-    let mut used_t_keys = BTreeSet::new();
+    if let Some(td) = manifest.text_domain.as_deref() {
+        opendash_core::l10n::validate_extension_text_domain(td).map_err(V2ZipError::BadRequest)?;
+    }
+
     for declaration in &manifest.templates {
         let source = required_v3_utf8(&files, &declaration.file)?;
         declared.insert(declaration.file.clone());
@@ -195,7 +193,6 @@ pub(crate) fn validate_theme_v3_files(
             &url_policy,
         )
         .map_err(V2ZipError::BadRequest)?;
-        used_t_keys.extend(collect_theme_translation_keys(source).map_err(V2ZipError::BadRequest)?);
     }
     for layout in &manifest.page_layouts {
         let source = required_v3_utf8(&files, &layout.file)?;
@@ -208,7 +205,6 @@ pub(crate) fn validate_theme_v3_files(
             &url_policy,
         )
         .map_err(V2ZipError::BadRequest)?;
-        used_t_keys.extend(collect_theme_translation_keys(source).map_err(V2ZipError::BadRequest)?);
     }
     for (key, source) in &parts {
         validate_and_compile_csec_composition_with_theme_urls(
@@ -219,59 +215,52 @@ pub(crate) fn validate_theme_v3_files(
             &url_policy,
         )
         .map_err(V2ZipError::BadRequest)?;
-        used_t_keys.extend(collect_theme_translation_keys(source).map_err(V2ZipError::BadRequest)?);
     }
 
-    let mut locale_dicts = BTreeMap::new();
-    let mut seen_lower_locale_paths = BTreeSet::new();
+    let mut lang_files_count = 0usize;
+    let mut seen_lower_lang_paths = BTreeSet::new();
     for (path, raw) in &files {
-        if let Some(rest) = path.strip_prefix("locales/") {
-            let Some(code) = rest.strip_suffix(".json") else {
-                return Err(V2ZipError::BadRequest(
-                    "File trong locales/ của theme v3 phải có đuôi .json.",
-                ));
-            };
-            if !seen_lower_locale_paths.insert(path.to_ascii_lowercase()) {
-                return Err(V2ZipError::BadRequest(
-                    "Theme v3 có file locales/*.json trùng tên hoa/thường.",
-                ));
-            }
-            if code != code.to_ascii_lowercase()
-                || !crate::storage::settings::valid_content_language(code)
-            {
-                return Err(V2ZipError::BadRequest(
-                    "Mã ngôn ngữ trong locales/<code>.json không hợp lệ.",
-                ));
-            }
-            if locale_dicts.len() >= MAX_THEME_LOCALE_FILES {
-                return Err(V2ZipError::BadRequest(
-                    "Theme v3 vượt quá giới hạn 32 file locales/*.json.",
-                ));
-            }
-            let dict = parse_theme_locale_json(raw).map_err(V2ZipError::BadRequest)?;
-            locale_dicts.insert(code.to_owned(), dict);
-            declared.insert(path.clone());
+        if path.starts_with("locales/") {
+            return Err(V2ZipError::BadRequest(
+                "Theme v3 không còn hỗ trợ locales/*.json; hãy dùng languages/*.{pot,po,mo}.",
+            ));
         }
-    }
-
-    if !used_t_keys.is_empty() {
-        let Some(def_locale) = manifest.default_locale.as_deref() else {
-            return Err(V2ZipError::BadRequest(
-                "Theme sử dụng khóa dịch t.<key> bắt buộc khai báo default_locale trong theme.json.",
-            ));
-        };
-        let def_code = def_locale.to_ascii_lowercase();
-        let Some(def_dict) = locale_dicts.get(&def_code) else {
-            return Err(V2ZipError::BadRequest(
-                "Theme thiếu file từ điển locales/<default_locale>.json.",
-            ));
-        };
-        for key in &used_t_keys {
-            if !def_dict.contains_key(key) {
+        if path.starts_with("languages/") {
+            if !seen_lower_lang_paths.insert(path.to_ascii_lowercase()) {
                 return Err(V2ZipError::BadRequest(
-                    "Theme thiếu khóa dịch t.<key> trong từ điển default_locale.",
+                    "Theme v3 có file languages/ trùng tên hoa/thường.",
                 ));
             }
+            if lang_files_count >= MAX_THEME_LOCALE_FILES {
+                return Err(V2ZipError::BadRequest(
+                    "Theme v3 vượt quá giới hạn 32 file languages/.",
+                ));
+            }
+            if path.ends_with(".mo") {
+                opendash_core::l10n::parse_mo(raw).map_err(|_| {
+                    V2ZipError::BadRequest("File .mo trong languages/ không hợp lệ.")
+                })?;
+            } else if path.ends_with(".po") {
+                let text = std::str::from_utf8(raw).map_err(|_| {
+                    V2ZipError::BadRequest("File .po trong languages/ phải là UTF-8.")
+                })?;
+                opendash_core::l10n::compile_po_to_mo(text).map_err(|_| {
+                    V2ZipError::BadRequest("File .po trong languages/ không hợp lệ.")
+                })?;
+            } else if path.ends_with(".pot") {
+                let text = std::str::from_utf8(raw).map_err(|_| {
+                    V2ZipError::BadRequest("File .pot trong languages/ phải là UTF-8.")
+                })?;
+                opendash_core::l10n::PotDocument::parse(text).map_err(|_| {
+                    V2ZipError::BadRequest("File .pot trong languages/ không hợp lệ.")
+                })?;
+            } else {
+                return Err(V2ZipError::BadRequest(
+                    "File trong languages/ của theme v3 phải có đuôi .pot, .po hoặc .mo.",
+                ));
+            }
+            lang_files_count += 1;
+            declared.insert(path.clone());
         }
     }
     for pattern in &manifest.patterns {
@@ -357,7 +346,7 @@ pub struct ThemeContentTypeDeclaration {
     pub key: String,
     pub label: String,
     #[serde(default)]
-    pub fields: Vec<opendash_core::content::ContentFieldDefinition>,
+    pub fields: Vec<opendash_core::field_schema::FieldSpec>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

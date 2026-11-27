@@ -7,7 +7,7 @@
 **Approved By:** Owner (thientran2359)  
 **Approval Evidence:** Owner chốt phương án `1A + 2A + 3A + 4A` (2026-11-26) và chỉ đạo triển khai trên `origin/main@43c19c2` ("kéo code mới nhất về và triển khai tiếp đi", 2026-11-27)  
 **Goldfish Review:** Hoàn tất 2 vòng Goldfish fresh-context 3-persona (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`); toàn bộ phát hiện Blocker/Major/Minor/Nit đã được xử lý trong Revision 3 và đồng bộ theo kiến trúc Feature-First trên `main@43c19c2`.  
-**Dependency Status:** Các phần lõi của [`unified-field-engine.md`](unified-field-engine.md) `S02`–`S03` (`0055_theme_option_locale_media_refs.sql`, `src/field_hydrate.rs`, `src/storage/fields/`, `BuilderRenderContext.hydration_media`, `builtin_themes/opendash-starter/`) đã merge vào `main@43c19c2`. Đặc tả này dùng migration kế tiếp **`0056`** (bản `S04` của `unified-field-engine` không chặn chuỗi triển khai `S01`–`S04`). Mọi file nguồn mới tuân thủ giới hạn `<= 600 LOC` và chuẩn Feature-First trong [`AGENTS.md`](../../AGENTS.md).
+**Dependency Status:** Các phần lõi của [`unified-field-engine.md`](unified-field-engine.md) (`0055`, `0056`), `0057` (`manual_redirects`), gettext `.pot`/`.po`/`.mo` và PR #620 đã merge vào `origin/main@45888d6`. Sau khi đồng bộ nhánh với `origin/main`, đặc tả này dùng migration kế tiếp **`0058`** (`cms/migrations/0058_responsive_media_and_replace.sql`). Mọi file nguồn mới tuân thủ giới hạn `<= 600 LOC` và chuẩn Feature-First trong [`AGENTS.md`](../../AGENTS.md).
 
 > [!NOTE]
 > Tài liệu này thiết lập đặc tả kỹ thuật đầy đủ theo quy trình **EGM (Elephant-Goldfish Model)** và [`AGENTS.md`](../../AGENTS.md) cho bộ ba năng lực media: **(1) Đa kích cỡ responsive (`srcset` / `sizes`) không upscale**, **(2) Nén WebP lossy có size-gate kèm encode-only security boundary (`webp =0.3.1`)**, và **(3) Replace Media giữ nguyên 64-hex `id` (`If-Match` CAS + `MediaReadGate` + journal `.quarantine/`)**, đồng thời giữ Backup gọn nhẹ (`4A`).
@@ -53,18 +53,18 @@ Cách tổ chức này dẫn đến ba giới hạn lớn khi vận hành websit
 
 ## 2. Architecture & Technical Plan
 
-### 2.1 Kiến trúc CSDL & Migration `0056`
+### 2.1 Kiến trúc CSDL & Migration `0058`
 
-Migration `cms/migrations/0056_responsive_media_and_replace.sql` chạy tuần tự sau `0055_theme_option_locale_media_refs.sql` (`221` schema objects trước `0056` trên `main@43c19c2`). Migration `0056` sử dụng `STRICT, WITHOUT ROWID` cho 2 bảng mới để không phát sinh thêm `sqlite_autoindex`, bổ sung **+7 net schema objects** (tổng `228 <= 256` giới hạn `MAX_SCHEMA_OBJECTS` của `storage/restore.rs`):
+Migration `cms/migrations/0058_responsive_media_and_replace.sql` chạy tuần tự sau `0057_manual_redirects_and_404_log.sql` (`227` schema objects trước `0058` trên `main@45888d6`). Migration `0058` sử dụng `STRICT, WITHOUT ROWID` cho 2 bảng mới để không phát sinh thêm `sqlite_autoindex`, bổ sung **+7 net schema objects** (tổng `234 <= 256` giới hạn `MAX_SCHEMA_OBJECTS` của `storage/restore.rs`):
 
 1. **Mở rộng `media_assets` (`ALTER TABLE`, `+0` table objects + `+2` index objects):**
-   - Lưu ý: Cột `generation` và `version` **ĐÃ TỒN TẠI** từ `0033_media_lifecycle.sql` (`generation INTEGER NOT NULL DEFAULT 1`, `version INTEGER NOT NULL DEFAULT 1`). Tuyệt đối **không** chạy `ADD COLUMN version` hoặc `ADD COLUMN generation` trong `0056`.
+   - Lưu ý: Cột `generation` và `version` **ĐÃ TỒN TẠI** từ `0033_media_lifecycle.sql` (`generation INTEGER NOT NULL DEFAULT 1`, `version INTEGER NOT NULL DEFAULT 1`). Tuyệt đối **không** chạy `ADD COLUMN version` hoặc `ADD COLUMN generation` trong `0058`.
    - Giữ nguyên toàn bộ `CHECK` bounds của `0030_media_video.sql` (`image`: `width/height BETWEEN 1 AND 6000`, `byte_size > 0 AND byte_size <= 8388608`, `thumb_width/height BETWEEN 1 AND 320`, `extension IN ('jpg','png','webp')`; `video`: `width BETWEEN 1 AND 3840`, `height BETWEEN 1 AND 2160`, `byte_size > 0 AND byte_size <= 104857600`, `duration_ms BETWEEN 1 AND 600000`, `video_codec IS NOT NULL`, `extension = 'mp4'`).
    - Chỉ `ALTER TABLE media_assets` thêm đúng **3 cột**:
      - `content_sha256 TEXT CHECK (content_sha256 IS NULL OR (length(content_sha256) = 64 AND content_sha256 GLOB '[0-9a-f]*'))`
      - `variants_ready_version INTEGER NOT NULL DEFAULT 0 CHECK (variants_ready_version >= 0)` (upload ảnh mới đặt `1`; ảnh legacy `0`; video đặt `0`).
      - `updated_at TEXT`
-   - Backfill trong `0056`:
+   - Backfill trong `0058`:
      - `UPDATE media_assets SET content_sha256 = id WHERE content_sha256 IS NULL;`
      - `UPDATE media_assets SET updated_at = created_at WHERE updated_at IS NULL;`
    - Thêm 2 index (`+2` objects):
@@ -237,7 +237,7 @@ Migration `cms/migrations/0056_responsive_media_and_replace.sql` chạy tuần t
      - **Nếu BẤT KỲ bước đĩa nào OR Tx 2 lỗi (kể cả `SQLITE_BUSY` / disk full):** chạy `rollback_replace_disk` — unlink `{id}.{new_ext}` (đặc biệt khi `old_ext != new_ext`), xóa `v{new_ver}/`, chuyển ngược `{id}.{old_ext}` & `{id}.thumb.png` từ `.quarantine/{job_id}/` về live (bản `v{old_ver}/` vẫn còn nguyên vẹn tại chỗ!), nhả `replacing = false` (`notify_waiters()`), cập nhật `phase = 'rolled_back'`, trả `500`.
      - **Chỉ SAU KHI Tx 2 commit & đã tắt `replacing = false` (`notify_waiters()`):** thực hiện best-effort xóa thư mục staging và `uploads/variants/{shard}/{id}/v{old_ver}/` (nếu gián đoạn trước khi kịp xóa, `Reconcile` tự thu dọn như `ReconcileOrphanKind::Variant`).
 5. **Thứ tự Khởi động trong `main.rs`:**
-   - `(1)` Chạy migrations `0001..0056`.
+   - `(1)` Chạy migrations `0001..0058`.
    - `(2)` Gọi **duy nhất 1 lần** `storage::operations::mark_interrupted_on_startup(&db)` (xóa lời gọi trùng lặp tại `main.rs`).
    - `(3)` `recover_orphaned_import_runs(&db, uploads_root)` -> `recover_pending_delete_jobs_on_startup` -> **`recover_pending_replace_jobs_on_startup`** (nếu job đang ở `'staged'`: đánh dấu `'rolled_back'`; nếu ở `'moving_old'` / `'promoting_new'`: **unlink mọi file đích mới `{id}.{new_extension}`, `.thumb.png` mới nếu đã đè, và `v{new_version}/` trước khi khôi phục file cũ từ `.quarantine/{job_id}/`**, rồi đánh dấu `'rolled_back'`).
    - `(4)` **Chỉ SAU khi các hàm recovery hoàn tất**, mới gọi `media_store.cleanup_staging().await`.
@@ -374,12 +374,12 @@ Tuân thủ [`M8_WRITER_INVENTORY.md`](../contracts/M8_WRITER_INVENTORY.md) và 
 
 ### 4.2 Phân chia Slices (`S01`–`S04`, Chuẩn Feature-First `<= 600 LOC`)
 
-#### Slice S01: Nền tảng Core, Migration `0056`, Nén WebP Biến thể, Upload `.staging/` & Route Variant
-- **Dependencies:** `main@43c19c2` (`unified-field-engine` S02–S03 / `0055` đã có mặt).
+#### Slice S01: Nền tảng Core, Migration `0058`, Nén WebP Biến thể, Upload `.staging/` & Route Variant
+- **Dependencies:** `main@45888d6` (`0055`–`0057` đã có mặt).
 - **File Ownership:**
   - `cms/Cargo.toml`, `cms/Cargo.lock`, `cms/crates/opendash-server/Cargo.toml`
   - `docs/architecture/TECH_STACK.md`
-  - `cms/migrations/0056_responsive_media_and_replace.sql`
+  - `cms/migrations/0058_responsive_media_and_replace.sql`
   - `cms/crates/opendash-core/src/lib.rs`, `cms/crates/opendash-core/src/media.rs`
   - `cms/crates/opendash-server/src/media/{mod.rs,types.rs,service.rs,read_gate.rs,variants.rs}`, `cms/crates/opendash-server/src/media_video/`
   - `cms/crates/opendash-server/src/storage/media/{mod.rs,types.rs,queries.rs,variants.rs,refs.rs}`, `cms/crates/opendash-server/src/storage/operations.rs`
@@ -391,7 +391,7 @@ Tuân thủ [`M8_WRITER_INVENTORY.md`](../contracts/M8_WRITER_INVENTORY.md) và 
   - `storage/media/` (tách feature-first `<= 600 LOC`) & `storage/operations.rs`: cập nhật `MediaAsset`, `MediaAssetDetails`, `allocate_or_save_with_variants` cho cả image & video (giải quyết va chạm `actual_id`), `find_many_details_for_ids`, thêm `OperationKind::MediaRegenerate` (`is_heavy() == false`).
   - `routes/media.rs`, `routes/public_content/assets_and_sitemap/`, `app.rs`: route `/media/{id}/variant/{spec_ext}` (public) và `/api/admin/media/{id}/variant/{spec_ext}` (admin `require_session`), lấy `acquire_read_lease(&id).await?` 1 lần trước DB query, nhánh `Method::HEAD` + `If-None-Match` (`304`); gắn test mới vào domain binary `tests/site_media_seo.rs`.
 - **Acceptance Criteria:**
-  1. `0056` migrate sạch từ `0055`, giữ nguyên cột/index `0030`/`0032`/`0033` và tổng schema objects là `228 <= 256`.
+  1. `0058` migrate sạch từ `0057`, giữ nguyên cột/index `0030`/`0032`/`0033` và tổng schema objects là `234 <= 256`.
   2. Upload JPEG / opaque PNG / alpha PNG (`<= 1 MP` & `> 1 MP`) / WebP sinh biến thể đúng quy tắc size-gate, không upscale, không tạo `thumbnail.{jpg,png}` trong `uploads/variants/`.
   3. Re-upload ảnh hoặc MP4 có SHA trùng với bản gốc của asset đã từng replace sang SHA mới tạo `actual_id` mới thành công, không trả nhầm asset mới.
   4. `HEAD` & `If-None-Match` hoạt động đúng trên cả `/media/...` và `/api/admin/media/...`, toàn bộ file nguồn mới tuân thủ `<= 600 LOC` và kiểm thử thuộc domain binary `site_media_seo`.

@@ -149,6 +149,7 @@ pub(super) async fn render_resolved_public_template_html(
     })?;
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: site_ctx.timezone.to_owned(),
+        ..Default::default()
     };
 
     // A fallback renderer can return a complete HTML document. Only its
@@ -464,6 +465,7 @@ pub(crate) async fn render_canonical_taxonomy(
     };
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: site.timezone.clone(),
+        ..Default::default()
     };
     let tax_value = serde_json::json!({ "key": schema.key, "id": term_id, "slug": term.slug, "name": schema.label });
     let fallback_html = content_render::render_archive_with_site_and_config_for_locale(

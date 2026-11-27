@@ -108,6 +108,7 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
         },
         filters: vec![],
         editor_panels: vec![],
+        text_domain: None,
         settings_schema: vec![],
         ..Default::default()
     };

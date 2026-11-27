@@ -1,4 +1,4 @@
-import { tStatic } from '../../i18n/index.tsx';
+import { __ } from '../../i18n/index.tsx';
 import { isUiOnlyFieldType } from '../../fields/helpers.ts';
 import type { FieldSpec } from '../../fields/types.ts';
 import type { BlockCatalogItemDto } from '../../types.ts';
@@ -56,13 +56,13 @@ export function appendNode(
   if (declarative && (!blockSchema || blockSchema.schema_version !== 1)) return null;
   const id = newNodeId(kind, next);
   const defaults: Record<string, Record<string, unknown>> = {
-    'core/heading': { level: 2, text: tStatic('builder.document.new_heading') },
-    'core/text': { text: tStatic('builder.document.new_content') },
+    'core/heading': { level: 2, text: __("New heading") },
+    'core/text': { text: __("New content") },
     'core/image': { media_id: '', alt: '' },
     'core/video': { media_id: '', controls: true, muted: false },
-    'core/button': { label: tStatic('builder.document.new_button'), url: '/' },
+    'core/button': { label: __("New button"), url: '/' },
     'core/list': { type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6 },
-    'core/contact_form': { form_id: 1, submit_label: tStatic('builder.document.submit') },
+    'core/contact_form': { form_id: 1, submit_label: __("Send message") },
     'core/pattern_ref': { pattern_id: 0 },
     'core/content_slot': {},
     'core/template_part': { part_key: 'header' },

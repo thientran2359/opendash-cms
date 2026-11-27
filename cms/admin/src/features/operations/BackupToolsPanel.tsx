@@ -18,19 +18,19 @@ export const BackupToolsPanel: React.FC<BackupToolsPanelProps> = ({
   onBackupError,
   onRestoreError,
 }) => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const [activeTab, setActiveTab] = useState<BackupTabId>('backup');
 
   return (
     <div className="min-w-0 space-y-5" data-testid="backup-tools-panel">
       <AdminTabs
         tabs={[
-          { id: 'backup', label: t('backup.tab_backup') },
-          { id: 'restore', label: t('backup.tab_restore') },
+          { id: 'backup', label: __("Backup") },
+          { id: 'restore', label: _x("Restore & safe mode", "backup.tab_restore") },
         ]}
         activeId={activeTab}
         onChange={setActiveTab}
-        ariaLabel={t('backup.tabs_label')}
+        ariaLabel={__("Backup and restore sections")}
         testId="backup-tools-tabs"
         idPrefix="backup-tools"
       />

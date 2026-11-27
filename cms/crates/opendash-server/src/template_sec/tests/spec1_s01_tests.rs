@@ -3,11 +3,11 @@ use serde_json::json;
 
 #[test]
 fn none_formatter_and_default_wrapper_keep_strict_undefined() {
-    let tpl = "<p>{{ entry.values.note }}|{{ entry.values.note | default('N/A') }}|{{ entry.values.note | d('') }}</p>";
+    let tpl = "<p>{{ entry.fields.note }}|{{ entry.fields.note | default('N/A') }}|{{ entry.fields.note | d('') }}</p>";
     let out = render_csec(
         "none_test",
         tpl,
-        json_to_safe_value(&json!({ "entry": { "values": { "note": null } } })),
+        json_to_safe_value(&json!({ "entry": { "fields": { "note": null } } })),
     )
     .unwrap();
     assert_eq!(decode_html_entities_for_url(&out), "<p>|N/A|</p>");
@@ -28,9 +28,11 @@ fn none_formatter_and_default_wrapper_keep_strict_undefined() {
 fn date_format_supports_civil_rfc3339_naive_and_rejects_bad_inputs() {
     let cfg = RenderFormattingConfig {
         timezone: "America/New_York".to_owned(),
+        ..Default::default()
     };
     let tz_hcm = RenderFormattingConfig {
         timezone: "Asia/Ho_Chi_Minh".to_owned(),
+        ..Default::default()
     };
     // Civil YYYY-MM-DD must NOT shift to previous day on negative timezone
     assert_eq!(

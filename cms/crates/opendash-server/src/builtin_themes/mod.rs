@@ -61,12 +61,19 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
             include_bytes!("opendash-starter/index.html").to_vec(),
         ),
         (
-            "locales/en.json".to_owned(),
-            include_bytes!("opendash-starter/locales/en.json").to_vec(),
+            "languages/opendash-starter.pot".to_owned(),
+            include_bytes!("opendash-starter/languages/opendash-starter.pot").to_vec(),
         ),
         (
-            "locales/vi.json".to_owned(),
-            include_bytes!("opendash-starter/locales/vi.json").to_vec(),
+            "languages/opendash-starter-vi.po".to_owned(),
+            include_bytes!("opendash-starter/languages/opendash-starter-vi.po").to_vec(),
+        ),
+        (
+            "languages/opendash-starter-vi.mo".to_owned(),
+            opendash_core::l10n::compile_po_to_mo(include_str!(
+                "opendash-starter/languages/opendash-starter-vi.po"
+            ))
+            .expect("valid starter vi.po"),
         ),
         (
             "page-layouts/canvas.html".to_owned(),

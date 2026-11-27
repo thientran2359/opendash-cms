@@ -53,15 +53,19 @@ pub(in crate::storage) async fn sync_entry_body_refs_in_conn(
         .bind(entry_id)
         .execute(&mut *conn)
         .await?;
-    sqlx::query("DELETE FROM entry_builder_media_refs WHERE entry_id = ?")
-        .bind(entry_id)
-        .execute(&mut *conn)
-        .await?;
+    sqlx::query(
+        "DELETE FROM entry_builder_media_refs WHERE entry_id = ? AND source_kind = 'builder'",
+    )
+    .bind(entry_id)
+    .execute(&mut *conn)
+    .await?;
+
+    sync_entry_field_media_refs_in_conn(conn, entry_id, schema, values).await?;
 
     let Some(body_field) = schema.effective_fields.get("body") else {
         return Ok(());
     };
-    if body_field.definition.field_type != opendash_core::content::ContentFieldType::RichText {
+    if body_field.definition.field_type != opendash_core::field_schema::FieldType::Richtext {
         return Ok(());
     }
     let Some(raw_body) = values.get("body").and_then(Value::as_str) else {
@@ -77,7 +81,7 @@ pub(in crate::storage) async fn sync_entry_body_refs_in_conn(
         .iter()
         .filter(|(_, fe)| {
             fe.effective_status == EffectiveFieldStatus::Active
-                && fe.definition.min_view_role <= actor_role
+                && fe.definition.effective_acl().0 <= actor_role
         })
         .map(|(k, _)| k.clone())
         .collect();
@@ -130,8 +134,9 @@ pub(in crate::storage) async fn sync_entry_body_refs_in_conn(
         .descriptor
         .settings
         .supports(ContentSupport::Builder)
-        && body_field.definition.public_exposure == opendash_core::content::PublicExposure::Public
-        && body_field.definition.min_view_role == FieldRole::Editor;
+        && body_field.definition.effective_acl().2
+            == opendash_core::content::PublicExposure::Public
+        && body_field.definition.effective_acl().0 == FieldRole::Editor;
     if !body_is_public {
         return Ok(());
     }

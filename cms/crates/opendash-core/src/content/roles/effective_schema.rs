@@ -12,27 +12,34 @@ impl EffectiveContentSchema {
         attached_groups.sort_by(|a, b| a.group_id.cmp(&b.group_id));
         let is_builtin = matches!(base.descriptor.key.as_str(), "post" | "page");
         let mut effective_fields = BTreeMap::new();
+        let mut ui_fields = Vec::new();
         let base_source_id = format!("base:{}", base.descriptor.key);
 
+        if let Err(e) = crate::field_schema::validate_field_specs(
+            &base.descriptor.fields,
+            crate::field_schema::FieldContext::Content,
+        ) {
+            return Err(classify_validation_error(e));
+        }
         for field in &base.descriptor.fields {
+            if field.is_ui_only() {
+                ui_fields.push(field.clone());
+                continue;
+            }
             if !is_builtin && RESERVED_ENTRY_KEYS.contains(&field.key.as_str()) {
                 return Err(SchemaTransitionError::FieldKeyCollision(format!(
                     "Trường '{}' trùng với khóa hệ thống được bảo vệ.",
                     field.key
                 )));
             }
-            if let Err(e) = field.validate() {
-                return Err(classify_validation_error(e));
-            }
-            let effective_status = if base.declaration_state == DeclarationState::Withdrawn
-                || field.declaration_state == DeclarationState::Withdrawn
-            {
-                EffectiveFieldStatus::Withdrawn
-            } else if base.status != ProviderStatus::Active {
-                EffectiveFieldStatus::ProviderInactive
-            } else {
-                EffectiveFieldStatus::Active
-            };
+            let effective_status =
+                if base.declaration_state == DeclarationState::Withdrawn || field.is_withdrawn() {
+                    EffectiveFieldStatus::Withdrawn
+                } else if base.status != ProviderStatus::Active {
+                    EffectiveFieldStatus::ProviderInactive
+                } else {
+                    EffectiveFieldStatus::Active
+                };
             if effective_fields
                 .insert(
                     field.key.clone(),
@@ -53,15 +60,22 @@ impl EffectiveContentSchema {
         }
 
         for group in &attached_groups {
+            if let Err(e) = crate::field_schema::validate_field_specs(
+                &group.fields,
+                crate::field_schema::FieldContext::Content,
+            ) {
+                return Err(classify_validation_error(e));
+            }
             for field in &group.fields {
+                if field.is_ui_only() {
+                    ui_fields.push(field.clone());
+                    continue;
+                }
                 if RESERVED_ENTRY_KEYS.contains(&field.key.as_str()) || field.key == "status" {
                     return Err(SchemaTransitionError::FieldKeyCollision(format!(
                         "Trường '{}' trong nhóm '{}' trùng với khóa hệ thống được bảo vệ.",
                         field.key, group.group_id
                     )));
-                }
-                if let Err(e) = field.validate() {
-                    return Err(classify_validation_error(e));
                 }
                 if let Some(existing) = effective_fields.get(&field.key) {
                     return Err(SchemaTransitionError::FieldKeyCollision(format!(
@@ -71,7 +85,7 @@ impl EffectiveContentSchema {
                 }
                 let effective_status = if group.status == FieldGroupStatus::Withdrawn
                     || group.association_state == DeclarationState::Withdrawn
-                    || field.declaration_state == DeclarationState::Withdrawn
+                    || field.is_withdrawn()
                 {
                     EffectiveFieldStatus::Withdrawn
                 } else if group.status == FieldGroupStatus::ProviderInactive {
@@ -95,21 +109,16 @@ impl EffectiveContentSchema {
             && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
             && !effective_fields.contains_key("featured_image")
         {
+            let mut fi_spec = crate::field_schema::FieldSpec::new(
+                crate::field_schema::FieldType::Media,
+                "featured_image",
+                "Ảnh đại diện",
+            );
+            fi_spec.media_kind = Some(crate::field_schema::MediaFieldKind::Image);
             effective_fields.insert(
                 "featured_image".into(),
                 EffectiveFieldEntry {
-                    definition: ContentFieldDefinition {
-                        key: "featured_image".into(),
-                        label: "Ảnh đại diện".into(),
-                        field_type: ContentFieldType::Image,
-                        required: false,
-                        options: Vec::new(),
-                        min_view_role: FieldRole::Editor,
-                        min_edit_role: FieldRole::Editor,
-                        public_exposure: PublicExposure::Public,
-                        default_value: None,
-                        declaration_state: DeclarationState::Declared,
-                    },
+                    definition: fi_spec,
                     owner: ResourceOwner::Core,
                     source_id: base_source_id.clone(),
                     effective_status: EffectiveFieldStatus::Active,
@@ -122,28 +131,22 @@ impl EffectiveContentSchema {
             && base.descriptor.settings.supports(ContentSupport::Builder)
         {
             if let Some(existing_body) = effective_fields.get("body") {
-                if existing_body.definition.field_type != ContentFieldType::RichText {
+                if existing_body.definition.field_type != crate::field_schema::FieldType::Richtext {
                     return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
-                        "Trường 'body' trên loại nội dung '{}' phải có kiểu rich_text khi bật ContentSupport::Builder.",
+                        "Trường 'body' trên loại nội dung '{}' phải có kiểu richtext khi bật ContentSupport::Builder.",
                         base.descriptor.key
                     )));
                 }
             } else {
+                let body_spec = crate::field_schema::FieldSpec::new(
+                    crate::field_schema::FieldType::Richtext,
+                    "body",
+                    "Nội dung",
+                );
                 effective_fields.insert(
                     "body".into(),
                     EffectiveFieldEntry {
-                        definition: ContentFieldDefinition {
-                            key: "body".into(),
-                            label: "Nội dung".into(),
-                            field_type: ContentFieldType::RichText,
-                            required: false,
-                            options: Vec::new(),
-                            min_view_role: FieldRole::Editor,
-                            min_edit_role: FieldRole::Editor,
-                            public_exposure: PublicExposure::Public,
-                            default_value: None,
-                            declaration_state: DeclarationState::Declared,
-                        },
+                        definition: body_spec,
                         owner: ResourceOwner::Core,
                         source_id: base_source_id.clone(),
                         effective_status: EffectiveFieldStatus::Active,
@@ -157,6 +160,7 @@ impl EffectiveContentSchema {
             base_version,
             attached_groups,
             effective_fields,
+            ui_fields,
             schema_token: String::new(),
         })
     }
@@ -242,7 +246,9 @@ pub fn verify_effective_schema_transition(
                 )));
             }
 
-            if old_entry.definition.field_type == ContentFieldType::Select && has_existing_entries {
+            if old_entry.definition.field_type == crate::field_schema::FieldType::Select
+                && has_existing_entries
+            {
                 let new_opts: HashSet<&str> = new_entry
                     .definition
                     .options
@@ -282,32 +288,31 @@ pub fn verify_effective_schema_transition(
 
     // Rule COMPAT-4 (270-R8): Unconditional Editor create-satisfiability & ACL/default checks on every transition
     for (key, entry) in &new_effective.effective_fields {
-        if entry.definition.min_edit_role < entry.definition.min_view_role {
+        let (min_view_role, min_edit_role, public_exposure) = entry.definition.effective_acl();
+        if min_edit_role < min_view_role {
             return Err(SchemaTransitionError::InvalidFieldAcl(format!(
                 "Trường '{key}' có min_edit_role thấp hơn min_view_role."
             )));
         }
-        if entry.definition.public_exposure == PublicExposure::Public
-            && entry.definition.min_view_role != FieldRole::Editor
-        {
+        if public_exposure == PublicExposure::Public && min_view_role != FieldRole::Editor {
             return Err(SchemaTransitionError::InvalidFieldAcl(format!(
                 "Trường '{key}' có min_view_role = admin không được đặt public_exposure = public."
             )));
         }
-        if let Some(ref def_val) = entry.definition.default_value {
+        if let Some(ref def_val) = entry.definition.default {
             if !valid_default_value(&entry.definition, def_val) {
                 return Err(SchemaTransitionError::InvalidFieldDefault(format!(
-                    "Trường '{key}' có default_value không hợp lệ hoặc bị cấm."
+                    "Trường '{key}' có default không hợp lệ hoặc bị cấm."
                 )));
             }
         }
         if entry.effective_required()
-            && entry.definition.min_edit_role == FieldRole::Admin
-            && entry.definition.default_value.is_none()
+            && min_edit_role == FieldRole::Admin
+            && entry.definition.default.is_none()
         {
             return Err(SchemaTransitionError::AdminRequiredFieldMissingDefault(
                 format!(
-                    "Trường bắt buộc '{key}' có min_edit_role = admin phải khai báo default_value hợp lệ để Editor có thể tạo mới bản ghi."
+                    "Trường bắt buộc '{key}' có min_edit_role = admin phải khai báo default hợp lệ để Editor có thể tạo mới bản ghi."
                 ),
             ));
         }

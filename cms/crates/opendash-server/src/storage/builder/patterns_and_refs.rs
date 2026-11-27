@@ -220,10 +220,12 @@ pub(in crate::storage) async fn replace_entry_builder_refs(
         .bind(id)
         .execute(&mut **tx)
         .await?;
-    sqlx::query("DELETE FROM entry_builder_media_refs WHERE entry_id = ?")
-        .bind(id)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM entry_builder_media_refs WHERE entry_id = ? AND source_kind = 'builder'",
+    )
+    .bind(id)
+    .execute(&mut **tx)
+    .await?;
     if let Some(document) = document {
         let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut **tx).await?;
         for pattern_id in pattern_ids_with_schemas(document, &schemas) {

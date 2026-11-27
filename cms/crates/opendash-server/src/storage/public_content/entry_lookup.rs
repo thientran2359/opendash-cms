@@ -156,7 +156,7 @@ pub async fn load_entry_render_snapshot_with_options(
     use crate::error::ApiError;
     use crate::storage::{builder, builder_binding, content, overrides, theme};
     use opendash_core::{
-        content::{ContentFieldType, ContentSupport, FieldRole, PublicExposure},
+        content::{ContentSupport, FieldRole, PublicExposure},
         registry::{DeclarationState, ProviderStatus},
         theme::TemplateCandidateKind,
     };
@@ -236,9 +236,9 @@ pub async fn load_entry_render_snapshot_with_options(
             .effective_fields
             .get("body")
             .is_some_and(|fe| {
-                fe.definition.field_type == ContentFieldType::RichText
-                    && fe.definition.public_exposure == PublicExposure::Public
-                    && fe.definition.min_view_role == FieldRole::Editor
+                fe.definition.field_type == opendash_core::field_schema::FieldType::Richtext
+                    && fe.definition.effective_acl().2 == PublicExposure::Public
+                    && fe.definition.effective_acl().0 == FieldRole::Editor
             });
     let mut render_budget = crate::page::RenderBudget::new();
     let raw_body = entry.values.get("body").and_then(serde_json::Value::as_str);

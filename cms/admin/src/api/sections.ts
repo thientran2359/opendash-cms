@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 /** Template role catalog remains available in S02; private Section CRUD and
@@ -20,5 +20,5 @@ export interface LocalTemplateLibrary {
 }
 
 export const getLocalTemplateLibrary = () => requestJson<LocalTemplateLibrary>('/api/admin/library', {
-  defaultErrorMessage: tStatic('api.sections.load_the_local_template_library'),
+  defaultErrorMessage: __("Could not load the local template library."),
 });

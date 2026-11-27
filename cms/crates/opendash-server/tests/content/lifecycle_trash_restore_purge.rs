@@ -156,7 +156,7 @@ async fn s02_http_trash_restore_purge_legacy_delete_and_rbac() {
         .json(&json!({
             "key": "product",
             "label": "Product",
-            "fields": [{"key": "sku", "label": "SKU", "type": "short_text", "required": false}],
+            "fields": [{"key": "sku", "label": "SKU", "type": "text", "required": false}],
             "settings": {
                 "public": true,
                 "has_archive": true,

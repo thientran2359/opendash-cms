@@ -57,6 +57,10 @@ impl ThemeV3Manifest {
                 return Err("Invalid theme default_locale");
             }
         }
+        if let Some(domain) = self.text_domain.as_deref() {
+            crate::l10n::validate_extension_text_domain(domain)
+                .map_err(|_| "Invalid theme text_domain")?;
+        }
         let mut targets = BTreeSet::new();
         for template in &self.templates {
             template.validate()?;
@@ -143,6 +147,7 @@ impl ThemeV3Manifest {
             render_cache: func.render_cache,
             declarations: Default::default(),
             editor_panels: Vec::new(),
+            text_domain: self.text_domain.clone(),
             settings_schema: func.settings_schema.clone(),
         })
     }

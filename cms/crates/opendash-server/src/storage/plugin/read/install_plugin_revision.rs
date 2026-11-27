@@ -461,6 +461,33 @@ pub async fn verify_active_theme_fence_in_tx(
     ))
 }
 
+pub async fn list_enabled_plugin_revision_digests(
+    db_pool: &SqlitePool,
+) -> Result<Vec<(String, String, String)>, String> {
+    let rows = sqlx::query(
+        "SELECT p.id, p.manifest_json, COALESCE(r.revision_digest, '') AS revision_digest
+         FROM plugins p
+         LEFT JOIN plugin_revisions r ON r.id = p.active_revision_id
+         WHERE p.enabled = 1
+         ORDER BY p.id",
+    )
+    .fetch_all(db_pool)
+    .await
+    .map_err(|e| format!("Lỗi đọc danh sách plugin revisions: {e}"))?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: String = row.get("id");
+        let manifest_json: String = row.get("manifest_json");
+        let digest: String = row.get("revision_digest");
+        let domain = serde_json::from_str::<opendash_core::plugin::PluginManifest>(&manifest_json)
+            .ok()
+            .and_then(|m| m.text_domain)
+            .unwrap_or_else(|| id.clone());
+        out.push((id, domain, digest));
+    }
+    Ok(out)
+}
+
 pub async fn load_plugin_executable(
     db_pool: &SqlitePool,
     id: &str,

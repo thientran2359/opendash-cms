@@ -1,5 +1,5 @@
 import React from 'react';
-import { useI18n } from '../i18n/index.tsx';
+import { __, _x } from '../i18n/index.tsx';
 import type { OwnedContentType } from '../features/content/types.ts';
 import {
   isRouteAllowed,
@@ -40,7 +40,6 @@ export interface ParentMenuItem {
 }
 
 export function buildMenuTree(
-  t: ReturnType<typeof useI18n>['t'],
   cptTypes: OwnedContentType[],
   isAdmin: boolean,
   cptTaxonomies: Record<string, Array<{ key: string; label: string }>> = {},
@@ -49,29 +48,29 @@ export function buildMenuTree(
     ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section' && ct.descriptor.key !== 'pattern',
   );
   return [
-    { id: 'dashboard', label: t('shell.dashboard'), icon: 'dashboard', hash: '#/dashboard' },
+    { id: 'dashboard', label: _x("Dashboard", "shell.dashboard"), icon: 'dashboard', hash: '#/dashboard' },
     {
       id: 'posts',
-      label: t('shell.posts'),
+      label: __("Posts"),
       icon: 'posts',
       hash: '#/posts',
       group: 'content',
       children: [
-        { label: t('shell.all_posts'), hash: '#/posts' },
-        { label: t('shell.new_post'), hash: '#/posts/new' },
-        { label: t('shell.categories'), hash: '#/posts/categories' },
-        { label: t('shell.tags'), hash: '#/posts/tags' },
+        { label: __("All posts"), hash: '#/posts' },
+        { label: __("Add new post"), hash: '#/posts/new' },
+        { label: __("Categories"), hash: '#/posts/categories' },
+        { label: __("Tags"), hash: '#/posts/tags' },
       ],
     },
     {
       id: 'pages',
-      label: t('shell.pages'),
+      label: __("Pages"),
       icon: 'pages',
       hash: '#/pages',
       group: 'content',
       children: [
-        { label: t('shell.all_pages'), hash: '#/pages' },
-        { label: t('shell.new_page'), hash: '#/pages/new' },
+        { label: __("All pages"), hash: '#/pages' },
+        { label: __("Add new page"), hash: '#/pages/new' },
       ],
     },
     ...customTypes.map(ct => ({
@@ -81,8 +80,8 @@ export function buildMenuTree(
       hash: `#/cpt/${ct.descriptor.key}`,
       group: 'content' as const,
       children: [
-        { label: t('shell.all_custom', { label: ct.descriptor.label }), hash: `#/cpt/${ct.descriptor.key}` },
-        { label: t('shell.new'), hash: `#/cpt/${ct.descriptor.key}/new` },
+        { label: __("All {{label}}", { label: ct.descriptor.label }), hash: `#/cpt/${ct.descriptor.key}` },
+        { label: __("Add new"), hash: `#/cpt/${ct.descriptor.key}/new` },
         ...(cptTaxonomies[ct.descriptor.key] ?? []).map(tax => ({
           label: tax.label,
           hash: `#/cpt/${encodeURIComponent(ct.descriptor.key)}/taxonomy/${encodeURIComponent(tax.key)}`,
@@ -91,14 +90,14 @@ export function buildMenuTree(
     })),
     {
       id: 'media',
-      label: t('shell.media'),
+      label: __("Media library"),
       icon: 'media',
       hash: '#/media',
       group: 'content',
     },
     {
       id: 'contact',
-      label: t('shell.contact'),
+      label: __("Contact"),
       icon: 'mail',
       hash: '#/settings/contact',
       group: 'content',
@@ -106,7 +105,7 @@ export function buildMenuTree(
     },
     {
       id: 'studio',
-      label: t('shell.studio'),
+      label: __("Customize appearance"),
       icon: 'builder',
       hash: '#/studio',
       group: 'appearance',
@@ -114,91 +113,92 @@ export function buildMenuTree(
     },
     {
       id: 'themes',
-      label: t('shell.themes'),
+      label: __("Themes"),
       icon: 'themes',
       hash: '#/appearance/themes',
       group: 'appearance',
       adminOnly: true,
       children: [
-        { label: t('shell.installed_themes'), hash: '#/appearance/themes' },
-        { label: t('shell.install_theme'), hash: '#/appearance/library' },
+        { label: __("Installed themes"), hash: '#/appearance/themes' },
+        { label: __("Install theme"), hash: '#/appearance/library' },
       ],
     },
     {
       id: 'patterns',
-      label: t('shell.patterns'),
+      label: __("Patterns"),
       icon: 'content',
       hash: '#/patterns',
       group: 'appearance',
       adminOnly: true,
       children: [
-        { label: t('shell.all_patterns'), hash: '#/patterns' },
-        { label: t('shell.new_pattern'), hash: '#/patterns/new' },
+        { label: __("All patterns"), hash: '#/patterns' },
+        { label: __("Add pattern"), hash: '#/patterns/new' },
       ],
     },
     {
       id: 'schema',
-      label: t('shell.schema'),
+      label: __("Content structure"),
       icon: 'schema',
       hash: '#/appearance/content-types',
       group: 'system',
       adminOnly: true,
       children: [
-        { label: t('shell.content_types'), hash: '#/appearance/content-types' },
-        { label: t('shell.taxonomy_definitions'), hash: '#/taxonomy/definitions' },
+        { label: __("Content types & fields"), hash: '#/appearance/content-types' },
+        { label: __("Custom taxonomies"), hash: '#/taxonomy/definitions' },
       ],
     },
     {
       id: 'plugins',
-      label: t('shell.plugins'),
+      label: __("Plugins"),
       icon: 'plugins',
       hash: '#/plugins',
       group: 'system',
       adminOnly: true,
       children: [
-        { label: t('shell.installed_plugins'), hash: '#/plugins' },
-        { label: t('shell.install_plugin'), hash: '#/plugins/install' },
+        { label: _x("Installed plugins", "shell.installed_plugins"), hash: '#/plugins' },
+        { label: _x("Install plugin", "shell.install_plugin"), hash: '#/plugins/install' },
       ],
     },
     {
       id: 'users',
-      label: t('shell.users'),
+      label: __("Users"),
       icon: 'users',
       hash: isAdmin ? '#/users' : '#/users/profile',
       group: 'system',
       children: [
-        { label: t('shell.all_users'), hash: '#/users', adminOnly: true },
-        { label: t('shell.new_user'), hash: '#/users/new', adminOnly: true },
-        { label: t('shell.profile'), hash: '#/users/profile' },
+        { label: __("All users"), hash: '#/users', adminOnly: true },
+        { label: __("Add user"), hash: '#/users/new', adminOnly: true },
+        { label: __("My profile"), hash: '#/users/profile' },
       ],
     },
     {
       id: 'tools',
-      label: t('shell.tools'),
+      label: __("Tools"),
       icon: 'tools',
       hash: '#/tools/backup',
       group: 'system',
       adminOnly: true,
       children: [
-        { label: t('shell.backup'), hash: '#/tools/backup' },
-        { label: t('shell.media_reconcile'), hash: '#/tools/media-reconcile' },
-        { label: t('shell.health'), hash: '#/tools/health' },
+        { label: __("Backup & restore"), hash: '#/tools/backup' },
+        { label: __("Media reconciliation"), hash: '#/tools/media-reconcile' },
+        { label: __("Redirects & 404"), hash: '#/tools/redirects' },
+        { label: __("System health"), hash: '#/tools/health' },
       ],
     },
     {
       id: 'settings',
-      label: t('shell.settings'),
+      label: __("Settings"),
       icon: 'settings',
       hash: '#/settings/general',
       group: 'system',
       adminOnly: true,
       children: [
-        { label: t('shell.general'), hash: '#/settings/general' },
-        { label: t('shell.multilingual'), hash: '#/settings/multilingual', adminOnly: true },
-        { label: t('shell.reading'), hash: '#/settings/reading' },
-        { label: t('shell.permalinks'), hash: '#/settings/permalinks' },
-        { label: t('shell.seo'), hash: '#/settings/seo' },
-        { label: t('shell.smtp'), hash: '#/settings/smtp' },
+        { label: __("General"), hash: '#/settings/general' },
+        { label: __("Multilingual"), hash: '#/settings/multilingual', adminOnly: true },
+        { label: __("Homepage & posts"), hash: '#/settings/reading' },
+        { label: __("Permalinks"), hash: '#/settings/permalinks' },
+        { label: __("SEO"), hash: '#/settings/seo' },
+        { label: __("Email notifications (SMTP)"), hash: '#/settings/smtp' },
       ],
     },
   ];

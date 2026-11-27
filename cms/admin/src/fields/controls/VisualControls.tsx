@@ -31,7 +31,7 @@ export const ColorControl: React.FC<{
   disabled?: boolean;
   onChange: (next: string) => void;
 }> = ({ field, value, disabled = false, onChange }) => {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const id = useId();
   const strVal = typeof value === 'string' ? value : '';
   const parsedAlpha = field.allow_alpha ? splitHexAlpha(strVal) : null;
@@ -47,7 +47,7 @@ export const ColorControl: React.FC<{
       />
       {field.allow_alpha && parsedAlpha && (
         <div className="flex items-center gap-2 rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-600">
-          <span>{t('fields.color.opacity')}</span>
+          <span>{__("Opacity")}</span>
           <input
             type="range"
             min={0}
@@ -55,7 +55,7 @@ export const ColorControl: React.FC<{
             step={1}
             disabled={disabled}
             value={parsedAlpha.alpha}
-            aria-label={t('fields.color.opacity_for', { label: field.label })}
+            aria-label={__("Opacity for {{label}}", { label: field.label })}
             onChange={e => {
               const a = Number(e.target.value);
               const hexA = a.toString(16).padStart(2, '0');
@@ -78,7 +78,7 @@ export const IconPickerControl: React.FC<{
   disabled?: boolean;
   onChange: (next: string) => void;
 }> = ({ field, value, disabled = false, onChange }) => {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const current = typeof value === 'string' ? value : '';
@@ -112,7 +112,7 @@ export const IconPickerControl: React.FC<{
           )}
         </div>
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-800">
-          {current || t('fields.icon.none_selected')}
+          {current || __("No icon selected")}
         </span>
         <AdminButton
           size="sm"
@@ -120,7 +120,7 @@ export const IconPickerControl: React.FC<{
           disabled={disabled}
           onClick={() => setOpen(v => !v)}
         >
-          {open ? t('fields.common.close') : t('fields.icon.choose')}
+          {open ? __("Close") : __("Choose icon")}
         </AdminButton>
         {current && (
           <AdminButton
@@ -129,7 +129,7 @@ export const IconPickerControl: React.FC<{
             disabled={disabled}
             onClick={() => onChange('')}
           >
-            {t('fields.common.clear')}
+            {__("Clear")}
           </AdminButton>
         )}
       </div>
@@ -140,12 +140,12 @@ export const IconPickerControl: React.FC<{
             type="search"
             value={query}
             disabled={disabled}
-            placeholder={t('fields.icon.search_placeholder')}
+            placeholder={__("Search 48 core icons…")}
             onChange={e => setQuery(e.target.value)}
             className="h-7 w-full rounded border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-sky-600"
           />
           {filtered.length === 0 ? (
-            <p className="text-xs text-zinc-500">{t('fields.icon.no_matches')}</p>
+            <p className="text-xs text-zinc-500">{__("No matching icon found.")}</p>
           ) : (
             <div className="grid max-h-48 grid-cols-6 gap-1 overflow-y-auto sm:grid-cols-8">
               {filtered.map(icon => {

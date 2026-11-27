@@ -34,6 +34,7 @@ pub(crate) fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'stat
     }
     let is_html = name.ends_with(".html");
     let is_json = name.ends_with(".json");
+    let is_l10n = name.ends_with(".pot") || name.ends_with(".po") || name.ends_with(".mo");
     let safe_file_name = name
         .bytes()
         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.'));
@@ -42,7 +43,8 @@ pub(crate) fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'stat
     }
     match parent {
         "" | "template-part" | "page-layouts" if is_html => Ok(V2_MAX_TEXT_BYTES),
-        "patterns" | "locales" if is_json => Ok(V2_MAX_TEXT_BYTES),
+        "patterns" if is_json => Ok(V2_MAX_TEXT_BYTES),
+        "languages" if is_l10n => Ok(1024 * 1024),
         _ if rel_path.starts_with("assets/") => {
             if !valid_asset_path(rel_path) {
                 return Err("Đường dẫn assets theme v3 không đúng schema D01.");

@@ -14,7 +14,7 @@ export const GalleryControl: React.FC<{
   onChange: (nextIds: string[]) => void;
   onApiError: (error: unknown, fallback: string) => void;
 }> = ({ field, value, csrfToken, disabled = false, onChange, onApiError }) => {
-  const { t, tCount } = useI18n();
+  const { __, _x, _n } = useI18n();
   const [pickerOpen, setPickerOpen] = useState(false);
   const ids = Array.isArray(value)
     ? value.filter((v): v is string => typeof v === 'string' && v.length > 0)
@@ -41,7 +41,7 @@ export const GalleryControl: React.FC<{
         <FieldLabelHeader
           label={field.label}
           required={field.required}
-          badge={tCount('fields.gallery.count', ids.length, { max: maxItems })}
+          badge={_n("{{count}} / {{max}} item", "{{count}} / {{max}} items", ids.length, { max: maxItems })}
         />
         <div className="flex items-center gap-1.5">
           <AdminButton
@@ -50,7 +50,7 @@ export const GalleryControl: React.FC<{
             disabled={disabled || ids.length >= maxItems}
             onClick={() => setPickerOpen(true)}
           >
-            {ids.length ? t('fields.gallery.edit') : t('fields.gallery.pick')}
+            {ids.length ? __("Edit gallery") : _x("Select media", "fields.gallery")}
           </AdminButton>
           {ids.length > 0 && (
             <AdminButton
@@ -59,7 +59,7 @@ export const GalleryControl: React.FC<{
               disabled={disabled}
               onClick={() => onChange([])}
             >
-              {t('fields.common.clear')}
+              {__("Clear")}
             </AdminButton>
           )}
         </div>
@@ -67,7 +67,7 @@ export const GalleryControl: React.FC<{
 
       {ids.length === 0 ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/70 px-3 py-4 text-center text-xs text-zinc-500">
-          {t('fields.gallery.empty')}
+          {__("No media items selected yet.")}
         </div>
       ) : (
         <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
@@ -95,7 +95,7 @@ export const GalleryControl: React.FC<{
                   <button
                     type="button"
                     disabled={disabled || idx === 0}
-                    aria-label={t('fields.common.move_up')}
+                    aria-label={_x("Move up", "fields.common")}
                     onClick={() => move(idx, -1)}
                     className="rounded px-1 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-100 disabled:opacity-35"
                   >
@@ -104,7 +104,7 @@ export const GalleryControl: React.FC<{
                   <button
                     type="button"
                     disabled={disabled || idx === ids.length - 1}
-                    aria-label={t('fields.common.move_down')}
+                    aria-label={_x("Move down", "fields.common")}
                     onClick={() => move(idx, 1)}
                     className="rounded px-1 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-100 disabled:opacity-35"
                   >
@@ -113,7 +113,7 @@ export const GalleryControl: React.FC<{
                   <button
                     type="button"
                     disabled={disabled}
-                    aria-label={t('fields.common.remove')}
+                    aria-label={__("Remove")}
                     onClick={() => remove(idx)}
                     className="rounded px-1 py-0.5 text-[11px] text-rose-600 hover:bg-rose-50 disabled:opacity-35"
                   >

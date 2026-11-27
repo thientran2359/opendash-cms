@@ -101,6 +101,7 @@ pub(crate) async fn render_entry_response_with_cache(
     };
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: site.timezone.clone(),
+        ..Default::default()
     };
     let entry_media_ids = content_render::collect_entry_media_ids(&[&entry], &effective_schema);
     let (archive_path, mut proj_map, entry_media_map) = {
@@ -300,15 +301,18 @@ pub(crate) async fn media_response(
     id: &str,
     thumbnail: bool,
 ) -> ApiResult<Response> {
-    if !media::valid_media_id(id) || !public_content::media_is_referenced(db, id).await? {
+    if !media::valid_media_id(id) {
         return Err(ApiError::not_found("Ảnh công khai không tồn tại."));
     }
     let read_lease = store.acquire_read_lease(id).await?;
     let asset = media::find(db, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Ảnh công khai không tồn tại."))?;
-    if thumbnail && asset.kind == "video" {
-        return Err(ApiError::not_found("Video không có thumbnail."));
+    if !public_content::media_is_referenced(db, id).await? {
+        return Err(ApiError::not_found("Ảnh công khai không tồn tại."));
+    }
+    if thumbnail && asset.kind != "image" {
+        return Err(ApiError::not_found("Ảnh công khai không tồn tại."));
     }
     if !thumbnail && asset.kind == "video" {
         let path = store.canonical_path(id, &asset.extension)?;

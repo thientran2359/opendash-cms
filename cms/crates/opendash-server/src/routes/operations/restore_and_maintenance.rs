@@ -160,6 +160,10 @@ pub async fn activate_recovery(
 
     crate::config::persist_clear_safe_mode(paths)?;
     state.recovery.set_safe_mode(false);
+    let _ = state
+        .catalog_registry
+        .reload_site_with_active_packages(&state.db, paths)
+        .await;
     let smtp = crate::storage::smtp::get_smtp_settings(&state.db).await?;
 
     Ok((

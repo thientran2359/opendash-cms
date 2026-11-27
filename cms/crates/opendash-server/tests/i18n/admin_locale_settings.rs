@@ -616,3 +616,119 @@ async fn admin_i18n_bootstrap_settings_http_scope_and_restart() {
     bootstrap(&client, &restarted, "vi", "vi").await;
     auth_scope(&client, &restarted, true).await;
 }
+
+fn encode_base64(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 63) as usize] as char);
+        out.push(TABLE[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+#[tokio::test]
+async fn s05_language_pack_upload_catalog_etag_and_delete() {
+    let root = SiteRoot::new();
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let server = Server::start(&root.0, &client).await;
+    let admin = Admin::setup(&client, &server).await;
+
+    // 1. Admin catalog ETag + 304 Not Modified
+    let cat_resp = client
+        .get(server.url("/api/i18n/admin/catalog?locale=vi"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cat_resp.status(), StatusCode::OK);
+    let cat_etag = cat_resp.headers()[header::ETAG]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let cat_304 = client
+        .get(server.url("/api/i18n/admin/catalog?locale=vi"))
+        .header(header::IF_NONE_MATCH, &cat_etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cat_304.status(), StatusCode::NOT_MODIFIED);
+
+    // 2. List packs
+    let packs_resp = client
+        .get(server.url("/api/admin/l10n/packs"))
+        .header(header::COOKIE, &admin.cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(packs_resp.status(), StatusCode::OK);
+    let packs_json: Value = packs_resp.json().await.unwrap();
+    assert!(
+        packs_json["domains"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["domain"] == "opendash")
+    );
+
+    // 3. Upload custom .po for `fr`
+    let po_content = concat!(
+        "msgid \"\"\n",
+        "msgstr \"Content-Type: text/plain; charset=UTF-8\\nPlural-Forms: nplurals=2; plural=(n > 1);\\n\"\n\n",
+        "msgid \"Settings\"\n",
+        "msgstr \"Paramètres\"\n"
+    );
+    let up = client
+        .post(server.url("/api/admin/l10n/packs/upload"))
+        .header(header::COOKIE, &admin.cookie)
+        .header(header::ORIGIN, &server.base)
+        .header("X-CSRF-Token", &admin.csrf)
+        .json(&json!({
+            "scope": "core",
+            "domain": "opendash",
+            "locale": "fr",
+            "filename": "fr.po",
+            "content_base64": encode_base64(po_content.as_bytes()),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(up.status(), StatusCode::OK);
+
+    // 4. Verify `fr` appears in catalog endpoint with translated string
+    let fr_cat = client
+        .get(server.url("/api/i18n/admin/catalog?locale=fr"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fr_cat.status(), StatusCode::OK);
+    let fr_json: Value = fr_cat.json().await.unwrap();
+    assert_eq!(fr_json["entries"]["Settings"], "Paramètres");
+
+    // 5. Delete override
+    let del = client
+        .delete(server.url("/api/admin/l10n/packs/core/opendash/fr"))
+        .header(header::COOKIE, &admin.cookie)
+        .header(header::ORIGIN, &server.base)
+        .header("X-CSRF-Token", &admin.csrf)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), StatusCode::OK);
+}

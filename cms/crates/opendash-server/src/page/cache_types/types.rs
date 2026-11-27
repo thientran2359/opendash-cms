@@ -1,7 +1,5 @@
 use super::*;
 
-use super::*;
-
 pub(crate) use crate::{
     error::{ApiError, ApiResult},
     public_context::CanonicalUrlBuilder,
@@ -719,7 +717,7 @@ pub fn render_builder_with_budget_and_base_path(
                                         form,
                                         &props.submit_label,
                                         is_preview,
-                                        l10n,
+                                        &l10n,
                                     );
                                     if !is_preview {
                                         has_active_contact_form = true;
@@ -781,6 +779,7 @@ pub fn render_builder_with_budget_and_base_path(
                                             let fmt_cfg =
                                                 crate::template_sec::RenderFormattingConfig {
                                                     timezone: state.timezone.clone(),
+                                                    ..Default::default()
                                                 };
                                             let menus_opt =
                                                 (!state.menus.is_empty()).then_some(&state.menus);

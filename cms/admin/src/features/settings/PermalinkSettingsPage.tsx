@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { useI18n, tStatic } from '../../i18n/index.tsx';
+import { useI18n, __, _x } from '../../i18n/index.tsx';
 import { ApiClientError, type PermalinkConflictItem } from '../../api/client.ts';
 import {
   getPermalinkSettings, savePermalinkSettings,
@@ -88,11 +88,11 @@ function safeServerPath(path: string | null): string | null {
 }
 
 function errorText(reason: unknown): string {
-  return reason instanceof Error ? reason.message : tStatic('permalink.network_error');
+  return reason instanceof Error ? reason.message : _x("Unable to connect to the server.", "permalink.network_error");
 }
 
 export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiError, onDirtyChange }: Props) {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const actorId = user?.id ?? null;
   const key = actorId === null ? null : `${siteInstanceId}:${actorId}`;
   const onApiErrorRef = useRef(onApiError);
@@ -237,7 +237,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     setStale(false);
     setError(null);
     setConflicts([]);
-    setNotice(tStatic('permalink.discarded'));
+    setNotice(__("Unsaved changes discarded; using the current server settings."));
   }
 
   function discardStaleAndReload() {
@@ -249,7 +249,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     setCustomMode(false);
     setStale(false);
     setConflicts([]);
-    setNotice(tStatic('permalink.discard_reload'));
+    setNotice(__("Draft discarded; loading the latest server version."));
     void load();
   }
 
@@ -276,16 +276,16 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
         setCustomMode(!PRESETS.some(item => item.value === result.post_structure));
       }
       setStale(false);
-      setNotice(tStatic('permalink.saved'));
+      setNotice(__("Permalinks saved. Public URLs have been updated together on the server."));
       // Refresh URL examples only after successful persistence.
       void load();
     } catch (reason) {
       if (!mounted.current) return;
       if (reason instanceof ApiClientError && reason.status === 412) {
         setStale(true);
-        setError(tStatic('permalink.stale_error'));
+        setError(__("Settings were changed in another session (412). Your draft is retained; load the latest version and compare before saving again."));
       } else if (reason instanceof ApiClientError && reason.status === 409) {
-        setError(tStatic('permalink.conflict_error', { message: errorText(reason) }));
+        setError(__("URL conflict (409). Server response: {{message}}. No changes were saved.", { message: errorText(reason) }));
         setConflicts(reason.conflicts ?? []);
       } else {
         setError(errorText(reason));
@@ -333,20 +333,20 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
   return (
     <section className="min-w-0 space-y-5" data-testid="permalink-settings" aria-labelledby="permalink-heading">
       <header>
-        <h2 id="permalink-heading" className="text-base font-semibold text-zinc-950">{t('permalink.heading')}</h2>
+        <h2 id="permalink-heading" className="text-base font-semibold text-zinc-950">{__("Permalinks")}</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          {t('permalink.description')}
+          {__("Choose how public URLs are generated for posts, custom post types and taxonomies. Current URLs change only after a successful save. Pages always use the root path (/<slug>); patterns are always private.")}
         </p>
       </header>
-      {loading && <p role="status" className="text-sm text-zinc-500">{t('permalink.loading')}</p>}
+      {loading && <p role="status" className="text-sm text-zinc-500">{__("Loading permalink settings…")}</p>}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {conflicts.length > 0 && (
         <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-900" data-testid="permalink-conflicts">
-          <p className="font-semibold">{t('permalink.conflicts')}</p>
+          <p className="font-semibold">{__("Conflicting URLs (up to 20 items from the server):")}</p>
           <ul className="mt-2 list-inside list-disc space-y-1 break-all font-mono text-xs">
             {conflicts.map((item, index) => (
               <li key={`${item.path}:${item.new_target}:${index}`}>
-                <span className="font-semibold">{item.path}</span> — {t('permalink.conflict_item', { newTarget: item.new_target, existingTarget: item.existing_target })}
+                <span className="font-semibold">{item.path}</span> — {__("{{newTarget}} conflicts with {{existingTarget}}", { newTarget: item.new_target, existingTarget: item.existing_target })}
               </li>
             ))}
           </ul>
@@ -355,31 +355,31 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {stale && (
         <AdminAlert tone="warning" className="space-y-2">
-          <p>{t('permalink.stale_warning')}</p>
+          <p>{__("Server settings are newer than the version you started editing. Your form is retained and Save is temporarily disabled to prevent overwriting.")}</p>
           <div className="flex flex-wrap gap-2">
             <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={() => void load()}>
-              {t('permalink.check_latest')}
+              {__("Check latest version")}
             </AdminButton>
             <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={discardStaleAndReload}>
-              {t('permalink.discard_latest')}
+              {__("Discard draft and use latest version")}
             </AdminButton>
           </div>
         </AdminAlert>
       )}
       {!loading && (!saved || !draft) && (
-        <AdminButton variant="primary" onClick={() => void load()}>{t('permalink.retry')}</AdminButton>
+        <AdminButton variant="primary" onClick={() => void load()}>{__("Try reloading")}</AdminButton>
       )}
       {saved && draft && (
         <form onSubmit={event => void save(event)} className="space-y-6">
           <AdminTabs
             tabs={[
-              { id: 'posts', label: t('permalink.tab_posts'), dirty: postsDirty },
-              { id: 'cpts', label: t('permalink.tab_cpts'), badge: typeKeys.length, dirty: cptsDirty },
-              { id: 'taxonomies', label: t('permalink.tab_taxonomies'), badge: taxonomyKeys.length, dirty: taxonomiesDirty },
+              { id: 'posts', label: __("Post URLs"), dirty: postsDirty },
+              { id: 'cpts', label: __("Custom post types"), badge: typeKeys.length, dirty: cptsDirty },
+              { id: 'taxonomies', label: _x("Taxonomies", "permalink.tab_taxonomies"), badge: taxonomyKeys.length, dirty: taxonomiesDirty },
             ]}
             activeId={activeTab}
             onChange={setActiveTab}
-            ariaLabel={t('permalink.tabs_label')}
+            ariaLabel={__("Permalink configuration sections")}
             testId="permalink-tabs"
             idPrefix="permalink"
           />
@@ -390,7 +390,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
             labelledBy="permalink-tab-posts"
             className="space-y-2"
           >
-            <label htmlFor="permalink-post-preset" className="block text-sm font-medium text-zinc-800">{t('permalink.post_structure')}</label>
+            <label htmlFor="permalink-post-preset" className="block text-sm font-medium text-zinc-800">{__("Post URL structure")}</label>
             <select id="permalink-post-preset" className="h-9 w-full max-w-2xl rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
               value={preset} disabled={loading} onChange={event => {
                 if (event.target.value === CUSTOM) {
@@ -404,18 +404,18 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                   updateDraft({ ...draft, post_structure: event.target.value });
                 }
               }}>
-              {PRESETS.map(item => <option key={item.value} value={item.value}>{t(item.labelKey)}</option>)}
-              <option value={CUSTOM}>{t('permalink.custom')}</option>
+              {PRESETS.map(item => <option key={item.value} value={item.value}>{__(item.labelKey)}</option>)}
+              <option value={CUSTOM}>{__("Custom")}</option>
             </select>
             {customMode && (
               <div className="space-y-2">
-                <label htmlFor="permalink-post-custom" className="block text-xs font-medium text-zinc-700">{t('permalink.custom_format')}</label>
+                <label htmlFor="permalink-post-custom" className="block text-xs font-medium text-zinc-700">{__("Custom format")}</label>
                 <input id="permalink-post-custom" className="h-9 w-full max-w-2xl rounded-md border border-zinc-300 bg-white px-3 font-mono text-sm text-zinc-900"
                   value={draft.post_structure} maxLength={512} disabled={loading}
                   onChange={event => updateDraft({ ...draft, post_structure: event.target.value })} />
               </div>
             )}
-            <div className="flex flex-wrap gap-1.5" aria-label={t('permalink.add_token')}>
+            <div className="flex flex-wrap gap-1.5" aria-label={__("Add a token to the permalink structure")}>
               {TOKENS.map(token => (
                 <AdminButton key={token} variant="secondary" size="sm" disabled={loading}
                   onClick={() => {
@@ -426,7 +426,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                 </AdminButton>
               ))}
             </div>
-            <p className="text-xs text-zinc-500">{t('permalink.token_help')}</p>
+            <p className="text-xs text-zinc-500">{__("Supports kebab-case literals and the tokens %category%, %postname%, %post_id% (no day, month or year).")}</p>
           </AdminTabPanel>
 
           <AdminTabPanel
@@ -434,9 +434,9 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
             id="permalink-panel-cpts"
             labelledBy="permalink-tab-cpts"
           >
-            <h3 className="text-sm font-semibold text-zinc-900">{t('permalink.cpt_heading')}</h3>
-            <p className="mb-3 mt-0.5 text-xs text-zinc-500">{t('permalink.cpt_help')}</p>
-            {typeKeys.length === 0 && <p className="text-sm text-zinc-500">{t('permalink.no_cpt')}</p>}
+            <h3 className="text-sm font-semibold text-zinc-900">{__("Custom post type bases")}</h3>
+            <p className="mb-3 mt-0.5 text-xs text-zinc-500">{__("Choose the inherited provider default (if available) or the system default (/{key}/{slug}). A custom base has 1–3 kebab-case segments with no leading or trailing /.")}</p>
+            {typeKeys.length === 0 && <p className="text-sm text-zinc-500">{__("No configurable public custom post types.")}</p>}
             <div className="grid gap-3.5 sm:grid-cols-2">
               {typeKeys.map(keyName => {
                 const available = typeOptions.find(type => type.descriptor.key === keyName);
@@ -446,29 +446,29 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                 return <div key={keyName} className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5 text-sm text-zinc-800">
                   <label htmlFor={`permalink-cpt-${keyName}`} className="font-medium text-zinc-900">
                     {available?.descriptor.label ?? keyName} <span className="font-normal text-zinc-500">({keyName})</span>
-                    {!available && <span className="ml-2 text-xs text-amber-700">{t('permalink.inactive')}</span>}
+                    {!available && <span className="ml-2 text-xs text-amber-700">{__("Inactive, retaining saved settings")}</span>}
                   </label>
                   <input id={`permalink-cpt-${keyName}`} className="mt-1.5 h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-sm text-zinc-900"
-                    aria-label={t('permalink.cpt_aria', { key: keyName })} disabled={!available || loading}
+                    aria-label={__("CPT base {{key}}", { key: keyName })} disabled={!available || loading}
                     value={draft.content_type_bases[keyName] ?? ''}
                     onChange={event => updateBaseChoice('content_type_bases', keyName, event.target.value || null)}
-                    placeholder={t('permalink.cpt_placeholder')} />
+                    placeholder={__("e.g. projects")} />
                   <p className="mt-1 text-xs text-zinc-500" data-testid={`cpt-base-mode-${keyName}`}>
-                    {choice === 'inherit' ? t('permalink.cpt_inherit_help')
-                      : choice === 'system' ? t('permalink.cpt_system_help')
-                        : t('permalink.custom_base')}
+                    {choice === 'inherit' ? __("Inheriting the provider default; otherwise using the system default (/{key}/{slug}).")
+                      : choice === 'system' ? __("System default (/{key}/{slug}).")
+                        : __("Using a custom site base.")}
                   </p>
                   {available && <div className="mt-2.5 flex flex-wrap gap-1.5">
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'system'}
                       onClick={() => updateBaseChoice('content_type_bases', keyName, null)}
-                      aria-label={t('permalink.cpt_system_aria', { name: keyName })}>{t('permalink.cpt_system')}</AdminButton>
+                      aria-label={__("System default (/{key}/{slug}) for CPT {{name}}", { name: keyName })}>{__("System default (/{key}/{slug})")}</AdminButton>
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'inherit'}
                       onClick={() => updateBaseChoice('content_type_bases', keyName, undefined)}
-                      aria-label={t('permalink.cpt_inherit_aria', { key: keyName })}>{t('permalink.inherit')}</AdminButton>
+                      aria-label={__("Inherit default for CPT {{key}}", { key: keyName })}>{__("Inherit default")}</AdminButton>
                   </div>}
                   {hasPendingChange && <AdminButton variant="ghost" size="sm" disabled={loading} onClick={() => revertInactiveBase('content_type_bases', keyName)}
                     className="mt-1.5 text-od-accent">
-                    {t('permalink.discard_cpt')}
+                    {__("Discard unsaved changes for this CPT")}
                   </AdminButton>}
                 </div>;
               })}
@@ -480,9 +480,9 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
             id="permalink-panel-taxonomies"
             labelledBy="permalink-tab-taxonomies"
           >
-            <h3 className="text-sm font-semibold text-zinc-900">{t('permalink.taxonomy_heading')}</h3>
-            <p className="mb-3 mt-0.5 text-xs text-zinc-500">{t('permalink.taxonomy_help')}</p>
-            {taxonomyKeys.length === 0 && <p className="text-sm text-zinc-500">{t('permalink.no_taxonomy')}</p>}
+            <h3 className="text-sm font-semibold text-zinc-900">{__("Taxonomy bases")}</h3>
+            <p className="mb-3 mt-0.5 text-xs text-zinc-500">{__("Choose the inherited provider default (if available) or the system default (/{kind}/{slug}). Hierarchical term paths cannot be configured.")}</p>
+            {taxonomyKeys.length === 0 && <p className="text-sm text-zinc-500">{__("No configurable public taxonomies.")}</p>}
             <div className="grid gap-3.5 sm:grid-cols-2">
               {taxonomyKeys.map(keyName => {
                 const available = taxonomyOptions.find(type => type.key === keyName);
@@ -492,40 +492,40 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                 return <div key={keyName} className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5 text-sm text-zinc-800">
                   <label htmlFor={`permalink-taxonomy-${keyName}`} className="font-medium text-zinc-900">
                     {available?.label ?? keyName} <span className="font-normal text-zinc-500">({keyName})</span>
-                    {!available && <span className="ml-2 text-xs text-amber-700">{t('permalink.inactive')}</span>}
+                    {!available && <span className="ml-2 text-xs text-amber-700">{__("Inactive, retaining saved settings")}</span>}
                   </label>
                   <input id={`permalink-taxonomy-${keyName}`} className="mt-1.5 h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-sm text-zinc-900"
-                    aria-label={t('permalink.taxonomy_aria', { key: keyName })} disabled={!available || loading}
+                    aria-label={__("Taxonomy base {{key}}", { key: keyName })} disabled={!available || loading}
                     value={draft.taxonomy_bases[keyName] ?? ''}
                     onChange={event => updateBaseChoice('taxonomy_bases', keyName, event.target.value || null)}
-                    placeholder={t('permalink.taxonomy_placeholder')} />
+                    placeholder={__("e.g. genres")} />
                   <p className="mt-1 text-xs text-zinc-500" data-testid={`taxonomy-base-mode-${keyName}`}>
-                    {choice === 'inherit' ? t('permalink.taxonomy_inherit_help')
-                      : choice === 'system' ? t('permalink.taxonomy_system_help')
-                        : t('permalink.custom_base')}
+                    {choice === 'inherit' ? __("Inheriting the provider default; otherwise using the system default (/{kind}/{slug}).")
+                      : choice === 'system' ? __("System default (/{kind}/{slug}).")
+                        : __("Using a custom site base.")}
                   </p>
                   {available && <div className="mt-2.5 flex flex-wrap gap-1.5">
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'system'}
                       onClick={() => updateBaseChoice('taxonomy_bases', keyName, null)}
-                      aria-label={t('permalink.taxonomy_system_aria', { name: keyName })}>{t('permalink.taxonomy_system')}</AdminButton>
+                      aria-label={__("System default (/{kind}/{slug}) for taxonomy {{name}}", { name: keyName })}>{__("System default (/{kind}/{slug})")}</AdminButton>
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'inherit'}
                       onClick={() => updateBaseChoice('taxonomy_bases', keyName, undefined)}
-                      aria-label={t('permalink.taxonomy_inherit_aria', { key: keyName })}>{t('permalink.inherit')}</AdminButton>
+                      aria-label={__("Inherit default for taxonomy {{key}}", { key: keyName })}>{__("Inherit default")}</AdminButton>
                   </div>}
                   {hasPendingChange && <AdminButton variant="ghost" size="sm" disabled={loading} onClick={() => revertInactiveBase('taxonomy_bases', keyName)}
                     className="mt-1.5 text-od-accent">
-                    {t('permalink.discard_taxonomy')}
+                    {__("Discard unsaved changes for this taxonomy")}
                   </AdminButton>}
                 </div>;
               })}
             </div>
           </AdminTabPanel>
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4" data-testid="permalink-server-preview">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('permalink.preview_heading')}</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{__("Current server URLs")}</h3>
             <p className="mt-1 text-xs text-zinc-600">
-              {t('permalink.preview_help')}
+              {__("These examples come from the public_url field in the API. While the form is unsaved, these remain the active URLs.")}
             </p>
-            {examples.length === 0 && <p className="mt-2 text-sm text-zinc-500">{t('permalink.no_examples')}</p>}
+            {examples.length === 0 && <p className="mt-2 text-sm text-zinc-500">{__("No published entries to show example URLs.")}</p>}
             {examples.map(item => <p key={item.label + item.path} className="mt-1.5 break-all text-sm">
               <span className="mr-2 font-medium text-zinc-800">{item.label}:</span>
               <a href={item.path} target="_blank" rel="noopener noreferrer" className="text-od-accent underline">{item.path}</a>
@@ -533,12 +533,12 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
           </div>
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
             <AdminButton type="submit" variant="primary" disabled={!csrfToken || !dirty || stale || saving || loading}>
-              {saving ? t('permalink.saving') : t('permalink.save')}
+              {saving ? __("Saving…") : __("Save permalinks")}
             </AdminButton>
             <AdminButton variant="secondary" disabled={!dirty || stale || saving} onClick={resetDraft}>
-              {t('permalink.discard')}
+              {__("Discard changes")}
             </AdminButton>
-            <span className="text-xs text-zinc-500">{dirty ? t('permalink.version_unsaved', { version: saved.version }) : t('permalink.version_synced', { version: saved.version })}</span>
+            <span className="text-xs text-zinc-500">{dirty ? __("Version {{version}} · Unsaved", { version: saved.version }) : __("Version {{version}} · Synced", { version: saved.version })}</span>
           </div>
         </form>
       )}

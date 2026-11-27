@@ -110,18 +110,20 @@ pub fn strip_richtext_to_plain(html: &str) -> String {
 }
 
 pub(super) fn plain_text_from_field(
-    definition: &ContentFieldDefinition,
+    definition: &opendash_core::field_schema::FieldSpec,
     value: &Value,
 ) -> Option<String> {
     let raw = match (definition.field_type, value) {
         (
-            ContentFieldType::ShortText | ContentFieldType::LongText | ContentFieldType::RichText,
+            opendash_core::field_schema::FieldType::Text
+            | opendash_core::field_schema::FieldType::Textarea
+            | opendash_core::field_schema::FieldType::Richtext,
             Value::String(s),
         ) => s.as_str(),
         _ => return None,
     };
     let clean = match definition.field_type {
-        ContentFieldType::RichText => {
+        opendash_core::field_schema::FieldType::Richtext => {
             let text = if opendash_core::builder_blocks::contains_blocks(raw) {
                 opendash_core::builder_blocks::extract_visible_text(raw)
             } else {
@@ -129,7 +131,8 @@ pub(super) fn plain_text_from_field(
             };
             text.split_whitespace().collect::<Vec<_>>().join(" ")
         }
-        ContentFieldType::ShortText | ContentFieldType::LongText => {
+        opendash_core::field_schema::FieldType::Text
+        | opendash_core::field_schema::FieldType::Textarea => {
             raw.split_whitespace().collect::<Vec<_>>().join(" ")
         }
         _ => String::new(),
@@ -165,7 +168,7 @@ pub(super) fn truncate_excerpt(text: &str) -> String {
 pub(super) fn build_entry_view_with_defs(
     record: &ContentEntryRecord,
     type_key: &str,
-    ordered_defs: &[&ContentFieldDefinition],
+    ordered_defs: &[&opendash_core::field_schema::FieldSpec],
     url: Option<String>,
     terms: &[PublicTermView],
     eligible_public_taxonomies: &[String],
@@ -184,17 +187,18 @@ pub(super) fn build_entry_view_with_defs(
 
     for &definition in ordered_defs {
         let value = record.values.get(&definition.key).unwrap_or(&Value::Null);
-        let extracted_rich = if definition.field_type == ContentFieldType::RichText {
-            value.as_str().map(|s| {
-                if opendash_core::builder_blocks::contains_blocks(s) {
-                    opendash_core::builder_blocks::extract_visible_text(s)
-                } else {
-                    s.to_owned()
-                }
-            })
-        } else {
-            None
-        };
+        let extracted_rich =
+            if definition.field_type == opendash_core::field_schema::FieldType::Richtext {
+                value.as_str().map(|s| {
+                    if opendash_core::builder_blocks::contains_blocks(s) {
+                        opendash_core::builder_blocks::extract_visible_text(s)
+                    } else {
+                        s.to_owned()
+                    }
+                })
+            } else {
+                None
+            };
         if let Some(ref clean) = extracted_rich {
             public_values.insert(definition.key.clone(), Value::String(clean.clone()));
         } else {
@@ -212,67 +216,73 @@ pub(super) fn build_entry_view_with_defs(
         }
 
         let kind = match definition.field_type {
-            ContentFieldType::ShortText => "short_text",
-            ContentFieldType::LongText => "long_text",
-            ContentFieldType::RichText => "rich_text",
-            ContentFieldType::Number => "number",
-            ContentFieldType::Boolean => "boolean",
-            ContentFieldType::Date => "date",
-            ContentFieldType::Select => "select",
-            ContentFieldType::Image => "image",
-            ContentFieldType::Gallery => "gallery",
+            opendash_core::field_schema::FieldType::Text => "text",
+            opendash_core::field_schema::FieldType::Textarea => "textarea",
+            opendash_core::field_schema::FieldType::Richtext => "richtext",
+            opendash_core::field_schema::FieldType::Number => "number",
+            opendash_core::field_schema::FieldType::Boolean => "boolean",
+            opendash_core::field_schema::FieldType::Date => "date",
+            opendash_core::field_schema::FieldType::Select => "select",
+            opendash_core::field_schema::FieldType::Media => "media",
+            opendash_core::field_schema::FieldType::Gallery => "gallery",
+            _ => "text",
         };
-        let (image_url, image_media) = if definition.field_type == ContentFieldType::Image {
-            if let Some(row) = value
-                .as_str()
-                .filter(|id| valid_media_id(id))
-                .and_then(|id| media_map.get(id))
-            {
-                (
-                    Some(format!("/media/{}/file?v={}", row.id, row.version.max(1))),
-                    Some(crate::field_hydrate::hydrate_media_row_for_template(
-                        row, false,
-                    )),
-                )
-            } else {
-                (media_url(value), None)
-            }
-        } else {
-            (None, None)
-        };
-        if cover_url.is_none() {
-            cover_url = image_url.clone();
-            cover_media = image_media.clone();
-        }
-        let (gallery_urls, gallery_media) = if definition.field_type == ContentFieldType::Gallery {
-            let mut urls = Vec::new();
-            let mut hydrated = Vec::new();
-            for item in value.as_array().into_iter().flatten() {
-                if let Some(row) = item
+        let (image_url, image_media) =
+            if definition.field_type == opendash_core::field_schema::FieldType::Media {
+                if let Some(row) = value
                     .as_str()
                     .filter(|id| valid_media_id(id))
                     .and_then(|id| media_map.get(id))
                 {
-                    urls.push(format!("/media/{}/file?v={}", row.id, row.version.max(1)));
-                    hydrated.push(crate::field_hydrate::hydrate_media_row_for_template(
-                        row, false,
-                    ));
-                } else if let Some(u) = media_url(item) {
-                    urls.push(u);
+                    (
+                        Some(format!("/media/{}/file?v={}", row.id, row.version.max(1))),
+                        Some(crate::field_hydrate::hydrate_media_row_for_template(
+                            row, false,
+                        )),
+                    )
+                } else {
+                    (media_url(value), None)
                 }
-            }
-            (urls, hydrated)
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        let text = match definition.field_type {
-            ContentFieldType::Image | ContentFieldType::Gallery => String::new(),
-            ContentFieldType::Boolean if value.is_boolean() => if value == &Value::Bool(true) {
-                l10n.yes
             } else {
-                l10n.no
+                (None, None)
+            };
+        if cover_url.is_none() {
+            cover_url = image_url.clone();
+            cover_media = image_media.clone();
+        }
+        let (gallery_urls, gallery_media) =
+            if definition.field_type == opendash_core::field_schema::FieldType::Gallery {
+                let mut urls = Vec::new();
+                let mut hydrated = Vec::new();
+                for item in value.as_array().into_iter().flatten() {
+                    if let Some(row) = item
+                        .as_str()
+                        .filter(|id| valid_media_id(id))
+                        .and_then(|id| media_map.get(id))
+                    {
+                        urls.push(format!("/media/{}/file?v={}", row.id, row.version.max(1)));
+                        hydrated.push(crate::field_hydrate::hydrate_media_row_for_template(
+                            row, false,
+                        ));
+                    } else if let Some(u) = media_url(item) {
+                        urls.push(u);
+                    }
+                }
+                (urls, hydrated)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+        let text = match definition.field_type {
+            opendash_core::field_schema::FieldType::Media
+            | opendash_core::field_schema::FieldType::Gallery => String::new(),
+            opendash_core::field_schema::FieldType::Boolean if value.is_boolean() => {
+                if value == &Value::Bool(true) {
+                    l10n.yes.as_ref()
+                } else {
+                    l10n.no.as_ref()
+                }
+                .to_string()
             }
-            .to_string(),
             _ => match (extracted_rich, value) {
                 (Some(clean), _) => clean,
                 (None, Value::Null) => String::new(),
@@ -356,8 +366,8 @@ pub(super) fn build_entry_view_with_defs(
         published_at: record.published_at.clone(),
         excerpt,
         reading_time_minutes,
-        values: public_values,
-        fields,
+        fields: public_values,
+        field_list: fields,
         cover_url,
         cover_media,
         terms: terms_map,
@@ -401,7 +411,7 @@ pub fn collect_entry_media_ids(
     for record in records {
         for fe in effective_schema.effective_fields.values() {
             if fe.effective_status != EffectiveFieldStatus::Active
-                || fe.definition.public_exposure != PublicExposure::Public
+                || fe.definition.effective_acl().2 != PublicExposure::Public
             {
                 continue;
             }
@@ -409,12 +419,12 @@ pub fn collect_entry_media_ids(
                 continue;
             };
             match fe.definition.field_type {
-                ContentFieldType::Image => {
+                opendash_core::field_schema::FieldType::Media => {
                     if let Some(id) = val.as_str().filter(|s| valid_media_id(s)) {
                         ids.insert(id.to_owned());
                     }
                 }
-                ContentFieldType::Gallery => {
+                opendash_core::field_schema::FieldType::Gallery => {
                     for item in val.as_array().into_iter().flatten() {
                         if let Some(id) = item.as_str().filter(|s| valid_media_id(s)) {
                             ids.insert(id.to_owned());
@@ -450,10 +460,10 @@ pub fn entry_view_with_url(
     schema: &ContentTypeDefinition,
     url: Option<String>,
 ) -> EntryView {
-    let ordered_defs: Vec<&ContentFieldDefinition> = schema
+    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = schema
         .fields
         .iter()
-        .filter(|d| d.public_exposure == PublicExposure::Public)
+        .filter(|d| d.effective_acl().2 == PublicExposure::Public)
         .collect();
     let empty_media = BTreeMap::new();
     build_entry_view_with_defs(
@@ -516,13 +526,13 @@ pub fn entry_view_with_context_and_media(
         }
     }
 
-    let ordered_defs: Vec<&ContentFieldDefinition> = ordered_keys
+    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = ordered_keys
         .into_iter()
         .filter_map(|key| effective_schema.effective_fields.get(key))
         .filter(|fe| {
             fe.effective_status == EffectiveFieldStatus::Active
-                && fe.definition.public_exposure == PublicExposure::Public
-                && fe.definition.min_view_role <= max_view_role
+                && fe.definition.effective_acl().2 == PublicExposure::Public
+                && fe.definition.effective_acl().0 <= max_view_role
         })
         .map(|fe| &fe.definition)
         .collect();

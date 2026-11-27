@@ -1,5 +1,5 @@
 import { formatNumber } from '../../i18n/format.ts';
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, _x, useI18n } from '../../i18n/index.tsx';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getEffectiveContentTypeTaxonomies,
@@ -134,10 +134,10 @@ export function safePublicPath(path: string | null | undefined): string | null {
 }
 
 function readableError(cause: unknown): string {
-  if (cause instanceof ApiClientError && cause.status === 412) return tStatic("feature.content.entrylistpage.412_the_item_changed_reload_the_list_to_get");
-  if (cause instanceof ApiClientError && cause.status === 403) return tStatic("feature.content.entrylistpage.403_you_do_not_have_permission_to_perform_this");
-  if (cause instanceof ApiClientError && cause.status === 401) return tStatic("feature.content.entrylistpage.401_your_session_is_no_longer_valid");
-  return cause instanceof Error ? cause.message : tStatic("feature.content.entrylistpage.the_request_did_not_complete");
+  if (cause instanceof ApiClientError && cause.status === 412) return __("412 — The item changed. Reload the list to get the latest version.");
+  if (cause instanceof ApiClientError && cause.status === 403) return __("403 — You do not have permission to perform this action.");
+  if (cause instanceof ApiClientError && cause.status === 401) return __("401 — Your session is no longer valid.");
+  return cause instanceof Error ? cause.message : __("The request did not complete.");
 }
 
 export function EntryListPage({
@@ -225,7 +225,7 @@ export function EntryListPage({
   const updateFilter = (patch: Partial<TaxonomyTableQuery>, resetPage = true) => {
     if (bulkBusyRef.current) return;
     if (quickEditRowId !== null && quickEditDirtyRef.current) {
-      if (!window.confirm(tStatic('quick_edit.confirm_discard'))) return;
+      if (!window.confirm(__("Discard unsaved Quick Edit changes?"))) return;
       editorDraftStore.deleteQuickEdit(typeKey, quickEditRowId);
       quickEditDirtyRef.current = false;
       setQuickEditRowId(null);
@@ -306,7 +306,7 @@ export function EntryListPage({
       .catch(cause => {
         if (!active || controller.signal.aborted || scopeRef.current !== scope) return;
         setErrorState({ scope, message: readableError(cause) });
-        if (cause instanceof ApiClientError && cause.status === 401) onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired"));
+        if (cause instanceof ApiClientError && cause.status === 401) onApiError(cause, __("Your session expired."));
       })
       .finally(() => { if (active && scopeRef.current === scope) setLoadingScope(null); });
     return () => { active = false; controller.abort(); };
@@ -340,7 +340,7 @@ export function EntryListPage({
         if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
         setTermsState({ accountScope, categoryEnabled: false, tagEnabled: false,
           definitions: [], byKind: {} });
-        onApiError(cause, tStatic("feature.content.entrylistpage.could_not_load_taxonomy_filters"));
+        onApiError(cause, __("Could not load taxonomy filters."));
       }
     })();
     return () => {
@@ -366,7 +366,7 @@ export function EntryListPage({
       if (controller.signal.aborted || accountScopeRef.current !== accountScope) return;
       if (cause instanceof ApiClientError && cause.status === 401) {
         controller.abort();
-        onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_loading_taxonomy_filters"));
+        onApiError(cause, __("Your session expired while loading taxonomy filters."));
       } else {
         setTermLoadErrors(previous => [...previous.filter(error => !error.startsWith(`${kind}: `)),
           `${kind}: ${readableError(cause)}`]);
@@ -411,7 +411,7 @@ export function EntryListPage({
             if (!authReported) {
               authReported = true;
               controller.abort();
-              onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_loading_term_names"));
+              onApiError(cause, __("Your session expired while loading term names."));
             }
             return;
           }
@@ -443,7 +443,7 @@ export function EntryListPage({
         if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
         setProviderError(readableError(cause));
         if (cause instanceof ApiClientError && cause.status === 401) {
-          onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_loading_provider_columns"));
+          onApiError(cause, __("Your session expired while loading provider columns."));
         }
       });
     return () => { active = false; controller.abort(); };
@@ -484,7 +484,7 @@ export function EntryListPage({
         if (controller.signal.aborted || accountScopeRef.current !== accountScope) return;
         setBulkBlockMessage(readableError(cause));
         if (cause instanceof ApiClientError && cause.status === 401) {
-          onApiError(cause, tStatic('api.taxonomy.load_terms'));
+          onApiError(cause, __("Could not load terms."));
         }
       })
       .finally(() => {
@@ -550,7 +550,7 @@ export function EntryListPage({
         onUnauthorized: cause =>
           onApiError(
             cause,
-            tStatic('feature.content.entrylistpage.your_session_expired_during_the_bulk_update'),
+            __("Your session expired during the bulk update."),
           ),
       });
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
@@ -585,7 +585,7 @@ export function EntryListPage({
   const performBulkTaxonomy = async () => {
     if (!bulkTaxKey) return;
     if ((bulkTaxOp === 'add' || bulkTaxOp === 'remove') && bulkTaxTermIds.length === 0) {
-      setBulkBlockMessage(tStatic('bulk.taxonomy_select_terms_required'));
+      setBulkBlockMessage(__("Choose at least one term for Add or Remove."));
       return;
     }
     const defLabel = terms?.definitions.find(d => d.key === bulkTaxKey)?.label ?? bulkTaxKey;
@@ -630,7 +630,7 @@ export function EntryListPage({
   const performProviderAction = async (column: ProviderColumn, row: EntryTableRow) => {
     if (providerBusyRef.current || bulkBusyRef.current || !csrfToken || !column.action_id ||
       column.owner_kind !== 'plugin') return;
-    if (!window.confirm(tStatic("feature.content.entrylistpage.run_action_value_for_value_value_this_action_may", { value1: column.label, value2: row.title, value3: row.id }))) return;
+    if (!window.confirm(__("Run action {{value1}} for {{value2}} (#{{value3}})? This action may change data.", { value1: column.label, value2: row.title, value3: row.id }))) return;
     const startingScope = scope;
     providerBusyRef.current = true;
     setProviderBusy(true);
@@ -641,7 +641,7 @@ export function EntryListPage({
         typeKey, row, column.owner_id, column.action_id, csrfToken,
       );
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
-      setProviderNotice(response.success ? tStatic("feature.content.entrylistpage.action_completed_for_value", { value1: row.id }) : tStatic("feature.content.entrylistpage.the_action_failed"));
+      setProviderNotice(response.success ? __("Action completed for #{{value1}}.", { value1: row.id }) : __("The action failed."));
       setRetry(old => old + 1);
     } catch (cause) {
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
@@ -655,7 +655,7 @@ export function EntryListPage({
       } else {
         setProviderNotice(`#${row.id}: ${readableError(cause)}`);
         if (cause instanceof ApiClientError && cause.status === 401)
-          onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_running_the_action"));
+          onApiError(cause, __("Your session expired while running the action."));
       }
     } finally {
       providerBusyRef.current = false;
@@ -681,7 +681,7 @@ export function EntryListPage({
   };
   const trashSingleRow = async (row: EntryTableRow) => {
     if (bulkBusyRef.current || !csrfToken || row.capabilities?.trash === false) return;
-    if (!window.confirm(tStatic("entry_lifecycle.confirm_move_to_trash_row", { value1: row.title, value2: row.id }))) return;
+    if (!window.confirm(__("Move \"{{value1}}\" (#{{value2}}) to Trash? You can restore it later from Trash.", { value1: row.title, value2: row.id }))) return;
     const startingScope = scope;
     bulkBusyRef.current = true;
     setBulkBusy(true);
@@ -697,7 +697,7 @@ export function EntryListPage({
     } catch (cause) {
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
       if (cause instanceof ApiClientError && cause.status === 401) {
-        onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_deleting_the_item"));
+        onApiError(cause, __("Your session expired while deleting the item."));
       } else {
         setBulkResults([{ id: row.id, status: 'failed', beforeVersion: row.version, message: `#${row.id}: ${readableError(cause)}` }]);
       }
@@ -712,7 +712,7 @@ export function EntryListPage({
     const needsPublicConfirm = Boolean(row.capabilities?.immediate_public_restore);
     if (
       needsPublicConfirm &&
-      !window.confirm(tStatic("entry_lifecycle.confirm_public_restore_row", { value1: row.title, value2: row.id }))
+      !window.confirm(__("Restore \"{{value1}}\" (#{{value2}})? This content type uses immediate publication and will become public immediately.", { value1: row.title, value2: row.id }))
     ) {
       return;
     }
@@ -728,7 +728,7 @@ export function EntryListPage({
     } catch (cause) {
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
       if (cause instanceof ApiClientError && cause.status === 401) {
-        onApiError(cause, tStatic("api.content.restore_the_entry"));
+        onApiError(cause, __("Could not restore the entry from Trash."));
       } else {
         setBulkResults([{ id: row.id, status: 'failed', beforeVersion: row.version, message: `#${row.id}: ${readableError(cause)}` }]);
       }
@@ -740,7 +740,7 @@ export function EntryListPage({
 
   const purgeSingleRow = async (row: EntryTableRow) => {
     if (bulkBusyRef.current || !csrfToken || user.role !== 'admin' || row.capabilities?.purge === false) return;
-    if (!window.confirm(tStatic("entry_lifecycle.confirm_purge_row", { value1: row.title, value2: row.id }))) return;
+    if (!window.confirm(_x("Permanently delete \"{{value1}}\" (#{{value2}})? This cannot be undone.", "entry_lifecycle.confirm_purge_row", { value1: row.title, value2: row.id }))) return;
     const startingScope = scope;
     bulkBusyRef.current = true;
     setBulkBusy(true);
@@ -751,7 +751,7 @@ export function EntryListPage({
     } catch (cause) {
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
       if (cause instanceof ApiClientError && cause.status === 401) {
-        onApiError(cause, tStatic("api.content.purge_the_entry"));
+        onApiError(cause, __("Could not permanently delete the entry."));
       } else {
         setBulkResults([{ id: row.id, status: 'failed', beforeVersion: row.version, message: `#${row.id}: ${readableError(cause)}` }]);
       }
@@ -764,7 +764,7 @@ export function EntryListPage({
   const editSuffix = queryHash.includes('?') ? queryHash.slice(queryHash.indexOf('?')) : '';
   const renderTermsCell = (row: EntryTableRow, kind: string) => {
     if (!row.term_ids.length) return <span className="text-zinc-400">—</span>;
-    if (!resolved) return <span className="text-xs text-zinc-400">{tStatic("reading.loading")}</span>;
+    if (!resolved) return <span className="text-xs text-zinc-400">{__("Loading…")}</span>;
     const matched = row.term_ids
       .map(id => {
         const term = resolved.labels.get(id);
@@ -772,7 +772,7 @@ export function EntryListPage({
       })
       .filter((item): item is { id: number; name: string } => item !== null);
     if (!matched.length) {
-      return <span className="text-zinc-400">{resolved.failed ? tStatic("feature.content.entrylistpage.could_not_load") : '—'}</span>;
+      return <span className="text-zinc-400">{resolved.failed ? __("Could not load") : '—'}</span>;
     }
     return (
       <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-0.5">
@@ -808,7 +808,7 @@ export function EntryListPage({
                 }
               }}
               className="text-left text-zinc-700 hover:text-od-accent hover:underline disabled:opacity-50"
-              title={tStatic("feature.content.entrylistpage.filter_by_value", { value1: term.name })}
+              title={__("Filter by {{value1}}", { value1: term.name })}
             >
               {term.name}
             </button>
@@ -838,18 +838,18 @@ export function EntryListPage({
   return (
     <section className="w-full min-w-0 space-y-3.5" data-testid={`entry-list-${typeKey}`} data-type-key={typeKey}>
       <div className="flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex flex-wrap items-center gap-1.5" aria-label={tStatic("feature.content.entrylistpage.filter_status")} role="group">
+        <div className="flex flex-wrap items-center gap-1.5" aria-label={__("Filter status")} role="group">
           {statuses.map(status => {
             const count = status === 'trash'
               ? (data?.status_counts.trash ?? 0)
               : (data?.status_counts[status] ?? 0);
             const label = status === 'all'
-              ? tStatic("feature.media.mediapicker.all")
+              ? __("All")
               : status === 'draft'
-                ? tStatic("feature.content.entrylistpage.draft")
+                ? __("Draft")
                 : status === 'published'
-                  ? tStatic("reading.published")
-                  : tStatic("entry_lifecycle.tab_trash");
+                  ? __("Published")
+                  : __("Trash");
             const active = (filters.status ?? 'all') === status;
             return (
               <AdminButton
@@ -873,7 +873,7 @@ export function EntryListPage({
             disabled={bulkBusy || loading}
             onClick={() => setRetry(prev => prev + 1)}
           >
-            {tStatic("reading.reload")}
+            {__("Reload")}
           </AdminButton>
           <AdminButton
             variant="primary"
@@ -881,7 +881,7 @@ export function EntryListPage({
             disabled={bulkBusy}
             onClick={() => onNavigateHash(`${base}/new${editSuffix}`)}
           >
-            {tStatic("feature.content.entrylistpage.add_new")}
+            {__("+ Add new")}
           </AdminButton>
         </div>
       </div>
@@ -895,20 +895,20 @@ export function EntryListPage({
               updateFilter({ q: q || undefined });
             }}>
             <label htmlFor={`entry-table-search-${typeKey}`} className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-zinc-600">
-              <span>{tStatic("feature.content.entrylistpage.search_title_or_slug")}</span>
+              <span>{__("Search title or slug")}</span>
               <input id={`entry-table-search-${typeKey}`} type="search" className={`${control} w-full`}
                 value={searchInput} maxLength={200} disabled={bulkBusy}
                 onChange={event => setSearchInput(event.target.value)}
-                placeholder={tStatic("feature.content.entrylistpage.enter_keywords")} />
+                placeholder={__("Enter keywords…")} />
             </label>
-            <AdminButton type="submit" variant="secondary" disabled={bulkBusy}>{tStatic("feature.content.entrylistpage.search")}</AdminButton>
+            <AdminButton type="submit" variant="secondary" disabled={bulkBusy}>{__("Search")}</AdminButton>
           </form>
 
           {localeState.hasMultipleLocales && (
             <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-              <span>{tStatic("feature.content.entrylistpage.language")}</span>
+              <span>{__("Language")}</span>
               <select
-                aria-label={tStatic("feature.content.entrylistpage.filter_language")}
+                aria-label={__("Filter language")}
                 data-testid="entry-locale-filter"
                 className={`${control} w-full`}
                 value={filters.locale ?? 'all'}
@@ -919,7 +919,7 @@ export function EntryListPage({
                   })
                 }
               >
-                <option value="all">{tStatic("feature.content.entrylistpage.all_languages")}</option>
+                <option value="all">{__("All languages")}</option>
                 {localeState.allLocales.map((loc) => (
                   <option key={loc.code} value={loc.code}>
                     {loc.label} ({loc.code})
@@ -930,8 +930,8 @@ export function EntryListPage({
           )}
 
           {!isTrashView && terms?.categoryEnabled && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-            <span>{tStatic("feature.content.entrylistpage.category")}</span>
-            <select aria-label={tStatic("feature.content.entrylistpage.filter_category")} className={`${control} w-full`}
+            <span>{_x("Category", "feature.content")}</span>
+            <select aria-label={__("Filter category")} className={`${control} w-full`}
               value={filters.category_id ?? ''} disabled={bulkBusy}
               onFocus={() => loadFilterOptions('category')}
               onChange={event => updateFilter({
@@ -939,17 +939,17 @@ export function EntryListPage({
                 taxonomy_key: undefined, term_id: undefined,
                 include_descendants: false,
               })}>
-              <option value="">{tStatic("feature.content.entrylistpage.all_categories")}</option>
+              <option value="">{_x("All categories", "feature.content")}</option>
               {filters.category_id && !terms.byKind.category?.some(term => term.id === filters.category_id) &&
                 <option value={filters.category_id}>{selectedOptionLabel('category', filters.category_id)}</option>}
               {terms.byKind.category?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
-              {!terms.byKind.category && <option disabled>{tStatic("feature.content.entrylistpage.tap_to_load_categories")}</option>}
+              {!terms.byKind.category && <option disabled>{__("Tap to load categories…")}</option>}
             </select>
           </label>}
 
           {!isTrashView && terms?.tagEnabled && <label className="flex min-w-[130px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-            <span>{tStatic("shell.tags")}</span>
-            <select aria-label={tStatic("feature.content.entrylistpage.filter_tags")} className={`${control} w-full`}
+            <span>{__("Tags")}</span>
+            <select aria-label={__("Filter tags")} className={`${control} w-full`}
               value={filters.tag_id ?? ''} disabled={bulkBusy}
               onFocus={() => loadFilterOptions('tag')}
               onChange={event => updateFilter({ tag_id: event.target.value ? Number(event.target.value) : undefined,
@@ -957,31 +957,31 @@ export function EntryListPage({
                 // A tag is an AND filter, not a reset of the selected category
                 // subtree. Preserve descendants only when a category is active.
                 include_descendants: Boolean(filters.category_id && filters.include_descendants) })}>
-              <option value="">{tStatic("feature.content.entrylistpage.all_tags")}</option>
+              <option value="">{_x("All tags", "feature.content")}</option>
               {filters.tag_id && !terms.byKind.tag?.some(term => term.id === filters.tag_id) &&
                 <option value={filters.tag_id}>{selectedOptionLabel('tag', filters.tag_id)}</option>}
               {terms.byKind.tag?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
-              {!terms.byKind.tag && <option disabled>{tStatic("feature.content.entrylistpage.tap_to_load_tags")}</option>}
+              {!terms.byKind.tag && <option disabled>{__("Tap to load tags…")}</option>}
             </select>
           </label>}
 
           {!isTrashView && customDefinitions.length > 0 && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-            <span>{tStatic("feature.common.ui_taxonomy")}</span>
-            <select aria-label={tStatic("feature.content.entrylistpage.choose_taxonomy_to_filter")} className={`${control} w-full`}
+            <span>{__("Taxonomy")}</span>
+            <select aria-label={__("Choose taxonomy to filter")} className={`${control} w-full`}
               disabled={bulkBusy} value={selectedTaxonomy}
               onChange={event => {
                 setTaxonomyChoice(event.target.value);
                 updateFilter({ taxonomy_key: undefined,
                   term_id: undefined, category_id: undefined, tag_id: undefined, include_descendants: false });
               }}>
-              <option value="">{tStatic("feature.content.entrylistpage.all_taxonomies")}</option>
+              <option value="">{__("All taxonomies")}</option>
               {customDefinitions.map(def => <option key={def.key} value={def.key}>{def.label}</option>)}
             </select>
           </label>}
 
           {!isTrashView && chosenDefinition && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
             <span>{chosenDefinition.label}</span>
-            <select aria-label={tStatic("feature.content.entrylistpage.filter_by_value", { value1: chosenDefinition.label })} className={`${control} w-full`}
+            <select aria-label={__("Filter by {{value1}}", { value1: chosenDefinition.label })} className={`${control} w-full`}
               disabled={bulkBusy} value={filters.term_id ?? ''}
               onFocus={() => loadFilterOptions(chosenDefinition.key)}
               onChange={event => {
@@ -990,25 +990,25 @@ export function EntryListPage({
                   term_id: event.target.value ? Number(event.target.value) : undefined,
                   include_descendants: false });
               }}>
-              <option value="">{tStatic("feature.content.entrylistpage.choose_term")}</option>
+              <option value="">{__("Choose term")}</option>
               {filters.term_id && !terms?.byKind[chosenDefinition.key]?.some(term => term.id === filters.term_id) &&
                 <option value={filters.term_id}>{selectedOptionLabel(chosenDefinition.key, filters.term_id)}</option>}
               {(terms?.byKind[chosenDefinition.key] ?? []).map(term =>
                 <option key={term.id} value={term.id}>{term.name}</option>)}
-              {!terms?.byKind[chosenDefinition.key] && <option disabled>{tStatic("feature.content.entrylistpage.tap_to_load_terms")}</option>}
+              {!terms?.byKind[chosenDefinition.key] && <option disabled>{__("Tap to load terms…")}</option>}
             </select>
           </label>}
 
           {!isTrashView && <label className="flex min-w-[145px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-            <span>{tStatic("feature.content.entrylistpage.month_utc")}</span>
-            <input type="month" aria-label={tStatic("feature.content.entrylistpage.filter_by_update_month")} className={`${control} w-full`}
+            <span>{__("Month (UTC)")}</span>
+            <input type="month" aria-label={__("Filter by update month")} className={`${control} w-full`}
               value={filters.updated_month ?? ''} disabled={bulkBusy}
               onChange={event => updateFilter({ updated_month: event.target.value || undefined })} />
           </label>}
 
           <label className="flex w-[88px] flex-col gap-1 text-xs font-medium text-zinc-600">
-            <span>{tStatic("feature.content.entrylistpage.per_page")}</span>
-            <select aria-label={tStatic("feature.content.entrylistpage.items_per_page")} className={`${control} w-full`}
+            <span>{__("Per page")}</span>
+            <select aria-label={__("Items per page")} className={`${control} w-full`}
               value={pageSize} disabled={bulkBusy}
               onChange={event => updateFilter({ limit: Number(event.target.value) })}>
               {[10, 20, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
@@ -1021,25 +1021,25 @@ export function EntryListPage({
             {filters.category_id && terms?.categoryEnabled && <label className="flex items-center gap-2 text-xs text-zinc-700">
               <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
                 onChange={event => updateFilter({ include_descendants: event.target.checked })} />
-              {tStatic("feature.content.entrylistpage.include_child_categories")}
+              {__("Include child categories")}
             </label>}
             {filters.term_id && chosenDefinition?.hierarchical && <label className="flex items-center gap-2 text-xs text-zinc-700">
               <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
                 onChange={event => updateFilter({ include_descendants: event.target.checked })} />
-              {tStatic("feature.content.entrylistpage.include_child_terms_of")}{' '}{chosenDefinition.label}
+              {__("Include child terms of")}{' '}{chosenDefinition.label}
             </label>}
           </div>
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2.5 border-t border-zinc-100 pt-2.5">
           {!isTrashView ? (
-            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={tStatic("feature.content.entrylistpage.bulk_actions")}>
-              <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {tStatic("feature.content.entrylistpage.selected")}</span>
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={__("Bulk actions")}>
+              <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {__("selected")}</span>
               {supportsDraftPublish && <>
                 <AdminButton variant="secondary" size="sm" data-testid="bulk-publish-btn" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                  onClick={() => void performBulk({ kind: 'published' })}>{tStatic("feature.content.entrylistpage.publish_selected")}</AdminButton>
+                  onClick={() => void performBulk({ kind: 'published' })}>{__("Publish selected")}</AdminButton>
                 <AdminButton variant="secondary" size="sm" data-testid="bulk-draft-btn" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                  onClick={() => void performBulk({ kind: 'draft' })}>{tStatic("feature.content.entrylistpage.move_to_draft_2")}</AdminButton>
+                  onClick={() => void performBulk({ kind: 'draft' })}>{__("Move to draft")}</AdminButton>
               </>}
               {(terms?.definitions.length ?? 0) > 0 && (
                 <AdminButton
@@ -1056,15 +1056,15 @@ export function EntryListPage({
                     setBulkTaxOpen(prev => !prev);
                   }}
                 >
-                  {tStatic("bulk.taxonomy_button")}
+                  {__("Bulk taxonomy")}
                 </AdminButton>
               )}
               <AdminButton variant="danger" size="sm" data-testid="bulk-move-to-trash-btn"
                 disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                onClick={() => void performBulk({ kind: 'trash' })}>{tStatic("entry_lifecycle.move_selected_to_trash")}</AdminButton>
+                onClick={() => void performBulk({ kind: 'trash' })}>{__("Move selected to Trash")}</AdminButton>
               {bulkBusy && (
                 <>
-                  <span role="status" className="text-xs text-zinc-600">{tStatic("feature.content.entrylistpage.processing_each_item_separately")}</span>
+                  <span role="status" className="text-xs text-zinc-600">{__("Processing each item separately…")}</span>
                   <AdminButton
                     variant="secondary"
                     size="sm"
@@ -1076,14 +1076,14 @@ export function EntryListPage({
                       bulkAbortRef.current?.abort();
                     }}
                   >
-                    {bulkCancelling ? tStatic("entry_lifecycle.bulk_cancelling") : tStatic("entry_lifecycle.bulk_cancel")}
+                    {bulkCancelling ? __("Cancelling...") : _x("Cancel", "entry_lifecycle.bulk_cancel")}
                   </AdminButton>
                 </>
               )}
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={tStatic("feature.content.entrylistpage.bulk_actions")}>
-              <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {tStatic("feature.content.entrylistpage.selected")}</span>
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={__("Bulk actions")}>
+              <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {__("selected")}</span>
               <AdminButton
                 variant="secondary"
                 size="sm"
@@ -1091,7 +1091,7 @@ export function EntryListPage({
                 disabled={bulkBusy || !csrfToken || !selectedRows.length}
                 onClick={() => void performBulk({ kind: 'restore', confirmPublicRestore: false })}
               >
-                {tStatic("bulk.restore_selected")}
+                {__("Restore selected")}
               </AdminButton>
               {user.role === 'admin' && (
                 <AdminButton
@@ -1101,12 +1101,12 @@ export function EntryListPage({
                   disabled={bulkBusy || !csrfToken || !selectedRows.length}
                   onClick={() => void performBulk({ kind: 'purge' })}
                 >
-                  {tStatic("bulk.purge_selected")}
+                  {__("Delete selected permanently")}
                 </AdminButton>
               )}
               {bulkBusy && (
                 <>
-                  <span role="status" className="text-xs text-zinc-600">{tStatic("feature.content.entrylistpage.processing_each_item_separately")}</span>
+                  <span role="status" className="text-xs text-zinc-600">{__("Processing each item separately…")}</span>
                   <AdminButton
                     variant="secondary"
                     size="sm"
@@ -1118,17 +1118,17 @@ export function EntryListPage({
                       bulkAbortRef.current?.abort();
                     }}
                   >
-                    {bulkCancelling ? tStatic("entry_lifecycle.bulk_cancelling") : tStatic("entry_lifecycle.bulk_cancel")}
+                    {bulkCancelling ? __("Cancelling...") : _x("Cancel", "entry_lifecycle.bulk_cancel")}
                   </AdminButton>
                 </>
               )}
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2.5 text-xs">
-            <span className="text-zinc-500" role="status">{data ? tStatic("feature.content.entrylistpage.total_value_items", { value1: formatNumber(data.total) }) : tStatic("feature.content.entrylistpage.loading_counts")}</span>
+            <span className="text-zinc-500" role="status">{data ? __("Total: {{value1}} items", { value1: formatNumber(data.total) }) : __("Loading counts…")}</span>
             <AdminButton variant="ghost" size="sm" disabled={bulkBusy}
               onClick={() => { setSearchInput(''); setTaxonomyChoice(''); onNavigateHash(base); }}>
-              {tStatic("feature.content.entrylistpage.clear_filters")}
+              {__("Clear filters")}
             </AdminButton>
           </div>
         </div>
@@ -1140,7 +1140,7 @@ export function EntryListPage({
           >
             <div className="flex flex-wrap items-end gap-2.5">
               <label className="flex min-w-[150px] flex-col gap-1 font-medium text-zinc-700">
-                <span>{tStatic('quick_edit.taxonomy_select_label')}</span>
+                <span>{__("Taxonomy")}</span>
                 <select
                   data-testid="bulk-taxonomy-key"
                   className={control}
@@ -1151,7 +1151,7 @@ export function EntryListPage({
                     setBulkTaxTermIds([]);
                   }}
                 >
-                  <option value="">{tStatic('quick_edit.taxonomy_none')}</option>
+                  <option value="">{__("No taxonomy change")}</option>
                   {(terms?.definitions ?? []).map(def => (
                     <option key={def.key} value={def.key}>{def.label}</option>
                   ))}
@@ -1160,7 +1160,7 @@ export function EntryListPage({
 
               {bulkTaxKey && (
                 <label className="flex min-w-[160px] flex-col gap-1 font-medium text-zinc-700">
-                  <span>{tStatic('quick_edit.taxonomy_op_label')}</span>
+                  <span>{__("Operation")}</span>
                   <select
                     data-testid="bulk-taxonomy-op"
                     className={control}
@@ -1168,9 +1168,9 @@ export function EntryListPage({
                     disabled={bulkBusy}
                     onChange={e => setBulkTaxOp(e.target.value as TaxonomyDeltaOp)}
                   >
-                    <option value="add">{tStatic('quick_edit.taxonomy_op_add')}</option>
-                    <option value="remove">{tStatic('quick_edit.taxonomy_op_remove')}</option>
-                    <option value="replace">{tStatic('quick_edit.taxonomy_op_replace')}</option>
+                    <option value="add">{__("Add terms")}</option>
+                    <option value="remove">{__("Remove terms")}</option>
+                    <option value="replace">{__("Replace taxonomy terms")}</option>
                   </select>
                 </label>
               )}
@@ -1183,7 +1183,7 @@ export function EntryListPage({
                   disabled={bulkBusy || !csrfToken || bulkTaxLoading}
                   onClick={() => void performBulkTaxonomy()}
                 >
-                  {tStatic('bulk.taxonomy_apply')}
+                  {__("Apply taxonomy to selected")}
                 </AdminButton>
               )}
             </div>
@@ -1191,13 +1191,13 @@ export function EntryListPage({
             {bulkTaxKey && (
               <div className="space-y-1.5">
                 <p className="font-medium text-zinc-600">
-                  {tStatic('quick_edit.taxonomy_terms_label', { value1: selectedLocaleCheck.locale || 'default' })}
+                  {__("Terms ({{value1}})", { value1: selectedLocaleCheck.locale || 'default' })}
                 </p>
                 {bulkTaxLoading ? (
-                  <p className="text-zinc-500">{tStatic('quick_edit.taxonomy_loading')}</p>
+                  <p className="text-zinc-500">{__("Loading terms for this language...")}</p>
                 ) : (bulkTaxCatalog[bulkTaxCatalogKey]?.length ?? 0) === 0 ? (
                   <p className="text-zinc-500">
-                    {tStatic('quick_edit.taxonomy_empty_catalog', { value1: selectedLocaleCheck.locale || 'default' })}
+                    {__("No terms exist for this taxonomy in language {{value1}}.", { value1: selectedLocaleCheck.locale || 'default' })}
                   </p>
                 ) : (
                   <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded border border-zinc-200 bg-white p-2" data-testid="bulk-taxonomy-terms">
@@ -1228,7 +1228,7 @@ export function EntryListPage({
                   </div>
                 )}
                 {bulkTaxOp === 'replace' && (
-                  <p className="text-[11px] text-zinc-500">{tStatic('quick_edit.taxonomy_clear_hint')}</p>
+                  <p className="text-[11px] text-zinc-500">{__("Leave all terms unchecked with Replace to clear only this taxonomy.")}</p>
                 )}
               </div>
             )}
@@ -1247,12 +1247,12 @@ export function EntryListPage({
           onResolved={() => {
             const rowId = pendingProviderConfirmation.rowId;
             setPendingProviderConfirmation(null);
-            setProviderNotice(tStatic("feature.content.entrylistpage.action_completed_for_value", { value1: rowId }));
+            setProviderNotice(__("Action completed for #{{value1}}.", { value1: rowId }));
             setRetry(old => old + 1);
           }}
           onCancelled={() => {
             setPendingProviderConfirmation(null);
-            setProviderNotice(tStatic("plugin_lifecycle.cancelled_notice"));
+            setProviderNotice(__("Confirmation cancelled. No content was changed."));
           }}
           onFailed={message => {
             const rowId = pendingProviderConfirmation.rowId;
@@ -1263,10 +1263,10 @@ export function EntryListPage({
       )}
 
       {termLoadErrors.length > 0 && <AdminAlert tone="warning" role="alert">
-        {tStatic("feature.content.entrylistpage.could_not_load_some_terms")}{' '}{termLoadErrors.join('; ')}{tStatic("feature.content.entrylistpage.other_filters_remain_available")}
+        {__("Could not load some terms:")}{' '}{termLoadErrors.join('; ')}{__(". Other filters remain available.")}
       </AdminAlert>}
       {resolved?.failed && <AdminAlert tone="warning" role="alert">
-        {tStatic("feature.content.entrylistpage.could_not_load_some_term_names_on_this_page")}
+        {__("Could not load some term names on this page. Try Reload to display them all.")}
       </AdminAlert>}
 
       {displayBulkResults.length > 0 && (() => {
@@ -1278,10 +1278,10 @@ export function EntryListPage({
           unattempted: displayBulkResults.filter(r => r.status === 'unattempted').length,
         };
         return (
-          <div className="space-y-2 rounded-lg border border-zinc-200 bg-white p-3" aria-label={tStatic("feature.content.entrylistpage.bulk_results")} data-testid="bulk-results-panel">
+          <div className="space-y-2 rounded-lg border border-zinc-200 bg-white p-3" aria-label={__("Bulk results")} data-testid="bulk-results-panel">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs font-semibold text-zinc-900">
-                {tStatic("entry_lifecycle.bulk_summary", {
+                {__("Succeeded: {{succeeded}} · Stale (412): {{stale}} · Failed: {{failed}} · Uncertain: {{uncertain}} · Unattempted: {{unattempted}}", {
                   succeeded: formatNumber(counts.succeeded),
                   stale: formatNumber(counts.stale),
                   failed: formatNumber(counts.failed),
@@ -1297,17 +1297,17 @@ export function EntryListPage({
                   disabled={bulkBusy || loading || !csrfToken}
                   onClick={retryRemainingBulk}
                 >
-                  {tStatic("entry_lifecycle.bulk_reconcile_retry", { value1: formatNumber(bulkRemainingRetryCount) })}
+                  {__("Retry remaining ({{value1}})", { value1: formatNumber(bulkRemainingRetryCount) })}
                 </AdminButton>
               )}
             </div>
             {unresolvedUncertainCount > 0 && (
               <p className="text-xs font-medium text-amber-800" data-testid="bulk-unresolved-uncertain-notice">
-                {tStatic('bulk.unresolved_uncertain_banner', { value1: formatNumber(unresolvedUncertainCount) })}
+                {__("{{value1}} uncertain item(s) changed on the server and require manual verification before retrying.", { value1: formatNumber(unresolvedUncertainCount) })}
               </p>
             )}
             {bulkRemainingRetryCount > 0 && (
-              <p className="text-xs text-zinc-600">{tStatic("entry_lifecycle.bulk_reconciling_notice")}</p>
+              <p className="text-xs text-zinc-600">{__("Refreshed server state. Review remaining rows before retrying; succeeded rows will not be replayed.")}</p>
             )}
             <ul className="space-y-1 text-xs">
               {displayBulkResults.map(result => (
@@ -1349,11 +1349,11 @@ export function EntryListPage({
             data-testid="quick-edit-trashed-guard"
             className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-950"
           >
-            <p className="font-semibold">{tStatic('quick_edit.trashed_title')}</p>
-            <p>{tStatic('quick_edit.trashed_hint')}</p>
+            <p className="font-semibold">{__("Entry moved to Trash (409)")}</p>
+            <p>{__("This entry can no longer be saved from Quick Edit. Copy any unsaved text below or restore it from Trash first.")}</p>
             {detachedDraft && (
               <label className="block space-y-1">
-                <span className="font-medium">{tStatic('quick_edit.recoverable_draft_label')}</span>
+                <span className="font-medium">{__("Recoverable unsaved edits")}</span>
                 <textarea
                   readOnly
                   rows={5}
@@ -1370,7 +1370,7 @@ export function EntryListPage({
                 variant="primary"
                 onClick={() => onNavigateHash(`${base}?status=trash`)}
               >
-                {tStatic('entry_lifecycle.open_trash_view')}
+                {__("Open Trash")}
               </AdminButton>
               <AdminButton
                 type="button"
@@ -1378,7 +1378,7 @@ export function EntryListPage({
                 variant="secondary"
                 data-testid="quick-edit-cancel-btn"
                 onClick={() => {
-                  if (quickEditDirtyRef.current && !window.confirm(tStatic('quick_edit.confirm_discard'))) {
+                  if (quickEditDirtyRef.current && !window.confirm(__("Discard unsaved Quick Edit changes?"))) {
                     return;
                   }
                   editorDraftStore.deleteQuickEdit(typeKey, quickEditRowId);
@@ -1386,23 +1386,23 @@ export function EntryListPage({
                   setQuickEditRowId(null);
                 }}
               >
-                {tStatic('quick_edit.cancel')}
+                {_x("Cancel", "quick_edit.cancel")}
               </AdminButton>
             </div>
           </div>
         );
       })()}
       {providerError && <AdminAlert tone="error" className="flex flex-wrap items-center gap-2">
-        <span>{tStatic("feature.content.entrylistpage.could_not_load_extension_columns")}{' '}{providerError}</span>
-        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>{tStatic("feature.dashboard.dashboardpage.retry")}</AdminButton>
+        <span>{__("Could not load extension columns:")}{' '}{providerError}</span>
+        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>{_x("Retry", "feature.dashboard")}</AdminButton>
       </AdminAlert>}
 
       {error && <AdminAlert tone="error" className="flex flex-wrap items-center gap-2">
         <span>{error}</span>
-        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(prev => prev + 1)}>{tStatic("feature.dashboard.dashboardpage.retry")}</AdminButton>
+        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(prev => prev + 1)}>{_x("Retry", "feature.dashboard")}</AdminButton>
       </AdminAlert>}
 
-      {loading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.content.entrylistpage.loading_list_from_server")}</p>}
+      {loading && <p role="status" className="text-xs text-zinc-500">{__("Loading list from server…")}</p>}
 
       <div
         role="region"
@@ -1412,11 +1412,11 @@ export function EntryListPage({
         aria-busy={loading}
       >
         <table className="w-full min-w-[780px] table-auto text-left text-sm" data-testid="entry-table">
-          <caption id={captionId} className="sr-only">{tStatic("feature.content.entrylistpage.content_table")}{' '}{typeKey}{tStatic("feature.content.entrylistpage.server_side_search_status_and_pagination")}</caption>
+          <caption id={captionId} className="sr-only">{__("Content table")}{' '}{typeKey}{__("; server-side search, status and pagination")}</caption>
           <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wider text-zinc-600">
             <tr>
               <th scope="col" className="w-10 px-3 py-2.5">
-                <input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_all_on_page")} checked={allSelected}
+                <input type="checkbox" aria-label={__("Select all on page")} checked={allSelected}
                   disabled={!currentRows.length || bulkBusy || loading}
                   onChange={event => setSelected(prev => {
                     const next = new Set(prev);
@@ -1424,17 +1424,17 @@ export function EntryListPage({
                     return next;
                   })} />
               </th>
-              {!isTrashView && <th scope="col" className="w-14 px-2 py-2.5 text-center">{tStatic("feature.media.mediapicker.images")}</th>}
+              {!isTrashView && <th scope="col" className="w-14 px-2 py-2.5 text-center">{__("Images")}</th>}
               <th scope="col" aria-sort={ariaSortFor('title')} className="min-w-[220px] px-3 py-2.5">
                 <button type="button" data-testid="sort-title" className={sortButton}
                   disabled={bulkBusy} onClick={() => sortBy('title')}>
-                  <span>{tStatic("feature.contact.contactpanel.title")}</span>
+                  <span>{__("Title")}</span>
                   {activeSort === 'title' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
                 </button>
               </th>
-              <th scope="col" className="whitespace-nowrap px-3 py-2.5">{tStatic("multilingual.status")}</th>
-              {!isTrashView && terms?.categoryEnabled && <th scope="col" className="px-3 py-2.5">{tStatic("feature.content.entrylistpage.category")}</th>}
-              {!isTrashView && terms?.tagEnabled && <th scope="col" className="px-3 py-2.5">{tStatic("shell.tags")}</th>}
+              <th scope="col" className="whitespace-nowrap px-3 py-2.5">{__("Status")}</th>
+              {!isTrashView && terms?.categoryEnabled && <th scope="col" className="px-3 py-2.5">{_x("Category", "feature.content")}</th>}
+              {!isTrashView && terms?.tagEnabled && <th scope="col" className="px-3 py-2.5">{__("Tags")}</th>}
               {!isTrashView && customDefinitions.map(def => <th key={def.key} scope="col" className="px-3 py-2.5">{def.label}</th>)}
               {!isTrashView && providerColumns.map(column => <th key={column.key} scope="col"
                 className="min-w-[120px] px-3 py-2.5">{column.label}</th>)}
@@ -1442,7 +1442,7 @@ export function EntryListPage({
                 <th scope="col" aria-sort={ariaSortFor('trashed_at')} className="min-w-[140px] whitespace-nowrap px-3 py-2.5">
                   <button type="button" data-testid="sort-trashed" className={sortButton}
                     disabled={bulkBusy} onClick={() => sortBy('trashed_at')}>
-                    <span>{tStatic("entry_lifecycle.trashed_date")}</span>
+                    <span>{__("Trashed date")}</span>
                     {activeSort === 'trashed_at' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
                   </button>
                 </th>
@@ -1450,7 +1450,7 @@ export function EntryListPage({
                 <th scope="col" aria-sort={ariaSortFor('updated_at')} className="min-w-[140px] whitespace-nowrap px-3 py-2.5">
                   <button type="button" data-testid="sort-updated" className={sortButton}
                     disabled={bulkBusy} onClick={() => sortBy('updated_at')}>
-                    <span>{tStatic("feature.content.entrylistpage.updated_date")}</span>
+                    <span>{__("Updated date")}</span>
                     {activeSort === 'updated_at' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
                   </button>
                 </th>
@@ -1461,7 +1461,7 @@ export function EntryListPage({
             {!loading && !error && currentRows.length === 0 && <tr>
               <td colSpan={isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length}
                 className="px-4 py-8 text-center text-sm text-zinc-500">
-                {data?.total === 0 ? tStatic("feature.content.entrylistpage.no_matching_content_clear_filters_to_see_more") : tStatic("feature.content.entrylistpage.no_items_on_this_page")}
+                {data?.total === 0 ? __("No matching content. Clear filters to see more.") : __("No items on this page.")}
               </td>
             </tr>}
             {currentRows.map(row => {
@@ -1472,7 +1472,7 @@ export function EntryListPage({
               const totalCols = isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length;
               const isQuickEditing = !isTrashView && quickEditRowId === row.id;
               return <Fragment key={row.id}><tr data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
-                <td className="px-3 py-2.5"><input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_item_value", { value1: row.id })}
+                <td className="px-3 py-2.5"><input type="checkbox" aria-label={__("Select item #{{value1}}", { value1: row.id })}
                   checked={selected.has(row.id)} disabled={bulkBusy}
                   onChange={event => toggleRow(row.id, event.target.checked)} /></td>
                 {!isTrashView && (
@@ -1539,7 +1539,7 @@ export function EntryListPage({
                             disabled={bulkBusy || row.capabilities?.restore === false}
                             onClick={() => void restoreSingleRow(row)}
                           >
-                            {tStatic("entry_lifecycle.restore")}
+                            {__("Restore")}
                           </button>
                         )}
                         {csrfToken && user.role === 'admin' && row.capabilities?.purge !== false && (
@@ -1552,14 +1552,14 @@ export function EntryListPage({
                               disabled={bulkBusy}
                               onClick={() => void purgeSingleRow(row)}
                             >
-                              {tStatic("entry_lifecycle.purge_permanently")}
+                              {__("Delete permanently")}
                             </button>
                           </>
                         )}
                       </div>
                       {restoreLocaleBlocked && (
                         <p className="text-[11px] text-amber-800">
-                          {tStatic("entry_lifecycle.locale_disabled_restore_blocked")}
+                          {__("Cannot restore while the entry's language is disabled.")}
                         </p>
                       )}
                     </div>
@@ -1570,10 +1570,10 @@ export function EntryListPage({
                           type="button"
                           className="font-medium text-od-accent hover:underline"
                           disabled={bulkBusy}
-                          aria-label={tStatic("feature.content.entrylistpage.edit_value_id_value", { value1: row.title, value2: row.id })}
+                          aria-label={__("Edit {{value1}}, ID {{value2}}", { value1: row.title, value2: row.id })}
                           onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
                         >
-                          {tStatic("shell.edit")}
+                          {_x("Edit", "shell.edit")}
                         </button>
                         {csrfToken && row.capabilities?.quick_edit !== false && (
                           <>
@@ -1586,7 +1586,7 @@ export function EntryListPage({
                               aria-expanded={isQuickEditing}
                               onClick={() => {
                                 if (quickEditRowId === row.id) {
-                                  if (quickEditDirtyRef.current && !window.confirm(tStatic('quick_edit.confirm_discard'))) {
+                                  if (quickEditDirtyRef.current && !window.confirm(__("Discard unsaved Quick Edit changes?"))) {
                                     return;
                                   }
                                   editorDraftStore.deleteQuickEdit(typeKey, row.id);
@@ -1595,7 +1595,7 @@ export function EntryListPage({
                                   return;
                                 }
                                 if (quickEditRowId !== null && quickEditDirtyRef.current) {
-                                  if (!window.confirm(tStatic('quick_edit.confirm_discard'))) {
+                                  if (!window.confirm(__("Discard unsaved Quick Edit changes?"))) {
                                     return;
                                   }
                                   editorDraftStore.deleteQuickEdit(typeKey, quickEditRowId);
@@ -1605,7 +1605,7 @@ export function EntryListPage({
                                 setQuickEditRowId(row.id);
                               }}
                             >
-                              {tStatic("quick_edit.button")}
+                              {__("Quick Edit")}
                             </button>
                           </>
                         )}
@@ -1617,9 +1617,9 @@ export function EntryListPage({
                               target="_blank"
                               rel="noopener noreferrer"
                               className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
-                              aria-label={tStatic("feature.content.entrylistpage.view_public_value", { value1: row.title })}
+                              aria-label={__("View public {{value1}}", { value1: row.title })}
                             >
-                              {tStatic("feature.common.view")}
+                              {__("View")}
                             </a>
                           </>
                         )}
@@ -1631,9 +1631,9 @@ export function EntryListPage({
                               target="_blank"
                               rel="noopener noreferrer"
                               className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
-                              aria-label={tStatic("feature.content.entrylistpage.preview_saved_draft_value", { value1: row.title })}
+                              aria-label={__("Preview saved draft {{value1}}", { value1: row.title })}
                             >
-                              {tStatic("feature.menus.menuspanel.preview")}
+                              {__("Preview")}
                             </a>
                           </>
                         )}
@@ -1645,18 +1645,18 @@ export function EntryListPage({
                               data-testid={`entry-trash-btn-${row.id}`}
                               className="font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                               disabled={bulkBusy || row.capabilities?.trash === false}
-                              title={readingBlocked ? tStatic("entry_lifecycle.reading_page_blocked_hint") : undefined}
-                              aria-label={tStatic("feature.content.entrylistpage.delete_value_id_value", { value1: row.title, value2: row.id })}
+                              title={readingBlocked ? __("Assigned in Reading Settings (Homepage or Posts page); reassign before moving to Trash.") : undefined}
+                              aria-label={__("Delete {{value1}}, ID {{value2}}", { value1: row.title, value2: row.id })}
                               onClick={() => void trashSingleRow(row)}
                             >
-                              {tStatic("entry_lifecycle.move_to_trash")}
+                              {__("Move to Trash")}
                             </button>
                           </>
                         )}
                       </div>
                       {readingBlocked && (
                         <p className="text-[11px] text-amber-800" data-testid={`reading-blocked-hint-${row.id}`}>
-                          {tStatic("entry_lifecycle.reading_page_blocked_hint")}{' '}
+                          {__("Assigned in Reading Settings (Homepage or Posts page); reassign before moving to Trash.")}{' '}
                           {user.role === 'admin' && (
                             <button
                               type="button"
@@ -1664,7 +1664,7 @@ export function EntryListPage({
                               onClick={() => onNavigateHash('#/settings/reading')}
                               className="font-medium text-od-accent underline"
                             >
-                              {tStatic("entry_lifecycle.open_reading_settings")}
+                              {__("Reading Settings")}
                             </button>
                           )}
                         </p>
@@ -1674,7 +1674,7 @@ export function EntryListPage({
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5">
                   <AdminBadge tone={row.publication_status === 'published' ? 'success' : 'neutral'}>
-                    {row.publication_status === 'published' ? tStatic("reading.published") : tStatic("feature.content.entrylistpage.draft")}
+                    {row.publication_status === 'published' ? __("Published") : __("Draft")}
                   </AdminBadge>
                 </td>
                 {!isTrashView && terms?.categoryEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'category')}</td>}
@@ -1708,7 +1708,7 @@ export function EntryListPage({
                         setQuickEditRowId(null);
                         quickEditDirtyRef.current = false;
                         setQuickEditNotice(
-                          tStatic('quick_edit.saved_notice', { value1: updated.id }),
+                          __("Saved Quick Edit changes for #{{value1}}.", { value1: updated.id }),
                         );
                         setRetry(prev => prev + 1);
                       }}
@@ -1741,15 +1741,15 @@ export function EntryListPage({
           </tbody>
         </table>
       </div>
-      <nav aria-label={tStatic("feature.content.entrylistpage.content_pagination")} className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
-        <span data-testid="entry-table-page-info">{data ? tStatic("feature.content.entrylistpage.showing_value_value_value", { value1: formatNumber(data.total ? offset + 1 : 0), value2: formatNumber(Math.min(offset + currentRows.length, data.total)), value3: formatNumber(data.total) }) : tStatic("feature.content.entrylistpage.page_not_loaded")}</span>
+      <nav aria-label={__("Content pagination")} className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
+        <span data-testid="entry-table-page-info">{data ? __("Showing {{value1}}–{{value2}} / {{value3}}", { value1: formatNumber(data.total ? offset + 1 : 0), value2: formatNumber(Math.min(offset + currentRows.length, data.total)), value3: formatNumber(data.total) }) : __("Page not loaded")}</span>
         <div className="flex items-center gap-2">
           <AdminButton variant="secondary" size="sm" disabled={bulkBusy || loading || offset === 0}
-            onClick={() => updateFilter({ offset: Math.max(0, offset - pageSize) }, false)}>{tStatic("feature.content.contentworkspace.previous_page")}</AdminButton>
-          <span className="tabular-nums">{tStatic("feature.common.page_number", { page: formatNumber(Math.floor(offset / pageSize) + 1) })}{data ? ` / ${formatNumber(Math.max(1, Math.ceil(data.total / pageSize)))}` : ''}</span>
+            onClick={() => updateFilter({ offset: Math.max(0, offset - pageSize) }, false)}>{__("Previous page")}</AdminButton>
+          <span className="tabular-nums">{__("Page {{page}}", { page: formatNumber(Math.floor(offset / pageSize) + 1) })}{data ? ` / ${formatNumber(Math.max(1, Math.ceil(data.total / pageSize)))}` : ''}</span>
           <AdminButton variant="secondary" size="sm"
             disabled={bulkBusy || loading || !data || offset + pageSize >= data.total || offset + pageSize > 1000000}
-            onClick={() => updateFilter({ offset: offset + pageSize }, false)}>{tStatic("feature.common.next_page")}</AdminButton>
+            onClick={() => updateFilter({ offset: offset + pageSize }, false)}>{__("Next page")}</AdminButton>
         </div>
       </nav>
     </section>

@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../i18n/index.tsx';
+import { __, _x, useI18n } from '../i18n/index.tsx';
 import { useEffect, useState } from 'react';
 import { ApiClientError } from '../api/client.ts';
 import { getEffectiveContentTypeTaxonomies, listContentTypes } from '../api/content.ts';
@@ -32,7 +32,7 @@ function readConfig(element: BuilderElement): TaxonomyListProps {
  * Missing schema/terms and failed lookups must never clear stored configuration.
  */
 export function BuilderListFields({ element, onChange, onError }: Props) {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const config = readConfig(element);
   const [types, setTypes] = useState<OwnedContentType[]>([]);
   const [categories, setCategories] = useState<TaxonomyTerm[]>([]);
@@ -72,9 +72,9 @@ export function BuilderListFields({ element, onChange, onError }: Props) {
       setLookupError('');
     }).catch(cause => {
       if (!alive) return;
-      setLookupError(t('builder.builder_list_fields.load_error'));
+      setLookupError(__("Could not load CPTs or taxonomies. Saved list configuration is preserved."));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onError(cause, t('builder.builder_list_fields.session_expired'));
+        onError(cause, __("Your session expired while loading the List block."));
     }).finally(() => { if (alive) setBusy(false); });
     return () => { alive = false; controller.abort(); };
   }, [element.id, config.type_key, reload]);
@@ -93,9 +93,9 @@ export function BuilderListFields({ element, onChange, onError }: Props) {
       .catch(cause => {
         if (!alive) return;
         setGenericTerms([]);
-        setLookupError(t('builder.builder_list_fields.term_error'));
+        setLookupError(__("Could not load terms for the selected taxonomy. Previous configuration is preserved."));
         if (cause instanceof ApiClientError && cause.status === 401)
-          onError(cause, t('builder.builder_list_fields.session_expired'));
+          onError(cause, __("Your session expired while loading the List block."));
       })
       .finally(() => { if (alive) setTermsBusy(false); });
     return () => { alive = false; controller.abort(); };
@@ -132,24 +132,24 @@ export function BuilderListFields({ element, onChange, onError }: Props) {
       || (!termsBusy && !genericTerms.some(term => term.id === config.term_id)));
 
   return (
-    <fieldset className="space-y-3 rounded-lg border border-sky-200 p-3" aria-label={tStatic("feature.common.ui_list_block")}>
-      <legend className="px-1 text-sm font-semibold text-sky-900">{t('builder.builder_list_fields.heading')}</legend>
-      <p className="text-xs text-slate-600">{t('builder.builder_list_fields.description')}
+    <fieldset className="space-y-3 rounded-lg border border-sky-200 p-3" aria-label={__("List Block")}>
+      <legend className="px-1 text-sm font-semibold text-sky-900">{__("Content list")}</legend>
+      <p className="text-xs text-slate-600">{__("Only queries published content; Preview/Save shows the first page. Public pages paginate each node independently.")}
       </p>
-      <label className="block text-xs font-semibold">{t('builder.builder_list_fields.content_type')}
-        <select className="mt-1 w-full" aria-label={tStatic("feature.common.ui_list_content_type")} value={config.type_key}
+      <label className="block text-xs font-semibold">{__("Content type")}
+        <select className="mt-1 w-full" aria-label={__("List content type")} value={config.type_key}
           onChange={event => update({ type_key: event.target.value })}>
           {config.type_key && !types.some(type => type.descriptor.key === config.type_key)
-            && <option value={config.type_key}>{config.type_key}{t('builder.builder_list_fields.missing_suffix')}</option>}
+            && <option value={config.type_key}>{config.type_key}{__(" (no longer exists)")}</option>}
           {types.map(type => <option key={type.descriptor.key} value={type.descriptor.key}
             disabled={type.status !== 'active'}>
             {type.descriptor.label} ({type.descriptor.key})
-            {type.status !== 'active' ? t('builder.builder_list_fields.inactive') : ''}
+            {type.status !== 'active' ? _x(" — inactive", "builder.builder_list_fields") : ''}
           </option>)}
         </select>
       </label>
-      <label className="block text-xs font-semibold">{t('builder.builder_list_fields.filter')}
-        <select className="mt-1 w-full" aria-label={tStatic("feature.common.ui_list_taxonomy_filter_mode")} value={filterMode}
+      <label className="block text-xs font-semibold">{__("Taxonomy filter")}
+        <select className="mt-1 w-full" aria-label={__("List taxonomy filter mode")} value={filterMode}
           onChange={event => {
             const mode = event.target.value as 'legacy' | 'generic';
             setFilterMode(mode);
@@ -157,81 +157,81 @@ export function BuilderListFields({ element, onChange, onError }: Props) {
             update({ category_id: undefined, tag_id: undefined,
               taxonomy_key: undefined, term_id: undefined, include_descendants: false });
           }}>
-          <option value="legacy">{t('builder.builder_list_fields.legacy')}</option>
-          <option value="generic">{t('builder.builder_list_fields.generic')}</option>
+          <option value="legacy">{__("Category / Tag (legacy configuration)")}</option>
+          <option value="generic">{__("Custom taxonomy")}</option>
         </select>
       </label>
       {filterMode === 'legacy' ? <>
         <label className="block text-xs font-semibold">
-          {tStatic("feature.common.ui_category")}
-          <select className="mt-1 w-full" aria-label={tStatic("feature.common.ui_list_category")} value={config.category_id ?? ''}
+          {_x("Category", "feature.common")}
+          <select className="mt-1 w-full" aria-label={__("List category")} value={config.category_id ?? ''}
             onChange={event => update({ category_id: event.target.value ? Number(event.target.value) : undefined })}>
-            <option value="">{t('builder.builder_list_fields.all_categories')}</option>
+            <option value="">{_x("All categories", "builder.builder_list_fields")}</option>
             {config.category_id !== undefined && !categories.some(term => term.id === config.category_id)
-              && <option value={config.category_id}>ID {config.category_id}{t('builder.builder_list_fields.missing')}</option>}
+              && <option value={config.category_id}>ID {config.category_id}{__(" (missing)")}</option>}
             {categories.map(term => <option key={term.id} value={term.id}>{term.name} (#{term.id})</option>)}
           </select>
         </label>
         <label className="block text-xs font-semibold">
-          {tStatic("feature.common.ui_tag")}
-          <select className="mt-1 w-full" aria-label={tStatic("feature.common.ui_list_tag")} value={config.tag_id ?? ''}
+          {__("Tag")}
+          <select className="mt-1 w-full" aria-label={__("List tag")} value={config.tag_id ?? ''}
             onChange={event => update({ tag_id: event.target.value ? Number(event.target.value) : undefined })}>
-            <option value="">{t('builder.builder_list_fields.all_tags')}</option>
+            <option value="">{_x("All tags", "builder.builder_list_fields")}</option>
             {config.tag_id !== undefined && !tags.some(term => term.id === config.tag_id)
-              && <option value={config.tag_id}>ID {config.tag_id}{t('builder.builder_list_fields.missing')}</option>}
+              && <option value={config.tag_id}>ID {config.tag_id}{__(" (missing)")}</option>}
             {tags.map(term => <option key={term.id} value={term.id}>{term.name} (#{term.id})</option>)}
           </select>
         </label>
       </> : <>
         <label className="block text-xs font-semibold">
-          {tStatic("feature.common.ui_taxonomy")}
-          <select className="mt-1 w-full" aria-label={tStatic("feature.common.ui_list_taxonomy")} value={selectedTaxonomy}
+          {__("Taxonomy")}
+          <select className="mt-1 w-full" aria-label={__("List taxonomy")} value={selectedTaxonomy}
             onChange={event => {
               setSelectedTaxonomy(event.target.value);
               update({ category_id: undefined, tag_id: undefined, taxonomy_key: undefined,
                 term_id: undefined, include_descendants: false });
             }}>
-            <option value="">{t('builder.builder_list_fields.choose_taxonomy')}</option>
+            <option value="">{__("Choose taxonomy")}</option>
             {selectedTaxonomy && !availableDefinitions.some(def => def.key === selectedTaxonomy)
-              && <option value={selectedTaxonomy}>{selectedTaxonomy}{t('builder.builder_list_fields.unavailable')}</option>}
+              && <option value={selectedTaxonomy}>{selectedTaxonomy}{__(" (unavailable)")}</option>}
             {availableDefinitions.map(def =>
               <option key={def.key} value={def.key}>{def.label} ({def.key})</option>)}
           </select>
         </label>
         <label className="block text-xs font-semibold">
-          {tStatic("feature.common.ui_term")}
-          <select className="mt-1 w-full" aria-label={tStatic("feature.common.ui_list_taxonomy_term")}
+          {__("Term")}
+          <select className="mt-1 w-full" aria-label={__("List taxonomy term")}
             disabled={!selectedTaxonomy || termsBusy || !selectedDefinition}
             value={selectedTaxonomy === config.taxonomy_key ? (config.term_id ?? '') : ''}
             onChange={event => update({ category_id: undefined, tag_id: undefined,
               taxonomy_key: event.target.value ? selectedTaxonomy : undefined,
               term_id: event.target.value ? Number(event.target.value) : undefined,
               include_descendants: false })}>
-            <option value="">{termsBusy ? t('builder.builder_list_fields.loading_terms') : t('builder.builder_list_fields.all_terms')}</option>
+            <option value="">{termsBusy ? __("Loading terms…") : __("All terms")}</option>
             {config.taxonomy_key === selectedTaxonomy && config.term_id !== undefined
               && !genericTerms.some(term => term.id === config.term_id)
-              && <option value={config.term_id}>ID {config.term_id}{t('builder.builder_list_fields.unavailable')}</option>}
+              && <option value={config.term_id}>ID {config.term_id}{__(" (unavailable)")}</option>}
             {genericTerms.map(term =>
               <option key={term.id} value={term.id}>{term.name} (#{term.id})</option>)}
           </select>
         </label>
       </>}
       <label className="flex items-center gap-2 text-xs font-semibold">
-        <input aria-label={tStatic("feature.common.ui_list_include_descendants")} type="checkbox"
+        <input aria-label={__("List include descendants")} type="checkbox"
           disabled={filterMode === 'legacy' ? !config.category_id
             : !selectedDefinition?.hierarchical || !config.term_id}
           checked={config.include_descendants}
-          onChange={event => update({ include_descendants: event.target.checked })} />{t('builder.builder_list_fields.descendants')}
+          onChange={event => update({ include_descendants: event.target.checked })} />{__("Include child terms")}
       </label>
-      <label className="block text-xs font-semibold">{t('builder.builder_list_fields.order')}
-        <select className="mt-1 w-full" aria-label={tStatic("feature.common.ui_list_sort")} value={config.sort}
+      <label className="block text-xs font-semibold">{__("Order")}
+        <select className="mt-1 w-full" aria-label={__("List sort")} value={config.sort}
           onChange={event => update({ sort: event.target.value as ListSort })}>
-          <option value="id_desc">{t('builder.builder_list_fields.newest')}</option>
-          <option value="id_asc">{t('builder.builder_list_fields.oldest')}</option>
+          <option value="id_desc">{__("Newest first (id_desc)")}</option>
+          <option value="id_asc">{__("Oldest first (id_asc)")}</option>
         </select>
       </label>
-      <label className="block text-xs font-semibold">{t('builder.builder_list_fields.page_size')}
-        <input className="mt-1 w-full" aria-label={tStatic("feature.common.ui_list_page_size")} type="number"
+      <label className="block text-xs font-semibold">{__("Items per page (1–20)")}
+        <input className="mt-1 w-full" aria-label={__("List page size")} type="number"
           min={1} max={20} step={1} value={config.page_size}
           onChange={event => {
             const value = Number(event.target.value);
@@ -239,12 +239,12 @@ export function BuilderListFields({ element, onChange, onError }: Props) {
           }} />
       </label>
       {(missingType || missingCategory || missingTag || missingGeneric) &&
-        <p role="status" className="text-xs text-amber-900">{t('builder.builder_list_fields.unavailable_notice')}
+        <p role="status" className="text-xs text-amber-900">{__("The referenced CPT or taxonomy/term is unavailable. The list is empty; configuration is preserved on save.")}
         </p>}
       {lookupError && <div className="space-y-2">
         <p role="alert" className="text-xs text-rose-700">{lookupError}</p>
         <button type="button" className="btn-secondary !py-1.5 text-xs"
-          onClick={() => { setLookupError(''); setReload(value => value + 1); }}>{t('builder.builder_list_fields.reload')}
+          onClick={() => { setLookupError(''); setReload(value => value + 1); }}>{__("Reload source list")}
         </button>
       </div>}
     </fieldset>

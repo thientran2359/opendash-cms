@@ -4,8 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use opendash_core::admin_extensions::{
     AdminColumn, AdminExtensions, AdminTermPanel, ColumnFormat, MAX_COLUMNS_EFFECTIVE,
-    TermFieldRole, TermFieldType,
 };
+use opendash_core::content::FieldRole;
+use opendash_core::field_schema::{FieldContext, FieldSpec, validate_field_value};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -53,7 +54,7 @@ pub struct EffectiveTermPanel {
     pub key: String,
     pub label: String,
     pub order: i32,
-    pub fields: Vec<opendash_core::admin_extensions::TermPanelField>,
+    pub fields: Vec<FieldSpec>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -190,6 +191,13 @@ pub async fn sync_owner_in_conn(
             .execute(&mut *conn).await?;
     }
     for panel in &ext.term_panels {
+        let mut panel = panel.clone();
+        opendash_core::field_schema::normalize_field_specs_for_scope(
+            &mut panel.fields,
+            FieldContext::Term,
+            opendash_core::field_schema::FieldScopeKind::TermPanelField,
+        )
+        .map_err(ApiError::bad_request)?;
         let raw = serde_json::to_string(&Declaration::TermPanel(panel.clone()))?;
         sqlx::query("INSERT INTO admin_extensions (owner_kind,owner_id,local_key,declaration_json,provider_status) VALUES (?,?,?,?,?)")
             .bind(owner_kind).bind(owner_id).bind(&panel.local_key).bind(raw).bind(status)
@@ -226,8 +234,8 @@ pub async fn set_theme_active_in_conn(
     Ok(())
 }
 
-fn allowed_field_role(role: &str, min: TermFieldRole) -> bool {
-    role == "admin" || (role == "editor" && min == TermFieldRole::Editor)
+fn allowed_field_role(role: &str, min: FieldRole) -> bool {
+    role == "admin" || (role == "editor" && min == FieldRole::Editor)
 }
 
 fn token_for(kind: &str, role: &str, panels: &[EffectiveTermPanel], gens: &[String]) -> String {
@@ -259,7 +267,7 @@ pub async fn effective_term_in_conn(
             let mut fields = panel
                 .fields
                 .into_iter()
-                .filter(|field| allowed_field_role(actor_role, field.min_role.clone()))
+                .filter(|field| allowed_field_role(actor_role, field.effective_acl().0))
                 .collect::<Vec<_>>();
             if fields.is_empty() {
                 continue;
@@ -399,29 +407,21 @@ pub async fn update_term_values_in_conn(
                 saved.remove(field_key);
                 continue;
             }
-            match def.field_type {
-                TermFieldType::Boolean if !value.is_boolean() => {
-                    return Err(ApiError::bad_request(
-                        "Extension boolean phải là true/false.",
-                    ));
-                }
-                TermFieldType::Text | TermFieldType::Textarea => {
-                    let s = value
-                        .as_str()
-                        .ok_or_else(|| ApiError::bad_request("Extension text phải là chuỗi."))?;
-                    if s.chars().count() > 4096 || s.chars().any(char::is_control) {
-                        return Err(ApiError::bad_request(
-                            "Extension text vượt 4096 hoặc chứa ký tự điều khiển.",
-                        ));
-                    }
-                    if def.required && s.trim().is_empty() {
-                        return Err(ApiError::bad_request(
-                            "Extension field bắt buộc không được rỗng.",
-                        ));
-                    }
-                }
-                _ => {}
-            }
+            let empty = BTreeMap::new();
+            validate_field_value(
+                def,
+                FieldContext::Term,
+                value,
+                true,
+                true,
+                false,
+                None,
+                &panel.fields,
+                &empty,
+                None,
+                true,
+            )
+            .map_err(ApiError::bad_request)?;
             saved.insert(field_key.clone(), value.clone());
         }
         sqlx::query(
@@ -465,8 +465,8 @@ pub async fn effective_list(
                 continue;
             };
             if field.effective_status != EffectiveFieldStatus::Active
-                || role < field.definition.min_view_role
-                || field.definition.public_exposure != PublicExposure::Public
+                || role < field.definition.effective_acl().0
+                || field.definition.effective_acl().2 != PublicExposure::Public
             {
                 continue;
             }

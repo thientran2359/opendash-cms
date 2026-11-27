@@ -431,7 +431,7 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .json(&json!({
             "key": "case_study",
             "label": "Case Study",
-            "fields": [{ "key": "client_name", "label": "Client", "type": "short_text", "required": true }]
+            "fields": [{ "key": "client_name", "label": "Client", "type": "text", "required": true }]
         }))
         .send()
         .await

@@ -7,7 +7,7 @@ async fn site() -> SqlitePool {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     db
 }
 

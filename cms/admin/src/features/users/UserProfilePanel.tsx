@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useState } from 'react';
 import { getProfile, updateProfile, type UserProfile } from '../../api/users.ts';
 import {
@@ -26,7 +26,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
   onApiError,
   onProfileUpdated,
 }) => {
-  const { t: translate } = useI18n();
+  const { __ } = useI18n();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [username, setUsername] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -44,7 +44,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
         setProfile(data);
         setUsername(data.username);
       })
-      .catch(err => onApiError(err, tStatic('api.users.load_your_profile')));
+      .catch(err => onApiError(err, __("Could not load your profile.")));
     return () => {
       active = false;
     };
@@ -70,7 +70,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
         payload.new_password = newPassword;
       }
       if (!payload.username && !payload.new_password) {
-        setErrorMsg(tStatic('feature.users.userprofilepanel.there_are_no_changes_to_save'));
+        setErrorMsg(__("There are no changes to save."));
         setSaving(false);
         return;
       }
@@ -79,10 +79,10 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
       setUsername(updated.username);
       setCurrentPassword('');
       setNewPassword('');
-      setMessage(tStatic('feature.users.userprofilepanel.your_profile_has_been_updated'));
+      setMessage(__("Your profile has been updated."));
       onProfileUpdated?.(updated);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : tStatic('api.users.update_your_profile');
+      const msg = err instanceof Error ? err.message : __("Could not update your profile.");
       setErrorMsg(msg);
       onApiError(err, msg);
     } finally {
@@ -91,15 +91,15 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
   };
 
   if (!profile) {
-    return <p className="text-sm text-zinc-500">{translate('feature.users.userprofilepanel.loading_profile')}</p>;
+    return <p className="text-sm text-zinc-500">{__("Loading profile...")}</p>;
   }
 
   return (
     <section className="max-w-xl space-y-5" data-testid="user-profile-panel">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">{translate('shell.profile')}</h2>
-          <p className="mt-0.5 text-xs text-zinc-500">{translate('feature.users.userprofilepanel.version_v')}{profile.version}</p>
+          <h2 className="text-base font-semibold text-zinc-950">{__("My profile")}</h2>
+          <p className="mt-0.5 text-xs text-zinc-500">{__("Version v")}{profile.version}</p>
         </div>
         <AdminBadge tone={profile.role === 'admin' ? 'success' : 'neutral'} className="uppercase">
           {profile.role}
@@ -112,18 +112,18 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
           tabs={[
             {
               id: 'account',
-              label: translate('profile.tab_account'),
+              label: __("Account info"),
               dirty: Boolean(username.trim() && username.trim() !== profile.username),
             },
             {
               id: 'password',
-              label: translate('profile.tab_password'),
+              label: __("Password"),
               dirty: Boolean(currentPassword || newPassword),
             },
           ]}
           activeId={activeTab}
           onChange={setActiveTab}
-          ariaLabel={translate('profile.tabs_label')}
+          ariaLabel={__("Profile sections")}
           testId="profile-tabs"
           idPrefix="profile"
         />
@@ -134,7 +134,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
           className="space-y-3"
         >
           <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-            <span>{translate('feature.users.userprofilepanel.username_display_name')}</span>
+            <span>{__("Username / Display name")}</span>
             <input
               type="text"
               className={INPUT_CLASS}
@@ -151,11 +151,11 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
           className="space-y-3"
         >
           <div>
-            <h3 className="text-sm font-semibold text-zinc-900">{translate('feature.users.userprofilepanel.change_password_optional')}</h3>
-            <p className="mt-0.5 text-xs text-zinc-500">{translate('feature.users.userprofilepanel.your_current_password_is_required_when_changing_your_password')}</p>
+            <h3 className="text-sm font-semibold text-zinc-900">{__("Change password (optional)")}</h3>
+            <p className="mt-0.5 text-xs text-zinc-500">{__("Your current password is required when changing your password.")}</p>
           </div>
           <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-            <span>{translate('feature.users.userprofilepanel.current_password')}</span>
+            <span>{__("Current password")}</span>
             <input
               type="password"
               className={INPUT_CLASS}
@@ -165,7 +165,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
             />
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-            <span>{translate('feature.users.userprofilepanel.new_password')}</span>
+            <span>{__("New password")}</span>
             <input
               type="password"
               className={INPUT_CLASS}
@@ -176,7 +176,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
           </label>
         </AdminTabPanel>
         <AdminButton type="submit" variant="primary" disabled={saving || !csrfToken}>
-          {saving ? translate('feature.users.userprofilepanel.saving') : translate('feature.users.userprofilepanel.save_profile')}
+          {saving ? __("Saving...") : __("Save profile")}
         </AdminButton>
       </form>
     </section>

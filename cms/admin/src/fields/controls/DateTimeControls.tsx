@@ -38,7 +38,7 @@ export const DateTimeControl: React.FC<{
   disabled?: boolean;
   onChange: (next: string) => void;
 }> = ({ field, value, siteTimezone = 'UTC', disabled = false, onChange }) => {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const id = useId();
   const utcStr = typeof value === 'string' ? value : '';
   const localStr = formatDateTimeForSiteTz(utcStr, siteTimezone);
@@ -76,7 +76,7 @@ export const DateTimeControl: React.FC<{
             onClick={() => onChange('')}
             className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100"
           >
-            {t('fields.common.clear')}
+            {__("Clear")}
           </button>
         )}
       </div>

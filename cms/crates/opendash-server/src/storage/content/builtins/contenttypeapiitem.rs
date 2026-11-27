@@ -22,27 +22,30 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
         "page" => "Trang",
         _ => return None,
     };
+    let mut fi = opendash_core::field_schema::FieldSpec::new(
+        opendash_core::field_schema::FieldType::Media,
+        "featured_image",
+        "Ảnh đại diện",
+    );
+    fi.media_kind = Some(opendash_core::field_schema::MediaFieldKind::Image);
+    let mut fields = vec![
+        opendash_core::field_schema::FieldSpec::new(
+            opendash_core::field_schema::FieldType::Richtext,
+            "body",
+            "Nội dung",
+        ),
+        fi,
+    ];
+    opendash_core::field_schema::normalize_field_specs_for_scope(
+        &mut fields,
+        opendash_core::field_schema::FieldContext::Content,
+        opendash_core::field_schema::FieldScopeKind::BaseCptField,
+    )
+    .expect("builtin fields must be valid");
     Some(ContentTypeDefinition {
         key: key.to_owned(),
         label: label.to_owned(),
-        fields: vec![
-            ContentFieldDefinition {
-                key: "body".into(),
-                label: "Nội dung".into(),
-                field_type: ContentFieldType::RichText,
-                required: false,
-                options: Vec::new(),
-                ..Default::default()
-            },
-            ContentFieldDefinition {
-                key: "featured_image".into(),
-                label: "Ảnh đại diện".into(),
-                field_type: ContentFieldType::Image,
-                required: false,
-                options: Vec::new(),
-                ..Default::default()
-            },
-        ],
+        fields,
         settings: ContentTypeSettings::default_for_type_key(key),
     })
 }
@@ -88,27 +91,49 @@ pub async fn preflight_builtin_key_collisions(
         } else {
             builtin_definition(&key).expect("known core key")
         };
-        let matching_definition = serde_json::from_str::<ContentTypeDefinition>(&raw)
+        let matching_definition = serde_json::from_str::<serde_json::Value>(&raw)
             .ok()
-            .map(|mut definition| {
-                // 0038 backfills the original 0008/0037 core JSON. Before
-                // migration, absence of settings must not look like key theft.
-                let has_settings = serde_json::from_str::<serde_json::Value>(&raw)
-                    .ok()
-                    .and_then(|value| value.get("settings").cloned())
-                    .is_some();
-                if !has_settings {
-                    definition.settings = canonical.settings.clone();
-                }
-                let allowed_settings = if matches!(key.as_str(), "section" | "pattern") {
-                    definition.settings == canonical.settings
+            .map(|val| {
+                let obj = val.as_object();
+                let key_ok = obj.and_then(|o| o.get("key")).and_then(|v| v.as_str())
+                    == Some(canonical.key.as_str());
+                let label_ok = obj.and_then(|o| o.get("label")).and_then(|v| v.as_str())
+                    == Some(canonical.label.as_str());
+                let fields_ok = if let Ok(def) =
+                    serde_json::from_value::<ContentTypeDefinition>(val.clone())
+                {
+                    def.fields == canonical.fields
+                } else if matches!(key.as_str(), "post" | "page") {
+                    obj.and_then(|o| o.get("fields"))
+                        .and_then(|v| v.as_array())
+                        .is_some_and(|arr| {
+                            arr.len() == 2
+                                && arr[0].get("key").and_then(|v| v.as_str()) == Some("body")
+                                && arr[0].get("type").and_then(|v| v.as_str()) == Some("rich_text")
+                                && arr[1].get("key").and_then(|v| v.as_str())
+                                    == Some("featured_image")
+                                && arr[1].get("type").and_then(|v| v.as_str()) == Some("image")
+                        })
                 } else {
-                    definition.settings.publication == ContentPublication::DraftPublish
+                    false
                 };
-                definition.key == canonical.key
-                    && definition.label == canonical.label
-                    && definition.fields == canonical.fields
-                    && allowed_settings
+                let settings_ok = match obj.and_then(|o| o.get("settings")) {
+                    None => true,
+                    Some(s_val) => {
+                        if let Ok(settings) =
+                            serde_json::from_value::<ContentTypeSettings>(s_val.clone())
+                        {
+                            if matches!(key.as_str(), "section" | "pattern") {
+                                settings == canonical.settings
+                            } else {
+                                settings.publication == ContentPublication::DraftPublish
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                };
+                key_ok && label_ok && fields_ok && settings_ok
             })
             == Some(true);
         if owner != "core" || owner_id.is_some() || status != "active" || !matching_definition {

@@ -8,7 +8,7 @@ async fn migration_0045_seeds_five_core_blocks_enforces_409_conflict_and_preserv
     crate::storage::content::preflight_builtin_key_collisions(&db)
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     ensure_embedded_core_blocks(&db).await.unwrap();
 
     let schema_cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
@@ -120,7 +120,7 @@ async fn provider_toggle_resyncs_media_acl_without_erasing_saved_homepage() {
     crate::storage::content::preflight_builtin_key_collisions(&db)
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     ensure_embedded_core_blocks(&db).await.unwrap();
 
     let image_id = "a".repeat(64);
@@ -239,7 +239,10 @@ async fn provider_toggle_resyncs_media_acl_without_erasing_saved_homepage() {
         .iter_mut()
         .find(|field| field.key == "body")
         .unwrap()
-        .public_exposure = PublicExposure::Private;
+        .acl = Some(opendash_core::field_schema::FieldAcl {
+        public_exposure: Some(PublicExposure::Private),
+        ..Default::default()
+    });
     sqlx::query("UPDATE content_types SET definition_json = ? WHERE key = 'page'")
         .bind(serde_json::to_string(&page_definition).unwrap())
         .execute(&mut *conn)

@@ -83,11 +83,13 @@ impl Drop for RunningServer {
     }
 }
 
-fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_route_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).expect("read route module dir") {
-        let path = entry.expect("route dir entry").path();
+        let path = entry.expect("read route dir entry").path();
         if path.is_dir() {
-            collect_rs_files(&path, out);
+            if path.file_name().and_then(|n| n.to_str()) != Some("tests") {
+                collect_route_rs_files(&path, out);
+            }
         } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("rs") {
             out.push(path);
         }
@@ -103,7 +105,7 @@ fn read_route_sources(routes_dir: &Path, file: &str) -> String {
     let mod_dir = routes_dir.join(stem);
     if mod_dir.is_dir() {
         let mut files = Vec::new();
-        collect_rs_files(&mod_dir, &mut files);
+        collect_route_rs_files(&mod_dir, &mut files);
         files.sort();
         assert!(
             !files.is_empty(),
@@ -197,6 +199,18 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
         (
             "seo.rs",
             &["put_entry_route", "put_entry_seo", "put_home_seo"],
+        ),
+        (
+            "redirects.rs",
+            &[
+                "create_redirect",
+                "update_redirect",
+                "delete_redirect",
+                "import_redirects",
+                "delete_not_found_log_handler",
+                "bulk_delete_not_found_logs_handler",
+                "clear_not_found_logs_handler",
+            ],
         ),
         (
             "settings.rs",

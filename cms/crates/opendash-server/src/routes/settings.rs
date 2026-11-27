@@ -96,8 +96,10 @@ pub async fn timezones_get(
 /// One process serves exactly one site.
 static GENERAL_SAVE_CACHE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-pub async fn admin_i18n_bootstrap(State(db): State<SqlitePool>) -> ApiResult<Response> {
-    let bootstrap = settings::get_admin_i18n_bootstrap(&db).await?;
+pub async fn admin_i18n_bootstrap(State(state): State<AppState>) -> ApiResult<Response> {
+    let bootstrap =
+        settings::get_admin_i18n_bootstrap_with_registry(&state.db, Some(&state.catalog_registry))
+            .await?;
     Ok((no_store_headers(None), Json(bootstrap)).into_response())
 }
 
@@ -123,11 +125,10 @@ pub async fn general_put(
             settings::save_general_for_locale(&state.db, query.locale.as_deref(), input, version)
                 .await
                 .map_err(map_storage_error)?;
-        if let SaveOutcome::Saved(ref saved) = outcome {
-            state.ui_locale.store(
-                crate::i18n::encode_ui_locale(&saved.cms_locale),
-                Ordering::Release,
-            );
+        if let SaveOutcome::Saved(ref saved) = outcome
+            && let Ok(mut guard) = state.ui_locale.write()
+        {
+            *guard = crate::i18n::encode_ui_locale_str(&saved.cms_locale);
         }
         Ok::<_, ApiError>(outcome)
     })

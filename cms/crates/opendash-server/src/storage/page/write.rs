@@ -140,8 +140,8 @@ pub(crate) fn body_can_grant_media(schema: &EffectiveContentSchema) -> bool {
             .settings
             .supports(ContentSupport::Builder)
         && schema.effective_fields.get("body").is_some_and(|body| {
-            body.definition.field_type == ContentFieldType::RichText
-                && body.definition.public_exposure == PublicExposure::Public
-                && body.definition.min_view_role == FieldRole::Editor
+            body.definition.field_type == opendash_core::field_schema::FieldType::Richtext
+                && body.definition.effective_acl().2 == PublicExposure::Public
+                && body.definition.effective_acl().0 == FieldRole::Editor
         })
 }

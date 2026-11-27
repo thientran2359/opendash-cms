@@ -1,5 +1,3 @@
-use std::{path::PathBuf, sync::Arc};
-
 use axum::{
     Extension, Router,
     extract::{DefaultBodyLimit, Request},
@@ -10,14 +8,12 @@ use axum::{
 };
 use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
 use rust_embed::RustEmbed;
-use sqlx::SqlitePool;
+use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    hooks::HookDispatcher,
     media::{MAX_MEDIA_BYTES, MediaStore},
     media_video::MAX_VIDEO_BYTES,
     package::V2_MAX_ZIP_BYTES,
-    plugin::PluginManager,
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
         builder::{
@@ -53,6 +49,7 @@ use crate::{
         },
         public::public_page,
         public_content::{media_file, media_thumb, media_variant},
+        redirects,
         settings::{
             general_get, general_put, locales_create, locales_delete, locales_get,
             locales_multilingual_put, locales_orphans_get, locales_orphans_purge,
@@ -76,89 +73,10 @@ use crate::{
     theme::MAX_ZIP_BYTES,
 };
 
-#[derive(Clone)]
-pub struct AppState {
-    pub db: SqlitePool,
-    pub ui_locale: Arc<std::sync::atomic::AtomicU8>,
-    pub plugin_manager: Arc<PluginManager>,
-    pub hooks: Arc<HookDispatcher>,
-    pub media_store: Arc<MediaStore>,
-    pub content_registry: Arc<
-        tokio::sync::RwLock<
-            opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>,
-        >,
-    >,
-    pub coordinator: Arc<crate::operations::SiteCoordinator>,
-    pub backup_registry: Arc<crate::backup::BackupRuntimeRegistry>,
-    pub block_template_cache: Arc<crate::page::BlockTemplateCache>,
-    pub site_cache_epoch: Arc<crate::cache::SiteCacheEpoch>,
-    pub render_cache: Arc<crate::cache::ExtensionRenderCache>,
-    pub recovery: crate::config::RecoveryState,
-    pub runtime_config: crate::config::RuntimeConfigV1,
-}
+pub use crate::state::AppState;
 
 #[derive(Clone, Copy)]
 pub(crate) struct HostOriginRejected;
-
-impl axum::extract::FromRef<AppState> for SqlitePool {
-    fn from_ref(state: &AppState) -> Self {
-        state.db.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<PluginManager> {
-    fn from_ref(state: &AppState) -> Self {
-        state.plugin_manager.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<HookDispatcher> {
-    fn from_ref(state: &AppState) -> Self {
-        state.hooks.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<MediaStore> {
-    fn from_ref(state: &AppState) -> Self {
-        state.media_store.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<crate::operations::SiteCoordinator> {
-    fn from_ref(state: &AppState) -> Self {
-        state.coordinator.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<crate::page::BlockTemplateCache> {
-    fn from_ref(state: &AppState) -> Self {
-        state.block_template_cache.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<crate::cache::SiteCacheEpoch> {
-    fn from_ref(state: &AppState) -> Self {
-        state.site_cache_epoch.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<crate::cache::ExtensionRenderCache> {
-    fn from_ref(state: &AppState) -> Self {
-        state.render_cache.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState>
-    for Arc<
-        tokio::sync::RwLock<
-            opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>,
-        >,
-    >
-{
-    fn from_ref(state: &AppState) -> Self {
-        state.content_registry.clone()
-    }
-}
 
 #[derive(RustEmbed)]
 #[folder = "../../admin/dist/"]
@@ -176,6 +94,25 @@ pub fn build_router_with_themes_root(
     expected_host: String,
     themes_root: PathBuf,
 ) -> Router {
+    build_router_with_telemetry(state, expected_host, themes_root, None)
+}
+
+pub fn build_router_with_telemetry(
+    state: AppState,
+    expected_host: String,
+    themes_root: PathBuf,
+    telemetry: Option<Arc<crate::redirects::RedirectTelemetryBuffer>>,
+) -> Router {
+    let (telemetry_buf, telemetry_drop_guard) = match telemetry {
+        Some(existing) => (existing, None),
+        None => {
+            let (buf, guard) = crate::redirects::RedirectTelemetryBuffer::spawn_with_coordinator(
+                state.db.clone(),
+                state.coordinator.clone(),
+            );
+            (buf, Some(Arc::new(guard)))
+        }
+    };
     let smtp_secrets_dir = crate::paths::SitePaths::from_env()
         .map(|p| p.smtp_secrets_dir())
         .unwrap_or_else(|_| PathBuf::from("database/secrets/smtp"));
@@ -190,7 +127,7 @@ pub fn build_router_with_themes_root(
     let trusted_origin = state.runtime_config.trusted_origin_normalized();
     let trusted_is_https = state.runtime_config.trusted_origin_is_https();
 
-    let router = Router::new()
+    let router_without_telemetry = Router::new()
         .route("/", get(public_page))
         .route("/media/{id}/file", get(media_file))
         .route("/media/{id}/thumbnail", get(media_thumb))
@@ -198,6 +135,7 @@ pub fn build_router_with_themes_root(
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))
         .route("/api/health", get(crate::routes::health::status))
         .route("/api/i18n/admin", get(crate::routes::settings::admin_i18n_bootstrap))
+        .route("/api/i18n/admin/catalog", get(crate::routes::l10n::admin_i18n_catalog))
         .route("/api/public/contact/received", get(crate::routes::contact::public_received))
         .route(
             "/api/public/contact/{id}",
@@ -372,14 +310,9 @@ pub fn build_router_with_themes_root(
             "/api/admin/locales/orphans/{code}/purge",
             post(locales_orphans_purge).layer(DefaultBodyLimit::max(4096)),
         )
-        .route(
-            "/api/admin/locales/{code}",
-            put(locales_update).delete(locales_delete).layer(DefaultBodyLimit::max(4096)),
-        )
-        .route(
-            "/api/admin/locales/{code}/set-default",
-            post(locales_set_default).layer(DefaultBodyLimit::max(4096)),
-        )
+        .route("/api/admin/locales/{code}", put(locales_update).delete(locales_delete).layer(DefaultBodyLimit::max(4096)))
+        .route("/api/admin/locales/{code}/set-default", post(locales_set_default).layer(DefaultBodyLimit::max(4096)))
+        .merge(crate::routes::l10n::router())
         .route("/api/admin/settings/timezones", get(timezones_get))
         .route(
             "/api/admin/settings/permalinks",
@@ -787,6 +720,43 @@ pub fn build_router_with_themes_root(
                     crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES,
                 )),
         )
+        .route(
+            "/api/admin/redirects",
+            get(redirects::rules::list_redirects)
+                .post(redirects::rules::create_redirect)
+                .layer(DefaultBodyLimit::max(redirects::MAX_REDIRECT_RULE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/redirects/{id}",
+            get(redirects::rules::get_redirect)
+                .put(redirects::rules::update_redirect)
+                .delete(redirects::rules::delete_redirect)
+                .layer(DefaultBodyLimit::max(redirects::MAX_REDIRECT_RULE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/redirects/import",
+            post(redirects::csv::import_redirects)
+                .layer(DefaultBodyLimit::max(redirects::MAX_REDIRECT_CSV_HTTP_BODY_BYTES)),
+        )
+        .route("/api/admin/redirects/export", get(redirects::csv::export_redirects))
+        .route(
+            "/api/admin/404-logs",
+            get(redirects::not_found_logs::list_not_found_logs_handler),
+        )
+        .route(
+            "/api/admin/404-logs/{id}",
+            delete(redirects::not_found_logs::delete_not_found_log_handler),
+        )
+        .route(
+            "/api/admin/404-logs/bulk-delete",
+            post(redirects::not_found_logs::bulk_delete_not_found_logs_handler)
+                .layer(DefaultBodyLimit::max(redirects::MAX_REDIRECT_RULE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/404-logs/clear",
+            post(redirects::not_found_logs::clear_not_found_logs_handler)
+                .layer(DefaultBodyLimit::max(redirects::MAX_NOT_FOUND_CLEAR_JSON_BYTES)),
+        )
         .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES))
         .layer(axum::Extension(secret_store))
         .layer(axum::Extension(smtp_service))
@@ -822,7 +792,14 @@ pub fn build_router_with_themes_root(
             }
             resp
         }
-    }))
-    .layer(Extension(ThemeStoreRoot(themes_root)))
-    .with_state(state)
+    }));
+    let router = router_without_telemetry
+        .layer(Extension(telemetry_buf))
+        .layer(Extension(ThemeStoreRoot(themes_root)));
+    let router = if let Some(guard) = telemetry_drop_guard {
+        router.layer(Extension(guard))
+    } else {
+        router
+    };
+    router.with_state(state)
 }

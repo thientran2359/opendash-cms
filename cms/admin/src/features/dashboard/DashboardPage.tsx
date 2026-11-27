@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, useI18n } from '../../i18n/index.tsx';
 import { formatNumber } from '../../i18n/format.ts';
 import React, { useEffect, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
@@ -17,7 +17,7 @@ const metrics = [
 ] as const;
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onApiError }) => {
-  const { t: translate } = useI18n();
+  const { __, _x } = useI18n();
   const [counts, setCounts] = useState<DashboardCounts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,9 +37,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onApiError }) => {
       })
       .catch(cause => {
         if (controller.signal.aborted) return;
-        setError(cause instanceof Error ? cause.message : tStatic('feature.dashboard.dashboardpage.could_not_load_statistics'));
+        setError(cause instanceof Error ? cause.message : __("Could not load statistics."));
         if (cause instanceof ApiClientError && cause.status === 401) {
-          onApiError(cause, tStatic('feature.dashboard.dashboardpage.the_session_is_invalid'));
+          onApiError(cause, __("The session is invalid."));
         }
       })
       .finally(() => {
@@ -52,8 +52,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onApiError }) => {
     <section className="space-y-3" aria-labelledby="dashboard-stats-heading">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 id="dashboard-stats-heading" className="text-base font-semibold text-zinc-950">{translate('feature.dashboard.dashboardpage.content_statistics')}</h2>
-          <p className="mt-0.5 text-sm text-zinc-600">{translate('feature.dashboard.dashboardpage.number_of_posts_and_pages_on_the_website')}</p>
+          <h2 id="dashboard-stats-heading" className="text-base font-semibold text-zinc-950">{__("Content statistics")}</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">{__("Number of posts and pages on the website.")}</p>
         </div>
         <AdminButton
           variant="secondary"
@@ -61,18 +61,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onApiError }) => {
           onClick={() => setRetryVersion(value => value + 1)}
           disabled={loading}
         >
-          {loading ? translate('feature.dashboard.dashboardpage.loading') : translate('feature.dashboard.dashboardpage.refresh_statistics')}
+          {loading ? __("Loading...") : __("Refresh statistics")}
         </AdminButton>
       </div>
 
       {error && (
         <AdminAlert tone="error" className="space-y-2.5">
-          <p>{translate('feature.dashboard.dashboardpage.could_not_load_statistics_2')}{' '}{error}</p>
+          <p>{__("Could not load statistics:")}{' '}{error}</p>
           <AdminButton
             variant="secondary"
             size="sm"
             onClick={() => setRetryVersion(value => value + 1)}
-          >{translate('feature.dashboard.dashboardpage.retry')}</AdminButton>
+          >{_x("Retry", "feature.dashboard")}</AdminButton>
         </AdminAlert>
       )}
 
@@ -83,11 +83,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onApiError }) => {
             className="min-w-0 rounded-xl border border-zinc-200 bg-white p-4"
             data-dashboard-metric={metric.kind + '-' + metric.status}
           >
-            <p className="text-xs font-medium text-zinc-500">{translate(metric.label)}</p>
+            <p className="text-xs font-medium text-zinc-500">{__(metric.label)}</p>
             <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-zinc-950">
-              {loading ? <span role="status" className="text-sm font-medium text-zinc-400">{translate('reading.loading')}</span>
+              {loading ? <span role="status" className="text-sm font-medium text-zinc-400">{__("Loading…")}</span>
                 : counts ? formatNumber(counts[metric.kind][metric.status])
-                  : <span aria-label={translate('feature.dashboard.dashboardpage.no_data_available')}>—</span>}
+                  : <span aria-label={__("No data available")}>—</span>}
             </p>
           </article>
         ))}

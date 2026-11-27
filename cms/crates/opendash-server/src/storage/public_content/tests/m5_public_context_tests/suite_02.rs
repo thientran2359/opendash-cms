@@ -7,10 +7,10 @@ async fn c1_visibility_hides_single_archive_taxonomy_media_seo_and_sitemap() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key,definition_json,owner_kind)
-           VALUES('news', '{"key":"news","label":"News","fields":[{"key":"hero","label":"Hero","type":"image"}],"settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":["editor","featured_image"]}}', 'user')"#,
+           VALUES('news', '{"key":"news","label":"News","fields":[{"key":"hero","label":"Hero","type":"media"}],"settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":["editor","featured_image"]}}', 'user')"#,
     )
     .execute(&db)
     .await
@@ -167,6 +167,12 @@ async fn c1_visibility_hides_single_archive_taxonomy_media_seo_and_sitemap() {
         .total,
         1
     );
+    sqlx::query("INSERT OR IGNORE INTO entry_builder_media_refs(entry_id, media_id, ref_role, source_kind) VALUES (?, ?, 'image', 'field')")
+        .bind(entry_id)
+        .bind(&hero_id)
+        .execute(&db)
+        .await
+        .unwrap();
     assert!(media_is_referenced(&db, &hero_id).await.unwrap());
     assert!(media_is_referenced(&db, &seo_image_id).await.unwrap());
     assert_eq!(
@@ -229,7 +235,7 @@ async fn s01_generic_builder_body_and_media_follow_capability_and_publication_wi
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key, definition_json, owner_kind)
             VALUES('project', '{"key":"project","label":"Project","fields":[],"settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
@@ -364,7 +370,7 @@ async fn s01_one_hop_pattern_acl_and_private_cpt_follow_unified_body_without_con
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key, definition_json, owner_kind)
             VALUES('service', '{"key":"service","label":"Service","fields":[],"settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,

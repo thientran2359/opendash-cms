@@ -453,8 +453,8 @@ pub(in crate::storage) async fn validate_entry_builder_document(
                             // The existing resolver picks the first public base image.
                             if let Some(field) =
                                 current.schema.base.descriptor.fields.iter().find(|f| {
-                                    f.field_type == ContentFieldType::Image
-                                        && f.public_exposure == PublicExposure::Public
+                                    f.field_type == opendash_core::field_schema::FieldType::Media
+                                        && f.effective_acl().2 == PublicExposure::Public
                                 })
                                 && !visible_builder_field(&current.schema, &field.key, role)
                             {

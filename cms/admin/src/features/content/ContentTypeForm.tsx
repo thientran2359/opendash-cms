@@ -1,10 +1,9 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, _x, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import {
-  CONTENT_FIELD_TYPES,
-  ContentFieldDefinition,
-  ContentFieldType,
+  FieldSpec,
+  FieldType,
 } from './types.ts';
 import type { ContentPublicationPolicy, ContentSupport, ContentTypeDefinitionWithSettings } from '../../api/content.ts';
 
@@ -17,7 +16,7 @@ export interface DraftField {
   id: number;
   key: string;
   label: string;
-  type: ContentFieldType;
+  type: FieldType;
   required: boolean;
   optionsText: string;
 }
@@ -90,7 +89,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
 
   const addField = () => {
     if (fields.length >= 64) {
-      setError(tStatic("feature.content.contenttypeform.a_content_type_supports_up_to_64_custom_fields"));
+      setError(__("A content type supports up to 64 custom fields."));
       return;
     }
     nextId.current += 1;
@@ -98,7 +97,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
       id: nextId.current,
       key: '',
       label: '',
-      type: 'short_text',
+      type: 'text',
       required: false,
       optionsText: '',
     }] });
@@ -112,34 +111,34 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
 
   const buildSchema = (): ContentTypeDefinitionWithSettings => {
     if (!snakeKeyPattern.test(key)) {
-      throw new Error(tStatic("feature.content.contenttypeform.the_cpt_key_must_start_with_a_lowercase_letter"));
+      throw new Error(__("The CPT key must start with a lowercase letter and contain only lowercase letters, digits and underscores (up to 64 characters)."));
     }
-    if (!label.trim()) throw new Error(tStatic("feature.content.contenttypeform.enter_a_content_type_name"));
-    if (label.length > 100) throw new Error(tStatic("feature.content.contenttypeform.the_content_type_name_must_be_at_most_100"));
+    if (!label.trim()) throw new Error(__("Enter a content type name."));
+    if (label.length > 100) throw new Error(__("The content type name must be at most 100 characters."));
     const usedKeys = new Set<string>();
-    const resultFields: ContentFieldDefinition[] = fields.map(field => {
-      if (!snakeKeyPattern.test(field.key)) throw new Error(tStatic("feature.content.contenttypeform.field_key_value_is_invalid", { value1: field.label || field.key }));
-      if (!field.label.trim() || field.label.length > 100) throw new Error(tStatic("feature.content.contenttypeform.field_name_value_is_invalid", { value1: field.key }));
-      if (usedKeys.has(field.key)) throw new Error(tStatic("feature.content.contenttypeform.field_value_has_a_duplicate_key", { value1: field.key }));
+    const resultFields: FieldSpec[] = fields.map(field => {
+      if (!snakeKeyPattern.test(field.key)) throw new Error(__("Field key \"{{value1}}\" is invalid.", { value1: field.label || field.key }));
+      if (!field.label.trim() || field.label.length > 100) throw new Error(__("Field name \"{{value1}}\" is invalid.", { value1: field.key }));
+      if (usedKeys.has(field.key)) throw new Error(__("Field \"{{value1}}\" has a duplicate key.", { value1: field.key }));
       usedKeys.add(field.key);
-      let options: ContentFieldDefinition['options'] = [];
+      let options: FieldSpec['options'] = [];
       if (field.type === 'select') {
         const lines = field.optionsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
         if (!lines.length || lines.length > 100) {
-          throw new Error(tStatic("feature.content.contenttypeform.field_value_requires_1_to_100_options", { value1: field.label }));
+          throw new Error(__("Field \"{{value1}}\" requires 1 to 100 options.", { value1: field.label }));
         }
         options = lines.map(line => {
           const separator = line.indexOf('|');
-          if (separator < 1) throw new Error(tStatic("feature.content.contenttypeform.option_value_must_use_the_format_value_label", { value1: line }));
+          if (separator < 1) throw new Error(__("Option \"{{value1}}\" must use the format value|Label.", { value1: line }));
           const value = line.slice(0, separator).trim();
           const optionLabel = line.slice(separator + 1).trim();
           if (!value || value.length > 128 || !optionLabel || optionLabel.length > 100) {
-            throw new Error(tStatic("feature.content.contenttypeform.option_value_has_an_invalid_value_or_label", { value1: line }));
+            throw new Error(__("Option \"{{value1}}\" has an invalid value or label.", { value1: line }));
           }
           return { value, label: optionLabel };
         });
         if (new Set(options.map(option => option.value)).size !== options.length) {
-          throw new Error(tStatic("feature.content.contenttypeform.field_value_has_duplicate_options", { value1: field.label }));
+          throw new Error(__("Field \"{{value1}}\" has duplicate options.", { value1: field.label }));
         }
       }
       return {
@@ -165,19 +164,19 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
         updateDraft(blankContentTypeCreationDraft());
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : tStatic("feature.content.contenttypeform.could_not_read_the_cpt_configuration"));
+      setError(err instanceof Error ? err.message : __("Could not read the CPT configuration."));
     }
   };
 
   return (
     <form onSubmit={submit} className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-zinc-950">{tStatic("feature.content.contenttypeform.register_a_new_content_type")}</h3>
-        <p className="mt-0.5 text-xs text-zinc-600">{tStatic("feature.content.contenttypeform.only_administrators_can_declare_cpts_labels_and_behavior_can")}</p>
+        <h3 className="text-base font-semibold text-zinc-950">{__("Register a new content type")}</h3>
+        <p className="mt-0.5 text-xs text-zinc-600">{__("Only administrators can declare CPTs. Labels and behavior can be edited in content type settings.")}</p>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label htmlFor="content-type-key" className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>{tStatic("feature.content.contenttypeform.cpt_key")}</span>
+          <span>{__("CPT key *")}</span>
           <input
             id="content-type-key"
             name="key"
@@ -187,11 +186,11 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             maxLength={64}
             onChange={e => update({ key: e.target.value })}
-            placeholder={tStatic("feature.common.ui_vi_du_portfolio_item")}
+            placeholder={__("e.g. portfolio_item")}
           />
         </label>
         <label htmlFor="content-type-label" className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>{tStatic("feature.content.contenttypeform.display_name")}</span>
+          <span>{__("Display name *")}</span>
           <input
             id="content-type-label"
             name="label"
@@ -201,12 +200,12 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             maxLength={100}
             onChange={e => update({ label: e.target.value })}
-            placeholder={tStatic("feature.content.contenttypeform.project")}
+            placeholder={__("Project")}
           />
         </label>
       </div>
       <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3.5">
-        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeform.content_type_behavior")}</legend>
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{__("Content type behavior")}</legend>
         <label htmlFor="new-cpt-public" className="flex items-center gap-2 text-sm text-zinc-800">
           <input
             id="new-cpt-public"
@@ -215,7 +214,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             onChange={e => update({ isPublic: e.target.checked })}
           />
-          <span>{tStatic("feature.content.contenttypeform.public_entries_public")}</span>
+          <span>{__("Public entries (public)")}</span>
         </label>
         <label htmlFor="new-cpt-archive" className="flex items-center gap-2 text-sm text-zinc-800">
           <input
@@ -225,10 +224,10 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             onChange={e => update({ hasArchive: e.target.checked })}
           />
-          <span>{tStatic("feature.content.contenttypeform.enable_archive_has_archive")}</span>
+          <span>{__("Enable archive (has_archive)")}</span>
         </label>
         <label htmlFor="new-cpt-publication" className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>{tStatic("feature.content.contenttypeform.publishing_workflow")}</span>
+          <span>{__("Publishing workflow")}</span>
           <select
             id="new-cpt-publication"
             className={SELECT_CLASS}
@@ -236,12 +235,12 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             onChange={event => update({ publication: event.target.value as ContentPublicationPolicy })}
           >
-            <option value="immediate">{tStatic("feature.content.contenttypeform.save_publishes_immediately_immediate")}</option>
-            <option value="draft_publish">{tStatic("feature.content.contenttypeform.save_draft_publish_draft_publish")}</option>
+            <option value="immediate">{__("Save publishes immediately (immediate)")}</option>
+            <option value="draft_publish">{__("Save draft / Publish (draft_publish)")}</option>
           </select>
         </label>
         <fieldset className="space-y-2 border-t border-zinc-100 pt-2.5">
-          <legend className="text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeform.editor_screen_features")}</legend>
+          <legend className="text-xs font-semibold uppercase tracking-wide text-zinc-700">{__("Editor screen features")}</legend>
           <label htmlFor="new-cpt-editor" className="flex items-center gap-2 text-sm text-zinc-800">
             <input
               id="new-cpt-editor"
@@ -250,7 +249,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               disabled={disabled}
               onChange={e => toggleSupport('editor', e.target.checked)}
             />
-            <span>{tStatic("feature.content.contenttypeform.editor_editor")}</span>
+            <span>{__("Editor (editor)")}</span>
           </label>
           <label htmlFor="new-cpt-featured-image" className="flex items-center gap-2 text-sm text-zinc-800">
             <input
@@ -260,7 +259,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               disabled={disabled}
               onChange={e => toggleSupport('featured_image', e.target.checked)}
             />
-            <span>{tStatic("feature.content.contenttypeform.featured_image_featured_image")}</span>
+            <span>{__("Featured image (featured_image)")}</span>
           </label>
           <label htmlFor="new-cpt-builder" className="flex items-center gap-2 text-sm text-zinc-800">
             <input
@@ -270,23 +269,23 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               disabled={disabled}
               onChange={e => toggleSupport('builder', e.target.checked)}
             />
-            <span>{tStatic("feature.common.visual_builder")}</span>
+            <span>{__("Visual Builder (builder)")}</span>
           </label>
-          <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeform.enable_builder_to_design_individual_entries_disabling_a_feature")}</p>
+          <p className="text-xs text-zinc-500">{__("Enable Builder to design individual entries. Disabling a feature preserves saved text, images and designs.")}</p>
         </fieldset>
       </fieldset>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-zinc-900">{tStatic("feature.common.custom_fields")} ({fields.length})</h4>
+        <h4 className="text-sm font-semibold text-zinc-900">{__("Custom fields")} ({fields.length})</h4>
         <AdminButton variant="secondary" size="sm" onClick={addField} disabled={disabled || fields.length >= 64}>
-          {tStatic("feature.content.contenttypeform.add_field")}
+          {_x("+ Add field", "feature.content")}
         </AdminButton>
       </div>
       {fields.map((field, index) => (
         <fieldset key={field.id} className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3.5">
-          <legend className="px-1 text-xs font-semibold text-zinc-700">{tStatic("feature.common.field")} {index + 1}</legend>
+          <legend className="px-1 text-xs font-semibold text-zinc-700">{__("Field")} {index + 1}</legend>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label htmlFor={`schema-field-key-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>{tStatic("feature.content.contenttypeform.field_key")}</span>
+              <span>{__("Field key *")}</span>
               <input
                 id={`schema-field-key-${field.id}`}
                 name="key"
@@ -299,7 +298,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               />
             </label>
             <label htmlFor={`schema-field-label-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>{tStatic("feature.content.contenttypeform.field_name")}</span>
+              <span>{__("Field name *")}</span>
               <input
                 id={`schema-field-label-${field.id}`}
                 name="label"
@@ -312,15 +311,15 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               />
             </label>
             <label htmlFor={`schema-field-type-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>{tStatic("feature.content.contenttypeform.data_type")}</span>
+              <span>{__("Data type")}</span>
               <select
                 id={`schema-field-type-${field.id}`}
                 className={SELECT_CLASS}
                 value={field.type}
                 disabled={disabled}
-                onChange={event => updateField(field.id, { type: event.target.value as ContentFieldType })}
+                onChange={event => updateField(field.id, { type: event.target.value as FieldType })}
               >
-                {CONTENT_FIELD_TYPES.map(opt => (
+                {(['text','textarea','richtext','number','boolean','date','select','media','gallery'] as FieldType[]).map(v => ({ value: v, label: v })).map(opt => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
@@ -333,19 +332,19 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
                 disabled={disabled}
                 onChange={e => updateField(field.id, { required: e.target.checked })}
               />
-              <span>{tStatic("feature.contact.contactpanel.required")}</span>
+              <span>{__("Required")}</span>
             </label>
           </div>
           {field.type === 'select' && (
             <label htmlFor={`schema-field-options-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>{tStatic("feature.content.contenttypeform.options_one_per_line_value_label")}</span>
+              <span>{__("Options * (one per line: value|Label)")}</span>
               <textarea
                 id={`schema-field-options-${field.id}`}
                 className="w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50"
                 value={field.optionsText}
                 disabled={disabled}
                 rows={4}
-                placeholder={tStatic("feature.content.contenttypeform.draft_draft_published_published")}
+                placeholder={__("draft|Draft\npublished|Published")}
                 onChange={e => updateField(field.id, { optionsText: e.target.value })}
               />
             </label>
@@ -356,14 +355,14 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             onClick={() => update({ fields: draftRef.current.fields.filter(item => item.id !== field.id) })}
             disabled={disabled}
           >
-            {tStatic("feature.content.contenttypeform.remove_field")}
+            {_x("Remove field", "feature.content")}
           </AdminButton>
         </fieldset>
       ))}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       <div>
         <AdminButton type="submit" variant="primary" size="md" disabled={disabled}>
-          {tStatic("feature.content.contenttypeform.create_content_type")}
+          {__("Create content type")}
         </AdminButton>
       </div>
     </form>

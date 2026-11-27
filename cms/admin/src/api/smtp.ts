@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 export type TlsMode = 'starttls' | 'implicit_tls';
@@ -42,7 +42,7 @@ export interface NotificationAttemptPublic {
 
 export function getSmtpSettings(): Promise<SmtpSettingsPublic> {
   return requestJson<SmtpSettingsPublic>('/api/admin/settings/smtp', {
-    defaultErrorMessage: tStatic('api.smtp.load_smtp_settings'),
+    defaultErrorMessage: __("Could not load SMTP settings."),
   });
 }
 
@@ -57,7 +57,7 @@ export function updateSmtpSettings(
     contentType: 'application/json',
     ifMatchVersion: version,
     body: JSON.stringify(payload),
-    defaultErrorMessage: tStatic('api.smtp.save_smtp_settings'),
+    defaultErrorMessage: __("Could not save SMTP settings."),
   });
 }
 
@@ -65,7 +65,7 @@ export function testSmtpSettings(csrfToken: string | null): Promise<{ ok: boolea
   return requestJson<{ ok: boolean }>('/api/admin/settings/smtp/test', {
     method: 'POST',
     csrfToken,
-    defaultErrorMessage: tStatic('api.smtp.send_the_smtp_test_email'),
+    defaultErrorMessage: __("Could not send the SMTP test email."),
   });
 }
 
@@ -81,6 +81,6 @@ export function notifyContactSubmission(
     contentType: 'application/json',
     ifMatchVersion: attemptVersion,
     body: JSON.stringify({ acknowledge_duplicate_risk: acknowledgeDuplicateRisk }),
-    defaultErrorMessage: tStatic('api.smtp.resend_the_smtp_notification'),
+    defaultErrorMessage: __("Could not resend the SMTP notification."),
   });
 }

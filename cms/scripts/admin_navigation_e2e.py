@@ -41,6 +41,8 @@ ADMIN_ROUTES = [
     ("#/tools/backup", '[aria-label="Encrypted backup"]', "h2:has-text('Storage reconciliation & quarantine')"),
     ("#/tools/media-reconcile", "h2:has-text('Storage reconciliation & quarantine')", '[aria-label="Encrypted backup"]'),
     ("#/tools/health", "h2:has-text('System status')", '[aria-label="Encrypted backup"]'),
+    ("#/tools/redirects", '[data-testid="redirects-tools-panel"]', '[aria-label="Encrypted backup"]'),
+    ("#/tools/404-log", '[data-testid="not-found-log-panel"]', '[aria-label="Encrypted backup"]'),
     ("#/settings/general", '[data-testid="general-settings"]', '[aria-label="Homepage SEO"]'),
     ("#/settings/reading", '[data-testid="reading-settings"]', '[data-testid="general-settings"]'),
     ("#/settings/multilingual", '[data-testid="multilingual-enabled-checkbox"]', '[data-testid="general-settings"]'),
@@ -180,6 +182,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     for restricted_hash in (
                         "#/appearance/menus", "#/appearance/options", "#/appearance/content-types",
                         "#/settings/content-types", "#/plugins/install", "#/tools/health",
+                        "#/tools/redirects", "#/tools/404-log",
                         "#/users/new", "#/settings/smtp", "#/settings/reading", "#/settings/multilingual",
                     ):
                         editor_page.goto(base + "/admin/" + restricted_hash, wait_until="domcontentloaded")

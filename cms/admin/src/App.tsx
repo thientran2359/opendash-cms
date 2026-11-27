@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { I18nProvider, tStatic, useI18n } from './i18n/index.tsx';
+import { I18nProvider, __, _x, useI18n } from './i18n/index.tsx';
 import { getAdminI18nBootstrap } from './api/auth.ts';
 import { MultilingualSettingsPage } from './features/settings/MultilingualSettingsPage.tsx';
 import { AuthUser, PluginSummary, type Role } from './types.ts';
@@ -36,6 +36,9 @@ import { ContactPanel } from './features/contact/ContactPanel.tsx';
 import { SmtpSettingsPanel } from './features/contact/SmtpSettingsPanel.tsx';
 import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
 import { BackupToolsPanel } from './features/operations/BackupToolsPanel.tsx';
+import { RedirectsToolsPanel } from './features/operations/RedirectsToolsPanel.tsx';
+import { clearRedirectsDrafts, discardRedirectsDraft } from './features/operations/redirectsDraftStore.ts';
+import { useAdminPlugins } from './features/plugins/useAdminPlugins.ts';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 import { TaxonomyDefinitionsPage } from './features/taxonomy/TaxonomyDefinitionsPage.tsx';
 import { PatternsPage } from './features/patterns/PatternsPage.tsx';
@@ -79,10 +82,10 @@ export const App: React.FC = () => (
 );
 
 const AppContent: React.FC = () => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [csrfToken, setCsrfToken] = useState<string | null>(null);
-  const [statusValue, setStatusMessage] = useState<string | (() => string)>(() => () => tStatic("app.checking_session"));
+  const [statusValue, setStatusMessage] = useState<string | (() => string)>(() => () => __("Checking session status…"));
   const statusMessage = typeof statusValue === 'function' ? statusValue() : statusValue;
   const [isError, setIsError] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -113,6 +116,12 @@ const AppContent: React.FC = () => {
   const markReadingDirty = useCallback((value: boolean) => {
     readingDirtyRef.current = value;
     setReadingDirty(value);
+  }, []);
+  const [toolsDirty, setToolsDirty] = useState(false);
+  const toolsDirtyRef = useRef(false);
+  const markToolsDirty = useCallback((value: boolean) => {
+    toolsDirtyRef.current = value;
+    setToolsDirty(value);
   }, []);
   const [studioDirty, setStudioDirty] = useState(false);
   const studioDirtyRef = useRef(false);
@@ -249,17 +258,19 @@ const AppContent: React.FC = () => {
       && acceptedHashRef.current !== destination && permalinkDirtyRef.current;
     const leavingReading = current.view === 'settings' && current.sub === 'reading'
       && acceptedHashRef.current !== destination && readingDirtyRef.current;
+    const leavingTools = current.view === 'tools' && (current.sub === 'redirects' || current.sub === '404-log')
+      && acceptedHashRef.current !== destination && toolsDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    const hasDirty = leavingDirtyEditor || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading;
+    const hasDirty = leavingDirtyEditor || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading || leavingTools;
     if (!hasDirty) return true;
     const approved = window.confirm(leavingStudio
-          ? tStatic("app.discard_studio")
+          ? __("Studio customization has unsaved changes. Discard changes and exit?")
         : leavingTerm
-          ? tStatic("app.discard_taxonomy")
-          : leavingSchema || leavingPattern || leavingPermalinks || leavingReading
-            ? tStatic("app.discard_changes")
-            : tStatic("app.keep_session_draft"));
+          ? __("Taxonomy has unsaved changes. Leaving will discard your draft. Continue?")
+          : leavingSchema || leavingPattern || leavingPermalinks || leavingReading || leavingTools
+            ? __("There are unsaved changes. Leaving may discard your draft. Continue?")
+            : __("There are unsaved changes. Leave this screen? The draft will be kept for this session."));
     if (approved && leavingPermalinks && userRef.current) {
       discardPermalinkDraft(siteInstanceIdRef.current, userRef.current.id);
       markPermalinkDirty(false);
@@ -267,6 +278,10 @@ const AppContent: React.FC = () => {
     if (approved && leavingReading && userRef.current) {
       discardReadingDraft(siteInstanceIdRef.current, userRef.current.id);
       markReadingDirty(false);
+    }
+    if (approved && leavingTools && userRef.current) {
+      discardRedirectsDraft(siteInstanceIdRef.current, userRef.current.id);
+      markToolsDirty(false);
     }
     return approved;
   };
@@ -332,13 +347,13 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(studioDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(studioDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || toolsDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, postsDirty, pagesDirty, termDirty, patternsDirty]);
+  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, toolsDirty, postsDirty, pagesDirty, termDirty, patternsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -379,7 +394,7 @@ const AppContent: React.FC = () => {
         setSelectedPluginId(prev => (prev && list.some(p => p.id === prev) ? prev : list[0].id));
       }
     } catch (err) {
-      handleApiError(err, tStatic("app.plugin_list_error"));
+      handleApiError(err, _x("Could not load plugins.", "app.plugin_list_error"));
     }
   };
 
@@ -406,11 +421,11 @@ const AppContent: React.FC = () => {
       if (res.synced_theme) parts.push(`theme:${res.synced_theme}`);
       if (res.synced_plugins.length > 0) parts.push(`plugins:${res.synced_plugins.join(',')}`);
       const summary = parts.length > 0 ? parts.join(' · ') : '0';
-      setStatus(() => tStatic('app.dev_sync_success', { summary }), false);
+      setStatus(() => __("Synced Dev Manifest ({{summary}}).", { summary }), false);
       setThemeRevision(v => v + 1);
       await Promise.all([loadCptTypes(), loadPlugins()]);
     } catch (err) {
-      handleApiError(err, tStatic('app.dev_sync_error'));
+      handleApiError(err, __("Could not sync Dev Manifest."));
     } finally {
       setDevSyncing(false);
     }
@@ -429,7 +444,7 @@ const AppContent: React.FC = () => {
         setSiteInstanceId(auth.site_instance_id ?? 'default-site');
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
-        setStatus(() => tStatic("app.signed_in", { username: auth.user.username, role: tStatic(auth.user.role === "admin" ? "app.role_admin" : "app.role_editor") }));
+        setStatus(() => __("Signed in: {{username}} ({{role}})", { username: auth.user.username, role: auth.user.role === "admin" ? __("Admin") : __("Editor") }));
         await Promise.all([loadCptTypes(), loadLocales()]);
         if (auth.user.role === 'admin') {
           await loadPlugins();
@@ -437,22 +452,22 @@ const AppContent: React.FC = () => {
       } catch {
         setUser(null);
         setCsrfToken(null);
-        setStatus(() => tStatic("app.sign_in_prompt"));
+        setStatus(() => __("Please sign in to use the builder."));
       }
     })();
   }, []);
 
   const handleSetup = async () => {
     if (!authUsername || !authPassword) {
-      setStatus(() => tStatic("app.credentials_required"), true);
+      setStatus(() => __("Enter your username and password."), true);
       return;
     }
     setIsProcessing(true);
     try {
       await api.setupAdmin(authUsername, authPassword);
-      setStatus(() => tStatic("app.setup_success"), false);
+      setStatus(() => __("Administrator created. Please sign in."), false);
     } catch (err) {
-      handleApiError(err, tStatic("app.setup_error"));
+      handleApiError(err, __("Administrator setup failed."));
     } finally {
       setIsProcessing(false);
     }
@@ -460,7 +475,7 @@ const AppContent: React.FC = () => {
 
   const handleLogin = async () => {
     if (!authUsername || !authPassword) {
-      setStatus(() => tStatic("app.credentials_required"), true);
+      setStatus(() => __("Enter your username and password."), true);
       return;
     }
     setIsProcessing(true);
@@ -470,6 +485,8 @@ const AppContent: React.FC = () => {
       const nextSiteId = res.site_instance_id ?? 'default-site';
       if (nextSiteId !== siteInstanceId) {
         editorDraftStore.clear();
+        clearRedirectsDrafts();
+        markToolsDirty(false);
         setSiteInstanceId(nextSiteId);
         setLocaleState(EMPTY_ADMIN_LOCALE_STATE);
         setBuilderReset(value => value + 1);
@@ -479,6 +496,8 @@ const AppContent: React.FC = () => {
       } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
         editorDraftStore.clear();
+        clearRedirectsDrafts();
+        markToolsDirty(false);
         setBuilderReset(value => value + 1);
         markStudioDirty(false);
         lastStudioRouteRef.current = null;
@@ -492,20 +511,20 @@ const AppContent: React.FC = () => {
       setUser(res.user);
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
-      setStatus(() => tStatic("app.login_success"), false);
+      setStatus(() => __("Signed in successfully."), false);
       await Promise.all([loadCptTypes(), loadLocales()]);
       if (res.user.role === 'admin') {
         await loadPlugins();
       }
     } catch (err) {
-      handleApiError(err, tStatic("app.login_error"));
+      handleApiError(err, __("Sign-in failed."));
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || studioDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm(tStatic("app.discard_logout"))) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || toolsDirtyRef.current || studioDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm(__("There are unsaved changes. Signing out will discard the current draft. Continue?"))) {
       return;
     }
     setIsProcessing(true);
@@ -515,6 +534,7 @@ const AppContent: React.FC = () => {
       editorDraftStore.clear();
       clearPermalinkDrafts();
       clearReadingDrafts();
+      clearRedirectsDrafts();
       setUser(null);
       setCsrfToken(null);
       setLocaleState(EMPTY_ADMIN_LOCALE_STATE);
@@ -530,6 +550,7 @@ const AppContent: React.FC = () => {
       setContentDirty(false);
       markPermalinkDirty(false);
       markReadingDirty(false);
+      markToolsDirty(false);
       markStudioDirty(false);
       lastStudioRouteRef.current = null;
       setPostsDirty(false);
@@ -541,9 +562,9 @@ const AppContent: React.FC = () => {
       setCptTypes([]);
       window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/dashboard');
       acceptedHashRef.current = '#/dashboard';
-      setStatus(() => tStatic("app.logout_success"), false);
+      setStatus(() => __("Signed out."), false);
     } catch (err) {
-      handleApiError(err, tStatic("app.logout_error"));
+      handleApiError(err, __("Sign-out failed."));
     } finally {
       setIsProcessing(false);
     }
@@ -552,89 +573,26 @@ const AppContent: React.FC = () => {
   const handleOwnAccountChanged = () => {
     authSessionEpochRef.current += 1;
     editorDraftStore.quarantineAll();
+    clearRedirectsDrafts();
+    markToolsDirty(false);
     setUser(null);
     setCsrfToken(null);
     setAuthPassword('');
-    setStatus(() => tStatic("app.session_revoked"), false);
+    setStatus(() => __("Your account session has been revoked. Please sign in again."), false);
   };
-  const handlePluginUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !csrfToken) return;
-    setIsProcessing(true);
-    setStatus(() => tStatic("app.installing_plugin"), false);
-    try {
-      const summary = await api.installPlugin(file, csrfToken);
-      setStatus(() => tStatic("app.plugin_installed", { name: summary.name, id: summary.id }), false);
-      setSelectedPluginId(summary.id);
-      await loadPlugins();
-    } catch (err) {
-      handleApiError(err, tStatic("app.install_error"));
-    } finally {
-      setIsProcessing(false);
-      e.target.value = '';
-    }
-  };
-
-  const handleDisablePlugin = async (id: string) => {
-    if (!csrfToken) return;
-    setIsProcessing(true);
-    try {
-      await api.disablePlugin(id, csrfToken);
-      setStatus(() => tStatic("app.plugin_disabled", { id }), false);
-      await loadPlugins();
-    } catch (err) {
-      handleApiError(err, tStatic("app.disable_error"));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleEnablePlugin = async (id: string) => {
-    if (!csrfToken) return;
-    setIsProcessing(true);
-    try {
-      await api.enablePlugin(id, csrfToken);
-      setStatus(() => tStatic("app.plugin_enabled", { id }), false);
-      await loadPlugins();
-    } catch (err) {
-      handleApiError(err, tStatic("app.enable_error"));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleRunPlugin = async () => {
-    if (!selectedPluginId || !csrfToken) return;
-    setIsProcessing(true);
-    setStatus(() => tStatic("app.plugin_running", { id: selectedPluginId }), false);
-    setPluginRunOutput('');
-    try {
-      const res = await api.runPlugin(selectedPluginId, pluginInputJson, csrfToken);
-      setPluginRunOutput(JSON.stringify(res, null, 2));
-      if (res.success) {
-        setStatus(() => tStatic("app.plugin_run_ok", { id: res.correlation_id }), false);
-      } else {
-        setStatus(() => tStatic("app.plugin_run_error", { error: res.error || res.code || "", id: res.correlation_id }), true);
-      }
-      await loadPlugins();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : tStatic("app.run_error");
-      setPluginRunOutput(
-        JSON.stringify(
-          {
-            success: false,
-            error: msg,
-            status: err instanceof api.ApiClientError ? err.status : undefined,
-          },
-          null,
-          2,
-        ),
-      );
-      handleApiError(err, tStatic("app.run_error"));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+  const { handlePluginUpload, handleDisablePlugin, handleEnablePlugin, handleRunPlugin } =
+    useAdminPlugins({
+      csrfToken,
+      selectedPluginId,
+      pluginInputJson,
+      setSelectedPluginId,
+      setPluginRunOutput,
+      setPlugins,
+      setIsProcessing,
+      setStatus,
+      handleApiError,
+      loadPlugins,
+    });
 
   const requestEpoch = authSessionEpochRef.current;
   const requestActorId = user?.id;
@@ -670,12 +628,12 @@ const AppContent: React.FC = () => {
       cptTypes={cptTypes}
       cptTaxonomies={Object.fromEntries(Object.entries(cptTaxonomies).map(([type, terms]) => [
         type, terms.map(term => ({
-          ...term, label: term.key === 'category' ? t('app.category') : term.key === 'tag' ? t('app.tag') : term.label,
+          ...term, label: term.key === 'category' ? _x("Category", "app.category") : term.key === 'tag' ? __("Tag") : term.label,
         })),
       ]))}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
+      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || toolsDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
       devMode={devMode}
       devTheme={devTheme}
       devPlugins={devPlugins}
@@ -740,33 +698,35 @@ const AppContent: React.FC = () => {
         ? (
           <BackupToolsPanel
             csrfToken={csrfToken}
-            onBackupError={(error) => handleApiError(error, tStatic("app.backup_error"))}
-            onRestoreError={(error) => handleApiError(error, tStatic("app.restore_error"))}
+            onBackupError={(error) => handleApiError(error, __("Encrypted backup failed."))}
+            onRestoreError={(error) => handleApiError(error, __("Restore or safe mode failed."))}
           />
         )
         : route.sub === 'media-reconcile'
-          ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.reconcile_error"))} />
-          : route.sub === 'health' ? <SystemStatus /> : null}
+          ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("Media reconciliation or quarantine cleanup failed."))} />
+          : (route.sub === 'redirects' || route.sub === '404-log')
+            ? <RedirectsToolsPanel key={`${siteInstanceId}:${user?.id ?? 'guest'}`} initialTab={route.sub === '404-log' ? 'not-found' : 'redirects'} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={(error) => scopedTaxonomyApiError(error, __("Redirects & 404 operation failed"))} onDirtyChange={markToolsDirty} onNavigateHash={navigateHash} />
+            : route.sub === 'health' ? <SystemStatus /> : null}
       settingsContent={route.sub === 'general'
-        ? <GeneralSettingsPanel key={`general:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, tStatic("app.general_error"))} />
+        ? <GeneralSettingsPanel key={`general:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, __("Site settings failed."))} />
         : route.sub === 'multilingual'
-          ? <MultilingualSettingsPage key={`multilingual:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, tStatic('app.general_error'))} />
+          ? <MultilingualSettingsPage key={`multilingual:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, __("Site settings failed."))} />
         : route.sub === 'permalinks'
           ? <PermalinkSettingsPage key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
               user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
-              onApiError={(error) => scopedTaxonomyApiError(error, tStatic("app.permalink_error"))}
+              onApiError={(error) => scopedTaxonomyApiError(error, __("Permalink settings failed."))}
               onDirtyChange={markPermalinkDirty} />
         : route.sub === 'reading'
           ? <ReadingSettingsPanel key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
               user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} localeState={localeState}
-              onApiError={(error) => scopedTaxonomyApiError(error, tStatic("app.reading_error"))}
+              onApiError={(error) => scopedTaxonomyApiError(error, __("Reading settings failed."))}
               onDirtyChange={markReadingDirty} />
         : route.sub === 'seo'
-          ? <SeoPanel csrfToken={csrfToken} localeState={localeState} onApiError={(error) => handleApiError(error, tStatic("app.seo_error"))} />
+          ? <SeoPanel csrfToken={csrfToken} localeState={localeState} onApiError={(error) => handleApiError(error, __("Homepage SEO failed."))} />
           : route.sub === 'contact'
-            ? <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.contact_error"))} />
+            ? <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("Contact form management failed."))} />
             : route.sub === 'smtp'
-              ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.smtp_error"))} />
+              ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("SMTP settings failed."))} />
               : null}
       usersContent={accountContextRole === 'admin' && <UsersPanel
         key={accountContextId ?? 'anonymous'}

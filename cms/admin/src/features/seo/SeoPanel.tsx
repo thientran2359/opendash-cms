@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { getHomeSeo, putHomeSeo } from '../../api/seo.ts';
@@ -20,7 +20,7 @@ export function SeoPanel({
   onApiError,
   localeState = EMPTY_ADMIN_LOCALE_STATE,
 }: SeoPanelProps) {
-  const { t: translate } = useI18n();
+  const { __ } = useI18n();
   const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
   const [activeLocale, setActiveLocale] = useState<string>(defaultLocaleCode);
   useEffect(() => {
@@ -89,11 +89,11 @@ export function SeoPanel({
         effectiveLocale,
       );
       setVersion(saved.version);
-      setStatus(tStatic('feature.seo.seopanel.homepage_seo_saved_v_value1', { value1: saved.version }));
+      setStatus(__("Homepage SEO saved (v{{value1}}).", { value1: saved.version }));
     } catch (error) {
       if (error instanceof ApiClientError && error.status === 412) {
         setStaleConflict(true);
-        setStatus(tStatic('feature.seo.seopanel.the_homepage_seo_version_changed_your_draft_has_been_retained'));
+        setStatus(__("The homepage SEO version changed. Your draft has been retained."));
       } else {
         onApiError(error);
       }
@@ -103,14 +103,14 @@ export function SeoPanel({
   };
 
   return (
-    <section className="space-y-4" aria-label={translate('feature.seo.seopanel.homepage_seo')}>
+    <section className="space-y-4" aria-label={__("Homepage SEO")}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">{translate('feature.seo.seopanel.homepage_seo')}</h2>
-          <p className="mt-0.5 text-sm text-zinc-600">{translate('feature.seo.seopanel.public_metadata_for_the_homepage')}<code className="text-xs">v{version}</code>).
+          <h2 className="text-base font-semibold text-zinc-950">{__("Homepage SEO")}</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">{__("Public metadata for the homepage (")}<code className="text-xs">v{version}</code>).
           </p>
         </div>
-        <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={load}>{translate('multilingual.reload')}</AdminButton>
+        <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={load}>{__("Reload")}</AdminButton>
       </div>
       <LocaleTabs
         localeState={localeState}
@@ -125,7 +125,7 @@ export function SeoPanel({
       )}
       <form className="max-w-2xl space-y-4" onSubmit={handleSave}>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-800">{translate('feature.seo.seopanel.seo_title_up_to_120_characters')}</span>
+          <span className="font-medium text-zinc-800">{__("SEO title (up to 120 characters)")}</span>
           <input
             type="text"
             className="h-9 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
@@ -136,7 +136,7 @@ export function SeoPanel({
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-800">{translate('feature.seo.seopanel.seo_description_up_to_320_characters')}</span>
+          <span className="font-medium text-zinc-800">{__("SEO description (up to 320 characters)")}</span>
           <textarea
             className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
             rows={2}
@@ -148,7 +148,7 @@ export function SeoPanel({
         </label>
         <div className="grid gap-3 md:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-800">{translate('feature.seo.seopanel.og_image_media_id_sha_256')}</span>
+            <span className="font-medium text-zinc-800">{__("OG image media ID (SHA-256)")}</span>
             <input
               type="text"
               className="h-9 rounded-md border border-zinc-300 bg-white px-3 font-mono text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
@@ -158,7 +158,7 @@ export function SeoPanel({
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-800">{translate('feature.seo.seopanel.custom_canonical_url')}</span>
+            <span className="font-medium text-zinc-800">{__("Custom canonical URL")}</span>
             <input
               type="url"
               className="h-9 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
@@ -175,11 +175,11 @@ export function SeoPanel({
             disabled={loading || saving}
             onChange={(e) => setNoindex(e.target.checked)}
           />
-          <span>{translate('feature.seo.seopanel.prevent_search_engines_from_indexing_noindex')}</span>
+          <span>{__("Prevent search engines from indexing (noindex)")}</span>
         </label>
         <div className="pt-1">
           <AdminButton type="submit" variant="primary" disabled={loading || saving || !csrfToken}>
-            {saving ? translate('general.saving') : translate('feature.seo.seopanel.save_homepage_seo')}
+            {saving ? __("Saving…") : __("Save homepage SEO")}
           </AdminButton>
         </div>
       </form>

@@ -17,7 +17,7 @@ export const LocaleTabs: React.FC<LocaleTabsProps> = ({
   label,
   testId = 'locale-tabs',
 }) => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   if (!localeState.hasMultipleLocales) {
     return null;
   }
@@ -26,7 +26,7 @@ export const LocaleTabs: React.FC<LocaleTabsProps> = ({
     <div
       className="flex flex-wrap items-center gap-1.5 border-b border-zinc-200 pb-2"
       role="tablist"
-      aria-label={label ?? t('shell.locale_content')}
+      aria-label={label ?? __("Content language")}
       data-testid={testId}
     >
       {localeState.allLocales.map((item) => {
@@ -49,12 +49,12 @@ export const LocaleTabs: React.FC<LocaleTabsProps> = ({
             <span className="opacity-75">({item.code})</span>
             {item.is_default && (
               <span className={`rounded px-1 py-0.5 text-[10px] ${selected ? 'bg-white/20' : 'bg-zinc-200 text-zinc-800'}`}>
-                {t('shell.locale_default')}
+                {__("Default")}
               </span>
             )}
             {!item.enabled && (
               <span className={`rounded px-1 py-0.5 text-[10px] ${selected ? 'bg-amber-500/20 text-amber-200' : 'bg-amber-100 text-amber-800'}`}>
-                {t('shell.locale_disabled')}
+                {_x("Disabled", "shell.locale_disabled")}
               </span>
             )}
           </button>

@@ -72,6 +72,7 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
         },
         filters: vec![],
         editor_panels: vec![],
+        text_domain: None,
         settings_schema: vec![],
         ..Default::default()
     };
@@ -215,6 +216,7 @@ async fn ipc_kv_get_stuck_parent_must_timeout_and_clean_up() {
         },
         filters: vec![],
         editor_panels: vec![],
+        text_domain: None,
         settings_schema: vec![],
         ..Default::default()
     };

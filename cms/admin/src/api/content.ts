@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import {
   CompositeEntrySaveInput,
   CompositeEntrySaveResult,
@@ -87,7 +87,7 @@ export function effectiveContentTypeSettings(
 
 export function listContentTypes(): Promise<OwnedContentTypeWithSettings[]> {
   return requestJson('/api/admin/content-types', {
-    defaultErrorMessage: tStatic('api.content.load_content_types'),
+    defaultErrorMessage: __("Could not load content types."),
   });
 }
 
@@ -97,8 +97,8 @@ export function createContentType(input: ContentTypeDefinitionWithSettings, csrf
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.content.create_the_content_type'),
-    oversizeErrorMessage: tStatic('api.content.the_content_type_definition_is_too_large'),
+    defaultErrorMessage: __("Could not create the content type."),
+    oversizeErrorMessage: __("The content type definition is too large."),
   });
 }
 
@@ -114,14 +114,14 @@ export function updateContentType(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.content.update_the_content_type'),
-    oversizeErrorMessage: tStatic('api.content.the_content_type_definition_is_too_large'),
+    defaultErrorMessage: __("Could not update the content type."),
+    oversizeErrorMessage: __("The content type definition is too large."),
   });
 }
 
 export function listFieldGroups(): Promise<FieldGroupRecord[]> {
   return requestJson('/api/admin/content-field-groups', {
-    defaultErrorMessage: tStatic('api.content.load_custom_field_groups'),
+    defaultErrorMessage: __("Could not load custom field groups."),
   });
 }
 
@@ -131,7 +131,7 @@ export function createFieldGroup(input: UserFieldGroupInput, csrfToken: string):
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.content.create_the_field_group'),
+    defaultErrorMessage: __("Could not create the field group."),
   });
 }
 
@@ -147,7 +147,7 @@ export function updateFieldGroup(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.content.update_the_field_group'),
+    defaultErrorMessage: __("Could not update the field group."),
   });
 }
 
@@ -160,13 +160,13 @@ export function deleteFieldGroup(
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: tStatic('api.content.withdraw_the_field_group'),
+    defaultErrorMessage: __("Could not withdraw the field group."),
   });
 }
 
 export function getEditorLayout(typeKey: string): Promise<EditorLayoutSnapshot> {
   return requestJson(`${contentTypePath(typeKey)}/editor-layout`, {
-    defaultErrorMessage: tStatic('api.content.load_the_editor_layout'),
+    defaultErrorMessage: __("Could not load the editor layout."),
   });
 }
 
@@ -182,13 +182,13 @@ export function putEditorLayout(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(layout),
-    defaultErrorMessage: tStatic('api.content.save_the_editor_layout'),
+    defaultErrorMessage: __("Could not save the editor layout."),
   });
 }
 
 export function getEffectiveEditorConfig(typeKey: string): Promise<EffectiveEditorConfigWithSettings> {
   return requestJson(`${contentTypePath(typeKey)}/effective-editor-config`, {
-    defaultErrorMessage: tStatic('api.content.load_the_effective_editor_configuration'),
+    defaultErrorMessage: __("Could not load the effective editor configuration."),
   });
 }
 
@@ -203,7 +203,7 @@ export function listContentEntries(
   appendEntryTermFilters(query, filters);
   if (locale) query.set('locale', locale);
   return requestJson(`${entriesPath(typeKey)}?${query}`, {
-    defaultErrorMessage: tStatic('api.content.load_entries'),
+    defaultErrorMessage: __("Could not load entries."),
   });
 }
 
@@ -227,7 +227,7 @@ export function createEntryTranslation(
     ifMatchVersion: expectedSourceVersion,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.content.create_a_translation'),
+    defaultErrorMessage: __("Could not create a translation."),
   });
 }
 
@@ -239,14 +239,14 @@ export function queryContentEntryTable(typeKey: string, filter: EntryTableQuery 
   }
   return requestJson(`${contentTypePath(typeKey)}/entry-table?${query}`, {
     signal,
-    defaultErrorMessage: tStatic('api.content.load_the_entry_table'),
+    defaultErrorMessage: __("Could not load the entry table."),
   });
 }
 
 export function getEffectiveEntryListConfig(typeKey: string, signal?: AbortSignal): Promise<EffectiveListConfig> {
   return requestJson(`${contentTypePath(typeKey)}/effective-list-config`, {
     signal,
-    defaultErrorMessage: tStatic('api.content.load_the_effective_provider_column_configuration'),
+    defaultErrorMessage: __("Could not load the effective provider column configuration."),
   });
 }
 
@@ -264,7 +264,7 @@ export function runEntryProviderAction(
       csrfToken,
       ifMatchVersion: row.version,
       expectLifecycleConfirmation: true,
-      defaultErrorMessage: tStatic('api.content.run_the_provider_action'),
+      defaultErrorMessage: __("Could not run the provider action."),
     },
   );
 }
@@ -281,7 +281,7 @@ export function queryRetainedTrashTable(
   if (filter.offset !== undefined) query.set('offset', String(filter.offset));
   return requestJson<EntryTableResult>(`${contentTypePath(typeKey)}/entry-table?${query}`, {
     signal,
-    defaultErrorMessage: tStatic('api.content.load_retained_trash'),
+    defaultErrorMessage: __("Could not load retained Trash entries."),
   });
 }
 
@@ -289,7 +289,7 @@ export function queryRetainedTrashTable(
 export function getEffectiveContentTypeTaxonomies(typeKey: string, signal?: AbortSignal): Promise<string[]> {
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/effective`, {
     signal,
-    defaultErrorMessage: tStatic('api.content.load_taxonomies_for_the_content_type'),
+    defaultErrorMessage: __("Could not load taxonomies for the content type."),
   });
 }
 
@@ -299,13 +299,13 @@ export function changeContentEntryPublication(
   return requestJson(`${entryPath(typeKey, id)}/publication`, {
     method: 'POST', csrfToken, ifMatchVersion: version, signal,
     contentType: 'application/json', body: JSON.stringify({ status }),
-    defaultErrorMessage: tStatic('api.content.change_the_publication_status'),
+    defaultErrorMessage: __("Could not change the publication status."),
   });
 }
 
 export function getContentEntry(typeKey: string, id: number): Promise<ContentEntryRecord> {
   return requestJson(entryPath(typeKey, id), {
-    defaultErrorMessage: tStatic('api.content.load_the_entry'),
+    defaultErrorMessage: __("Could not load the entry."),
   });
 }
 
@@ -319,8 +319,8 @@ export function createEntryComposite(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.content.create_the_entry'),
-    oversizeErrorMessage: tStatic('api.content.the_entry_exceeds_the_512_kib_limit'),
+    defaultErrorMessage: __("Could not create the entry."),
+    oversizeErrorMessage: __("The entry exceeds the 512 KiB limit."),
   });
 }
 
@@ -335,8 +335,8 @@ export function updateEntryComposite(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.content.save_the_entry'),
-    oversizeErrorMessage: tStatic('api.content.the_entry_exceeds_the_512_kib_limit'),
+    defaultErrorMessage: __("Could not save the entry."),
+    oversizeErrorMessage: __("The entry exceeds the 512 KiB limit."),
   });
 }
 
@@ -354,7 +354,7 @@ export function trashContentEntry(
     contentType: 'application/json',
     body: '{}',
     signal,
-    defaultErrorMessage: tStatic('api.content.trash_the_entry'),
+    defaultErrorMessage: __("Could not move the entry to Trash."),
   });
 }
 
@@ -374,7 +374,7 @@ export function restoreContentEntry(
       options?.confirmPublicRestore ? { confirm_public_restore: true } : {},
     ),
     signal: options?.signal,
-    defaultErrorMessage: tStatic('api.content.restore_the_entry'),
+    defaultErrorMessage: __("Could not restore the entry from Trash."),
   });
 }
 
@@ -392,7 +392,7 @@ export function purgeContentEntry(
     ifMatchVersion: version,
     confirmPurge: true,
     signal: options?.signal,
-    defaultErrorMessage: tStatic('api.content.purge_the_entry'),
+    defaultErrorMessage: __("Could not permanently delete the entry."),
   }).then(() => undefined);
 }
 
@@ -412,7 +412,7 @@ export function patchEntryMetadata(
     contentType: 'application/json',
     body: JSON.stringify(patch),
     signal,
-    defaultErrorMessage: tStatic('api.content.patch_entry_metadata'),
+    defaultErrorMessage: __("Could not save quick metadata changes."),
   });
 }
 
@@ -427,6 +427,6 @@ export function deleteContentEntry(
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: tStatic('api.content.trash_the_entry'),
+    defaultErrorMessage: __("Could not move the entry to Trash."),
   }).then(() => undefined);
 }

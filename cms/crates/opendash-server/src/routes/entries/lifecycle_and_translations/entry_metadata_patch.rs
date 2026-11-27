@@ -160,6 +160,7 @@ pub(crate) async fn render_admin_single_fallback_html(
     };
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: general.timezone.clone(),
+        ..Default::default()
     };
     let definition = &effective.base.descriptor;
     let breadcrumbs = content_render::single_breadcrumbs(

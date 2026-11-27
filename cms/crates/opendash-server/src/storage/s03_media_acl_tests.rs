@@ -26,7 +26,7 @@ async fn fixture() -> (SqlitePool, BuilderDocument, String, String) {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         "INSERT INTO builder_block_definitions
           (block_id, owner_kind, owner_id, provider_status, declaration_state, schema_json, template, revision_digest)
@@ -210,7 +210,10 @@ async fn plugin_media_public_read_rechecks_body_policy_with_stale_pattern_refere
         .iter_mut()
         .find(|field| field.key == "body")
         .unwrap();
-    body.public_exposure = PublicExposure::Private;
+    body.acl = Some(opendash_core::field_schema::FieldAcl {
+        public_exposure: Some(PublicExposure::Private),
+        ..Default::default()
+    });
     sqlx::query("UPDATE content_types SET definition_json=? WHERE key='page'")
         .bind(serde_json::to_string(&definition).unwrap())
         .execute(&db)
@@ -238,7 +241,10 @@ async fn plugin_media_public_read_rechecks_body_policy_with_stale_pattern_refere
         .iter_mut()
         .find(|field| field.key == "body")
         .unwrap()
-        .public_exposure = PublicExposure::Public;
+        .acl = Some(opendash_core::field_schema::FieldAcl {
+        public_exposure: Some(PublicExposure::Public),
+        ..Default::default()
+    });
     sqlx::query("UPDATE content_types SET definition_json=? WHERE key='page'")
         .bind(serde_json::to_string(&definition).unwrap())
         .execute(&db)
@@ -313,7 +319,10 @@ async fn plugin_media_projects_to_home_entry_and_template_acl_with_privacy_guard
         .get_mut("body")
         .unwrap()
         .definition
-        .public_exposure = PublicExposure::Private;
+        .acl = Some(opendash_core::field_schema::FieldAcl {
+        public_exposure: Some(PublicExposure::Private),
+        ..Default::default()
+    });
     let mut tx = db.begin().await.unwrap();
     entries::sync_entry_body_refs_in_conn(
         &mut tx,

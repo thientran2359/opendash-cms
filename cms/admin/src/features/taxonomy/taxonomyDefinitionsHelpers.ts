@@ -1,7 +1,7 @@
 import type { AuthUser } from '../../types.ts';
 import type { TaxonomyDefinition } from '../../api/taxonomy.ts';
 import { ApiClientError, requestJson } from '../../api/client.ts';
-import { tStatic } from '../../i18n/index.tsx';
+import { __ } from '../../i18n/index.tsx';
 
 export type TaxonomyDefsTabId = 'definitions' | 'eligibility';
 
@@ -47,11 +47,11 @@ export interface ConfiguredTaxonomies {
 }
 export const getConfiguredTaxonomies = async (typeKey: string, signal?: AbortSignal): Promise<ConfiguredTaxonomies> => {
   const configured: ConfiguredTaxonomies = await requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
-    signal, defaultErrorMessage: tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_saved_taxonomy_configuration"),
+    signal, defaultErrorMessage: __("Could not load saved taxonomy configuration."),
   });
   // Fail closed if the server has not deployed the atomic snapshot contract.
   if (!Number.isSafeInteger(configured.type_version) || configured.type_version < 1) {
-    throw new Error(tStatic("feature.taxonomy.taxonomydefinitionspage.the_server_did_not_return_type_version_from_the"));
+    throw new Error(__("The server did not return type_version from the same taxonomy snapshot; saving is unsafe."));
   }
   return configured;
 };
@@ -71,9 +71,9 @@ export const buttonClass = 'inline-flex h-8 items-center rounded-md border borde
 
 export function failure(cause: unknown, fallback: string): string {
   if (cause instanceof ApiClientError) {
-    if (cause.status === 401) return tStatic("feature.taxonomy.taxonomydefinitionspage.your_session_expired_401_input_is_retained");
-    if (cause.status === 412) return tStatic("feature.taxonomy.taxonomydefinitionspage.configuration_changed_412_retain_input_and_reload_before_saving");
-    if (cause.status === 409) return tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_change_configuration_409_value", { value1: cause.message });
+    if (cause.status === 401) return __("Your session expired (401); input is retained.");
+    if (cause.status === 412) return __("Configuration changed (412); retain input and reload before saving.");
+    if (cause.status === 409) return __("Could not change configuration (409): {{value1}}", { value1: cause.message });
   }
   return cause instanceof Error ? cause.message : fallback;
 }

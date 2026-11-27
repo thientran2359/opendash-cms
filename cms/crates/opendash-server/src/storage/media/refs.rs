@@ -1,62 +1,50 @@
 use std::collections::BTreeMap;
 
-use opendash_core::content::{
-    ContentEntryInput, ContentFieldType, ContentTypeDefinition, EffectiveContentSchema,
-};
+use opendash_core::content::{ContentEntryInput, ContentTypeDefinition, EffectiveContentSchema};
 use serde_json::Value;
 use sqlx::SqlitePool;
 
 use super::queries::{find, valid_media_id};
 use crate::error::{ApiError, ApiResult};
 
-fn collect_image_ids<'a>(
-    schema: &ContentTypeDefinition,
-    input: &'a ContentEntryInput,
-) -> Vec<&'a str> {
+fn collect_image_ids(schema: &ContentTypeDefinition, input: &ContentEntryInput) -> Vec<String> {
     let mut ids = Vec::new();
     for field in &schema.fields {
+        if field.is_ui_only() {
+            continue;
+        }
         let Some(value) = input.values.get(&field.key) else {
             continue;
         };
-        match field.field_type {
-            ContentFieldType::Image => {
-                if let Some(s) = value.as_str() {
-                    ids.push(s);
-                }
-            }
-            ContentFieldType::Gallery => {
-                if let Some(arr) = value.as_array() {
-                    ids.extend(arr.iter().filter_map(|v| v.as_str()));
-                }
-            }
-            _ => continue,
-        }
+        let collected = opendash_core::field_schema::collect_media_ids(
+            std::slice::from_ref(field),
+            &std::collections::BTreeMap::from([(field.key.clone(), value.clone())]),
+        );
+        ids.extend(collected.image_ids);
+        ids.extend(collected.video_ids);
+        ids.extend(collected.any_ids);
+        ids.extend(collected.file_ids);
     }
     ids
 }
 
-pub fn collect_effective_image_ids<'a>(
+pub fn collect_effective_image_ids(
     effective: &EffectiveContentSchema,
-    values: &'a BTreeMap<String, Value>,
-) -> Vec<&'a str> {
+    values: &BTreeMap<String, Value>,
+) -> Vec<String> {
     let mut ids = Vec::new();
     for (key, entry) in &effective.effective_fields {
         let Some(value) = values.get(key) else {
             continue;
         };
-        match entry.definition.field_type {
-            ContentFieldType::Image => {
-                if let Some(s) = value.as_str() {
-                    ids.push(s);
-                }
-            }
-            ContentFieldType::Gallery => {
-                if let Some(arr) = value.as_array() {
-                    ids.extend(arr.iter().filter_map(|v| v.as_str()));
-                }
-            }
-            _ => continue,
-        }
+        let collected = opendash_core::field_schema::collect_media_ids(
+            std::slice::from_ref(&entry.definition),
+            &std::collections::BTreeMap::from([(entry.definition.key.clone(), value.clone())]),
+        );
+        ids.extend(collected.image_ids);
+        ids.extend(collected.video_ids);
+        ids.extend(collected.any_ids);
+        ids.extend(collected.file_ids);
     }
     ids
 }
@@ -69,8 +57,8 @@ pub async fn require_existing_references(
     input: &ContentEntryInput,
 ) -> ApiResult<()> {
     for id in collect_image_ids(schema, input) {
-        if !valid_media_id(id)
-            || !matches!(find(db, id).await?, Some(asset) if asset.kind == "image")
+        if !valid_media_id(&id)
+            || !matches!(find(db, &id).await?, Some(asset) if asset.kind == "image")
         {
             return Err(ApiError::bad_request(
                 "Ảnh tham chiếu chưa có trong Media Library. Hãy chọn ảnh đã upload.",
@@ -86,8 +74,8 @@ pub async fn require_existing_effective_references(
     values: &BTreeMap<String, Value>,
 ) -> ApiResult<()> {
     for id in collect_effective_image_ids(effective, values) {
-        if !valid_media_id(id)
-            || !matches!(find(db, id).await?, Some(asset) if asset.kind == "image")
+        if !valid_media_id(&id)
+            || !matches!(find(db, &id).await?, Some(asset) if asset.kind == "image")
         {
             return Err(ApiError::bad_request(
                 "Ảnh tham chiếu chưa có trong Media Library. Hãy chọn ảnh đã upload.",
@@ -103,7 +91,7 @@ pub async fn require_existing_references_in_tx(
     input: &ContentEntryInput,
 ) -> ApiResult<()> {
     for id in collect_image_ids(schema, input) {
-        verify_active_image_in_tx(conn, id).await?;
+        verify_active_image_in_tx(conn, &id).await?;
     }
     Ok(())
 }
@@ -114,7 +102,7 @@ pub async fn require_existing_effective_references_in_tx(
     values: &BTreeMap<String, Value>,
 ) -> ApiResult<()> {
     for id in collect_effective_image_ids(effective, values) {
-        verify_active_image_in_tx(conn, id).await?;
+        verify_active_image_in_tx(conn, &id).await?;
     }
     Ok(())
 }

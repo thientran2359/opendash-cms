@@ -9,7 +9,12 @@ pub fn check_read_policy(
     req: &HostReadRequest,
 ) -> Result<(), &'static str> {
     if execution_mode == HookExecutionMode::FilterContactBeforeSubmit
-        && !matches!(req, HostReadRequest::PluginSecretGet { .. })
+        && !matches!(
+            req,
+            HostReadRequest::PluginSecretGet { .. }
+                | HostReadRequest::L10nTranslate { .. }
+                | HostReadRequest::L10nTranslateBatch { .. }
+        )
     {
         return Err("Thao tác đọc dữ liệu bị cấm trong filter:contact/before_submit.");
     }
@@ -137,6 +142,36 @@ pub fn check_read_policy(
                 return Err("permission_denied: action:plugin_secrets_read");
             }
         }
+        HostReadRequest::L10nTranslate {
+            text_domain, msgid, ..
+        } => {
+            check_l10n_item_policy(manifest, text_domain.as_deref(), msgid)?;
+        }
+        HostReadRequest::L10nTranslateBatch { items } => {
+            if items.is_empty() || items.len() > MAX_L10N_CALLS {
+                return Err("Số lượng mục l10n_translate_batch không hợp lệ.");
+            }
+            for item in items {
+                check_l10n_item_policy(manifest, item.text_domain.as_deref(), &item.msgid)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_l10n_item_policy(
+    manifest: &PluginManifest,
+    text_domain: Option<&str>,
+    msgid: &str,
+) -> Result<(), &'static str> {
+    if msgid.len() > 2048 {
+        return Err("msgid vượt quá giới hạn 2 KiB.");
+    }
+    if let Some(dom) = text_domain {
+        let own_domain = manifest.text_domain.as_deref().unwrap_or(&manifest.id);
+        if dom != own_domain && dom != "opendash" {
+            return Err("permission_denied: l10n_foreign_domain");
+        }
     }
     Ok(())
 }
@@ -147,25 +182,42 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
         return HostOperationResponse::err("Quá thời gian thực thi (deadline exceeded).");
     }
 
-    ctx.host_calls_count += 1;
-    let max_calls = if matches!(
-        ctx.execution_mode,
-        HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
-    ) {
-        MAX_RENDER_HOST_CALLS
-    } else {
-        MAX_HOST_CALLS
-    };
-    if ctx.host_calls_count > max_calls {
-        return HostOperationResponse::err(format!(
-            "Vượt quá số lần gọi host tối đa ({max_calls})."
-        ));
-    }
-
     let req: HostOperationRequest = match serde_json::from_str(req_json) {
         Ok(r) => r,
         Err(_) => return HostOperationResponse::err("Thao tác host không đúng định dạng JSON."),
     };
+
+    if matches!(
+        req,
+        HostOperationRequest::L10nTranslate { .. }
+            | HostOperationRequest::L10nTranslateBatch { .. }
+    ) {
+        let charge = match &req {
+            HostOperationRequest::L10nTranslateBatch { items } => items.len().max(1),
+            _ => 1,
+        };
+        if ctx.l10n_calls_count.saturating_add(charge) > MAX_L10N_CALLS {
+            return HostOperationResponse::err(format!(
+                "Vượt quá số lần gọi l10n tối đa ({MAX_L10N_CALLS})."
+            ));
+        }
+        ctx.l10n_calls_count += charge;
+    } else {
+        ctx.host_calls_count += 1;
+        let max_calls = if matches!(
+            ctx.execution_mode,
+            HookExecutionMode::FilterRender | HookExecutionMode::RouteGet
+        ) {
+            MAX_RENDER_HOST_CALLS
+        } else {
+            MAX_HOST_CALLS
+        };
+        if ctx.host_calls_count > max_calls {
+            return HostOperationResponse::err(format!(
+                "Vượt quá số lần gọi host tối đa ({max_calls})."
+            ));
+        }
+    }
 
     match req {
         HostOperationRequest::KvGet { key } => handle_kv_get(ctx, &key),
@@ -384,6 +436,32 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
                 return HostOperationResponse::err("Khóa secret không hợp lệ.");
             }
             dispatch_host_read(ctx, HostReadRequest::PluginSecretGet { key })
+        }
+        HostOperationRequest::L10nTranslate {
+            text_domain,
+            msgid,
+            msgid_plural,
+            count,
+            context,
+            locale,
+        } => dispatch_host_read(
+            ctx,
+            HostReadRequest::L10nTranslate {
+                text_domain,
+                msgid,
+                msgid_plural,
+                count,
+                context,
+                locale: locale.or_else(|| ctx.default_locale.clone()),
+            },
+        ),
+        HostOperationRequest::L10nTranslateBatch { mut items } => {
+            for item in &mut items {
+                if item.locale.is_none() {
+                    item.locale = ctx.default_locale.clone();
+                }
+            }
+            dispatch_host_read(ctx, HostReadRequest::L10nTranslateBatch { items })
         }
         HostOperationRequest::Log { level, message } => {
             if ctx.execution_mode == HookExecutionMode::FilterContactBeforeSubmit {

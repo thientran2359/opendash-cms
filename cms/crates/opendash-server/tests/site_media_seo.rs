@@ -2,6 +2,8 @@
 mod contact_form_ui;
 #[path = "site_media_seo/contact_forms.rs"]
 mod contact_forms;
+#[path = "site_media_seo/manual_redirects_404/mod.rs"]
+mod manual_redirects_404;
 #[path = "site_media_seo/menus.rs"]
 mod menus;
 #[path = "site_media_seo/public_routes.rs"]

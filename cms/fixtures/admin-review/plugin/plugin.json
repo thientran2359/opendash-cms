@@ -42,14 +42,14 @@
             "label": "Private Review Note",
             "type": "text",
             "required": false,
-            "min_role": "admin"
+            "acl": { "min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private" }
           },
           {
             "key": "reviewed",
             "label": "Reviewed",
             "type": "boolean",
             "required": false,
-            "min_role": "editor"
+            "acl": { "min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "private" }
           }
         ]
       }

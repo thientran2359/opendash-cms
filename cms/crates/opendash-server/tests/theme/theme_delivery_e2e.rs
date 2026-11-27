@@ -206,7 +206,7 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
                     "key": "portfolio",
                     "label": "Portfolio",
                     "fields": [
-                        { "key": "client", "label": "Client", "type": "short_text", "required": true }
+                        { "key": "client", "label": "Client", "type": "text", "required": true }
                     ],
                     "taxonomies": ["category", "tag"]
                 }

@@ -31,7 +31,7 @@ export const PluginLifecycleConfirmation: React.FC<PluginLifecycleConfirmationPr
   onFailed,
   onUnauthorized,
 }) => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const [submitting, setSubmitting] = useState<'confirm' | 'cancel' | null>(null);
 
   const isPurge = confirmation.operation === 'purge';
@@ -55,10 +55,10 @@ export const PluginLifecycleConfirmation: React.FC<PluginLifecycleConfirmationPr
     } catch (err) {
       if (err instanceof ApiClientError && err.status === 401) {
         onUnauthorized?.();
-        onFailed(t('plugin_lifecycle.confirm_session_expired'), 401);
+        onFailed(__("Your session has expired (401). Sign in again and re-run the action if still needed."), 401);
         return;
       }
-      const message = err instanceof Error ? err.message : t('api.plugins.confirm_lifecycle_action');
+      const message = err instanceof Error ? err.message : __("Could not resolve plugin lifecycle confirmation.");
       onFailed(message, err instanceof ApiClientError ? err.status : undefined);
     } finally {
       setSubmitting(null);
@@ -77,35 +77,35 @@ export const PluginLifecycleConfirmation: React.FC<PluginLifecycleConfirmationPr
       <div className="space-y-1">
         <p className="text-sm font-semibold">
           {isPurge
-            ? t('plugin_lifecycle.confirm_purge_title')
-            : t('plugin_lifecycle.confirm_public_restore_title')}
+            ? __("Confirm permanent deletion requested by plugin")
+            : __("Confirm immediate public restore requested by plugin")}
         </p>
         <p className="text-xs leading-5">
           {isPurge
-            ? t('plugin_lifecycle.confirm_purge_warning')
-            : t('plugin_lifecycle.confirm_public_restore_warning')}
+            ? __("This action will permanently delete the trashed entry and cannot be undone.")
+            : __("Restoring this immediate-mode entry will make it publicly visible immediately.")}
         </p>
       </div>
 
       <dl className="grid grid-cols-1 gap-x-4 gap-y-1 rounded-md border border-current/15 bg-white/80 p-2.5 text-xs text-zinc-800 sm:grid-cols-2">
         <div>
-          <dt className="font-semibold text-zinc-500">{t('plugin_lifecycle.field_plugin_action')}</dt>
+          <dt className="font-semibold text-zinc-500">{__("Plugin / Action")}</dt>
           <dd className="font-mono break-all">{pluginId} / {actionId}</dd>
         </div>
         <div>
-          <dt className="font-semibold text-zinc-500">{t('plugin_lifecycle.field_target')}</dt>
+          <dt className="font-semibold text-zinc-500">{__("Target entry")}</dt>
           <dd className="break-words">{confirmation.title} (#{confirmation.entry_id})</dd>
         </div>
         <div>
-          <dt className="font-semibold text-zinc-500">{t('plugin_lifecycle.field_type_locale')}</dt>
+          <dt className="font-semibold text-zinc-500">{__("Type · Language · Version")}</dt>
           <dd className="font-mono">{confirmation.type_key} · {confirmation.locale} · v{confirmation.version}</dd>
         </div>
         <div>
-          <dt className="font-semibold text-zinc-500">{t('plugin_lifecycle.field_slug')}</dt>
+          <dt className="font-semibold text-zinc-500">{__("Slug")}</dt>
           <dd className="font-mono break-all">{confirmation.slug}</dd>
         </div>
         <div className="sm:col-span-2">
-          <dt className="font-semibold text-zinc-500">{t('plugin_lifecycle.field_expires_at')}</dt>
+          <dt className="font-semibold text-zinc-500">{__("Expires at (UTC)")}</dt>
           <dd className="font-mono">{confirmation.expires_at}</dd>
         </div>
       </dl>
@@ -120,10 +120,10 @@ export const PluginLifecycleConfirmation: React.FC<PluginLifecycleConfirmationPr
           onClick={() => void submitDecision('confirm')}
         >
           {submitting === 'confirm'
-            ? t('plugin_lifecycle.confirming')
+            ? __("Confirming...")
             : isPurge
-              ? t('plugin_lifecycle.confirm_purge_button')
-              : t('plugin_lifecycle.confirm_restore_button')}
+              ? __("Confirm permanent delete")
+              : __("Confirm public restore")}
         </AdminButton>
         <AdminButton
           type="button"
@@ -133,7 +133,7 @@ export const PluginLifecycleConfirmation: React.FC<PluginLifecycleConfirmationPr
           data-testid="plugin-lifecycle-cancel-btn"
           onClick={() => void submitDecision('cancel')}
         >
-          {submitting === 'cancel' ? t('plugin_lifecycle.cancelling') : t('multilingual.cancel')}
+          {submitting === 'cancel' ? __("Cancelling...") : _x("Cancel", "multilingual.cancel")}
         </AdminButton>
       </div>
     </AdminAlert>

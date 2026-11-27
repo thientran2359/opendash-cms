@@ -39,38 +39,6 @@ pub(super) fn required_v3_utf8<'a>(
     Ok(source)
 }
 
-/// Parses and validates a flat theme dictionary `locales/<code>.json`.
-pub(crate) fn parse_theme_locale_json(
-    raw: &[u8],
-) -> Result<BTreeMap<String, String>, &'static str> {
-    let text = std::str::from_utf8(raw).map_err(|_| "File từ điển locale phải là UTF-8 hợp lệ.")?;
-    let value: serde_json::Value =
-        serde_json::from_str(text).map_err(|_| "File từ điển locale không phải JSON hợp lệ.")?;
-    let obj = value
-        .as_object()
-        .ok_or("File từ điển locale phải là JSON object phẳng.")?;
-    if obj.len() > MAX_THEME_LOCALE_KEYS {
-        return Err("File từ điển locale vượt quá giới hạn 512 khóa.");
-    }
-    let mut dict = BTreeMap::new();
-    for (key, val) in obj {
-        if !opendash_core::id::valid_snake_key_with_limit(key, 64) {
-            return Err("Khóa trong từ điển locale phải là snake_case tối đa 64 ký tự.");
-        }
-        let s = val
-            .as_str()
-            .ok_or("Giá trị trong từ điển locale phải là chuỗi phẳng.")?;
-        if s.chars().count() > MAX_THEME_LOCALE_VALUE_CHARS {
-            return Err("Chuỗi dịch trong từ điển locale vượt quá 500 ký tự.");
-        }
-        if s.chars().any(|ch| ch.is_control()) {
-            return Err("Chuỗi dịch trong từ điển locale không được chứa ký tự điều khiển.");
-        }
-        dict.insert(key.clone(), s.to_owned());
-    }
-    Ok(dict)
-}
-
 pub fn load_v3_files_from_dir(root: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
     let meta = std::fs::metadata(root)
         .map_err(|e| format!("Không thể truy cập thư mục theme '{}': {e}", root.display()))?;

@@ -338,7 +338,7 @@ async fn upgrade_0040_preserves_explicit_site_null_and_absent_choices() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    let migrator = sqlx::migrate!("../../migrations");
+    let migrator = &crate::storage::MIGRATOR;
     migrator.run_to(40, &db).await.unwrap();
     sqlx::query(
         r#"UPDATE site_permalink_settings

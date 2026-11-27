@@ -1,5 +1,5 @@
 import { formatNumber } from '../../i18n/format.ts';
-import { getEffectiveBcp47, tStatic, useI18n } from '../../i18n/index.tsx';
+import { getEffectiveBcp47, __, _x, useI18n } from '../../i18n/index.tsx';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { mediaThumbnailUrl } from '../../api/media.ts';
@@ -105,8 +105,8 @@ export function TaxonomyPage({
       if (signal?.aborted) return;
       setTerms([]);
       setDefinition(null);
-      setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.taxonomypage.could_not_load_taxonomy"));
-      onApiError(cause, tStatic("feature.taxonomy.taxonomypage.could_not_load_taxonomy"));
+      setError(cause instanceof Error ? cause.message : __("Could not load taxonomy."));
+      onApiError(cause, __("Could not load taxonomy."));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -131,20 +131,20 @@ export function TaxonomyPage({
 
   const remove = async (term: TaxonomyTerm) => {
     if (!admin || !csrfToken || busy) return;
-    if (!window.confirm(tStatic("feature.taxonomy.taxonomypage.permanently_delete_term_value_value_in_taxonomy_value_content", { value1: term.name, value2: term.id, value3: kind }))) return;
+    if (!window.confirm(__("Permanently delete term \"{{value1}}\" (#{{value2}}) in taxonomy {{value3}}? Content associations or child terms will block deletion.", { value1: term.name, value2: term.id, value3: kind }))) return;
     setBusy(true); setError(''); setNotice('');
     try {
       await deleteTaxonomyTerm(term.id, term.version, csrfToken);
-      setNotice(tStatic("feature.taxonomy.taxonomypage.deleted_value", { value1: term.id }));
+      setNotice(__("Deleted #{{value1}}.", { value1: term.id }));
       if (selectedTermId === term.id) {
         onNavigateHash(listHash);
       }
       await refresh();
     } catch (cause) {
       setError(cause instanceof ApiClientError && cause.status === 412
-        ? tStatic("feature.taxonomy.taxonomypage.the_item_changed_412_reload_the_list_before_deleting")
-        : cause instanceof Error ? cause.message : tStatic("api.taxonomy.delete_the_term"));
-      onApiError(cause, tStatic("api.taxonomy.delete_the_term"));
+        ? __("The item changed (412). Reload the list before deleting.")
+        : cause instanceof Error ? cause.message : __("Could not delete the term."));
+      onApiError(cause, __("Could not delete the term."));
     } finally { setBusy(false); }
   };
 
@@ -153,23 +153,23 @@ export function TaxonomyPage({
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-zinc-950">
-            {definition?.label ?? (kind === 'category' ? tStatic("feature.content.entrylistpage.category") : kind === 'tag' ? tStatic("shell.tags") : kind)} ({terms.length})
+            {definition?.label ?? (kind === 'category' ? _x("Category", "feature.content") : kind === 'tag' ? __("Tags") : kind)} ({terms.length})
           </h2>
           <p className="mt-0.5 text-xs text-zinc-500">
-            {definition?.hierarchical ? tStatic("feature.taxonomy.taxonomypage.hierarchical_taxonomies_support_up_to_8_levels_the_parent") : tStatic("feature.taxonomy.taxonomypage.flat_taxonomies_have_no_parent_changing_the_name_or")}
+            {definition?.hierarchical ? __("Hierarchical taxonomies support up to 8 levels; the parent can change without changing the ID.") : __("Flat taxonomies have no parent; changing the name or slug preserves the ID.")}
           </p>
-          {!admin && user && <p className="mt-0.5 text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomypage.editors_can_edit_authorized_extension_fields_only_admins_can")}</p>}
+          {!admin && user && <p className="mt-0.5 text-xs text-zinc-500">{__("Editors can edit authorized extension fields; only admins can edit core properties.")}</p>}
           {definition && (definition.provider_status !== 'active' || definition.declaration_state !== 'declared') &&
-            <p className="mt-0.5 text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomypage.taxonomy_is_inactive_saved_terms_remain_visible")}</p>}
+            <p className="mt-0.5 text-xs text-amber-700">{__("Taxonomy is inactive; saved terms remain visible.")}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
           <AdminButton variant="secondary" size="sm" disabled={busy}
-            onClick={() => onNavigateHash('#/taxonomy/definitions')}>{tStatic("feature.taxonomy.taxonomypage.taxonomy_definitions")}</AdminButton>
+            onClick={() => onNavigateHash('#/taxonomy/definitions')}>{__("Taxonomy definitions")}</AdminButton>
           <AdminButton variant="secondary" size="sm" disabled={loading || busy}
-            onClick={() => void refresh()}>{tStatic("feature.users.userspanel.refresh")}</AdminButton>
+            onClick={() => void refresh()}>{__("Refresh")}</AdminButton>
           {admin && routeMode === 'edit' && (
             <AdminButton variant="primary" size="sm" disabled={busy || loading || !definition || definition.provider_status !== 'active' || definition.declaration_state !== 'declared'}
-              onClick={() => onNavigateHash(listHash)}>{tStatic("feature.content.entrylistpage.add_new")}</AdminButton>
+              onClick={() => onNavigateHash(listHash)}>{__("+ Add new")}</AdminButton>
           )}
         </div>
       </header>
@@ -181,17 +181,17 @@ export function TaxonomyPage({
         <div className="min-w-0 space-y-3" data-testid="taxonomy-list-column">
           <div className="flex flex-wrap items-end gap-3">
             <label htmlFor="taxonomy-search" className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-zinc-600">
-              <span>{tStatic("feature.taxonomy.taxonomypage.search_by_name_slug_or_id")}</span>
+              <span>{__("Search by name, slug or ID")}</span>
               <input id="taxonomy-search" type="search" value={search}
                 onChange={event => { setSearch(event.target.value); setPage(0); }}
-                placeholder={tStatic("feature.taxonomy.taxonomypage.enter_name_slug_or_id")}
+                placeholder={__("Enter name, slug or ID...")}
                 className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900" />
             </label>
             {localeState.hasMultipleLocales && (
               <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600">
-                <span>{tStatic("feature.content.entrylistpage.language")}</span>
+                <span>{__("Language")}</span>
                 <select
-                  aria-label={tStatic("feature.taxonomy.taxonomypage.filter_taxonomy_language")}
+                  aria-label={__("Filter taxonomy language")}
                   data-testid="taxonomy-locale-filter"
                   value={filterLocale}
                   onChange={(event) => {
@@ -200,7 +200,7 @@ export function TaxonomyPage({
                   }}
                   className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
                 >
-                  <option value="all">{tStatic("feature.content.entrylistpage.all_languages")}</option>
+                  <option value="all">{__("All languages")}</option>
                   {localeState.allLocales.map((loc) => (
                     <option key={loc.code} value={loc.code}>
                       {loc.label} ({loc.code})
@@ -210,10 +210,10 @@ export function TaxonomyPage({
               </label>
             )}
           </div>
-          {loading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomypage.loading_list")}</p>}
+          {loading && <p role="status" className="text-xs text-zinc-500">{__("Loading list...")}</p>}
           <div className="space-y-2" aria-busy={loading}>
             {!loading && visible.length === 0 && <p className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500">
-              {search ? tStatic("feature.taxonomy.taxonomypage.no_matching_items") : tStatic("feature.taxonomy.taxonomypage.no_items_yet")}
+              {search ? _x("No matching items.", "feature.taxonomy") : __("No items yet.")}
             </p>}
             {visible.map(({term, depth}) => {
               const isSelected = routeMode === 'edit' && selectedTermId === term.id;
@@ -248,31 +248,31 @@ export function TaxonomyPage({
                         </h3>
                         <p className="break-all text-xs text-zinc-500">/{term.slug} · ID #{term.id} · v{term.version}</p>
                         {definition?.hierarchical && <p className="text-xs text-zinc-500">
-                          {term.parent_id === null ? tStatic("feature.taxonomy.taxonomypage.root_category") : tStatic("feature.taxonomy.taxonomypage.parent_prefix", { parent: byId.get(term.parent_id)?.name ?? `#${term.parent_id}` })} {tStatic("feature.taxonomy.taxonomypage.level")}{' '}{depth + 1}
+                          {term.parent_id === null ? __("Root category") : __("Parent: {{parent}}", { parent: byId.get(term.parent_id)?.name ?? `#${term.parent_id}` })} {__("· Level")}{' '}{depth + 1}
                         </p>}
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       <AdminButton variant={isSelected ? 'primary' : 'secondary'} size="sm" disabled={busy}
-                        aria-label={tStatic("feature.taxonomy.taxonomypage.open_editor_for_value_id_value", { value1: term.name, value2: term.id })}
-                        onClick={() => onNavigateHash(editHash(term.id))}>{admin ? tStatic("multilingual.edit") : tStatic("feature.taxonomy.taxonomypage.extensions")}</AdminButton>
+                        aria-label={__("Open editor for {{value1}}, ID {{value2}}", { value1: term.name, value2: term.id })}
+                        onClick={() => onNavigateHash(editHash(term.id))}>{admin ? _x("Edit", "multilingual.edit") : __("Extensions")}</AdminButton>
                       {admin && <AdminButton variant="danger" size="sm" disabled={busy}
-                        aria-label={tStatic("feature.content.entrylistpage.delete_value_id_value", { value1: term.name, value2: term.id })}
-                        onClick={() => void remove(term)}>{tStatic("multilingual.delete")}</AdminButton>}
+                        aria-label={__("Delete {{value1}}, ID {{value2}}", { value1: term.name, value2: term.id })}
+                        onClick={() => void remove(term)}>{__("Delete")}</AdminButton>}
                     </div>
                   </div>
                 </article>
               );
             })}
           </div>
-          <nav aria-label={tStatic("feature.taxonomy.taxonomypage.taxonomy_pagination")} className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
-            <span>{tStatic("feature.taxonomy.taxonomypage.showing")}{' '}{filtered.length ? currentPage * PAGE_SIZE + 1 : 0}–{Math.min(filtered.length, (currentPage + 1) * PAGE_SIZE)} / {filtered.length}</span>
+          <nav aria-label={__("Taxonomy pagination")} className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
+            <span>{__("Showing")}{' '}{filtered.length ? currentPage * PAGE_SIZE + 1 : 0}–{Math.min(filtered.length, (currentPage + 1) * PAGE_SIZE)} / {filtered.length}</span>
             <div className="flex items-center gap-2">
               <AdminButton variant="secondary" size="sm" disabled={loading || currentPage === 0}
-                onClick={() => setPage(currentPage - 1)}>{tStatic("feature.users.userspanel.previous")}</AdminButton>
-              <span className="tabular-nums">{tStatic("feature.common.page_number", { page: formatNumber(currentPage + 1) })}/{formatNumber(pages)}</span>
+                onClick={() => setPage(currentPage - 1)}>{__("Previous")}</AdminButton>
+              <span className="tabular-nums">{__("Page {{page}}", { page: formatNumber(currentPage + 1) })}/{formatNumber(pages)}</span>
               <AdminButton variant="secondary" size="sm" disabled={loading || currentPage + 1 >= pages}
-                onClick={() => setPage(currentPage + 1)}>{tStatic("feature.common.next")}</AdminButton>
+                onClick={() => setPage(currentPage + 1)}>{__("Next")}</AdminButton>
             </div>
           </nav>
         </div>
@@ -314,7 +314,7 @@ export function TaxonomyPage({
               onSaved={() => void refresh()}
             />
           ) : (
-            <AdminAlert tone="info">{tStatic('taxonomy.editor_select_term_hint')}</AdminAlert>
+            <AdminAlert tone="info">{__("Select a term from the list on the left to edit its extension fields.")}</AdminAlert>
           )}
         </div>
       </div>
