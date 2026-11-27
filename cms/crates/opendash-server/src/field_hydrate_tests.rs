@@ -151,7 +151,14 @@ fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
     };
 
     let mut nonces = RichTextNonceTable::default();
-    let hydrated = hydrate_field_values(&specs, &raw, &ctx, Some(&mut nonces), true).unwrap();
+    let hydrated = hydrate_field_values(
+        &specs,
+        &raw,
+        &ctx,
+        Some(&mut nonces),
+        HydrationVisibility::OptionsPublicOnly,
+    )
+    .unwrap();
 
     assert!(!hydrated.contains_key("tab_main"));
     assert!(!hydrated.contains_key("internal_note"));
@@ -227,7 +234,14 @@ fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
     assert!(nonces.substitute_into_document(bad_attr).is_err());
 
     // Plain sanitized mode (for plugin host SiteOptionsGet) returns HTML without nonces
-    let plain = hydrate_field_values(&specs, &raw, &ctx, None, true).unwrap();
+    let plain = hydrate_field_values(
+        &specs,
+        &raw,
+        &ctx,
+        None,
+        HydrationVisibility::OptionsPublicOnly,
+    )
+    .unwrap();
     assert!(
         plain["bio"]
             .as_str()
@@ -317,7 +331,8 @@ fn hydrates_responsive_studio_block_scalars_and_nested_repeater_groups() {
         is_preview: false,
         tag_media_provenance: false,
     };
-    let hydrated = hydrate_field_values(&specs, &raw, &ctx, None, false).unwrap();
+    let hydrated =
+        hydrate_field_values(&specs, &raw, &ctx, None, HydrationVisibility::All).unwrap();
     assert_eq!(hydrated["align"], json!("left"));
     assert_eq!(hydrated["radius"], json!(8));
     assert_eq!(hydrated["layout"], json!("stack"));
@@ -326,4 +341,96 @@ fn hydrates_responsive_studio_block_scalars_and_nested_repeater_groups() {
         hydrated["items"][0]["meta"]["badge"],
         json!({ "name": "star" })
     );
+}
+
+#[test]
+fn content_public_visibility_filters_nested_private_and_admin_group_repeater_children() {
+    use opendash_core::content::FieldRole;
+
+    let pub_img = sample_hash('a');
+    let priv_img = sample_hash('b');
+    let specs: Vec<FieldSpec> = serde_json::from_value(json!([
+        {
+            "type": "group",
+            "key": "pub_group",
+            "label": "Public Group",
+            "acl": { "min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public" },
+            "fields": [
+                { "type": "media", "key": "pub_media", "label": "Pub Media", "acl": { "min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public" } },
+                { "type": "media", "key": "priv_media", "label": "Priv Media", "acl": { "min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "private" } },
+                { "type": "richtext", "key": "priv_rt", "label": "Priv RT", "acl": { "min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "public" } }
+            ]
+        },
+        {
+            "type": "repeater",
+            "key": "pub_rep",
+            "label": "Public Repeater",
+            "acl": { "min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public" },
+            "fields": [
+                { "type": "text", "key": "pub_title", "label": "Title", "acl": { "min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public" } },
+                { "type": "text", "key": "priv_secret", "label": "Secret", "acl": { "min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "private" } },
+                { "type": "richtext", "key": "priv_rep_rt", "label": "Priv Rep RT", "acl": { "min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "private" } }
+            ]
+        }
+    ]))
+    .unwrap();
+    let raw = BTreeMap::from([
+        (
+            "pub_group".into(),
+            json!({ "pub_media": pub_img, "priv_media": priv_img, "priv_rt": "<p>secret</p>" }),
+        ),
+        (
+            "pub_rep".into(),
+            json!([{ "pub_title": "Visible", "priv_secret": "Hidden", "priv_rep_rt": "<p>hidden</p>" }]),
+        ),
+    ]);
+    let vis = HydrationVisibility::ContentPublic {
+        max_view_role: FieldRole::Editor,
+    };
+    let mut media_ids = BTreeSet::new();
+    let mut entry_ids = BTreeSet::new();
+    let mut term_ids = BTreeSet::new();
+    collect_hydration_ids(
+        &specs,
+        &raw,
+        vis,
+        &mut media_ids,
+        &mut entry_ids,
+        &mut term_ids,
+    );
+    assert!(media_ids.contains(&pub_img));
+    assert!(!media_ids.contains(&priv_img));
+
+    let media = BTreeMap::from([(
+        pub_img.clone(),
+        HydratedMediaRow {
+            id: pub_img.clone(),
+            kind: "image".into(),
+            mime_type: "image/png".into(),
+            version: 1,
+            width: Some(100),
+            height: Some(100),
+            variants: Vec::new(),
+        },
+    )]);
+    let entries = BTreeMap::new();
+    let terms = BTreeMap::new();
+    let ctx = HydrationContext {
+        media: &media,
+        entries: &entries,
+        terms: &terms,
+        is_preview: false,
+        tag_media_provenance: false,
+    };
+    let mut nonces = RichTextNonceTable::default();
+    let hydrated = hydrate_field_values(&specs, &raw, &ctx, Some(&mut nonces), vis).unwrap();
+    let grp = hydrated["pub_group"].as_object().unwrap();
+    assert!(grp.contains_key("pub_media"));
+    assert!(!grp.contains_key("priv_media"));
+    assert!(!grp.contains_key("priv_rt"));
+    let row = hydrated["pub_rep"][0].as_object().unwrap();
+    assert_eq!(row["pub_title"], json!("Visible"));
+    assert!(!row.contains_key("priv_secret"));
+    assert!(!row.contains_key("priv_rep_rt"));
+    assert!(nonces.is_empty());
 }

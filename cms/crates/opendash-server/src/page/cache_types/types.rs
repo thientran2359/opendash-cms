@@ -774,7 +774,7 @@ pub fn render_builder_with_budget_and_base_path(
                                                     &props.values,
                                                     &hydration_ctx,
                                                     Some(&mut local_rt),
-                                                    false,
+                                                    crate::field_hydrate::HydrationVisibility::All,
                                                 )?;
                                             let fmt_cfg =
                                                 crate::template_sec::RenderFormattingConfig {

@@ -77,7 +77,7 @@ pub(super) fn collect_builder_document_media_ids(
                             crate::field_hydrate::collect_hydration_ids(
                                 &def.schema.schema.fields,
                                 &props.values,
-                                false,
+                                crate::field_hydrate::HydrationVisibility::All,
                                 media_ids,
                                 entry_ids,
                                 term_ids,

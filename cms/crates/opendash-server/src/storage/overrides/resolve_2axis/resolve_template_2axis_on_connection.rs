@@ -65,19 +65,24 @@ pub(in crate::storage) async fn validate_cpt_target_fields_in_tx(
     {
         return Err(ApiError::bad_request("scope_entry_id không hợp lệ."));
     }
-    let def_json: Option<String> =
-        sqlx::query_scalar("SELECT definition_json FROM content_types WHERE key = ?")
-            .bind(type_key)
-            .fetch_optional(&mut **tx)
-            .await?;
-    let Some(raw) = def_json else {
+    let Some(eff) =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut **tx, type_key).await?
+    else {
         return Err(ApiError::not_found(
             "Không tìm thấy loại nội dung cho scope.",
         ));
     };
-    let def: ContentTypeDefinition = serde_json::from_str(&raw)
-        .map_err(|_| ApiError::internal("Định nghĩa loại nội dung không hợp lệ."))?;
-    let field_keys: Vec<String> = def.fields.into_iter().map(|f| f.key).collect();
+    let field_keys: Vec<String> = eff
+        .effective_fields
+        .into_iter()
+        .filter(|(_, fe)| {
+            fe.effective_status == opendash_core::content::EffectiveFieldStatus::Active
+                && !fe.definition.is_ui_only()
+                && fe.definition.effective_acl().2 == opendash_core::content::PublicExposure::Public
+                && fe.definition.effective_acl().0 <= opendash_core::content::FieldRole::Editor
+        })
+        .map(|(k, _)| k)
+        .collect();
 
     if let Some(eid) = entry_id {
         let exists: Option<i64> = sqlx::query_scalar(

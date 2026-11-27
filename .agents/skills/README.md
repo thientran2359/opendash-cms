@@ -1,20 +1,20 @@
-# Active Project Skills (EGM + Multi-Agent Execution)
+# Active Project Skills (Quy trình 7 Bước Feature-Worktree EGM)
 
-OpenDash kết hợp **EGM (Elephant-Goldfish Model)** cho khâu nghiên cứu, soạn đặc tả & review thiết kế (**Atlas / Nova / Aster**) với **bộ skill điều phối GitHub/CoS** cho khâu giao việc & thực thi đa nền tảng (**Forge** trên Windows, **Harbor** trên macOS).
+Theo **Owner Directive 2026-11-27** ([`AGENTS.md`](../../AGENTS.md), [ADR-0010](../../docs/decisions/ADR-0010-agent-project-and-merge-authority.md)), OpenDash đã ngừng giao Slice cho Harbor/Forge và chuyển sang luồng **1 Feature = 1 Worktree (`feat/<slug>`) = 1 PR** với test chạy 1 lần khi xong toàn bộ tính năng.
 
-| Skill | Vai trò chính | Mục đích |
-| --- | --- | --- |
-| [`opendash-elephant`](opendash-elephant/SKILL.md) | Atlas, Nova, Aster | Nạp ngữ cảnh kiến trúc, hợp đồng lõi (`CORE_FOUNDATION`, `PLUGIN_ABI`, `M8_WRITER_INVENTORY`), `GoldfishContext` mặc định và lệnh kiểm tra chuẩn cho EGM |
-| [`atlas-task-dispatch`](atlas-task-dispatch/SKILL.md) | Atlas, Aster | Giao Issue triển khai từ Design Spec EGM đã `Approved` sang Forge (Windows) / Harbor (macOS) qua CoS adapter (`RUN`, `RESUME`, `STATUS`, `RUN PR`) |
-| [`github-task-pickup`](github-task-pickup/SKILL.md) | Forge, Harbor (và Atlas/Aster/Nova) | Nhận/tiếp tục Issue triển khai trên GitHub Project #3 theo `## Detailed Implementation Plan` của Design Spec EGM đã duyệt, kiểm thử và mở PR |
-| [`github-pr-review-merge`](github-pr-review-merge/SKILL.md) | Atlas, Aster, Nova | Review PR (cả PR Design Spec EGM lẫn PR code của Forge/Harbor), kiểm tra CI/bằng chứng thực chạy và merge an toàn với `expected_head_sha` |
+| Skill | Trạng thái | Vai trò chính | Mục đích |
+| --- | --- | --- | --- |
+| [`opendash-elephant`](opendash-elephant/SKILL.md) | **Active** | Elephant / Agent trực tiếp | Nạp ngữ cảnh kiến trúc, `GoldfishContext`, kiểm chứng 3 tầng và quy trình 7 bước EGM |
+| [`github-pr-review-merge`](github-pr-review-merge/SKILL.md) | **Active** | Coordinator / Agent trực tiếp | Review Feature PR (`feat/<slug>`), kiểm chứng Tầng 1, merge sau khi Owner chốt (Bước 7) và dọn worktree |
+| [`atlas-task-dispatch`](atlas-task-dispatch/SKILL.md) | **Standby / Retired (2026-11-27)** | Lịch sử | Trước đây giao Issue sang Forge/Harbor qua CoS adapter; chỉ dùng nếu Owner yêu cầu khôi phục |
+| [`github-task-pickup`](github-task-pickup/SKILL.md) | **Standby / Retired (2026-11-27)** | Lịch sử | Trước đây Harbor/Forge tự nhận Issue Slice từ Project #3; hiện ngừng sử dụng |
 
 ## Các Skill EGM Đi kèm Plugin (`egm`)
 
 1. **`/egm-brainstorm`**: Khám phá bài toán cùng chủ dự án và gọi Goldfish phản biện sớm (`concepts_brief.md`).
-2. **`/egm-draft`**: Soạn đặc tả thiết kế kỹ thuật theo từng mục có cổng phê duyệt, lưu vào [`docs/designs/<feature>.md`](../../docs/designs/README.md) và đăng ký vào [`docs/designs/SITEMAP.md`](../../docs/designs/SITEMAP.md).
-3. **`/egm-review`** / **`/egm-review-loop`** + **`/egm-resolve`**: Khởi chạy swarm Goldfish độc lập kiểm tra đặc tả và kế hoạch triển khai đối chiếu với code thật trong `cms/`.
+2. **`/egm-draft`**: Soạn đặc tả thiết kế kỹ thuật (kèm Slice nội bộ & đặt trước số migration nếu chạy song song), lưu vào [`docs/designs/<feature>.md`](../../docs/designs/README.md) và đăng ký vào [`docs/designs/SITEMAP.md`](../../docs/designs/SITEMAP.md).
+3. **`/egm-review`** / **`/egm-review-loop`** + **`/egm-resolve`**: Khởi chạy swarm Goldfish đối chiếu đặc tả với code thật trong `cms/` theo cỡ tính năng.
 4. **`/egm-bootstrap`**: Tạo/cập nhật cây `README.md` cấp thư mục trong `cms/`.
-5. **`/egm-drift-report`**: Đối chiếu định kỳ `docs/` với `cms/` để phát hiện độ lệch.
+5. **`/egm-drift-report`**: Đối chiếu `docs/` với `cms/` ngay trên `feat/<slug>` (shift-left cuối Bước 5) và định kỳ trước release.
 
-> Skill tranh luận liên-agent cũ (`discussion-turn-responder`) và các hook/watcher nền đã được lưu trữ tại [`../archive/`](../archive/README.md) vì khâu phản biện thiết kế đã do Goldfish đảm nhiệm. Không tải hoặc chạy các skill trong `archive/`.
+> Skill tranh luận liên-agent cũ (`discussion-turn-responder`) và các hook/watcher nền đã được lưu trữ tại [`../archive/`](../archive/README.md). Không tải hoặc chạy các skill trong `archive/`.

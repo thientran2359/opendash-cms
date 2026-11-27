@@ -6,7 +6,15 @@ import type { ContentFieldValue, EffectiveEditorConfigProjection } from '../cont
 function supportAllowsField(typeKey: string, key: string, settings: ContentTypeSettings): boolean {
   if (typeKey !== 'post' && typeKey !== 'page') return true;
   if (key === 'body') return settings.supports.includes('editor') || settings.supports.includes('builder');
+  if (key === 'featured_image') return settings.supports.includes('featured_image');
   return true;
+}
+
+export function matchesMediaPickerKind(
+  fieldType: FieldSpec['type'] | undefined,
+  kind: 'image' | 'gallery',
+): boolean {
+  return kind === 'image' ? fieldType === 'media' : fieldType === 'gallery';
 }
 
 function isEmptyRequiredValue(spec: FieldSpec, val: unknown): boolean {

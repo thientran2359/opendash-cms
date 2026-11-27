@@ -212,6 +212,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            AND e.trashed_at IS NULL
            AND e.publication_status = 'published'
            AND e.content_type_key NOT IN ('pattern', 'section')
+           AND t.provider_status = 'active'
+           AND t.declaration_state = 'declared'
            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(id)
@@ -226,6 +228,13 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
             else {
                 continue;
             };
+            if schema.base.status != opendash_core::registry::ProviderStatus::Active
+                || schema.base.declaration_state
+                    != opendash_core::registry::DeclarationState::Declared
+                || !schema.base.descriptor.settings.public
+            {
+                continue;
+            }
             let Ok(values) = serde_json::from_str::<
                 std::collections::BTreeMap<String, serde_json::Value>,
             >(&values_json) else {
@@ -234,11 +243,15 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
             let specs: Vec<opendash_core::field_schema::FieldSpec> = schema
                 .effective_fields
                 .iter()
-                .filter(|(k, _)| k.as_str() != "body")
+                .filter(|(k, entry)| {
+                    k.as_str() != "body"
+                        && entry.effective_status
+                            == opendash_core::content::EffectiveFieldStatus::Active
+                })
                 .map(|(_, entry)| entry.definition.clone())
                 .collect();
             let collected =
-                opendash_core::field_schema::collect_public_media_ids(&specs, &values, true);
+                opendash_core::field_schema::collect_public_media_ids(&specs, &values, false);
             if collected.all_ids().contains(id) {
                 return Ok(true);
             }

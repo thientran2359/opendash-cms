@@ -199,7 +199,7 @@ pub async fn hydrate_single_entry_view_in_conn(
     crate::field_hydrate::collect_hydration_ids(
         &ordered_specs,
         &record.values,
-        false,
+        crate::field_hydrate::HydrationVisibility::ContentPublic { max_view_role },
         &mut media_ids,
         &mut entry_ids,
         &mut term_ids,
@@ -313,7 +313,7 @@ pub async fn hydrate_entry_views_with_options_in_conn(
             crate::field_hydrate::collect_hydration_ids(
                 specs,
                 &record.values,
-                false,
+                crate::field_hydrate::HydrationVisibility::ContentPublic { max_view_role },
                 &mut media_ids,
                 &mut ref_entry_ids,
                 &mut ref_term_ids,
