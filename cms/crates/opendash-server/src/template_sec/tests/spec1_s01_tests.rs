@@ -28,9 +28,11 @@ fn none_formatter_and_default_wrapper_keep_strict_undefined() {
 fn date_format_supports_civil_rfc3339_naive_and_rejects_bad_inputs() {
     let cfg = RenderFormattingConfig {
         timezone: "America/New_York".to_owned(),
+        ..Default::default()
     };
     let tz_hcm = RenderFormattingConfig {
         timezone: "Asia/Ho_Chi_Minh".to_owned(),
+        ..Default::default()
     };
     // Civil YYYY-MM-DD must NOT shift to previous day on negative timezone
     assert_eq!(

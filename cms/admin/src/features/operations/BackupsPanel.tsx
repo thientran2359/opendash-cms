@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, useI18n } from '../../i18n/index.tsx';
 import { formatMediaBytes, formatMediaDate } from '../media/library/format.ts';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -25,7 +25,7 @@ function generateRequestId64Hex(): string {
 }
 
 export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
-  const { t: translate } = useI18n();
+  const { __ } = useI18n();
   const [data, setData] = useState<BackupListResponse | null>(null);
   const [passphrase, setPassphrase] = useState('');
   const [confirmPassphrase, setConfirmPassphrase] = useState('');
@@ -71,11 +71,11 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
     e.preventDefault();
     setNotice(null);
     if (!csrfToken) {
-      setNotice(tStatic('feature.operations.backupspanel.missing_session_csrf_token'));
+      setNotice(__("Missing session CSRF token."));
       return;
     }
     if (passphrase !== confirmPassphrase) {
-      setNotice(tStatic('feature.operations.backupspanel.the_confirmation_password_does_not_match'));
+      setNotice(__("The confirmation password does not match."));
       return;
     }
     setBusy(true);
@@ -91,7 +91,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
       setConfirmPassphrase('');
       setReason('');
       setActiveJob(job);
-      setNotice(tStatic('feature.operations.backupspanel.started_backup_job_value1', { value1: job.id.slice(0, 12) }));
+      setNotice(__("Started backup job {{value1}}…", { value1: job.id.slice(0, 12) }));
       await refresh();
     } catch (error) {
       onApiError(error);
@@ -106,7 +106,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
     try {
       const updated = await cancelOperationJob(csrfToken, activeJob.id, activeJob.version);
       setActiveJob(updated);
-      setNotice(tStatic('feature.operations.backupspanel.cancelled_job_value1', { value1: updated.id.slice(0, 12) }));
+      setNotice(__("Cancelled job {{value1}}…", { value1: updated.id.slice(0, 12) }));
       await refresh();
     } catch (error) {
       onApiError(error);
@@ -120,7 +120,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
     setBusy(true);
     try {
       await deleteBackupArtifact(csrfToken, id);
-      setNotice(tStatic('feature.operations.backupspanel.deleted_backup_package_value1', { value1: id.slice(0, 12) }));
+      setNotice(__("Deleted backup package {{value1}}…", { value1: id.slice(0, 12) }));
       await refresh();
     } catch (error) {
       onApiError(error);
@@ -130,22 +130,22 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
   };
 
   return (
-    <section className="space-y-4" aria-label={translate('feature.operations.backupspanel.encrypted_backup')}>
+    <section className="space-y-4" aria-label={__("Encrypted backup")}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">{translate('feature.operations.backupspanel.encrypted_backup_odbackup_age')}</h2>
+          <h2 className="text-base font-semibold text-zinc-950">{__("Encrypted backup (.odbackup.age)")}</h2>
           <p className="mt-0.5 text-sm text-zinc-600">
             {data
-              ? translate('feature.operations.backupspanel.storing_value1_value2_backup_packages_up_to_value3_receipts', { value1: data.active_artifact_count, value2: data.max_artifacts, value3: data.max_receipts })
-              : translate('feature.operations.backupspanel.loading_backup_information')}
+              ? __("Storing {{value1}} / {{value2}} backup packages · up to {{value3}} receipts.", { value1: data.active_artifact_count, value2: data.max_artifacts, value3: data.max_receipts })
+              : __("Loading backup information…")}
           </p>
         </div>
-        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy}>{translate('feature.users.userspanel.refresh')}</AdminButton>
+        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy}>{__("Refresh")}</AdminButton>
       </div>
 
       <form onSubmit={handleCreateBackup} className="flex max-w-xl flex-col gap-3">
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>{translate('feature.operations.backupspanel.encryption_passphrase_16_128_characters_not_stored_on_the_server')}</span>
+          <span>{__("Encryption passphrase (16–128 characters, not stored on the server)")}</span>
           <input
             type="password"
             className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
@@ -156,7 +156,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
           />
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>{translate('feature.operations.backupspanel.confirm_encryption_passphrase')}</span>
+          <span>{__("Confirm encryption passphrase")}</span>
           <input
             type="password"
             className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
@@ -167,19 +167,19 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
           />
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>{translate('feature.operations.backupspanel.note_optional')}</span>
+          <span>{__("Note (optional)")}</span>
           <input
             type="text"
             className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder={translate('feature.operations.backupspanel.example_before_upgrading_the_theme')}
+            placeholder={__("Example: Before upgrading the theme")}
           />
         </label>
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <AdminButton type="submit" variant="primary" disabled={busy || Boolean(activeJob)}>{translate('feature.operations.backupspanel.create_encrypted_backup')}</AdminButton>
+          <AdminButton type="submit" variant="primary" disabled={busy || Boolean(activeJob)}>{__("Create encrypted backup")}</AdminButton>
           {activeJob && (activeJob.state === 'queued' || activeJob.state === 'running') && (
-            <AdminButton variant="danger" onClick={handleCancel} disabled={busy}>{translate('feature.operations.backupspanel.cancel_job')}{activeJob.state})
+            <AdminButton variant="danger" onClick={handleCancel} disabled={busy}>{__("Cancel job (")}{activeJob.state})
             </AdminButton>
           )}
         </div>
@@ -191,11 +191,11 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
         <table className="table">
           <thead>
             <tr>
-              <th>{translate('feature.operations.backupspanel.file')}</th>
-              <th>{translate('feature.operations.backupspanel.size')}</th>
+              <th>{__("File")}</th>
+              <th>{__("Size")}</th>
               <th>SHA-256</th>
-              <th>{translate('feature.operations.backupspanel.created_at')}</th>
-              <th>{translate('multilingual.actions')}</th>
+              <th>{__("Created at")}</th>
+              <th>{__("Actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -206,13 +206,13 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
                 <td><code>{art.sha256.slice(0, 16)}…</code></td>
                 <td>{formatMediaDate(art.created_at)}</td>
                 <td className="row-gap">
-                  <a className="btn-secondary" href={getBackupDownloadUrl(art.id)} download={art.filename}>{translate('feature.operations.backupspanel.download')}</a>
+                  <a className="btn-secondary" href={getBackupDownloadUrl(art.id)} download={art.filename}>{__("Download")}</a>
                   <button
                     type="button"
                     className="btn-danger"
                     onClick={() => void handleDeleteArtifact(art.id)}
                     disabled={busy}
-                  >{translate('multilingual.delete')}</button>
+                  >{__("Delete")}</button>
                 </td>
               </tr>
             ))}

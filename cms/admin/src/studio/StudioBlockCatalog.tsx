@@ -1,4 +1,4 @@
-import { useI18n, tStatic } from '../i18n/index.tsx';
+import { useI18n, __, _x } from '../i18n/index.tsx';
 import { useState } from 'react';
 import type { BlockCatalogItemDto, BlockCategory, BlockSchemaV1 } from '../types.ts';
 import {
@@ -71,25 +71,25 @@ export function studioCatalogAdditionLimit(
   const parentLoc = locate(document, parentId);
   if (kind === 'element' && (parentId === null || parentLoc?.kind === 'section' || parentLoc?.kind === 'column')) {
     const inserted = appendFreeformElement(document, parentId, elementType, blockSchema ? { blockSchema } : undefined);
-    if (!inserted) return tStatic("studio.cannot_add_at_this_location");
-    if (allNodes(inserted.document).length > 512) return tStatic("studio.512_node_limit");
-    return JSON.stringify(inserted.document).length > 256 * 1024 ? tStatic("studio.256_kib_limit") : null;
+    if (!inserted) return __("Cannot add at this location");
+    if (allNodes(inserted.document).length > 512) return __("512-node limit");
+    return JSON.stringify(inserted.document).length > 256 * 1024 ? __("256 KiB limit") : null;
   }
   if (kind === 'row' && (parentId === null || parentLoc?.kind === 'section')) {
     const rowRes = appendRowWithColumns(document, parentId, columnCount);
-    if (!rowRes) return tStatic("studio.cannot_create_row");
-    if (allNodes(rowRes.document).length > 512) return tStatic("studio.512_node_limit");
-    return JSON.stringify(rowRes.document).length > 256 * 1024 ? tStatic("studio.256_kib_limit") : null;
+    if (!rowRes) return __("Cannot create row");
+    if (allNodes(rowRes.document).length > 512) return __("512-node limit");
+    return JSON.stringify(rowRes.document).length > 256 * 1024 ? __("256 KiB limit") : null;
   }
-  if (allNodes(document).length + 1 > 512) return tStatic("studio.512_node_limit");
+  if (allNodes(document).length + 1 > 512) return __("512-node limit");
   const inserted = appendNode(document, parentId, kind, elementType,
     blockSchema ? { blockSchema } : undefined);
-  if (!inserted) return tStatic("studio.cannot_add_at_this_location");
+  if (!inserted) return __("Cannot add at this location");
   let next = inserted.document;
   if (kind === 'row') {
     for (let index = 0; index < columnCount; index++) {
       const column = appendNode(next, inserted.id, 'column', elementType);
-      if (!column) return tStatic("studio.cannot_create_row");
+      if (!column) return __("Cannot create row");
       next = column.document;
     }
     if (columnCount > 1) {
@@ -97,34 +97,34 @@ export function studioCatalogAdditionLimit(
       if (row) row.responsive = { desktop: { columns_per_row: columnCount } };
     }
   }
-  return JSON.stringify(next).length > 256 * 1024 ? tStatic("studio.256_kib_limit") : null;
+  return JSON.stringify(next).length > 256 * 1024 ? __("256 KiB limit") : null;
 }
 
 export function StudioBlockCatalog({
   document, parentId, insertableTypes, blockSchemas = [], disabled = false,
   onAddNode, onAddRowWithColumns, onOpenPatternLibrary, onOpenMediaPicker,
 }: StudioBlockCatalogProps) {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const CORE_NAMES: Record<string, { title: string; description: string; symbol: string }> = {
-    'core/heading': { title: t("studio.heading"), description: t("studio.heading_h1_h6"), symbol: 'H' },
-    'core/text': { title: t("studio.text"), description: t("studio.text_paragraph"), symbol: 'T' },
-    'core/image': { title: t("studio.image"), description: t("studio.image_from_media_library"), symbol: '▣' },
-    'core/video': { title: t("studio.video"), description: t("studio.mp4_video"), symbol: '▶' },
-    'core/button': { title: t("studio.button"), description: t("studio.link_button"), symbol: '▭' },
-    'core/list': { title: t("studio.content_list"), description: t("studio.filtered_entries"), symbol: '☷' },
-    'core/contact_form': { title: t("studio.contact_form"), description: t("studio.configured_form"), symbol: '✉' },
-    'core/pattern_ref': { title: t("studio.reusable_pattern"), description: t("studio.reference_a_saved_pattern"), symbol: '▦' },
-    'core/content_slot': { title: t("studio.content_slot"), description: t("studio.entry_content_placeholder"), symbol: '◫' },
-    'core/template_part': { title: t("studio.template_part"), description: t("studio.header_footer_part"), symbol: '▤' },
+    'core/heading': { title: __("Heading"), description: __("Heading H1–H6"), symbol: 'H' },
+    'core/text': { title: _x("Text", "studio.text"), description: __("Text paragraph"), symbol: 'T' },
+    'core/image': { title: __("Image"), description: __("Image from media library"), symbol: '▣' },
+    'core/video': { title: __("Video"), description: __("MP4 video"), symbol: '▶' },
+    'core/button': { title: __("Button"), description: __("Link button"), symbol: '▭' },
+    'core/list': { title: __("Content list"), description: __("Filtered entries"), symbol: '☷' },
+    'core/contact_form': { title: __("Contact form"), description: __("Configured form"), symbol: '✉' },
+    'core/pattern_ref': { title: __("Reusable pattern"), description: __("Reference a saved pattern"), symbol: '▦' },
+    'core/content_slot': { title: __("Content slot"), description: __("Entry content placeholder"), symbol: '◫' },
+    'core/template_part': { title: __("Template part"), description: __("Header / Footer / Part"), symbol: '▤' },
   };
 
   const BLOCK_CATEGORIES: Array<{ key: BlockCategory; title: string }> = [
-    { key: 'layout', title: t("studio.layout") },
-    { key: 'media', title: t("studio.media") },
-    { key: 'interactive', title: t("studio.interactive") },
-    { key: 'content', title: t("studio.content") },
-    { key: 'marketing', title: t("studio.marketing") },
-    { key: 'plugin', title: t("studio.plugin") },
+    { key: 'layout', title: __("Layout") },
+    { key: 'media', title: _x("Media", "studio.media") },
+    { key: 'interactive', title: __("Interactive") },
+    { key: 'content', title: __("Content") },
+    { key: 'marketing', title: __("Marketing") },
+    { key: 'plugin', title: __("Plugin") },
   ];
 
   const [query, setQuery] = useState('');
@@ -145,9 +145,9 @@ export function StudioBlockCatalog({
     + 'text-left text-sm text-slate-800 hover:border-sky-300 hover:bg-sky-50 '
     + 'focus-visible:outline-2 focus-visible:outline-sky-600 disabled:cursor-not-allowed disabled:opacity-45';
 
-  if (invalidParent) return <section className="p-3" aria-label={t("studio.add_block_61")}>
+  if (invalidParent) return <section className="p-3" aria-label={_x("Add block", "studio.add_block_61")}>
     <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-      {t("studio.this_container_no_longer_exists_return_to_page_structure_to_choose_another_location")}
+      {__("This container no longer exists. Return to Page structure to choose another location.")}
     </p>
   </section>;
 
@@ -177,9 +177,9 @@ export function StudioBlockCatalog({
       description: CORE_NAMES[type].description,
       symbol: CORE_NAMES[type].symbol,
       limit: type === 'core/content_slot' && countElementsByType(document, type) >= 1
-        ? t("studio.limit_of_one_content_slot")
+        ? __("Limit of one content slot")
         : type === 'core/list' && countElementsByType(document, type) >= 8
-          ? t("studio.limit_of_eight_lists") : null,
+          ? __("Limit of eight lists") : null,
     }));
   const active = blockSchemas.filter(item =>
     item.status === 'active' && item.declaration_state === 'declared'
@@ -208,26 +208,26 @@ export function StudioBlockCatalog({
   </button>;
   };
 
-  return <section className="min-w-0 space-y-4 p-2.5" aria-label={t("studio.add_block_61")}>
+  return <section className="min-w-0 space-y-4 p-2.5" aria-label={_x("Add block", "studio.add_block_61")}>
     {supportsElements && (
       <label className="block text-xs font-medium text-slate-700">
-        {t("studio.find_block_or_element")}
+        {__("Find block or element")}
         <input type="search" value={query} onChange={event => setQuery(event.target.value)}
-          placeholder={t("studio.search_by_name_or_block_id")}
+          placeholder={__("Search by name or block ID…")}
           className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-sky-600" />
       </label>
     )}
 
     {(allowSectionAtRoot || allowRowHere || allowColumnInRow) && !normalized && (
       <div className="space-y-2">
-        <h3 className="text-xs font-semibold text-slate-600">{t("studio.layout")}</h3>
+        <h3 className="text-xs font-semibold text-slate-600">{__("Layout")}</h3>
         {allowSectionAtRoot && (
           <button type="button" className={baseButton} disabled={disabled || !!addSectionLimit}
             title={addSectionLimit ?? undefined}
             onClick={() => onAddNode(null, 'section')}>
             <span aria-hidden="true" className="text-2xl text-sky-600">▤</span>
-            <span><strong className="block">{t("studio.empty_section")}</strong><span className="text-xs text-slate-500">
-              {addSectionLimit ?? t("studio.large_layout_region_for_the_page")}</span></span>
+            <span><strong className="block">{__("Empty section")}</strong><span className="text-xs text-slate-500">
+              {addSectionLimit ?? __("Large layout region for the page.")}</span></span>
           </button>
         )}
         {allowRowHere && ([1, 2, 3] as const).map(count => {
@@ -239,7 +239,7 @@ export function StudioBlockCatalog({
               {Array.from({ length: count }, (_, i) => <span key={i}
                 className="h-7 flex-1 rounded-sm border border-sky-300 bg-sky-100" />)}
             </span>
-            <span>{t("studio.row_with_count_columns", { count })}{limit && <small className="block text-xs text-slate-500">{limit}</small>}</span>
+            <span>{__("Row with {{count}} columns", { count })}{limit && <small className="block text-xs text-slate-500">{limit}</small>}</span>
           </button>;
         })}
         {allowColumnInRow && (
@@ -247,7 +247,7 @@ export function StudioBlockCatalog({
             title={addColumnLimit ?? undefined}
             onClick={() => onAddNode(parentId, 'column')}>
             <span aria-hidden="true" className="text-2xl text-sky-600">▯</span>
-            <span>{t("studio.column")}{addColumnLimit && <small className="block text-xs text-slate-500">
+            <span>{__("Column")}{addColumnLimit && <small className="block text-xs text-slate-500">
               {addColumnLimit}</small>}</span>
           </button>
         )}
@@ -255,9 +255,9 @@ export function StudioBlockCatalog({
           <button type="button" data-testid="studio-open-pattern-library"
             className={baseButton} disabled={disabled || libraryLimit} onClick={onOpenPatternLibrary}>
             <span aria-hidden="true" className="text-2xl text-sky-600">▦</span>
-            <span><strong className="block">{t("studio.choose_from_the_pattern_library")}</strong>
+            <span><strong className="block">{__("Choose from the pattern library…")}</strong>
               <span className="text-xs text-slate-500">
-                {libraryLimit ? t("studio.document_size_or_node_limit_reached") : t("studio.insert_layout_at_the_end_of_the_page")}
+                {libraryLimit ? __("Document size or node limit reached") : __("Insert layout at the end of the page.")}
               </span></span>
           </button>
         )}
@@ -270,14 +270,14 @@ export function StudioBlockCatalog({
         title={mediaLimit ?? undefined}
         onClick={() => onOpenMediaPicker(parentId)} className={baseButton}>
         <span aria-hidden="true" className="text-2xl text-sky-600">▧</span>
-        <span className="text-xs font-semibold">{t("studio.insert_image_from_media_library")}
+        <span className="text-xs font-semibold">{__("Insert image from media library…")}
           {mediaLimit && <small className="block text-xs font-normal">{mediaLimit}</small>}
         </span>
       </button>
     )}
 
     {core.length > 0 && <div className="space-y-2">
-      <h3 className="text-xs font-semibold text-slate-600">{t("studio.core_blocks")}</h3>
+      <h3 className="text-xs font-semibold text-slate-600">{__("Core blocks")}</h3>
       <div className="grid grid-cols-2 gap-2">
         {core.map(item => renderBlock(item.type, item.title, item.description, item.symbol, item.limit))}
       </div>
@@ -294,7 +294,7 @@ export function StudioBlockCatalog({
     })}
     {core.length === 0 && active.length === 0 && !allowSectionAtRoot && !allowRowHere && !allowColumnInRow && (
       <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-500">
-        {t("studio.no_blocks_are_available_for_this_location")}
+        {__("No blocks are available for this location.")}
       </p>
     )}
   </section>;

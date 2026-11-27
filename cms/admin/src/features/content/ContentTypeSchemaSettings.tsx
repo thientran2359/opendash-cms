@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, _x, useI18n } from '../../i18n/index.tsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createContentType,
@@ -97,7 +97,7 @@ const settingsDiffer = (
 // api/content.ts; use the canonical routes here without changing shared APIs.
 function getConfiguredTaxonomies(typeKey: string, signal?: AbortSignal): Promise<ConfiguredTaxonomies> {
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
-    signal, defaultErrorMessage: tStatic("feature.content.contenttypeschemasettings.could_not_load_configured_taxonomies"),
+    signal, defaultErrorMessage: __("Could not load configured taxonomies."),
   });
 }
 
@@ -105,7 +105,7 @@ function putTaxonomyEligibility(typeKey: string, version: number, taxonomies: st
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
     method: 'PUT', csrfToken: token, ifMatchVersion: version, contentType: 'application/json',
     body: JSON.stringify({ taxonomies, expected_version: version }),
-    defaultErrorMessage: tStatic("api.content.update_assigned_taxonomies"),
+    defaultErrorMessage: __("Could not update assigned taxonomies."),
   });
 }
 
@@ -202,7 +202,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       setCreateOpenState({ scope: createScope, open: true });
       return;
     }
-    if (createDirty && !window.confirm(tStatic("feature.content.contenttypeschemasettings.discard_the_unsaved_new_content_type_form"))) return;
+    if (createDirty && !window.confirm(__("Discard the unsaved new content type form?"))) return;
     createFormEpochRef.current += 1;
     // Explicit close/discard is destructive; a 401 unmount deliberately does
     // not call this handler so same-account reauthentication can restore.
@@ -221,7 +221,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       }
     } catch (err) {
       if (isCancelled?.()) return;
-      onApiError(err, tStatic("feature.content.contenttypeschemasettings.could_not_load_the_content_type_list"));
+      onApiError(err, __("Could not load the content type list."));
     }
   };
 
@@ -276,7 +276,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       .catch(cause => {
         if (!alive || controller.signal.aborted) return;
         if (cause instanceof ApiClientError && cause.status === 401) {
-          onApiError(cause, tStatic('api.content.load_retained_trash'));
+          onApiError(cause, __("Could not load retained Trash entries."));
         }
         if (
           cause instanceof ApiClientError &&
@@ -287,7 +287,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           setRevision(r => r + 1);
           onContentTypesChanged();
         }
-        setRetainedTrashError(cause instanceof Error ? cause.message : tStatic('api.content.load_retained_trash'));
+        setRetainedTrashError(cause instanceof Error ? cause.message : __("Could not load retained Trash entries."));
       })
       .finally(() => {
         if (alive) setRetainedTrashLoading(false);
@@ -302,7 +302,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     if (!csrfToken || !activeKey || retainedTrashBusyId !== null) return;
     if (
       !window.confirm(
-        tStatic('entry_lifecycle.confirm_purge_row', { value1: row.title, value2: row.id }),
+        _x("Permanently delete \"{{value1}}\" (#{{value2}})? This cannot be undone.", "entry_lifecycle.confirm_purge_row", { value1: row.title, value2: row.id }),
       )
     ) {
       return;
@@ -316,7 +316,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     } catch (cause) {
       if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 401) {
-        onApiError(cause, tStatic('api.content.purge_the_entry'));
+        onApiError(cause, __("Could not permanently delete the entry."));
       }
       if (
         cause instanceof ApiClientError &&
@@ -327,7 +327,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         setRevision(r => r + 1);
         onContentTypesChanged();
       }
-      setRetainedTrashError(cause instanceof Error ? cause.message : tStatic('api.content.purge_the_entry'));
+      setRetainedTrashError(cause instanceof Error ? cause.message : __("Could not permanently delete the entry."));
     } finally {
       if (mountedRef.current) setRetainedTrashBusyId(null);
     }
@@ -424,21 +424,21 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         setTaxonomyDraft([...remembered.selected]);
         setTaxonomyState({ identity: currentIdentity, available,
           applied: [...remembered.baseline], baseVersion: remembered.baseVersion, stale });
-        if (stale) setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.your_selection_was_recovered_but_the_cpt_or_taxonomy"));
-        else setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.recovered_this_account_s_unsaved_taxonomy_selection"));
+        if (stale) setTaxonomyNotice(__("Your selection was recovered, but the CPT or taxonomy configuration has changed on the server. Review it before saving."));
+        else setTaxonomyNotice(__("Recovered this account's unsaved taxonomy selection."));
       } else {
         setTaxonomyDraft([...applied.taxonomies]);
         setTaxonomyState({ identity: currentIdentity, available,
           applied: [...applied.taxonomies], baseVersion: applied.type_version,
           stale: activeType!.version !== applied.type_version });
         if (activeType!.version !== applied.type_version) {
-          setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.the_cpt_changed_while_loading_review_the_latest_version"));
+          setTaxonomyNotice(__("The CPT changed while loading. Review the latest version before saving."));
         }
       }
     }).catch(error => {
       if (!active || controller.signal.aborted) return;
-      setTaxonomyError(error instanceof Error ? error.message : tStatic("feature.content.contenttypeschemasettings.could_not_load_taxonomy_associations"));
-      onApiError(error, tStatic("feature.content.contenttypeschemasettings.could_not_load_taxonomy_associations"));
+      setTaxonomyError(error instanceof Error ? error.message : __("Could not load taxonomy associations."));
+      onApiError(error, __("Could not load taxonomy associations."));
     });
     return () => { active = false; controller.abort(); };
   }, [activeKey, currentIdentity, revision, isPattern, selectedScope]);
@@ -448,7 +448,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     if (!activeType || !taxonomyLoaded || !canEditTaxonomies || isPattern || taxonomyBusy
       || savingSettings || !csrfToken || taxonomyLoaded.stale || !taxonomyChanged) return;
     if (settingsChanged && !window.confirm(
-      tStatic("feature.content.contenttypeschemasettings.saving_taxonomies_reloads_the_cpt_version_unsaved_general_configuration"),
+      __("Saving taxonomies reloads the CPT version. Unsaved general configuration changes may be discarded. Continue?"),
     )) return;
     const initialScope = selectedScope;
     const initialType = activeKey;
@@ -465,7 +465,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       setTaxonomyDraft(chosen);
       setTaxonomyState({ identity: `${activeKey}:${updated.version}`, available: taxonomyLoaded.available,
         applied: chosen, baseVersion: updated.version, stale: false });
-      setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.applicable_taxonomies_saved_successfully"));
+      setTaxonomyNotice(__("Applicable taxonomies saved successfully."));
       setRevision(prev => prev + 1);
       onContentTypesChanged();
     } catch (error) {
@@ -482,10 +482,10 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           ? { ...previous, stale: true } : previous);
       }
       const suffix = error instanceof ApiClientError && error.status === 412
-        ? tStatic("feature.content.contenttypeschemasettings.412_cpt_schema_changed_your_selection_is_retained_review")
+        ? __("412 — CPT schema changed. Your selection is retained; review the server version before saving again.")
         : error instanceof ApiClientError && error.status === 403
-          ? tStatic("feature.content.contenttypeschemasettings.403_you_do_not_have_permission_to_update_taxonomies")
-          : error instanceof Error ? error.message : tStatic("feature.content.contenttypeschemasettings.could_not_save_taxonomies");
+          ? __("403 — You do not have permission to update taxonomies.")
+          : error instanceof Error ? error.message : __("Could not save taxonomies.");
       setTaxonomyError(suffix);
       if (error instanceof ApiClientError && error.status === 401) onApiError(error, suffix);
     } finally {
@@ -496,7 +496,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   const rebaseTaxonomyDraft = async () => {
     if (!taxonomyLoaded || !activeKey || taxonomyBusy || savingSettings) return;
     if (settingsChanged && !window.confirm(
-      tStatic("feature.content.contenttypeschemasettings.reviewing_taxonomies_reloads_the_latest_cpt_version_and_discards"),
+      __("Reviewing taxonomies reloads the latest CPT version and discards unsaved general configuration. Continue?"),
     )) return;
     const startingScope = selectedScope;
     const startingType = activeKey;
@@ -512,14 +512,14 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       if (latestScopeRef.current !== startingScope || latestTypeRef.current !== startingType) return;
       const fresh = freshTypes.find(item => item.descriptor.key === activeKey);
       if (!fresh) {
-        setTaxonomyError(tStatic("feature.content.contenttypeschemasettings.the_content_type_was_deleted_your_draft_is_retained"));
+        setTaxonomyError(__("The content type was deleted. Your draft is retained but cannot be saved."));
         return;
       }
       if (fresh.version !== configured.type_version) {
         // These two HTTP calls may themselves straddle a concurrent edit.
         // Never pair pre-edit associations with the post-edit CAS version.
         setTaxonomyState(previous => previous ? { ...previous, stale: true } : previous);
-        setTaxonomyError(tStatic("feature.content.contenttypeschemasettings.the_cpt_changed_during_review_your_input_is_retained"));
+        setTaxonomyError(__("The CPT changed during review. Your input is retained; try again to obtain a consistent version."));
         return;
       }
       const selectedBefore = new Set(previousSelection);
@@ -541,13 +541,13 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       setContentTypes(freshTypes);
       setTaxonomyState(nextState);
       setTaxonomyDraft(merged);
-      setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.loaded_the_latest_cpt_version_and_reapplied_your_changed"));
+      setTaxonomyNotice(__("Loaded the latest CPT version and reapplied your changed selections. Review before saving."));
     } catch (cause) {
       if (!mountedRef.current) return;
       if (latestScopeRef.current !== startingScope || latestTypeRef.current !== startingType) return;
-      setTaxonomyError(cause instanceof Error ? cause.message : tStatic("feature.content.contenttypeschemasettings.could_not_review_the_latest_configuration"));
+      setTaxonomyError(cause instanceof Error ? cause.message : __("Could not review the latest configuration."));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onApiError(cause, tStatic("feature.content.contenttypeschemasettings.your_session_expired_while_reviewing_taxonomies"));
+        onApiError(cause, __("Your session expired while reviewing taxonomies."));
     } finally {
       setTaxonomyBusy(false);
     }
@@ -561,7 +561,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     setTaxonomyState(null);
     setTaxonomyDraft([]);
     setTaxonomyError('');
-    setTaxonomyNotice(tStatic("feature.content.contenttypeschemasettings.discarded_unsaved_taxonomy_selections_loading_the_server_configuration"));
+    setTaxonomyNotice(__("Discarded unsaved taxonomy selections; loading the server configuration."));
     setRevision(old => old + 1);
   };
 
@@ -576,7 +576,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         setEditSettings({ ...saved.settings, supports: [...saved.settings.supports] });
         const stale = saved.stale || saved.baseVersion !== activeType.version;
         setSettingsStale(stale);
-        if (stale) setSettingsError(tStatic("feature.content.contenttypeschemasettings.the_cpt_version_changed_your_input_is_retained_review"));
+        if (stale) setSettingsError(__("The CPT version changed. Your input is retained; review the latest version before saving."));
       } else {
         setDraftIdentity(`${activeType.descriptor.key}:${activeType.version}`);
         setEditLabel(activeType.descriptor.label);
@@ -593,7 +593,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     // currently selected CPT. Refuse before the POST rather than prompting
     // after the server has already committed the new CPT.
     if (settingsChanged || taxonomyChanged) {
-      setSettingsError(tStatic("feature.content.contenttypeschemasettings.save_or_discard_the_current_cpt_taxonomy_changes_before"));
+      setSettingsError(__("Save or discard the current CPT/taxonomy changes before creating a new content type."));
       return false;
     }
     const requestScope = createScope;
@@ -619,7 +619,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           setCreateDirtyState({ scope: requestScope, dirty: false });
           setCreateOpenState({ scope: requestScope, open: false });
         }
-        const message = tStatic("feature.content.contenttypeschemasettings.created_cpt_value_but_other_changes_remain_unsaved_your", { value1: created.descriptor.key });
+        const message = __("Created CPT {{value1}}, but other changes remain unsaved. Your input is retained; save or discard changes before switching screens.", { value1: created.descriptor.key });
         setSettingsError(message);
         // Provider-owned CPTs have no editable schema form; show the receipt
         // outside that branch so the post-201 success cannot be invisible.
@@ -632,13 +632,13 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       // committed the state change above, so clear only the completed create
       // draft now, before navigating to the newly committed CPT.
       onDirtyChange?.(false);
-      setCreateNoticeState({ scope: requestScope, message: tStatic("feature.content.contenttypeschemasettings.created_cpt_value", { value1: created.descriptor.key }) });
+      setCreateNoticeState({ scope: requestScope, message: __("Created CPT {{value1}}.", { value1: created.descriptor.key }) });
       onSelectTypeKey(created.descriptor.key);
       return true;
     } catch (cause) {
       if (mountedRef.current && latestCreateScopeRef.current === requestScope &&
           cause instanceof ApiClientError && cause.status === 401) {
-        onApiError(cause, tStatic("feature.content.contenttypeschemasettings.your_session_expired_while_creating_the_cpt_unsaved_input"));
+        onApiError(cause, __("Your session expired while creating the CPT; unsaved input is retained."));
       }
       throw cause;
     }
@@ -689,11 +689,11 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           const saved = settingsDraftMemory.get(requestScope);
           if (saved) settingsDraftMemory.set(requestScope, { ...saved, stale: true });
         }
-        setSettingsError(tStatic("feature.content.contenttypeschemasettings.the_configuration_changed_elsewhere_412_your_input_is_retained"));
+        setSettingsError(__("The configuration changed elsewhere (412). Your input is retained; load the latest version before saving again."));
       } else if (err instanceof ApiClientError && err.status === 409) {
-        setSettingsError(tStatic("feature.content.contenttypeschemasettings.configuration_conflict_409_value_your_current_input_is_retained", { value1: err.message }));
+        setSettingsError(__("Configuration conflict (409): {{value1}}. Your current input is retained.", { value1: err.message }));
       } else {
-        onApiError(err, tStatic("api.content.update_the_content_type"));
+        onApiError(err, __("Could not update the content type."));
       }
     } finally {
       if (mountedRef.current && latestScopeRef.current === requestScope) setSavingSettings(false);
@@ -709,12 +709,12 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       if (!mountedRef.current || latestScopeRef.current !== requestScope) return;
       const fresh = types.find(item => item.descriptor.key === activeKey);
       if (!fresh) {
-        setSettingsError(tStatic("feature.content.contenttypeschemasettings.the_cpt_was_deleted_your_input_is_retained_for"));
+        setSettingsError(__("The CPT was deleted; your input is retained for copying."));
         return;
       }
       const saved = settingsDraftMemory.get(requestScope);
       if (!saved) {
-        setSettingsError(tStatic("feature.content.contenttypeschemasettings.there_is_no_cpt_draft_to_review_use_reload"));
+        setSettingsError(__("There is no CPT draft to review; use Reload from server."));
         return;
       }
       const newSettings = effectiveContentTypeSettings(activeKey, fresh.descriptor.settings);
@@ -734,7 +734,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         ...(changed.supports && !sameKeys(newSettings.supports, prev.supports) ? ['supports'] : []),
       ];
       if (conflicts.length && !window.confirm(
-        tStatic("feature.content.contenttypeschemasettings.the_server_also_changed_value_keep_your_current_values", { value1: conflicts.join(', ') }),
+        __("The server also changed {{value1}}. Keep your current values when reviewing the latest CPT?", { value1: conflicts.join(', ') }),
       )) return;
       const mergedSettings: ContentTypeSettings = {
         public: changed.public ? saved.settings.public : newSettings.public,
@@ -752,12 +752,12 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       setEditLabel(mergedLabel); setEditSettings(mergedSettings);
       setDraftIdentity(`${activeKey}:${fresh.version}`);
       setSettingsStale(false);
-      setSettingsError(tStatic("feature.content.contenttypeschemasettings.reviewed_the_latest_cpt_version_your_changes_are_retained"));
+      setSettingsError(__("Reviewed the latest CPT version; your changes are retained. Review before saving."));
     } catch (cause) {
       if (!mountedRef.current || latestScopeRef.current !== requestScope) return;
-      setSettingsError(cause instanceof Error ? cause.message : tStatic("feature.content.contenttypeschemasettings.could_not_review_the_cpt_version"));
+      setSettingsError(cause instanceof Error ? cause.message : __("Could not review the CPT version."));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onApiError(cause, tStatic("feature.content.contenttypeschemasettings.your_session_expired_while_reviewing_the_cpt_configuration"));
+        onApiError(cause, __("Your session expired while reviewing the CPT configuration."));
     } finally {
       if (mountedRef.current && latestScopeRef.current === requestScope) setSavingSettings(false);
     }
@@ -767,14 +767,14 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     <section className="space-y-6" data-testid="content-type-schema-settings">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{tStatic("feature.content.contenttypeschemasettings.structure_content_types")}</p>
-          <h2 className="mt-1 text-xl font-bold tracking-tight text-zinc-950">{tStatic("shell.content_types")}</h2>
+          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{__("Structure / Content types")}</p>
+          <h2 className="mt-1 text-xl font-bold tracking-tight text-zinc-950">{__("Content types & fields")}</h2>
           <p className="mt-1 text-sm text-zinc-600">
-            {tStatic("feature.content.contenttypeschemasettings.configure_schema_extension_field_groups_and_single_edit_layout")}
+            {__("Configure schema, extension field groups and Single Edit layout for each content type.")}
           </p>
         </div>
         <AdminButton variant={showCreateForm ? 'secondary' : 'primary'} size="md" onClick={toggleCreateForm}>
-          {showCreateForm ? tStatic("feature.content.contenttypeschemasettings.close_cpt_creation_form") : tStatic("feature.content.contenttypeschemasettings.create_content_type")}
+          {showCreateForm ? __("Close CPT creation form") : __("+ Create content type")}
         </AdminButton>
       </div>
 
@@ -792,12 +792,12 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           />
           {createDirty && <p role="status" className="mt-3 text-xs text-zinc-600">
             {createScope
-              ? tStatic("feature.content.contenttypeschemasettings.unsaved_cpt_input_is_retained_in_memory_by_site")
-              : tStatic("feature.content.contenttypeschemasettings.the_site_account_could_not_be_verified_for_draft")}
+              ? __("Unsaved CPT input is retained in memory by site and account when your session expires. Reloading the browser clears the draft.")
+              : __("The site/account could not be verified for draft recovery; save before leaving this screen.")}
           </p>}
           <div className="mt-3">
             <AdminButton variant="secondary" size="sm" onClick={toggleCreateForm}>
-              {tStatic("feature.content.contenttypeschemasettings.close_form_discard_unsaved_input")}
+              {__("Close form / discard unsaved input")}
             </AdminButton>
           </div>
         </div>
@@ -833,23 +833,23 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         const cptTabs: AdminTabItem<ContentTypeTabId>[] = [
           {
             id: 'overview',
-            label: tStatic('content_types.tab_overview'),
+            label: __("Overview & schema"),
             dirty: settingsChanged || settingsStale,
           },
           {
             id: 'taxonomies',
-            label: tStatic('content_types.tab_taxonomies'),
+            label: _x("Taxonomies", "content_types.tab_taxonomies"),
             badge: isPattern ? undefined : taxonomyLoaded ? taxonomyDraft.length : undefined,
             dirty: Boolean(taxonomyChanged || taxonomyLoaded?.stale),
           },
           {
             id: 'field_groups',
-            label: tStatic('content_types.tab_field_groups'),
+            label: __("Field groups"),
             badge: fieldGroupCount,
           },
           {
             id: 'layout',
-            label: tStatic('content_types.tab_layout'),
+            label: __("Editor layout"),
             badge: layoutVersion !== null ? `v${layoutVersion}` : undefined,
           },
         ];
@@ -874,22 +874,22 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                     {canonicalSettings && (
                       <AdminBadge tone={canonicalSettings.public ? 'success' : 'neutral'}>
                         {canonicalSettings.public
-                          ? tStatic('content_types.badge_public')
-                          : tStatic('content_types.badge_private')}
+                          ? __("Public")
+                          : __("Private")}
                       </AdminBadge>
                     )}
                     {canonicalSettings?.has_archive && (
-                      <AdminBadge tone="neutral">{tStatic('content_types.badge_archive')}</AdminBadge>
+                      <AdminBadge tone="neutral">{__("Archive")}</AdminBadge>
                     )}
                   </div>
                   <p className="mt-1 text-xs text-zinc-500">
-                    {tStatic("feature.common.key")}: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> · {tStatic("feature.content.contenttypeschemasettings.owner")}{' '}{activeType.owner.kind}
+                    {__("Key")}: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> · {__("· Owner:")}{' '}{activeType.owner.kind}
                   </p>
                 </div>
                 <div className="text-xs text-zinc-600">
-                  {tStatic("feature.common.base_fields")} ({activeType.descriptor.fields.length}):{' '}
+                  {__("Base fields")} ({activeType.descriptor.fields.length}):{' '}
                   <span className="font-mono text-zinc-700">
-                    {activeType.descriptor.fields.map(f => f.key).join(', ') || tStatic("feature.content.contenttypeschemasettings.none")}
+                    {activeType.descriptor.fields.map(f => f.key).join(', ') || _x("None", "feature.content")}
                   </span>
                 </div>
               </div>
@@ -898,7 +898,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                 tabs={cptTabs}
                 activeId={activeTab}
                 onChange={setActiveTab}
-                ariaLabel={tStatic('content_types.tabs_label')}
+                ariaLabel={__("Content type configuration sections")}
                 testId="content-type-tabs"
                 idPrefix="content-type"
                 className="border-b-0"
@@ -912,13 +912,13 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
             >
               <div className="rounded-xl border border-zinc-200 bg-white p-5">
                 <h4 className="text-sm font-semibold text-zinc-950">
-                  {tStatic("feature.content.contenttypeschemasettings.schema_information")}{' '}{activeType.descriptor.label}
+                  {__("Schema information:")}{' '}{activeType.descriptor.label}
                 </h4>
                 {canEditSettings ? (
-                  <form onSubmit={handleUpdateSettings} className="mt-4 space-y-4" aria-label={tStatic("feature.content.contenttypeschemasettings.content_type_configuration")}>
+                  <form onSubmit={handleUpdateSettings} className="mt-4 space-y-4" aria-label={__("Content type configuration")}>
                     {activeType.owner.kind === 'user' && (
                       <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-                        <span>{tStatic("multilingual.label")}</span>
+                        <span>{__("Display name")}</span>
                         <input type="text" value={editLabel} required maxLength={100}
                           disabled={!csrfToken || savingSettings} onChange={event => changeEditLabel(event.target.value)}
                           className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent" />
@@ -926,63 +926,63 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                     )}
                     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                       <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
-                        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeschemasettings.public_visibility")}</legend>
+                        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{__("Public visibility")}</legend>
                         <label className="flex items-center gap-2 text-sm text-zinc-800">
                           <input type="checkbox" checked={editSettings.public}
                             disabled={!csrfToken || savingSettings}
                             onChange={event => changeEditSettings({ public: event.target.checked })} />
-                          {tStatic("feature.content.contenttypeschemasettings.public_content_public")}
+                          {__("Public content (public)")}
                         </label>
                         <label className="flex items-center gap-2 text-sm text-zinc-800">
                           <input type="checkbox" checked={editSettings.has_archive}
                             disabled={!csrfToken || savingSettings}
                             onChange={event => changeEditSettings({ has_archive: event.target.checked })} />
-                          {tStatic("feature.content.contenttypeform.enable_archive_has_archive")}
+                          {__("Enable archive (has_archive)")}
                         </label>
                         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-                          <span>{tStatic("feature.content.contenttypeform.publishing_workflow")}</span>
+                          <span>{__("Publishing workflow")}</span>
                           <select className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
                             value={editSettings.publication} disabled={!csrfToken || savingSettings || isBuiltin}
                             onChange={event => changeEditSettings({
                               publication: event.target.value as ContentPublicationPolicy,
                             })}>
-                            <option value="immediate">{tStatic("feature.content.contenttypeform.save_publishes_immediately_immediate")}</option>
-                            <option value="draft_publish">{tStatic("feature.content.contenttypeform.save_draft_publish_draft_publish")}</option>
+                            <option value="immediate">{__("Save publishes immediately (immediate)")}</option>
+                            <option value="draft_publish">{__("Save draft / Publish (draft_publish)")}</option>
                           </select>
                         </label>
-                        {isBuiltin && <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.posts_and_pages_always_use_save_draft_publish")}</p>}
+                        {isBuiltin && <p className="text-xs text-zinc-500">{__("Posts and pages always use Save draft / Publish.")}</p>}
                       </fieldset>
 
                       <div className="space-y-4">
                         <fieldset className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
-                          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeform.editor_screen_features")}</legend>
+                          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{__("Editor screen features")}</legend>
                           <label className="flex items-center gap-2 text-sm text-zinc-800">
                             <input type="checkbox" checked={editSettings.supports.includes('editor')}
                               disabled={!csrfToken || savingSettings}
                               onChange={event => toggleSupport('editor', event.target.checked)} />
-                            {tStatic("feature.content.contenttypeform.editor_editor")}
+                            {__("Editor (editor)")}
                           </label>
                           <label className="flex items-center gap-2 text-sm text-zinc-800">
                             <input type="checkbox" checked={editSettings.supports.includes('featured_image')}
                               disabled={!csrfToken || savingSettings}
                               onChange={event => toggleSupport('featured_image', event.target.checked)} />
-                            {tStatic("feature.content.contenttypeform.featured_image_featured_image")}
+                            {__("Featured image (featured_image)")}
                           </label>
                           <label className="flex items-center gap-2 text-sm text-zinc-800">
                             <input type="checkbox" checked={editSettings.supports.includes('builder')}
                               disabled={!csrfToken || savingSettings}
                               onChange={event => toggleSupport('builder', event.target.checked)} />
-                            {tStatic("feature.common.visual_builder")}
+                            {__("Visual Builder (builder)")}
                           </label>
-                          <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.enable_builder_to_design_individual_entries_disabling_a_feature")}</p>
+                          <p className="text-xs text-zinc-500">{__("Enable Builder to design individual entries. Disabling a feature does not delete saved text, images or Builder designs.")}</p>
                         </fieldset>
 
                         <div className="rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
                           <div className="text-xs font-semibold uppercase tracking-wide text-zinc-700">
-                            {tStatic("feature.common.base_fields")} ({activeType.descriptor.fields.length})
+                            {__("Base fields")} ({activeType.descriptor.fields.length})
                           </div>
                           {activeType.descriptor.fields.length === 0 ? (
-                            <p className="mt-1.5 text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.none")}</p>
+                            <p className="mt-1.5 text-xs text-zinc-500">{_x("None", "feature.content")}</p>
                           ) : (
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               {activeType.descriptor.fields.map(field => (
@@ -1002,16 +1002,16 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
 
                     {settingsError && <AdminAlert tone="error">{settingsError}</AdminAlert>}
                     {settingsStale && <AdminAlert tone="warning" role="alert" className="space-y-2">
-                      <p>{tStatic("feature.content.contenttypeschemasettings.the_cpt_version_changed_your_input_is_retained_but")}</p>
+                      <p>{__("The CPT version changed. Your input is retained but cannot be saved with the old CAS token.")}</p>
                       <AdminButton variant="secondary" size="sm"
                         disabled={savingSettings || taxonomyBusy} onClick={() => void rebaseSettingsDraft()}>
-                        {tStatic("feature.content.contenttypeschemasettings.review_latest_cpt_and_keep_current_changes")}
+                        {__("Review latest CPT and keep current changes")}
                       </AdminButton>
                     </AdminAlert>}
                     <div className="flex flex-wrap items-center gap-2">
                       <AdminButton type="submit" variant="primary" size="md"
                         disabled={!settingsChanged || settingsStale || !csrfToken || savingSettings || taxonomyBusy}>
-                        {savingSettings ? tStatic("feature.users.userprofilepanel.saving") : tStatic("feature.content.contenttypeschemasettings.save_configuration")}
+                        {savingSettings ? __("Saving...") : __("Save configuration")}
                       </AdminButton>
                       <AdminButton variant="secondary" size="md" disabled={savingSettings || taxonomyBusy}
                         onClick={() => {
@@ -1025,14 +1025,14 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                           setRevision(r => r + 1);
                           setSettingsError('');
                         }}>
-                        {tStatic("feature.content.contenttypeschemasettings.reload_from_server_discard_edits")}
+                        {__("Reload from server (discard edits)")}
                       </AdminButton>
                     </div>
                   </form>
                 ) : (
                   <p className="mt-3 text-sm text-zinc-600">
-                    {isPattern ? tStatic("feature.content.contenttypeschemasettings.pattern_is_a_private_content_type_and_its_public")
-                      : tStatic("feature.content.contenttypeschemasettings.this_configuration_is_provider_owned_and_read_only_here")}
+                    {isPattern ? __("Pattern is a private content type and its public configuration cannot be changed.")
+                      : __("This configuration is provider-owned and read-only here.")}
                   </p>
                 )}
               </div>
@@ -1041,19 +1041,19 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                 <section
                   className="mt-4 rounded-xl border border-amber-200 bg-white p-5 space-y-3"
                   data-testid="retained-trash-maintenance"
-                  aria-label={tStatic("entry_lifecycle.retained_trash_title")}
+                  aria-label={__("Retained Trash Maintenance")}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <h4 className="text-sm font-semibold text-zinc-950">
-                        {tStatic("entry_lifecycle.retained_trash_title")}
+                        {__("Retained Trash Maintenance")}
                         {retainedTrash?.key === activeKey ? ` (${retainedTrash.data.total})` : ''}
                       </h4>
                       <p className="mt-1 text-xs text-zinc-600">
-                        {tStatic("entry_lifecycle.retained_trash_description")}
+                        {__("Metadata-only view for trashed entries retained under this inactive or withdrawn content type. Administrators may permanently delete retained Trash rows here.")}
                       </p>
                       <p className="mt-1 text-xs text-amber-800">
-                        {tStatic("entry_lifecycle.retained_trash_reactivation_hint")}
+                        {__("To restore entries instead of purging them, re-enable the content type provider first.")}
                       </p>
                     </div>
                     <AdminButton
@@ -1062,18 +1062,18 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                       disabled={retainedTrashLoading || retainedTrashBusyId !== null}
                       onClick={() => setRetainedTrashReloadTick(n => n + 1)}
                     >
-                      {tStatic("reading.reload")}
+                      {__("Reload")}
                     </AdminButton>
                   </div>
 
                   {retainedTrashProviderActive && (
                     <AdminAlert tone="info" className="flex flex-wrap items-center justify-between gap-2">
-                      <span>{tStatic("entry_lifecycle.retained_trash_provider_active_hint")}</span>
+                      <span>{__("This content type is now active. Manage its entries in the ordinary Trash view.")}</span>
                       <a
                         href={activeKey === 'post' ? '#/posts?status=trash' : activeKey === 'page' ? '#/pages?status=trash' : `#/cpt/${encodeURIComponent(activeKey)}?status=trash`}
                         className="font-medium text-od-accent underline"
                       >
-                        {tStatic("entry_lifecycle.open_trash_view")}
+                        {__("Open Trash")}
                       </a>
                     </AdminAlert>
                   )}
@@ -1082,13 +1082,13 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
 
                   {retainedTrashLoading && (
                     <p role="status" className="text-xs text-zinc-500">
-                      {tStatic("entry_lifecycle.retained_trash_loading")}
+                      {__("Loading retained Trash entries...")}
                     </p>
                   )}
 
                   {!retainedTrashLoading && retainedTrash?.key === activeKey && retainedTrash.data.items.length === 0 && !retainedTrashError && (
                     <p className="rounded-lg border border-dashed border-zinc-200 p-4 text-xs text-zinc-500">
-                      {tStatic("entry_lifecycle.retained_trash_empty")}
+                      {__("No retained Trash entries for this content type.")}
                     </p>
                   )}
 
@@ -1098,11 +1098,11 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                         <table className="w-full table-auto text-left text-xs">
                           <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
                             <tr>
-                              <th className="px-3 py-2">{tStatic("feature.contact.contactpanel.title")}</th>
-                              <th className="px-3 py-2">{tStatic("feature.content.entrylistpage.language")}</th>
-                              <th className="px-3 py-2">{tStatic("multilingual.status")}</th>
-                              <th className="px-3 py-2">{tStatic("entry_lifecycle.trashed_date")}</th>
-                              <th className="px-3 py-2 text-right">{tStatic("multilingual.delete")}</th>
+                              <th className="px-3 py-2">{__("Title")}</th>
+                              <th className="px-3 py-2">{__("Language")}</th>
+                              <th className="px-3 py-2">{__("Status")}</th>
+                              <th className="px-3 py-2">{__("Trashed date")}</th>
+                              <th className="px-3 py-2 text-right">{__("Delete")}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-zinc-100">
@@ -1116,8 +1116,8 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                                 <td className="px-3 py-2">
                                   <AdminBadge tone="neutral">
                                     {row.publication_status === 'published'
-                                      ? tStatic("reading.published")
-                                      : tStatic("feature.content.entrylistpage.draft")}
+                                      ? __("Published")
+                                      : __("Draft")}
                                   </AdminBadge>
                                 </td>
                                 <td className="px-3 py-2 font-mono text-zinc-600">
@@ -1131,7 +1131,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                                     data-testid={`retained-trash-purge-${row.id}`}
                                     onClick={() => void handlePurgeRetainedRow(row)}
                                   >
-                                    {tStatic("entry_lifecycle.purge_permanently")}
+                                    {__("Delete permanently")}
                                   </AdminButton>
                                 </td>
                               </tr>
@@ -1151,7 +1151,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                               disabled={retainedTrashLoading || retainedTrashOffset === 0}
                               onClick={() => setRetainedTrashOffset(o => Math.max(0, o - 20))}
                             >
-                              {tStatic("feature.content.contentworkspace.previous_page")}
+                              {__("Previous page")}
                             </AdminButton>
                             <AdminButton
                               variant="secondary"
@@ -1159,7 +1159,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                               disabled={retainedTrashLoading || retainedTrashOffset + 20 >= retainedTrash.data.total}
                               onClick={() => setRetainedTrashOffset(o => o + 20)}
                             >
-                              {tStatic("feature.common.next_page")}
+                              {__("Next page")}
                             </AdminButton>
                           </div>
                         </div>
@@ -1175,12 +1175,12 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
               id="content-type-panel-taxonomies"
               labelledBy="content-type-tab-taxonomies"
             >
-              <section className="rounded-xl border border-zinc-200 bg-white p-5" aria-label={tStatic("feature.content.contenttypeschemasettings.taxonomies_applicable_to_the_content_type")}>
+              <section className="rounded-xl border border-zinc-200 bg-white p-5" aria-label={__("Taxonomies applicable to the content type")}>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <h3 className="text-base font-semibold text-zinc-950">{tStatic("feature.content.contenttypeschemasettings.applicable_taxonomies")}</h3>
+                    <h3 className="text-base font-semibold text-zinc-950">{__("Applicable taxonomies")}</h3>
                     <p className="mt-1 text-sm text-zinc-600">
-                      {tStatic("feature.content.contenttypeschemasettings.select_taxonomies_that_may_be_associated_with")}{' '}{activeType.descriptor.label}{tStatic("feature.content.contenttypeschemasettings.clearing_a_selection_does_not_delete_saved_associations")}
+                      {__("Select taxonomies that may be associated with")}{' '}{activeType.descriptor.label}{__(". Clearing a selection does not delete saved associations.")}
                     </p>
                   </div>
                   {!isPattern && canEditTaxonomies && taxonomyLoaded && taxonomyDraft.length > 0 && (
@@ -1190,12 +1190,12 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                       disabled={taxonomyBusy || savingSettings}
                       onClick={clearAllTaxonomies}
                     >
-                      {tStatic('content_types.clear_all_taxonomies')}
+                      {__("Clear all")}
                     </AdminButton>
                   )}
                 </div>
-                {isPattern ? <p className="mt-3 text-sm text-zinc-600">{tStatic("feature.content.contenttypeschemasettings.patterns_do_not_support_taxonomies")}</p>
-                  : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-zinc-600">{tStatic("feature.content.contenttypeschemasettings.loading_applicable_taxonomies")}</p>
+                {isPattern ? <p className="mt-3 text-sm text-zinc-600">{__("Patterns do not support taxonomies.")}</p>
+                  : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-zinc-600">{_x("Loading applicable taxonomies…", "feature.content")}</p>
                     : <form className="mt-3.5 space-y-3.5" onSubmit={handleUpdateTaxonomies}>
                         <div className="grid gap-2.5 sm:grid-cols-2">
                           {taxonomyLoaded.available.filter(def =>
@@ -1215,9 +1215,9 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                                   setTaxonomyNotice('');
                                 }} />
                               <span><strong className="block font-medium text-zinc-900">{def.label}</strong>
-                                <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700">{def.key}</code> · <span className="text-xs text-zinc-500">{def.hierarchical ? tStatic("feature.content.contenttypeschemasettings.hierarchical") : tStatic("feature.content.contenttypeschemasettings.non_hierarchical")}</span>
+                                <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700">{def.key}</code> · <span className="text-xs text-zinc-500">{def.hierarchical ? __("Hierarchical") : __("Non-hierarchical")}</span>
                                 {(def.provider_status !== 'active' || def.declaration_state !== 'declared')
-                                  && <span className="mt-0.5 block text-xs text-amber-700">{tStatic("feature.content.contenttypeschemasettings.the_provider_is_inactive_or_its_declaration_was_withdrawn")}</span>}
+                                  && <span className="mt-0.5 block text-xs text-amber-700">{__("The provider is inactive or its declaration was withdrawn; saved selections are retained.")}</span>}
                               </span>
                             </label>
                           ))}
@@ -1229,34 +1229,34 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                                   setTaxonomyDraft(next);
                                   rememberTaxonomyDraft(taxonomyLoaded, next);
                                 }} />
-                              <span>{key} {tStatic("feature.content.contenttypeschemasettings.taxonomy_no_longer_exists_in_the_current_list_clear")}</span>
+                              <span>{key} {__("— Taxonomy no longer exists in the current list. Clear the selection to remove the saved key.")}</span>
                             </label>
                           ))}
                         </div>
-                        {!canEditTaxonomies && <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeschemasettings.only_administrators_can_change_taxonomies_patterns_do_not_support")}</p>}
+                        {!canEditTaxonomies && <p className="text-xs text-zinc-500">{__("Only administrators can change taxonomies; patterns do not support them.")}</p>}
                         {taxonomyChanged && <p className="text-xs text-zinc-500" role="status">
                           {selectedScope
-                            ? tStatic("feature.content.contenttypeschemasettings.unsaved_taxonomy_selections_are_kept_in_this_session_s")
-                            : tStatic("feature.content.contenttypeschemasettings.unsaved_selections_will_be_lost_when_leaving_the_screen")}
+                            ? __("Unsaved taxonomy selections are kept in this session's memory by account, site and content type when you navigate or sign in again. Reloading the page clears the draft.")
+                            : __("Unsaved selections will be lost when leaving the screen or when your session expires; drafts can only be retained when the site and account are identified.")}
                         </p>}
                         {taxonomyNotice && <AdminAlert tone="info">{taxonomyNotice}</AdminAlert>}
                         {taxonomyLoaded.stale && <AdminAlert tone="warning" className="space-y-2">
-                          <p role="alert">{tStatic("feature.content.contenttypeschemasettings.the_cpt_version_schema_or_taxonomy_configuration_changed_your")}</p>
+                          <p role="alert">{__("The CPT version/schema or taxonomy configuration changed. Your selection is retained; do not save with the old CAS token.")}</p>
                           <AdminButton variant="secondary" size="sm"
                             disabled={taxonomyBusy || savingSettings || !csrfToken}
                             onClick={() => void rebaseTaxonomyDraft()}>
-                            {tStatic("feature.content.contenttypeschemasettings.review_server_version_and_keep_current_selections")}
+                            {__("Review server version and keep current selections")}
                           </AdminButton>
                         </AdminAlert>}
                         {taxonomyError && <AdminAlert tone="error">{taxonomyError}</AdminAlert>}
                         <div className="flex flex-wrap gap-2">
                           <AdminButton type="submit" variant="primary" size="md"
                             disabled={!canEditTaxonomies || !taxonomyChanged || taxonomyBusy || savingSettings || !csrfToken || taxonomyLoaded.stale}>
-                            {taxonomyBusy ? tStatic("reading.saving") : tStatic("feature.content.contenttypeschemasettings.save_applicable_taxonomies")}
+                            {taxonomyBusy ? __("Saving…") : __("Save applicable taxonomies")}
                           </AdminButton>
                           <AdminButton variant="secondary" size="md"
                             disabled={taxonomyBusy || savingSettings} onClick={discardTaxonomyDraft}>
-                            {tStatic("feature.content.contenttypeschemasettings.discard_unsaved_selections")}
+                            {__("Discard unsaved selections")}
                           </AdminButton>
                         </div>
                       </form>}

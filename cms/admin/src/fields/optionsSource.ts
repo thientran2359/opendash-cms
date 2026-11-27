@@ -1,5 +1,5 @@
 import { requestJson } from '../api/client.ts';
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import type {
   DynamicSelectOption,
   OptionsSourceResponse,
@@ -64,7 +64,7 @@ export async function fetchOptionsSource(
     `/api/admin/fields/options-source?${query.toString()}`,
     {
       signal,
-      defaultErrorMessage: tStatic('fields.errors.load_options_source'),
+      defaultErrorMessage: __("Could not load dynamic options source."),
     },
   )
     .then(res => {
@@ -91,13 +91,13 @@ export async function resolveEntriesByIds(
   const uniqueIds = [...new Set(ids)].filter(id => Number.isSafeInteger(id) && id > 0);
   if (uniqueIds.length === 0) return [];
   if (uniqueIds.length > 50) {
-    throw new Error(tStatic('fields.errors.entry_resolve_limit'));
+    throw new Error(__("Cannot resolve more than 50 entries in one request."));
   }
   return requestJson<ResolvedEntrySummary[]>(
     `/api/admin/fields/entries-resolve?ids=${uniqueIds.join(',')}`,
     {
       signal,
-      defaultErrorMessage: tStatic('fields.errors.resolve_entries'),
+      defaultErrorMessage: __("Could not resolve selected entry labels."),
     },
   );
 }

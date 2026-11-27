@@ -227,7 +227,7 @@ pub fn compose_document_with_seo_with_assets(
                     format!(
                         "<main data-doc-diagnostic=\"{}\"><p>{}</p><pre>{}</pre></main>",
                         escape_html_attr(diag.code),
-                        escape_html_attr(l10n.invalid_template_content),
+                        escape_html_attr(&l10n.invalid_template_content),
                         escape_html_attr(rendered_layout),
                     ),
                 )

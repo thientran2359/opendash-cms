@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, useI18n } from '../../i18n/index.tsx';
 import { formatMediaDate } from '../media/library/format.ts';
 import { useEffect, useState } from 'react';
 import {
@@ -27,18 +27,18 @@ interface Props {
 
 function defaultFields(): ContactFormField[] {
   return [
-  { key: 'name', label: tStatic('feature.contact.contactpanel.full_name'), kind: 'text', required: true },
-  { key: 'email', label: tStatic('feature.contact.contactpanel.email'), kind: 'email', required: true },
-  { key: 'message', label: tStatic('feature.contact.contactpanel.message'), kind: 'textarea', required: true },
+  { key: 'name', label: __("Full name"), kind: 'text', required: true },
+  { key: 'email', label: __("Email"), kind: 'email', required: true },
+  { key: 'message', label: __("Message"), kind: 'textarea', required: true },
   ];
 }
 
 export function ContactPanel({ csrfToken, onApiError }: Props) {
-  const { t: translate } = useI18n();
+  const { __, _x } = useI18n();
   const [forms, setForms] = useState<ContactFormRecord[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [slug, setSlug] = useState(() => tStatic('feature.contact.contactpanel.default_slug'));
-  const [title, setTitle] = useState(tStatic('shell.contact'));
+  const [slug, setSlug] = useState(() => __("contact"));
+  const [title, setTitle] = useState(__("Contact"));
   const [status, setStatus] = useState<'active' | 'disabled'>('active');
   const [fields, setFields] = useState<ContactFormField[]>(defaultFields);
   const [replyToField, setReplyToField] = useState<string>('email');
@@ -69,8 +69,8 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
   const selectForm = (form: ContactFormRecord | null) => {
     if (!form) {
       setSelectedId(null);
-      setSlug(tStatic('feature.contact.contactpanel.default_slug'));
-      setTitle(tStatic('shell.contact'));
+      setSlug(__("contact"));
+      setTitle(__("Contact"));
       setStatus('active');
       setFields(defaultFields());
       setReplyToField('email');
@@ -102,13 +102,13 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
       if (selectedId == null) {
         const created = await createContactForm(csrfToken, payload);
         selectForm(created);
-        setNotice(tStatic('feature.contact.contactpanel.contact_form_created'));
+        setNotice(__("Contact form created."));
       } else {
         const current = forms.find((f) => f.id === selectedId);
         if (!current) return;
         const updated = await updateContactForm(csrfToken, selectedId, current.version, payload);
         selectForm(updated);
-        setNotice(tStatic('feature.contact.contactpanel.contact_form_updated'));
+        setNotice(__("Contact form updated."));
       }
       await loadAll();
     } catch (err) {
@@ -127,7 +127,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
     try {
       await deleteContactForm(csrfToken, current.id, current.version);
       selectForm(null);
-      setNotice(tStatic('feature.contact.contactpanel.contact_form_deleted'));
+      setNotice(__("Contact form deleted."));
       await loadAll();
     } catch (err) {
       onApiError(err);
@@ -140,7 +140,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
     if (fields.length >= 20) return;
     setFields([
       ...fields,
-      { key: `field_${fields.length + 1}`, label: tStatic('feature.contact.contactpanel.field_value1', { value1: fields.length + 1 }), kind: 'text', required: false },
+      { key: `field_${fields.length + 1}`, label: __("Field {{value1}}", { value1: fields.length + 1 }), kind: 'text', required: false },
     ]);
   };
 
@@ -170,8 +170,8 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
     <section id="contact-forms-panel" className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">{translate('feature.contact.contactpanel.contact_forms_inbox')}</h2>
-          <p className="mt-0.5 text-sm text-zinc-600">{translate('feature.contact.contactpanel.design_safe_contact_forms_no_public_javascript_and_view_incoming_messages')}</p>
+          <h2 className="text-base font-semibold text-zinc-950">{__("Contact forms & inbox")}</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">{__("Design safe contact forms (no public JavaScript) and view incoming messages.")}</p>
         </div>
         <button
           type="button"
@@ -180,19 +180,19 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
             selectForm(null);
             setActiveTab('forms');
           }}
-        >{translate('feature.contact.contactpanel.new_form')}</button>
+        >{__("+ New form")}</button>
       </div>
 
       {notice && <p className="mt-3 rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p>}
 
       <AdminTabs
         tabs={[
-          { id: 'forms', label: translate('contact.tab_forms'), badge: forms.length },
-          { id: 'inbox', label: translate('contact.tab_inbox'), badge: submissions.length },
+          { id: 'forms', label: __("Forms"), badge: forms.length },
+          { id: 'inbox', label: __("Inbox"), badge: submissions.length },
         ]}
         activeId={activeTab}
         onChange={setActiveTab}
-        ariaLabel={translate('contact.tabs_label')}
+        ariaLabel={__("Contact forms and inbox sections")}
         testId="contact-tabs"
         idPrefix="contact"
       />
@@ -220,7 +220,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
 
           <form onSubmit={handleSaveForm} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <label className="block text-xs font-medium text-slate-700">{translate('feature.contact.contactpanel.slug')}<input
+              <label className="block text-xs font-medium text-slate-700">{__("Slug")}<input
                   type="text"
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
@@ -228,7 +228,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                   required
                 />
               </label>
-              <label className="block text-xs font-medium text-slate-700">{translate('feature.contact.contactpanel.title')}<input
+              <label className="block text-xs font-medium text-slate-700">{__("Title")}<input
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -239,16 +239,16 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <label className="block text-xs font-medium text-slate-700">{translate('multilingual.status')}<select
+              <label className="block text-xs font-medium text-slate-700">{__("Status")}<select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as 'active' | 'disabled')}
                   className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
                 >
-                  <option value="active">{translate('feature.contact.contactpanel.active')}</option>
-                  <option value="disabled">{translate('feature.contact.contactpanel.disabled')}</option>
+                  <option value="active">{_x("Active", "feature.contact")}</option>
+                  <option value="disabled">{_x("Disabled", "feature.contact")}</option>
                 </select>
               </label>
-              <label className="block text-xs font-medium text-slate-700">{translate('feature.contact.contactpanel.reply_to_field_optional')}<input
+              <label className="block text-xs font-medium text-slate-700">{__("Reply-To field (optional)")}<input
                   type="text"
                   value={replyToField}
                   onChange={(e) => setReplyToField(e.target.value)}
@@ -260,20 +260,20 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-700">{translate('feature.contact.contactpanel.fields')}{fields.length}/20)</span>
+                <span className="text-xs font-medium text-slate-700">{__("Fields (")}{fields.length}/20)</span>
                 <button
                   type="button"
                   onClick={handleAddField}
                   disabled={fields.length >= 20}
                   className="text-xs font-medium text-indigo-600 hover:underline disabled:opacity-50"
-                >{translate('feature.contact.contactpanel.add_field')}</button>
+                >{_x("+ Add field", "feature.contact")}</button>
               </div>
               {fields.map((f, idx) => (
                 <div key={idx} className="grid grid-cols-12 items-center gap-2 rounded border border-slate-100 bg-slate-50 p-2">
                   <input
                     type="text"
                     value={f.key}
-                    aria-label={translate('feature.contact.contactpanel.field_key_value1', { value1: idx + 1 })}
+                    aria-label={__("Field key {{value1}}", { value1: idx + 1 })}
                     onChange={(e) => {
                       const next = [...fields];
                       next[idx] = { ...f, key: e.target.value };
@@ -284,7 +284,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                   <input
                     type="text"
                     value={f.label}
-                    aria-label={translate('feature.contact.contactpanel.field_label_value1', { value1: idx + 1 })}
+                    aria-label={__("Field label {{value1}}", { value1: idx + 1 })}
                     onChange={(e) => {
                       const next = [...fields];
                       next[idx] = { ...f, label: e.target.value };
@@ -294,26 +294,26 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                   />
                   <select
                     value={f.kind}
-                    aria-label={translate('feature.contact.contactpanel.field_type_value1', { value1: idx + 1 })}
+                    aria-label={__("Field type {{value1}}", { value1: idx + 1 })}
                     onChange={(e) => {
                       const kind = e.target.value as ContactFieldKind;
                       const next = [...fields];
                       next[idx] = {
                         ...f,
                         kind,
-                        options: kind === 'select' ? f.options ?? [translate('feature.contact.contactpanel.option_1')] : undefined,
+                        options: kind === 'select' ? f.options ?? [__("Option 1")] : undefined,
                       };
                       setFields(next);
                     }}
                     className="col-span-3 rounded border border-slate-300 px-1.5 py-1 text-xs"
                   >
-                    <option value="text">{translate('feature.contact.contactpanel.text')}</option>
-                    <option value="email">{translate('feature.contact.contactpanel.email')}</option>
-                    <option value="textarea">{translate('feature.contact.contactpanel.text_area')}</option>
-                    <option value="select">{translate('feature.contact.contactpanel.select')}</option>
-                    <option value="checkbox">{translate('feature.contact.contactpanel.checkbox')}</option>
+                    <option value="text">{_x("Text", "feature.contact")}</option>
+                    <option value="email">{__("Email")}</option>
+                    <option value="textarea">{__("Text area")}</option>
+                    <option value="select">{__("Select")}</option>
+                    <option value="checkbox">{__("Checkbox")}</option>
                   </select>
-                  <label className="col-span-1 flex items-center justify-center text-xs" title={translate('feature.contact.contactpanel.required')}>
+                  <label className="col-span-1 flex items-center justify-center text-xs" title={__("Required")}>
                     <input
                       type="checkbox"
                       checked={f.required}
@@ -329,7 +329,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                     onClick={() => setFields(fields.filter((_, i) => i !== idx))}
                     disabled={fields.length <= 1}
                     className="col-span-1 text-xs text-rose-600 disabled:opacity-30"
-                    title={translate('feature.contact.contactpanel.remove_field')}
+                    title={_x("Remove field", "feature.contact")}
                   >
                     ×
                   </button>
@@ -337,7 +337,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                     <input
                       type="text"
                       value={(f.options ?? []).join(', ')}
-                      aria-label={translate('feature.contact.contactpanel.field_options_value1', { value1: idx + 1 })}
+                      aria-label={__("Field options {{value1}}", { value1: idx + 1 })}
                       onChange={(e) => {
                         const next = [...fields];
                         next[idx] = {
@@ -346,7 +346,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                         };
                         setFields(next);
                       }}
-                      placeholder={translate('feature.contact.contactpanel.option_1_option_2')}
+                      placeholder={__("Option 1, Option 2")}
                       className="col-span-12 rounded border border-slate-300 px-2 py-1 text-xs"
                     />
                   )}
@@ -360,7 +360,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                 disabled={busy}
                 className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
               >
-                {selectedId == null ? translate('feature.contact.contactpanel.create_form') : translate('feature.contact.contactpanel.save_form')}
+                {selectedId == null ? __("Create form") : __("Save form")}
               </button>
               {selectedId != null && (
                 <button
@@ -368,7 +368,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                   disabled={busy}
                   onClick={handleDeleteForm}
                   className="rounded border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                >{translate('feature.contact.contactpanel.delete_form')}</button>
+                >{__("Delete form")}</button>
               )}
             </div>
           </form>
@@ -381,9 +381,9 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
         labelledBy="contact-tab-inbox"
       >
         <div className="max-w-3xl space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-          <h3 className="text-sm font-semibold text-slate-900">{translate('feature.contact.contactpanel.contact_inbox')}{submissions.length})</h3>
+          <h3 className="text-sm font-semibold text-slate-900">{__("Contact inbox (")}{submissions.length})</h3>
           {submissions.length === 0 ? (
-            <p className="text-sm text-slate-500">{translate('feature.contact.contactpanel.no_contact_messages_yet')}</p>
+            <p className="text-sm text-slate-500">{__("No contact messages yet.")}</p>
           ) : (
             <ul className="divide-y divide-slate-100">
               {submissions.map((sub) => (
@@ -392,14 +392,14 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                     type="button"
                     onClick={() => handleOpenSubmission(sub.id)}
                     className="text-left font-medium text-slate-800 hover:underline"
-                  >{translate('feature.contact.contactpanel.message_2')}{sub.id}{' '}{translate('feature.contact.contactpanel.form')}{sub.form_id} (v{sub.form_version}) · {formatMediaDate(sub.created_at)}
+                  >{__("Message #")}{sub.id}{' '}{__("· Form #")}{sub.form_id} (v{sub.form_version}) · {formatMediaDate(sub.created_at)}
                   </button>
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => handleDeleteSubmission(sub.id)}
                     className="text-xs text-rose-600 hover:underline"
-                  >{translate('multilingual.delete')}</button>
+                  >{__("Delete")}</button>
                 </li>
               ))}
             </ul>
@@ -408,8 +408,8 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
           {selectedSub && (
             <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-sm">
               <div className="flex items-center justify-between">
-                <strong className="text-slate-900">{translate('feature.contact.contactpanel.message_details')}{selectedSub.id}</strong>
-                <span className="text-xs text-slate-500">{translate('feature.contact.contactpanel.email_delivery_status')}{' '}{selectedSub.notification_state}</span>
+                <strong className="text-slate-900">{__("Message details #")}{selectedSub.id}</strong>
+                <span className="text-xs text-slate-500">{__("Email delivery status:")}{' '}{selectedSub.notification_state}</span>
               </div>
               <dl className="mt-2 space-y-1.5">
                 {selectedSub.schema_snapshot.fields.map((field) => (
@@ -423,10 +423,10 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
               </dl>
               {selectedSub.notification_attempts.length > 0 && (
                 <div className="mt-3 border-t border-slate-200 pt-2">
-                  <p className="text-xs font-semibold text-slate-700">{translate('feature.contact.contactpanel.smtp_notification_history')}</p>
+                  <p className="text-xs font-semibold text-slate-700">{__("SMTP notification history")}</p>
                   <ul className="mt-1 space-y-1 text-xs text-slate-600">
                     {selectedSub.notification_attempts.map((att) => (
-                      <li key={att.id}>{translate('feature.contact.contactpanel.attempt')}{att.attempt_number}: <strong>{att.state}</strong>
+                      <li key={att.id}>{__("Attempt #")}{att.attempt_number}: <strong>{att.state}</strong>
                         {att.diagnostic_code ? ` (${att.diagnostic_code})` : ''}
                       </li>
                     ))}
@@ -443,7 +443,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                               type="checkbox"
                               checked={ackDupRisk}
                               onChange={(e) => setAckDupRisk(e.target.checked)}
-                            />{translate('feature.contact.contactpanel.acknowledge_duplicate_delivery_risk_unknown')}</label>
+                            />{__("Acknowledge duplicate delivery risk (unknown)")}</label>
                         )}
                         <button
                           type="button"
@@ -463,7 +463,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                             }
                           }}
                           className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-                        >{translate('feature.contact.contactpanel.resend_smtp_notification')}</button>
+                        >{__("Resend SMTP notification")}</button>
                       </div>
                     );
                   })()}

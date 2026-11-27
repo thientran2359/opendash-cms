@@ -1,4 +1,4 @@
-import { useI18n, tStatic } from '../i18n/index.tsx';
+import { useI18n, __ } from '../i18n/index.tsx';
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
 import { type BuilderDocument, type BuilderViewport, VIEWPORT_WIDTHS, locate } from './document.ts';
@@ -204,7 +204,7 @@ export async function preparePreviewMarkup(
   let skipped = Math.max(0, mediaPaths.length - MEDIA_PREVIEW_LIMIT);
   let bytes = 0;
   for (const path of mediaPaths.slice(0, MEDIA_PREVIEW_LIMIT)) {
-    if (signal.aborted) throw new DOMException(tStatic('builder.builder_preview_frame.abort'), 'AbortError');
+    if (signal.aborted) throw new DOMException(__("Preview was cancelled."), 'AbortError');
     let blob: Blob;
     try {
       blob = await api.getPrivatePreviewMedia(path, signal);
@@ -226,8 +226,8 @@ export async function preparePreviewMarkup(
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error ?? new Error(tStatic('builder.builder_preview_frame.image_error')));
-      reader.onabort = () => reject(new DOMException(tStatic('builder.builder_preview_frame.abort'), 'AbortError'));
+      reader.onerror = () => reject(reader.error ?? new Error(__("Could not read preview image.")));
+      reader.onabort = () => reject(new DOMException(__("Preview was cancelled."), 'AbortError'));
       if (signal.aborted) reader.abort();
       else reader.readAsDataURL(blob);
     });
@@ -313,9 +313,9 @@ export async function preparePreviewMarkup(
 
     // Keep the bridge script constant; translated strings travel as inert metadata.
     for (const [name, label] of [
-      ['section', tStatic('builder.builder_preview_frame.gear_section')],
-      ['element', tStatic('builder.builder_preview_frame.gear_element')],
-      ['title', tStatic('builder.builder_preview_frame.gear_title')],
+      ['section', __("Section actions")],
+      ['element', __("Element actions")],
+      ['title', __("Block actions")],
     ]) {
       const labelMeta = parsed.createElement('meta');
       labelMeta.setAttribute('name', 'od-studio-gear-' + name);
@@ -382,7 +382,7 @@ export function BuilderPreviewFrame({
   frameClassName = '!h-[650px] !border-0',
   onPrepared,
 }: BuilderPreviewFrameProps) {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const [preparedHtml, setPreparedHtml] = useState<string>('');
   const [preparedSeq, setPreparedSeq] = useState<number>(0);
   const [preparing, setPreparing] = useState<boolean>(false);
@@ -434,7 +434,7 @@ export function BuilderPreviewFrame({
       .catch(cause => {
         if (controller.signal.aborted || seq !== seqRef.current) return;
         setPreparedHtml('');
-        onApiErrorRef.current?.(cause, t('builder.builder_preview_frame.prepare_error'));
+        onApiErrorRef.current?.(cause, __("Could not prepare preview data."));
       })
       .finally(() => {
         if (seq === seqRef.current) setPreparing(false);
@@ -442,7 +442,7 @@ export function BuilderPreviewFrame({
     return () => {
       controller.abort();
     };
-  }, [html, interactive, t]);
+  }, [html, interactive]);
 
   useEffect(() => {
     if (!interactive) return;
@@ -553,7 +553,7 @@ export function BuilderPreviewFrame({
           key={`${interactive ? 'interactive' : 'static'}-${preparedSeq}`}
           ref={iframeRef}
           id="canvas"
-          title={title ?? t('builder.builder_preview_frame.title')}
+          title={title ?? __("Builder preview (opaque sandbox)")}
           sandbox={interactive ? 'allow-scripts' : ''}
           referrerPolicy="no-referrer"
           onLoad={sendHighlight}
@@ -576,7 +576,7 @@ export function BuilderPreviewFrame({
           }}
           data-testid="builder-preview-preparing"
         >
-          {t('builder.builder_preview_frame.preparing')}
+          {__("Preparing preview…")}
         </div>
       )}
     </div>

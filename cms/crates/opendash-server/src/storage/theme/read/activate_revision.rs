@@ -214,32 +214,26 @@ impl ActiveThemeV3 {
             .collect()
     }
 
-    /// Per-key merges theme dictionaries (`default_locale -> primary_subtag -> exact code`)
-    /// so missing keys in secondary dictionaries never trigger strict UndefinedError.
-    pub fn merged_translations(&self, locale_code: &str) -> BTreeMap<String, String> {
-        let mut merged = BTreeMap::new();
-        if let Some(default_locale) = self.manifest.default_locale.as_deref() {
-            let def_code = default_locale.to_ascii_lowercase();
-            if let Some(dict) = self.locales.get(&def_code) {
-                for (k, v) in dict {
-                    merged.insert(k.clone(), v.clone());
-                }
-            }
+    pub fn l10n_catalog_map(
+        &self,
+        locale_code: &str,
+    ) -> BTreeMap<String, std::sync::Arc<opendash_core::l10n::Catalog>> {
+        let mut out = BTreeMap::new();
+        let domain = self
+            .manifest
+            .text_domain
+            .as_deref()
+            .unwrap_or(&self.manifest.theme_id);
+        let canon = opendash_core::l10n::canonicalize_locale_code(locale_code)
+            .unwrap_or_else(|_| locale_code.to_ascii_lowercase());
+        if let Some(cat) = self.l10n_catalogs.get(&canon) {
+            out.insert(domain.to_owned(), cat.clone());
+        } else if let Some((primary, _)) = canon.split_once('-')
+            && let Some(cat) = self.l10n_catalogs.get(primary)
+        {
+            out.insert(domain.to_owned(), cat.clone());
         }
-        let target_code = locale_code.to_ascii_lowercase();
-        if let Some((primary, _)) = target_code.split_once('-') {
-            if let Some(dict) = self.locales.get(primary) {
-                for (k, v) in dict {
-                    merged.insert(k.clone(), v.clone());
-                }
-            }
-        }
-        if let Some(dict) = self.locales.get(&target_code) {
-            for (k, v) in dict {
-                merged.insert(k.clone(), v.clone());
-            }
-        }
-        merged
+        out
     }
 }
 
@@ -448,7 +442,7 @@ pub(in crate::storage) async fn load_active_theme_v3_in_conn(
             templates: snap.templates,
             parts: snap.parts,
             page_layouts: snap.page_layouts,
-            locales: snap.locales,
+            l10n_catalogs: snap.l10n_catalogs,
         }));
     }
     let mut templates = BTreeMap::new();
@@ -475,17 +469,28 @@ pub(in crate::storage) async fn load_active_theme_v3_in_conn(
         };
         page_layouts.insert(layout.key.clone(), source);
     }
-    let mut locales = BTreeMap::new();
+    let mut l10n_catalogs = BTreeMap::new();
+    let domain = manifest
+        .text_domain
+        .as_deref()
+        .unwrap_or(&manifest.theme_id);
     for rel_path in revision.file_digests.keys() {
-        if let Some(rest) = rel_path.strip_prefix("locales/") {
-            if let Some(code) = rest.strip_suffix(".json") {
-                let Ok(bytes) = std::fs::read(rev_dir.join(rel_path)) else {
-                    return Ok(None);
-                };
-                let Ok(dict) = crate::theme::parse_theme_locale_json(&bytes) else {
-                    return Ok(None);
-                };
-                locales.insert(code.to_owned(), dict);
+        if let Some(rest) = rel_path.strip_prefix("languages/") {
+            if let Some(stem) = rest.strip_suffix(".mo")
+                && let Some(raw_loc) = stem.strip_prefix(&format!("{domain}-"))
+                && let Ok(canon) = opendash_core::l10n::canonicalize_locale_code(raw_loc)
+                && let Ok(bytes) = std::fs::read(rev_dir.join(rel_path))
+                && let Ok(cat) = opendash_core::l10n::parse_mo(&bytes)
+            {
+                l10n_catalogs.insert(canon, std::sync::Arc::new(cat));
+            } else if let Some(stem) = rest.strip_suffix(".po")
+                && let Some(raw_loc) = stem.strip_prefix(&format!("{domain}-"))
+                && let Ok(canon) = opendash_core::l10n::canonicalize_locale_code(raw_loc)
+                && !l10n_catalogs.contains_key(&canon)
+                && let Ok(text) = std::fs::read_to_string(rev_dir.join(rel_path))
+                && let Ok(cat) = opendash_core::l10n::parse_po(&text)
+            {
+                l10n_catalogs.insert(canon, std::sync::Arc::new(cat));
             }
         }
     }
@@ -496,6 +501,6 @@ pub(in crate::storage) async fn load_active_theme_v3_in_conn(
         templates,
         parts,
         page_layouts,
-        locales,
+        l10n_catalogs,
     }))
 }

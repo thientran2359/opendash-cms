@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 export interface EntryRouteSnapshot {
@@ -27,21 +27,21 @@ export interface HomeSeoSnapshot extends SeoMetadataInput {
 export function getEntryRoute(typeKey: string, id: number): Promise<EntryRouteSnapshot> {
   return requestJson<EntryRouteSnapshot>(
     `/api/admin/content-types/${encodeURIComponent(typeKey)}/entries/${id}/route`,
-    { defaultErrorMessage: tStatic('api.seo.load_the_custom_permalink') },
+    { defaultErrorMessage: __("Could not load the custom permalink.") },
   );
 }
 
 export function getEntrySeo(typeKey: string, id: number): Promise<EntrySeoSnapshot> {
   return requestJson<EntrySeoSnapshot>(
     `/api/admin/content-types/${encodeURIComponent(typeKey)}/entries/${id}/seo`,
-    { defaultErrorMessage: tStatic('api.seo.load_entry_seo') },
+    { defaultErrorMessage: __("Could not load entry SEO.") },
   );
 }
 
 export function getHomeSeo(locale?: string | null): Promise<HomeSeoSnapshot> {
   const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
   return requestJson<HomeSeoSnapshot>(`/api/admin/seo/home${query}`, {
-    defaultErrorMessage: tStatic('api.seo.load_homepage_seo'),
+    defaultErrorMessage: __("Could not load homepage SEO."),
   });
 }
 
@@ -58,6 +58,6 @@ export function putHomeSeo(
     contentType: 'application/json',
     ifMatchVersion: expectedVersion,
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.seo.save_homepage_seo'),
+    defaultErrorMessage: __("Could not save homepage SEO."),
   });
 }

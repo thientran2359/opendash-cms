@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, _x, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createEntryComposite,
@@ -469,9 +469,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         setDirty(Boolean(restored?.dirty_fields.length));
         setConfig(freshCfg);
         if (layoutUnavailable) {
-          setStatusNote(tStatic("feature.editor.singleeditworkspace.could_not_load_theme_templates_content_and_the_previous"));
+          setStatusNote(__("Could not load theme templates. Content and the previous selection are retained; reload before selecting a new template."));
         } else if (restored && restored.schema_token_at_edit !== freshCfg.schema_token) {
-          setStatusNote(tStatic("feature.editor.singleeditworkspace.schema_changed_your_draft_is_retained_saving_checks_the"));
+          setStatusNote(__("Schema changed. Your draft is retained; saving checks the old schema token to prevent overwrites."));
         }
       } catch (err) {
         if (!active) return;
@@ -498,7 +498,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         baselineRef.current = null;
         draftRef.current = null;
         setDirty(false);
-        onApiError(err, tStatic("feature.editor.singleeditworkspace.could_not_load_editor_screen_data"));
+        onApiError(err, __("Could not load editor screen data."));
       }
     })();
 
@@ -539,15 +539,15 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     const requestEpoch = editorDraftStore.getSessionEpoch();
     const expectedSchemaToken = schemaTokenRef.current;
     const nextErrors: Record<string, string> = {};
-    if (!snapshot.title.trim()) nextErrors.title = tStatic("feature.editor.singleeditworkspace.title_cannot_be_empty");
-    if (!snapshot.slug.trim()) nextErrors.slug = tStatic("feature.editor.singleeditworkspace.slug_cannot_be_empty");
+    if (!snapshot.title.trim()) nextErrors.title = __("Title cannot be empty.");
+    if (!snapshot.slug.trim()) nextErrors.slug = __("Slug cannot be empty.");
 
     for (const [fk, eff] of Object.entries(config.effective_fields)) {
       if (eff.effective_required && eff.editable && supportAllowsField(typeKey, fk, effectiveSettings)) {
         const v = snapshot.values[fk];
         const empty = snapshot.cleared_fields.includes(fk) || v === undefined || v === null || (typeof v === 'string' && !v.trim());
         if (empty) {
-          nextErrors[fk] = tStatic("feature.editor.singleeditworkspace.field_value_is_required", { value1: eff.definition.label });
+          nextErrors[fk] = __("Field \"{{value1}}\" is required.", { value1: eff.definition.label });
         }
       }
     }
@@ -671,7 +671,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               activeDraftKeyRef.current === draftKey &&
               activeMediaScopeRef.current === mediaScopeKey &&
               error instanceof ApiClientError && error.status === 401) {
-            onApiError(error, tStatic("feature.editor.singleeditworkspace.your_session_expired_while_loading_the_public_url"));
+            onApiError(error, __("Your session expired while loading the public URL."));
           }
         });
       }
@@ -704,8 +704,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         setDirty(changed.length > 0 || themeKeyDirtyRef.current);
       }
       setStatusNote(hasNewerChanges
-        ? tStatic("feature.editor.singleeditworkspace.saved_snapshot_vvalue_newer_edits_remain_unsaved", { value1: res.entry.version })
-        : tStatic("feature.editor.singleeditworkspace.saved_successfully_vvalue", { value1: res.entry.version }));
+        ? __("Saved snapshot v{{value1}}; newer edits remain unsaved.", { value1: res.entry.version })
+        : __("Saved successfully (v{{value1}}).", { value1: res.entry.version }));
       if (entryId === null && navigateOnCreate) {
         onNavigateHash(`${listHashPrefix}/${res.entry.id}/edit`);
       }
@@ -717,7 +717,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         editorDraftStore.quarantineAll();
       }
       if (err instanceof ApiClientError && err.status === 412) {
-        setStatusNote(tStatic("feature.editor.singleeditworkspace.version_or_schema_conflict_412_your_draft_is_retained"));
+        setStatusNote(__("Version or schema conflict (412). Your draft is retained for resolution."));
       } else if (
         err instanceof ApiClientError &&
         err.status === 409 &&
@@ -725,11 +725,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       ) {
         // Entry was moved to Trash in another session: retain dirty RAM draft and direct user to Trash.
         setTrashedBlockedReason(err.message);
-        setStatusNote(tStatic("entry_lifecycle.editor_entry_trashed_on_save"));
+        setStatusNote(__("This entry was moved to Trash in another session (409). Your unsaved draft is retained; restore the entry from Trash before saving."));
       } else if (err instanceof ApiClientError && err.status === 409) {
-        setStatusNote(tStatic("feature.editor.singleeditworkspace.static_path_or_slug_conflict_409_choose_another_path"));
+        setStatusNote(__("Static path or slug conflict (409). Choose another path or review conflict details. Your draft is retained."));
       }
-      onApiError(err, tStatic("api.postPage.save_the_entry"));
+      onApiError(err, __("Could not save the entry."));
       return null;
     } finally {
       saveInFlightRef.current = false;
@@ -740,9 +740,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   if (isPattern) {
     if (!isActive || !user) return null;
     return <div className="od-admin-card space-y-3" role="status">
-      <p className="text-sm text-slate-700">{tStatic("feature.editor.singleeditworkspace.patterns_are_private_content_shared_through_visual_builder")}</p>
+      <p className="text-sm text-slate-700">{__("Patterns are private content shared through Visual Builder.")}</p>
       <button type="button" onClick={() => onNavigateHash(entryId === null
-        ? '#/patterns' : `#/patterns/${entryId}/edit`)}>{tStatic("feature.editor.singleeditworkspace.open_pattern_management")}</button>
+        ? '#/patterns' : `#/patterns/${entryId}/edit`)}>{__("Open Pattern management")}</button>
     </div>;
   }
 
@@ -761,9 +761,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           role="alert"
           data-testid="single-edit-trashed-guard"
         >
-          <p className="font-semibold">{tStatic("entry_lifecycle.editor_entry_unavailable_title")}</p>
+          <p className="font-semibold">{__("This entry is not available for direct editing")}</p>
           <p className="text-xs leading-5 text-amber-900">{trashedBlockedReason}</p>
-          <p className="text-xs text-amber-800">{tStatic("entry_lifecycle.editor_entry_unavailable_hint")}</p>
+          <p className="text-xs text-amber-800">{__("If the entry is in Trash, restore it from the Trash view first. Any authorized unsaved draft in this session has been preserved.")}</p>
           <div className="flex flex-wrap gap-2 pt-1">
             <button
               type="button"
@@ -771,20 +771,20 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               onClick={() => onNavigateHash(`${listHashPrefix}?status=trash`)}
               className="inline-flex h-8 items-center rounded-md bg-od-accent px-3 text-xs font-medium text-white hover:bg-od-accent-hover"
             >
-              {tStatic("entry_lifecycle.open_trash_view")}
+              {__("Open Trash")}
             </button>
             <button
               type="button"
               onClick={() => onNavigateHash(listHashPrefix)}
               className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
             >
-              {tStatic("entry_lifecycle.back_to_list")}
+              {__("Back to list")}
             </button>
           </div>
         </div>
       );
     }
-    return <p className="text-sm text-slate-600">{tStatic("feature.editor.singleeditworkspace.loading_editor_configuration")}</p>;
+    return <p className="text-sm text-slate-600">{__("Loading editor configuration...")}</p>;
   }
 
   // Public URLs must come from the server route authority. Never derive a URL
@@ -810,7 +810,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const templatePanelNode = showTemplateBox ? (
     <div className="space-y-1.5" data-testid="theme-template-selection">
       <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-theme-selector">
-        <span>{typeKey === 'page' ? tStatic("feature.editor.singleeditworkspace.page_template_layout") : tStatic("feature.editor.singleeditworkspace.custom_single_template")}</span>
+        <span>{typeKey === 'page' ? __("Page Template / Layout") : __("Custom Single Template")}</span>
         <select
           id="entry-theme-selector"
           className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
@@ -827,16 +827,16 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
           }}
         >
-          <option value="">{tStatic("feature.editor.singleeditworkspace.theme_default")}</option>
+          <option value="">{__("Theme default")}</option>
           {templateChoices.map(choice => (
             <option key={choice.key} value={choice.key}>{choice.label}</option>
           ))}
           {selectedThemeKey && !templateChoices.some(choice => choice.key === selectedThemeKey) && (
-            <option value={selectedThemeKey}>{selectedThemeKey} {tStatic("feature.editor.singleeditworkspace.no_longer_provided_by_current_theme_preserved")}</option>
+            <option value={selectedThemeKey}>{selectedThemeKey} {__("(no longer provided by current theme — preserved)")}</option>
           )}
         </select>
       </label>
-      {themeKeyDirty && <p className="text-xs font-medium text-amber-700">{tStatic("feature.editor.panelregionrenderer.unsaved")}</p>}
+      {themeKeyDirty && <p className="text-xs font-medium text-amber-700">{__("● Unsaved")}</p>}
     </div>
   ) : null;
 
@@ -869,9 +869,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       if (error instanceof ApiClientError) {
         setTranslationError(error.message);
       } else {
-        setTranslationError(tStatic("feature.editor.singleeditworkspace.could_not_create_translation"));
+        setTranslationError(__("Could not create translation."));
       }
-      onApiError(error, tStatic("feature.editor.singleeditworkspace.could_not_create_translation_2"));
+      onApiError(error, __("Could not create translation"));
     } finally {
       setCreatingTranslation(false);
     }
@@ -881,7 +881,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     <div className="space-y-2.5" data-testid="entry-translations-panel">
       {entryId === null ? (
         <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-locale-select">
-          <span>{tStatic("shell.locale_content")}</span>
+          <span>{__("Content language")}</span>
           <select
             id="entry-locale-select"
             data-testid="entry-locale-select"
@@ -896,7 +896,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           >
             {localeState.allLocales.map(loc => (
               <option key={loc.code} value={loc.code}>
-                {loc.label} ({loc.code}){loc.is_default ? tStatic("feature.editor.singleeditworkspace.default") : ''}
+                {loc.label} ({loc.code}){loc.is_default ? __(" — Default") : ''}
               </option>
             ))}
           </select>
@@ -904,14 +904,14 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       ) : (
         <>
           <div className="flex items-center justify-between text-xs">
-            <span className="font-medium text-zinc-700">{tStatic("feature.content.entrylistpage.language")}</span>
+            <span className="font-medium text-zinc-700">{__("Language")}</span>
             <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-zinc-800" data-testid="entry-locked-locale">
               {entryLocale || defaultLocaleCode}
             </span>
           </div>
           {translations.length > 0 && (
             <div className="space-y-1">
-              <p className="text-xs font-medium text-zinc-600">{tStatic("feature.editor.singleeditworkspace.linked_translations")}</p>
+              <p className="text-xs font-medium text-zinc-600">{__("Linked translations")}</p>
               <ul className="space-y-1">
                 {translations.map(tr => (
                   <li key={tr.id} className="flex items-center justify-between gap-2 text-xs">
@@ -927,9 +927,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
                     </a>
                     <span className="shrink-0 text-[11px] text-zinc-500">
                       {tr.publication_status === 'published'
-                        ? tStatic("feature.editor.singleeditworkspace.status_published")
+                        ? __("published")
                         : tr.publication_status === 'draft'
-                          ? tStatic("feature.editor.singleeditworkspace.status_draft")
+                          ? __("draft")
                           : tr.publication_status}
                     </span>
                   </li>
@@ -939,7 +939,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           )}
           {missingTranslationLocales.length > 0 && (
             <div className="space-y-1 pt-1">
-              <p className="text-xs font-medium text-zinc-600">{tStatic("feature.editor.singleeditworkspace.create_translation")}</p>
+              <p className="text-xs font-medium text-zinc-600">{__("Create translation")}</p>
               <div className="flex flex-wrap gap-1.5">
                 {missingTranslationLocales.map(loc => (
                   <button
@@ -955,7 +955,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
                     data-testid={`create-translation-${loc.code}`}
                     className="inline-flex h-7 items-center rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {tStatic("feature.editor.singleeditworkspace.create_translation_2")}{loc.code})
+                    {__("+ Create translation (")}{loc.code})
                   </button>
                 ))}
               </div>
@@ -969,7 +969,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const handleDelete = async () => {
     const version = baselineRef.current?.version;
     if (entryId === null || version === null || version === undefined || !csrfToken || saving) return;
-    if (!window.confirm(tStatic("entry_lifecycle.confirm_move_to_trash_single"))) return;
+    if (!window.confirm(__("Move this entry to Trash? You can restore it later from Trash."))) return;
     setSaving(true);
     try {
       await trashContentEntry(typeKey, entryId, version, csrfToken);
@@ -978,7 +978,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       onDirtyChange(false);
       onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)));
     } catch (err) {
-      onApiError(err, tStatic("api.content.trash_the_entry"));
+      onApiError(err, __("Could not move the entry to Trash."));
     } finally {
       setSaving(false);
     }
@@ -1003,7 +1003,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             onClick={() => onNavigateHash(`${listHashPrefix}?status=trash`)}
             className="inline-flex h-7 items-center rounded border border-amber-400 bg-white px-2.5 text-xs font-medium text-amber-950 hover:bg-amber-100"
           >
-            {tStatic("entry_lifecycle.open_trash_view")}
+            {__("Open Trash")}
           </button>
         </div>
       )}
@@ -1023,7 +1023,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             setPendingActionConfirmation(null);
             setActionOutputs(prev => ({
               ...prev,
-              [panelId]: res ? JSON.stringify(res, null, 2) : tStatic("plugin_lifecycle.cancelled_notice"),
+              [panelId]: res ? JSON.stringify(res, null, 2) : __("Confirmation cancelled. No content was changed."),
             }));
           }}
           onFailed={message => {
@@ -1173,7 +1173,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
                 confirmation: err.confirmation,
               });
             } else {
-              onApiError(err, tStatic("feature.editor.singleeditworkspace.error_running_plugin_action"));
+              onApiError(err, __("Error running plugin action."));
             }
           } finally {
             setActionBusy(prev => ({ ...prev, [panelId]: false }));
@@ -1183,7 +1183,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         canOpenBuilder={!isPattern && Boolean(settings?.supports.includes('builder'))}
         onOpenBuilder={() => {
           if (isPattern || !settings?.supports.includes('builder')) {
-            setStatusNote(tStatic("feature.editor.singleeditworkspace.this_content_type_does_not_support_builder_yet"));
+            setStatusNote(__("This content type does not support Builder yet."));
             return;
           }
           if (dirty) {
@@ -1191,7 +1191,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             return;
           }
           if (entryId === null) {
-            setStatusNote(tStatic("feature.editor.singleeditworkspace.save_the_content_before_opening_builder"));
+            setStatusNote(__("Save the content before opening Builder."));
             return;
           }
           onNavigateHash(entryBuilderHash);
@@ -1206,10 +1206,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       >
         <style>{'dialog.od-confirm-dialog:modal{overscroll-behavior:contain} dialog.od-confirm-dialog::backdrop{overflow:hidden;overscroll-behavior:contain;background:rgba(9,9,11,0.45)}'}</style>
         <h2 id="builder-unsaved-title" className="text-base font-semibold text-zinc-950">
-          {tStatic("feature.editor.singleeditworkspace.unsaved_editor_changes")}
+          {__("Unsaved editor changes")}
         </h2>
         <p className="mt-2 text-sm text-zinc-600">
-          {tStatic("feature.editor.singleeditworkspace.do_you_want_to_save_your_current_edits_before")}
+          {__("Do you want to save your current edits before opening Appearance customization (Builder)?")}
         </p>
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           {entryId !== null && (
@@ -1226,7 +1226,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               data-testid="builder-prompt-discard"
               className="inline-flex h-9 items-center rounded-md border border-rose-200 bg-rose-50 px-3 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
             >
-              {tStatic("feature.editor.singleeditworkspace.discard_changes_open")}
+              {__("Discard changes & open")}
             </button>
           )}
           <button
@@ -1237,7 +1237,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             data-testid="builder-prompt-cancel"
             className="inline-flex h-9 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
           >
-            {tStatic("multilingual.cancel")}
+            {_x("Cancel", "multilingual.cancel")}
           </button>
           <button
             type="button"
@@ -1255,7 +1255,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             data-testid="builder-prompt-save"
             className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
           >
-            {saving ? tStatic("reading.saving") : tStatic("feature.editor.singleeditworkspace.save_open_builder")}
+            {saving ? __("Saving…") : __("Save & open Builder")}
           </button>
         </div>
       </dialog>
@@ -1297,29 +1297,29 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         >
           <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl space-y-4">
             <h3 className="text-base font-semibold text-zinc-900">
-              {tStatic("feature.editor.singleeditworkspace.create_translation_3")}{translationModalLocale})
+              {__("Create translation (")}{translationModalLocale})
             </h3>
             <p className="text-xs text-zinc-600">
-              {tStatic("feature.editor.singleeditworkspace.the_system_copies_content_custom_fields_matching_language_taxonomy")}
+              {__("The system copies content, custom fields, matching-language taxonomy terms and referenced media to a new draft translation.")}
             </p>
             <div className="space-y-3">
               <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-                <span>{tStatic("feature.editor.singleeditworkspace.title_optional")}</span>
+                <span>{__("Title (optional)")}</span>
                 <input
                   type="text"
                   value={translationTitle}
                   onChange={e => setTranslationTitle(e.target.value)}
-                  placeholder={title || tStatic("feature.editor.singleeditworkspace.leave_empty_to_copy_the_original_title")}
+                  placeholder={title || __("Leave empty to copy the original title")}
                   className="h-9 rounded-md border border-zinc-300 px-2.5 text-sm text-zinc-900"
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-                <span>{tStatic("feature.editor.singleeditworkspace.slug_optional")}</span>
+                <span>{__("Slug (optional)")}</span>
                 <input
                   type="text"
                   value={translationSlug}
                   onChange={e => setTranslationSlug(e.target.value)}
-                  placeholder={tStatic("feature.editor.singleeditworkspace.leave_empty_to_generate_from_title")}
+                  placeholder={__("Leave empty to generate from title")}
                   className="h-9 rounded-md border border-zinc-300 px-2.5 text-sm text-zinc-900"
                 />
               </label>
@@ -1334,7 +1334,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
                 onClick={() => setTranslationModalLocale(null)}
                 className="inline-flex h-9 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
               >
-                {tStatic("multilingual.cancel")}
+                {_x("Cancel", "multilingual.cancel")}
               </button>
               <button
                 type="button"
@@ -1343,7 +1343,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
                 data-testid="confirm-create-translation"
                 className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
               >
-                {creatingTranslation ? tStatic("feature.editor.singleeditworkspace.creating") : tStatic("feature.editor.singleeditworkspace.create_translation")}
+                {creatingTranslation ? __("Creating…") : __("Create translation")}
               </button>
             </div>
           </div>

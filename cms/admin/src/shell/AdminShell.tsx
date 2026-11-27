@@ -74,11 +74,11 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
   libraryContent, studioContent,
 }) => {
-  const { t, setSection } = useI18n();
+  const { __, _x, setSection } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const menuTree = buildMenuTree(t, cptTypes, user?.role === 'admin', cptTaxonomies);
+  const menuTree = buildMenuTree(cptTypes, user?.role === 'admin', cptTaxonomies);
   const activeParentId =
     route.view === 'cpt' && route.typeKey
       ? `cpt:${route.typeKey}`
@@ -126,9 +126,9 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const visibleMenu = menuTree.filter(item => !item.adminOnly || user?.role === 'admin');
   const groupOrder: { id: string; label: string | null; match: NavigationGroup | null }[] = [
     { id: 'dashboard', label: null, match: null },
-    { id: 'content', label: t('shell.group_content'), match: 'content' },
-    { id: 'appearance', label: t('shell.group_appearance'), match: 'appearance' },
-    { id: 'system', label: t('shell.group_system'), match: 'system' },
+    { id: 'content', label: __("Content"), match: 'content' },
+    { id: 'appearance', label: __("Appearance"), match: 'appearance' },
+    { id: 'system', label: __("System"), match: 'system' },
   ];
   const menuGroups = groupOrder.map(group => ({
     ...group,
@@ -156,21 +156,21 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     route.rawHash.split('?')[0];
   const activeChild = activeParent?.children?.find(child => child.hash === selectedNavHash);
   const subLabels: Record<string, string> = {
-    list: t('shell.list'), new: t('shell.new'), edit: t('shell.edit'), library: t('shell.library'),
-    general: t('shell.general'), multilingual: t('shell.multilingual'), reading: t('shell.reading'), permalinks: t('shell.permalinks'), seo: t('shell.seo'), contact: t('shell.contact'), smtp: t('shell.smtp'),
-    'content-types': t('shell.content_types'), themes: t('shell.themes'), menus: t('shell.menus'),
-    definitions: t('shell.taxonomy_definitions'), terms: t('shell.terms'),
-    options: t('shell.theme_options'), health: t('shell.health'),
-    'media-reconcile': t('shell.media_reconcile'), backup: t('shell.backup'),
-    install: t('shell.settings'), profile: t('shell.profile'),
+    list: __("List"), new: __("Add new"), edit: _x("Edit", "shell.edit"), library: __("Library"),
+    general: __("General"), multilingual: __("Multilingual"), reading: __("Homepage & posts"), permalinks: __("Permalinks"), seo: __("SEO"), contact: __("Contact"), smtp: __("Email notifications (SMTP)"),
+    'content-types': __("Content types & fields"), themes: __("Themes"), menus: __("Menus"),
+    definitions: __("Custom taxonomies"), terms: _x("Terms", "shell.terms"),
+    options: __("Theme options"), health: __("System health"),
+    'media-reconcile': __("Media reconciliation"), backup: __("Backup & restore"),
+    install: __("Settings"), profile: __("My profile"),
   };
   const pageTitle = routeForbidden
-    ? t('shell.forbidden_title')
-    : activeChild?.label ?? (route.sub === 'edit' ? t('shell.edit') : subLabels[route.sub]) ?? activeParent?.label ?? t('shell.dashboard');
-  const documentSection = user ? pageTitle : t('shell.login_title');
+    ? __("403 Access denied")
+    : activeChild?.label ?? (route.sub === 'edit' ? _x("Edit", "shell.edit") : subLabels[route.sub]) ?? activeParent?.label ?? _x("Dashboard", "shell.dashboard");
+  const documentSection = user ? pageTitle : __("Admin sign in");
   useEffect(() => { setSection(documentSection); }, [documentSection, setSection]);
   const breadcrumbParts = [
-    t('shell.admin'),
+    __("Administration"),
     activeGroupLabel,
     activeParent?.label,
     ...(pageTitle !== activeParent?.label ? [pageTitle] : []),
@@ -208,8 +208,8 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           <section className="od-auth-card w-full max-w-md rounded-2xl p-7 shadow-xs sm:p-9">
             <div className="od-logo od-logo-large" aria-hidden="true">O</div>
             <div className="mt-4 text-xs font-semibold uppercase tracking-widest text-od-accent">OpenDash CMS</div>
-            <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-zinc-950">{t('shell.login_title')}</h1>
-            <p className="mb-6 mt-1.5 text-sm text-zinc-600">{t('shell.login_description')}</p>
+            <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-zinc-950">{__("Admin sign in")}</h1>
+            <p className="mb-6 mt-1.5 text-sm text-zinc-600">{__("Manage website content and design in one workspace.")}</p>
             <AuthPanel
               user={user} authUsername={authUsername} authPassword={authPassword}
               statusMessage={statusMessage} isError={isError} isProcessing={isProcessing}
@@ -231,16 +231,16 @@ export const AdminShell: React.FC<AdminShellProps> = ({
       )}
 
       <div className={user && !isStudioView ? 'od-layout' : 'hidden'} data-testid="admin-layout" aria-hidden={!user || isStudioView}>
-        {mobileOpen && <button type="button" className="od-drawer-overlay" aria-label={t('shell.close_menu')} onClick={() => setMobileOpen(false)} />}
-        <aside id="admin-navigation" className={'od-sidebar ' + (mobileOpen ? 'od-sidebar-open' : '')} aria-label={t('shell.navigation')}>
+        {mobileOpen && <button type="button" className="od-drawer-overlay" aria-label={__("Close menu")} onClick={() => setMobileOpen(false)} />}
+        <aside id="admin-navigation" className={'od-sidebar ' + (mobileOpen ? 'od-sidebar-open' : '')} aria-label={__("Admin navigation")}>
           <div className="od-brand flex items-center gap-2.5 px-4 py-3.5">
             <div className="od-logo" aria-hidden="true">O</div>
             <div className="min-w-0">
               <div className="text-sm font-bold tracking-tight text-zinc-950">OpenDash</div>
-              <div className="text-[11px] text-zinc-500">{t('shell.content_management')}</div>
+              <div className="text-[11px] text-zinc-500">{__("Content Management")}</div>
             </div>
           </div>
-          <nav className="od-nav overflow-y-auto px-2.5 py-3" aria-label={t('shell.nav_items')}>
+          <nav className="od-nav overflow-y-auto px-2.5 py-3" aria-label={__("Admin sections")}>
             <div className="flex flex-col gap-0.5">
               {menuGroups.map(group => <div key={group.id} className="od-nav-group" data-nav-group={group.id}>
                 {group.label && <p className="od-nav-group-title">{group.label}</p>}
@@ -258,7 +258,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                         data-menu-id={item.id}
                         aria-expanded={visibleChildren.length > 0 ? isExpanded : undefined}
                         disabled={item.disabled}
-                        title={item.disabled ? t('shell.unavailable') : undefined}
+                        title={item.disabled ? __("Unavailable — will be enabled when the feature is complete") : undefined}
                         onClick={() => {
                           if (visibleChildren.length > 0) {
                             setOpenMenuId(isExpanded ? null : item.id);
@@ -269,7 +269,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                         <span className="flex min-w-0 items-center gap-2">
                           <NavIcon name={item.icon} />
                           <span className="truncate">{item.label}</span>
-                          {item.disabled && <span className="od-nav-coming-soon">{t('shell.coming_soon')}</span>}
+                          {item.disabled && <span className="od-nav-coming-soon">{__("Coming soon")}</span>}
                         </span>
                         {visibleChildren.length > 0 && (
                           <span className="text-[11px] text-zinc-400" aria-hidden="true">
@@ -283,7 +283,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                             const isSubActive = selectedNavHash === sub.hash;
                             return (
                               sub.disabled
-                                ? <span key={sub.hash} className="od-nav-sub-disabled" aria-disabled="true">{t('shell.disabled_submenu', { label: sub.label })}</span>
+                                ? <span key={sub.hash} className="od-nav-sub-disabled" aria-disabled="true">{__("{{label}} · Coming soon", { label: sub.label })}</span>
                                 : <a key={sub.hash} href={sub.hash}
                                   onClick={e => { e.preventDefault(); navigate(sub.hash); }}
                                   aria-current={isSubActive ? 'page' : undefined}
@@ -303,13 +303,13 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               </div>)}
             </div>
           </nav>
-          <div className="od-sidebar-bottom px-4 py-2.5 text-[11px]">{t('shell.footer')}</div>
+          <div className="od-sidebar-bottom px-4 py-2.5 text-[11px]">{__("OpenDash · Admin")}</div>
         </aside>
 
         <div className="od-workspace min-w-0">
           <header className="od-topbar flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <button type="button" className="od-menu-toggle" aria-label={t('shell.open_menu')} aria-controls="admin-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}>
+              <button type="button" className="od-menu-toggle" aria-label={__("Open menu")} aria-controls="admin-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}>
                 <span aria-hidden="true">☰</span>
               </button>
               <div className="min-w-0">
@@ -326,7 +326,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                     className="inline-flex items-center rounded-md border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-bold tracking-wide text-amber-900"
                     title={[devTheme ? `Theme: ${devTheme}` : null, devPlugins.length > 0 ? `Plugins: ${devPlugins.join(', ')}` : null].filter(Boolean).join(' · ') || undefined}
                   >
-                    {t('shell.dev_mode_badge')}
+                    {__("DEV MODE")}
                   </span>
                   {user?.role === 'admin' && onSyncDevManifest && (
                     <button
@@ -336,12 +336,12 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                       onClick={onSyncDevManifest}
                       className="inline-flex h-7 items-center rounded-md border border-amber-300 bg-white px-2.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-50 disabled:opacity-50"
                     >
-                      {devSyncing ? t('shell.dev_syncing') : t('shell.dev_sync_button')}
+                      {devSyncing ? __("Syncing…") : __("Sync Dev Manifest")}
                     </button>
                   )}
                 </div>
               )}
-              {hasUnsavedChanges && <span className="od-unsaved-label" role="status">{t('shell.unsaved')}</span>}
+              {hasUnsavedChanges && <span className="od-unsaved-label" role="status">{__("● Unsaved changes")}</span>}
               {user && <AuthPanel
                 user={user} authUsername={authUsername} authPassword={authPassword}
                 statusMessage={statusMessage} isError={isError} isProcessing={isProcessing}
@@ -354,16 +354,16 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           <PageContainerTag id="admin-main" className="od-page-container px-4 py-5 sm:px-6 sm:py-6">
             {user && routeForbidden && (
               <section className="od-admin-card border-rose-200 bg-rose-50" data-testid="rbac-forbidden" role="alert">
-                <h2 className="text-lg font-semibold text-rose-900">{t('shell.forbidden_heading')}</h2>
+                <h2 className="text-lg font-semibold text-rose-900">{__("403 — Access denied")}</h2>
                 <p className="mt-2 text-sm text-rose-800">
-                  {t('shell.forbidden_message', { path: route.rawHash })}
+                  {__("Your account does not have permission to access {{path}}.", { path: route.rawHash })}
                 </p>
                 <button
                   type="button"
                   onClick={() => navigate('#/dashboard')}
                   className="mt-4 inline-flex h-9 items-center rounded-md bg-zinc-900 px-3.5 text-sm font-medium text-white hover:bg-zinc-800"
                 >
-                  {t('shell.back_dashboard')}
+                  {__("Back to dashboard")}
                 </button>
               </section>
             )}
@@ -371,16 +371,16 @@ export const AdminShell: React.FC<AdminShellProps> = ({
             {user && !routeForbidden && route.view === 'dashboard' && (
               <div className="od-dashboard space-y-6" id="dashboard-main">
                 <div className="od-welcome rounded-xl px-5 py-4 sm:px-6 sm:py-5">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-od-accent">{t('shell.dashboard_heading')}</div>
-                  <h2 className="mt-1 text-xl font-semibold tracking-tight text-zinc-950">{t('shell.welcome', { username: user.username })}</h2>
-                  <p className="mt-1 max-w-2xl text-sm text-zinc-600">{t('shell.dashboard_description')}</p>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-od-accent">{_x("Dashboard", "shell.dashboard_heading")}</div>
+                  <h2 className="mt-1 text-xl font-semibold tracking-tight text-zinc-950">{__("Hello, {{username}}", { username: user.username })}</h2>
+                  <p className="mt-1 max-w-2xl text-sm text-zinc-600">{__("Choose a section from the sidebar to manage content and configure the system.")}</p>
                 </div>
                 {dashboardContent}
                 {customCptTypes.length > 0 && (
                   <section className="space-y-3" aria-labelledby="dashboard-cpt-heading" data-testid="dashboard-cpt-shortcuts">
                     <div>
-                      <h2 id="dashboard-cpt-heading" className="text-base font-semibold text-zinc-950">{t('shell.custom_types')}</h2>
-                      <p className="mt-0.5 text-sm text-zinc-600">{t('shell.custom_types_description')}</p>
+                      <h2 id="dashboard-cpt-heading" className="text-base font-semibold text-zinc-950">{__("Custom content types")}</h2>
+                      <p className="mt-0.5 text-sm text-zinc-600">{__("Shortcuts to manage active custom content types.")}</p>
                     </div>
                     <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {customCptTypes.map(ct => (
@@ -395,14 +395,14 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                               onClick={e => { e.preventDefault(); navigate(`#/cpt/${ct.descriptor.key}`); }}
                               className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
                             >
-                              {t('shell.list')}
+                              {__("List")}
                             </a>
                             <a
                               href={`#/cpt/${ct.descriptor.key}/new`}
                               onClick={e => { e.preventDefault(); navigate(`#/cpt/${ct.descriptor.key}/new`); }}
                               className="inline-flex h-8 items-center rounded-md bg-od-accent px-2.5 text-xs font-medium text-white hover:bg-od-accent-hover"
                             >
-                              {t('shell.add_new_short')}
+                              {__("+ New")}
                             </a>
                           </div>
                         </article>
@@ -415,20 +415,20 @@ export const AdminShell: React.FC<AdminShellProps> = ({
 
             {!routeForbidden && (
               <>
-                <section className={user && route.view === 'posts' ? `od-editor-panel${postsLegacy}` : 'hidden'} aria-label={t('shell.posts')} aria-hidden={!user || route.view !== 'posts'}>{postsContent}</section>
-                <section className={user && route.view === 'pages' ? `od-editor-panel${pagesLegacy}` : 'hidden'} aria-label={t('shell.pages')} aria-hidden={!user || route.view !== 'pages'}>{pagesContent}</section>
+                <section className={user && route.view === 'posts' ? `od-editor-panel${postsLegacy}` : 'hidden'} aria-label={__("Posts")} aria-hidden={!user || route.view !== 'posts'}>{postsContent}</section>
+                <section className={user && route.view === 'pages' ? `od-editor-panel${pagesLegacy}` : 'hidden'} aria-label={__("Pages")} aria-hidden={!user || route.view !== 'pages'}>{pagesContent}</section>
                 {user && route.view === 'media' && mediaContent}
                 {user && route.view === 'taxonomy' && <div className="od-admin-card min-w-0 max-w-full">{taxonomyContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'themes' && <div className="od-admin-card min-w-0">{themesContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' && <div className="od-legacy-scope">{libraryContent}</div>}
                 {user?.role === 'admin' && route.view === 'patterns' && <div className="od-legacy-scope">{patternsContent}</div>}
 
-                <section className={user && route.view === 'cpt' ? `od-editor-panel${cptLegacy}` : 'hidden'} aria-label={t('shell.custom_content')} aria-hidden={!user || route.view !== 'cpt'}>
+                <section className={user && route.view === 'cpt' ? `od-editor-panel${cptLegacy}` : 'hidden'} aria-label={__("Custom content")} aria-hidden={!user || route.view !== 'cpt'}>
                   <div id="content-main">{contentContent}</div>
                 </section>
 
                 {user?.role === 'admin' && route.view === 'plugins' && <div className="od-admin-card">{pluginsContent}</div>}
-                <section className={user?.role === 'admin' && route.view === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label={t('shell.users')} aria-hidden={user?.role !== 'admin' || route.view !== 'users'}>
+                <section className={user?.role === 'admin' && route.view === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label={__("Users")} aria-hidden={user?.role !== 'admin' || route.view !== 'users'}>
                   {usersContent}
                 </section>
                 {user && route.view === 'profile' && <div className="od-admin-card min-w-0">{profileContent}</div>}

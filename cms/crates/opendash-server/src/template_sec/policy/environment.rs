@@ -74,7 +74,96 @@ pub fn restricted_environment_with_config(cfg: &RenderFormattingConfig) -> Envir
     env.add_test("string", minijinja::tests::is_string);
     env.add_test("sequence", minijinja::tests::is_sequence);
     env.add_test("mapping", minijinja::tests::is_mapping);
+
+    let catalogs_1 = cfg.l10n_catalogs.clone();
+    let default_dom_1 = cfg.l10n_domain.clone().unwrap_or_default();
+    env.add_function(
+        "__",
+        move |msgid: &str, domain_or_params: Option<Value>, params: Option<Value>| -> String {
+            let (domain, p) = split_domain_and_params(domain_or_params, params, &default_dom_1);
+            let translated = catalogs_1
+                .get(domain.as_str())
+                .and_then(|c| c.get_with_context(None, msgid))
+                .unwrap_or(msgid);
+            interpolate_l10n_params(translated, p.as_ref(), None)
+        },
+    );
+
+    let catalogs_2 = cfg.l10n_catalogs.clone();
+    let default_dom_2 = cfg.l10n_domain.clone().unwrap_or_default();
+    env.add_function(
+        "_x",
+        move |msgid: &str,
+              context: &str,
+              domain_or_params: Option<Value>,
+              params: Option<Value>|
+              -> String {
+            let (domain, p) = split_domain_and_params(domain_or_params, params, &default_dom_2);
+            let translated = catalogs_2
+                .get(domain.as_str())
+                .and_then(|c| c.get_with_context(Some(context), msgid))
+                .unwrap_or(msgid);
+            interpolate_l10n_params(translated, p.as_ref(), None)
+        },
+    );
+
+    let catalogs_3 = cfg.l10n_catalogs.clone();
+    let default_dom_3 = cfg.l10n_domain.clone().unwrap_or_default();
+    env.add_function(
+        "_n",
+        move |singular: &str,
+              plural: &str,
+              count: i64,
+              domain_or_params: Option<Value>,
+              params: Option<Value>|
+              -> String {
+            let (domain, p) = split_domain_and_params(domain_or_params, params, &default_dom_3);
+            let fallback = if count == 1 { singular } else { plural };
+            let translated = catalogs_3
+                .get(domain.as_str())
+                .and_then(|c| c.get_plural_with_context(None, singular, count))
+                .unwrap_or(fallback);
+            interpolate_l10n_params(translated, p.as_ref(), Some(count))
+        },
+    );
     env
+}
+
+fn split_domain_and_params(
+    domain_or_params: Option<Value>,
+    params: Option<Value>,
+    default_domain: &str,
+) -> (String, Option<Value>) {
+    match domain_or_params {
+        Some(v) if v.as_str().is_some() => {
+            (v.as_str().unwrap_or(default_domain).to_owned(), params)
+        }
+        Some(v) => (default_domain.to_owned(), Some(v)),
+        None => (default_domain.to_owned(), params),
+    }
+}
+
+fn interpolate_l10n_params(template: &str, params: Option<&Value>, count: Option<i64>) -> String {
+    let mut out = template.to_owned();
+    if let Some(c) = count {
+        let s = c.to_string();
+        out = out.replace("{n}", &s).replace("{count}", &s);
+    }
+    if let Some(map) = params
+        && map.kind() == minijinja::value::ValueKind::Map
+        && let Ok(iter) = map.try_iter()
+    {
+        for key in iter {
+            if let Some(k) = key.as_str()
+                && let Ok(val) = map.get_item(&key)
+                && !val.is_undefined()
+                && !val.is_none()
+            {
+                out = out.replace(&format!("{{{k}}}"), &val.to_string());
+            }
+        }
+    }
+    out
 }
 
 /// Validates a template against the C-SEC MiniJinja AST allowlist and contextual HTML/URL/CSS rules.

@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { getPluginUiSchema, invokePluginAction } from '../../api/plugins.ts';
@@ -31,7 +31,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
   csrfToken,
   onUnauthorized,
 }) => {
-  const { t: translate } = useI18n();
+  const { __ } = useI18n();
   const [schema, setSchema] = useState<DeclarativeUiSchemaV1 | null>(null);
   const [activeScreenId, setActiveScreenId] = useState<string>('');
   const [loadError, setLoadError] = useState<string>('');
@@ -66,10 +66,10 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
         if (controller.signal.aborted) return;
         if (err instanceof ApiClientError && err.status === 401) {
           onUnauthorized();
-          setLoadError(tStatic('feature.plugins.declarativepluginui.your_session_has_expired_401_the_draft_is_retained'));
+          setLoadError(__("Your session has expired (401). The draft is retained."));
           return;
         }
-        setLoadError(err instanceof Error ? err.message : tStatic('api.plugins.load_the_declarative_ui'));
+        setLoadError(err instanceof Error ? err.message : __("Could not load the declarative UI."));
       });
     return () => controller.abort();
   }, [pluginId, onUnauthorized]);
@@ -117,16 +117,16 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
       if (err instanceof ApiClientError && err.status === 401) {
         // Keep draft in memory; never auto-resubmit after re-login.
         onUnauthorized();
-        setActionError(tStatic('feature.plugins.declarativepluginui.your_session_has_expired_401_sign_in_again_the_draft_has_been_retained'));
+        setActionError(__("Your session has expired (401). Sign in again; the draft has been retained."));
       } else if (err instanceof ApiClientError && err.confirmation) {
         setPendingConfirmation({ actionId, confirmation: err.confirmation });
       } else if (err instanceof ApiClientError) {
         const codeLabel = [403, 412, 422].includes(err.status) ? ` (${err.status})` : '';
         setActionError(`${err.message}${codeLabel}`);
       } else if (err instanceof DOMException && err.name === 'AbortError') {
-        setActionError(tStatic('feature.plugins.declarativepluginui.the_request_timed_out_the_draft_is_retained'));
+        setActionError(__("The request timed out. The draft is retained."));
       } else {
-        setActionError(err instanceof Error ? err.message : tStatic('feature.plugins.declarativepluginui.connection_error'));
+        setActionError(err instanceof Error ? err.message : __("Connection error."));
       }
     } finally {
       window.clearTimeout(timer);
@@ -235,7 +235,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
             }
           }}
         >
-          {isSubmitting ? translate('feature.plugins.declarativepluginui.executing') : (node.label ?? node.action_id ?? translate('feature.plugins.declarativepluginui.execute'))}
+          {isSubmitting ? __("Executing...") : (node.label ?? node.action_id ?? __("Execute"))}
         </button>
       );
     }
@@ -251,7 +251,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
         <div key={node.id} className="declarative-collection">
           {node.label && <strong>{node.label}</strong>}
           {node.columns && node.columns.length > 0 && (
-            <div className="muted">{translate('feature.plugins.declarativepluginui.columns')}{' '}{node.columns.join(', ')}</div>
+            <div className="muted">{__("Columns:")}{' '}{node.columns.join(', ')}</div>
           )}
         </div>
       );
@@ -260,8 +260,8 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
   };
 
   return (
-    <section aria-label={translate('feature.plugins.declarativepluginui.declarative_plugin_ui')} style={{ marginTop: 16 }}>
-      <h3>{translate('feature.plugins.declarativepluginui.declarative_ui')}{schema.plugin_id})</h3>
+    <section aria-label={__("Declarative plugin UI")} style={{ marginTop: 16 }}>
+      <h3>{__("Declarative UI (")}{schema.plugin_id})</h3>
       {schema.screens.length > 1 && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           {schema.screens.map(scr => (
@@ -295,7 +295,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
               setActionResult(
                 result
                   ? JSON.stringify(result, null, 2)
-                  : translate('plugin_lifecycle.cancelled_notice'),
+                  : __("Confirmation cancelled. No content was changed."),
               );
             }}
             onFailed={message => {

@@ -1,4 +1,4 @@
-import { tStatic } from '../../i18n/index.tsx';
+import { __ } from '../../i18n/index.tsx';
 /** Wire types for M3–M7 content, field groups, panel registry, and composite save APIs. */
 export type ContentFieldType =
   | 'short_text'
@@ -12,15 +12,15 @@ export type ContentFieldType =
   | 'gallery';
 
 export const CONTENT_FIELD_TYPES: Array<{ value: ContentFieldType; label: string }> = [
-  { value: 'short_text', get label() { return tStatic("feature.content.types.short_text"); } },
-  { value: 'long_text', get label() { return tStatic("feature.content.types.long_text"); } },
-  { value: 'rich_text', get label() { return tStatic("feature.content.types.rich_text_content"); } },
-  { value: 'number', get label() { return tStatic("feature.content.types.number"); } },
-  { value: 'boolean', get label() { return tStatic("feature.content.types.on_off"); } },
-  { value: 'date', get label() { return tStatic("feature.content.types.date"); } },
-  { value: 'select', get label() { return tStatic("feature.content.types.choice"); } },
-  { value: 'image', get label() { return tStatic("feature.content.types.image_media_id"); } },
-  { value: 'gallery', get label() { return tStatic("feature.content.types.gallery_list_of_ids"); } },
+  { value: 'short_text', get label() { return __("Short text"); } },
+  { value: 'long_text', get label() { return __("Long text"); } },
+  { value: 'rich_text', get label() { return __("Rich text content"); } },
+  { value: 'number', get label() { return __("Number"); } },
+  { value: 'boolean', get label() { return __("On / off"); } },
+  { value: 'date', get label() { return __("Date"); } },
+  { value: 'select', get label() { return __("Choice"); } },
+  { value: 'image', get label() { return __("Image (media ID)"); } },
+  { value: 'gallery', get label() { return __("Gallery (list of IDs)"); } },
 ];
 
 export type FieldRole = 'editor' | 'admin';

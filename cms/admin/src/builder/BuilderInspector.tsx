@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../i18n/index.tsx';
+import { __, _x, useI18n } from '../i18n/index.tsx';
 import { useState } from 'react';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
 import type { BlockCatalogItemDto, BlockPropValue } from '../types.ts';
@@ -158,13 +158,13 @@ export function BuilderInspector({
   onSectionStyleChange,
   onError,
 }: Props) {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const [showPicker, setShowPicker] = useState<'image' | 'video' | 'poster' | 'section-bg' | null>(null);
   const item = locate(document, selectedId);
   if (!item) return (
-    <section className={hideHeader ? 'px-1 py-2' : 'rounded-xl border border-slate-200 bg-white p-4'} aria-label={tStatic("feature.common.ui_inspector")}>
-      {!hideHeader && <h2 className="!mt-0 text-base font-semibold">{t('builder.builder_inspector.properties')}</h2>}
-      <p className="text-sm text-slate-500">{t('builder.builder_inspector.select')}</p>
+    <section className={hideHeader ? 'px-1 py-2' : 'rounded-xl border border-slate-200 bg-white p-4'} aria-label={__("Inspector")}>
+      {!hideHeader && <h2 className="!mt-0 text-base font-semibold">{__("Properties")}</h2>}
+      <p className="text-sm text-slate-500">{__("Select a node in the Tree or Canvas to edit.")}</p>
     </section>
   );
   const element = isElement(item.node) ? item.node : null;
@@ -254,16 +254,16 @@ export function BuilderInspector({
     });
   };
   return (
-    <section className={hideHeader ? 'space-y-4 px-1 py-1' : 'space-y-4 rounded-xl border border-slate-200 bg-white p-4'} aria-label={tStatic("feature.common.ui_inspector")}>
+    <section className={hideHeader ? 'space-y-4 px-1 py-1' : 'space-y-4 rounded-xl border border-slate-200 bg-white p-4'} aria-label={__("Inspector")}>
       {!hideHeader && <div>
-        <h2 className="!m-0 text-base font-semibold text-slate-900">{t('builder.builder_inspector.properties')}</h2>
+        <h2 className="!m-0 text-base font-semibold text-slate-900">{__("Properties")}</h2>
         <p className="mt-1 text-sm text-slate-600">{nodeTitle(item, blockSchemas)}</p>
         <code className="block break-all text-[11px] text-slate-400">{item.node.id}</code>
       </div>}
       {!locked && onMetaChange && (
         <div className="grid grid-cols-1 gap-2.5 pb-1" data-testid="inspector-meta-identity">
           <label className="block space-y-1">
-            <span className="block text-[11px] font-semibold uppercase tracking-wide text-zinc-600">{t('builder.builder_inspector.name')}</span>
+            <span className="block text-[11px] font-semibold uppercase tracking-wide text-zinc-600">{__("Block name")}</span>
             <input
               type="text"
               maxLength={80}
@@ -281,7 +281,7 @@ export function BuilderInspector({
               maxLength={64}
               data-testid="inspector-meta-id"
               value={item.node.meta?.html_id ?? ''}
-              placeholder={tStatic("feature.common.ui_vd_hero_section")}
+              placeholder={__("e.g. hero-section")}
               onChange={event => {
                 const clean = event.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
                 onMetaChange(item.node.id, { html_id: clean });
@@ -292,19 +292,19 @@ export function BuilderInspector({
         </div>
       )}
       {sectionNode && !locked && onSectionStyleChange && (
-        <div role="group" className="space-y-3 border-t border-zinc-200 pt-3" aria-label={tStatic("feature.common.ui_section_background_layout")} data-testid="inspector-section-style">
+        <div role="group" className="space-y-3 border-t border-zinc-200 pt-3" aria-label={__("Section Background & Layout")} data-testid="inspector-section-style">
           <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">
-            {t('builder.builder_inspector.background_layout')}
+            {__("Section · Background & Layout")}
           </h3>
           <ColorSwatchControl
             id="section-bg-color"
-            label={t('builder.builder_inspector.background_color')}
+            label={__("Background Color")}
             value={sectionNode.style?.background_color ?? ''}
             onChange={color => onSectionStyleChange(sectionNode.id, { background_color: color || undefined })}
           />
           <MediaCardControl
             id="section-bg-media"
-            label={t('builder.builder_inspector.background_image')}
+            label={__("Background Image")}
             value={sectionNode.style?.background_media_id ?? ''}
             acceptKind="image"
             testId="inspector-section-bg-image"
@@ -312,13 +312,13 @@ export function BuilderInspector({
             onClear={() => onSectionStyleChange(sectionNode.id, { background_media_id: undefined })}
           />
           <SegmentedButtonsControl
-            label={t('builder.builder_inspector.content_width')}
+            label={__("Content Width")}
             value={sectionNode.style?.content_width ?? ''}
             options={[
-              { value: '', label: t('builder.builder_inspector.default'), title: t('builder.builder_inspector.theme') },
-              { value: 'boxed', label: t('builder.builder_inspector.width_boxed'), title: t('builder.builder_inspector.boxed') },
-              { value: 'wide', label: t('builder.builder_inspector.width_wide'), title: t('builder.builder_inspector.wide') },
-              { value: 'full', label: t('builder.builder_inspector.width_full'), title: t('builder.builder_inspector.full') },
+              { value: '', label: __("Default"), title: __("Follow theme") },
+              { value: 'boxed', label: __("Boxed"), title: __("Constrain to container") },
+              { value: 'wide', label: __("Wide"), title: __("Wider than container") },
+              { value: 'full', label: __("Full"), title: __("100% full width") },
             ]}
             testIdPrefix="inspector-section-width"
             onChange={val => onSectionStyleChange(sectionNode.id, {
@@ -344,14 +344,14 @@ export function BuilderInspector({
         const alCur = effCurrent.text_align ?? 'start';
 
         return (
-          <div role="group" className="space-y-3 border-t border-zinc-200 pt-3" aria-label={t('builder.builder_inspector.layout_group')}>
+          <div role="group" className="space-y-3 border-t border-zinc-200 pt-3" aria-label={__("Layout and Spacing")}>
             <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">
-              {t('builder.builder_inspector.layout')}
+              {__("Layout & Spacing")}
             </h3>
             {item.kind === 'row' && (
               <>
                 <SegmentedButtonsControl
-                  label={t('builder.builder_inspector.columns')}
+                  label={__("Columns per row")}
                   readout={`grid-cols-${colCur}`}
                   value={String(colCur)}
                   options={[
@@ -373,7 +373,7 @@ export function BuilderInspector({
                 />
                 <TailwindGapControl
                   id="responsive-gap_px"
-                  label={tStatic("feature.common.ui_gap")}
+                  label={__("Gap")}
                   value={gapCur}
                   testIdPrefix="responsive-gap"
                   responsiveInfo={{
@@ -389,14 +389,14 @@ export function BuilderInspector({
             )}
             {item.kind === 'column' && (
               <SegmentedButtonsControl
-                label={t('builder.builder_inspector.align')}
+                label={__("Text Align")}
                 readout={ALIGN_CLASS_MAP[alCur]}
                 value={alCur}
                 options={[
-                  { value: 'start', label: t('builder.builder_inspector.left'), title: 'Start' },
-                  { value: 'center', label: t('builder.builder_inspector.center'), title: 'Center' },
-                  { value: 'end', label: t('builder.builder_inspector.right'), title: 'End' },
-                  { value: 'justify', label: t('builder.builder_inspector.justify'), title: 'Justify' },
+                  { value: 'start', label: __("Left"), title: 'Start' },
+                  { value: 'center', label: __("Center"), title: 'Center' },
+                  { value: 'end', label: __("Right"), title: 'End' },
+                  { value: 'justify', label: __("Justify"), title: 'Justify' },
                 ]}
                 testIdPrefix="responsive-text-align"
                 responsiveInfo={{
@@ -411,7 +411,7 @@ export function BuilderInspector({
             )}
             <SpacingBoxControl
               key={`${item.node.id}:padding`}
-              label={tStatic("feature.common.ui_padding")}
+              label={__("Padding")}
               propPrefix="p"
               unit="px"
               min={0}
@@ -439,7 +439,7 @@ export function BuilderInspector({
             {onBoxSpacingChange && (
               <SpacingBoxControl
                 key={`${item.node.id}:margin`}
-                label={tStatic("feature.common.ui_margin")}
+                label={__("Margin")}
                 propPrefix="m"
                 unit="px"
                 min={-128}
@@ -464,11 +464,11 @@ export function BuilderInspector({
       })()}
       {locked && (
         <p role="status" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          {t('builder.builder_inspector.locked')}
+          {__("The node cannot be resolved or its provider is missing. Content and position are preserved; deletion requires confirmation.")}
         </p>
       )}
       {element?.type === 'plugin/block' && !locked && block && (
-        <div className="space-y-2" aria-label={t('builder.builder_inspector.declarative')}>
+        <div className="space-y-2" aria-label={__("Declarative block properties")}>
           <p className="break-all text-xs text-slate-600">{block.block_id}</p>
           <UnifiedFieldForm
             key={element.id + ':' + block.block_id}
@@ -485,7 +485,7 @@ export function BuilderInspector({
         </div>
       )}
       {!element && <p className="text-[11px] text-zinc-500">
-        {t('builder.builder_inspector.responsive_notice')}
+        {__("Responsive changes are written to the document on Save. Add or reorder nodes from the Tree.")}
       </p>}
       {element && !locked && ![
         'core/list',
@@ -496,7 +496,7 @@ export function BuilderInspector({
         'core/content_slot',
         'plugin/block',
       ].includes(element.type) && (
-        <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label={t('builder.builder_inspector.element_props')}>
+        <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label={__("Element properties")}>
           {element.type === 'core/heading' && (() => {
             const rawLevel = Number(element.props.level);
             const activeLevel = Number.isInteger(rawLevel) && rawLevel >= 1 && rawLevel <= 6
@@ -504,14 +504,14 @@ export function BuilderInspector({
             return (
               <>
                 <SegmentedButtonsControl
-                  label={t('builder.builder_inspector.heading_level')}
+                  label={__("Heading level")}
                   value={activeLevel}
                   options={['1', '2', '3', '4', '5', '6'].map(lvl => ({ value: lvl, label: `H${lvl}` }))}
                   testIdPrefix="heading-level"
                   onChange={val => onChange(element.id, 'level', Number(val))}
                 />
                 <label className="block space-y-1">
-                  <span className="block text-xs font-semibold text-zinc-800">{t('builder.builder_inspector.heading')}</span>
+                  <span className="block text-xs font-semibold text-zinc-800">{__("Heading")}</span>
                   <input
                     className={INSPECTOR_INPUT_CLASS}
                     type="text"
@@ -527,7 +527,7 @@ export function BuilderInspector({
             binding != null ? (
               <label className="block space-y-1.5">
                 <span className="block text-xs font-semibold text-zinc-800">
-                  {t('builder.builder_inspector.fallback')}
+                  {__("Fallback content (when Field Binding is empty)")}
                 </span>
                 <textarea
                   className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-sky-600"
@@ -537,13 +537,13 @@ export function BuilderInspector({
                   onChange={event => applyPatch(element.id, { text: event.target.value, rich: undefined })}
                 />
                 <span className="block text-[11px] text-zinc-500">
-                  {t('builder.builder_inspector.binding_on')}
+                  {__("Field Binding is enabled — fallback uses plain text.")}
                 </span>
               </label>
             ) : (
               <LightboxRichTextTrigger
                 id="core-text-editor"
-                label={t('builder.builder_inspector.text')}
+                label={__("Text content")}
                 value={staticValue(element, 'text')}
                 maxBytes={16384}
                 onChange={html => applyPatch(element.id, { text: html, rich: true })}
@@ -554,7 +554,7 @@ export function BuilderInspector({
             <>
               <MediaCardControl
                 id="core-image-media"
-                label={t('builder.builder_inspector.image')}
+                label={__("Image")}
                 value={staticValue(element, 'media_id')}
                 acceptKind="image"
                 testId="inspector-image-media"
@@ -562,13 +562,13 @@ export function BuilderInspector({
                 onClear={() => onChange(element.id, 'media_id', undefined)}
               />
               <label className="block space-y-1">
-                <span className="block text-xs font-semibold text-zinc-800">{t('builder.builder_inspector.alt')}</span>
+                <span className="block text-xs font-semibold text-zinc-800">{__("Image description (alt)")}</span>
                 <input
                   className={INSPECTOR_INPUT_CLASS}
                   type="text"
                   maxLength={512}
                   value={staticValue(element, 'alt')}
-                  placeholder={t('builder.builder_inspector.alt_placeholder')}
+                  placeholder={__("Describe the image for SEO & screen readers…")}
                   onChange={event => onChange(element.id, 'alt', event.target.value)}
                 />
               </label>
@@ -577,7 +577,7 @@ export function BuilderInspector({
           {element.type === 'core/button' && (
             <>
               <label className="block space-y-1">
-                <span className="block text-xs font-semibold text-zinc-800">{t('builder.builder_inspector.button_label')}</span>
+                <span className="block text-xs font-semibold text-zinc-800">{__("Button label")}</span>
                 <input
                   className={INSPECTOR_INPUT_CLASS}
                   type="text"
@@ -588,7 +588,7 @@ export function BuilderInspector({
               </label>
               <LinkControl
                 id="core-button-link"
-                label={t('builder.builder_inspector.url')}
+                label={_x("URL", "builder.builder_inspector")}
                 showFlags
                 value={{
                   url: staticValue(element, 'url'),
@@ -606,9 +606,9 @@ export function BuilderInspector({
         </form>
       )}
       {element?.type === 'core/template_part' && !locked && (
-        <div className="space-y-2" aria-label={tStatic("feature.common.ui_template_part")}>
+        <div className="space-y-2" aria-label={__("Template Part")}>
           <label htmlFor="template-part-key" className="block text-sm font-medium text-slate-700">
-            {t('builder.builder_inspector.part_key')}
+            {__("Part Key (e.g. header, footer)")}
           </label>
           <input
             id="template-part-key"
@@ -623,46 +623,46 @@ export function BuilderInspector({
           </datalist>
           {!VALID_TEMPLATE_PART_KEY.test(staticValue(element, 'part_key')) && (
             <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
-              {t('builder.builder_inspector.part_validation')}
+              {__("part_key accepts lowercase a-z, digits 0-9 and hyphens - (starts with a letter, maximum 64 characters).")}
             </p>
           )}
           <p className="text-xs text-slate-500">
-            {t('builder.builder_inspector.part_help')}
+            {__("Insert a reusable part from a DB override or the theme v3 parts/ folder. You can edit, change the key or delete it normally.")}
           </p>
         </div>
       )}
       {element?.type === 'core/content_slot' && !locked && (
-        <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-xs text-sky-950" aria-label={tStatic("feature.common.ui_content_slot")}>
-          <p className="font-semibold">{t('builder.builder_inspector.slot')}</p>
-          <p>{t('builder.builder_inspector.slot_desc')}</p>
+        <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-xs text-sky-950" aria-label={_x("Content Slot", "feature.common")}>
+          <p className="font-semibold">{__("Main content (Content Slot)")}</p>
+          <p>{__("This is where post/page content is inserted when rendering the template. This node has no additional configurable properties.")}</p>
           {requiresContentSlot && !deletable && (
             <p role="status" className="font-medium text-amber-900" data-testid="content-slot-locked-notice">
-              {t('builder.builder_inspector.slot_required')}
+              {__("Keep at least one core/content_slot for this template type — the last slot cannot be deleted.")}
             </p>
           )}
         </div>
       )}
       {element?.type === 'core/pattern_ref' && !locked && (
-        <div className="space-y-2" aria-label={tStatic("feature.common.ui_reusable_pattern")}>
-          <label htmlFor="pattern-ref-id" className="block text-sm font-medium text-slate-700">{tStatic("feature.common.ui_reusable_pattern")}</label>
+        <div className="space-y-2" aria-label={_x("Reusable Pattern", "feature.common")}>
+          <label htmlFor="pattern-ref-id" className="block text-sm font-medium text-slate-700">{_x("Reusable Pattern", "feature.common")}</label>
           <select id="pattern-ref-id" className={INSPECTOR_INPUT_CLASS} value={Number(element.props.pattern_id) || 0}
             onChange={event => onChange(element.id, 'pattern_id', Number(event.target.value))}>
-            <option value={0}>{t('builder.builder_inspector.choose_pattern')}</option>
+            <option value={0}>{__("Choose pattern…")}</option>
             {patterns.map(pattern => <option key={pattern.id} value={pattern.id}>{pattern.title} (#{pattern.id})</option>)}
             {Number(element.props.pattern_id) > 0 && !patterns.some(pattern => pattern.id === element.props.pattern_id) &&
-              <option value={Number(element.props.pattern_id)}>{tStatic("feature.common.ui_pattern")}{String(element.props.pattern_id)} {t('builder.builder_inspector.pattern_missing')}</option>}
+              <option value={Number(element.props.pattern_id)}>{_x("Pattern #", "feature.common")}{String(element.props.pattern_id)} {__(" · no longer exists")}</option>}
           </select>
-          <button type="button" className="btn-secondary rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50" onClick={onRefreshPatterns}>{t('builder.builder_inspector.refresh_patterns')}</button>
+          <button type="button" className="btn-secondary rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50" onClick={onRefreshPatterns}>{__("Reload pattern list")}</button>
           {Number(element.props.pattern_id) === 0 && <p role="alert" className="text-sm text-amber-800">
-            {t('builder.builder_inspector.valid_pattern')}
+            {__("Choose a valid pattern before saving Builder.")}
           </p>}
           {patternsLoaded && Number(element.props.pattern_id) > 0
             && !patterns.some(pattern => pattern.id === element.props.pattern_id) && (
               <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
-                {t('builder.builder_inspector.pattern_deleted', { id: String(element.props.pattern_id) })}
+                {__("Pattern #{{id}} has been deleted or no longer exists. The block is preserved in Builder so you can choose a replacement; public content skips the missing block.", { id: String(element.props.pattern_id) })}
               </p>
             )}
-          <p className="text-xs text-slate-500">{t('builder.builder_inspector.pattern_sync')}</p>
+          <p className="text-xs text-slate-500">{__("Synchronized pattern: all referencing pages receive the new layout when the original is saved.")}</p>
         </div>
       )}
       {element && !locked && ['core/heading', 'core/text', 'core/image', 'core/button'].includes(element.type) && (
@@ -672,7 +672,7 @@ export function BuilderInspector({
         <BuilderListFields key={element.id} element={element} onChange={onListChange} onError={onError} />
       )}
       {element?.type === 'core/video' && !locked && (
-        <div className="space-y-3" aria-label={t('builder.builder_inspector.video_props')}>
+        <div className="space-y-3" aria-label={__("Video properties")}>
           <MediaCardControl
             id="core-video-media"
             label="Video MP4"
@@ -684,7 +684,7 @@ export function BuilderInspector({
           />
           <MediaCardControl
             id="core-video-poster"
-            label={t('builder.builder_inspector.poster')}
+            label={__("Poster image (optional)")}
             value={staticValue(element, 'poster_image_id')}
             acceptKind="image"
             testId="inspector-video-poster"
@@ -693,13 +693,13 @@ export function BuilderInspector({
           />
           <ToggleSwitchControl
             id="core-video-controls"
-            label={t('builder.builder_inspector.controls')}
+            label={__("Show playback controls")}
             checked={element.props.controls !== false}
             onChange={checked => onChange(element.id, 'controls', checked)}
           />
           <ToggleSwitchControl
             id="core-video-muted"
-            label={t('builder.builder_inspector.muted')}
+            label={__("Mute by default")}
             checked={element.props.muted === true}
             onChange={checked => onChange(element.id, 'muted', checked)}
           />
@@ -710,22 +710,22 @@ export function BuilderInspector({
       )}
       {binding != null && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900">
-          <strong>{t('builder.builder_inspector.binding')}</strong>
-          <p className="mt-1">{t('builder.builder_inspector.binding_desc')}</p>
+          <strong>{__("Existing Field Binding")}</strong>
+          <p className="mt-1">{__("Binding information is preserved when editing static properties.")}</p>
           <pre className="mt-2 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(binding, null, 2)}</pre>
         </div>
       )}
       {!locked && onMetaChange && (
-        <div role="group" aria-label={tStatic("feature.common.ui_advanced")} className="space-y-3 border-t border-zinc-200 pt-3" data-testid="inspector-meta-advanced">
-          <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.common.ui_advanced")}</h3>
+        <div role="group" aria-label={__("Advanced")} className="space-y-3 border-t border-zinc-200 pt-3" data-testid="inspector-meta-advanced">
+          <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">{__("Advanced")}</h3>
           <label className="block space-y-1">
-            <span className="block text-xs font-medium text-zinc-700">{tStatic("feature.common.ui_class_css_classes")}</span>
+            <span className="block text-xs font-medium text-zinc-700">{__("Class (CSS Classes)")}</span>
             <input
               type="text"
               maxLength={256}
               data-testid="inspector-meta-class"
               value={item.node.meta?.class_name ?? ''}
-              placeholder={tStatic("feature.common.ui_vd_py_16_bg_slate_50_rounded_xl")}
+              placeholder={__("e.g. py-16 bg-slate-50 rounded-xl")}
               onChange={event => {
                 const clean = event.target.value.replace(/[^a-zA-Z0-9 _:/.\[\]%#-]/g, '');
                 onMetaChange(item.node.id, { class_name: clean });
@@ -734,12 +734,12 @@ export function BuilderInspector({
             />
           </label>
           <div className="space-y-1.5">
-            <span className="block text-xs font-medium text-zinc-700">{t('builder.builder_inspector.visibility')}</span>
-            <div className="grid grid-cols-3 gap-1.5" role="group" aria-label={t('builder.builder_inspector.screens')}>
+            <span className="block text-xs font-medium text-zinc-700">{__("Device visibility")}</span>
+            <div className="grid grid-cols-3 gap-1.5" role="group" aria-label={__("Viewport visibility")}>
               {([
-                { key: 'hide_desktop', label: t('studio.desktop') },
-                { key: 'hide_tablet', label: t('studio.tablet') },
-                { key: 'hide_mobile', label: t('studio.mobile') },
+                { key: 'hide_desktop', label: __("Desktop") },
+                { key: 'hide_tablet', label: __("Tablet") },
+                { key: 'hide_mobile', label: __("Mobile") },
               ] as const).map(dev => {
                 const hidden = Boolean(vis[dev.key]);
                 return (
@@ -754,7 +754,7 @@ export function BuilderInspector({
                         ? 'border-zinc-200 bg-zinc-100 text-zinc-400 line-through'
                         : 'border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100')}
                   >
-                    {dev.label} {hidden ? t('builder.builder_inspector.hidden') : '✓'}
+                    {dev.label} {hidden ? __(" · Hidden") : '✓'}
                   </button>
                 );
               })}
@@ -771,7 +771,7 @@ export function BuilderInspector({
             data-testid="inspector-delete-node-btn"
             className="w-full rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {deletable ? t('builder.builder_inspector.delete') : t('builder.builder_inspector.cannot_delete')}
+            {deletable ? __("Delete this node") : __("Cannot delete a required Content Slot")}
           </button>
         </div>
       )}

@@ -1,0 +1,56 @@
+# OpenDash Starter Theme Translation Template.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Primary navigation"
+msgstr ""
+
+msgid "Links"
+msgstr ""
+
+msgid "Footer links"
+msgstr ""
+
+msgid "News and insights"
+msgstr ""
+
+msgid "Latest posts"
+msgstr ""
+
+msgid "No posts yet."
+msgstr ""
+
+msgid "← Posts"
+msgstr ""
+
+msgid "No content yet."
+msgstr ""
+
+msgid "← Previous"
+msgstr ""
+
+msgid "Next →"
+msgstr ""
+
+msgid "Pagination"
+msgstr ""
+
+msgid "Topic"
+msgstr ""
+
+msgid "Illustration "
+msgstr ""
+
+msgid "404 — Page not found"
+msgstr ""
+
+msgid "This page does not exist or has been moved."
+msgstr ""
+
+msgid "Back to Home"
+msgstr ""
+
+msgid "Language"
+msgstr ""

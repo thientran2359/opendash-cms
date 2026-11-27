@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 import type { Role } from '../types.ts';
 
@@ -17,7 +17,7 @@ export interface UpdateProfileInput {
 
 export function getProfile(): Promise<UserProfile> {
   return requestJson('/api/admin/profile', {
-    defaultErrorMessage: tStatic('api.users.load_your_profile'),
+    defaultErrorMessage: __("Could not load your profile."),
   });
 }
 
@@ -32,6 +32,6 @@ export function updateProfile(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.users.update_your_profile'),
+    defaultErrorMessage: __("Could not update your profile."),
   });
 }

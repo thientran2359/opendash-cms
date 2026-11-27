@@ -1,4 +1,4 @@
-import { useI18n, type TranslationKey } from '../i18n/index.tsx';
+import { __, useI18n } from '../i18n/index.tsx';
 import React from 'react';
 import type { AdminLocaleState } from '../api/locales.ts';
 import type { MenuRecord, MenuSlotsSnapshot } from '../api/menus.ts';
@@ -103,14 +103,14 @@ function pageChoiceValue(id: string): number | null {
   return Number.isSafeInteger(num) && num > 0 ? num : null;
 }
 
-function sourceBadge(item: StudioTargetItem, t: (key: TranslationKey) => string): { label: string; tone: 'success' | 'neutral' | 'warning' } {
+function sourceBadge(item: StudioTargetItem): { label: string; tone: 'success' | 'neutral' | 'warning' } {
   if (item.effective_source.kind === 'db_override') {
-    return { label: t("studio.page_builder_override"), tone: 'success' };
+    return { label: __("Page builder override"), tone: 'success' };
   }
   if (item.effective_source.kind === 'active_theme') {
-    return { label: t("studio.c_sec_theme"), tone: 'neutral' };
+    return { label: __("C-SEC theme"), tone: 'neutral' };
   }
-  return { label: t("studio.core_default"), tone: 'warning' };
+  return { label: __("Core default"), tone: 'warning' };
 }
 
 export const StudioCustomizerNav: React.FC<Props> = ({
@@ -173,14 +173,14 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   canvasPickSeq,
   openPatternSeq,
 }) => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const GROUP_LABELS: Record<StudioTargetGroup, string> = {
-    parts: t("studio.shared_components_parts"),
-    core: t("studio.core_templates"),
-    content_types: t("studio.content_types_cpt"),
-    page_layouts: t("studio.page_layouts"),
-    custom_templates: t("studio.custom_detail_templates"),
-    overrides: t("studio.other_database_overrides"),
+    parts: __("Shared components (Parts)"),
+    core: __("Core templates"),
+    content_types: __("Content types (CPT)"),
+    page_layouts: __("Page layouts"),
+    custom_templates: __("Custom detail templates"),
+    overrides: __("Other database overrides"),
   };
   const selectedTarget = selectedTargetKey
     ? targets.find(item => item.canonical_target_key === selectedTargetKey) ?? null
@@ -188,18 +188,18 @@ export const StudioCustomizerNav: React.FC<Props> = ({
 
   if (panel === 'root') {
     const customizerItems: Array<{ id: StudioPanelId; label: string; desc: string; dirty: boolean }> = [
-      { id: 'identity', label: t("studio.site_identity"), desc: t("studio.website_title_tagline_and_timezone"), dirty: generalDirty },
-      { id: 'theme-options', label: t("studio.appearance_options"), desc: t("studio.social_media_branding_and_theme_options"), dirty: globalOptionsDirty || themeOptionsDirty },
-      { id: 'menus', label: t("studio.menus_and_locations"), desc: t("studio.create_and_edit_menus_and_assign_display_locations"), dirty: menuSlotsDirty },
-      { id: 'reading', label: t("studio.homepage_and_reading"), desc: t("studio.choose_a_static_homepage_and_posts_page"), dirty: readingDirty },
+      { id: 'identity', label: __("Site identity"), desc: __("Website title, tagline and timezone"), dirty: generalDirty },
+      { id: 'theme-options', label: __("Appearance options"), desc: __("Social media, branding and theme options"), dirty: globalOptionsDirty || themeOptionsDirty },
+      { id: 'menus', label: __("Menus and locations"), desc: __("Create and edit menus and assign display locations"), dirty: menuSlotsDirty },
+      { id: 'reading', label: __("Homepage and reading"), desc: __("Choose a static homepage and posts page"), dirty: readingDirty },
     ];
 
     return (
-      <nav className="flex h-full flex-col overflow-y-auto" aria-label={t("studio.appearance_customization_navigation")} data-testid="studio-nav-root">
+      <nav className="flex h-full flex-col overflow-y-auto" aria-label={__("Appearance customization navigation")} data-testid="studio-nav-root">
         <div className="space-y-5 p-3">
           <div>
             <p className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-              {t("studio.customize_website")}
+              {__("Customize website")}
             </p>
             <ul className="m-0 list-none space-y-1 p-0">
               {customizerItems.map(item => (
@@ -213,7 +213,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                     <span className="min-w-0">
                       <span className="flex items-center gap-2 text-sm font-medium text-zinc-900">
                         <span>{item.label}</span>
-                        {item.dirty && <span className="h-2 w-2 rounded-full bg-amber-500" title={t("studio.unsaved_changes")} />}
+                        {item.dirty && <span className="h-2 w-2 rounded-full bg-amber-500" title={__("Unsaved changes")} />}
                       </span>
                       <span className="mt-0.5 block truncate text-xs text-zinc-500">{item.desc}</span>
                     </span>
@@ -226,7 +226,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
 
           <div>
             <p className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-              {t("studio.build_templates")}
+              {__("Build templates")}
             </p>
             <button
               type="button"
@@ -236,11 +236,11 @@ export const StudioCustomizerNav: React.FC<Props> = ({
             >
               <span className="min-w-0">
                 <span className="flex items-center gap-2 text-sm font-medium text-zinc-900">
-                  <span>{t("studio.templates_and_page_builder")}</span>
-                  {templateDirty && <span className="h-2 w-2 rounded-full bg-amber-500" title={t("studio.template_has_unsaved_changes")} />}
+                  <span>{__("Templates and page builder")}</span>
+                  {templateDirty && <span className="h-2 w-2 rounded-full bg-amber-500" title={__("Template has unsaved changes")} />}
                 </span>
                 <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                  {t("studio.template_kinds")}
+                  {__("Header, Footer, Page Layout, Single & Archive")}
                 </span>
               </span>
               <span className="text-zinc-400" aria-hidden="true">›</span>
@@ -257,11 +257,11 @@ export const StudioCustomizerNav: React.FC<Props> = ({
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-identity">
         <div className="space-y-4 p-4">
           {!generalDraft ? (
-            <p className="text-xs text-zinc-500">{t("studio.loading_website_settings")}</p>
+            <p className="text-xs text-zinc-500">{__("Loading website settings…")}</p>
           ) : (
             <>
               <label className="block space-y-1 text-xs font-medium text-zinc-700" htmlFor="studio-site-title">
-                <span>{t("studio.website_title_site_title")}</span>
+                <span>{__("Website title (site_title)")}</span>
                 <input
                   id="studio-site-title"
                   type="text"
@@ -274,7 +274,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               </label>
 
               <label className="block space-y-1 text-xs font-medium text-zinc-700" htmlFor="studio-site-tagline">
-                <span>{t("studio.tagline_short_description")}</span>
+                <span>{__("Tagline (short description)")}</span>
                 <textarea
                   id="studio-site-tagline"
                   rows={3}
@@ -287,7 +287,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               </label>
 
               <label className="block space-y-1 text-xs font-medium text-zinc-700" htmlFor="studio-site-timezone">
-                <span>{t("studio.display_timezone")}</span>
+                <span>{__("Display timezone")}</span>
                 <select
                   id="studio-site-timezone"
                   disabled={disabled}
@@ -296,7 +296,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                   onChange={e => onGeneralChange({ ...generalDraft, timezone: e.target.value })}
                 >
                   {legacyTz && (
-                    <option value={generalDraft.timezone}>{t("studio.timezone_current", { timezone: generalDraft.timezone })}</option>
+                    <option value={generalDraft.timezone}>{__("{{timezone}} (current)", { timezone: generalDraft.timezone })}</option>
                   )}
                   {(timezones.length > 0 ? timezones : [generalDraft.timezone]).map(tz => (
                     <option key={tz} value={tz}>{tz}</option>
@@ -304,7 +304,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 </select>
               </label>
               <p className="text-xs text-zinc-500">
-                {t("studio.changes_appear_in_the_live_preview_on_the_right_and_are_saved_only_when_you_select_save_changes")}
+                {__("Changes appear in the live preview on the right and are saved only when you select Save changes.")}
               </p>
             </>
           )}
@@ -321,10 +321,10 @@ export const StudioCustomizerNav: React.FC<Props> = ({
             <div className="flex items-center justify-between gap-2">
               <div>
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-800">
-                  {t("studio.global_site_options")}
+                  {__("Global site options")}
                 </h2>
                 <p className="mt-0.5 text-[11px] text-zinc-500">
-                  {t("studio.shared_across_blocks_and_retained_when_changing_themes")}
+                  {__("Shared across blocks and retained when changing themes.")}
                 </p>
               </div>
               {globalOptionsSnapshot && (
@@ -345,17 +345,17 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 disabled={disabled}
               />
             ) : (
-              <p className="text-xs text-zinc-500">{t("studio.loading_global_site_options")}</p>
+              <p className="text-xs text-zinc-500">{__("Loading global site options…")}</p>
             )}
           </section>
 
           <section className="space-y-3 border-t border-zinc-200 pt-4" data-testid="theme-specific-options-section">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-800">
-              {t("studio.theme_specific_options")}
+              {__("Theme-specific options")}
             </h2>
             {!activeThemeId ? (
               <AdminAlert tone="info">
-                {t("studio.no_active_v3_theme_with_configurable_options")}
+                {__("No active v3 theme with configurable options.")}
               </AdminAlert>
             ) : (
               <fieldset disabled={disabled} className="min-w-0">
@@ -406,11 +406,11 @@ export const StudioCustomizerNav: React.FC<Props> = ({
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-reading">
         <div className="space-y-4 p-4">
           {!readingDraft ? (
-            <p className="text-xs text-zinc-500">{t("studio.loading_reading_settings")}</p>
+            <p className="text-xs text-zinc-500">{__("Loading reading settings…")}</p>
           ) : (
             <>
               <label className="block space-y-1 text-xs font-medium text-zinc-700" htmlFor="studio-reading-homepage">
-                <span>{t("studio.homepage_static_homepage")}</span>
+                <span>{__("Homepage (static homepage)")}</span>
                 <select
                   id="studio-reading-homepage"
                   disabled={disabled}
@@ -418,11 +418,11 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                   value={readingDraft.homepage_page_id ?? ''}
                   onChange={e => onReadingChange({ ...readingDraft, homepage_page_id: pageChoiceValue(e.target.value) })}
                 >
-                  <option value="">{t("studio.default_homepage_latest_posts")}</option>
+                  <option value="">{__("— Default homepage (latest posts) —")}</option>
                   {readingDraft.homepage_page_id !== null &&
                     !publishedPages.some(p => p.id === readingDraft.homepage_page_id) && (
                       <option value={readingDraft.homepage_page_id}>
-                        {t("feature.common.ui_page")}{readingDraft.homepage_page_id} ({readingSettings?.homepage_status ?? t("studio.current")})
+                        {__("Page #")}{readingDraft.homepage_page_id} ({readingSettings?.homepage_status ?? __("current")})
                       </option>
                     )}
                   {publishedPages.map(page => (
@@ -432,7 +432,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               </label>
 
               <label className="block space-y-1 text-xs font-medium text-zinc-700" htmlFor="studio-reading-posts-page">
-                <span>{t("studio.posts_page")}</span>
+                <span>{_x("Posts page", "studio.posts_page")}</span>
                 <select
                   id="studio-reading-posts-page"
                   disabled={disabled}
@@ -440,11 +440,11 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                   value={readingDraft.posts_page_id ?? ''}
                   onChange={e => onReadingChange({ ...readingDraft, posts_page_id: pageChoiceValue(e.target.value) })}
                 >
-                  <option value="">{t("studio.no_posts_page_selected")}</option>
+                  <option value="">{__("— No posts page selected —")}</option>
                   {readingDraft.posts_page_id !== null &&
                     !publishedPages.some(p => p.id === readingDraft.posts_page_id) && (
                       <option value={readingDraft.posts_page_id}>
-                        {t("feature.common.ui_page")}{readingDraft.posts_page_id} ({readingSettings?.posts_page_status ?? t("studio.current")})
+                        {__("Page #")}{readingDraft.posts_page_id} ({readingSettings?.posts_page_status ?? __("current")})
                       </option>
                     )}
                   {publishedPages.map(page => (
@@ -455,12 +455,12 @@ export const StudioCustomizerNav: React.FC<Props> = ({
 
               {samePageSelected && (
                 <AdminAlert tone="warning">
-                  {t("studio.the_homepage_and_posts_page_must_be_different_select_two_different_pages_before_saving")}
+                  {__("The homepage and posts page must be different. Select two different pages before saving.")}
                 </AdminAlert>
               )}
 
               <p className="text-xs text-zinc-500">
-                {t("studio.homepage_and_reading_settings_affect_homepage_routing_select_save_changes_to_apply")}
+                {__("Homepage and reading settings affect homepage routing; select Save changes to apply.")}
               </p>
             </>
           )}
@@ -471,7 +471,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
 
   // panel === 'templates'
   if (selectedTarget) {
-    const badge = sourceBadge(selectedTarget, t);
+    const badge = sourceBadge(selectedTarget);
     const showCreateWarning = !selectedTarget.override_id && !templateEditingEnabled;
     const allowRouteContext = ['single', 'page', 'page_layout', 'single_custom'].includes(selectedTarget.target.kind);
     return (
@@ -486,11 +486,11 @@ export const StudioCustomizerNav: React.FC<Props> = ({
             <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-950" data-testid="studio-template-override-warning">
               <p className="font-semibold">
                 {selectedTarget.has_theme_source
-                  ? t("studio.this_target_uses_the_original_c_sec_html_template_from_the_active_theme")
-                  : t("studio.this_target_has_no_page_builder_override_in_the_database_using_the_default_fallback")}
+                  ? __("This target uses the original C-SEC HTML template from the active theme.")
+                  : __("This target has no page builder override in the database (using the default fallback).")}
               </p>
               <p className="leading-relaxed">
-                {t("studio.initializing_the_page_builder_creates_a_template_override_for_key_after_save_changes_this_layout_replaces_the_original_theme_template_reversible_with_restore_defaults", { key: selectedTarget.canonical_target_key })}
+                {__("Initializing the page builder creates a template override for {{key}}. After Save changes, this layout replaces the original theme template (reversible with Restore defaults).", { key: selectedTarget.canonical_target_key })}
               </p>
               <AdminButton
                 variant="primary"
@@ -500,7 +500,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 onClick={onInitializeTemplateOverride}
                 data-testid="studio-init-template-override"
               >
-                {t("studio.initialize_page_builder_layout")}
+                {__("Initialize page builder layout")}
               </AdminButton>
             </div>
           ) : (
@@ -547,7 +547,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
     <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-templates">
       <div className="space-y-4 p-3">
         {targets.length === 0 ? (
-          <p className="px-1 text-xs text-zinc-500">{t("studio.loading_templates")}</p>
+          <p className="px-1 text-xs text-zinc-500">{__("Loading templates…")}</p>
         ) : (
           GROUP_ORDER.map(group => {
             const groupItems = targets.filter(item => item.group === group);
@@ -559,7 +559,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 </p>
                 <ul className="m-0 list-none space-y-1 p-0">
                   {groupItems.map(item => {
-                    const badge = sourceBadge(item, t);
+                    const badge = sourceBadge(item);
                     return (
                       <li key={item.canonical_target_key}>
                         <button

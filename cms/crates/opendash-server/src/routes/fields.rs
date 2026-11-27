@@ -201,7 +201,7 @@ mod tests {
         let runtime_config = crate::config::RuntimeConfigV1::load(&paths).unwrap();
         let state = crate::app::AppState {
             db: db.clone(),
-            ui_locale: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            ui_locale: Arc::new(std::sync::RwLock::new(None)),
             plugin_manager,
             hooks,
             media_store: Arc::new(crate::media::MediaStore::new(paths.uploads_dir())),
@@ -211,6 +211,7 @@ mod tests {
             block_template_cache: crate::page::BlockTemplateCache::global().clone(),
             site_cache_epoch: Arc::clone(crate::cache::SiteCacheEpoch::global()),
             render_cache: Arc::new(crate::cache::ExtensionRenderCache::new()),
+            catalog_registry: Arc::new(crate::l10n::CatalogRegistry::new_empty()),
             recovery: crate::config::RecoveryState::new(false),
             runtime_config,
         };

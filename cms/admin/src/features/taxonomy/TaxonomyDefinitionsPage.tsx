@@ -1,4 +1,4 @@
-import { getEffectiveBcp47, tStatic, useI18n } from '../../i18n/index.tsx';
+import { getEffectiveBcp47, __, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { listContentTypes } from '../../api/content.ts';
 import type { OwnedContentTypeWithSettings } from '../../api/content.ts';
@@ -123,8 +123,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       if (!typeKey) setTypeKey(nextTypes.find(item => item.descriptor.key !== 'section')?.descriptor.key ?? '');
     } catch (cause) {
       if (signal?.aborted) return;
-      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_the_taxonomy_list")));
-      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_the_taxonomy_list"));
+      setError(failure(cause, __("Could not load the taxonomy list.")));
+      onErrorRef.current(cause, __("Could not load the taxonomy list."));
     } finally { if (!signal?.aborted) setLoading(false); }
   };
 
@@ -167,8 +167,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       if (controller.signal.aborted || !mountedRef.current ||
           requestEpoch !== eligibilityRequestEpochRef.current) return;
       setEligibilityConflict(true);
-      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_content_type_taxonomies")));
-      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_content_type_taxonomies"));
+      setError(failure(cause, __("Could not load content type taxonomies.")));
+      onErrorRef.current(cause, __("Could not load content type taxonomies."));
     }).finally(() => {
       if (!controller.signal.aborted && mountedRef.current &&
           requestEpoch === eligibilityRequestEpochRef.current) setEligibilityLoading(false);
@@ -178,7 +178,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
 
   const choose = (next: string) => {
     if (next === activeKey) return;
-    if (configDirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.discard_changes_to_the_current_definition_and_switch_to"))) return;
+    if (configDirty && !window.confirm(__("Discard changes to the current definition and switch to another item?"))) return;
     recoveredRef.current = null;
     const definition = definitions.find(item => item.key === next);
     setActiveKey(next);
@@ -199,7 +199,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
           form[field] !== baseline[field]);
       const overlaps = changed.filter(field => server[field] !== baseline[field]);
       if (overlaps.length && !window.confirm(
-        tStatic("feature.taxonomy.taxonomydefinitionspage.the_server_also_changed_value_keep_current_values_and", { value1: overlaps.join(', ') }),
+        __("The server also changed {{value1}}. Keep current values and try saving against the latest version?", { value1: overlaps.join(', ') }),
       )) return;
       const next = { ...server };
       for (const field of changed) {
@@ -209,12 +209,12 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       }
       setDefinitions(previous => [...previous.filter(item => item.key !== activeKey), latest]);
       setBaseline(server); setForm(next); setConflict(false);
-      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.reviewed_vvalue_edited_fields_are_retained_review_before_saving", { value1: latest.version }));
+      setNotice(__("Reviewed v{{value1}}. Edited fields are retained; review before saving.", { value1: latest.version }));
       recoveredRef.current = null;
     } catch (cause) {
       if (!mountedRef.current) return;
-      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_latest_taxonomy_version")));
-      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_latest_taxonomy_version"));
+      setError(failure(cause, __("Could not load latest taxonomy version.")));
+      onErrorRef.current(cause, __("Could not load latest taxonomy version."));
     } finally { setBusy(false); }
   };
 
@@ -238,11 +238,11 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       const latestType = nextTypes.find(item => item.descriptor.key === typeKey);
       if (!latestType) {
         setEligibilityConflict(true);
-        setError(tStatic("feature.taxonomy.taxonomydefinitionspage.content_type_no_longer_exists_selections_are_retained")); return;
+        setError(__("Content type no longer exists; selections are retained.")); return;
       }
       if (latestType.version !== configured.type_version) {
         setEligibilityConflict(true);
-        setError(tStatic("feature.taxonomy.taxonomydefinitionspage.the_cpt_list_version_differs_from_the_taxonomy_snapshot"));
+        setError(__("The CPT list version differs from the taxonomy snapshot. Selections are retained; review again to avoid losing associations."));
         return;
       }
       setTypes(nextTypes);
@@ -251,12 +251,12 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       setEligible(next);
       setEligibilityTypeVersion(configured.type_version);
       setEligibilityConflict(false);
-      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.reviewed_the_latest_taxonomy_configuration_your_changed_selections_are"));
+      setNotice(__("Reviewed the latest taxonomy configuration; your changed selections are reapplied. Review before saving."));
       recoveredRef.current = null;
     } catch (cause) {
       if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
-      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_review_taxonomy_configuration")));
-      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_review_taxonomy_configuration"));
+      setError(failure(cause, __("Could not review taxonomy configuration.")));
+      onErrorRef.current(cause, __("Could not review taxonomy configuration."));
     } finally { setBusy(false); }
   };
 
@@ -265,10 +265,10 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     if (!csrfToken || !canEdit || busy || loading || conflict) return;
     const label = form.label.trim();
     if (!label || [...label].length > 100 || /[\u0000-\u001f\u007f]/.test(label)) {
-      setError(tStatic("feature.taxonomy.taxonomydefinitionspage.taxonomy_name_must_be_1_to_100_characters_without")); return;
+      setError(__("Taxonomy name must be 1 to 100 characters without control characters.")); return;
     }
     if (isNew && (form.key.length > 64 || !/^[a-z][a-z0-9_]*$/.test(form.key))) {
-      setError(tStatic("feature.taxonomy.taxonomydefinitionspage.taxonomy_key_must_be_a_valid_lowercase_identifier")); return;
+      setError(__("Taxonomy key must be a valid lowercase identifier.")); return;
     }
     const changes = {
       ...(label !== baseline.label ? { label } : {}),
@@ -278,7 +278,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     };
     if (!isNew && Object.keys(changes).length === 0) {
       setForm(baseline);
-      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.no_changes_to_save"));
+      setNotice(__("No changes to save."));
       return;
     }
     setBusy(true); setError(''); setNotice('');
@@ -289,7 +289,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       if (!mountedRef.current) return;
       setActiveKey(updated.key); setBaseline(fromDefinition(updated)); setForm(fromDefinition(updated));
       setDefinitions(previous => [...previous.filter(item => item.key !== updated.key), updated]);
-      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.saved_taxonomy_value_vvalue", { value1: updated.key, value2: updated.version }));
+      setNotice(__("Saved taxonomy {{value1}} (v{{value2}}).", { value1: updated.key, value2: updated.version }));
       setConflict(false);
       recoveredRef.current = null;
       if (scope) {
@@ -304,21 +304,21 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     } catch (cause) {
       if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 412) setConflict(true);
-      setError(failure(cause, tStatic("feature.content.contenttypeschemasettings.could_not_save_taxonomies")));
-      onErrorRef.current(cause, tStatic("feature.content.contenttypeschemasettings.could_not_save_taxonomies"));
+      setError(failure(cause, __("Could not save taxonomies.")));
+      onErrorRef.current(cause, __("Could not save taxonomies."));
     } finally { setBusy(false); }
   };
 
   const remove = async () => {
     if (!active || !canDelete || !csrfToken || busy) return;
-    if (!window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.delete_taxonomy_value_value_existing_terms_associations_and_active", { value1: active.label, value2: active.key }))) return;
+    if (!window.confirm(__("Delete taxonomy {{value1}} ({{value2}})? Existing terms, associations and active providers will block deletion.", { value1: active.label, value2: active.key }))) return;
     setBusy(true); setError(''); setNotice('');
     try {
       await deleteTaxonomyDefinition(active.key, active.version, csrfToken);
       if (!mountedRef.current) return;
       setDefinitions(previous => previous.filter(item => item.key !== active.key));
       setActiveKey(''); setForm(blank()); setBaseline(blank());
-      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.deleted_taxonomy_value", { value1: active.key }));
+      setNotice(__("Deleted taxonomy {{value1}}.", { value1: active.key }));
       recoveredRef.current = null;
       if (scope) {
         if (eligibleDirty) definitionDrafts.set(scope, {
@@ -331,8 +331,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     } catch (cause) {
       if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 412) setConflict(true);
-      setError(failure(cause, tStatic("api.taxonomy.delete_the_taxonomy")));
-      onErrorRef.current(cause, tStatic("api.taxonomy.delete_the_taxonomy"));
+      setError(failure(cause, __("Could not delete the taxonomy.")));
+      onErrorRef.current(cause, __("Could not delete the taxonomy."));
     } finally { setBusy(false); }
   };
 
@@ -349,7 +349,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       if (latest.type_version !== eligibilityTypeVersion ||
           !keysEqual(selectedKeys(latest), eligibilityBaseline)) {
         setEligibilityConflict(true);
-        setError(tStatic("feature.taxonomy.taxonomydefinitionspage.schema_eligibility_changed_since_editing_began_retain_selections_and"));
+        setError(__("Schema/eligibility changed since editing began. Retain selections and review before saving."));
         return;
       }
       const submitted = [...eligible];
@@ -365,7 +365,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       // The pre-PUT `latest.effective` describes the old selection instead.
       setConfiguredEffective(submitted.filter(key => definitions.some(item =>
         item.key === key && item.provider_status === 'active' && item.declaration_state === 'declared')));
-      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.updated_applicable_taxonomies_for_value", { value1: typeKey }));
+      setNotice(__("Updated applicable taxonomies for {{value1}}.", { value1: typeKey }));
       recoveredRef.current = null;
       if (scope) {
         if (configDirty) definitionDrafts.set(scope, {
@@ -380,8 +380,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     } catch (cause) {
       if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 412) setEligibilityConflict(true);
-      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_update_applicable_taxonomies")));
-      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_update_applicable_taxonomies"));
+      setError(failure(cause, __("Could not update applicable taxonomies.")));
+      onErrorRef.current(cause, __("Could not update applicable taxonomies."));
     } finally { setBusy(false); }
   };
 
@@ -389,12 +389,12 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   return <section className="w-full min-w-0 space-y-5" data-testid="taxonomy-definitions-page">
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-sky-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.content_configuration")}</p>
-        <h2 className="mt-1 text-2xl font-bold">{tStatic("feature.common.ui_taxonomy")}</h2>
-        <p className="text-sm text-slate-600">{tStatic("feature.taxonomy.taxonomydefinitionspage.create_grouping_types_manage_terms_and_select_applicable_content")}</p>
+        <p className="text-xs font-semibold uppercase tracking-widest text-sky-700">{__("Content / Configuration")}</p>
+        <h2 className="mt-1 text-2xl font-bold">{__("Taxonomy")}</h2>
+        <p className="text-sm text-slate-600">{__("Create grouping types, manage terms and select applicable content types.")}</p>
       </div>
       <button className={buttonClass} type="button" disabled={busy || loading} onClick={() => {
-        if (dirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.discard_unsaved_changes_and_reload"))) return;
+        if (dirty && !window.confirm(__("Discard unsaved changes and reload?"))) return;
         const requestEpoch = ++eligibilityRequestEpochRef.current;
         if (scope) definitionDrafts.delete(scope);
         recoveredRef.current = null;
@@ -408,37 +408,37 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
         }).catch(cause => {
           if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
           setEligibilityConflict(true);
-          setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_reload_taxonomies")));
-          onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_reload_taxonomies"));
+          setError(failure(cause, __("Could not reload taxonomies.")));
+          onErrorRef.current(cause, __("Could not reload taxonomies."));
         }).finally(() => {
           if (mountedRef.current && requestEpoch === eligibilityRequestEpochRef.current)
             setEligibilityLoading(false);
         }); }
-      }}>{tStatic("reading.reload")}</button>
+      }}>{__("Reload")}</button>
     </header>
     {error && <AdminAlert tone="error">{error}</AdminAlert>}
     {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
     {missingDefinition && <AdminAlert tone="warning" role="alert">
-      {tStatic("feature.common.ui_taxonomy")} {activeKey} {tStatic("feature.taxonomy.taxonomydefinitionspage.was_deleted_or_is_no_longer_accessible_your_input")}
+      {__("Taxonomy")} {activeKey} {__("was deleted or is no longer accessible. Your input remains visible below for copying; it cannot be saved to the missing definition.")}
     </AdminAlert>}
-    {loading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.loading_taxonomies")}</p>}
+    {loading && <p role="status" className="text-xs text-zinc-500">{__("Loading taxonomies…")}</p>}
     <AdminTabs
       tabs={[
         {
           id: 'definitions',
-          label: tStatic('taxonomy_defs.tab_definitions'),
+          label: __("Definitions"),
           badge: `${definitions.length}/64`,
           dirty: configDirty || conflict,
         },
         {
           id: 'eligibility',
-          label: tStatic('taxonomy_defs.tab_eligibility'),
+          label: __("Content type eligibility"),
           dirty: eligibleDirty || eligibilityConflict || eligibilityVersionMismatch,
         },
       ]}
       activeId={activeTab}
       onChange={setActiveTab}
-      ariaLabel={tStatic('taxonomy_defs.tabs_label')}
+      ariaLabel={__("Taxonomy configuration sections")}
       testId="taxonomy-definitions-tabs"
       idPrefix="taxonomy-defs"
     />
@@ -450,60 +450,60 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-zinc-950">{tStatic("feature.taxonomy.taxonomydefinitionspage.definitions")}{definitions.length}/64)</h3>
+            <h3 className="text-sm font-semibold text-zinc-950">{__("Definitions (")}{definitions.length}/64)</h3>
             {user.role === 'admin' && <AdminButton variant="primary" size="sm" disabled={busy || definitions.length >= 64}
-              onClick={() => choose('__new__')}>{tStatic("feature.taxonomy.taxonomydefinitionspage.add_taxonomy")}</AdminButton>}
+              onClick={() => choose('__new__')}>{__("+ Add taxonomy")}</AdminButton>}
           </div>
           {ordered.map(item => <div key={item.key} className={`rounded-xl border p-3.5 transition-colors ${activeKey === item.key ? 'border-od-accent bg-blue-50/50' : 'border-zinc-200 bg-white'}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="break-words text-sm font-semibold text-zinc-950">{item.label} <span className="font-normal text-zinc-500">({item.key})</span></p>
-                <p className="mt-0.5 text-xs text-zinc-500">{item.hierarchical ? tStatic("feature.content.contenttypeschemasettings.hierarchical") : tStatic("feature.taxonomy.taxonomydefinitionspage.flat")} · {item.public ? tStatic("feature.editor.panelregionrenderer.public") : tStatic("feature.editor.panelregionrenderer.private")} · {item.owner.kind} · v{item.version}</p>
+                <p className="mt-0.5 text-xs text-zinc-500">{item.hierarchical ? __("Hierarchical") : __("Flat")} · {item.public ? __("Public") : __("Private")} · {item.owner.kind} · v{item.version}</p>
                 {item.provider_status !== 'active' || item.declaration_state !== 'declared' ?
-                  <p className="mt-0.5 text-xs text-amber-800">{tStatic("feature.common.ui_provider")} {item.provider_status}{tStatic("feature.taxonomy.taxonomydefinitionspage.declaration")}{' '}{item.declaration_state}{tStatic("feature.taxonomy.taxonomydefinitionspage.data_is_retained")}</p> : null}
+                  <p className="mt-0.5 text-xs text-amber-800">{__("Provider")} {item.provider_status}{__(", declaration")}{' '}{item.declaration_state}{__("; data is retained.")}</p> : null}
               </div>
               <div className="flex gap-1.5">
-                <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => choose(item.key)}>{tStatic("feature.taxonomy.taxonomydefinitionspage.configuration")}</AdminButton>
+                <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => choose(item.key)}>{__("Configuration")}</AdminButton>
                 <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => {
-                  if (dirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.there_are_unsaved_changes_leave_this_page"))) return;
+                  if (dirty && !window.confirm(__("There are unsaved changes. Leave this page?"))) return;
                   onNavigateHash(termsHash(item.key));
-                }}>{tStatic("feature.common.ui_term")}</AdminButton>
+                }}>{__("Term")}</AdminButton>
               </div>
             </div>
           </div>)}
         </div>
         <div className="min-w-0 space-y-4">
           {(isNew || active || missingDefinition) && <form onSubmit={event => void saveDefinition(event)} className="space-y-4 rounded-xl border border-zinc-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-zinc-950">{isNew ? tStatic("feature.taxonomy.taxonomydefinitionspage.create_definition") : tStatic("feature.taxonomy.taxonomydefinitionspage.edit_value", { value1: active?.key ?? activeKey })}</h3>
-            <label className="block text-xs font-medium text-zinc-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.key")}
+            <h3 className="text-sm font-semibold text-zinc-950">{isNew ? __("Create definition") : __("Edit {{value1}}", { value1: active?.key ?? activeKey })}</h3>
+            <label className="block text-xs font-medium text-zinc-700">{__("Key *")}
               <input className={fieldClass} value={form.key} maxLength={64} required disabled={!isNew || busy || !canEdit}
                 onChange={event => setForm(previous => ({ ...previous, key: event.target.value }))}/>
-              <span className="mt-1 block text-xs font-normal text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.use_lowercase_letters_digits_and_underscores_the_key_cannot")}</span>
+              <span className="mt-1 block text-xs font-normal text-zinc-500">{__("Use lowercase letters, digits and underscores; the key cannot change after creation.")}</span>
             </label>
-            <label className="block text-xs font-medium text-zinc-700">{tStatic("feature.content.contenttypeform.display_name")}
+            <label className="block text-xs font-medium text-zinc-700">{__("Display name *")}
               <input className={fieldClass} value={form.label} maxLength={100} required disabled={busy || !canEdit}
                 onChange={event => setForm(previous => ({ ...previous, label: event.target.value }))}/>
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.hierarchical}
               disabled={busy || !canEdit || active?.owner.kind === 'core'} onChange={event => setForm(previous => ({ ...previous, hierarchical: event.target.checked }))}/>
-              {tStatic("feature.taxonomy.taxonomydefinitionspage.allow_parent_child_hierarchy_up_to_8_levels")}</label>
+              {__("Allow parent/child hierarchy (up to 8 levels)")}</label>
             <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.public}
               disabled={busy || !canEdit} onChange={event => setForm(previous => ({ ...previous, public: event.target.checked }))}/>
-              {tStatic("feature.taxonomy.taxonomydefinitionspage.allow_public_visibility")}</label>
+              {__("Allow public visibility")}</label>
             {active && active.owner.kind !== 'user' && <p className="text-xs text-zinc-500">{active.owner.kind === 'core'
-              ? tStatic("feature.taxonomy.taxonomydefinitionspage.core_taxonomies_retain_their_key_and_hierarchy_mode")
-              : tStatic("feature.taxonomy.taxonomydefinitionspage.the_definition_is_provider_managed_only_the_provider_can")}</p>}
+              ? __("Core taxonomies retain their key and hierarchy mode.")
+              : __("The definition is provider-managed. Only the provider can edit or delete it.")}</p>}
             {conflict && <AdminAlert tone="warning" role="alert" className="space-y-2">
-              <p>{tStatic("feature.taxonomy.taxonomydefinitionspage.version_is_stale_your_input_is_retained_review_the")}</p>
+              <p>{__("Version is stale. Your input is retained; review the latest version before saving.")}</p>
               <AdminButton variant="secondary" size="sm" disabled={busy || !active}
-                onClick={() => void rebaseDefinition()}>{tStatic("feature.taxonomy.taxonomydefinitionspage.review_latest_version_and_retain_edited_fields")}</AdminButton>
+                onClick={() => void rebaseDefinition()}>{__("Review latest version and retain edited fields")}</AdminButton>
             </AdminAlert>}
             <div className="flex flex-wrap gap-2">
               <AdminButton type="submit" variant="primary" disabled={busy || !csrfToken || !canEdit || conflict || (!isNew && !configDirty)}>
-                {busy ? tStatic("reading.saving") : tStatic("feature.taxonomy.taxonomydefinitionspage.save_definition")}</AdminButton>
-              {canDelete && <AdminButton variant="danger" disabled={busy || !csrfToken || conflict} onClick={() => void remove()}>{tStatic("multilingual.delete")}</AdminButton>}
+                {busy ? __("Saving…") : __("Save definition")}</AdminButton>
+              {canDelete && <AdminButton variant="danger" disabled={busy || !csrfToken || conflict} onClick={() => void remove()}>{__("Delete")}</AdminButton>}
               {missingDefinition && <AdminButton variant="secondary" onClick={() => choose('')}>
-                {tStatic("feature.taxonomy.taxonomydefinitionspage.discard_input_whose_save_target_no_longer_exists")}
+                {__("Discard input whose save target no longer exists")}
               </AdminButton>}
             </div>
           </form>}
@@ -516,12 +516,12 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       labelledBy="taxonomy-defs-tab-eligibility"
     >
       <div className="max-w-2xl space-y-3 rounded-xl border border-zinc-200 bg-white p-5">
-        <h3 className="text-sm font-semibold text-zinc-950">{tStatic("feature.taxonomy.taxonomydefinitionspage.associate_taxonomies_with_content_types")}</h3>
+        <h3 className="text-sm font-semibold text-zinc-950">{__("Associate taxonomies with content types")}</h3>
         <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-          <span>{tStatic("feature.taxonomy.taxonomydefinitionspage.content_type")}</span>
+          <span>{__("Content type")}</span>
           <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 disabled:opacity-50" value={typeKey} disabled={busy || eligibilityLoading || loading}
             onChange={event => {
-              if (eligibleDirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.discard_unsaved_taxonomy_changes"))) return;
+              if (eligibleDirty && !window.confirm(__("Discard unsaved taxonomy changes?"))) return;
               recoveredRef.current = null;
               setTypeKey(event.target.value); setError('');
             }}>
@@ -529,7 +529,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
               <option key={item.descriptor.key} value={item.descriptor.key}>{item.descriptor.label} ({item.descriptor.key})</option>)}
           </select>
         </label>
-        {eligibilityLoading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.loading_eligibility_configuration")}</p>}
+        {eligibilityLoading && <p role="status" className="text-xs text-zinc-500">{__("Loading eligibility configuration…")}</p>}
         <div className="grid gap-2.5 sm:grid-cols-2">
           {!eligibilityLoading && definitions.map(item => <label key={item.key} className="flex items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3 text-sm text-zinc-800 hover:border-zinc-300">
             <input type="checkbox" className="mt-1" checked={eligible.includes(item.key)}
@@ -538,23 +538,23 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
                 ? [...previous, item.key] : previous.filter(key => key !== item.key))}/>
             <span>{item.label} ({item.key})
               {(item.provider_status !== 'active' || item.declaration_state !== 'declared') &&
-                <span className="block text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.provider_inactive_or_declaration_withdrawn_configured_associations_are_retained")}</span>}
+                <span className="block text-xs text-amber-700">{__("Provider inactive or declaration withdrawn; configured associations are retained.")}</span>}
             </span>
           </label>)}
         </div>
         {(eligibilityConflict || eligibilityVersionMismatch) && <AdminAlert tone="warning" role="alert" className="space-y-2">
-          <p>{tStatic("feature.taxonomy.taxonomydefinitionspage.cpt_version_differs_from_the_taxonomy_snapshot_or_the")}</p>
+          <p>{__("CPT version differs from the taxonomy snapshot or the schema changed. Selections are retained; review before saving.")}</p>
           <AdminButton variant="secondary" size="sm" disabled={busy || eligibilityLoading}
-            onClick={() => void rebaseEligibility()}>{tStatic("feature.taxonomy.taxonomydefinitionspage.review_latest_schema_and_retain_changed_selections")}</AdminButton>
+            onClick={() => void rebaseEligibility()}>{__("Review latest schema and retain changed selections")}</AdminButton>
         </AdminAlert>}
         {eligible.some(key => !definitions.some(item => item.key === key)) &&
-          <p role="status" className="text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.configured_taxonomies_are_missing_from_the_list_they_are")}</p>}
+          <p role="status" className="text-xs text-amber-700">{__("Configured taxonomies are missing from the list. They are retained to avoid unintentionally losing associations.")}</p>}
         {definitions.some(item => eligible.includes(item.key) && !configuredEffective.includes(item.key)) &&
-          <p role="status" className="text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.inactive_taxonomies_do_not_appear_in_the_picker_but")}</p>}
+          <p role="status" className="text-xs text-amber-700">{__("Inactive taxonomies do not appear in the picker, but configuration is retained for when the provider becomes active again.")}</p>}
         <AdminButton variant="primary" onClick={() => void saveEligibility()}
           disabled={!typeEditable || !csrfToken || !eligibleDirty || busy || eligibilityLoading ||
-            eligibilityConflict || eligibilityTypeVersion === null || eligibilityVersionMismatch}>{tStatic("feature.taxonomy.taxonomydefinitionspage.save_applicable_types")}</AdminButton>
-        {!typeEditable && typeKey && <p className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.only_admins_can_edit_applicable_taxonomies_for_valid_cpts")}</p>}
+            eligibilityConflict || eligibilityTypeVersion === null || eligibilityVersionMismatch}>{__("Save applicable types")}</AdminButton>
+        {!typeEditable && typeKey && <p className="text-xs text-zinc-500">{__("Only admins can edit applicable taxonomies for valid CPTs (except Section).")}</p>}
       </div>
     </AdminTabPanel>
   </section>;

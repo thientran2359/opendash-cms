@@ -14,12 +14,18 @@ pub const TEMPLATE_FUEL_LIMIT: u64 = 10_000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderFormattingConfig {
     pub timezone: String,
+    pub l10n_locale: Option<String>,
+    pub l10n_domain: Option<String>,
+    pub l10n_catalogs: BTreeMap<String, std::sync::Arc<opendash_core::l10n::Catalog>>,
 }
 
 impl Default for RenderFormattingConfig {
     fn default() -> Self {
         Self {
             timezone: "UTC".to_owned(),
+            l10n_locale: None,
+            l10n_domain: None,
+            l10n_catalogs: BTreeMap::new(),
         }
     }
 }

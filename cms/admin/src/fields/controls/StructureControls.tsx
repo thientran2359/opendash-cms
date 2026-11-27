@@ -87,7 +87,7 @@ export const RepeaterControl: React.FC<{
   renderNestedFields,
   onChange,
 }) => {
-  const { t, tCount } = useI18n();
+  const { __, _x, _n } = useI18n();
   const rows: Record<string, unknown>[] = Array.isArray(value)
     ? value.map(item =>
         item && typeof item === 'object' && !Array.isArray(item)
@@ -136,7 +136,7 @@ export const RepeaterControl: React.FC<{
         <FieldLabelHeader
           label={field.label}
           required={field.required}
-          badge={tCount('fields.repeater.row_count', rows.length, { max: maxItems })}
+          badge={_n("{{count}} / {{max}} row", "{{count}} / {{max}} rows", rows.length, { max: maxItems })}
         />
         <AdminButton
           size="sm"
@@ -144,13 +144,13 @@ export const RepeaterControl: React.FC<{
           disabled={disabled || rows.length >= maxItems}
           onClick={addRow}
         >
-          + {field.button_label || t('fields.repeater.add_row')}
+          + {field.button_label || __("Add item")}
         </AdminButton>
       </div>
 
       {rows.length === 0 ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/70 px-3 py-3 text-center text-xs text-zinc-500">
-          {t('fields.repeater.empty')}
+          {__("No items added yet.")}
         </div>
       ) : layout === 'table' ? (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
@@ -173,7 +173,7 @@ export const RepeaterControl: React.FC<{
                   <button
                     type="button"
                     disabled={disabled || idx === 0}
-                    aria-label={t('fields.common.move_up')}
+                    aria-label={_x("Move up", "fields.common")}
                     onClick={() => moveRow(idx, -1)}
                     className="rounded px-1.5 py-0.5 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-35"
                   >
@@ -182,7 +182,7 @@ export const RepeaterControl: React.FC<{
                   <button
                     type="button"
                     disabled={disabled || idx === rows.length - 1}
-                    aria-label={t('fields.common.move_down')}
+                    aria-label={_x("Move down", "fields.common")}
                     onClick={() => moveRow(idx, 1)}
                     className="rounded px-1.5 py-0.5 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-35"
                   >
@@ -191,7 +191,7 @@ export const RepeaterControl: React.FC<{
                   <button
                     type="button"
                     disabled={disabled || rows.length <= minItems}
-                    aria-label={t('fields.common.remove')}
+                    aria-label={__("Remove")}
                     onClick={() => removeRow(idx)}
                     className="rounded px-1.5 py-0.5 text-xs text-rose-600 hover:bg-rose-50 disabled:opacity-35"
                   >
@@ -233,7 +233,7 @@ export const RepeaterControl: React.FC<{
                     <button
                       type="button"
                       disabled={disabled || idx === 0}
-                      aria-label={t('fields.common.move_up')}
+                      aria-label={_x("Move up", "fields.common")}
                       onClick={() => moveRow(idx, -1)}
                       className="rounded px-1 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-100 disabled:opacity-35"
                     >
@@ -242,7 +242,7 @@ export const RepeaterControl: React.FC<{
                     <button
                       type="button"
                       disabled={disabled || idx === rows.length - 1}
-                      aria-label={t('fields.common.move_down')}
+                      aria-label={_x("Move down", "fields.common")}
                       onClick={() => moveRow(idx, 1)}
                       className="rounded px-1 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-100 disabled:opacity-35"
                     >
@@ -251,7 +251,7 @@ export const RepeaterControl: React.FC<{
                     <button
                       type="button"
                       disabled={disabled || rows.length >= maxItems}
-                      aria-label={t('fields.repeater.duplicate')}
+                      aria-label={__("Duplicate row")}
                       onClick={() => duplicateRow(idx)}
                       className="rounded px-1 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-100 disabled:opacity-35"
                     >
@@ -260,7 +260,7 @@ export const RepeaterControl: React.FC<{
                     <button
                       type="button"
                       disabled={disabled || rows.length <= minItems}
-                      aria-label={t('fields.common.remove')}
+                      aria-label={__("Remove")}
                       onClick={() => removeRow(idx)}
                       className="rounded px-1 py-0.5 text-[11px] text-rose-600 hover:bg-rose-50 disabled:opacity-35"
                     >

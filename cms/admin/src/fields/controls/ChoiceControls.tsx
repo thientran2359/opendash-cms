@@ -62,7 +62,7 @@ const StaticSelectControl: React.FC<{
   responsiveInfo?: ResponsiveDotInfo;
   onChange: (next: string | string[]) => void;
 }> = ({ field, value, disabled = false, responsiveInfo, onChange }) => {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const id = useId();
   const options = field.options ?? [];
 
@@ -135,7 +135,7 @@ const StaticSelectControl: React.FC<{
         className={STUDIO_INPUT_CLASS}
       >
         {(field.allow_null || !strVal) && (
-          <option value="">{t('fields.select.empty_option')}</option>
+          <option value="">{__("— Select —")}</option>
         )}
         {options.map(opt => (
           <option key={opt.value} value={opt.value}>
@@ -156,7 +156,7 @@ export const DynamicSelectControl: React.FC<{
   onChange: (next: string | string[]) => void;
   onApiError: (error: unknown, fallback: string) => void;
 }> = ({ field, value, contextTypeKey, locale, disabled = false, onChange, onApiError }) => {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const id = useId();
   const source = field.options_source;
   const [items, setItems] = useState<DynamicSelectOption[]>([]);
@@ -176,14 +176,14 @@ export const DynamicSelectControl: React.FC<{
       })
       .catch(err => {
         if (!controller.signal.aborted) {
-          onApiError(err, t('fields.errors.load_options_source'));
+          onApiError(err, __("Could not load dynamic options source."));
         }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [source, contextTypeKey, locale, onApiError, t]);
+  }, [source, contextTypeKey, locale, onApiError]);
 
   if (field.multiple) {
     const selected = Array.isArray(value)
@@ -201,9 +201,9 @@ export const DynamicSelectControl: React.FC<{
       <div className="space-y-1.5">
         <FieldLabelHeader label={field.label} required={field.required} />
         {loading ? (
-          <p className="text-xs text-zinc-500">{t('fields.common.loading')}</p>
+          <p className="text-xs text-zinc-500">{__("Loading…")}</p>
         ) : items.length === 0 ? (
-          <p className="text-xs italic text-zinc-400">{t('fields.select.no_dynamic_items')}</p>
+          <p className="text-xs italic text-zinc-400">{__("No available items in this source.")}</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {items.map(opt => {
@@ -246,11 +246,11 @@ export const DynamicSelectControl: React.FC<{
         className={STUDIO_INPUT_CLASS}
       >
         <option value="">
-          {loading ? t('fields.common.loading') : t('fields.select.empty_option')}
+          {loading ? __("Loading…") : __("— Select —")}
         </option>
         {hasSavedMissing && (
           <option value={strVal}>
-            {t('fields.select.saved_missing_value', { value: strVal })}
+            {__("Saved value (unavailable): {{value}}", { value: strVal })}
           </option>
         )}
         {items.map(item => (

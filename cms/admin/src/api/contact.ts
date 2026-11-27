@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 import type { NotificationAttemptPublic } from './smtp.ts';
 
@@ -58,7 +58,7 @@ export interface ContactSubmissionDetail {
 
 export function listContactForms(): Promise<ContactFormRecord[]> {
   return requestJson<ContactFormRecord[]>('/api/admin/contact/forms', {
-    defaultErrorMessage: tStatic('api.contact.load_contact_forms'),
+    defaultErrorMessage: __("Could not load contact forms."),
   });
 }
 
@@ -71,7 +71,7 @@ export function createContactForm(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.contact.create_the_contact_form'),
+    defaultErrorMessage: __("Could not create the contact form."),
   });
 }
 
@@ -87,7 +87,7 @@ export function updateContactForm(
     contentType: 'application/json',
     ifMatchVersion: version,
     body: JSON.stringify(input),
-    defaultErrorMessage: tStatic('api.contact.update_the_contact_form'),
+    defaultErrorMessage: __("Could not update the contact form."),
   });
 }
 
@@ -100,7 +100,7 @@ export function deleteContactForm(
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: tStatic('api.contact.delete_the_contact_form'),
+    defaultErrorMessage: __("Could not delete the contact form."),
   });
 }
 
@@ -112,13 +112,13 @@ export function listContactSubmissions(
   const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (formId != null) qs.set('form_id', String(formId));
   return requestJson<ContactSubmissionSummary[]>(`/api/admin/contact/submissions?${qs.toString()}`, {
-    defaultErrorMessage: tStatic('api.contact.load_the_contact_inbox'),
+    defaultErrorMessage: __("Could not load the contact inbox."),
   });
 }
 
 export function getContactSubmission(id: number): Promise<ContactSubmissionDetail> {
   return requestJson<ContactSubmissionDetail>(`/api/admin/contact/submissions/${id}`, {
-    defaultErrorMessage: tStatic('api.contact.load_the_contact_message'),
+    defaultErrorMessage: __("Could not load the contact message."),
   });
 }
 
@@ -126,6 +126,6 @@ export function deleteContactSubmission(csrfToken: string | null, id: number): P
   return requestJson<void>(`/api/admin/contact/submissions/${id}`, {
     method: 'DELETE',
     csrfToken,
-    defaultErrorMessage: tStatic('api.contact.delete_the_contact_message'),
+    defaultErrorMessage: __("Could not delete the contact message."),
   });
 }

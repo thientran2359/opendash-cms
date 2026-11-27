@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, _x, useI18n } from '../../i18n/index.tsx';
 import type { EntryTableRow } from '../content/types.ts';
 
 /** Declarative server-projected configuration only: no HTML/JS/CSS injection. */
@@ -59,7 +59,7 @@ export function safeAdminProviderLink(value: unknown): string | null {
 function cellLabel(value: unknown): string {
   if (typeof value === 'string') return value.slice(0, 4096);
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  if (typeof value === 'boolean') return value ? tStatic("feature.extensions.admincontributionrenderer.yes") : tStatic("feature.extensions.admincontributionrenderer.no");
+  if (typeof value === 'boolean') return value ? __("Yes") : __("No");
   return '—';
 }
 
@@ -82,11 +82,11 @@ export function AdminColumnCell({
         : safeLink ?
           <a className="break-all text-sky-700 underline" href={safeLink}
             target="_blank" rel="noopener noreferrer">{label}</a>
-          : <span className="break-words text-slate-700">{column.format === 'link' && raw ? tStatic("feature.extensions.admincontributionrenderer.invalid_path") : label}</span>}
+          : <span className="break-words text-slate-700">{column.format === 'link' && raw ? __("Invalid path") : label}</span>}
       {column.owner_kind === 'plugin' && column.action_id && <button type="button"
         className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
         disabled={busy} onClick={() => onRun(column, row)}
-        aria-label={tStatic("feature.extensions.admincontributionrenderer.run_value_for_item_value", { value1: column.label, value2: row.id })}>{tStatic("feature.extensions.admincontributionrenderer.run")}</button>}
+        aria-label={__("Run {{value1}} for item #{{value2}}", { value1: column.label, value2: row.id })}>{__("Run")}</button>}
     </span>
   );
 }
@@ -103,7 +103,7 @@ export function AdminTermPanels({
 }) {
   useI18n();
   if (!config.panels.length) return null;
-  return <div className="space-y-4" aria-label={tStatic("feature.extensions.admincontributionrenderer.provider_extension_fields")} data-testid="term-extension-panels">
+  return <div className="space-y-4" aria-label={__("Provider extension fields")} data-testid="term-extension-panels">
     {config.panels.map(panel => <fieldset key={panel.key} className="space-y-3 rounded-xl border border-slate-200 p-4"
       data-provider-panel={panel.key}>
       <legend className="px-1 text-sm font-semibold text-slate-900">{panel.label}</legend>
@@ -115,7 +115,7 @@ export function AdminTermPanels({
           {field.type === 'boolean' ? <span className="mt-1 flex gap-2">
             <input id={id} type="checkbox" checked={stored === true} disabled={disabled}
               onChange={event => onChange(panel.key, field.key, event.target.checked)} />
-            <span>{stored === true ? tStatic("feature.content.fieldvalueinput.on") : tStatic("shell.locale_disabled")}</span>
+            <span>{stored === true ? __("On") : _x("Disabled", "shell.locale_disabled")}</span>
           </span> : field.type === 'textarea' ?
             <textarea id={id} className={fieldClass} rows={3} maxLength={4096} disabled={disabled}
               required={field.required} value={typeof stored === 'string' ? stored : ''}
