@@ -69,6 +69,7 @@ interface Props {
   patternsLoaded: boolean;
   onRefreshPatterns: () => void;
   availablePartKeys: string[];
+  templateDiagnostics?: Array<{ node_id: string; code: string }>;
   onBuilderMessage: (msg: string, failed?: boolean) => void;
   onApiError: (error: unknown, fallback: string) => void;
   disabled?: boolean;
@@ -159,6 +160,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   patternsLoaded,
   onRefreshPatterns,
   availablePartKeys,
+  templateDiagnostics = [],
   onBuilderMessage,
   onApiError,
   disabled = false,
@@ -535,9 +537,10 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               allowPatternRef={false}
               allowList={true}
               allowContentSlot={!selectedTarget.forbids_content_slot}
-              allowTemplatePart={true}
+              allowTemplatePart={true} allowSearchResults={true}
               requiresContentSlot={selectedTarget.requires_content_slot}
               availablePartKeys={availablePartKeys}
+              diagnostics={templateDiagnostics}
               disabled={disabled}
               onMessage={onBuilderMessage}
               onApiError={onApiError}

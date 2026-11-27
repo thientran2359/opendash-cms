@@ -215,6 +215,7 @@ pub(in crate::storage) async fn mutate_entry_builder(
             .execute(&mut *tx)
             .await?;
         replace_entry_builder_refs(&mut tx, id, ref_doc).await?;
+        crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, id).await?;
     }
     let saved = entry_builder_snapshot(&mut tx, type_key, id).await?;
     crate::storage::revisions::record_entry_revision_and_clear_autosave_in_tx(

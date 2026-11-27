@@ -49,6 +49,7 @@ export interface BuilderEditorCoreProps {
   allowList?: boolean;
   allowContentSlot?: boolean;
   allowTemplatePart?: boolean;
+  allowSearchResults?: boolean;
   requiresContentSlot?: boolean;
   availablePartKeys?: string[];
   diagnostics?: Array<{ node_id: string; code: string; message?: string }>;
@@ -90,6 +91,7 @@ export function BuilderEditorCore({
   allowList = true,
   allowContentSlot = false,
   allowTemplatePart = false,
+  allowSearchResults = false,
   requiresContentSlot = false,
   availablePartKeys,
   diagnostics = [],
@@ -118,6 +120,7 @@ export function BuilderEditorCore({
     if (type === 'core/list' && !allowList) return false;
     if (type === 'core/content_slot' && !allowContentSlot) return false;
     if (type === 'core/template_part' && !allowTemplatePart) return false;
+    if (type === 'core/search_results' && !allowSearchResults) return false;
     return true;
   });
 
@@ -469,7 +472,11 @@ export function BuilderEditorCore({
           <strong>{__("Block diagnostics:")}</strong>
           <ul className="mt-1 list-disc pl-4 space-y-0.5">
             {diagnostics.map((d, idx) => (
-              <li key={`${d.node_id}-${idx}`}>{d.node_id}: {d.message ?? d.code}</li>
+              <li key={`${d.node_id}-${idx}`} data-diagnostic-code={d.code}>
+                {d.node_id}: {d.code === 'search_results_outside_search_route'
+                  ? __("Search Results blocks only display items on the search route.")
+                  : (d.message ?? d.code)}
+              </li>
             ))}
           </ul>
         </div>

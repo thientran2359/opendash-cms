@@ -109,6 +109,9 @@ pub(crate) fn resolve_collection_source(
                 Expr::Var(v) if v.id == "locale" && g.name == "alternates" => {
                     Some(UrlSourceKind::TrustedLink)
                 }
+                Expr::Var(v) if v.id == "search" && g.name == "facets" => {
+                    Some(UrlSourceKind::TrustedLink)
+                }
                 Expr::GetAttr(menu_slot)
                     if g.name == "items"
                         && matches!(&menu_slot.expr, Expr::Var(v) if v.id == "menus") =>
@@ -204,7 +207,12 @@ pub(crate) fn is_href_only_expr(
             Expr::Var(v) if v.id == "pagination" => {
                 matches!(g.name, "previous_url" | "next_url")
             }
-            Expr::Var(v) if v.id == "locale" => g.name == "home_url",
+            Expr::Var(v) if v.id == "locale" => {
+                matches!(g.name, "home_url" | "search_url")
+            }
+            Expr::Var(v) if v.id == "search" => {
+                matches!(g.name, "action_url" | "clear_type_url")
+            }
             Expr::Var(v) if v.id == "options" => {
                 policy.allows_cite_href(&format!("options.{}", g.name))
             }
@@ -298,6 +306,20 @@ pub(crate) fn is_src_and_href_expr(
     }
 }
 
+pub(crate) fn is_form_action_expr(expr: &Expr<'_>) -> bool {
+    matches!(
+        expr,
+        Expr::GetAttr(g)
+            if matches!(
+                (&g.expr, g.name),
+                (Expr::Var(v), "home_url" | "search_url") if v.id == "locale"
+            ) || matches!(
+                (&g.expr, g.name),
+                (Expr::Var(v), "action_url") if v.id == "search"
+            )
+    )
+}
+
 pub(crate) fn is_valid_theme_url_expr(
     expr: &Expr<'_>,
     slot: UrlAttrSlot,
@@ -309,6 +331,7 @@ pub(crate) fn is_valid_theme_url_expr(
             is_href_only_expr(expr, scopes, policy) || is_src_and_href_expr(expr, scopes, policy)
         }
         UrlAttrSlot::Cite => is_href_only_expr(expr, scopes, policy),
+        UrlAttrSlot::FormAction => is_form_action_expr(expr),
         UrlAttrSlot::SrcAndHref => is_src_and_href_expr(expr, scopes, policy),
         UrlAttrSlot::LinkCss => {
             matches!(&expr, Expr::GetItem(g)
@@ -332,25 +355,27 @@ pub(crate) fn walk_theme_ast_with_url_scopes(
     is_full_doctype_doc: bool,
     policy: &ThemeUrlPolicy,
     allow_trusted_theme_markup: bool,
+    allow_search_form: bool,
 ) -> Result<ThemeTemplateUsageFlags, &'static str> {
     let mut usage = ThemeTemplateUsageFlags::default();
     let (final_states, _) = walk_theme_stmt_with_url_scopes(
         stmt,
-        BTreeSet::from([ThemeHtmlState::with_trust(
+        BTreeSet::from([ThemeHtmlState::with_depths(
             ThemeHtmlState::Body,
-            allow_trusted_theme_markup,
-            0,
+            allow_trusted_theme_markup || allow_search_form,
+            HtmlDepths::default(),
         )]),
         UrlScopeStack::root(),
         is_part,
         is_full_doctype_doc,
         policy,
         allow_trusted_theme_markup,
+        allow_search_form,
         &mut usage,
     )?;
     if final_states
         .iter()
-        .any(|state| state.inner() != &ThemeHtmlState::Body || state.trusted_depth() != 0)
+        .any(|state| state.inner() != &ThemeHtmlState::Body || state.has_open_depths())
     {
         return Err(
             "Template phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment/style/title).",
@@ -359,6 +384,7 @@ pub(crate) fn walk_theme_ast_with_url_scopes(
     Ok(usage)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn walk_theme_stmts_with_url_scopes(
     stmts: &[Stmt<'_>],
     mut states: BTreeSet<ThemeHtmlState>,
@@ -367,6 +393,7 @@ pub(crate) fn walk_theme_stmts_with_url_scopes(
     is_full_doctype_doc: bool,
     policy: &ThemeUrlPolicy,
     allow_trusted_theme_markup: bool,
+    allow_search_form: bool,
     usage: &mut ThemeTemplateUsageFlags,
 ) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
     for child in stmts {
@@ -378,6 +405,7 @@ pub(crate) fn walk_theme_stmts_with_url_scopes(
             is_full_doctype_doc,
             policy,
             allow_trusted_theme_markup,
+            allow_search_form,
             usage,
         )?;
         states = next_states;

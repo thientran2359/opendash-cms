@@ -357,6 +357,8 @@ pub(super) fn build_entry_view_with_defs(
         primary_category,
         ext: BTreeMap::new(),
         theme_ext: BTreeMap::new(),
+        snippet_segments: Vec::new(),
+        type_label: String::new(),
     }
 }
 

@@ -266,7 +266,7 @@ test('buildMenuTree matches reorganized IA order, icons, groups, and clean Edito
   const tools = fullTree.find(item => item.id === 'tools');
   assert.deepEqual(
     tools.children.map(c => c.hash),
-    ['#/tools/redirects', '#/tools/backup', '#/tools/media-reconcile', '#/tools/health'],
+    ['#/tools/redirects', '#/tools/backup', '#/tools/media-reconcile', '#/tools/search', '#/tools/health'],
   );
 
   const settings = fullTree.find(item => item.id === 'settings');

@@ -469,6 +469,7 @@ pub enum ThemeLocaleTarget<'a> {
     Entry { entry_id: i64 },
     Archive { type_key: &'a str },
     Term { term_id: i64 },
+    Search { raw_search_query: Option<&'a str> },
     None,
 }
 

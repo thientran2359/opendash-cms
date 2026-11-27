@@ -221,3 +221,92 @@ impl ThemeUrlPolicy {
         format!("{:?}", self.entry_field_nodes)
     }
 }
+
+pub(super) struct TagAcc {
+    pub(super) tag_name: String,
+    pub(super) is_close: bool,
+    pub(super) attr_name: String,
+    pub(super) quote: Option<u8>,
+    pub(super) attr_has_static_bytes: bool,
+    pub(super) attr_expr_count: u8,
+    pub(super) seen_attrs: BTreeSet<String>,
+    pub(super) link_rel_stylesheet: bool,
+    pub(super) link_has_valid_href: bool,
+    pub(super) meta_ok: bool,
+    pub(super) form_has_action: bool,
+    pub(super) attr_static_buf: String,
+}
+
+impl TagAcc {
+    pub(super) fn reset_attr(&mut self, first: char) {
+        self.attr_name.clear();
+        self.attr_name.push(first.to_ascii_lowercase());
+        self.quote = None;
+        self.attr_has_static_bytes = false;
+        self.attr_expr_count = 0;
+        self.attr_static_buf.clear();
+    }
+
+    pub(super) fn push_static_char(&mut self, ch: char) -> Result<(), &'static str> {
+        self.attr_has_static_bytes = true;
+        if is_security_checked_attr(&self.attr_name) {
+            if self.attr_static_buf.len() + ch.len_utf8() > 4096 {
+                return Err("Giá trị thuộc tính tĩnh vượt quá 4096 bytes.");
+            }
+            self.attr_static_buf.push(ch);
+        }
+        Ok(())
+    }
+
+    pub(super) fn finish_attr(&mut self, opts: HtmlStepOptions) -> Result<(), &'static str> {
+        finalize_theme_attr(
+            &self.tag_name,
+            &mut self.attr_name,
+            &mut self.quote,
+            &mut self.attr_has_static_bytes,
+            &mut self.attr_expr_count,
+            &mut self.seen_attrs,
+            &mut self.link_rel_stylesheet,
+            &mut self.link_has_valid_href,
+            &mut self.meta_ok,
+            &mut self.form_has_action,
+            &mut self.attr_static_buf,
+            opts,
+        )
+    }
+
+    pub(super) fn finish_tag(
+        &self,
+        opts: HtmlStepOptions,
+        depths: HtmlDepths,
+    ) -> Result<ThemeHtmlState, &'static str> {
+        finalize_theme_tag(
+            &self.tag_name,
+            self.is_close,
+            self.link_rel_stylesheet,
+            self.link_has_valid_href,
+            self.meta_ok,
+            self.form_has_action,
+            opts,
+            depths,
+        )
+    }
+
+    pub(super) fn into_state(self, phase: TagPhase) -> ThemeHtmlState {
+        ThemeHtmlState::Tag {
+            tag_name: self.tag_name,
+            is_close: self.is_close,
+            phase,
+            attr_name: self.attr_name,
+            quote: self.quote,
+            attr_has_static_bytes: self.attr_has_static_bytes,
+            attr_expr_count: self.attr_expr_count,
+            seen_attrs: self.seen_attrs,
+            link_rel_stylesheet: self.link_rel_stylesheet,
+            link_has_valid_href: self.link_has_valid_href,
+            meta_ok: self.meta_ok,
+            form_has_action: self.form_has_action,
+            attr_static_buf: self.attr_static_buf,
+        }
+    }
+}

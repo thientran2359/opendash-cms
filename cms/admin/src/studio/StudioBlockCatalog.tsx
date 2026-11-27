@@ -113,6 +113,8 @@ export function StudioBlockCatalog({
     'core/button': { title: __("Button"), description: __("Link button"), symbol: '▭' },
     'core/list': { title: __("Content list"), description: __("Filtered entries"), symbol: '☷' },
     'core/contact_form': { title: __("Contact form"), description: __("Configured form"), symbol: '✉' },
+    'core/search_form': { title: __("Search form"), description: __("Site search box"), symbol: '⌕' },
+    'core/search_results': { title: __("Search results"), description: __("Paginated search results"), symbol: '▤' },
     'core/pattern_ref': { title: __("Reusable pattern"), description: __("Reference a saved pattern"), symbol: '▦' },
     'core/content_slot': { title: __("Content slot"), description: __("Entry content placeholder"), symbol: '◫' },
     'core/template_part': { title: __("Template part"), description: __("Header / Footer / Part"), symbol: '▤' },

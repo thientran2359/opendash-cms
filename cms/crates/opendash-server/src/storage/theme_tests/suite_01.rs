@@ -279,6 +279,14 @@ async fn candidate_order_covers_layout_home_taxonomy_not_found_and_parts() {
             .collect::<Vec<_>>(),
         ["not_found", "index"]
     );
+    let search = build_candidates(&PublicTemplateContext::Search).unwrap();
+    assert_eq!(
+        search
+            .iter()
+            .map(|c| c.canonical_key().unwrap())
+            .collect::<Vec<_>>(),
+        ["search", "index"]
+    );
     let tmp = TempDirGuard::new("parts");
     let db = init_db(&tmp.path().join("site.sqlite")).await.unwrap();
     let mut parts = BTreeMap::new();

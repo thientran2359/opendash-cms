@@ -57,6 +57,7 @@ pub(in crate::storage) async fn render_public_builder(
         Some(&page::BuilderTemplateContext {
             content_html: slot,
             parts: &parts,
+            search: ctx.search,
         }),
         &empty_patterns,
         false,
@@ -198,6 +199,22 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &part_refs, false).await?;
     }
     let url_policy = active_theme_url_policy(active_v3)?;
+    let header_search_view: Option<content_render::SearchView> = theme_context
+        .get("search")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .filter(|s: &content_render::SearchView| s.is_search_route)
+        .map(|mut s| {
+            s.is_search_route = false;
+            s
+        });
+    let header_pagination = content_render::PaginationView::empty();
+    let header_search = header_search_view
+        .as_ref()
+        .map(|view| page::BuilderSearchData {
+            view,
+            entries: &[],
+            pagination: &header_pagination,
+        });
     let context = PublicBuilderContext {
         state: &state,
         active: active_v3,
@@ -207,6 +224,7 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         cache,
         url_policy: &url_policy,
         fmt_cfg,
+        search: header_search,
     };
 
     async fn render_shell_slot(

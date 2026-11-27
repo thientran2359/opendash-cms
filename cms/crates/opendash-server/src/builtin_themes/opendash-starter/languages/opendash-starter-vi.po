@@ -55,3 +55,24 @@ msgstr "Về Trang chủ"
 
 msgid "Language"
 msgstr "Ngôn ngữ"
+
+msgid "Search"
+msgstr "Tìm kiếm"
+
+msgid "Search the site..."
+msgstr "Tìm kiếm trên trang..."
+
+msgid "Search filters"
+msgstr "Bộ lọc tìm kiếm"
+
+msgid "All"
+msgstr "Tất cả"
+
+msgid "Results:"
+msgstr "Kết quả:"
+
+msgid "Enter keywords to search published content."
+msgstr "Nhập từ khóa để tìm kiếm nội dung đã xuất bản."
+
+msgid "No matching results found."
+msgstr "Không tìm thấy kết quả phù hợp."

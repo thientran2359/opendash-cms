@@ -352,6 +352,7 @@ pub async fn sync_dev_theme_in_db(
             .execute(&mut *conn)
             .await?;
         crate::storage::page::resync_plugin_block_acls_in_tx(&mut conn).await?;
+        crate::storage::search::sync_builder_entries_in_conn(&mut conn).await?;
         Ok(())
     }
     .await;

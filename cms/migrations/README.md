@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **58** `.sql` files numbered `0001` through `0059` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `crate::storage::MIGRATOR` (`sqlx::migrate!("../../migrations")`) in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
+`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **59** `.sql` files numbered `0001` through `0060` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `crate::storage::MIGRATOR` (`sqlx::migrate!("../../migrations")`) in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
 
 | Group / Milestone | Migrations | Primary Tables & Schema Objects |
 | --- | --- | --- |
@@ -31,6 +31,7 @@
 | **Manual Redirects & 404 Log (`0057`)** | [`0057_manual_redirects_and_404_log.sql`](0057_manual_redirects_and_404_log.sql) | Adds `manual_redirects` (`source_path COLLATE BINARY UNIQUE`, `301`/`302`, `version` CAS, `hit_count`), `not_found_logs` (`path COLLATE BINARY UNIQUE`, `hit_count`, `first_seen_at`/`last_seen_at` `%Y-%m-%dT%H:%M:%fZ`), and 2 secondary indexes (`+6` net schema objects: `221 -> 227` migration objects). |
 | **Responsive Media & In-Place Replace (`0058`)** | [`0058_responsive_media_and_replace.sql`](0058_responsive_media_and_replace.sql) | Adds `media_assets.{content_sha256,variants_ready_version,updated_at}` + 2 indexes, creates `media_variants` and `media_replace_jobs` (`STRICT, WITHOUT ROWID`), and rebuilds `operation_jobs` adding `media_regenerate` (`+7` net schema objects: `227 -> 234` migration objects). |
 | **Revisions & Autosave (`0059`)** | [`0059_entry_revisions_and_autosaves.sql`](0059_entry_revisions_and_autosaves.sql) | Creates immutable `entry_revisions` (max `25` per entry, SHA-256 `content_hash` dedup, baseline capture) and per-user `entry_autosaves` (`PRIMARY KEY (entry_id, user_id)`, `cleared_fields_json`, `*_touched`, `client_seq`), plus 2 secondary indexes (`+6` net schema objects, `242 / 256` total in `sqlite_schema`). |
+| **Public Site Search (`0060`)** | [`0060_public_site_search_fts5.sql`](0060_public_site_search_fts5.sql) | Creates SQLite FTS5 virtual table `entry_search_fts` (`content=''`, `contentless_delete=1`, `unicode61 remove_diacritics 2`, `+5` schema objects, `247 / 256` total in `sqlite_schema`), and rebuilds `template_overrides` (`+'search'`) + `operation_jobs` (`+'search_reindex'` in `CHECK` & `idx_operation_jobs_single_active_heavy`). |
 
 ## Interface
 
@@ -42,7 +43,7 @@
 ## Invariants
 
 - **Immutable applied migrations:** Never edit SQL content or change line endings (LF) of existing migration files; SQLx verifies checksums in `_sqlx_migrations` against embedded bytes.
-- **Monotonic numbering:** Every new schema change must be added as the next sequential `NNNN_<snake_case>.sql` file (`0060_*` onward; `0016` remains permanently unused).
+- **Monotonic numbering:** Every new schema change must be added as the next sequential `NNNN_<snake_case>.sql` file (`0061_*` onward; `0016` remains permanently unused).
 - **Pre-existing ownership safety:** `preflight_builtin_key_collisions` must run before `0008` so user/theme/plugin-owned `post`/`page` descriptors are never overwritten during bootstrap.
 - **Database integrity enforcement:** Triggers (`content_entries_core_insert_draft`, `taxonomy_terms_parent_*`, `content_entries_pattern_private_*`, `content_entries_mark_has_been_published_*`, and `*_locale_*` triggers from `0047`) enforce domain invariants at the SQLite layer alongside `PRAGMA foreign_keys = ON`.
 - **Storage layering:** All runtime SQL queries (`sqlx::query*`) against these tables belong in `cms/crates/opendash-server/src/storage/`, per [CORE_FOUNDATION.md](../../docs/contracts/CORE_FOUNDATION.md).

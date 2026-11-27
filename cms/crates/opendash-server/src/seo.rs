@@ -143,6 +143,12 @@ impl SeoView {
             json_ld: Vec::new(),
         }
     }
+
+    pub fn for_search_page(lang: &str, dir: &str, title: &str) -> Self {
+        let mut view = Self::for_noindex_page_with_dir(lang, dir, title);
+        view.robots = "noindex,follow".to_string();
+        view
+    }
 }
 
 pub const MAX_JSON_LD_BLOCKS: usize = 4;

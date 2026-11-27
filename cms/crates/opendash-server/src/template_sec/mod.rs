@@ -22,6 +22,9 @@ pub use theme_validator::*;
 #[path = "tests/composition_tests/mod.rs"]
 mod composition_tests;
 #[cfg(test)]
+#[path = "tests/search_form_csec_tests.rs"]
+mod search_form_csec_tests;
+#[cfg(test)]
 #[path = "tests/spec1_s01_tests.rs"]
 mod spec1_s01_tests;
 #[cfg(test)]

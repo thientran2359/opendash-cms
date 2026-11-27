@@ -25,7 +25,7 @@ Thanh điều hướng Admin (desktop sidebar thu gọn được + mobile drawer
 | **Hệ thống** | **Cấu trúc nội dung** | Loại nội dung & Trường (`#/content-structure/content-types`, alias `#/appearance/content-types`, `#/settings/content-types`) · Taxonomy tùy chỉnh (`#/content-structure/taxonomies`, alias `#/taxonomy/definitions`) | Admin |
 | **Hệ thống** | **Plugins** | Plugins đã cài (`#/plugins`) · Cài plugin (`#/plugins/install`) | Admin |
 | **Hệ thống** | **Người dùng** | Tất cả người dùng (`#/users`) · Thêm người dùng (`#/users/new`) | Admin *(Editor không thấy nhóm Hệ thống)* |
-| **Hệ thống** | **Công cụ** | Chuyển hướng & 404 (`#/tools/redirects`, alias `#/tools/404-log`) · Sao lưu & Phục hồi (`#/tools/backup`) · Đối soát Media (`#/tools/media-reconcile`) · Tình trạng hệ thống (`#/tools/health`) | Admin |
+| **Hệ thống** | **Công cụ** | Chuyển hướng & 404 (`#/tools/redirects`, alias `#/tools/404-log`) · Sao lưu & Phục hồi (`#/tools/backup`) · Đối soát Media (`#/tools/media-reconcile`) · Chỉ mục tìm kiếm (`#/tools/search`) · Tình trạng hệ thống (`#/tools/health`) | Admin |
 | **Hệ thống** | **Cài đặt** | Tổng quát (`#/settings/general`) · Trang chủ & Bài viết (`#/settings/reading`) · Đường dẫn tĩnh (`#/settings/permalinks`) · SEO trang chủ (`#/settings/seo`, liên thông tới Chuyển hướng & 404) · Đa ngôn ngữ (`#/settings/multilingual`) · Thông báo Email (SMTP) (`#/settings/smtp`, liên thông về Liên hệ) | Admin |
 
 - Mỗi màn hình có URL riêng hỗ trợ reload, back/forward; ẩn menu không thay thế kiểm quyền server.

@@ -251,6 +251,7 @@ async fn execute_restore_in_writer_tx(
         )
         .await?;
         clear_actor_autosave_in_tx(&mut tx, entry_id, actor.user.id).await?;
+        crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, entry_id).await?;
         let opened = entry_builder_snapshot(&mut tx, type_key, entry_id)
             .await?
             .opened;
@@ -369,6 +370,7 @@ async fn execute_restore_in_writer_tx(
     )
     .await?;
     clear_actor_autosave_in_tx(&mut tx, entry_id, actor.user.id).await?;
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, entry_id).await?;
 
     let row: entries::EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at

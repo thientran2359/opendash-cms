@@ -100,7 +100,7 @@ export type NodeKind = 'section' | 'row' | 'column' | 'element';
 /** ElementType is the legacy binding/field registry's closed set. PatternRef
  * is an insertable core block with its own typed Inspector, no field binding. */
 
-export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/video' | 'core/button' | 'core/list' | 'core/contact_form';
+export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/video' | 'core/button' | 'core/list' | 'core/contact_form' | 'core/search_form' | 'core/search_results';
 
 export type TemplateElementType = 'core/content_slot' | 'core/template_part';
 /** Declarative schema IDs are selected in the palette, but their AST type is
@@ -117,6 +117,8 @@ export const ELEMENT_TYPES: InsertableElementType[] = [
   'core/button',
   'core/list',
   'core/contact_form',
+  'core/search_form',
+  'core/search_results',
   'core/pattern_ref',
   'core/content_slot',
   'core/template_part',
@@ -404,6 +406,7 @@ export function nodeTypeTitle(location: NodeLocation, blockCatalog: BlockCatalog
   return ({
     'core/heading': __("Heading"), 'core/text': _x("Text", "builder.document"),
     'core/image': __("Image"), 'core/video': __("Video"), 'core/button': __("Button"), 'core/list': __("List"), 'core/contact_form': __("Contact form"),
+    'core/search_form': __("Search form"), 'core/search_results': __("Search results"),
     'core/pattern_ref': _x("Reusable Pattern", "builder.document"),
     'core/content_slot': _x("Content Slot", "builder.document"),
     'legacy/block': __("Theme block"),

@@ -1,9 +1,9 @@
 //! M7-S03-T01 admin entry route handlers and public custom-path / redirect fallback.
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     Json,
-    extract::{Extension, OriginalUri, Path, Query, State},
+    extract::{ConnectInfo, Extension, OriginalUri, Path, Query, State},
     http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -114,6 +114,8 @@ pub async fn public_fallback(
     State(render_cache): State<Arc<ExtensionRenderCache>>,
     themes_root: Option<Extension<ThemeStoreRoot>>,
     telemetry: Option<Extension<Arc<RedirectTelemetryBuffer>>>,
+    search_limiter: Option<Extension<crate::routes::search::SearchRateLimiter>>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     method: Method,
     OriginalUri(uri): OriginalUri,
@@ -156,6 +158,7 @@ pub async fn public_fallback(
         {
             return missing_public_page(&db, themes_root, None, Some(&services)).await;
         }
+        crate::public_context::validate_percent_encoding(raw).map_err(ApiError::bad_request)?;
         if decoded_path != "/" && decoded_path.len() <= MAX_REDIRECT_SOURCE_PATH_BYTES {
             if let Some(hit) = find_active_manual_redirect(&db, &decoded_path)
                 .await
@@ -194,7 +197,37 @@ pub async fn public_fallback(
     }
 
     validate_public_request_path(lookup_path).map_err(ApiError::bad_request)?;
+    crate::public_context::validate_percent_encoding(raw).map_err(ApiError::bad_request)?;
     let resolved = permalinks::resolve_public_path(&db, lookup_path).await?;
+    let peer_key = crate::routes::search::peer_rate_limit_key(peer.as_ref());
+    if resolved.is_none()
+        && !first_seg.is_empty()
+        && !lookup_path[1..].contains('/')
+        && crate::public_context::has_search_param(raw)
+        && let Some(locale) =
+            crate::storage::settings::enabled_secondary_locale_for_segment(&db, first_seg).await?
+    {
+        let sq = crate::public_context::parse_search_query(raw).map_err(ApiError::bad_request)?;
+        if had_trailing_slash {
+            let target = CanonicalUrlBuilder::search_url(
+                &format!("/{locale}"),
+                Some(&sq.query),
+                sq.content_type.as_deref(),
+                sq.page,
+            );
+            return Ok(permanent_public_redirect(target));
+        }
+        return crate::routes::public_content::render_search_response_for_locale(
+            &db,
+            themes_root,
+            &locale,
+            raw,
+            Some(&services),
+            search_limiter.as_ref().map(|Extension(l)| l),
+            &peer_key,
+        )
+        .await;
+    }
     if resolved.as_ref().is_none_or(|r| r.redirect)
         && lookup_path != "/"
         && lookup_path.len() <= MAX_REDIRECT_SOURCE_PATH_BYTES
@@ -245,6 +278,29 @@ pub async fn public_fallback(
             locale,
             is_home,
         } => {
+            if is_home && crate::public_context::has_search_param(raw) {
+                let sq = crate::public_context::parse_search_query(raw)
+                    .map_err(ApiError::bad_request)?;
+                if resolved.redirect || had_trailing_slash {
+                    let target = CanonicalUrlBuilder::search_url(
+                        &resolved.canonical_path,
+                        Some(&sq.query),
+                        sq.content_type.as_deref(),
+                        sq.page,
+                    );
+                    return Ok(permanent_public_redirect(target));
+                }
+                return crate::routes::public_content::render_search_response_for_locale(
+                    &db,
+                    themes_root,
+                    &locale,
+                    raw,
+                    Some(&services),
+                    search_limiter.as_ref().map(|Extension(l)| l),
+                    &peer_key,
+                )
+                .await;
+            }
             validate_single_query(raw).map_err(ApiError::bad_request)?;
             let Some(record) = public_content::get_published_by_id(&db, id).await? else {
                 let response =
@@ -270,6 +326,8 @@ pub async fn public_fallback(
                     resolved.canonical_path,
                     raw,
                     Some(&services),
+                    search_limiter.as_ref().map(|Extension(l)| l),
+                    &peer_key,
                 )
                 .await
             } else {
@@ -344,6 +402,29 @@ pub async fn public_fallback(
             .await
         }
         PublicRouteTarget::Home { locale } => {
+            if crate::public_context::has_search_param(raw) {
+                let sq = crate::public_context::parse_search_query(raw)
+                    .map_err(ApiError::bad_request)?;
+                if resolved.redirect || had_trailing_slash {
+                    let target = CanonicalUrlBuilder::search_url(
+                        &resolved.canonical_path,
+                        Some(&sq.query),
+                        sq.content_type.as_deref(),
+                        sq.page,
+                    );
+                    return Ok(permanent_public_redirect(target));
+                }
+                return crate::routes::public_content::render_search_response_for_locale(
+                    &db,
+                    themes_root,
+                    &locale,
+                    raw,
+                    Some(&services),
+                    search_limiter.as_ref().map(|Extension(l)| l),
+                    &peer_key,
+                )
+                .await;
+            }
             validate_single_query(raw).map_err(ApiError::bad_request)?;
             if resolved.redirect || had_trailing_slash {
                 return Ok(permanent_public_redirect(resolved.canonical_path));
@@ -355,6 +436,8 @@ pub async fn public_fallback(
                 resolved.canonical_path,
                 raw,
                 Some(&services),
+                search_limiter.as_ref().map(|Extension(l)| l),
+                &peer_key,
             )
             .await
         }

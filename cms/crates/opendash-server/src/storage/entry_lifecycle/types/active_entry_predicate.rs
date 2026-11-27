@@ -148,6 +148,7 @@ pub(in crate::storage) async fn physical_delete_cleanup_in_tx(
     .execute(&mut **tx)
     .await?;
     crate::storage::plugin_projections::delete_entry_projections_in_tx(tx, row.id).await?;
+    crate::storage::search::delete_entry_search_index_in_conn(tx, row.id).await?;
     if row.type_key == "page" {
         crate::storage::permalinks::sync_claims_in_tx(tx).await?;
     } else {

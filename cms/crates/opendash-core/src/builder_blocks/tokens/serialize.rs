@@ -157,6 +157,24 @@ pub fn serialize_builder_document_to_blocks(
                                     props,
                                 )?;
                             }
+                            KnownElement::SearchForm(props) => {
+                                serialize_self_closing(
+                                    &mut out,
+                                    "search_form",
+                                    &element.id,
+                                    el_meta,
+                                    props,
+                                )?;
+                            }
+                            KnownElement::SearchResults(props) => {
+                                serialize_self_closing(
+                                    &mut out,
+                                    "search_results",
+                                    &element.id,
+                                    el_meta,
+                                    props,
+                                )?;
+                            }
                             KnownElement::ContentSlot(props) => {
                                 serialize_self_closing(
                                     &mut out,
