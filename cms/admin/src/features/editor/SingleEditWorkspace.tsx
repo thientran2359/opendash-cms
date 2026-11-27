@@ -248,7 +248,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       || target.schemaToken !== activeMediaSchemaRef.current
       || !eff || !eff.editable || eff.effective_status !== 'active'
       || !supportAllowsField(typeKey, target.fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
-      || eff.definition.type !== target.kind
+      || eff.definition.type !== (target.kind === 'image' ? 'media' : 'gallery')
     ) return;
     setMediaPicker(null);
     // Trust the picker-provided ordered selection, not any stale React values

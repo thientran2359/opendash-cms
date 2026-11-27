@@ -100,9 +100,9 @@ pub struct EditorLayoutConfigV1 {
     pub regions: EditorRegionsConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectiveFieldProjection {
-    pub definition: ContentFieldDefinition,
+    pub definition: crate::field_schema::FieldSpec,
     pub owner: ResourceOwner,
     pub source_id: String,
     pub effective_status: EffectiveFieldStatus,
@@ -126,7 +126,7 @@ pub struct EffectiveEditorRegionsProjection {
     pub sidebar: Vec<EffectivePanelProjection>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectiveEditorConfigProjection {
     pub type_key: String,
     pub label: String,
@@ -173,7 +173,7 @@ pub(crate) fn has_core_body_panel(effective: &EffectiveContentSchema) -> bool {
         && effective
             .effective_fields
             .get("body")
-            .is_some_and(|fe| fe.definition.field_type == ContentFieldType::RichText)
+            .is_some_and(|fe| fe.definition.field_type == crate::field_schema::FieldType::Richtext)
 }
 
 pub fn eligible_base_field_keys(effective: &EffectiveContentSchema) -> Vec<String> {

@@ -4,11 +4,13 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::field_schema::{FieldContext, FieldSpec};
+
 pub const MAX_COLUMNS_PER_OWNER: usize = 16;
 pub const MAX_PANELS_PER_OWNER: usize = 16;
 pub const MAX_COLUMNS_EFFECTIVE: usize = 32;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AdminExtensions {
     pub schema_version: u8,
@@ -39,40 +41,14 @@ pub struct AdminColumn {
     pub action_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TermFieldType {
-    Text,
-    Textarea,
-    Boolean,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TermFieldRole {
-    Admin,
-    Editor,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct TermPanelField {
-    pub key: String,
-    pub label: String,
-    #[serde(rename = "type")]
-    pub field_type: TermFieldType,
-    pub required: bool,
-    pub min_role: TermFieldRole,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AdminTermPanel {
     pub local_key: String,
     pub label: String,
     pub kind: String,
     pub order: i32,
-    pub fields: Vec<TermPanelField>,
+    pub fields: Vec<FieldSpec>,
 }
 
 fn valid_local_key(key: &str) -> bool {
@@ -159,15 +135,18 @@ impl AdminExtensions {
             if panel.fields.is_empty() || panel.fields.len() > 16 {
                 return Err("admin_extensions term panel cần 1..16 fields.");
             }
-            let mut fields = BTreeSet::new();
             for field in &panel.fields {
-                if !valid_local_key(&field.key)
-                    || !valid_label(&field.label)
-                    || !fields.insert(field.key.as_str())
-                {
+                if !valid_local_key(&field.key) {
                     return Err("admin_extensions term field key/label không hợp lệ hoặc trùng.");
                 }
             }
+            let mut normalized = panel.fields.clone();
+            crate::field_schema::normalize_field_specs_for_scope(
+                &mut normalized,
+                FieldContext::Term,
+                crate::field_schema::FieldScopeKind::TermPanelField,
+            )
+            .map_err(|_| "admin_extensions term field key/label không hợp lệ hoặc trùng.")?;
         }
         Ok(())
     }

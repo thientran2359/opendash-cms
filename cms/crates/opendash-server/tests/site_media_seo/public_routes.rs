@@ -449,7 +449,7 @@ async fn custom_entry_routes_redirects_cas_and_privacy() {
             "key": "landing",
             "label": "Landing",
             "fields": [
-                { "key": "summary", "label": "Summary", "type": "short_text" }
+                { "key": "summary", "label": "Summary", "type": "text" }
             ]
         }))
         .send()

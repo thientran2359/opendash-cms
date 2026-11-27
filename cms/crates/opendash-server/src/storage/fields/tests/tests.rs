@@ -58,28 +58,22 @@ async fn lists_all_8_options_sources_and_enforces_visibility_filters() {
             {
                 "key": "price",
                 "label": "Giá bán",
-                "type": "short_text",
-                "min_view_role": "editor",
-                "min_edit_role": "editor",
-                "public_exposure": "public",
+                "type": "text",
+                "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public"},
                 "declaration_state": "declared"
             },
             {
                 "key": "cost",
                 "label": "Giá vốn",
-                "type": "short_text",
-                "min_view_role": "admin",
-                "min_edit_role": "admin",
-                "public_exposure": "private",
+                "type": "text",
+                "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"},
                 "declaration_state": "declared"
             },
             {
                 "key": "internal_note",
                 "label": "Ghi chú nội bộ",
-                "type": "short_text",
-                "min_view_role": "editor",
-                "min_edit_role": "editor",
-                "public_exposure": "private",
+                "type": "text",
+                "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "private"},
                 "declaration_state": "declared"
             }
         ],

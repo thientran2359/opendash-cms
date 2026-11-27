@@ -60,23 +60,6 @@ pub enum EffectiveFieldStatus {
     Withdrawn,
 }
 
-/// The nine custom-field kinds supported by the V1 content editor.
-/// Rendering of field values belongs to later M3/M4 slices. Values are
-/// validated here before persistence; rich text is never rendered as HTML here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ContentFieldType {
-    ShortText,
-    LongText,
-    RichText,
-    Number,
-    Boolean,
-    Date,
-    Select,
-    Image,
-    Gallery,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SelectOption {
@@ -96,27 +79,11 @@ pub(crate) const fn default_true() -> bool {
     true
 }
 
-pub fn valid_default_value(field: &ContentFieldDefinition, value: &Value) -> bool {
+pub fn valid_default_value(field: &crate::field_schema::FieldSpec, value: &Value) -> bool {
     if value.is_null() {
         return false;
     }
-    if matches!(
-        field.field_type,
-        ContentFieldType::Image | ContentFieldType::Gallery
-    ) {
-        return false;
-    }
-    if !valid_field_value(field, value) {
-        return false;
-    }
-    if matches!(
-        field.field_type,
-        ContentFieldType::ShortText | ContentFieldType::LongText | ContentFieldType::RichText
-    ) && value.as_str().is_none_or(|s| s.trim().is_empty())
-    {
-        return false;
-    }
-    true
+    valid_field_value(field, value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -214,9 +181,9 @@ impl ContentTypeSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectiveFieldEntry {
-    pub definition: ContentFieldDefinition,
+    pub definition: crate::field_schema::FieldSpec,
     pub owner: ResourceOwner,
     pub source_id: String,
     pub effective_status: EffectiveFieldStatus,

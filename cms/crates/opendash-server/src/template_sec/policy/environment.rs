@@ -197,12 +197,16 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
         return Err("Template hoặc part vượt giới hạn 512 KiB.");
     }
     let root_sites = composition_sites(root_name, root_source, false, policy)?;
+    let part_policy = policy.without_cpt_entry_fields();
     let mut part_sites = BTreeMap::new();
     for (key, source) in parts {
         if !valid_part_key(key) {
             return Err("Part key không hợp lệ.");
         }
-        part_sites.insert(key.clone(), composition_sites(key, source, true, policy)?);
+        part_sites.insert(
+            key.clone(),
+            composition_sites(key, source, true, &part_policy)?,
+        );
     }
 
     // Check all declared parts, even unreachable ones: a dormant cycle must

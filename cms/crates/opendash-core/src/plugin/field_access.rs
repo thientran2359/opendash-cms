@@ -99,10 +99,11 @@ pub fn plugin_can_read_field_for_owner(
             return false;
         }
     }
-    if actor_role < field_entry.definition.min_view_role {
+    let (min_view_role, _, public_exposure) = field_entry.definition.effective_acl();
+    if actor_role < min_view_role {
         return false;
     }
-    if field_entry.definition.public_exposure == crate::content::PublicExposure::Public {
+    if public_exposure == crate::content::PublicExposure::Public {
         return true;
     }
     let expected_owner = match owner_kind {
@@ -157,10 +158,11 @@ pub fn plugin_can_write_field_for_owner(
             return false;
         }
     }
-    if actor_role < field_entry.definition.min_edit_role {
+    let (_, min_edit_role, public_exposure) = field_entry.definition.effective_acl();
+    if actor_role < min_edit_role {
         return false;
     }
-    if field_entry.definition.public_exposure == crate::content::PublicExposure::Public {
+    if public_exposure == crate::content::PublicExposure::Public {
         return true;
     }
     let expected_owner = match owner_kind {

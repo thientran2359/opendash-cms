@@ -157,15 +157,13 @@ async fn site_instance_id_downgrade_scrub_and_fallback_save() {
             "key": "portfolio",
             "label": "Portfolio",
             "fields": [
-                { "key": "client", "label": "Client", "type": "short_text", "required": true },
+                { "key": "client", "label": "Client", "type": "text", "required": true },
                 {
                     "key": "margin",
                     "label": "Margin",
                     "type": "number",
                     "required": false,
-                    "min_view_role": "admin",
-                    "min_edit_role": "admin",
-                    "public_exposure": "private"
+                    "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}
                 }
             ]
         }))

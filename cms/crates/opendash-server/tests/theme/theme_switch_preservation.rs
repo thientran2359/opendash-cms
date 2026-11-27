@@ -155,7 +155,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
                     "key": "portfolio",
                     "label": "Portfolio",
                     "fields": [
-                        { "key": "client", "label": "Client", "type": "short_text", "required": true },
+                        { "key": "client", "label": "Client", "type": "text", "required": true },
                         { "key": "budget", "label": "Budget", "type": "number", "required": false }
                     ],
                     "taxonomies": ["category", "tag"]
@@ -566,7 +566,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
                     "key": "portfolio",
                     "label": "Portfolio",
                     "fields": [
-                        { "key": "client", "label": "Client", "type": "short_text", "required": true },
+                        { "key": "client", "label": "Client", "type": "text", "required": true },
                         { "key": "budget", "label": "Budget", "type": "number", "required": false },
                         { "key": "year", "label": "Year", "type": "number", "required": false }
                     ],

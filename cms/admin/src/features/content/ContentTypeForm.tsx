@@ -2,9 +2,8 @@ import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import {
-  CONTENT_FIELD_TYPES,
-  ContentFieldDefinition,
-  ContentFieldType,
+  FieldSpec,
+  FieldType,
 } from './types.ts';
 import type { ContentPublicationPolicy, ContentSupport, ContentTypeDefinitionWithSettings } from '../../api/content.ts';
 
@@ -17,7 +16,7 @@ export interface DraftField {
   id: number;
   key: string;
   label: string;
-  type: ContentFieldType;
+  type: FieldType;
   required: boolean;
   optionsText: string;
 }
@@ -98,7 +97,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
       id: nextId.current,
       key: '',
       label: '',
-      type: 'short_text',
+      type: 'text',
       required: false,
       optionsText: '',
     }] });
@@ -117,12 +116,12 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
     if (!label.trim()) throw new Error(tStatic("feature.content.contenttypeform.enter_a_content_type_name"));
     if (label.length > 100) throw new Error(tStatic("feature.content.contenttypeform.the_content_type_name_must_be_at_most_100"));
     const usedKeys = new Set<string>();
-    const resultFields: ContentFieldDefinition[] = fields.map(field => {
+    const resultFields: FieldSpec[] = fields.map(field => {
       if (!snakeKeyPattern.test(field.key)) throw new Error(tStatic("feature.content.contenttypeform.field_key_value_is_invalid", { value1: field.label || field.key }));
       if (!field.label.trim() || field.label.length > 100) throw new Error(tStatic("feature.content.contenttypeform.field_name_value_is_invalid", { value1: field.key }));
       if (usedKeys.has(field.key)) throw new Error(tStatic("feature.content.contenttypeform.field_value_has_a_duplicate_key", { value1: field.key }));
       usedKeys.add(field.key);
-      let options: ContentFieldDefinition['options'] = [];
+      let options: FieldSpec['options'] = [];
       if (field.type === 'select') {
         const lines = field.optionsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
         if (!lines.length || lines.length > 100) {
@@ -318,9 +317,9 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
                 className={SELECT_CLASS}
                 value={field.type}
                 disabled={disabled}
-                onChange={event => updateField(field.id, { type: event.target.value as ContentFieldType })}
+                onChange={event => updateField(field.id, { type: event.target.value as FieldType })}
               >
-                {CONTENT_FIELD_TYPES.map(opt => (
+                {(['text','textarea','richtext','number','boolean','date','select','media','gallery'] as FieldType[]).map(v => ({ value: v, label: v })).map(opt => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>

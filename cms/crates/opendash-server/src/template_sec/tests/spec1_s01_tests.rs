@@ -3,11 +3,11 @@ use serde_json::json;
 
 #[test]
 fn none_formatter_and_default_wrapper_keep_strict_undefined() {
-    let tpl = "<p>{{ entry.values.note }}|{{ entry.values.note | default('N/A') }}|{{ entry.values.note | d('') }}</p>";
+    let tpl = "<p>{{ entry.fields.note }}|{{ entry.fields.note | default('N/A') }}|{{ entry.fields.note | d('') }}</p>";
     let out = render_csec(
         "none_test",
         tpl,
-        json_to_safe_value(&json!({ "entry": { "values": { "note": null } } })),
+        json_to_safe_value(&json!({ "entry": { "fields": { "note": null } } })),
     )
     .unwrap();
     assert_eq!(decode_html_entities_for_url(&out), "<p>|N/A|</p>");

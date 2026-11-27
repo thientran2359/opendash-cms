@@ -733,15 +733,17 @@ async fn s03_copy_on_create_rbac_and_immediate_cpt() {
         "label": "FAQ",
         "settings": { "public": true, "has_archive": false, "publication": "immediate", "supports": ["editor"] },
         "fields": [
-            { "key": "answer", "label": "Answer", "type": "short_text", "required": true },
+            { "key": "answer", "label": "Answer", "type": "text", "required": true },
             {
                 "key": "admin_note",
                 "label": "Admin Note",
-                "type": "short_text",
+                "type": "text",
                 "required": false,
-                "min_view_role": "admin",
-                "min_edit_role": "admin",
-                "public_exposure": "private"
+                "acl": {
+                    "min_view_role": "admin",
+                    "min_edit_role": "admin",
+                    "public_exposure": "private"
+                }
             }
         ]
     });
@@ -815,16 +817,18 @@ async fn s03_copy_on_create_rbac_and_immediate_cpt() {
             "label": "FAQ Req",
             "settings": { "public": true, "has_archive": false, "publication": "immediate", "supports": ["editor"] },
             "fields": [
-                { "key": "answer", "label": "Answer", "type": "short_text", "required": true },
+                { "key": "answer", "label": "Answer", "type": "text", "required": true },
                 {
                     "key": "admin_note",
                     "label": "Admin Note",
-                    "type": "short_text",
+                    "type": "text",
                     "required": true,
-                    "default_value": "admin-default",
-                    "min_view_role": "admin",
-                    "min_edit_role": "admin",
-                    "public_exposure": "private"
+                    "default": "admin-default",
+                    "acl": {
+                        "min_view_role": "admin",
+                        "min_edit_role": "admin",
+                        "public_exposure": "private"
+                    }
                 }
             ]
         }))

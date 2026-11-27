@@ -1,5 +1,7 @@
 import { tStatic, useI18n } from '../../i18n/index.tsx';
 import type { EntryTableRow } from '../content/types.ts';
+import type { FieldSpec } from '../../fields/types.ts';
+import { UnifiedFieldForm } from '../../fields/UnifiedFieldForm.tsx';
 
 /** Declarative server-projected configuration only: no HTML/JS/CSS injection. */
 export interface ProviderColumn {
@@ -18,19 +20,11 @@ export interface EffectiveListConfig {
   columns: ProviderColumn[];
 }
 
-export interface TermPanelField {
-  key: string;
-  label: string;
-  type: 'text' | 'textarea' | 'boolean';
-  required: boolean;
-  min_role: 'admin' | 'editor';
-}
-
 export interface EffectiveTermPanel {
   key: string;
   label: string;
   order: number;
-  fields: TermPanelField[];
+  fields: FieldSpec[];
 }
 
 export type TermExtensionValues = Record<string, Record<string, string | boolean | null>>;
@@ -91,15 +85,17 @@ export function AdminColumnCell({
   );
 }
 
-const fieldClass = 'mt-1 block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50';
+
 
 export function AdminTermPanels({
-  config, values, disabled, onChange,
+  config, values, disabled, onChange, csrfToken = null, onApiError,
 }: {
   config: EffectiveTermConfig;
   values: TermExtensionValues;
   disabled: boolean;
   onChange: (panelKey: string, key: string, value: string | boolean | null) => void;
+  csrfToken?: string | null;
+  onApiError?: (err: unknown, fallback: string) => void;
 }) {
   useI18n();
   if (!config.panels.length) return null;
@@ -107,24 +103,21 @@ export function AdminTermPanels({
     {config.panels.map(panel => <fieldset key={panel.key} className="space-y-3 rounded-xl border border-slate-200 p-4"
       data-provider-panel={panel.key}>
       <legend className="px-1 text-sm font-semibold text-slate-900">{panel.label}</legend>
-      {panel.fields.map((field, index) => {
-        const id = `term-panel-${panel.key.replace(/[^a-zA-Z0-9]/g, '-')}-${index}`;
-        const stored = values[panel.key]?.[field.key];
-        return <label key={field.key} htmlFor={id} className="block text-sm font-medium text-slate-800">
-          {field.label}{field.required ? ' *' : ''}
-          {field.type === 'boolean' ? <span className="mt-1 flex gap-2">
-            <input id={id} type="checkbox" checked={stored === true} disabled={disabled}
-              onChange={event => onChange(panel.key, field.key, event.target.checked)} />
-            <span>{stored === true ? tStatic("feature.content.fieldvalueinput.on") : tStatic("shell.locale_disabled")}</span>
-          </span> : field.type === 'textarea' ?
-            <textarea id={id} className={fieldClass} rows={3} maxLength={4096} disabled={disabled}
-              required={field.required} value={typeof stored === 'string' ? stored : ''}
-              onChange={event => onChange(panel.key, field.key, event.target.value)} /> :
-            <input id={id} className={fieldClass} maxLength={4096} disabled={disabled}
-              required={field.required} value={typeof stored === 'string' ? stored : ''}
-              onChange={event => onChange(panel.key, field.key, event.target.value)} />}
-        </label>;
-      })}
+      <UnifiedFieldForm
+        context="term"
+        fields={panel.fields}
+        values={values[panel.key] ?? {}}
+        onChange={next => {
+          for (const field of panel.fields) {
+            if (field.key in next && next[field.key] !== values[panel.key]?.[field.key]) {
+              onChange(panel.key, field.key, next[field.key] as string | boolean | null);
+            }
+          }
+        }}
+        csrfToken={csrfToken}
+        disabled={disabled}
+        onApiError={onApiError ?? (() => {})}
+      />
     </fieldset>)}
   </div>;
 }

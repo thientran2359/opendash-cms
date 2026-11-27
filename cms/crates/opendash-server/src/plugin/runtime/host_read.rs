@@ -41,7 +41,7 @@ pub(super) fn project_entry_for_host(
     for (k, v) in entry.values {
         if let Some(fe) = effective.effective_fields.get(&k) {
             let allowed = if is_public_scope {
-                fe.definition.public_exposure == PublicExposure::Public
+                fe.definition.effective_acl().2 == PublicExposure::Public
                     && plugin_can_read_field_for_owner(
                         owner_kind,
                         manifest,

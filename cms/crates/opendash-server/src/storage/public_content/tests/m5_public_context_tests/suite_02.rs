@@ -10,7 +10,7 @@ async fn c1_visibility_hides_single_archive_taxonomy_media_seo_and_sitemap() {
     sqlx::migrate!("../../migrations").run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key,definition_json,owner_kind)
-           VALUES('news', '{"key":"news","label":"News","fields":[{"key":"hero","label":"Hero","type":"image"}],"settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":["editor","featured_image"]}}', 'user')"#,
+           VALUES('news', '{"key":"news","label":"News","fields":[{"key":"hero","label":"Hero","type":"media"}],"settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":["editor","featured_image"]}}', 'user')"#,
     )
     .execute(&db)
     .await
@@ -167,6 +167,12 @@ async fn c1_visibility_hides_single_archive_taxonomy_media_seo_and_sitemap() {
         .total,
         1
     );
+    sqlx::query("INSERT OR IGNORE INTO entry_builder_media_refs(entry_id, media_id, ref_role, source_kind) VALUES (?, ?, 'image', 'field')")
+        .bind(entry_id)
+        .bind(&hero_id)
+        .execute(&db)
+        .await
+        .unwrap();
     assert!(media_is_referenced(&db, &hero_id).await.unwrap());
     assert!(media_is_referenced(&db, &seo_image_id).await.unwrap());
     assert_eq!(

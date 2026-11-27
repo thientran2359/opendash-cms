@@ -12,9 +12,7 @@ pub(super) use opendash_core::{
         ExtractedBlockRefs, extract_block_refs_lenient_with_schemas,
         serialize_builder_document_to_blocks,
     },
-    content::{
-        ContentFieldType, ContentSupport, EffectiveContentSchema, FieldRole, PublicExposure,
-    },
+    content::{ContentSupport, EffectiveContentSchema, FieldRole, PublicExposure},
     registry::{DeclarationState, OwnedDescriptor, ProviderStatus, RegistryCatalog, ResourceOwner},
 };
 

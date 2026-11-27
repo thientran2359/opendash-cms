@@ -66,7 +66,7 @@ pub(in crate::storage) async fn load_field_group_in_tx(
         });
     }
 
-    let fields: Vec<ContentFieldDefinition> = serde_json::from_str(&fields_json)
+    let fields: Vec<opendash_core::field_schema::FieldSpec> = serde_json::from_str(&fields_json)
         .map_err(|_| ApiError::internal("Dữ liệu fields_json của field group không hợp lệ."))?;
     let default_region = EditorRegion::from_db(&default_region_str)
         .ok_or_else(|| ApiError::internal("default_region của field group không hợp lệ."))?;

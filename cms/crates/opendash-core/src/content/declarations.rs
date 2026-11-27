@@ -4,15 +4,16 @@ use super::*;
 /// re-declares a CPT or field group (`270-R1`). Preserves declared order of incoming fields and
 /// appends withdrawn fields deterministically.
 pub fn merge_package_redeclared_fields(
-    existing_fields: &[ContentFieldDefinition],
-    incoming_fields: &[ContentFieldDefinition],
-) -> Vec<ContentFieldDefinition> {
+    existing_fields: &[crate::field_schema::FieldSpec],
+    incoming_fields: &[crate::field_schema::FieldSpec],
+) -> Vec<crate::field_schema::FieldSpec> {
     let incoming_keys: HashSet<&str> = incoming_fields.iter().map(|f| f.key.as_str()).collect();
-    let mut merged: Vec<ContentFieldDefinition> = incoming_fields.to_vec();
+    let mut merged: Vec<crate::field_schema::FieldSpec> = incoming_fields.to_vec();
     for old in existing_fields {
         if !incoming_keys.contains(old.key.as_str()) {
             let mut withdrawn = old.clone();
-            withdrawn.declaration_state = DeclarationState::Withdrawn;
+            withdrawn.declaration_state =
+                Some(crate::field_schema::FieldDeclarationState::Withdrawn);
             merged.push(withdrawn);
         }
     }
@@ -35,13 +36,13 @@ pub(super) fn validate_provider_rewrite_base(base: Option<&str>) -> Result<(), &
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentTypeDeclaration {
     pub key: String,
     pub label: String,
     #[serde(default)]
-    pub fields: Vec<ContentFieldDefinition>,
+    pub fields: Vec<crate::field_schema::FieldSpec>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
     /// Omission preserves existing provider-owned settings on package re-install.

@@ -105,8 +105,8 @@ pub async fn prepare_entry_translation(
     let mut copied_values = BTreeMap::new();
     for (k, v) in &source.values {
         if let Some(fe) = effective.effective_fields.get(k)
-            && (caller_role < fe.definition.min_view_role
-                || caller_role < fe.definition.min_edit_role)
+            && (caller_role < fe.definition.effective_acl().0
+                || caller_role < fe.definition.effective_acl().1)
         {
             continue;
         }
@@ -115,10 +115,10 @@ pub async fn prepare_entry_translation(
     for (k, fe) in &effective.effective_fields {
         if fe.effective_status != EffectiveFieldStatus::Withdrawn
             && fe.definition.required
-            && (caller_role < fe.definition.min_view_role
-                || caller_role < fe.definition.min_edit_role)
+            && (caller_role < fe.definition.effective_acl().0
+                || caller_role < fe.definition.effective_acl().1)
         {
-            if let Some(def) = &fe.definition.default_value {
+            if let Some(def) = &fe.definition.default {
                 copied_values
                     .entry(k.clone())
                     .or_insert_with(|| def.clone());

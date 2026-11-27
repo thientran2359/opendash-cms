@@ -7,62 +7,6 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     let result: i64 = sqlx::query_scalar(
         r#"SELECT EXISTS (
            SELECT 1
-           FROM content_entries AS e
-           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-           JOIN content_types AS t ON t.key = e.content_type_key
-           JOIN json_each(t.definition_json, '$.fields') AS f
-           WHERE e.trashed_at IS NULL AND e.publication_status = 'published' AND e.content_type_key != 'pattern'
-             AND t.provider_status = 'active'
-             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
-             AND COALESCE(json_extract(f.value, '$.public_exposure'), 'public') = 'public'
-             AND (
-             (
-               json_extract(f.value, '$.type') = 'image'
-               AND json_extract(e.values_json, '$.' || json_extract(f.value, '$.key')) = ?
-             )
-             OR (
-               json_extract(f.value, '$.type') = 'gallery'
-               AND EXISTS (
-                 SELECT 1
-                 FROM json_each(json_extract(e.values_json, '$.' || json_extract(f.value, '$.key'))) AS item
-                 WHERE item.value = ?
-               )
-             )
-             )
-           LIMIT 1
-         ) OR EXISTS (
-           SELECT 1
-           FROM content_entries AS e
-           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-           JOIN content_types AS t ON t.key = e.content_type_key
-           JOIN content_field_group_targets AS gt
-             ON gt.type_key = e.content_type_key
-            AND gt.association_state IN ('declared', 'withdrawn')
-           JOIN content_field_groups AS g
-             ON g.group_id = gt.group_id
-            AND g.status IN ('active', 'provider_inactive', 'withdrawn')
-           JOIN json_each(g.fields_json) AS f
-           WHERE e.trashed_at IS NULL AND e.publication_status = 'published' AND e.content_type_key != 'pattern'
-             AND t.provider_status = 'active'
-             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
-             AND COALESCE(json_extract(f.value, '$.public_exposure'), 'private') = 'public'
-             AND (
-             (
-               json_extract(f.value, '$.type') = 'image'
-               AND json_extract(e.values_json, '$.' || json_extract(f.value, '$.key')) = ?
-             )
-             OR (
-               json_extract(f.value, '$.type') = 'gallery'
-               AND EXISTS (
-                 SELECT 1
-                 FROM json_each(json_extract(e.values_json, '$.' || json_extract(f.value, '$.key'))) AS item
-                 WHERE item.value = ?
-               )
-             )
-             )
-           LIMIT 1
-         ) OR EXISTS (
-           SELECT 1
            FROM site_global_option_media_refs AS gom
            WHERE gom.media_id = ?
          ) OR EXISTS (
@@ -172,10 +116,6 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     .bind(id)
     .bind(id)
     .bind(id)
-    .bind(id)
-    .bind(id)
-    .bind(id)
-    .bind(id)
     .fetch_one(db)
     .await?;
     if result != 0 {
@@ -235,11 +175,11 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            AND e.content_type_key NOT IN ('pattern', 'section')
            AND (
              EXISTS (SELECT 1 FROM entry_builder_media_refs AS r
-                     WHERE r.entry_id = e.id AND r.media_id = ?)
+                     WHERE r.entry_id = e.id AND r.media_id = ? AND r.source_kind = 'builder')
              OR EXISTS (
                SELECT 1 FROM entry_pattern_refs AS pref
                JOIN entry_builder_media_refs AS r ON r.entry_id = pref.target_pattern_id
-               WHERE pref.source_entry_id = e.id AND r.media_id = ?
+               WHERE pref.source_entry_id = e.id AND r.media_id = ? AND r.source_kind = 'builder'
              )
            )",
     )
@@ -247,17 +187,76 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     .bind(id)
     .fetch_all(db)
     .await?;
-    if builder_type_keys.is_empty() {
-        return Ok(false);
+    if !builder_type_keys.is_empty() {
+        let mut conn = db.acquire().await?;
+        for type_key in builder_type_keys {
+            if let Some(schema) =
+                crate::storage::content::load_effective_content_schema_in_tx(&mut conn, &type_key)
+                    .await?
+                && crate::storage::page::body_can_grant_media(&schema)
+            {
+                return Ok(true);
+            }
+        }
     }
-    let mut conn = db.acquire().await?;
-    for type_key in builder_type_keys {
-        if let Some(schema) =
-            crate::storage::content::load_effective_content_schema_in_tx(&mut conn, &type_key)
-                .await?
-            && crate::storage::page::body_can_grant_media(&schema)
-        {
-            return Ok(true);
+
+    let field_candidates: Vec<(String, String)> = sqlx::query_as(
+        "SELECT DISTINCT e.content_type_key, e.values_json
+         FROM entry_builder_media_refs AS r
+         JOIN content_entries AS e ON e.id = r.entry_id
+         JOIN content_types AS t ON t.key = e.content_type_key
+         JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL
+          AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+         WHERE r.media_id = ?
+           AND r.source_kind = 'field'
+           AND e.trashed_at IS NULL
+           AND e.publication_status = 'published'
+           AND e.content_type_key NOT IN ('pattern', 'section')
+           AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
+    )
+    .bind(id)
+    .fetch_all(db)
+    .await?;
+    if !field_candidates.is_empty() {
+        let mut conn = db.acquire().await?;
+        for (type_key, values_json) in field_candidates {
+            let Some(schema) =
+                crate::storage::content::load_effective_content_schema_in_tx(&mut conn, &type_key)
+                    .await?
+            else {
+                continue;
+            };
+            let Ok(values) = serde_json::from_str::<
+                std::collections::BTreeMap<String, serde_json::Value>,
+            >(&values_json) else {
+                continue;
+            };
+            for (key, entry) in &schema.effective_fields {
+                if key == "body" {
+                    continue;
+                }
+                if entry.definition.effective_acl().2
+                    != opendash_core::content::PublicExposure::Public
+                {
+                    continue;
+                }
+                if let Some(val) = values.get(key) {
+                    let collected = opendash_core::field_schema::collect_media_ids(
+                        std::slice::from_ref(&entry.definition),
+                        &std::collections::BTreeMap::from([(
+                            entry.definition.key.clone(),
+                            val.clone(),
+                        )]),
+                    );
+                    if collected.image_ids.contains(id)
+                        || collected.video_ids.contains(id)
+                        || collected.any_ids.contains(id)
+                        || collected.file_ids.contains(id)
+                    {
+                        return Ok(true);
+                    }
+                }
+            }
         }
     }
     Ok(false)

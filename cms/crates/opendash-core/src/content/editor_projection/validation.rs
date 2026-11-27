@@ -1,42 +1,21 @@
 use super::*;
 
-pub fn valid_field_value(field: &ContentFieldDefinition, value: &Value) -> bool {
-    let text = value.as_str();
-    match field.field_type {
-        ContentFieldType::ShortText => text.is_some_and(|s| {
-            s.chars().count() <= 512
-                && s.chars().all(|c| !c.is_control())
-                && (!field.required || !s.trim().is_empty())
-        }),
-        ContentFieldType::LongText => text.is_some_and(|s| {
-            s.chars().count() <= 100_000 && (!field.required || !s.trim().is_empty())
-        }),
-        ContentFieldType::RichText => text.is_some_and(|s| {
-            let len_ok = if crate::builder_blocks::contains_blocks(s) {
-                s.len() <= crate::builder_blocks::MAX_BUILDER_BLOCK_BODY_BYTES
-                    && s.chars().count() <= crate::builder_blocks::MAX_BUILDER_BLOCK_BODY_BYTES
-            } else {
-                s.chars().count() <= 200_000
-            };
-            len_ok && (!field.required || !s.trim().is_empty())
-        }),
-        ContentFieldType::Number => value.is_number(),
-        ContentFieldType::Boolean => value.is_boolean(),
-        ContentFieldType::Date => text.is_some_and(valid_iso_date),
-        ContentFieldType::Select => {
-            text.is_some_and(|selected| field.options.iter().any(|option| option.value == selected))
-        }
-        ContentFieldType::Image => text.is_some_and(valid_media_id),
-        ContentFieldType::Gallery => value.as_array().is_some_and(|items| {
-            (!field.required || !items.is_empty()) && items.len() <= 50 && {
-                let mut seen = HashSet::new();
-                items.iter().all(|item| {
-                    item.as_str()
-                        .is_some_and(|id| valid_media_id(id) && seen.insert(id))
-                })
-            }
-        }),
-    }
+pub fn valid_field_value(field: &crate::field_schema::FieldSpec, value: &Value) -> bool {
+    let empty = BTreeMap::new();
+    crate::field_schema::validate_field_value(
+        field,
+        crate::field_schema::FieldContext::Content,
+        value,
+        true,
+        true,
+        false,
+        None,
+        std::slice::from_ref(field),
+        &empty,
+        None,
+        true,
+    )
+    .is_ok()
 }
 
 /// The domain checks opaque media identifier syntax; the server storage layer
@@ -80,56 +59,10 @@ pub(crate) fn valid_iso_date(value: &str) -> bool {
 
 /// Compatibility helper used by legacy callers.
 pub fn check_base_fields_compatibility(
-    existing: &[ContentFieldDefinition],
-    incoming: &[ContentFieldDefinition],
+    existing: &[crate::field_schema::FieldSpec],
+    incoming: &[crate::field_schema::FieldSpec],
     has_existing_entries: bool,
 ) -> Result<(), &'static str> {
-    let incoming_by_key: HashMap<&str, &ContentFieldDefinition> =
-        incoming.iter().map(|f| (f.key.as_str(), f)).collect();
-    let existing_by_key: HashMap<&str, &ContentFieldDefinition> =
-        existing.iter().map(|f| (f.key.as_str(), f)).collect();
-
-    for old in existing {
-        let Some(new) = incoming_by_key.get(old.key.as_str()) else {
-            if has_existing_entries {
-                return Err(
-                    "cannot_remove_field_with_data: Không thể xóa hoặc đổi key field khi đã có dữ liệu cũ.",
-                );
-            }
-            continue;
-        };
-        if old.field_type != new.field_type {
-            return Err(
-                "incompatible_schema_change: Không thể đổi kiểu dữ liệu (type) của custom field đã tồn tại.",
-            );
-        }
-        let old_req = old.required && old.declaration_state != DeclarationState::Withdrawn;
-        let new_req = new.required && new.declaration_state != DeclarationState::Withdrawn;
-        if !old_req && new_req && has_existing_entries {
-            return Err(
-                "incompatible_schema_change: Không thể đổi field tùy chọn thành bắt buộc (required) khi đã có dữ liệu.",
-            );
-        }
-        if old.field_type == ContentFieldType::Select && has_existing_entries {
-            let new_values: HashSet<&str> = new.options.iter().map(|o| o.value.as_str()).collect();
-            for old_opt in &old.options {
-                if !new_values.contains(old_opt.value.as_str()) {
-                    return Err(
-                        "incompatible_schema_change: Không thể xóa lựa chọn (select option) khi đã có dữ liệu cũ.",
-                    );
-                }
-            }
-        }
-    }
-
-    for new in incoming {
-        let new_req = new.required && new.declaration_state != DeclarationState::Withdrawn;
-        if !existing_by_key.contains_key(new.key.as_str()) && new_req && has_existing_entries {
-            return Err(
-                "incompatible_schema_change: Không thể thêm field bắt buộc (required) mới khi đã có dữ liệu.",
-            );
-        }
-    }
-
-    Ok(())
+    crate::field_schema::check_schema_compatibility(existing, incoming, has_existing_entries)
+        .map_err(|_| "incompatible_schema_change: Không thể thay đổi schema không tương thích khi đã có dữ liệu.")
 }

@@ -158,12 +158,12 @@ pub(in crate::storage) fn check_entry_body_edit_acl(
             "Loại nội dung không có trường 'body' hợp lệ cho Trình dựng trang.",
         ));
     };
-    if body_field.definition.field_type != ContentFieldType::RichText {
+    if body_field.definition.field_type != opendash_core::field_schema::FieldType::Richtext {
         return Err(ApiError::forbidden(
             "Trường 'body' phải có kiểu rich_text để dùng Trình dựng trang.",
         ));
     }
-    if actor_field_role(actor) < body_field.definition.min_edit_role {
+    if actor_field_role(actor) < body_field.definition.effective_acl().1 {
         return Err(ApiError::forbidden(
             "Bạn không có quyền chỉnh sửa nội dung 'body'.",
         ));
@@ -173,9 +173,9 @@ pub(in crate::storage) fn check_entry_body_edit_acl(
 
 pub(in crate::storage) fn body_allows_public_refs(schema: &EffectiveContentSchema) -> bool {
     schema.effective_fields.get("body").is_some_and(|fe| {
-        fe.definition.field_type == ContentFieldType::RichText
-            && fe.definition.public_exposure == PublicExposure::Public
-            && fe.definition.min_view_role == FieldRole::Editor
+        fe.definition.field_type == opendash_core::field_schema::FieldType::Richtext
+            && fe.definition.effective_acl().2 == PublicExposure::Public
+            && fe.definition.effective_acl().0 == FieldRole::Editor
     })
 }
 
@@ -185,8 +185,8 @@ pub(in crate::storage) fn visible_builder_field(
     role: FieldRole,
 ) -> bool {
     schema.effective_fields.get(key).is_some_and(|field| {
-        field.definition.min_view_role <= role
-            && field.definition.public_exposure == PublicExposure::Public
+        field.definition.effective_acl().0 <= role
+            && field.definition.effective_acl().2 == PublicExposure::Public
             && field.effective_status == EffectiveFieldStatus::Active
     })
 }

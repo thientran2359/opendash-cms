@@ -247,9 +247,9 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
     let descriptor = json!({
         "key":"table_acl","label":"Table ACL",
         "fields":[
-            {"key":"public_note","label":"Visible","type":"short_text"},
-            {"key":"admin_secret","label":"Admin only","type":"short_text","min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"},
-            {"key":"private_note","label":"Private","type":"short_text","public_exposure":"private"}
+            {"key":"public_note","label":"Visible","type":"text"},
+            {"key":"admin_secret","label":"Admin only","type":"text","acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}},
+            {"key":"private_note","label":"Private","type":"text","acl":{"public_exposure":"private"}}
         ]
     });
     sqlx::query(

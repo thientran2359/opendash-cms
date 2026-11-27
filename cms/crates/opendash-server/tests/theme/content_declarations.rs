@@ -189,7 +189,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                     "key": "portfolio",
                     "label": "Portfolio",
                     "fields": [
-                        { "key": "client", "label": "Client", "type": "short_text", "required": false },
+                        { "key": "client", "label": "Client", "type": "text", "required": false },
                         {
                             "key": "stage",
                             "label": "Stage",
@@ -313,7 +313,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                     "key": "portfolio",
                     "label": "Portfolio Showcase",
                     "fields": [
-                        { "key": "client", "label": "Client Name", "type": "short_text", "required": false },
+                        { "key": "client", "label": "Client Name", "type": "text", "required": false },
                         {
                             "key": "stage",
                             "label": "Stage",
@@ -324,7 +324,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                                 { "value": "live", "label": "Live" }
                             ]
                         },
-                        { "key": "summary", "label": "Summary", "type": "long_text", "required": false }
+                        { "key": "summary", "label": "Summary", "type": "textarea", "required": false }
                     ],
                     "taxonomies": ["category", "tag"]
                 }]
@@ -394,7 +394,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                     "key": "portfolio",
                     "label": "Portfolio",
                     "fields": [
-                        { "key": "client", "label": "Client", "type": "short_text", "required": false },
+                        { "key": "client", "label": "Client", "type": "text", "required": false },
                         {
                             "key": "stage",
                             "label": "Stage",
@@ -405,7 +405,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                                 { "value": "live", "label": "Live" }
                             ]
                         },
-                        { "key": "must_have", "label": "Must Have", "type": "short_text", "required": true }
+                        { "key": "must_have", "label": "Must Have", "type": "text", "required": true }
                     ]
                 }]
             }
@@ -436,7 +436,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                     "key": "portfolio",
                     "label": "Portfolio",
                     "fields": [
-                        { "key": "client", "label": "Client", "type": "short_text", "required": false },
+                        { "key": "client", "label": "Client", "type": "text", "required": false },
                         {
                             "key": "stage",
                             "label": "Stage",

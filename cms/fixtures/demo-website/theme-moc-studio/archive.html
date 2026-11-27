@@ -11,8 +11,8 @@
         <h2>
           {% if entry.url %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}
         </h2>
-        {% if entry.values.mo_ta_ngan %}<p>{{ entry.values.mo_ta_ngan }}</p>{% endif %}
-        {% if entry.values.summary %}<p>{{ entry.values.summary }}</p>{% endif %}
+        {% if entry.fields.mo_ta_ngan %}<p>{{ entry.fields.mo_ta_ngan }}</p>{% endif %}
+        {% if entry.fields.summary %}<p>{{ entry.fields.summary }}</p>{% endif %}
       </article>
     {% else %}
       <p>Chưa có nội dung trong chuyên mục này.</p>

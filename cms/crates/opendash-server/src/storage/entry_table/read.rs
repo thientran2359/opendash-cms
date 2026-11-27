@@ -91,8 +91,8 @@ pub(crate) async fn load_single_active_row_in_tx(
     record.values.retain(|key, _| {
         effective.effective_fields.get(key).is_some_and(|field| {
             field.effective_status == EffectiveFieldStatus::Active
-                && caller_role >= field.definition.min_view_role
-                && field.definition.public_exposure == PublicExposure::Public
+                && caller_role >= field.definition.effective_acl().0
+                && field.definition.effective_acl().2 == PublicExposure::Public
         })
     });
     let is_reading_assigned = assigned_reading_pages.contains(&record.id);

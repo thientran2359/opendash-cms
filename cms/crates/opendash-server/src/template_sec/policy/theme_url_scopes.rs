@@ -141,7 +141,7 @@ pub(crate) fn resolve_collection_source(
                     Some(UrlSourceKind::TrustedLink)
                 }
                 Expr::Var(v)
-                    if g.name == "fields"
+                    if (g.name == "fields" || g.name == "field_list")
                         && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedEntry) =>
                 {
                     Some(UrlSourceKind::TrustedField)
