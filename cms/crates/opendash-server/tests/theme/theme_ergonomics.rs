@@ -892,7 +892,10 @@ async fn theme_ergonomics_cuj_all_helpers_rich_context_zero_n_plus_1_and_withdra
         .text()
         .await
         .unwrap();
-    assert!(single_html.contains("od-route-single"));
+    assert!(
+        single_html.contains("od-route-single"),
+        "missing od-route-single: {single_html}"
+    );
     assert!(single_html.contains("od-type-post"));
     assert!(single_html.contains("data-tpl=\"single-post\""));
     assert!(single_html.contains("data-read-min=\"2\""));
@@ -1091,7 +1094,7 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
         ),
         (
             "set_field_image_url_taint",
-            r#"{% set field = entry %}<img src="{{ field.image_url }}" alt="x">"#,
+            r#"{% set field = entry %}<img src="{{ field.media.url }}" alt="x">"#,
         ),
         (
             "set_row_entries_for_loop_taint",

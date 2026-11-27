@@ -11,6 +11,7 @@ import {
 import { MediaPicker } from '../media/MediaPicker.tsx';
 import { AdminTermPanels, type EffectiveTermConfig, type TermExtensionValues } from '../extensions/AdminContributionRenderer.tsx';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { useSiteTimezone } from '../../fields/useSiteTimezone.ts';
 
 import {
   type TermEditProps, type FormValues, type TermDraft,
@@ -71,6 +72,7 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
     }
   }, [selectedLocale, defaultLocaleCode]);
   const activeTermLocale = mode === 'edit' ? (current?.locale ?? defaultLocaleCode) : selectedLocale;
+  const siteTimezone = useSiteTimezone();
   const dirty = form.name !== baseline.name || form.slug !== baseline.slug ||
     form.parentId !== baseline.parentId || form.featuredImageId !== baseline.featuredImageId ||
     JSON.stringify(extensions) !== JSON.stringify(extensionBaseline);
@@ -485,6 +487,8 @@ export function TermEditPage({kind, mode, cptTypeKey, termId, user, siteInstance
 
         {mode === 'edit' && extensionConfig && <AdminTermPanels config={extensionConfig}
           values={extensions} disabled={busy}
+          csrfToken={csrfToken} locale={activeTermLocale || null} siteTimezone={siteTimezone}
+          onApiError={onApiError}
           onChange={(panelKey, key, value) => setExtensions(previous => ({
             ...previous,
             [panelKey]: { ...(previous[panelKey] ?? {}), [key]: value },

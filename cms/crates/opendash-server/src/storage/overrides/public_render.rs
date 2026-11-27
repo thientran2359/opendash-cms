@@ -211,6 +211,7 @@ pub(in crate::storage) fn render_csec_template_for_preview(
     target_key: &str,
     html: &str,
     active: Option<&ActiveThemeV3>,
+    db_schema: Option<&EffectiveContentSchema>,
     theme_context: &serde_json::Value,
     slot_html: Option<&str>,
     budget: &mut PublicCompositionBudget,
@@ -219,7 +220,7 @@ pub(in crate::storage) fn render_csec_template_for_preview(
     let kind = csec_content_kind_for_target_key(target_key);
     let empty_parts = BTreeMap::new();
     let parts = active.map(|v| &v.parts).unwrap_or(&empty_parts);
-    let url_policy = active_theme_url_policy(active)?;
+    let url_policy = active_theme_url_policy_for_target(active, Some(target_key), db_schema)?;
     let composition = if let Some(active) = active {
         template_sec::ThemeCompositionCache::global().get_or_compile(
             &active.revision_digest,

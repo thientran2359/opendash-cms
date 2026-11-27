@@ -13,3 +13,6 @@ pub use roles::*;
 #[cfg(test)]
 #[path = "tests/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "tests/unified_field_regressions.rs"]
+mod unified_field_regressions;

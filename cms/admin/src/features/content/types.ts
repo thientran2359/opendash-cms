@@ -32,7 +32,13 @@ export interface OwnedContentType {
 
 export type ContentMode = 'editor' | 'builder';
 
-export type ContentFieldValue = string | number | boolean | string[] | null;
+export type ContentFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | Record<string, unknown>
+  | unknown[];
 
 export interface TranslationLinkSummary {
   id: number;
@@ -287,6 +293,7 @@ export interface EffectivePanelProjection {
   placement: PanelPlacementConfig;
   field_keys: string[];
   subgroups: LayoutFieldSubgroup[];
+  panel_fields?: FieldSpec[];
 }
 
 export interface EffectiveEditorRegionsProjection {

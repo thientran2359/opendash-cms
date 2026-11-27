@@ -328,6 +328,40 @@ pub(crate) fn active_theme_url_policy(
     }
 }
 
+pub(crate) fn active_theme_url_policy_for_target(
+    active: Option<&ActiveThemeV3>,
+    target_key: Option<&str>,
+    db_schema: Option<&EffectiveContentSchema>,
+) -> ApiResult<template_sec::ThemeUrlPolicy> {
+    let policy = active_theme_url_policy(active)?;
+    let (Some(active), Some(tkey)) = (active, target_key) else {
+        return Ok(policy);
+    };
+    let Some(cpt) = crate::theme::cpt_scope_for_target_key(&active.manifest, tkey) else {
+        return Ok(policy);
+    };
+    let manifest_json = serde_json::to_string(&active.manifest)?;
+    let decls =
+        crate::theme::parse_theme_declarations(&manifest_json).map_err(ApiError::internal)?;
+    let mut by_key = BTreeMap::new();
+    for spec in crate::theme::declared_fields_for_cpt(&decls, cpt) {
+        by_key.insert(spec.key.clone(), spec);
+    }
+    if let Some(eff) = db_schema
+        && eff.base.descriptor.key == cpt
+    {
+        for (k, fe) in &eff.effective_fields {
+            if fe.effective_status == opendash_core::content::EffectiveFieldStatus::Active {
+                by_key.insert(k.clone(), fe.definition.clone());
+            } else {
+                by_key.remove(k);
+            }
+        }
+    }
+    let merged: Vec<_> = by_key.into_values().collect();
+    Ok(policy.with_cpt_entry_fields(&merged))
+}
+
 pub(in crate::storage) fn part_scope_prefix(key: &str, expansion_idx: usize) -> String {
     match key {
         "header" => "hdr".to_owned(),

@@ -129,7 +129,8 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     manifest.validate().map_err(str::to_owned)?;
     let url_policy =
         crate::storage::settings::theme_url_policy(&manifest_json).map_err(str::to_owned)?;
-    crate::theme::parse_theme_declarations(&manifest_json).map_err(str::to_owned)?;
+    let declarations =
+        crate::theme::parse_theme_declarations(&manifest_json).map_err(str::to_owned)?;
 
     let theme_action_ids: Vec<String> = manifest
         .functions
@@ -185,6 +186,17 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
         let bytes = add_read(&decl.file, cap)?;
         let src = String::from_utf8(bytes)
             .map_err(|_| format!("Template '{}' không phải UTF-8 hợp lệ.", decl.file))?;
+        let canonical_key = decl.canonical_key().map_err(str::to_owned)?;
+        let cpt_policy;
+        let tpl_policy = match crate::theme::cpt_scope_for_target_key(&manifest, &canonical_key) {
+            Some(cpt) => {
+                cpt_policy = url_policy.with_cpt_entry_fields(
+                    &crate::theme::declared_fields_for_cpt(&declarations, cpt),
+                );
+                &cpt_policy
+            }
+            None => &url_policy,
+        };
         let kind = match decl.kind {
             TemplateCandidateKind::Home
             | TemplateCandidateKind::Page
@@ -196,11 +208,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
             _ => CsecContentKind::NonEntry,
         };
         validate_and_compile_csec_composition_with_theme_urls(
-            &decl.file,
-            &src,
-            &parts,
-            kind,
-            &url_policy,
+            &decl.file, &src, &parts, kind, tpl_policy,
         )
         .map_err(str::to_owned)?;
         let key = decl.canonical_key().map_err(str::to_owned)?;

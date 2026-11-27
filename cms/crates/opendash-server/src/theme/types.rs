@@ -77,7 +77,7 @@ pub(crate) fn validate_theme_v3_files(
         .map_err(V2ZipError::BadRequest)?;
     let blocks =
         collect_package_blocks(&files, &manifest.theme_id).map_err(V2ZipError::BadRequest)?;
-    parse_theme_declarations(&manifest_json).map_err(V2ZipError::BadRequest)?;
+    let declarations = parse_theme_declarations(&manifest_json).map_err(V2ZipError::BadRequest)?;
     let theme_action_ids: Vec<String> = manifest
         .functions
         .as_ref()
@@ -175,6 +175,18 @@ pub(crate) fn validate_theme_v3_files(
     for declaration in &manifest.templates {
         let source = required_v3_utf8(&files, &declaration.file)?;
         declared.insert(declaration.file.clone());
+        let canonical_key = declaration
+            .canonical_key()
+            .map_err(V2ZipError::BadRequest)?;
+        let cpt_policy;
+        let tpl_policy = match cpt_scope_for_target_key(&manifest, &canonical_key) {
+            Some(cpt) => {
+                cpt_policy =
+                    url_policy.with_cpt_entry_fields(&declared_fields_for_cpt(&declarations, cpt));
+                &cpt_policy
+            }
+            None => &url_policy,
+        };
         let kind = match declaration.kind {
             TemplateCandidateKind::Home
             | TemplateCandidateKind::Page
@@ -190,7 +202,7 @@ pub(crate) fn validate_theme_v3_files(
             source,
             &parts,
             kind,
-            &url_policy,
+            tpl_policy,
         )
         .map_err(V2ZipError::BadRequest)?;
     }
