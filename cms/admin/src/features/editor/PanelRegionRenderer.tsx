@@ -28,6 +28,7 @@ export interface PanelRegionRendererProps {
   actionBusy: Record<string, boolean>;
   entryId: number | null;
   userId: number | null;
+  userRole?: 'admin' | 'editor';
   termIds: number[];
   primaryCategoryTermId: number | null;
   publicPath: string | null;
@@ -93,6 +94,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   actionBusy,
   entryId,
   userId,
+  userRole = 'editor',
   termIds,
   primaryCategoryTermId,
   publicPath,
@@ -449,7 +451,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
         case 'taxonomies':
           return config.taxonomies.length > 0 ? (
             <div data-testid="single-edit-terms">
-              <TermPicker userId={userId} selectedIds={termIds} disabled={saving}
+              <TermPicker userId={userId} userRole={userRole} csrfToken={csrfToken} selectedIds={termIds} disabled={saving}
                 typeKey={config.type_key} locale={locale} allowedKinds={config.taxonomies}
                 variant="cards"
                 primaryCategoryTermId={config.type_key === 'post' && config.taxonomies.includes('category')

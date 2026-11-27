@@ -1128,6 +1128,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         actionBusy={actionBusy}
         entryId={entryId}
         userId={user?.id ?? null}
+        userRole={user?.role}
         termIds={termIds}
         primaryCategoryTermId={primaryCategoryTermId}
         publicPath={publicPath}

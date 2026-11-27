@@ -180,8 +180,22 @@ export const FieldSpecEditorCard: React.FC<FieldSpecEditorCardProps> = ({
                   <select className={INPUT_CLASS} value={field.type} disabled={disabled}
                     onChange={e => {
                       const nextType = e.target.value as FieldType;
-                      const fresh = createBlankFieldSpec(siblings, adminOnlyLocation, nextType);
-                      onChange({ ...fresh, key: field.key, label: field.label, width: field.width, acl: field.acl });
+                      const fresh = createBlankFieldSpec(siblings, adminOnlyLocation, nextType, depth === 0 ? domain : 'content');
+                      const nextUiOnly = nextType === 'tab' || nextType === 'accordion' || nextType === 'message';
+                      onChange({
+                        ...fresh,
+                        key: field.key,
+                        label: field.label,
+                        width: field.width,
+                        ...(nextUiOnly
+                          ? {}
+                          : {
+                              acl: field.acl ?? fresh.acl,
+                              ...(domain === 'options_page' && depth === 0
+                                ? { public: field.public ?? fresh.public ?? false }
+                                : {}),
+                            }),
+                      });
                       if (nextType === 'select' || nextType === 'checkbox' || nextType === 'radio_buttons') {
                         setOptionsText(serializeSelectOptions(fresh.options));
                       }
@@ -385,7 +399,7 @@ export const FieldSpecEditorCard: React.FC<FieldSpecEditorCardProps> = ({
                   <div className="space-y-2">
                     {subfields.map((sub, subIdx) => (
                       <FieldSpecEditorCard
-                        key={`${sub.key}-${subIdx}`}
+                        key={`subfield-${subIdx}`}
                         field={sub}
                         index={subIdx}
                         total={subfields.length}
@@ -469,7 +483,14 @@ export const FieldSpecEditorCard: React.FC<FieldSpecEditorCardProps> = ({
                       disabled={disabled}
                       onChange={e => {
                         const [v, ed] = e.target.value.split(':') as ['editor' | 'admin', 'editor' | 'admin'];
-                        updateAcl({ min_view_role: v, min_edit_role: ed });
+                        if (v === 'admin') {
+                          update({
+                            ...(domain === 'options_page' && depth === 0 ? { public: false } : {}),
+                            acl: { min_view_role: v, min_edit_role: ed, public_exposure: 'private' },
+                          });
+                        } else {
+                          updateAcl({ min_view_role: v, min_edit_role: ed });
+                        }
                       }}>
                       <option value="editor:editor">{__("Editor views & edits")}</option>
                       <option value="editor:admin">{__("Editor views, Admin edits")}</option>
@@ -479,16 +500,35 @@ export const FieldSpecEditorCard: React.FC<FieldSpecEditorCardProps> = ({
                   <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
                     <span>{__("Public hydration exposure")}</span>
                     <select className={INPUT_CLASS}
-                      value={field.acl?.public_exposure ?? 'public'}
+                      value={
+                        domain === 'options_page' && depth === 0
+                          ? (field.public ? 'public' : 'private')
+                          : (field.acl?.public_exposure ?? 'public')
+                      }
                       disabled={disabled || adminOnlyLocation}
-                      onChange={e => updateAcl({ public_exposure: e.target.value as 'public' | 'private' })}>
+                      onChange={e => {
+                        const exp = e.target.value as 'public' | 'private';
+                        if (domain === 'options_page' && depth === 0) {
+                          update({
+                            public: exp === 'public',
+                            acl: {
+                              min_view_role: exp === 'public' ? 'editor' : (field.acl?.min_view_role ?? 'editor'),
+                              min_edit_role: field.acl?.min_edit_role ?? 'editor',
+                              public_exposure: exp,
+                            },
+                          });
+                        } else {
+                          updateAcl({ public_exposure: exp });
+                        }
+                      }}>
                       <option value="public">{__("Public (rendered in themes)")}</option>
                       <option value="private">{__("Private (Admin/Editor only)")}</option>
                     </select>
                   </label>
                   <div className="flex flex-wrap items-center gap-3 self-end pb-1 text-xs text-zinc-700 sm:col-span-2">
                     <label className="inline-flex items-center gap-1.5">
-                      <input type="checkbox" checked={Boolean(field.show_in_list)} disabled={disabled}
+                      <input type="checkbox" checked={Boolean(field.show_in_list)}
+                        disabled={disabled || domain !== 'content' || depth > 0}
                         onChange={e => update({ show_in_list: e.target.checked })} />
                       <span>{__("Show in list column")}</span>
                     </label>
@@ -496,6 +536,12 @@ export const FieldSpecEditorCard: React.FC<FieldSpecEditorCardProps> = ({
                       <input type="checkbox" checked={Boolean(field.responsive)} disabled={disabled}
                         onChange={e => update({ responsive: e.target.checked })} />
                       <span>{__("Responsive")}</span>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5">
+                      <input type="checkbox" checked={Boolean(field.translatable)}
+                        disabled={disabled || domain !== 'options_page' || depth > 0}
+                        onChange={e => update({ translatable: e.target.checked })} />
+                      <span>{__("Translatable (multilingual)")}</span>
                     </label>
                   </div>
                 </>

@@ -23,6 +23,7 @@ import {
   locationHasEntryTaxonomy,
   moveArrayItem,
   snakeKeyFromLabel,
+  syncFieldsForDomain,
   uniqueFieldKey,
 } from './fieldBuilderHelpers.ts';
 import { FieldSpecEditorCard } from './FieldSpecEditorCard.tsx';
@@ -113,9 +114,18 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
   const dataFieldCount = countDataFields(fields);
 
   const handleAddField = () => {
-    const next = createBlankFieldSpec(fields, adminOnlyLoc);
+    const next = createBlankFieldSpec(fields, adminOnlyLoc, 'text', domain);
     setFields(prev => [...prev, next]);
     setLiveStatus(__("Added field {{value1}}.", { value1: next.key }));
+  };
+
+  const handleLocationChange = (nextLocation: LocationRuleGroups) => {
+    setLocation(nextLocation);
+    const nextDomain = inferDomainFromLocation(nextLocation);
+    const nextAdminOnly = isLocationRestrictedToAdminOnly(nextLocation);
+    if (nextDomain !== domain) {
+      setFields(prev => syncFieldsForDomain(prev, nextDomain, nextAdminOnly));
+    }
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -150,7 +160,7 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
       location,
       presentation,
       active,
-      fields,
+      fields: syncFieldsForDomain(fields, domain, adminOnlyLoc),
     };
 
     setSaving(true);
@@ -282,7 +292,7 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
         <div className="space-y-2.5">
           {fields.map((spec, idx) => (
             <FieldSpecEditorCard
-              key={`${spec.key}-${idx}`}
+              key={`field-${idx}`}
               field={spec}
               index={idx}
               total={fields.length}
@@ -322,7 +332,7 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
       <LocationRulesBuilder
         location={location}
         disabled={isReadOnlyProvider || saving}
-        onChange={setLocation}
+        onChange={handleLocationChange}
       />
 
       <fieldset className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4">

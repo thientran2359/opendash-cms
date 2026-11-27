@@ -431,12 +431,14 @@ UPDATE content_types
    AND json_type(definition_json, '$.settings.archive_per_page') IS NULL;
 
 UPDATE content_types
-   SET definition_json = json_set(
-       definition_json,
-       '$.settings.show_in_menu', json('false'),
-       '$.settings.exclude_from_sitemap', json('true'),
-       '$.settings.hierarchical', json('false'),
-       '$.settings.menu_position', json('null')
+   SET definition_json = json_remove(
+       json_set(
+           definition_json,
+           '$.settings.show_in_menu', json('false'),
+           '$.settings.exclude_from_sitemap', json('true'),
+           '$.settings.hierarchical', json('false')
+       ),
+       '$.settings.menu_position'
    )
  WHERE key = 'pattern';
 

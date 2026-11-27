@@ -68,13 +68,16 @@ export function createBlankFieldSpec(
   siblings: readonly FieldSpec[],
   adminOnlyLocation = false,
   type: FieldType = 'text',
+  domain: FieldGroupDomain = 'content',
 ): FieldSpec {
-  const key = uniqueFieldKey(type === 'tab' || type === 'accordion' || type === 'message' ? `ui_${type}` : 'new_field', siblings);
+  const isUiOnly = type === 'tab' || type === 'accordion' || type === 'message';
+  const key = uniqueFieldKey(isUiOnly ? `ui_${type}` : 'new_field', siblings);
+  const isOptionsPrivateDefault = domain === 'options_page';
   return {
     type,
     key,
     label: 'New Field',
-    required: false,
+    ...(isUiOnly ? {} : { required: false }),
     width: 100,
     ...(type === 'select' || type === 'checkbox' || type === 'radio_buttons'
       ? { options: [{ value: 'option_1', label: 'Option 1' }] }
@@ -83,11 +86,17 @@ export function createBlankFieldSpec(
     ...(type === 'term_ref' ? { taxonomy: 'category' } : {}),
     ...(type === 'range' ? { min: 0, max: 100, step: 1 } : {}),
     ...(type === 'group' || type === 'repeater' ? { fields: [] } : {}),
-    acl: {
-      min_view_role: adminOnlyLocation ? 'admin' : 'editor',
-      min_edit_role: adminOnlyLocation ? 'admin' : 'editor',
-      public_exposure: adminOnlyLocation ? 'private' : 'public',
-    },
+    ...(type === 'message' ? { tone: 'info' as const, body: '' } : {}),
+    ...(isUiOnly
+      ? {}
+      : {
+          ...(isOptionsPrivateDefault ? { public: false } : {}),
+          acl: {
+            min_view_role: adminOnlyLocation ? 'admin' : 'editor',
+            min_edit_role: adminOnlyLocation ? 'admin' : 'editor',
+            public_exposure: adminOnlyLocation || isOptionsPrivateDefault ? 'private' : 'public',
+          },
+        }),
   };
 }
 
@@ -156,4 +165,53 @@ export function moveArrayItem<T>(list: readonly T[], fromIdx: number, toIdx: num
   const [moved] = next.splice(fromIdx, 1);
   next.splice(toIdx, 0, moved);
   return next;
+}
+
+export function syncFieldsForDomain(
+  fields: readonly FieldSpec[],
+  domain: FieldGroupDomain,
+  adminOnlyLocation: boolean,
+  depth = 0,
+): FieldSpec[] {
+  return fields.map(spec => {
+    const isUiOnly = spec.type === 'tab' || spec.type === 'accordion' || spec.type === 'message';
+    const next: FieldSpec = { ...spec };
+    if (next.fields) {
+      next.fields = syncFieldsForDomain(next.fields, domain, adminOnlyLocation, depth + 1);
+    }
+    if (isUiOnly) {
+      delete next.acl;
+      delete next.public;
+      delete next.translatable;
+      delete next.show_in_list;
+      delete next.sync_entry_terms;
+      return next;
+    }
+    if (domain === 'options_page') {
+      delete next.show_in_list;
+      delete next.sync_entry_terms;
+      if (depth === 0) {
+        const minView = adminOnlyLocation ? 'admin' : (next.acl?.min_view_role ?? 'editor');
+        const minEdit = minView === 'admin' ? 'admin' : (next.acl?.min_edit_role ?? 'editor');
+        const makePublic = !adminOnlyLocation && minView === 'editor' && Boolean(next.public);
+        next.public = makePublic;
+        next.acl = {
+          min_view_role: minView,
+          min_edit_role: minEdit,
+          public_exposure: makePublic ? 'public' : 'private',
+        };
+      } else {
+        delete next.public;
+        delete next.translatable;
+      }
+    } else {
+      delete next.public;
+      delete next.translatable;
+      if (domain === 'term') {
+        delete next.show_in_list;
+        delete next.sync_entry_terms;
+      }
+    }
+    return next;
+  });
 }

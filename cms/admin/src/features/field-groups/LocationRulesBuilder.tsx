@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { listContentTypes, type OwnedContentTypeWithSettings } from '../../api/content.ts';
+import { listOptionsPages, type CustomOptionsPageDefinition } from '../../api/optionsPages.ts';
 import { listTaxonomyDefinitions, type TaxonomyDefinition } from '../../api/taxonomy.ts';
 import { getActiveThemeLayouts, getThemes, type ThemeLayoutCatalog } from '../../api/themes.ts';
 import type {
@@ -57,6 +58,7 @@ export const LocationRulesBuilder: React.FC<LocationRulesBuilderProps> = ({
   const [taxonomies, setTaxonomies] = useState<TaxonomyDefinition[]>([]);
   const [layouts, setLayouts] = useState<ThemeLayoutCatalog | null>(null);
   const [themeIds, setThemeIds] = useState<string[]>([]);
+  const [optionsPages, setOptionsPages] = useState<CustomOptionsPageDefinition[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -65,11 +67,13 @@ export const LocationRulesBuilder: React.FC<LocationRulesBuilderProps> = ({
       listTaxonomyDefinitions().catch(() => []),
       getActiveThemeLayouts().catch(() => null),
       getThemes().catch(() => null),
-    ]).then(([cts, taxes, themeLayoutSnap, themesSnap]) => {
+      listOptionsPages().catch(() => []),
+    ]).then(([cts, taxes, themeLayoutSnap, themesSnap, optPages]) => {
       if (!alive) return;
       setContentTypes(cts.filter(ct => ct.descriptor.key !== 'pattern' && ct.descriptor.key !== 'section'));
       setTaxonomies(taxes);
       setLayouts(themeLayoutSnap);
+      setOptionsPages(optPages);
       if (themesSnap) {
         const uniq = Array.from(new Set(themesSnap.revisions.map(r => r.theme_id)));
         setThemeIds(uniq);
@@ -165,7 +169,7 @@ export const LocationRulesBuilder: React.FC<LocationRulesBuilderProps> = ({
               value={rule.value} disabled={disabled}
               placeholder="site_global / theme:<id> / custom:<key>"
               onChange={e => setValue(e.target.value)} />
-            {themeIds.length > 0 && (
+            {(themeIds.length > 0 || optionsPages.length > 0) && (
               <div className="flex flex-wrap gap-1 text-[10px]">
                 <button type="button" disabled={disabled} onClick={() => setValue('site_global')}
                   className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-zinc-600 hover:bg-zinc-50">
@@ -175,6 +179,12 @@ export const LocationRulesBuilder: React.FC<LocationRulesBuilderProps> = ({
                   <button key={tid} type="button" disabled={disabled} onClick={() => setValue(`theme:${tid}`)}
                     className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-zinc-600 hover:bg-zinc-50">
                     theme:{tid}
+                  </button>
+                ))}
+                {optionsPages.slice(0, 4).map(op => (
+                  <button key={op.page_key} type="button" disabled={disabled} onClick={() => setValue(`custom:${op.page_key}`)}
+                    className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-zinc-600 hover:bg-zinc-50">
+                    custom:{op.page_key}
                   </button>
                 ))}
               </div>
@@ -200,13 +210,11 @@ export const LocationRulesBuilder: React.FC<LocationRulesBuilderProps> = ({
 
   return (
     <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3.5" data-testid="location-rules-builder">
+      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">
+        {__("Location rules")}
+      </legend>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <legend className="text-xs font-semibold uppercase tracking-wide text-zinc-700">
-            {__("Location rules")}
-          </legend>
-          <AdminBadge tone="neutral">{domain}</AdminBadge>
-        </div>
+        <AdminBadge tone="neutral">{domain}</AdminBadge>
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           {([
             ['content', __("Content")],

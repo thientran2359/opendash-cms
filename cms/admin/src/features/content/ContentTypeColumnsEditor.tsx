@@ -55,15 +55,13 @@ export const ContentTypeColumnsEditor: React.FC<ContentTypeColumnsEditorProps> =
 
   return (
     <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
+      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">
+        {__("Admin table columns (list_columns)")} ({columns.length}/{MAX_COLUMNS})
+      </legend>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <legend className="text-xs font-semibold uppercase tracking-wide text-zinc-700">
-            {__("Admin table columns (list_columns)")} ({columns.length}/{MAX_COLUMNS})
-          </legend>
-          <p className="mt-0.5 text-xs text-zinc-500">
-            {__("Configure extra columns shown in the Entry List table (Private field columns are filtered by role).")}
-          </p>
-        </div>
+        <p className="text-xs text-zinc-500">
+          {__("Configure extra columns shown in the Entry List table (Private field columns are filtered by role).")}
+        </p>
         <AdminButton
           type="button"
           variant="secondary"

@@ -15,6 +15,7 @@ import {
 export interface OptionsPageMenuItem {
   page_key: string;
   menu_label: string;
+  parent_menu?: 'content' | 'appearance' | 'system' | 'settings' | 'top_level';
   menu_icon?: string | null;
   menu_position: number;
   min_edit_role: 'admin' | 'editor';
@@ -119,14 +120,20 @@ export function buildMenuTree(
         ],
       };
     }),
-    ...visibleOptionsPages.map(page => ({
-      id: `options:${page.page_key}`,
-      label: page.menu_label,
-      icon: page.menu_icon?.trim() || 'settings',
-      hash: `#/options/${encodeURIComponent(page.page_key)}`,
-      group: 'content' as const,
-      adminOnly: page.min_edit_role === 'admin',
-    })),
+    ...visibleOptionsPages
+      .filter(page => !(page.parent_menu === 'settings' && isAdmin))
+      .map(page => ({
+        id: `options:${page.page_key}`,
+        label: page.menu_label,
+        icon: page.menu_icon?.trim() || 'settings',
+        hash: `#/options/${encodeURIComponent(page.page_key)}`,
+        group: (page.parent_menu === 'appearance'
+          ? 'appearance'
+          : page.parent_menu === 'system' || page.parent_menu === 'settings'
+            ? 'system'
+            : 'content') as 'content' | 'appearance' | 'system',
+        adminOnly: page.min_edit_role === 'admin',
+      })),
     {
       id: 'media',
       label: __("Media library"),
@@ -240,6 +247,14 @@ export function buildMenuTree(
         { label: __("Permalinks"), hash: '#/settings/permalinks' },
         { label: __("SEO"), hash: '#/settings/seo' },
         { label: __("Email notifications (SMTP)"), hash: '#/settings/smtp' },
+        ...(isAdmin
+          ? visibleOptionsPages
+              .filter(page => page.parent_menu === 'settings')
+              .map(page => ({
+                label: page.menu_label,
+                hash: `#/options/${encodeURIComponent(page.page_key)}`,
+              }))
+          : []),
       ],
     },
   ];

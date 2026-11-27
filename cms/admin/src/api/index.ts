@@ -9,11 +9,29 @@ export type { HomepagePreview, BuilderDiagnostic } from './builder.ts';
 export { getThemes, installTheme } from './themes.ts';
 export { getPlugins, installPlugin, runPlugin, disablePlugin, enablePlugin } from './plugins.ts';
 export {
-  listTaxonomyTerms, createTaxonomyTerm, updateTaxonomyTerm, deleteTaxonomyTerm,
+  listTaxonomyTerms,
+  getEffectiveTermConfig,
+  getNewTermEffectiveConfig,
+  createTaxonomyTerm,
+  updateTaxonomyTerm,
+  deleteTaxonomyTerm,
 } from './taxonomy.ts';
 export type {
-  TaxonomyKind, TaxonomyTerm, TaxonomyTermPage, TaxonomyTermInput, TaxonomyTermChanges,
+  TaxonomyKind,
+  TaxonomySelectionMode,
+  TaxonomySettings,
+  TaxonomyDefinition,
+  TaxonomyDefinitionInput,
+  TaxonomyDefinitionChanges,
+  TermSeoInput,
+  TermFieldGroupView,
+  EffectiveTermEditorConfig,
+  TaxonomyTerm,
+  TaxonomyTermPage,
+  TaxonomyTermInput,
+  TaxonomyTermChanges,
 } from './taxonomy.ts';
+export * from './optionsPages.ts';
 export {
   getMenuSlots,
   putMenuSlots,
