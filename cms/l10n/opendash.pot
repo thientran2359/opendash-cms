@@ -18948,6 +18948,742 @@ msgstr ""
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr ""
 
+#: server:error:revision.pattern_admin_only
+msgid "Only Administrators may operate on Pattern revisions or autosaves."
+msgstr ""
+
+#: server:error:revision.section_forbidden
+msgid "Section content type does not support revisions or autosaves."
+msgstr ""
+
+#: server:error:revision.invalid_content_type_key
+msgid "Invalid content type key for revision request."
+msgstr ""
+
+#: server:error:revision.json_content_type_required
+msgid "Request must use Content-Type: application/json."
+msgstr ""
+
+#: server:error:revision.invalid_revision_id
+msgid "Invalid revision ID."
+msgstr ""
+
+#: server:error:revision.duplicate_limit_param
+msgid "Duplicate limit query parameter."
+msgstr ""
+
+#: server:error:revision.limit_not_integer
+msgid "Query parameter limit must be an integer between 1 and 25."
+msgstr ""
+
+#: server:error:revision.limit_out_of_range
+msgid "Query parameter limit must be between 1 and 25."
+msgstr ""
+
+#: server:error:revision.duplicate_offset_param
+msgid "Duplicate offset query parameter."
+msgstr ""
+
+#: server:error:revision.offset_not_integer
+msgid "Query parameter offset must be an integer between 0 and 1000."
+msgstr ""
+
+#: server:error:revision.offset_out_of_range
+msgid "Query parameter offset must be between 0 and 1000."
+msgstr ""
+
+#: server:error:revision.invalid_list_query
+msgid "Invalid revision list query parameters."
+msgstr ""
+
+#: server:error:revision.invalid_compare_target
+msgid "Invalid revision compare target for from/to."
+msgstr ""
+
+#: server:error:revision.duplicate_from_param
+msgid "Duplicate compare 'from' query parameter."
+msgstr ""
+
+#: server:error:revision.duplicate_to_param
+msgid "Duplicate compare 'to' query parameter."
+msgstr ""
+
+#: server:error:revision.invalid_compare_query
+msgid "Invalid revision compare query parameters."
+msgstr ""
+
+#: server:error:revision.missing_compare_params
+msgid "Both compare query parameters 'from' and 'to' are required."
+msgstr ""
+
+#: server:error:revision.invalid_restore_json
+msgid "Invalid revision restore JSON payload."
+msgstr ""
+
+#: server:error:revision.missing_refs
+msgid "Revision snapshot contains missing or incompatible references. Confirm to sanitize them before restoring."
+msgstr ""
+
+#: server:error:revision.not_found
+msgid "Revision snapshot not found."
+msgstr ""
+
+#: server:error:revision.trashed_entry
+msgid "entry_trashed: Entry is in Trash and cannot access revisions or autosave."
+msgstr ""
+
+#: server:error:revision.version_conflict_reload
+msgid "Content entry version changed. Reload before restoring revision."
+msgstr ""
+
+#: server:error:revision.builder_disabled
+msgid "Builder support is currently disabled for this content type."
+msgstr ""
+
+#: server:error:revision.builder_disabled_field
+msgid "Builder support is disabled."
+msgstr ""
+
+#: server:error:revision.required_field_missing
+msgid "Missing required field values after sanitizing deleted references."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Restored content values payload exceeds 768 KiB limit."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Sanitized Builder content exceeds 384 KiB limit."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Builder content exceeds the allowed size limit."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Pattern without a Builder document only supports content_mode = 'editor'."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Invalid content_mode for pattern restore."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Primary category term must be included in term_ids."
+msgstr ""
+
+#: server:error:revision.restore_validation_failed
+msgid "Invalid primary category term."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Invalid stored content_mode in DB; cannot capture revision snapshot."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored content field JSON is malformed; cannot capture revision snapshot."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored Builder JSON is invalid; cannot capture revision snapshot."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored Builder payload is not a JSON object; cannot capture revision snapshot."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Invalid revision source stored in DB."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Invalid Builder document JSON payload."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Builder JSON is not valid UTF-8."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored revision values_json is corrupted."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored revision term_ids_json is corrupted."
+msgstr ""
+
+#: server:error:revision.corrupt_snapshot
+msgid "Stored revision seo_json is corrupted."
+msgstr ""
+
+#: server:error:autosave.invalid_version_or_seq
+msgid "Autosave base_version and client_seq must be positive integers >= 1."
+msgstr ""
+
+#: server:error:autosave.null_title_forbidden
+msgid "Autosave title cannot be set to null."
+msgstr ""
+
+#: server:error:autosave.invalid_title
+msgid "Autosave title must not contain control characters or exceed 200 characters."
+msgstr ""
+
+#: server:error:autosave.too_many_cleared_fields
+msgid "Autosave cleared_fields exceeds the maximum of 128 entries."
+msgstr ""
+
+#: server:error:autosave.too_many_term_ids
+msgid "Autosave term_ids exceeds the maximum of 96 entries."
+msgstr ""
+
+#: server:error:autosave.invalid_seo
+msgid "Invalid autosave SEO payload."
+msgstr ""
+
+#: server:error:autosave.seo_too_large
+msgid "Autosave SEO payload exceeds 4096-byte limit."
+msgstr ""
+
+#: server:error:autosave.pattern_too_large
+msgid "Pattern autosave payload exceeds allowed size limit."
+msgstr ""
+
+#: server:error:autosave.invalid_json
+msgid "Invalid autosave JSON payload."
+msgstr ""
+
+#: server:error:autosave.pattern_admin_only
+msgid "Only Administrators may save Pattern autosaves."
+msgstr ""
+
+#: server:error:autosave.builder_locked_or_disabled
+msgid "Builder is locked for your role or disabled for this content type."
+msgstr ""
+
+#: server:error:autosave.base_version_in_future
+msgid "Autosave base_version exceeds current entry version."
+msgstr ""
+
+#: server:error:autosave.payload_too_large
+msgid "Merged autosave payload exceeds 768 KiB limit."
+msgstr ""
+
+#: server:error:autosave.not_found
+msgid "Autosave draft not found."
+msgstr ""
+
+#: server:error:autosave.corrupt_surface
+msgid "Invalid stored autosave source_surface in DB."
+msgstr ""
+
+#: server:error:autosave.pattern_studio_only
+msgid "Pattern autosave only supports source_surface = 'studio' with builder_document."
+msgstr ""
+
+#: server:error:autosave.pattern_builder_required
+msgid "Pattern autosave requires builder_document."
+msgstr ""
+
+#: server:error:autosave.studio_builder_required
+msgid "Studio autosave requires builder_document."
+msgstr ""
+
+#: server:error:autosave.builder_doc_too_large
+msgid "Builder document exceeds 256 KiB limit."
+msgstr ""
+
+#: server:error:autosave.invalid_builder_json
+msgid "Invalid Builder document JSON."
+msgstr ""
+
+#: server:error:autosave.studio_body_too_large
+msgid "Serialized Studio body exceeds 384 KiB limit."
+msgstr ""
+
+#: admin:revisions.revisions
+msgid "Could not load revision history."
+msgstr ""
+
+#: admin:revisions.revisions
+msgid "Could not load revision details."
+msgstr ""
+
+#: admin:revisions.revisions
+msgid "Could not compare revisions."
+msgstr ""
+
+#: admin:revisions.revisions
+msgid "Could not restore this revision."
+msgstr ""
+
+#: admin:revisions.revisions
+msgid "Could not check for an autosaved draft."
+msgstr ""
+
+#: admin:revisions.revisions
+msgid "Could not save autosave draft."
+msgstr ""
+
+#: admin:revisions.revisions
+msgid "Could not discard the autosaved draft."
+msgstr ""
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Studio"
+msgstr ""
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Autosave recovery"
+msgstr ""
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Your unsaved draft from this session is already active. A server autosave from {{value1}} ({{value2}}) is also stored."
+msgstr ""
+
+#: admin:revisions.autosaverecoverybanner
+msgid "A newer autosave from {{value1}} ({{value2}}) is available."
+msgstr ""
+
+#: admin:revisions.autosaverecoverybanner
+msgid "This autosave was based on version v{{value1}}. Restoring it preserves the current entry version so you can review before saving."
+msgstr ""
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Administrator-only fields are omitted from this autosave and will stay unchanged from the saved entry."
+msgstr ""
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Restore autosave"
+msgstr ""
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Compare with current"
+msgstr ""
+
+#: admin:revisions.autosaverecoverybanner
+msgid "Discard autosave"
+msgstr ""
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Autosaving…"
+msgstr ""
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Autosaved at {{value1}}"
+msgstr ""
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Stale base version"
+msgstr ""
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Revisions:"
+msgstr ""
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Autosave"
+msgstr ""
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Browse"
+msgstr ""
+
+#: admin:revisions.publishboxrevisionscontrol
+msgid "Autosave failed."
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgctxt "revision.diff_empty"
+msgid "(empty)"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "{{value1}} unchanged lines collapsed"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Large content diff was truncated to keep comparison fast. Inspect individual snapshots for the complete text."
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "No text changes."
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Before"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "After"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "v{{value1}} -> v{{value2}}"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Administrator-only fields differ between these snapshots and are hidden from this view."
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Content mode changed: {{value1}} -> {{value2}}"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "No visible differences between the selected snapshots."
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Body content"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Builder blocks"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Nodes: {{value1}} -> {{value2}} ({{value3}} unchanged)"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Block comparison was truncated due to document size."
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Fields"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Taxonomy terms"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "missing"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Primary category:"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgctxt "revision.none"
+msgid "(none)"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Theme & Layout"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Page layout:"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgctxt "revision.default"
+msgid "(default)"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "Custom template:"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "SEO metadata"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "References unavailable in source snapshot ({{value1}})"
+msgstr ""
+
+#: admin:revisions.revisiondiffview
+msgid "References unavailable in target snapshot ({{value1}})"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Your session expired while loading revision history."
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Your session expired while comparing revisions."
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Your session expired while loading revision details."
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Could not load more revisions."
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Current saved state"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Latest autosave"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Revision History"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Current saved version: v{{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Revision inspection mode"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Compare changes"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Snapshot details"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Restoring…"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Restore #{{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "This revision references items that are missing or inactive. Restoring it will drop or sanitize those references."
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Acknowledge and restore"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Compare from"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Compare to"
+msgstr ""
+
+#: admin:revisions.revisionhistorymodal
+msgid "Computing comparison…"
+msgstr ""
+
+#: admin:revisions.revisionlistsidebar
+msgid "Saved revisions"
+msgstr ""
+
+#: admin:revisions.revisionlistsidebar
+msgid "Snapshots ({{value1}})"
+msgstr ""
+
+#: admin:revisions.revisionlistsidebar
+msgid "Loading revisions…"
+msgstr ""
+
+#: admin:revisions.revisionlistsidebar
+msgid "Restored from #{{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionlistsidebar
+msgid "Load older revisions"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing media ({{value1}}): {{value2}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing taxonomy term ID: {{value1}}"
+msgid_plural "Missing taxonomy term IDs: {{value1}}"
+msgstr[0] ""
+msgstr[1] ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing referenced entry IDs: {{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing Pattern IDs: {{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing contact form IDs: {{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing dynamic options ({{value1}}): {{value2}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Invalid List block filters ({{value1}}): {{value2}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Unavailable Builder blocks ({{value1}}): {{value2}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Field bindings that will be cleared ({{value1}}): {{value2}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing theme templates/layouts: {{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Removed schema fields ignored on restore: {{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Removed block properties ignored on restore: {{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Restricted fields preserved from current entry: {{value1}}"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Missing or changed references detected"
+msgstr ""
+
+#: admin:revisions.revisionmissingrefsnotice
+msgid "Snapshot normalization notes"
+msgstr ""
+
+#: admin:revisions.revisionsnapshotview
+msgid "Loading snapshot details…"
+msgstr ""
+
+#: admin:revisions.revisionsnapshotview
+msgid "Title:"
+msgstr ""
+
+#: admin:revisions.revisionsnapshotview
+msgid "Slug:"
+msgstr ""
+
+#: admin:revisions.revisionsnapshotview
+msgid "Content mode:"
+msgstr ""
+
+#: admin:revisions.revisionsnapshotview
+msgid "Author:"
+msgstr ""
+
+#: admin:revisions.revisionsnapshotview
+msgid "Administrator-only fields in this snapshot are hidden from your role."
+msgstr ""
+
+#: admin:revisions.revisionsnapshotview
+msgid "Builder sections:"
+msgstr ""
+
+#: admin:revisions.revisionsnapshotview
+msgid "Taxonomy terms:"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Created"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Saved"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Builder save"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Builder reset"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Quick edit"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "SEO save"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Pattern save"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Plugin save"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Restored"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Imported"
+msgstr ""
+
+#: admin:revisions.types
+msgctxt "revision.source"
+msgid "Baseline"
+msgstr ""
+
+#: admin:revisions.types
+msgid "Unknown time"
+msgstr ""
+
+#: admin:revisions.useentryautosave
+msgid "Your session expired while autosaving."
+msgstr ""
+
+#: admin:revisions.usesingleeditrevisions
+msgid "Your session expired while checking revision history."
+msgstr ""
+
+#: admin:revisions.usesingleeditrevisions
+msgid "Autosaved changes were loaded into your working draft. Review and save to create a new revision."
+msgstr ""
+
+#: admin:revisions.usesingleeditrevisions
+msgid "Server autosave discarded."
+msgstr ""
+
+#: admin:revisions.singleeditworkspace
+msgid "Restored snapshot #{{value1}} as new version v{{value2}}."
+msgstr ""
+
+msgid "An autosaved draft from Content Editor ({{value1}}) has no Visual Builder layout data."
+msgstr ""
+
+msgid "Dismiss"
+msgstr ""
+
+msgid "Loaded autosaved Visual Builder layout. Review and save to create a new revision."
+msgstr ""
+
+msgid "Open in Editor"
+msgstr ""
+
+msgid "Saved from Content Editor; applying here loads only Visual Builder blocks."
+msgstr ""
+
+msgid "This autosave was based on version v{{value1}}."
+msgstr ""
+
+msgid "This restored revision uses the standard Editor mode (editor)."
+
 #: admin:api.media.could_not_load_media_details
 msgid "Could not load media details."
 msgstr ""

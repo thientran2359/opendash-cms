@@ -285,6 +285,8 @@ pub async fn create_entry_with_fence(
     .await?;
     let record = decoded_with_terms(&mut tx, row).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::revisions::record_fenced_entry_revision_in_tx(&mut *tx, id, true, fence, actor)
+        .await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(record)
@@ -337,6 +339,7 @@ pub async fn update_entry_with_fence(
     if let Some(ids) = &input.term_ids {
         validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
+    crate::storage::revisions::capture_baseline_if_missing_in_tx(&mut *tx, id).await?;
     let json = serde_json::to_string(&input.values)?;
     let result = sqlx::query(
         "UPDATE content_entries
@@ -384,6 +387,10 @@ pub async fn update_entry_with_fence(
             .await?;
             let record = decoded_with_terms(&mut tx, row).await?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+            crate::storage::revisions::record_fenced_entry_revision_in_tx(
+                &mut *tx, id, false, fence, actor,
+            )
+            .await?;
             tx.commit().await?;
             crate::cache::SiteCacheEpoch::global().bump();
             Ok(record)
@@ -467,6 +474,14 @@ pub async fn create_entry_with_schema_fence(
     .await?;
     let record = decoded_with_terms(&mut tx, row).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::revisions::record_entry_revision_and_clear_autosave_in_tx(
+        &mut *tx,
+        id,
+        opendash_core::revisions::RevisionSource::Create,
+        crate::storage::revisions::RevisionActor::User(actor),
+        None,
+    )
+    .await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(record)
@@ -511,6 +526,7 @@ pub async fn update_entry_with_schema_fence(
     if let Some(ids) = &input.term_ids {
         validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
+    crate::storage::revisions::capture_baseline_if_missing_in_tx(&mut *tx, id).await?;
     let json = serde_json::to_string(&input.values)?;
     let result = sqlx::query(
         "UPDATE content_entries
@@ -558,6 +574,14 @@ pub async fn update_entry_with_schema_fence(
             .await?;
             let record = decoded_with_terms(&mut tx, row).await?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+            crate::storage::revisions::record_entry_revision_and_clear_autosave_in_tx(
+                &mut *tx,
+                id,
+                opendash_core::revisions::RevisionSource::Save,
+                crate::storage::revisions::RevisionActor::User(actor),
+                Some(actor.user.id),
+            )
+            .await?;
             tx.commit().await?;
             crate::cache::SiteCacheEpoch::global().bump();
             Ok(record)

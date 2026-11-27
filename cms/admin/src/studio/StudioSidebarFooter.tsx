@@ -2,6 +2,7 @@ import { useI18n } from '../i18n/index.tsx';
 import React from 'react';
 import { AdminButton } from '../components/AdminPrimitives.tsx';
 import { type BuilderViewport } from '../builder/document.ts';
+import { formatRevisionTimestamp, type AutosaveState } from '../features/revisions/types.ts';
 
 export type StudioSavePolicy =
   | { mode: 'customizer' }
@@ -29,15 +30,28 @@ interface Props {
   showPatternButton?: boolean;
   onOpenPatternLibrary?: () => void;
   patternDisabled?: boolean;
+  autosaveState?: AutosaveState;
 }
 
 export const StudioSidebarFooter: React.FC<Props> = ({
   saving, busy = false, viewport, onViewportChange, canShowUndo,
   canUndo, canRedo, onUndo, onRedo, savePolicy, canSave, onSaveCustomizer, onSaveEntry,
   showPatternButton = false, onOpenPatternLibrary, patternDisabled = false,
+  autosaveState,
 }) => {
   const { __, _x } = useI18n();
   const disabled = saving || busy;
+  const autosaveStatusText =
+    savePolicy.mode === 'entry' && autosaveState
+      ? autosaveState.status === 'saving'
+        ? __("Autosaving…")
+        : autosaveState.status === 'saved' && autosaveState.savedAt
+          ? __("Autosaved at {{value1}}", {
+              value1: formatRevisionTimestamp(autosaveState.savedAt),
+            }) +
+            (autosaveState.isStaleBase ? ` · ${__("Stale base version")}` : '')
+          : ''
+      : '';
   return (
     <footer className="shrink-0 space-y-2 border-t border-zinc-200 bg-white p-3" data-testid="studio-sidebar-footer">
       {showPatternButton && onOpenPatternLibrary && (
@@ -62,6 +76,33 @@ export const StudioSidebarFooter: React.FC<Props> = ({
           </button>
         ))}
       </div>
+      {savePolicy.mode === 'entry' && autosaveState && (
+        <div className="space-y-0.5">
+          <div
+            role="status"
+            aria-live="polite"
+            data-testid="studio-autosave-status"
+            className={
+              autosaveStatusText
+                ? autosaveState.status === 'saved'
+                  ? 'text-[11px] font-medium text-emerald-700'
+                  : 'text-[11px] text-zinc-600'
+                : 'sr-only'
+            }
+          >
+            {autosaveStatusText}
+          </div>
+          {autosaveState.status === 'error' && (
+            <div
+              role="alert"
+              data-testid="studio-autosave-error"
+              className="text-[11px] font-medium text-rose-700"
+            >
+              {autosaveState.errorMessage || __("Autosave failed.")}
+            </div>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1.5">
         {canShowUndo && (
           <div className="mr-auto flex items-center gap-1">

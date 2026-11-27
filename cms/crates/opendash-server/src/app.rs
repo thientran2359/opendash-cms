@@ -1,9 +1,8 @@
 use axum::{
     Extension, Router,
     extract::{DefaultBodyLimit, Request},
-    http::{StatusCode, header},
+    http::header,
     middleware::{self, Next},
-    response::IntoResponse,
     routing::{delete, get, post, put},
 };
 use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
@@ -11,7 +10,7 @@ use rust_embed::RustEmbed;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    media::{MAX_MEDIA_BYTES, MediaStore},
+    media::MAX_MEDIA_BYTES,
     media_video::MAX_VIDEO_BYTES,
     package::V2_MAX_ZIP_BYTES,
     routes::{
@@ -636,6 +635,29 @@ pub fn build_router_with_telemetry(
             get(crate::routes::seo::get_entry_seo)
                 .put(crate::routes::seo::put_entry_seo)
                 .layer(DefaultBodyLimit::max(crate::routes::seo::MAX_SEO_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/revisions",
+            get(crate::routes::revisions::revisions_list),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/revisions/compare",
+            get(crate::routes::revisions::revisions_compare),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/revisions/{rev_id}",
+            get(crate::routes::revisions::revision_get),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/revisions/{rev_id}/restore",
+            post(crate::routes::revisions::revision_restore).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/autosave",
+            get(crate::routes::revisions::autosave_get)
+                .put(crate::routes::revisions::autosave_put)
+                .delete(crate::routes::revisions::autosave_delete)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
         )
         .route(
             "/api/admin/seo/home",

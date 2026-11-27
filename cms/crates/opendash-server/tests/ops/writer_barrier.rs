@@ -213,6 +213,10 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
             ],
         ),
         (
+            "revisions.rs",
+            &["revision_restore", "autosave_put", "autosave_delete"],
+        ),
+        (
             "settings.rs",
             &[
                 "general_put",

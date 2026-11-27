@@ -1958,8 +1958,8 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     // Taxonomy Featured Image adds 0052 (`taxonomy_terms.featured_image_media_id`),
     // and Spec B S01 adds 0053 (owner_kind isolation for Theme Functions runtime),
     // and Entry Lifecycle S01 adds 0054 (`content_entries.trashed_at` + lifecycle indexes),
-    // and 0055–0058 (Unified Field Engine, Manual Redirects & 404 Log, Responsive Media); the 0040→0041 assertions above still hold.
-    assert_eq!(migration_version, 58);
+    // and 0055–0059 (Unified Field Engine, Manual Redirects & 404 Log, Responsive Media, Revisions & Autosave); the 0040→0041 assertions above still hold.
+    assert_eq!(migration_version, 59);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

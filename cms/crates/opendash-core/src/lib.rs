@@ -15,5 +15,6 @@ pub mod media;
 pub mod plugin;
 pub mod redirects;
 pub mod registry;
+pub mod revisions;
 pub mod richtext;
 pub mod theme;

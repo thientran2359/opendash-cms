@@ -27,6 +27,17 @@ pub async fn put_entry_seo(
     expected_version: i64,
     input: SeoMetadataInput,
 ) -> ApiResult<EntrySeoSnapshot> {
+    put_entry_seo_for_actor(db, type_key, entry_id, expected_version, input, None).await
+}
+
+pub async fn put_entry_seo_for_actor(
+    db: &SqlitePool,
+    type_key: &str,
+    entry_id: i64,
+    expected_version: i64,
+    input: SeoMetadataInput,
+    actor: Option<&crate::auth::SessionContext>,
+) -> ApiResult<EntrySeoSnapshot> {
     let clean = validate_seo_input(&input)?;
     let mut conn = db.acquire().await?;
     sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
@@ -52,6 +63,7 @@ pub async fn put_entry_seo(
             ));
         }
         verify_og_media_exists_in_tx(&mut conn, clean.og_image_id.as_deref()).await?;
+        crate::storage::revisions::capture_baseline_if_missing_in_tx(&mut *conn, entry_id).await?;
 
         let bumped = sqlx::query(
             "UPDATE content_entries
@@ -88,6 +100,17 @@ pub async fn put_entry_seo(
         .await?;
 
         sync_entry_seo_media_ref_in_tx(&mut conn, entry_id).await?;
+        let rev_actor = actor
+            .map(crate::storage::revisions::RevisionActor::User)
+            .unwrap_or(crate::storage::revisions::RevisionActor::System);
+        crate::storage::revisions::capture_entry_revision_in_tx(
+            &mut *conn,
+            entry_id,
+            opendash_core::revisions::RevisionSource::SeoSave,
+            None,
+            rev_actor,
+        )
+        .await?;
 
         Ok(EntrySeoSnapshot {
             entry_version: expected_version + 1,
