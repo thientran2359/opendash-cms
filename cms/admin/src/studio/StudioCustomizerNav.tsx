@@ -340,6 +340,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 savedValues={globalOptionsSnapshot.values}
                 onChange={onGlobalOptionsChange}
                 viewport={viewport}
+                siteTimezone={generalDraft?.timezone}
                 csrfToken={csrfToken}
                 onApiError={onApiError}
                 disabled={disabled}
@@ -474,6 +475,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
     const badge = sourceBadge(selectedTarget);
     const showCreateWarning = !selectedTarget.override_id && !templateEditingEnabled;
     const allowRouteContext = ['single', 'page', 'page_layout', 'single_custom'].includes(selectedTarget.target.kind);
+    const contextTypeKey = selectedTarget.target.content_type ?? (selectedTarget.target.kind === 'page' ? 'page' : null);
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-template-editor">
         <div className="space-y-2.5 px-1.5 py-2">
@@ -527,6 +529,9 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               patternsLoaded={patternsLoaded}
               onRefreshPatterns={onRefreshPatterns}
               allowRouteContext={allowRouteContext}
+              contextTypeKey={contextTypeKey}
+              locale={previewLocale ?? localeState?.defaultLocale?.code ?? null}
+              siteTimezone={generalDraft?.timezone}
               allowPatternRef={false}
               allowList={true}
               allowContentSlot={!selectedTarget.forbids_content_slot}

@@ -50,6 +50,42 @@ pub fn valid_lowercase_locale_code(value: &str) -> bool {
     valid_bcp47_tag(value) && !value.bytes().any(|b| b.is_ascii_uppercase())
 }
 
+/// Single source of truth for the 26 reserved system path prefixes across core,
+/// routing, and manual redirects.
+pub const RESERVED_SYSTEM_ROOTS: &[&str] = &[
+    "admin",
+    "api",
+    "assets",
+    "auth",
+    "builder",
+    "content",
+    "favicon.ico",
+    "forms",
+    "health",
+    "media",
+    "p",
+    "page",
+    "pattern",
+    "preview",
+    "registry",
+    "robots.txt",
+    "save",
+    "section",
+    "sitemap.xml",
+    "sitemaps",
+    "static",
+    "studio",
+    "taxonomy",
+    "theme",
+    "themes",
+    "uploads",
+];
+
+/// Returns `true` when `root` matches any closed reserved system path prefix.
+pub fn is_reserved_system_root(root: &str) -> bool {
+    RESERVED_SYSTEM_ROOTS.contains(&root)
+}
+
 /// Validates a namespaced block identifier (`<namespace>/<name>`) where each
 /// segment is a `kebab-case` identifier up to 32 characters (e.g. `sample-theme/hero-banner`).
 pub fn valid_namespaced_block_id(value: &str) -> bool {

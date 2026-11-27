@@ -26,7 +26,7 @@ async fn fixture() -> (SqlitePool, BuilderDocument, String, String) {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         "INSERT INTO builder_block_definitions
           (block_id, owner_kind, owner_id, provider_status, declaration_state, schema_json, template, revision_digest)

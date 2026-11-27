@@ -20,6 +20,8 @@ use crate::{
     template_sec::RichTextNonceTable,
 };
 
+pub use opendash_core::field_schema::HydrationVisibility;
+
 pub struct HydrationContext<'a> {
     pub media: &'a BTreeMap<String, HydratedMediaRow>,
     pub entries: &'a BTreeMap<i64, HydratedEntryRefRow>,
@@ -27,22 +29,36 @@ pub struct HydrationContext<'a> {
     pub is_preview: bool,
 }
 
+fn filter_specs_for_visibility(
+    specs: &[FieldSpec],
+    visibility: HydrationVisibility,
+) -> Vec<FieldSpec> {
+    let mut out = Vec::new();
+    for spec in specs {
+        if !visibility.allows(spec) {
+            continue;
+        }
+        let mut cloned = spec.clone();
+        if matches!(cloned.field_type, FieldType::Group | FieldType::Repeater) {
+            cloned.fields =
+                filter_specs_for_visibility(&cloned.fields, visibility.child_visibility());
+        }
+        out.push(cloned);
+    }
+    out
+}
+
 /// Collects all referenced `media_ids`, `entry_ids`, and `term_ids` across a set of
 /// specs + merged raw values so the caller can execute at most 3 Zero-N+1 batch queries.
 pub fn collect_hydration_ids(
     specs: &[FieldSpec],
     raw_values: &BTreeMap<String, Value>,
-    only_public: bool,
+    visibility: HydrationVisibility,
     media_ids: &mut BTreeSet<String>,
     entry_ids: &mut BTreeSet<i64>,
     term_ids: &mut BTreeSet<i64>,
 ) {
-    let subset: Vec<FieldSpec> = specs
-        .iter()
-        .filter(|spec| !spec.is_ui_only() && spec.field_type != FieldType::Secret)
-        .filter(|spec| !only_public || spec.public)
-        .cloned()
-        .collect();
+    let subset = filter_specs_for_visibility(specs, visibility);
     if subset.is_empty() {
         return;
     }
@@ -205,12 +221,33 @@ fn unwrap_responsive_desktop<'a>(
     Some(val)
 }
 
+pub fn hydrate_field_value_stateless(
+    spec: &FieldSpec,
+    raw_val: Option<&Value>,
+    visibility: HydrationVisibility,
+) -> Result<Value, &'static str> {
+    let media = BTreeMap::new();
+    let entries = BTreeMap::new();
+    let terms = BTreeMap::new();
+    let ctx = HydrationContext {
+        media: &media,
+        entries: &entries,
+        terms: &terms,
+        is_preview: false,
+    };
+    hydrate_field_value(spec, raw_val, &ctx, None, visibility)
+}
+
 pub fn hydrate_field_value(
     spec: &FieldSpec,
     raw_val: Option<&Value>,
     ctx: &HydrationContext<'_>,
     mut richtext_nonces: Option<&mut RichTextNonceTable>,
+    visibility: HydrationVisibility,
 ) -> Result<Value, &'static str> {
+    if !visibility.allows(spec) {
+        return Ok(Value::Null);
+    }
     match spec.field_type {
         FieldType::Tab | FieldType::Accordion | FieldType::Message | FieldType::Secret => {
             Ok(Value::Null)
@@ -389,8 +426,13 @@ pub fn hydrate_field_value(
                 .and_then(Value::as_object)
                 .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 .unwrap_or_default();
-            let hydrated =
-                hydrate_field_values(&spec.fields, &child_raw, ctx, richtext_nonces, false)?;
+            let hydrated = hydrate_field_values(
+                &spec.fields,
+                &child_raw,
+                ctx,
+                richtext_nonces,
+                visibility.child_visibility(),
+            )?;
             let mut obj = Map::with_capacity(hydrated.len());
             for (k, v) in hydrated {
                 obj.insert(k, v);
@@ -416,7 +458,7 @@ pub fn hydrate_field_value(
                     &item_raw,
                     ctx,
                     richtext_nonces.as_deref_mut(),
-                    false,
+                    visibility.child_visibility(),
                 )?;
                 let mut obj = Map::with_capacity(hydrated.len());
                 for (k, v) in hydrated {
@@ -434,14 +476,11 @@ pub fn hydrate_field_values(
     raw_values: &BTreeMap<String, Value>,
     ctx: &HydrationContext<'_>,
     mut richtext_nonces: Option<&mut RichTextNonceTable>,
-    only_public: bool,
+    visibility: HydrationVisibility,
 ) -> Result<BTreeMap<String, Value>, &'static str> {
     let mut out = BTreeMap::new();
     for spec in specs {
-        if spec.is_ui_only() || spec.field_type == FieldType::Secret {
-            continue;
-        }
-        if only_public && !spec.public {
+        if !visibility.allows(spec) {
             continue;
         }
         let val = hydrate_field_value(
@@ -449,6 +488,7 @@ pub fn hydrate_field_values(
             raw_values.get(&spec.key),
             ctx,
             richtext_nonces.as_deref_mut(),
+            visibility,
         )?;
         out.insert(spec.key.clone(), val);
     }

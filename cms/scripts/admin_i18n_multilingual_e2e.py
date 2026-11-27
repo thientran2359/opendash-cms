@@ -11,8 +11,7 @@ from contextlib import closing
 
 from playwright.sync_api import expect, sync_playwright
 
-from menu_picker_e2e import launch_server, stop_server
-from media_smoke import make_png
+from e2e_helpers import launch_server, make_png, stop_server
 
 
 GENERAL = "/api/admin/settings/general"

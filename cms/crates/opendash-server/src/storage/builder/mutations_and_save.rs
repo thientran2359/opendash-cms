@@ -160,7 +160,7 @@ pub(in crate::storage) fn check_entry_body_edit_acl(
     };
     if body_field.definition.field_type != opendash_core::field_schema::FieldType::Richtext {
         return Err(ApiError::forbidden(
-            "Trường 'body' phải có kiểu rich_text để dùng Trình dựng trang.",
+            "Trường 'body' phải có kiểu richtext để dùng Trình dựng trang.",
         ));
     }
     if actor_field_role(actor) < body_field.definition.effective_acl().1 {

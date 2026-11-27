@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **56** `.sql` files numbered `0001` through `0057` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `sqlx::migrate!("../../migrations")` in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
+`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **57** `.sql` files numbered `0001` through `0058` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `sqlx::migrate!("../../migrations")` in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
 
 | Group / Milestone | Migrations | Primary Tables & Schema Objects |
 | --- | --- | --- |
@@ -28,7 +28,8 @@
 | **Entry Lifecycle (Trash)** | [`0054_entry_lifecycle.sql`](0054_entry_lifecycle.sql) | Additive nullable UTC column `content_entries.trashed_at` (`DEFAULT NULL`, preserving all existing rows as active) and composite index `idx_content_entries_lifecycle_list (content_type_key, locale, trashed_at, publication_status, id)`. Forward-only; downgrade by dropping columns or opening with an older binary is unsupported (SQLx compiled migration validation refuses unknown applied migrations; rollback uses separate-root pre-upgrade backup recovery). |
 | **Unified Field Engine (`0055`)** | [`0055_theme_option_locale_media_refs.sql`](0055_theme_option_locale_media_refs.sql) | Rebuilds `theme_option_media_refs` adding `locale TEXT NOT NULL DEFAULT ''` to `PRIMARY KEY (owner_kind, owner_id, locale, option_key, media_id)` so translatable theme option media references track per-locale refs cleanly (`+0` net schema objects). |
 | **Unified Field Engine (`0056`)** | [`0056_unified_field_content_cutover.sql`](0056_unified_field_content_cutover.sql) | Rebuilds `entry_builder_media_refs` adding `source_kind` (`'builder'` \| `'field'`) and `'file'` `ref_role`, normalizes `content_types`/`content_field_groups`/`admin_extensions` to `FieldSpec`, and backfills `source_kind = 'field'` (`+0` net schema objects). |
-| **Public Site Search (`0057`)** | [`0057_public_site_search_fts5.sql`](0057_public_site_search_fts5.sql) | Creates SQLite FTS5 virtual table `entry_search_fts` (`content=''`, `contentless_delete=1`, `unicode61 remove_diacritics 2`, `+5` schema objects), and rebuilds `template_overrides` (`+'search'`) + `operation_jobs` (`+'search_reindex'` in `CHECK` & `idx_operation_jobs_single_active_heavy`). |
+| **Manual Redirects & 404 Log (`0057`)** | [`0057_manual_redirects_and_404_log.sql`](0057_manual_redirects_and_404_log.sql) | Adds `manual_redirects` (`source_path COLLATE BINARY UNIQUE`, `301`/`302`, `version` CAS, `hit_count`), `not_found_logs` (`path COLLATE BINARY UNIQUE`, `hit_count`, `first_seen_at`/`last_seen_at` `%Y-%m-%dT%H:%M:%fZ`), and 2 secondary indexes (`+6` net schema objects: `221 -> 227` migration objects). |
+| **Public Site Search (`0058`)** | [`0058_public_site_search_fts5.sql`](0058_public_site_search_fts5.sql) | Creates SQLite FTS5 virtual table `entry_search_fts` (`content=''`, `contentless_delete=1`, `unicode61 remove_diacritics 2`, `+5` schema objects: `227 -> 232`), and rebuilds `template_overrides` (`+'search'`) + `operation_jobs` (`+'search_reindex'` in `CHECK` & `idx_operation_jobs_single_active_heavy`). |
 
 ## Interface
 
@@ -40,7 +41,7 @@
 ## Invariants
 
 - **Immutable applied migrations:** Never edit SQL content or change line endings (LF) of existing migration files; SQLx verifies checksums in `_sqlx_migrations` against embedded bytes.
-- **Monotonic numbering:** Every new schema change must be added as the next sequential `NNNN_<snake_case>.sql` file (`0058_*` onward; `0016` remains permanently unused).
+- **Monotonic numbering:** Every new schema change must be added as the next sequential `NNNN_<snake_case>.sql` file (`0059_*` onward; `0016` remains permanently unused).
 - **Pre-existing ownership safety:** `preflight_builtin_key_collisions` must run before `0008` so user/theme/plugin-owned `post`/`page` descriptors are never overwritten during bootstrap.
 - **Database integrity enforcement:** Triggers (`content_entries_core_insert_draft`, `taxonomy_terms_parent_*`, `content_entries_pattern_private_*`, `content_entries_mark_has_been_published_*`, and `*_locale_*` triggers from `0047`) enforce domain invariants at the SQLite layer alongside `PRAGMA foreign_keys = ON`.
 - **Storage layering:** All runtime SQL queries (`sqlx::query*`) against these tables belong in `cms/crates/opendash-server/src/storage/`, per [CORE_FOUNDATION.md](../../docs/contracts/CORE_FOUNDATION.md).
@@ -55,8 +56,5 @@ Run from the repository root:
 
 ```powershell
 cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
-python cms/scripts/egm_pattern_s02_migration.py
-python cms/scripts/windows_auth_smoke.py --binary cms/target/debug/opendash.exe --baseline-db cms/fixtures/baseline_0001.sqlite
+cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test content migration_0056_upgrades_baseline_0001
 ```
-
-On Linux/macOS, pass `--binary cms/target/debug/opendash` to smoke scripts.

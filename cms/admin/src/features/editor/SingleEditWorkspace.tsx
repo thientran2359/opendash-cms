@@ -16,23 +16,15 @@ import {
 import { runPluginAction } from '../../api/plugins.ts';
 import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
 import { ApiClientError } from '../../api/client.ts';
-import {
-  getActiveThemeLayouts,
-  type ThemeLayoutCatalog,
-} from '../../api/themes.ts';
-import {
-  EMPTY_ADMIN_LOCALE_STATE,
-  type AdminLocaleState,
-} from '../../api/locales.ts';
+import { getActiveThemeLayouts, type ThemeLayoutCatalog } from '../../api/themes.ts';
+import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../../api/locales.ts';
 import type { AuthUser, PluginLifecycleConfirmation as PluginLifecycleConfirmationDto } from '../../types.ts';
-import type {
-  ContentFieldValue,
-  EffectiveEditorConfigProjection,
-  EffectivePanelProjection,
-  TranslationLinkSummary,
-} from '../content/types.ts';
+import type { ContentFieldValue, EffectiveEditorConfigProjection, EffectivePanelProjection, TranslationLinkSummary } from '../content/types.ts';
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
+import { matchesMediaPickerKind, validateRequiredEditorFields } from './editorFieldValidation.ts';
+import { useSiteTimezone } from '../../fields/useSiteTimezone.ts';
+import { isUiOnlyFieldType } from '../../fields/helpers.ts';
 import { MediaPicker } from '../media/MediaPicker.tsx';
 import { EntryListPage, entryTableHash, parseEntryTableHash, safePublicPath } from '../content/EntryListPage.tsx';
 import { PluginLifecycleConfirmation } from '../plugins/PluginLifecycleConfirmation.tsx';
@@ -99,6 +91,7 @@ function displayEditorConfig(
     }).map(panel => ({
       ...panel,
       field_keys: panel.field_keys.filter(key => supportAllowsField(typeKey, key, settings)),
+      panel_fields: panel.panel_fields?.filter(spec => isUiOnlyFieldType(spec.type) || supportAllowsField(typeKey, spec.key, settings)),
       subgroups: panel.subgroups.map(group => ({
         ...group,
         field_keys: group.field_keys.filter(key => supportAllowsField(typeKey, key, settings)),
@@ -144,6 +137,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   onNavigateHash,
 }) => {
   useI18n();
+  const siteTimezone = useSiteTimezone();
   const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
   const [entryLocale, setEntryLocale] = useState<string>(defaultLocaleCode);
   const [translations, setTranslations] = useState<TranslationLinkSummary[]>([]);
@@ -248,7 +242,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       || target.schemaToken !== activeMediaSchemaRef.current
       || !eff || !eff.editable || eff.effective_status !== 'active'
       || !supportAllowsField(typeKey, target.fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
-      || eff.definition.type !== (target.kind === 'image' ? 'media' : 'gallery')
+      || !matchesMediaPickerKind(eff.definition.type, target.kind)
     ) return;
     setMediaPicker(null);
     // Trust the picker-provided ordered selection, not any stale React values
@@ -541,16 +535,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     const nextErrors: Record<string, string> = {};
     if (!snapshot.title.trim()) nextErrors.title = __("Title cannot be empty.");
     if (!snapshot.slug.trim()) nextErrors.slug = __("Slug cannot be empty.");
-
-    for (const [fk, eff] of Object.entries(config.effective_fields)) {
-      if (eff.effective_required && eff.editable && supportAllowsField(typeKey, fk, effectiveSettings)) {
-        const v = snapshot.values[fk];
-        const empty = snapshot.cleared_fields.includes(fk) || v === undefined || v === null || (typeof v === 'string' && !v.trim());
-        if (empty) {
-          nextErrors[fk] = __("Field \"{{value1}}\" is required.", { value1: eff.definition.label });
-        }
-      }
-    }
+    Object.assign(
+      nextErrors,
+      validateRequiredEditorFields(config, typeKey, effectiveSettings, snapshot, (label) =>
+        __("Field \"{{value1}}\" is required.", { value1: label })),
+    );
 
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors(nextErrors);
@@ -1078,6 +1067,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         templatePanelNode={templatePanelNode}
         translationPanelNode={translationPanelNode}
         locale={localeState.hasMultipleLocales && !isPattern ? (entryLocale || defaultLocaleCode || undefined) : undefined}
+        csrfToken={csrfToken}
+        siteTimezone={siteTimezone}
         saving={saving}
         dirty={dirty}
         onDelete={entryId !== null && baselineRef.current?.version !== null && baselineRef.current?.version !== undefined ? () => void handleDelete() : undefined}
@@ -1125,7 +1116,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             !csrfToken || !user || !draftRef.current
             || !eff || !eff.editable || eff.effective_status !== 'active'
             || !supportAllowsField(typeKey, fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
-            || eff.definition.type !== kind
+            || !matchesMediaPickerKind(eff.definition.type, kind)
           ) return;
           setMediaPicker({
             fieldKey, kind, scopeKey: mediaScopeKey,
@@ -1265,7 +1256,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         && config.effective_fields[mediaPicker.fieldKey]?.editable
         && config.effective_fields[mediaPicker.fieldKey]?.effective_status === 'active'
         && supportAllowsField(typeKey, mediaPicker.fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
-        && config.effective_fields[mediaPicker.fieldKey]?.definition.type === mediaPicker.kind
+        && matchesMediaPickerKind(config.effective_fields[mediaPicker.fieldKey]?.definition.type, mediaPicker.kind)
         && (
           <MediaPicker
             key={`${mediaPicker.scopeKey}:${mediaPicker.fieldKey}`}

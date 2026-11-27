@@ -147,7 +147,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           ? '#/taxonomy/definitions' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
     route.view === 'profile' ? '#/users/profile' :
     route.view === 'studio' ? '#/studio' :
-    route.view === 'tools' ? `#/tools/${route.sub}` :
+    route.view === 'tools' ? (route.sub === '404-log' ? '#/tools/redirects' : `#/tools/${route.sub}`) :
     route.view === 'settings'
       ? (route.sub === 'content-types' ? '#/appearance/content-types' : `#/settings/${route.sub}`) :
     route.view === 'media' ? '#/media' :
@@ -162,6 +162,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     definitions: __("Custom taxonomies"), terms: _x("Terms", "shell.terms"),
     options: __("Theme options"), health: __("System health"),
     'media-reconcile': __("Media reconciliation"), backup: __("Backup & restore"),
+    redirects: __("Redirects & 404"), '404-log': __("Redirects & 404 Log"),
     install: __("Settings"), profile: __("My profile"),
   };
   const pageTitle = routeForbidden

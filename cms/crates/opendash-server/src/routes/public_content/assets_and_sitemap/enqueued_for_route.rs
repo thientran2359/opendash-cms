@@ -206,40 +206,19 @@ pub(crate) async fn render_canonical_archive(
         public_content::list_published_with_total(&db, &type_key, ARCHIVE_SIZE, offset, filters)
             .await?;
     let has_more = offset.saturating_add(ARCHIVE_SIZE) < total_items;
-    let entry_urls = crate::storage::seo::resolve_public_entry_paths_by_ids(&db, &records).await?;
-    let pairs: Vec<(i64, String)> = records
-        .iter()
-        .map(|r| (r.id, r.content_type_key.clone()))
-        .collect();
-    let mut terms_map = public_content::batch_load_public_entry_terms(&db, &pairs).await?;
-    let eligible_taxonomies =
-        public_content::batch_load_eligible_public_taxonomies(&db, std::slice::from_ref(&type_key))
-            .await?
-            .remove(&type_key)
-            .unwrap_or_default();
-    let archive_ids: Vec<i64> = records.iter().map(|r| r.id).collect();
-    let mut proj_map =
-        crate::storage::plugin_projections::batch_load_entry_projections(&db, &archive_ids).await?;
-    let entries: Vec<_> = records
-        .into_iter()
-        .map(|record| {
-            let u = entry_urls.get(&record.id).cloned();
-            let terms = terms_map.remove(&record.id).unwrap_or_default();
-            let mut view = content_render::entry_view_with_context(
-                &record,
-                &effective_schema,
-                u,
-                &terms,
-                &eligible_taxonomies,
-                FieldRole::Editor,
-            );
-            if let Some(proj) = proj_map.remove(&record.id) {
-                view.ext = proj.ext;
-                view.theme_ext = proj.theme_ext;
-            }
-            view
-        })
-        .collect();
+    let mut archive_richtext_nonces = crate::template_sec::RichTextNonceTable::default();
+    let entries = {
+        let mut conn = db.acquire().await?;
+        public_content::hydrate_entry_views_with_options_in_conn(
+            &mut conn,
+            records,
+            Some(&locale),
+            false,
+            FieldRole::Editor,
+            Some(&mut archive_richtext_nonces),
+        )
+        .await?
+    };
     let previous = (page > 1)
         .then(|| {
             Some(CanonicalUrlBuilder::with_query(
@@ -329,6 +308,10 @@ pub(crate) async fn render_canonical_archive(
     })?;
     let mut budget = overrides::PublicCompositionBudget::default();
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
+    budget
+        .render_budget
+        .richtext_nonces
+        .extend(archive_richtext_nonces);
     let locale_ctx = seo::build_theme_locale_context(
         &db,
         Some(&locale),

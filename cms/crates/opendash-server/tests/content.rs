@@ -42,3 +42,5 @@ mod taxonomy_definitions;
 mod term_routes;
 #[path = "content/unified_field_content_cutover.rs"]
 mod unified_field_content_cutover;
+#[path = "content/unified_field_drift_regressions.rs"]
+mod unified_field_drift_regressions;

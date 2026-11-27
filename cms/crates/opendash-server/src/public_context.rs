@@ -7,43 +7,10 @@ use opendash_core::{
     id::{valid_kebab_segment_with_limit, valid_package_id},
 };
 
+pub use opendash_core::id::{RESERVED_SYSTEM_ROOTS, is_reserved_system_root};
+
 pub const ARCHIVE_SIZE: i64 = 20;
 pub const MAX_ARCHIVE_PAGE: i64 = 10_000;
-
-/// Single source of truth for the 26 reserved system path prefixes.
-const RESERVED_SYSTEM_ROOTS: &[&str] = &[
-    "admin",
-    "api",
-    "assets",
-    "auth",
-    "builder",
-    "content",
-    "favicon.ico",
-    "forms",
-    "health",
-    "media",
-    "p",
-    "page",
-    "pattern",
-    "preview",
-    "registry",
-    "robots.txt",
-    "save",
-    "section",
-    "sitemap.xml",
-    "sitemaps",
-    "static",
-    "studio",
-    "taxonomy",
-    "theme",
-    "themes",
-    "uploads",
-];
-
-/// Returns `true` when `root` matches any closed reserved system path prefix.
-pub fn is_reserved_system_root(root: &str) -> bool {
-    RESERVED_SYSTEM_ROOTS.contains(&root)
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaxonomyKind {

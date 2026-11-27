@@ -130,9 +130,22 @@ pub(crate) async fn render_admin_single_fallback_html(
         .await?
         .remove(&record.id)
         .unwrap_or_default();
-    let view = content_render::authenticated_preview_view_with_context(
-        record, effective, None, &terms, &eligible, actor_role,
-    );
+    let mut richtext_nonces = crate::template_sec::RichTextNonceTable::default();
+    let view = {
+        let mut conn = db.acquire().await?;
+        public_content::hydrate_single_entry_view_in_conn(
+            &mut conn,
+            record,
+            effective,
+            None,
+            &terms,
+            &eligible,
+            actor_role,
+            true,
+            Some(&mut richtext_nonces),
+        )
+        .await?
+    };
     let archive_url = {
         let mut conn = db.acquire().await?;
         permalinks::canonical_archive_path_in_tx(&mut conn, type_key, &record.locale).await?
@@ -166,7 +179,7 @@ pub(crate) async fn render_admin_single_fallback_html(
         &view.title,
         view.url.clone(),
     );
-    content_render::render_single_with_context_for_locale(
+    content_render::render_single_with_context_and_nonces_for_locale(
         definition,
         &view,
         selected_template,
@@ -175,6 +188,7 @@ pub(crate) async fn render_admin_single_fallback_html(
         &breadcrumbs,
         &fmt_cfg,
         &record.locale,
+        Some(&richtext_nonces),
     )
 }
 

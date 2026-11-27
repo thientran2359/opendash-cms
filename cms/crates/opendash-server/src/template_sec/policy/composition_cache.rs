@@ -51,6 +51,7 @@ impl ThemeCompositionCache {
                 CsecContentKind::Index => 1,
                 CsecContentKind::NonEntry => 2,
             },
+            entry_fields_key: policy.entry_fields_fingerprint(),
         };
         if let Some(found) = self
             .inner

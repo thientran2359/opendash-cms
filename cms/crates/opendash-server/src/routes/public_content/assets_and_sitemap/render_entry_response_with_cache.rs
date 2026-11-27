@@ -103,29 +103,34 @@ pub(crate) async fn render_entry_response_with_cache(
         timezone: site.timezone.clone(),
         ..Default::default()
     };
-    let (archive_path, mut proj_map) = {
+    let (archive_path, view) = {
         let mut conn = db.acquire().await?;
         let path =
             permalinks::canonical_archive_path_in_tx(&mut conn, &type_key, &entry_locale).await?;
-        let proj_map = crate::storage::plugin_projections::batch_load_entry_projections_in_conn(
+        let mut proj_map =
+            crate::storage::plugin_projections::batch_load_entry_projections_in_conn(
+                &mut conn,
+                &[entry.id],
+            )
+            .await?;
+        let mut view = public_content::hydrate_single_entry_view_in_conn(
             &mut conn,
-            &[entry.id],
+            &entry,
+            &effective_schema,
+            Some(canonical_path_for_seo.clone()),
+            &terms,
+            &eligible_public_taxonomies,
+            FieldRole::Editor,
+            false,
+            Some(&mut richtext_nonces),
         )
         .await?;
-        (path, proj_map)
+        if let Some(proj) = proj_map.remove(&entry.id) {
+            view.ext = proj.ext;
+            view.theme_ext = proj.theme_ext;
+        }
+        (path, view)
     };
-    let mut view = content_render::entry_view_with_context(
-        &entry,
-        &effective_schema,
-        Some(canonical_path_for_seo.clone()),
-        &terms,
-        &eligible_public_taxonomies,
-        FieldRole::Editor,
-    );
-    if let Some(proj) = proj_map.remove(&entry.id) {
-        view.ext = proj.ext;
-        view.theme_ext = proj.theme_ext;
-    }
     let breadcrumbs = if is_home {
         content_render::home_breadcrumbs(
             content_render::DEFAULT_BREADCRUMB_HOME_LABEL,

@@ -5,6 +5,7 @@ import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimi
 import { isUiOnlyFieldType } from '../../fields/helpers.ts';
 import type { FieldSpec } from '../../fields/types.ts';
 import { UnifiedFieldForm } from '../../fields/UnifiedFieldForm.tsx';
+import { useSiteTimezone } from '../../fields/useSiteTimezone.ts';
 
 export type OwnerKind = 'theme' | 'plugin' | 'theme_functions';
 
@@ -95,6 +96,7 @@ export interface OwnerOptionsFormProps {
   csrfToken: string | null;
   viewport?: BuilderViewport;
   locale?: string | null;
+  siteTimezone?: string;
   saving?: boolean;
   notice?: string;
   error?: string;
@@ -120,6 +122,7 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
   csrfToken,
   viewport = 'desktop',
   locale,
+  siteTimezone,
   saving = false,
   notice = '',
   error = '',
@@ -133,6 +136,7 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
   onSubmit,
   onApiError,
 }) => {
+  const resolvedTimezone = useSiteTimezone(siteTimezone);
 
   const renderFields = () => (
     <UnifiedFieldForm
@@ -145,6 +149,7 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
         onChange(normalizeOwnerValuesForFields(next, fields, savedValues ?? values))
       }
       viewport={viewport}
+      siteTimezone={resolvedTimezone}
       csrfToken={csrfToken}
       locale={locale}
       disabled={saving}

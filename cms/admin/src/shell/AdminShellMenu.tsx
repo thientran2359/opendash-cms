@@ -181,6 +181,7 @@ export function buildMenuTree(
       children: [
         { label: __("Backup & restore"), hash: '#/tools/backup' },
         { label: __("Media reconciliation"), hash: '#/tools/media-reconcile' },
+        { label: __("Redirects & 404"), hash: '#/tools/redirects' },
         { label: __("System health"), hash: '#/tools/health' },
       ],
     },

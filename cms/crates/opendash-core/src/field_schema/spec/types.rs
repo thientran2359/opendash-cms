@@ -40,6 +40,39 @@ impl FieldContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HydrationVisibility {
+    All,
+    OptionsPublicOnly,
+    ContentPublic { max_view_role: FieldRole },
+}
+
+impl HydrationVisibility {
+    /// Options fields declare `public: true` only at top level; once a public
+    /// Group/Repeater is admitted, child sub-fields are readable (`All`).
+    /// Content fields propagate `ContentPublic` ACL filtering recursively.
+    pub const fn child_visibility(self) -> Self {
+        match self {
+            Self::OptionsPublicOnly => Self::All,
+            other => other,
+        }
+    }
+
+    pub fn allows(self, spec: &FieldSpec) -> bool {
+        if spec.is_ui_only() || spec.field_type == FieldType::Secret {
+            return false;
+        }
+        match self {
+            Self::All => true,
+            Self::OptionsPublicOnly => spec.public,
+            Self::ContentPublic { max_view_role } => {
+                let (min_view, _, exposure) = spec.effective_acl();
+                exposure == PublicExposure::Public && min_view <= max_view_role
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldScopeKind {
@@ -83,6 +116,39 @@ pub enum FieldType {
 }
 
 impl FieldType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Textarea => "textarea",
+            Self::Number => "number",
+            Self::Range => "range",
+            Self::Email => "email",
+            Self::Url => "url",
+            Self::Secret => "secret",
+            Self::Richtext => "richtext",
+            Self::Media => "media",
+            Self::Gallery => "gallery",
+            Self::Link => "link",
+            Self::Select => "select",
+            Self::Checkbox => "checkbox",
+            Self::RadioButtons => "radio_buttons",
+            Self::Boolean => "boolean",
+            Self::Color => "color",
+            Self::Icon => "icon",
+            Self::Date => "date",
+            Self::Datetime => "datetime",
+            Self::Time => "time",
+            Self::Spacing => "spacing",
+            Self::EntryRef => "entry_ref",
+            Self::TermRef => "term_ref",
+            Self::Group => "group",
+            Self::Repeater => "repeater",
+            Self::Tab => "tab",
+            Self::Accordion => "accordion",
+            Self::Message => "message",
+        }
+    }
+
     pub fn is_ui_only(self) -> bool {
         matches!(self, Self::Tab | Self::Accordion | Self::Message)
     }

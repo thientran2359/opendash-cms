@@ -132,6 +132,45 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
     Ok(parsed)
 }
 
+pub fn cpt_scope_for_target_key<'a>(
+    manifest: &'a ThemeV3Manifest,
+    target_key: &'a str,
+) -> Option<&'a str> {
+    if let Some(rest) = target_key.strip_prefix("single:type:") {
+        return rest.split(':').next().filter(|s| !s.is_empty());
+    }
+    if let Some(rest) = target_key.strip_prefix("archive:type:") {
+        return (!rest.is_empty()).then_some(rest);
+    }
+    if let Some(custom_key) = target_key.strip_prefix("single_custom:") {
+        return manifest.templates.iter().find_map(|tpl| {
+            (tpl.kind == TemplateCandidateKind::SingleCustom
+                && tpl.custom_key.as_deref() == Some(custom_key)
+                && tpl.allowed_types.len() == 1)
+                .then(|| tpl.allowed_types[0].as_str())
+        });
+    }
+    None
+}
+
+pub fn declared_fields_for_cpt(
+    declarations: &ThemeDeclarations,
+    cpt_key: &str,
+) -> Vec<opendash_core::field_schema::FieldSpec> {
+    let mut fields = Vec::new();
+    for ct in &declarations.content_types {
+        if ct.key == cpt_key {
+            fields.extend(ct.fields.iter().cloned());
+        }
+    }
+    for fg in &declarations.field_groups {
+        if fg.target_types.iter().any(|t| t == cpt_key) {
+            fields.extend(fg.fields.iter().cloned());
+        }
+    }
+    fields
+}
+
 pub fn theme_asset_mime(rel_path: &str) -> Option<&'static str> {
     let ext = rel_path
         .rsplit_once('.')

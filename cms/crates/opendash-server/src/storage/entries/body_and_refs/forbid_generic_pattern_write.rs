@@ -82,6 +82,7 @@ pub(in crate::storage) async fn sync_entry_body_refs_in_conn(
         .filter(|(_, fe)| {
             fe.effective_status == EffectiveFieldStatus::Active
                 && fe.definition.effective_acl().0 <= actor_role
+                && fe.definition.effective_acl().2 == PublicExposure::Public
         })
         .map(|(k, _)| k.clone())
         .collect();
@@ -169,6 +170,29 @@ pub(in crate::storage) async fn sync_entry_body_refs_in_conn(
     Ok(())
 }
 
+pub(super) async fn validate_effective_relational_refs_in_conn(
+    conn: &mut SqliteConnection,
+    effective: &EffectiveContentSchema,
+    values: &BTreeMap<String, Value>,
+    previous_values: Option<&BTreeMap<String, Value>>,
+    entry_locale: &str,
+) -> ApiResult<()> {
+    let specs: Vec<opendash_core::field_schema::FieldSpec> = effective
+        .effective_fields
+        .iter()
+        .filter(|(k, _)| k.as_str() != "body")
+        .map(|(_, fe)| fe.definition.clone())
+        .collect();
+    crate::storage::fields::validate_relational_refs_in_conn(
+        conn,
+        &specs,
+        values,
+        previous_values,
+        Some(entry_locale),
+    )
+    .await
+}
+
 pub(in crate::storage) fn extract_body_from_values_json(values_json: &str) -> Option<String> {
     serde_json::from_str::<BTreeMap<String, Value>>(values_json)
         .ok()
@@ -201,6 +225,14 @@ pub async fn create_entry_with_fence(
     let entry_locale =
         resolve_entry_write_locale_in_tx(&mut tx, input.locale.as_deref(), None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
+    validate_effective_relational_refs_in_conn(
+        &mut tx,
+        &effective,
+        &input.values,
+        None,
+        &entry_locale,
+    )
+    .await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
@@ -293,7 +325,16 @@ pub async fn update_entry_with_fence(
         resolve_entry_write_locale_in_tx(&mut tx, input.locale.as_deref(), Some(&existing_locale))
             .await?;
     let previous_body = extract_body_from_values_json(&old_values_json);
+    let previous_values = serde_json::from_str::<BTreeMap<String, Value>>(&old_values_json).ok();
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
+    validate_effective_relational_refs_in_conn(
+        &mut tx,
+        &effective,
+        &input.values,
+        previous_values.as_ref(),
+        &entry_locale,
+    )
+    .await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
@@ -368,6 +409,14 @@ pub async fn create_entry_with_schema_fence(
     let entry_locale =
         resolve_entry_write_locale_in_tx(&mut tx, input.locale.as_deref(), None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
+    validate_effective_relational_refs_in_conn(
+        &mut tx,
+        &effective,
+        &input.values,
+        None,
+        &entry_locale,
+    )
+    .await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
@@ -452,7 +501,16 @@ pub async fn update_entry_with_schema_fence(
         resolve_entry_write_locale_in_tx(&mut tx, input.locale.as_deref(), Some(&existing_locale))
             .await?;
     let previous_body = extract_body_from_values_json(&old_values_json);
+    let previous_values = serde_json::from_str::<BTreeMap<String, Value>>(&old_values_json).ok();
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
+    validate_effective_relational_refs_in_conn(
+        &mut tx,
+        &effective,
+        &input.values,
+        previous_values.as_ref(),
+        &entry_locale,
+    )
+    .await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }

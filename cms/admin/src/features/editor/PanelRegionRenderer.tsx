@@ -4,10 +4,9 @@ import React, { useState } from 'react';
 import type {
   ContentFieldValue,
   EffectiveEditorConfigProjection,
-  EffectiveFieldProjection,
   EffectivePanelProjection,
 } from '../content/types.ts';
-import { UnifiedFieldForm } from '../../fields/UnifiedFieldForm.tsx';
+import { PanelFieldSliceForm } from './PanelFieldSliceForm.tsx';
 import { TermPicker } from '../taxonomy/TermPicker.tsx';
 import { mediaThumbnailUrl } from '../../api/media.ts';
 
@@ -59,6 +58,8 @@ export interface PanelRegionRendererProps {
   onDelete?: () => void;
   onOpenBuilder: () => void;
   canOpenBuilder: boolean;
+  csrfToken: string | null;
+  siteTimezone?: string;
   saving: boolean;
   dirty: boolean;
 }
@@ -114,6 +115,8 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   onDelete,
   onOpenBuilder,
   canOpenBuilder,
+  csrfToken,
+  siteTimezone,
   saving,
   dirty,
 }) => {
@@ -152,60 +155,25 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
     if (Number.isNaN(d.getTime())) return null;
     return d.toISOString().slice(0, 19).replace('T', ' ');
   };
-  const renderField = (fieldKey: string) => {
-    const eff: EffectiveFieldProjection | undefined = config.effective_fields[fieldKey];
-    if (!eff) return null;
-    const isWithdrawn = eff.effective_status !== 'active';
-    const isCleared = clearedFields.includes(fieldKey);
-    const err = fieldErrors[fieldKey];
-
-    return (
-      <div key={fieldKey} className="space-y-1" data-field-key={fieldKey}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-medium text-slate-600">
-            {isWithdrawn && (
-              <span className="mr-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">
-                {__("Fallback")} ({eff.effective_status})
-              </span>
-            )}
-            {!eff.editable && (
-              <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">
-                {__("Read-only")}
-              </span>
-            )}
-          </span>
-          {eff.editable && !eff.effective_required && fieldKey in values && !isCleared && (
-            <button
-              type="button"
-              onClick={() => onFieldClear(fieldKey)}
-              className="text-xs text-slate-500 underline hover:text-rose-700"
-            >
-              {__("Clear value")}
-            </button>
-          )}
-        </div>
-        <UnifiedFieldForm
-          context="content"
-          fields={[eff.definition]}
-          values={values}
-          onChange={next => onFieldChange(fieldKey, next[fieldKey] as ContentFieldValue)}
-          csrfToken={null}
-          disabled={!eff.editable || (
-            (eff.definition.type === 'media' || eff.definition.type === 'gallery')
-            && eff.effective_status !== 'active'
-          )}
-          onApiError={() => {}}
-        />
-        {err && (
-          <p className="text-xs font-medium text-rose-700" role="alert">
-            {err}
-          </p>
-        )}
-      </div>
-    );
-  };
 
   const renderPanelBody = (proj: EffectivePanelProjection) => {
+    const renderSlice = (fieldKeys: readonly string[], usePanelFields = false) => (
+      <PanelFieldSliceForm
+        config={config}
+        proj={proj}
+        fieldKeys={fieldKeys}
+        usePanelFields={usePanelFields}
+        values={values}
+        clearedFields={clearedFields}
+        fieldErrors={fieldErrors}
+        csrfToken={csrfToken}
+        locale={locale}
+        siteTimezone={siteTimezone}
+        onFieldChange={onFieldChange}
+        onFieldClear={onFieldClear}
+        onApiError={onApiError}
+      />
+    );
     const kind = proj.panel.kind;
     if (kind.kind === 'core_built_in') {
       switch (kind.core_key) {
@@ -309,7 +277,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   )}
                 </div>
               )}
-              {renderField('body')}
+              {renderSlice(['body'])}
             </div>
           );
         }
@@ -376,10 +344,10 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
         case 'base_fields':
           return (
             <div className="space-y-3">
-              {proj.field_keys.length === 0 ? (
+              {(proj.panel_fields?.length ?? 0) === 0 && proj.field_keys.length === 0 ? (
                 <p className="text-xs text-slate-500">{__("No unassigned base fields.")}</p>
               ) : (
-                proj.field_keys.map(renderField)
+                renderSlice(proj.field_keys, true)
               )}
             </div>
           );
@@ -651,10 +619,39 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           {proj.subgroups.map(sg => (
             <div key={sg.subgroup_id} className="space-y-2 rounded border border-slate-100 bg-slate-50 p-2.5">
               <div className="text-xs font-semibold text-slate-700">{sg.title}</div>
-              {sg.field_keys.map(renderField)}
+              <PanelFieldSliceForm
+                config={config}
+                proj={proj}
+                fieldKeys={sg.field_keys}
+                values={values}
+                clearedFields={clearedFields}
+                fieldErrors={fieldErrors}
+                csrfToken={csrfToken}
+                locale={locale}
+                siteTimezone={siteTimezone}
+                onFieldChange={onFieldChange}
+                onFieldClear={onFieldClear}
+                onApiError={onApiError}
+              />
             </div>
           ))}
-          {ungroupedKeys.map(renderField)}
+          {ungroupedKeys.length > 0 && (
+            <PanelFieldSliceForm
+              config={config}
+              proj={proj}
+              fieldKeys={ungroupedKeys}
+              usePanelFields={proj.subgroups.length === 0}
+              values={values}
+              clearedFields={clearedFields}
+              fieldErrors={fieldErrors}
+              csrfToken={csrfToken}
+              locale={locale}
+              siteTimezone={siteTimezone}
+              onFieldChange={onFieldChange}
+              onFieldClear={onFieldClear}
+              onApiError={onApiError}
+            />
+          )}
         </div>
       );
     }

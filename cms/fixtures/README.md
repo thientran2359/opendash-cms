@@ -5,8 +5,8 @@
 Deterministic, synthetic, and baseline fixtures supporting migration upgrade tests, Admin extension integration checks, M7 media/SMTP verification, M8 backup/restore E2E suites, and the isolated Mộc Studio demo website. None of these fixtures contain production credentials, personal data, or third-party proprietary media.
 
 Directory index:
-- `baseline_0001.sqlite` (`24576` bytes): Pre-M1.1 baseline SQLite database (`git` origin `1fba9ac`) containing legacy `theme_blocks` and `home_page` tables; managed by [make_baseline_fixture.py](../scripts/make_baseline_fixture.py) and consumed by upgrade/smoke tests (`cms/scripts/windows_auth_smoke.py`, `cms/scripts/content_types_smoke.py`, `cms/scripts/content_entries_smoke.py`, and `cms/crates/opendash-server/tests/m7_s09_t01_schema_field_groups.rs`).
-- `admin-review/`: Isolated deterministic `admin_extensions` manifests (`plugin/plugin.json` for `review-provider` and `theme/theme.json` for `review-theme`) exercised by [admin_extensions_e2e.py](../scripts/admin_extensions_e2e.py); never installed on a live owner site.
+- `baseline_0001.sqlite` (`24576` bytes): Pre-M1.1 baseline SQLite database (`git` origin `1fba9ac`) containing legacy `theme_blocks` and `home_page` tables; managed by [make_baseline_fixture.py](../scripts/make_baseline_fixture.py) and consumed by Rust upgrade integration tests ([field_groups.rs](../crates/opendash-server/tests/content/field_groups.rs) and [unified_field_content_cutover.rs](../crates/opendash-server/tests/content/unified_field_content_cutover.rs)).
+- `admin-review/`: Isolated deterministic `admin_extensions` manifests (`plugin/plugin.json` for `review-provider` and `theme/theme.json` for `review-theme`) for isolated Admin review/testing; never installed on a live owner site.
 - [demo-website](./demo-website/README.md): Mộc Studio isolated demo site fixture (`theme-moc-studio/` + [screen-inventory.md](./demo-website/screen-inventory.md)) driven by [demo-website-runner.py](../scripts/demo-website-runner.py) and `dev.py`.
 - [m7](./m7/README.md): Synthetic MP4 (`video-avc-aac.mp4`) and localhost TLS test keypair (`smtp-test-cert.pem`, `smtp-test-key.pem`) for M7 media/SMTP E2E tests.
 - [m8](./m8/README.md): Schema fingerprint baseline ([schema_fingerprints.json](./m8/schema_fingerprints.json)) and OPS-01 restore contract/negative-corpus definitions for M8 E2E harnesses.
@@ -38,5 +38,5 @@ Verify the baseline SQLite fixture, demo runner, and M7/M8 integration suites:
 
 ```powershell
 python cms/scripts/make_baseline_fixture.py --destination cms/fixtures/baseline_0001.sqlite
-cargo test --manifest-path cms/Cargo.toml --locked --test m7_s08_t01_e2e --test m8_s08_t01_e2e
+cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test site_media_seo --test ops
 ```

@@ -6,7 +6,7 @@ use opendash_core::admin_extensions::{
     AdminColumn, AdminExtensions, AdminTermPanel, ColumnFormat, MAX_COLUMNS_EFFECTIVE,
 };
 use opendash_core::content::FieldRole;
-use opendash_core::field_schema::{FieldContext, FieldSpec, validate_field_value};
+use opendash_core::field_schema::{FieldContext, FieldSpec};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -55,6 +55,8 @@ pub struct EffectiveTermPanel {
     pub label: String,
     pub order: i32,
     pub fields: Vec<FieldSpec>,
+    #[serde(default)]
+    pub read_only_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -264,21 +266,28 @@ pub async fn effective_term_in_conn(
             if panel.kind != kind {
                 continue;
             }
-            let mut fields = panel
+            let fields = panel
                 .fields
                 .into_iter()
                 .filter(|field| allowed_field_role(actor_role, field.effective_acl().0))
                 .collect::<Vec<_>>();
-            if fields.is_empty() {
+            if !fields.iter().any(|field| !field.is_ui_only()) {
                 continue;
             }
-            fields.sort_by(|a, b| a.key.cmp(&b.key));
+            let read_only_keys = fields
+                .iter()
+                .filter(|field| {
+                    !field.is_ui_only() && !allowed_field_role(actor_role, field.effective_acl().1)
+                })
+                .map(|field| field.key.clone())
+                .collect();
             let key = qualified(&reg.owner_kind, &reg.owner_id, &reg.local_key);
             panels.push(EffectiveTermPanel {
                 key,
                 label: panel.label,
                 order: panel.order,
                 fields,
+                read_only_keys,
             });
         }
     }
@@ -349,9 +358,18 @@ pub async fn update_term_values_in_conn(
             .as_object()
             .ok_or_else(|| ApiError::bad_request("extensions panel phải là JSON object."))?;
         for key in fields.keys() {
-            if !panel.fields.iter().any(|field| &field.key == key) {
+            let Some(def) = panel
+                .fields
+                .iter()
+                .find(|field| &field.key == key && !field.is_ui_only())
+            else {
                 return Err(ApiError::forbidden(
                     "Không có quyền cập nhật extension field.",
+                ));
+            };
+            if !allowed_field_role(actor_role, def.effective_acl().1) {
+                return Err(ApiError::forbidden(
+                    "Không có quyền chỉnh sửa trường extension này.",
                 ));
             }
         }
@@ -361,11 +379,27 @@ pub async fn update_term_values_in_conn(
             "schema_token đã thay đổi, giữ bản nhập và tải lại cấu hình.",
         ));
     }
+    if patches.is_empty() {
+        return Ok(());
+    }
+    let term_locale: String = sqlx::query_scalar("SELECT locale FROM taxonomy_terms WHERE id=?")
+        .bind(term_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    let mut full_panels: BTreeMap<String, Vec<FieldSpec>> = BTreeMap::new();
+    for reg in active_in_conn(conn).await? {
+        if let Declaration::TermPanel(panel) = reg.declaration
+            && panel.kind == kind
+        {
+            full_panels.insert(
+                qualified(&reg.owner_kind, &reg.owner_id, &reg.local_key),
+                panel.fields,
+            );
+        }
+    }
     for (panel_key, fields) in patches {
-        let panel = current
-            .panels
-            .iter()
-            .find(|p| &p.key == panel_key)
+        let full_fields = full_panels
+            .get(panel_key)
             .ok_or_else(|| ApiError::conflict("Panel đã rút khỏi registry hoặc không có quyền."))?;
         let raw = fields
             .as_object()
@@ -386,44 +420,53 @@ pub async fn update_term_values_in_conn(
         .bind(segments[2])
         .fetch_optional(&mut *conn)
         .await?;
-        let mut saved: BTreeMap<String, Value> = previous
+        let previous_saved: BTreeMap<String, Value> = previous
             .as_deref()
             .map(serde_json::from_str)
             .transpose()
             .map_err(|_| ApiError::internal("Dữ liệu extension đã lưu không hợp lệ."))?
             .unwrap_or_default();
+        let mut saved = previous_saved.clone();
         for (field_key, value) in raw {
-            let def = panel
-                .fields
-                .iter()
-                .find(|f| &f.key == field_key)
-                .ok_or_else(|| ApiError::forbidden("Không có quyền cập nhật extension field."))?;
             if value.is_null() {
-                if def.required {
-                    return Err(ApiError::bad_request(
-                        "Trường bắt buộc không được xóa null.",
-                    ));
-                }
                 saved.remove(field_key);
-                continue;
+            } else {
+                saved.insert(field_key.clone(), value.clone());
             }
-            let empty = BTreeMap::new();
-            validate_field_value(
-                def,
-                FieldContext::Term,
-                value,
-                true,
-                true,
-                false,
-                None,
-                &panel.fields,
-                &empty,
-                None,
-                true,
-            )
-            .map_err(ApiError::bad_request)?;
-            saved.insert(field_key.clone(), value.clone());
         }
+        let valid_keys: BTreeSet<&str> = full_fields
+            .iter()
+            .filter(|f| !f.is_ui_only())
+            .map(|f| f.key.as_str())
+            .collect();
+        let validation_prev: BTreeMap<String, Value> = previous_saved
+            .iter()
+            .filter(|(k, _)| valid_keys.contains(k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let validation_saved: BTreeMap<String, Value> = saved
+            .iter()
+            .filter(|(k, _)| valid_keys.contains(k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        opendash_core::field_schema::validate_field_values(
+            full_fields,
+            opendash_core::field_schema::FieldContext::Term,
+            &validation_saved,
+            Some(&validation_prev),
+        )
+        .map_err(ApiError::bad_request)?;
+        let collected_media =
+            opendash_core::field_schema::collect_media_ids(full_fields, &validation_saved);
+        crate::storage::fields::verify_collected_media_ids_in_conn(conn, &collected_media).await?;
+        crate::storage::fields::validate_relational_refs_in_conn(
+            conn,
+            full_fields,
+            &validation_saved,
+            Some(&validation_prev),
+            Some(&term_locale),
+        )
+        .await?;
         sqlx::query(
             "INSERT INTO term_extension_values (term_id,owner_kind,owner_id,local_key,values_json)
              VALUES (?,?,?,?,?) ON CONFLICT(term_id,owner_kind,owner_id,local_key)

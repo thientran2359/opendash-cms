@@ -43,7 +43,7 @@ impl ContentTypeDefinitionInput {
         if !valid_label(&self.label) {
             return Err("Tên loại nội dung không hợp lệ.");
         }
-        if self.fields.len() > 64 {
+        if self.fields.iter().filter(|f| !f.is_ui_only()).count() > 64 {
             return Err("Mỗi loại nội dung hỗ trợ tối đa 64 custom fields.");
         }
         let mut canonical_fields = self.fields;
@@ -91,7 +91,7 @@ impl ContentTypeDefinition {
         if self.key == "pattern" && self.settings != ContentTypeSettings::private_pattern() {
             return Err("Pattern phải luôn riêng tư và chỉ hỗ trợ Builder.");
         }
-        if self.fields.len() > 64 {
+        if self.fields.iter().filter(|f| !f.is_ui_only()).count() > 64 {
             return Err("Mỗi loại nội dung hỗ trợ tối đa 64 custom fields.");
         }
         let is_builtin_post_or_page = matches!(self.key.as_str(), "post" | "page");
@@ -158,7 +158,8 @@ impl ManifestFieldGroupInput {
         if !(-1000..=1000).contains(&self.default_order) {
             return Err("default_order của field_group phải nằm trong khoảng [-1000..=1000].");
         }
-        if self.fields.is_empty() || self.fields.len() > 64 {
+        let data_count = self.fields.iter().filter(|f| !f.is_ui_only()).count();
+        if data_count == 0 || data_count > 64 {
             return Err("Mỗi field_group phải khai báo từ 1 đến 64 custom fields.");
         }
         let mut canonical_fields = self.fields.clone();

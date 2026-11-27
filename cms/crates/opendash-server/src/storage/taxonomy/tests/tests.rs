@@ -4,7 +4,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use std::time::Duration;
 
 async fn fixture(db: &SqlitePool) -> SessionContext {
-    sqlx::migrate!("../../migrations").run(db).await.unwrap();
+    crate::storage::MIGRATOR.run(db).await.unwrap();
     let id = sqlx::query(
         "INSERT INTO users (username, password_hash, role) VALUES ('tax_admin', 'unused', 'admin')",
     )

@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/scripts/` contains **36** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, canonical lifecycle benchmarks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
+`cms/scripts/` contains **20** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, shared E2E/benchmark helpers, canonical lifecycle benchmarks, and current Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
 
 ## Interface
 
@@ -28,43 +28,27 @@
 | [`codegraph-index-docs.mjs`](codegraph-index-docs.mjs) | Indexes canonical contracts, ADRs, and `docs/designs/*.md` into local CodeGraph (`[--list-sources]` works without the engine binary). |
 | [`codegraph-query.mjs`](codegraph-query.mjs) | CLI wrapper for CodeGraph queries: `symbol <query>`, `callgraph\|callers\|callees <file> <line>`, `docs <query>`, `entrypoints`. |
 
-### API, Auth, Media, Benchmark & Migration Smoke Tests (8)
+### Shared Helpers, Baseline Fixture & Performance Benchmark (3)
 
-All smoke scripts launch isolated server instances (ephemeral loopback ports and `TemporaryDirectory` DB/site roots) via `running(...)` or apply SQLite migrations in memory, accepting `--binary <path>` where a server executable is required:
+Shared stdlib test utilities (`e2e_helpers.py`), baseline DB fixture generator, and deterministic lifecycle benchmark runner:
 
-- [`windows_smoke.py`](windows_smoke.py) — Core HTTP v3 theme, entry builder, retired M3–M5 `404` checks, and launcher helper (`running`, `sample_theme`).
-- [`windows_auth_smoke.py`](windows_auth_smoke.py) — Auth, RBAC, session expiry, CSRF, concurrent setup, and DB upgrade tests.
+- [`e2e_helpers.py`](e2e_helpers.py) — Shared pure-stdlib helpers (`free_port`, `wait_for_health`, `launch_server`, `stop_server`, `api_json`, `set_cms_locale`, `admin_login`, `make_png`) imported by the kept E2E and benchmark suites.
 - [`make_baseline_fixture.py`](make_baseline_fixture.py) — Generates or verifies `cms/fixtures/baseline_0001.sqlite` (`create_baseline_fixture`).
-- [`content_types_smoke.py`](content_types_smoke.py) — CPT API CRUD & SQLite smoke (`running`, `login`, `request`).
-- [`content_entries_smoke.py`](content_entries_smoke.py) — Content entry CRUD, concurrency, and media wiring smoke (`api`).
-- [`media_smoke.py`](media_smoke.py) — Media library upload/PNG helper and lifecycle smoke (`make_png`, `upload_image`).
-- [`egm_pattern_s02_migration.py`](egm_pattern_s02_migration.py) — In-memory SQLite migration test applying `0001`–`0043` then `0044` (`apply_through`) to verify Section-to-Pattern upgrade integrity.
 - [`entry_lifecycle_benchmark.py`](entry_lifecycle_benchmark.py) — Canonical S04 baseline-vs-candidate performance benchmark (`--baseline-binary`, `--candidate-binary`, `--artifact-dir`, optional `--sizes`) verifying NFR gates P1–P3 across deterministic 1k/10k/50k fixtures.
 
-### Live Browser E2E Suites (16)
+### Live Browser E2E Suites (5)
 
 Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-specific `--artifact-dir` / `--browser` flags):
 
 - [`admin_i18n_multilingual_e2e.py`](admin_i18n_multilingual_e2e.py) — Admin i18n and multilingual settings (`0051`) browser journeys.
-- [`admin_nav_single_edit_e2e.py`](admin_nav_single_edit_e2e.py) — Bounded Chrome Admin navigation, RBAC, and single-edit acceptance.
-- [`cpt_builder_e2e.py`](cpt_builder_e2e.py) — CPT builder browser smoke on an isolated site.
-- [`pattern_library_studio_e2e.py`](pattern_library_studio_e2e.py) — Pattern library, Studio Mode 2 Pattern (`#/studio/entry/pattern/:id`), and RBAC Chrome + API E2E suite.
 - [`entry_lifecycle_trash_e2e.py`](entry_lifecycle_trash_e2e.py) — Entry Trash/Restore/Purge, Reading guard, dormant retained-Trash maintenance, Editor vs Admin RBAC, Studio/Editor trashed guards, and plugin host confirmation Chrome E2E suite.
 - [`entry_lifecycle_quick_edit_e2e.py`](entry_lifecycle_quick_edit_e2e.py) — Inline Quick Edit, site-timezone `published_at`, single-taxonomy delta, 412 diff + explicit rebase, simultaneous Single Edit + Quick Edit 401/Cancel isolation, trashed-target 409 guard, and 390px mobile Chrome E2E suite.
 - [`entry_lifecycle_bulk_actions_e2e.py`](entry_lifecycle_bulk_actions_e2e.py) — Bounded current-page Bulk Actions (broadened `draft_publish` CPT publication, single-taxonomy add/remove/replace, mixed-locale block, Trash/Restore/Admin-only Purge, mixed 200/412 + uncertain reconciliation without replaying successes, EN/VI, 390px mobile) Chrome E2E suite.
-- [`general_settings_browser.py`](general_settings_browser.py) — General Settings (`SITE-01`) embedded Admin browser test.
-- [`page_builder_scope_e2e.py`](page_builder_scope_e2e.py) — Page builder Studio Mode 2 E2E acceptance (`ui_create_page`, `new_heading`, `change_heading`).
-- [`template_library_e2e.py`](template_library_e2e.py) — Local template library, Pattern CRUD (`create_ui_pattern`), and Studio override E2E test.
-- [`admin_extensions_e2e.py`](admin_extensions_e2e.py) — Plugin provider Admin columns, actions, and term panels E2E.
-- [`menu_picker_e2e.py`](menu_picker_e2e.py) — Admin menu picker E2E and shared launcher/theme helpers (`launch_server`, `stop_server`, `admin_login`, `api_json`, `set_cms_locale`, `theme_zip`).
-- [`admin_navigation_e2e.py`](admin_navigation_e2e.py) — Grouped Admin routes and one-screen-per-destination E2E.
-- [`entry_table_e2e.py`](entry_table_e2e.py) — Entry tables, bulk CAS, URL redirect history, and mobile viewport E2E.
-- [`operations_backup_restore_e2e.py`](operations_backup_restore_e2e.py) — Backup → restore → re-auth → activate → re-edit → Save → public E2E.
-- [`windows_users_browser.py`](windows_users_browser.py) — Embedded Admin Users UI test at desktop and 390px viewports.
+- [`manual_redirects_404_e2e.py`](manual_redirects_404_e2e.py) — Manual redirects (301/302), CSV dry-run/import/BOM export, aggregated 404 log, 1-click redirect, `401`/`412` draft recovery, RBAC, and `en`/`vi`/mobile Chrome E2E.
 
 ## Invariants
 
-- **Site data isolation:** Smoke and E2E scripts must use `TemporaryDirectory` (`OPENDASH_SITE_ROOT` / `OPENDASH_DB_PATH`) and ephemeral loopback ports; they must never write to root `database/`, `themes/`, `plugins/`, `uploads/`, or target a running owner server.
+- **Site data isolation:** Benchmark and E2E scripts must use `TemporaryDirectory` (`OPENDASH_SITE_ROOT` / `OPENDASH_DB_PATH`) and ephemeral loopback ports; they must never write to root `database/`, `themes/`, `plugins/`, `uploads/`, or target a running owner server.
 - **Deterministic builds:** [`build.ps1`](build.ps1) and [`build-release-linux.sh`](build-release-linux.sh) use `npm ci` (unless `--skip-npm-ci` is passed) and `cargo --locked` against [`cms/Cargo.lock`](../Cargo.lock), [`cms/admin/package.json`](../admin/package.json), and [`cms/examples/plugins/sample-plugin/package.json`](../examples/plugins/sample-plugin/package.json).
 - **No external runtime deps for core gates:** [`check-standards.py`](check-standards.py), [`check-plans.py`](check-plans.py), and [`verify-release-artifact.py`](verify-release-artifact.py) rely strictly on Python 3.11+ stdlib; [`check-i18n.mjs`](check-i18n.mjs) relies only on Node.js stdlib.
 

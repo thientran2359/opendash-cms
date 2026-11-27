@@ -7,7 +7,7 @@ async fn builder_generic_taxonomy_list_hides_drafts_and_survives_withdrawn_refer
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         "INSERT INTO taxonomy_definitions(key,label,hierarchical,public,owner_kind)
          VALUES('genre','Genre',1,1,'user')",
@@ -202,7 +202,7 @@ async fn published_taxonomy_filter_excludes_drafts_before_pagination() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     let root = sqlx::query(
         "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Root','root','vi','tg-' || lower(hex(randomblob(8))))",
     )

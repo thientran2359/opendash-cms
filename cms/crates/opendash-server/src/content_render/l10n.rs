@@ -144,10 +144,12 @@ pub const DEFAULT_SINGLE: &str = r##"<!doctype html>
 {% if archive_url %}<nav class="mb-6"><a class="text-od-primary hover:underline" href="{{ archive_url }}">← {{ content_type.label }}</a></nav>{% endif %}
 <article class="od-prose"><h1>{{ entry.title }}</h1>
 <dl class="mt-8">{% for field in entry.field_list %}
-{% if field.text or field.image_url or field.gallery_urls %}
+{% if field.text or field.media or field.gallery or field.link %}
 <dt class="mt-6 font-semibold">{{ field.label }}</dt>
-{% if field.image_url %}<dd class="my-2"><img class="h-auto max-w-full rounded-lg" src="{{ field.image_url }}" alt="{{ field.label }}" loading="lazy"></dd>
-{% elif field.gallery_urls %}<dd class="my-2 flex flex-wrap gap-3">{% for url in field.gallery_urls %}<img class="h-36 w-48 rounded-lg object-contain" src="{{ url }}" alt="{{ field.label }}" loading="lazy">{% endfor %}</dd>
+{% if field.media %}<dd class="my-2"><img class="h-auto max-w-full rounded-lg" src="{{ field.media.url }}" alt="{{ field.media.alt or field.label }}" loading="lazy"></dd>
+{% elif field.gallery %}<dd class="my-2 flex flex-wrap gap-3">{% for img in field.gallery %}<img class="h-36 w-48 rounded-lg object-contain" src="{{ img.url }}" alt="{{ img.alt or field.label }}" loading="lazy">{% endfor %}</dd>
+{% elif field.link %}<dd class="my-2"><a class="text-od-primary hover:underline" href="{{ field.link.url }}">{{ field.link.label or field.link.url }}</a></dd>
+{% elif field.field_type == "richtext" %}<dd class="my-2 od-prose">{{ field.text }}</dd>
 {% else %}<dd class="my-2 whitespace-pre-wrap break-words">{{ field.text }}</dd>{% endif %}
 {% endif %}
 {% endfor %}</dl>
@@ -219,6 +221,31 @@ pub fn render_single_with_context_for_locale(
     fmt_cfg: &RenderFormattingConfig,
     locale_code: &str,
 ) -> ApiResult<String> {
+    render_single_with_context_and_nonces_for_locale(
+        schema,
+        entry,
+        selected_template,
+        site,
+        archive_url,
+        breadcrumbs,
+        fmt_cfg,
+        locale_code,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_single_with_context_and_nonces_for_locale(
+    schema: &ContentTypeDefinition,
+    entry: &EntryView,
+    selected_template: Option<&str>,
+    site: &SiteContext<'_>,
+    archive_url: Option<&str>,
+    breadcrumbs: &[BreadcrumbItem],
+    fmt_cfg: &RenderFormattingConfig,
+    locale_code: &str,
+    richtext_nonces: Option<&crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<String> {
     let data = serde_json::json!({
         "content_type": schema,
         "entry": entry,
@@ -227,10 +254,19 @@ pub fn render_single_with_context_for_locale(
         "site": site,
         "l10n": core_l10n(locale_code),
     });
-    if let Some(custom) = selected_template {
-        if let Ok(html) = theme::render_content_with_config(custom, &data, fmt_cfg) {
-            return Ok(html);
+    let html = if let Some(custom) = selected_template {
+        match theme::render_content_with_config(custom, &data, fmt_cfg) {
+            Ok(html) => html,
+            Err(_) => theme::render_content_with_config(DEFAULT_SINGLE, &data, fmt_cfg)
+                .map_err(ApiError::internal)?,
         }
+    } else {
+        theme::render_content_with_config(DEFAULT_SINGLE, &data, fmt_cfg)
+            .map_err(ApiError::internal)?
+    };
+    if let Some(nonces) = richtext_nonces {
+        finalize_document_richtext(html, nonces)
+    } else {
+        Ok(html)
     }
-    theme::render_content_with_config(DEFAULT_SINGLE, &data, fmt_cfg).map_err(ApiError::internal)
 }
