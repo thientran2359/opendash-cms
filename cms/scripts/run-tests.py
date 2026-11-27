@@ -313,7 +313,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             (("theme", "override", "layout"), "theme"),
             (("plugin", "projection", "extension", "hook", "functions_runtime"), "plugin"),
             (("entry", "content", "taxonomy", "field", "lifecycle", "trash", "search", "fts", "revision", "autosave"), "content"),
-            (("builder", "pattern", "section", "block", "revision", "autosave"), "builder"),
+            (("builder", "pattern", "section", "block"), "builder"),
             (("i18n", "multilingual", "locale"), "i18n"),
             (("permalink", "redirect", "404", "seo", "menu", "media", "responsive", "variant", "contact", "smtp", "option", "setting"), "site-media-seo"),
             (("backup", "operation", "maintenance", "restore", "job"), "ops"),
@@ -338,8 +338,6 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
 
     if path.startswith("cms/crates/opendash-server/src/"):
         sub = path[len("cms/crates/opendash-server/src/") :]
-        if sub.startswith("storage/revisions/"):
-            return {"builder", "content"}, set(), False, False
         if sub == "http_middleware.rs":
             return set(ALL_GROUP_NAMES), set(), True, False
         server_routes: dict[str, set[str]] = {
@@ -469,8 +467,8 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             ("search/", {"content"}),
             ("storage/search/", {"content"}),
             ("routes/search/", {"content"}),
-            ("revisions/", {"builder", "content"}),
-            ("storage/revisions/", {"builder", "content"}),
+            ("revisions/", {"content"}),
+            ("storage/revisions/", {"content"}),
             ("routes/revisions/", {"builder", "content", "ops"}),
             ("routes/extensions/", {"plugin", "content"}),
             ("hooks/", {"plugin"}),
@@ -970,7 +968,7 @@ class RunTestsSelfTest(unittest.TestCase):
             all_tests,
         )
         self.assertFalse(mig_plan.run_all_workspace)
-        self.assertEqual(set(mig_plan.groups), {"theme", "content", "builder"})
+        self.assertEqual(set(mig_plan.groups), {"theme", "content"})
 
         core_plan = build_plan_from_files(
             ["cms/crates/opendash-core/src/revisions/text_diff.rs"],
@@ -985,7 +983,7 @@ class RunTestsSelfTest(unittest.TestCase):
             all_tests,
         )
         self.assertFalse(server_plan.run_all_workspace)
-        self.assertEqual(set(server_plan.groups), {"builder", "content"})
+        self.assertEqual(set(server_plan.groups), {"content"})
         self.assertIn("storage::revisions", server_plan.unit_filters)
 
     def test_runner_env_defaults_rust_test_threads_to_4(self) -> None:
