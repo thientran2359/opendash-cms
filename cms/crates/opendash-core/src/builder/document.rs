@@ -170,7 +170,7 @@ pub(super) fn index_previous_plugin_values<'a>(
     map
 }
 
-pub(super) fn is_preserved(
+pub fn is_preserved(
     previous: Option<&BuilderDocument>,
     (s, r, c, e): (usize, usize, usize, usize),
     section: &SectionNode,

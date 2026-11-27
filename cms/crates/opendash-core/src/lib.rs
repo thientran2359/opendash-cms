@@ -13,5 +13,6 @@ pub mod id;
 pub mod l10n;
 pub mod plugin;
 pub mod registry;
+pub mod revisions;
 pub mod richtext;
 pub mod theme;

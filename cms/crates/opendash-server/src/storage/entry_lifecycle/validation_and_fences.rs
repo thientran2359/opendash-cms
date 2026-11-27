@@ -387,6 +387,8 @@ pub(in crate::storage) async fn commit_metadata_patch_inner(
         ));
     }
 
+    crate::storage::revisions::capture_baseline_if_missing_in_tx(&mut *tx, entry_id).await?;
+
     let was_ever_published_int: i64 = sqlx::query_scalar(
         "SELECT has_been_published FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
@@ -496,6 +498,15 @@ pub(in crate::storage) async fn commit_metadata_patch_inner(
         }
         crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     }
+
+    crate::storage::revisions::capture_entry_revision_in_tx(
+        &mut *tx,
+        entry_id,
+        opendash_core::revisions::RevisionSource::QuickEdit,
+        None,
+        crate::storage::revisions::RevisionActor::User(actor),
+    )
+    .await?;
 
     let caller_role = match actor.user.role {
         Role::Admin => opendash_core::content::FieldRole::Admin,

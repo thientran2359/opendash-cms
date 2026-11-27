@@ -73,6 +73,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "field_hydrate::",
             "storage::builder",
             "storage::page",
+            "storage::revisions",
             "routes::builder",
         ),
     ),
@@ -86,6 +87,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::entries",
             "storage::entry_table",
             "storage::fields",
+            "storage::revisions",
             "storage::taxonomy",
             "routes::entries",
             "routes::fields",
@@ -232,6 +234,8 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         return {"plugin"}, set(), False, False
 
     if path.startswith("cms/crates/opendash-core/src/"):
+        if path.startswith("cms/crates/opendash-core/src/revisions/"):
+            return {"builder", "content"}, set(), False, False
         filename = path.rsplit("/", 1)[-1]
         core_routes: dict[str, set[str]] = {
             "theme.rs": {"theme"},
@@ -282,8 +286,8 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         keyword_map = (
             (("theme", "override", "layout"), "theme"),
             (("plugin", "projection", "extension", "hook", "functions_runtime"), "plugin"),
-            (("entry", "content", "taxonomy", "field", "lifecycle", "trash"), "content"),
-            (("builder", "pattern", "section", "block"), "builder"),
+            (("entry", "content", "taxonomy", "field", "lifecycle", "trash", "revision", "autosave"), "content"),
+            (("builder", "pattern", "section", "block", "revision", "autosave"), "builder"),
             (("i18n", "multilingual", "locale"), "i18n"),
             (("permalink", "seo", "menu", "media", "contact", "smtp", "option", "setting"), "site-media-seo"),
             (("backup", "operation", "maintenance", "restore", "job"), "ops"),
@@ -308,6 +312,8 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
 
     if path.startswith("cms/crates/opendash-server/src/"):
         sub = path[len("cms/crates/opendash-server/src/") :]
+        if sub.startswith("storage/revisions/"):
+            return {"builder", "content"}, set(), False, False
         server_routes: dict[str, set[str]] = {
             # Theme & public rendering
             "theme.rs": {"theme"},
@@ -705,6 +711,31 @@ class RunTestsSelfTest(unittest.TestCase):
     def test_macos_tmpdir_resolves_symlink(self) -> None:
         env = canonical_tmpdir_env({"TMPDIR": "/var/tmp"}, platform="darwin")
         self.assertTrue(env["TMPDIR"].startswith("/private/"))
+
+    def test_revisions_and_autosaves_routing(self) -> None:
+        all_tests = discover_integration_tests()
+        mig_plan = build_plan_from_files(
+            ["cms/migrations/0057_entry_revisions_and_autosaves.sql"],
+            all_tests,
+        )
+        self.assertFalse(mig_plan.run_all_workspace)
+        self.assertEqual(set(mig_plan.groups), {"theme", "content", "builder"})
+
+        core_plan = build_plan_from_files(
+            ["cms/crates/opendash-core/src/revisions/text_diff.rs"],
+            all_tests,
+        )
+        self.assertFalse(core_plan.run_all_workspace)
+        self.assertEqual(set(core_plan.groups), {"builder", "content"})
+        self.assertIn("storage::revisions", core_plan.unit_filters)
+
+        server_plan = build_plan_from_files(
+            ["cms/crates/opendash-server/src/storage/revisions/capture.rs"],
+            all_tests,
+        )
+        self.assertFalse(server_plan.run_all_workspace)
+        self.assertEqual(set(server_plan.groups), {"builder", "content"})
+        self.assertIn("storage::revisions", server_plan.unit_filters)
 
 
 def run_self_test() -> int:
