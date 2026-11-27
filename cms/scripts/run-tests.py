@@ -57,8 +57,9 @@ GROUPS: tuple[GroupSpec, ...] = (
             "field_hydrate::",
             "public_context::",
             "package::",
+            "cache::",
+            "dev_mode::",
             "storage::theme",
-            "storage::overrides",
             "storage::import",
             "storage::public_content",
             "routes::themes",
@@ -85,6 +86,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "field_hydrate::",
             "storage::content",
             "storage::entries",
+            "storage::entry_lifecycle",
             "storage::entry_table",
             "storage::fields",
             "storage::revisions",
@@ -101,7 +103,9 @@ GROUPS: tuple[GroupSpec, ...] = (
         unit_filters=(
             "plugin::",
             "hooks::",
+            "cache::",
             "field_hydrate::",
+            "storage::entry_lifecycle",
             "storage::plugin",
             "routes::plugin",
         ),
@@ -113,6 +117,8 @@ GROUPS: tuple[GroupSpec, ...] = (
         test_patterns=("i18n",),
         unit_filters=(
             "i18n::",
+            "i18n_redirects::",
+            "l10n::",
             "field_hydrate::",
             "storage::settings",
             "routes::settings",
@@ -125,13 +131,13 @@ GROUPS: tuple[GroupSpec, ...] = (
         unit_filters=(
             "media::",
             "media_video::",
+            "i18n_redirects::",
             "smtp::",
             "field_hydrate::",
             "storage::menu",
             "storage::permalinks",
-            "storage::seo",
             "storage::settings",
-            "storage::s03_media_acl",
+            "storage::builder::s03_media_acl_tests",
             "routes::media",
             "routes::settings",
         ),
@@ -234,8 +240,21 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         return {"plugin"}, set(), False, False
 
     if path.startswith("cms/crates/opendash-core/src/"):
-        if path.startswith("cms/crates/opendash-core/src/revisions/"):
-            return {"builder", "content"}, set(), False, False
+        sub_core = path[len("cms/crates/opendash-core/src/") :]
+        core_prefixes: tuple[tuple[str, set[str]], ...] = (
+            ("theme/", {"theme"}),
+            ("builder/", {"builder", "content"}),
+            ("builder_blocks/", {"builder"}),
+            ("richtext/", {"builder", "content"}),
+            ("content/", {"content"}),
+            ("plugin/", {"plugin"}),
+            ("l10n/", {"i18n"}),
+            ("redirects/", {"site-media-seo"}),
+            ("revisions/", {"builder", "content"}),
+        )
+        for prefix, groups in core_prefixes:
+            if sub_core.startswith(prefix):
+                return groups, set(), False, False
         filename = path.rsplit("/", 1)[-1]
         core_routes: dict[str, set[str]] = {
             "theme.rs": {"theme"},
@@ -289,7 +308,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             (("entry", "content", "taxonomy", "field", "lifecycle", "trash", "revision", "autosave"), "content"),
             (("builder", "pattern", "section", "block", "revision", "autosave"), "builder"),
             (("i18n", "multilingual", "locale"), "i18n"),
-            (("permalink", "seo", "menu", "media", "contact", "smtp", "option", "setting"), "site-media-seo"),
+            (("permalink", "redirect", "404", "seo", "menu", "media", "contact", "smtp", "option", "setting"), "site-media-seo"),
             (("backup", "operation", "maintenance", "restore", "job"), "ops"),
         )
         matched_any = False
@@ -322,6 +341,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "document.rs": {"theme"},
             "public_context.rs": {"theme"},
             "package.rs": {"theme", "plugin"},
+            "cache.rs": {"theme", "plugin"},
             "storage/theme.rs": {"theme"},
             "storage/theme_tests.rs": {"theme"},
             "storage/overrides.rs": {"theme", "builder"},
@@ -345,12 +365,14 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "storage/entry_table.rs": {"content"},
             "storage/fields.rs": {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
             "field_hydrate.rs": {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
+            "field_hydrate_tests.rs": {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
             "storage/taxonomy.rs": {"content"},
             "storage/dashboard.rs": {"content"},
             "routes/content.rs": {"content"},
             "routes/entries.rs": {"content"},
             "routes/fields.rs": {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
             "routes/taxonomy.rs": {"content"},
+            "routes/taxonomy_tests.rs": {"content"},
             "routes/dashboard.rs": {"content"},
             # Plugins & Hooks
             "hooks.rs": {"plugin"},
@@ -361,13 +383,17 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "routes/plugin.rs": {"plugin"},
             # Multilingual & i18n
             "i18n.rs": {"i18n"},
+            "i18n_redirects.rs": {"i18n", "site-media-seo"},
+            "routes/l10n.rs": {"i18n"},
             # Site, Media, SEO, Contact & SMTP
             "contact.rs": {"site-media-seo"},
             "media.rs": {"site-media-seo"},
             "media_lifecycle.rs": {"site-media-seo", "ops"},
             "media_video.rs": {"site-media-seo"},
+            "redirects.rs": {"site-media-seo"},
             "seo.rs": {"site-media-seo"},
             "smtp.rs": {"site-media-seo"},
+            "smtp_tests.rs": {"site-media-seo"},
             "storage/contact.rs": {"site-media-seo"},
             "storage/media.rs": {"site-media-seo"},
             "storage/media_lifecycle.rs": {"site-media-seo", "ops"},
@@ -392,6 +418,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "backup_worker.rs": {"ops"},
             "restore.rs": {"ops"},
             "operations.rs": {"ops"},
+            "operations_tests.rs": {"ops"},
             "operations_worker_process.rs": {"ops"},
             "config.rs": {"ops"},
             "paths.rs": {"ops"},
@@ -399,11 +426,57 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "storage/backup.rs": {"ops"},
             "storage/restore.rs": {"ops"},
             "storage/operations.rs": {"ops"},
+            "storage/operations_tests.rs": {"ops"},
             "routes/operations.rs": {"ops"},
         }
         if sub in server_routes:
             return server_routes[sub], set(), False, False
-        # Shared runtime entrypoints (main.rs, app.rs, auth.rs, error.rs, storage/mod.rs, etc.)
+        server_prefixes: tuple[tuple[str, set[str]], ...] = (
+            ("theme/", {"theme"}),
+            ("template_sec/", {"theme"}),
+            ("content_render/", {"theme", "content"}),
+            ("document/", {"theme"}),
+            ("dev_mode/", {"theme"}),
+            ("storage/theme/", {"theme"}),
+            ("storage/theme_tests/", {"theme"}),
+            ("storage/overrides/", {"theme"}),
+            ("storage/import/", {"theme"}),
+            ("storage/public_content/", {"theme", "content"}),
+            ("routes/themes/", {"theme"}),
+            ("routes/public_content/", {"theme", "content"}),
+            ("page/", {"builder", "theme"}),
+            ("storage/builder/", {"builder"}),
+            ("storage/page/", {"builder", "theme"}),
+            ("storage/content/", {"content"}),
+            ("storage/entries/", {"content"}),
+            ("storage/entry_lifecycle/", {"content", "plugin"}),
+            ("storage/entry_table/", {"content"}),
+            ("storage/fields/", {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"}),
+            ("storage/taxonomy/", {"content"}),
+            ("routes/entries/", {"content"}),
+            ("routes/extensions/", {"plugin", "content"}),
+            ("hooks/", {"plugin"}),
+            ("storage/plugin/", {"plugin"}),
+            ("storage/plugin_projections/", {"plugin"}),
+            ("routes/plugin/", {"plugin"}),
+            ("l10n/", {"i18n"}),
+            ("media/", {"site-media-seo"}),
+            ("media_lifecycle/", {"site-media-seo", "ops"}),
+            ("media_video/", {"site-media-seo"}),
+            ("storage/menu/", {"site-media-seo", "theme"}),
+            ("storage/permalinks/", {"site-media-seo", "content"}),
+            ("storage/redirects/", {"site-media-seo"}),
+            ("storage/seo/", {"site-media-seo"}),
+            ("storage/settings/", {"site-media-seo", "i18n", "theme"}),
+            ("routes/redirects/", {"site-media-seo"}),
+            ("backup_worker/", {"ops"}),
+            ("secrets/", {"ops", "site-media-seo"}),
+            ("routes/operations/", {"ops"}),
+        )
+        for prefix, groups in server_prefixes:
+            if sub.startswith(prefix):
+                return groups, set(), False, False
+        # Shared runtime entrypoints (main.rs, app.rs, state.rs, auth.rs, error.rs, storage/mod.rs, etc.)
         return set(ALL_GROUP_NAMES), set(), True, False
 
     # Any other unrecognized file inside cms/crates/ escalates safely.
@@ -572,6 +645,14 @@ def canonical_tmpdir_env(base_env: dict[str, str], platform: str | None = None) 
     return env
 
 
+def test_runner_env(base_env: dict[str, str], platform: str | None = None) -> dict[str, str]:
+    """Build subprocess environment with canonical TMPDIR and bounded default parallelism."""
+    env = canonical_tmpdir_env(base_env, platform=platform)
+    if not env.get("RUST_TEST_THREADS", "").strip():
+        env["RUST_TEST_THREADS"] = "4"
+    return env
+
+
 def build_cargo_commands(plan: SelectionPlan, release: bool) -> list[list[str]]:
     base = ["cargo", "test", "--manifest-path", str(CARGO_MANIFEST), "--locked"]
     if release:
@@ -715,7 +796,7 @@ class RunTestsSelfTest(unittest.TestCase):
     def test_revisions_and_autosaves_routing(self) -> None:
         all_tests = discover_integration_tests()
         mig_plan = build_plan_from_files(
-            ["cms/migrations/0057_entry_revisions_and_autosaves.sql"],
+            ["cms/migrations/0058_entry_revisions_and_autosaves.sql"],
             all_tests,
         )
         self.assertFalse(mig_plan.run_all_workspace)
@@ -736,6 +817,34 @@ class RunTestsSelfTest(unittest.TestCase):
         self.assertFalse(server_plan.run_all_workspace)
         self.assertEqual(set(server_plan.groups), {"builder", "content"})
         self.assertIn("storage::revisions", server_plan.unit_filters)
+
+    def test_runner_env_defaults_rust_test_threads_to_4(self) -> None:
+        env = test_runner_env({"TMPDIR": "/private/tmp"}, platform="linux")
+        self.assertEqual(env["RUST_TEST_THREADS"], "4")
+
+    def test_runner_env_preserves_explicit_rust_test_threads(self) -> None:
+        env = test_runner_env(
+            {"TMPDIR": "/private/tmp", "RUST_TEST_THREADS": "8"}, platform="linux"
+        )
+        self.assertEqual(env["RUST_TEST_THREADS"], "8")
+
+    def test_modular_subdirectories_route_without_escalating_to_all(self) -> None:
+        all_tests = discover_integration_tests()
+        cases = (
+            ("cms/crates/opendash-core/src/theme/mod.rs", {"theme"}),
+            ("cms/crates/opendash-core/src/content/types.rs", {"content"}),
+            ("cms/crates/opendash-server/src/template_sec/policy/mod.rs", {"theme"}),
+            ("cms/crates/opendash-server/src/storage/entries/list.rs", {"content"}),
+            ("cms/crates/opendash-server/src/storage/entry_lifecycle/trash.rs", {"content", "plugin"}),
+            ("cms/crates/opendash-server/src/routes/operations/backup.rs", {"ops"}),
+        )
+        for path, expected_groups in cases:
+            plan = build_plan_from_files([path], all_tests)
+            self.assertFalse(plan.run_all_workspace, f"{path} should stay targeted")
+            self.assertEqual(set(plan.groups), expected_groups, path)
+
+        shared = build_plan_from_files(["cms/crates/opendash-core/src/field_schema/spec/mod.rs"], all_tests)
+        self.assertTrue(shared.run_all_workspace)
 
 
 def run_self_test() -> int:
@@ -848,7 +957,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    env = canonical_tmpdir_env(dict(os.environ))
+    env = test_runner_env(dict(os.environ))
     started = time.monotonic()
     for cmd in commands:
         printable = " ".join(cmd)

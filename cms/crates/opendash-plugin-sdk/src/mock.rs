@@ -394,6 +394,28 @@ impl MockHost {
                 self.logs.push((level, message));
                 json!({ "ok": true, "data": { "staged": true } })
             }
+            MockOpRequest::L10nTranslate {
+                msgid,
+                msgid_plural,
+                count,
+                ..
+            } => {
+                let text = match (msgid_plural, count) {
+                    (Some(plural), Some(n)) if n != 1 => plural,
+                    _ => msgid,
+                };
+                json!({ "ok": true, "data": { "text": text } })
+            }
+            MockOpRequest::L10nTranslateBatch { items } => {
+                let texts: Vec<String> = items
+                    .into_iter()
+                    .map(|item| match (item.msgid_plural, item.count) {
+                        (Some(plural), Some(n)) if n != 1 => plural,
+                        _ => item.msgid,
+                    })
+                    .collect();
+                json!({ "ok": true, "data": { "texts": texts } })
+            }
         };
         serde_json::to_vec(&resp_val).map_err(|e| e.to_string())
     }
@@ -531,6 +553,37 @@ enum MockOpRequest {
         level: LogLevel,
         message: String,
     },
+    L10nTranslate {
+        #[serde(default, rename = "text_domain")]
+        _text_domain: Option<String>,
+        msgid: String,
+        #[serde(default)]
+        msgid_plural: Option<String>,
+        #[serde(default)]
+        count: Option<i64>,
+        #[serde(default, rename = "context")]
+        _context: Option<String>,
+        #[serde(default, rename = "locale")]
+        _locale: Option<String>,
+    },
+    L10nTranslateBatch {
+        items: Vec<MockL10nBatchItem>,
+    },
+}
+
+#[derive(Deserialize)]
+struct MockL10nBatchItem {
+    #[serde(default, rename = "text_domain")]
+    _text_domain: Option<String>,
+    msgid: String,
+    #[serde(default)]
+    msgid_plural: Option<String>,
+    #[serde(default)]
+    count: Option<i64>,
+    #[serde(default, rename = "context")]
+    _context: Option<String>,
+    #[serde(default, rename = "locale")]
+    _locale: Option<String>,
 }
 
 struct ActiveMockState {

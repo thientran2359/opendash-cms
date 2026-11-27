@@ -29,8 +29,8 @@ pub struct SchemaFingerprintFixture {
     pub objects: Vec<SchemaObjectFingerprint>,
 }
 
-fn compiled_migrator() -> Migrator {
-    sqlx::migrate!("../../migrations")
+fn compiled_migrator() -> &'static Migrator {
+    &crate::storage::MIGRATOR
 }
 
 pub async fn build_expected_schema_objects(
@@ -56,8 +56,14 @@ pub async fn build_expected_schema_objects(
         ));
     }
 
-    let mut sub_migrator = base;
-    sub_migrator.migrations = Cow::Owned(subset_migrations);
+    let sub_migrator = Migrator {
+        migrations: Cow::Owned(subset_migrations),
+        ignore_missing: base.ignore_missing,
+        locking: base.locking,
+        no_tx: base.no_tx,
+        table_name: base.table_name.clone(),
+        create_schemas: base.create_schemas.clone(),
+    };
 
     let mut mem = SqliteConnection::connect("sqlite::memory:")
         .await

@@ -21,7 +21,7 @@ import traceback
 import zipfile
 
 from playwright.sync_api import expect, sync_playwright
-from menu_picker_e2e import api_json, admin_login, launch_server, stop_server
+from e2e_helpers import api_json, admin_login, launch_server, stop_server
 
 
 def sha(path: pathlib.Path) -> str:

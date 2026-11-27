@@ -44,16 +44,39 @@ impl PublicCompositionBudget {
         locale_code: &str,
         locale_ctx: serde_json::Value,
     ) {
+        self.set_locale_context_with_registry(
+            active,
+            Some(crate::l10n::CatalogRegistry::global()),
+            locale_code,
+            locale_ctx,
+        );
+    }
+
+    pub fn set_locale_context_with_registry(
+        &mut self,
+        active: Option<&ActiveThemeV3>,
+        registry: Option<&crate::l10n::CatalogRegistry>,
+        locale_code: &str,
+        locale_ctx: serde_json::Value,
+    ) {
         self.shared_locale_code = locale_code.to_owned();
-        self.shared_domain = active.map(|v| {
+        let domain = active.map(|v| {
             v.manifest
                 .text_domain
                 .clone()
                 .unwrap_or_else(|| v.manifest.theme_id.clone())
         });
-        self.shared_l10n = active
+        self.shared_domain = domain.clone();
+        let mut catalogs = active
             .map(|v| v.l10n_catalog_map(locale_code))
             .unwrap_or_default();
+        if let Some(reg) = registry {
+            let reg_map = reg.theme_render_catalogs(domain.as_deref().unwrap_or(""), locale_code);
+            for (k, v) in reg_map {
+                catalogs.insert(k, v);
+            }
+        }
+        self.shared_l10n = catalogs;
         self.shared_locale = Some(template_sec::json_to_safe_value(&locale_ctx));
     }
 
@@ -137,16 +160,25 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
     collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[&record.document], false)
         .await?;
     let url_policy = active_theme_url_policy(active)?;
+    let domain = active.map(|a| {
+        a.manifest
+            .text_domain
+            .clone()
+            .unwrap_or_else(|| a.manifest.theme_id.clone())
+    });
+    let mut l10n_catalogs = active
+        .map(|a| a.l10n_catalog_map(&effective_locale))
+        .unwrap_or_default();
+    for (k, v) in crate::l10n::CatalogRegistry::global()
+        .theme_render_catalogs(domain.as_deref().unwrap_or(""), &effective_locale)
+    {
+        l10n_catalogs.insert(k, v);
+    }
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
         l10n_locale: Some(effective_locale.clone()),
-        l10n_domain: active.map(|a| {
-            a.manifest
-                .text_domain
-                .clone()
-                .unwrap_or_else(|| a.manifest.theme_id.clone())
-        }),
-        l10n_catalogs: active.map(|a| a.l10n_catalogs.clone()).unwrap_or_default(),
+        l10n_domain: domain,
+        l10n_catalogs,
         ..Default::default()
     };
     let context = PublicBuilderContext {
@@ -179,6 +211,7 @@ pub(in crate::storage) fn render_csec_template_for_preview(
     target_key: &str,
     html: &str,
     active: Option<&ActiveThemeV3>,
+    db_schema: Option<&EffectiveContentSchema>,
     theme_context: &serde_json::Value,
     slot_html: Option<&str>,
     budget: &mut PublicCompositionBudget,
@@ -187,7 +220,7 @@ pub(in crate::storage) fn render_csec_template_for_preview(
     let kind = csec_content_kind_for_target_key(target_key);
     let empty_parts = BTreeMap::new();
     let parts = active.map(|v| &v.parts).unwrap_or(&empty_parts);
-    let url_policy = active_theme_url_policy(active)?;
+    let url_policy = active_theme_url_policy_for_target(active, Some(target_key), db_schema)?;
     let composition = if let Some(active) = active {
         template_sec::ThemeCompositionCache::global().get_or_compile(
             &active.revision_digest,

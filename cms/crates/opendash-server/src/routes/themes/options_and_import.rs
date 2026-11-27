@@ -139,6 +139,9 @@ pub async fn theme_activate(
                             }
                         }
                     }
+                    let _ = crate::l10n::CatalogRegistry::global()
+                        .reload_site_with_active_packages(&db, coordinator.paths())
+                        .await;
                     Ok((headers(Some(selection.version)), Json(selection)).into_response())
                 }
                 RevisionActivationOutcome::NotFound => {

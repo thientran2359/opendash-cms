@@ -1,4 +1,4 @@
--- 0057_entry_revisions_and_autosaves.sql
+-- 0058_entry_revisions_and_autosaves.sql
 -- Additive revision history and per-user server autosaves for content_entries (including pattern CPT).
 -- +6 sqlite_schema objects total (2 tables, 2 unique autoindexes, 2 secondary indexes; 0 triggers).
 

@@ -25,9 +25,10 @@ export interface EffectiveTermPanel {
   label: string;
   order: number;
   fields: FieldSpec[];
+  read_only_keys?: string[];
 }
 
-export type TermExtensionValues = Record<string, Record<string, string | boolean | null>>;
+export type TermExtensionValues = Record<string, Record<string, unknown>>;
 
 export interface EffectiveTermConfig {
   schema_version: 1;
@@ -88,13 +89,15 @@ export function AdminColumnCell({
 
 
 export function AdminTermPanels({
-  config, values, disabled, onChange, csrfToken = null, onApiError,
+  config, values, disabled, onChange, csrfToken = null, locale = null, siteTimezone = 'UTC', onApiError,
 }: {
   config: EffectiveTermConfig;
   values: TermExtensionValues;
   disabled: boolean;
-  onChange: (panelKey: string, key: string, value: string | boolean | null) => void;
+  onChange: (panelKey: string, key: string, value: unknown) => void;
   csrfToken?: string | null;
+  locale?: string | null;
+  siteTimezone?: string;
   onApiError?: (err: unknown, fallback: string) => void;
 }) {
   useI18n();
@@ -110,12 +113,15 @@ export function AdminTermPanels({
         onChange={next => {
           for (const field of panel.fields) {
             if (field.key in next && next[field.key] !== values[panel.key]?.[field.key]) {
-              onChange(panel.key, field.key, next[field.key] as string | boolean | null);
+              onChange(panel.key, field.key, next[field.key]);
             }
           }
         }}
         csrfToken={csrfToken}
+        locale={locale}
+        siteTimezone={siteTimezone}
         disabled={disabled}
+        readOnlyKeys={new Set(panel.read_only_keys ?? [])}
         onApiError={onApiError ?? (() => {})}
       />
     </fieldset>)}

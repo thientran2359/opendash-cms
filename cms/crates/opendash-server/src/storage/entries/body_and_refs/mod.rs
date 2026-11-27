@@ -7,14 +7,14 @@ pub(super) use std::collections::BTreeMap;
 pub(super) use opendash_core::content::{
     ContentEntryInput, ContentMode, ContentPublication, ContentSupport, ContentTypeDefinition,
     ContentTypeSettings, EffectiveContentSchema, EffectiveFieldStatus, FieldRole, PatchField,
-    deserialize_patch_field,
+    PublicExposure, deserialize_patch_field,
 };
 
 pub(super) use serde::Serialize;
 
 pub(super) use serde_json::Value;
 
-pub(super) use sqlx::{Sqlite, SqlitePool, Transaction};
+pub(super) use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 pub(super) use crate::{
     auth::{self, SessionContext},

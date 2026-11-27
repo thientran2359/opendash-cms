@@ -201,6 +201,18 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
             &["put_entry_route", "put_entry_seo", "put_home_seo"],
         ),
         (
+            "redirects.rs",
+            &[
+                "create_redirect",
+                "update_redirect",
+                "delete_redirect",
+                "import_redirects",
+                "delete_not_found_log_handler",
+                "bulk_delete_not_found_logs_handler",
+                "clear_not_found_logs_handler",
+            ],
+        ),
+        (
             "settings.rs",
             &[
                 "general_put",

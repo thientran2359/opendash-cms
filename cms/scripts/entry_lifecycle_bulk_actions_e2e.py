@@ -19,7 +19,7 @@ import tempfile
 import traceback
 
 from playwright.sync_api import expect, sync_playwright
-from menu_picker_e2e import api_json, admin_login, launch_server, set_cms_locale, stop_server
+from e2e_helpers import api_json, admin_login, launch_server, set_cms_locale, stop_server
 
 
 def sha(path: pathlib.Path) -> str:

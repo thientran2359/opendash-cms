@@ -39,7 +39,7 @@ async fn provider_redeclaration_advances_taxonomy_cas_once_only_when_changed() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
 
     declare(&db, &["category"]).await;
     let initial = load_configured_taxonomies(&db, "provider_books_cas")

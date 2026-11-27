@@ -51,7 +51,7 @@ fn is_localized_admin_path(path: &str) -> bool {
         || path.starts_with("/api/themes/")
 }
 
-async fn effective_locale_for_error(
+pub(crate) async fn effective_locale_for_error(
     db: &sqlx::SqlitePool,
     ui_locale: &Arc<RwLock<Option<String>>>,
 ) -> String {
@@ -228,6 +228,9 @@ async fn read_bounded_error_body(
     Ok(bytes.into())
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct PrelocalizedErrorResponse;
+
 pub(crate) async fn localize_error_response(
     axum::extract::State(state): axum::extract::State<crate::app::AppState>,
     request: axum::extract::Request,
@@ -237,6 +240,13 @@ pub(crate) async fn localize_error_response(
     let method = request.method().clone();
     let admin = is_localized_admin_path(request.uri().path());
     let mut response = next.run(request).await;
+    if response
+        .extensions()
+        .get::<PrelocalizedErrorResponse>()
+        .is_some()
+    {
+        return response;
+    }
     let status = response.status();
     if !status.is_client_error() && !status.is_server_error() {
         return response;

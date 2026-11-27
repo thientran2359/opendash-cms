@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use opendash_core::l10n::{
     Catalog, L10nError, MAX_MO_BYTES, MAX_PO_BYTES, MAX_SITE_LANGUAGE_FILES,
@@ -77,6 +77,11 @@ impl Default for CatalogRegistry {
 }
 
 impl CatalogRegistry {
+    pub fn global() -> &'static Arc<CatalogRegistry> {
+        static GLOBAL: OnceLock<Arc<CatalogRegistry>> = OnceLock::new();
+        GLOBAL.get_or_init(|| Arc::new(CatalogRegistry::new_empty()))
+    }
+
     pub fn new_empty() -> Self {
         Self {
             snapshot: RwLock::new(Arc::new(CatalogSnapshot::default())),
@@ -207,6 +212,119 @@ impl CatalogRegistry {
         *self.snapshot.write().unwrap_or_else(|e| e.into_inner()) = new_snap;
         SiteCacheEpoch::global().bump();
         Ok(())
+    }
+
+    /// Reloads `<site_root>/languages/` overrides together with the embedded Core `vi.mo` pack.
+    pub fn reload_site_defaults(
+        &self,
+        paths: &SitePaths,
+        bundled_packages: BTreeMap<(L10nScope, String, String), Vec<u8>>,
+        dev_overlays: BTreeMap<(L10nScope, String, String), Vec<u8>>,
+    ) -> Result<(), L10nError> {
+        let mut embedded = BTreeMap::new();
+        embedded.insert("vi".to_owned(), crate::l10n::EMBEDDED_VI_MO.to_vec());
+        self.reload_from_site_paths(paths, embedded, bundled_packages, dev_overlays)
+    }
+
+    /// Builds a `{domain}` catalog map for Theme v3 C-SEC rendering at `locale`,
+    /// combining Theme catalogs (with site overrides) and Core `"opendash"` fallbacks.
+    pub fn theme_render_catalogs(
+        &self,
+        theme_domain: &str,
+        locale: &str,
+    ) -> BTreeMap<String, Arc<Catalog>> {
+        let mut out = BTreeMap::new();
+        if let Some(core_cat) = self.resolve(L10nScope::Core, "opendash", locale) {
+            out.insert("opendash".to_owned(), core_cat.catalog);
+        }
+        if !theme_domain.is_empty()
+            && let Some(theme_cat) = self.resolve(L10nScope::Theme, theme_domain, locale)
+        {
+            out.insert(theme_domain.to_owned(), theme_cat.catalog);
+        }
+        out
+    }
+
+    /// Reloads `<site_root>/languages/`, embedded Core `vi.mo`, and bundled `languages/*.{mo,po}`
+    /// from the currently active Theme v3 revision and enabled Plugin revisions.
+    pub async fn reload_site_with_active_packages(
+        &self,
+        db: &sqlx::SqlitePool,
+        paths: &SitePaths,
+    ) -> Result<(), L10nError> {
+        let mut bundled = BTreeMap::new();
+        if let Ok(sel) = crate::storage::theme::get_active_selection(db).await
+            && let Some(rev_id) = sel.revision_id
+        {
+            let lang_dir = paths
+                .themes_dir()
+                .join("revisions")
+                .join(&rev_id)
+                .join("languages");
+            collect_dir_l10n_packages(&lang_dir, L10nScope::Theme, None, &mut bundled);
+        }
+        if let Ok(plugins) = crate::storage::plugin::list_enabled_plugin_revision_digests(db).await
+        {
+            for (_plugin_id, domain, digest) in plugins {
+                if !digest.is_empty() {
+                    let lang_dir = paths
+                        .plugins_dir()
+                        .join("revisions")
+                        .join(&digest)
+                        .join("languages");
+                    collect_dir_l10n_packages(
+                        &lang_dir,
+                        L10nScope::Plugin,
+                        Some(&domain),
+                        &mut bundled,
+                    );
+                }
+            }
+        }
+        self.reload_site_defaults(paths, bundled, BTreeMap::new())
+    }
+}
+
+fn collect_dir_l10n_packages(
+    dir: &Path,
+    scope: L10nScope,
+    forced_domain: Option<&str>,
+    out: &mut BTreeMap<(L10nScope, String, String), Vec<u8>>,
+) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut po_fallback: Vec<(String, String, Vec<u8>)> = Vec::new();
+    for ent in entries.flatten() {
+        let path = ent.path();
+        if !path.is_file() {
+            continue;
+        }
+        let fname = ent.file_name().to_string_lossy().to_string();
+        if let Some(stem) = fname.strip_suffix(".mo") {
+            if let Some((parsed_domain, locale)) = parse_pack_stem(scope, stem) {
+                let domain = forced_domain.unwrap_or(&parsed_domain).to_owned();
+                if let Ok(bytes) = fs::read(&path) {
+                    out.insert((scope, domain, locale), bytes);
+                }
+            }
+        } else if let Some(stem) = fname.strip_suffix(".po")
+            && let Some((parsed_domain, locale)) = parse_pack_stem(scope, stem)
+        {
+            let domain = forced_domain.unwrap_or(&parsed_domain).to_owned();
+            if let Ok(bytes) = fs::read(&path) {
+                po_fallback.push((domain, locale, bytes));
+            }
+        }
+    }
+    for (domain, locale, po_bytes) in po_fallback {
+        let key = (scope, domain, locale);
+        if !out.contains_key(&key)
+            && let Ok(text) = std::str::from_utf8(&po_bytes)
+            && let Ok(mo_bytes) = compile_po_to_mo(text)
+        {
+            out.insert(key, mo_bytes);
+        }
     }
 }
 
@@ -396,6 +514,3 @@ fn sha256_hex(bytes: &[u8]) -> String {
     }
     out
 }
-
-#[allow(dead_code)]
-fn _check_path_helper(_p: &Path) {}

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Single HTTP transport and typed endpoint layer for the OpenDash React Admin (`cms/admin/`). All requests to `/auth/*`, `/api/health`, `/api/i18n/admin`, `/api/themes/*`, and `/api/admin/*` flow through [`client.ts`](client.ts) across 21 TypeScript modules (`index.ts` barrel plus 20 domain modules). See [Core Foundation](../../../../docs/contracts/CORE_FOUNDATION.md) and [CMS Architecture](../../../../docs/architecture/CMS_ARCHITECTURE.md).
+Single HTTP transport and typed endpoint layer for the OpenDash React Admin (`cms/admin/`). All requests to `/auth/*`, `/api/health`, `/api/i18n/admin`, `/api/themes/*`, and `/api/admin/*` flow through [`client.ts`](client.ts) across 22 TypeScript modules (`index.ts` barrel plus 21 domain modules). See [Core Foundation](../../../../docs/contracts/CORE_FOUNDATION.md) and [CMS Architecture](../../../../docs/architecture/CMS_ARCHITECTURE.md).
 
 ## Interface
 
@@ -31,13 +31,14 @@ Single HTTP transport and typed endpoint layer for the OpenDash React Admin (`cm
   - `[contact.ts:listContactForms]`, `[contact.ts:createContactForm]`, `[contact.ts:updateContactForm]`, `[contact.ts:deleteContactForm]`, `[contact.ts:listContactSubmissions]`, `[contact.ts:getContactSubmission]`, `[contact.ts:deleteContactSubmission]`.
   - `[smtp.ts:getSmtpSettings]`, `[smtp.ts:updateSmtpSettings]`, `[smtp.ts:testSmtpSettings]`, `[smtp.ts:notifyContactSubmission]`.
   - `[operations.ts:getOperationsDiagnostics]`, `[operations.ts:planReconcile]`, `[operations.ts:applyReconcile]`, `[operations.ts:purgeQuarantine]`, `[operations.ts:listBackups]`, `[operations.ts:createBackup]`, `[operations.ts:getOperationJob]`, `[operations.ts:cancelOperationJob]`, `[operations.ts:deleteBackupArtifact]`, `[operations.ts:getBackupDownloadUrl]`, `[operations.ts:uploadRestoreArchive]`, `[operations.ts:createRestoreJob]`, `[operations.ts:getRecoveryStatus]`, `[operations.ts:activateRecovery]`.
+  - `[redirects.ts:listManualRedirects]`, `[redirects.ts:getManualRedirect]`, `[redirects.ts:createManualRedirect]`, `[redirects.ts:updateManualRedirect]`, `[redirects.ts:deleteManualRedirect]`, `[redirects.ts:importRedirectsCsv]`, `[redirects.ts:exportRedirectsCsvBlob]`, `[redirects.ts:listNotFoundLogs]`, `[redirects.ts:deleteNotFoundLog]`, `[redirects.ts:bulkDeleteNotFoundLogs]`, `[redirects.ts:clearNotFoundLogs]`.
 
 ## Invariants
 
 - **Single `fetch` Boundary:** 100% of `fetch` calls across `cms/admin/src/` originate inside `[client.ts:requestJson]`, `[client.ts:requestText]`, and `[client.ts:requestBlob]`, enforced by [check-standards.py](../../../scripts/check-standards.py).
 - **Same-Origin Credentials & Security Headers:** Every call sets `credentials: 'same-origin'`; mutations attach `X-CSRF-Token`, optimistic concurrency guards serialize `If-Match: "vN"` (`ifMatchVersion`) or explicit `If-Match` (`ifMatch`, e.g. `"gv{generation}-v{version}"` in `[media.ts:deleteMedia]`), and binary uploads pass `X-File-Name: encodeURIComponent(uploadFilename)`.
 - **Private Media Isolation:** `[client.ts:requestBlob]` enforces `cache: 'no-store'` and forwards `AbortSignal` when resolving authenticated preview media.
-- **Deterministic Error & Localization Contract:** `client.ts` normalizes non-2xx responses into `[client.ts:ApiClientError]`, caps parsed `409` `conflicts` arrays at 20 items, maps `413` to `oversizeErrorMessage` in `[client.ts:requestJson]` (while `[client.ts:handleResponseText]`, `[client.ts:requestText]`, and `[client.ts:requestBlob]` fall back to `defaultMessage`), and sources fallback strings from `[../i18n/index.tsx:tStatic]` (`../i18n/README.md`).
+- **Deterministic Error & Localization Contract:** `client.ts` normalizes non-2xx responses into `[client.ts:ApiClientError]`, caps parsed `409` `conflicts` arrays at 20 items, maps `413` to `oversizeErrorMessage` in `[client.ts:requestJson]` (while `[client.ts:handleResponseText]`, `[client.ts:requestText]`, and `[client.ts:requestBlob]` fall back to `defaultMessage`), and sources fallback strings from `[../i18n/index.tsx:__]` (`../i18n/README.md`).
 - **Batch Bound Validation:** `[taxonomy.ts:resolveTaxonomyTermLabels]` rejects requests locally unless `ids` contains 1–100 unique positive safe integers.
 
 ## Side Effects

@@ -152,6 +152,10 @@ impl PluginManifest {
         if !matches!(self.manifest_schema, 1..=3) {
             return Err("manifest_schema không được hỗ trợ (chỉ hỗ trợ 1, 2 hoặc 3).");
         }
+        if let Some(domain) = self.text_domain.as_deref() {
+            crate::l10n::validate_extension_text_domain(domain)
+                .map_err(|_| "text_domain trong manifest.json không hợp lệ.")?;
+        }
         if !self.declarations.field_groups.is_empty() && self.manifest_schema < 2 {
             return Err("field_groups trong plugin.json chỉ hợp lệ khi manifest_schema >= 2.");
         }

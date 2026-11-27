@@ -117,7 +117,7 @@ async fn migration_0055_schema_delta_is_zero() {
             .await
             .unwrap();
 
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     let total_objects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
         .fetch_one(&db)
         .await
@@ -176,7 +176,7 @@ async fn migration_0050_schema_delta_is_plus_two_and_under_object_limit() {
             .await
             .unwrap();
 
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     let total_objects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
         .fetch_one(&db)
         .await
@@ -235,7 +235,7 @@ async fn migration_0053_schema_delta_is_zero() {
             .await
             .unwrap();
 
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     let total_objects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
         .fetch_one(&db)
         .await
@@ -253,7 +253,7 @@ async fn theme_and_plugin_with_identical_ids_are_strictly_isolated() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
 
     let theme_media = "a".repeat(64);
     let plugin_media = "b".repeat(64);
@@ -440,7 +440,7 @@ async fn plugin_settings_storage_handles_redaction_cas_preserve_rotate_clear_and
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
 
     let schema = sample_plugin_schema();
     let plugin_manifest = serde_json::json!({

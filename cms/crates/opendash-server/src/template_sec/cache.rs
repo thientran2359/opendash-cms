@@ -5,6 +5,7 @@ pub struct ThemeCompositionCacheKey {
     pub revision_digest: String,
     pub target_key: String,
     pub content_kind: u8,
+    pub entry_fields_key: String,
 }
 
 #[derive(Debug, Default)]

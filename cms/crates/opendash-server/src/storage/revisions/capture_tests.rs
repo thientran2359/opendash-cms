@@ -88,7 +88,7 @@ async fn insert_test_post(
 }
 
 #[tokio::test]
-async fn migration_0057_schema_count_and_restore_rebase_preserves_revisions_clears_autosaves() {
+async fn migration_0058_schema_count_and_restore_rebase_preserves_revisions_clears_autosaves() {
     let guard = TempDirGuard::new("rev-schema");
     let (db, db_path, locale) = setup_test_db(&guard).await;
 
@@ -101,8 +101,8 @@ async fn migration_0057_schema_count_and_restore_rebase_preserves_revisions_clea
         "sqlite_schema count {count} must stay <= MAX_SCHEMA_OBJECTS (256)"
     );
     assert_eq!(
-        count, 229,
-        "expected 223 baseline (incl. _sqlx_migrations & sqlite_sequence) + 6 objects from 0057"
+        count, 235,
+        "expected 229 baseline (incl. 0057 manual_redirects & _sqlx_migrations) + 6 objects from 0058"
     );
 
     let user = insert_test_user(&db, "admin", Role::Admin).await;
@@ -144,12 +144,12 @@ async fn migration_0057_schema_count_and_restore_rebase_preserves_revisions_clea
     let ro_ver = crate::storage::restore::validate_restored_db_read_only(&copy_path)
         .await
         .expect("read-only restore validation");
-    assert!(ro_ver >= 57);
+    assert!(ro_ver >= 58);
 
     let rebased_ver = crate::storage::restore::validate_and_rebase_copy(&copy_path)
         .await
         .expect("rebase copy validation");
-    assert!(rebased_ver >= 57);
+    assert!(rebased_ver >= 58);
 
     let rebased_pool = init_db(&copy_path).await.unwrap();
     let rev_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entry_revisions")

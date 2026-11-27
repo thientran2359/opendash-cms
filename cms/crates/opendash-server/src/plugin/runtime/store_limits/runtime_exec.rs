@@ -282,7 +282,6 @@ impl PluginRuntime {
         let child_ref = Arc::new(std::sync::Mutex::new(Some(child)));
         let worker_thread_ref = Arc::new(std::sync::Mutex::new(None));
         self.active_workers.fetch_add(1, Ordering::SeqCst);
-
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let mut guard = ProcessGuard {
             child: Arc::clone(&child_ref),
@@ -292,7 +291,6 @@ impl PluginRuntime {
             cancel_tx,
             permit: Some(permit),
         };
-
         let (tx, rx) = tokio::sync::oneshot::channel();
         let tokio_handle = tokio::runtime::Handle::current();
         let worker_cancel = Arc::clone(&cancellation_token);
@@ -302,7 +300,6 @@ impl PluginRuntime {
         let child_ref_worker = Arc::clone(&child_ref);
         let action_caps_for_host = action_capabilities.clone();
         let correlation_for_log = correlation_id.clone();
-
         let thread_handle = std::thread::Builder::new()
             .name(format!("plugin-worker-{}", manifest.id))
             .spawn(move || {
@@ -319,6 +316,10 @@ impl PluginRuntime {
                         .map_err(|e| PluginError::Internal(format!("Lỗi ghi code bytes: {e}")))?;
 
                     let req = crate::plugin::worker::WorkerInvocationRequest {
+                        default_locale: input
+                            .get("locale")
+                            .and_then(|v| v.as_str())
+                            .map(ToOwned::to_owned),
                         manifest: manifest_clone.clone(),
                         input,
                         allow_loopback,
@@ -332,10 +333,8 @@ impl PluginRuntime {
                     };
                     write_ipc_frame(&mut child_stdin, &req, MAX_IPC_FRAME_BYTES)
                         .map_err(PluginError::Internal)?;
-
                     let mut reader = BufReader::new(child_stdout);
                     scan_ipc_magic(&mut reader)?;
-
                     loop {
                         let frame: WorkerToHostFrame =
                             read_ipc_frame(&mut reader, MAX_IPC_FRAME_BYTES).map_err(|_| {

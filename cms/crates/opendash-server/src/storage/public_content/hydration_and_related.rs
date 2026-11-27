@@ -177,9 +177,96 @@ pub async fn batch_load_public_entry_terms(
     batch_load_public_entry_terms_in_conn(&mut conn, entries).await
 }
 
-pub(in crate::storage) async fn hydrate_entry_views_in_conn(
+pub async fn hydrate_single_entry_view_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    record: &ContentEntryRecord,
+    effective_schema: &opendash_core::content::EffectiveContentSchema,
+    url: Option<String>,
+    terms: &[crate::content_render::PublicTermView],
+    eligible_public_taxonomies: &[String],
+    max_view_role: opendash_core::content::FieldRole,
+    is_preview: bool,
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<crate::content_render::EntryView> {
+    let ordered_specs: Vec<opendash_core::field_schema::FieldSpec> =
+        crate::content_render::ordered_public_field_defs(effective_schema, max_view_role)
+            .into_iter()
+            .cloned()
+            .collect();
+    let mut media_ids = std::collections::BTreeSet::new();
+    let mut entry_ids = std::collections::BTreeSet::new();
+    let mut term_ids = std::collections::BTreeSet::new();
+    crate::field_hydrate::collect_hydration_ids(
+        &ordered_specs,
+        &record.values,
+        false,
+        &mut media_ids,
+        &mut entry_ids,
+        &mut term_ids,
+    );
+    let entries_map = if entry_ids.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        crate::storage::fields::load_entry_ref_hydration_map_in_conn(
+            conn,
+            &entry_ids,
+            is_preview,
+            Some(&record.locale),
+        )
+        .await?
+    };
+    let terms_hydrate_map = if term_ids.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        let map = crate::storage::fields::load_term_ref_hydration_map_in_conn(
+            conn,
+            &term_ids,
+            is_preview,
+            Some(&record.locale),
+        )
+        .await?;
+        for t in map.values() {
+            if let Some(ref fid) = t.featured_image_media_id {
+                media_ids.insert(fid.clone());
+            }
+        }
+        map
+    };
+    let media_map = if media_ids.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        crate::storage::fields::load_media_hydration_map_in_conn(conn, &media_ids).await?
+    };
+    let hydration_ctx = crate::field_hydrate::HydrationContext {
+        media: &media_map,
+        entries: &entries_map,
+        terms: &terms_hydrate_map,
+        is_preview,
+    };
+    let view = crate::content_render::build_hydrated_entry_view_with_context(
+        record,
+        effective_schema,
+        url,
+        terms,
+        eligible_public_taxonomies,
+        max_view_role,
+        Some(&hydration_ctx),
+        richtext_nonces,
+    );
+    Ok(if is_preview {
+        crate::content_render::rewrite_preview_media_urls(view, &record.content_type_key)
+    } else {
+        view
+    })
+}
+
+pub async fn hydrate_entry_views_with_options_in_conn(
     conn: &mut sqlx::SqliteConnection,
     records: Vec<ContentEntryRecord>,
+    active_locale: Option<&str>,
+    is_preview: bool,
+    max_view_role: opendash_core::content::FieldRole,
+    mut richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
 ) -> ApiResult<Vec<crate::content_render::EntryView>> {
     if records.is_empty() {
         return Ok(Vec::new());
@@ -202,13 +289,76 @@ pub(in crate::storage) async fn hydrate_entry_views_in_conn(
     let mut terms_map = batch_load_public_entry_terms_in_conn(conn, &pairs).await?;
     let tax_map = batch_load_eligible_public_taxonomies_in_conn(conn, &distinct_types).await?;
     let mut schemas = std::collections::BTreeMap::new();
+    let mut specs_by_type = std::collections::BTreeMap::new();
     for tk in &distinct_types {
         if let Some(eff) =
             crate::storage::content::load_effective_content_schema_in_tx(conn, tk).await?
         {
+            let specs: Vec<opendash_core::field_schema::FieldSpec> =
+                crate::content_render::ordered_public_field_defs(&eff, max_view_role)
+                    .into_iter()
+                    .cloned()
+                    .collect();
+            specs_by_type.insert(tk.clone(), specs);
             schemas.insert(tk.clone(), eff);
         }
     }
+
+    let mut media_ids = std::collections::BTreeSet::new();
+    let mut ref_entry_ids = std::collections::BTreeSet::new();
+    let mut ref_term_ids = std::collections::BTreeSet::new();
+    for record in &records {
+        if let Some(specs) = specs_by_type.get(&record.content_type_key) {
+            crate::field_hydrate::collect_hydration_ids(
+                specs,
+                &record.values,
+                false,
+                &mut media_ids,
+                &mut ref_entry_ids,
+                &mut ref_term_ids,
+            );
+        }
+    }
+    let locale_hint = active_locale.or_else(|| records.first().map(|r| r.locale.as_str()));
+    let entries_map = if ref_entry_ids.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        crate::storage::fields::load_entry_ref_hydration_map_in_conn(
+            conn,
+            &ref_entry_ids,
+            is_preview,
+            locale_hint,
+        )
+        .await?
+    };
+    let ref_terms_map = if ref_term_ids.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        let map = crate::storage::fields::load_term_ref_hydration_map_in_conn(
+            conn,
+            &ref_term_ids,
+            is_preview,
+            locale_hint,
+        )
+        .await?;
+        for t in map.values() {
+            if let Some(ref fid) = t.featured_image_media_id {
+                media_ids.insert(fid.clone());
+            }
+        }
+        map
+    };
+    let media_map = if media_ids.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        crate::storage::fields::load_media_hydration_map_in_conn(conn, &media_ids).await?
+    };
+    let hydration_ctx = crate::field_hydrate::HydrationContext {
+        media: &media_map,
+        entries: &entries_map,
+        terms: &ref_terms_map,
+        is_preview,
+    };
 
     let mut proj_map =
         crate::storage::plugin_projections::batch_load_entry_projections_in_conn(conn, &entry_ids)
@@ -225,19 +375,40 @@ pub(in crate::storage) async fn hydrate_entry_views_in_conn(
             .get(&record.content_type_key)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        let mut view = crate::content_render::entry_view_with_context(
+        let mut view = crate::content_render::build_hydrated_entry_view_with_context(
             &record,
             eff,
             url,
             &terms,
             eligible_taxonomies,
-            opendash_core::content::FieldRole::Editor,
+            max_view_role,
+            Some(&hydration_ctx),
+            richtext_nonces.as_deref_mut(),
         );
-        view.ext = proj_map
-            .remove(&record.id)
-            .map(|p| p.ext)
-            .unwrap_or_default();
+        if is_preview {
+            view =
+                crate::content_render::rewrite_preview_media_urls(view, &record.content_type_key);
+        }
+        if let Some(proj) = proj_map.remove(&record.id) {
+            view.ext = proj.ext;
+            view.theme_ext = proj.theme_ext;
+        }
         views.push(view);
     }
     Ok(views)
+}
+
+pub(in crate::storage) async fn hydrate_entry_views_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    records: Vec<ContentEntryRecord>,
+) -> ApiResult<Vec<crate::content_render::EntryView>> {
+    hydrate_entry_views_with_options_in_conn(
+        conn,
+        records,
+        None,
+        false,
+        opendash_core::content::FieldRole::Editor,
+        None,
+    )
+    .await
 }

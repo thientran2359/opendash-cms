@@ -55,6 +55,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     options: &BTreeMap<String, serde_json::Value>,
     menus: &BTreeMap<String, menu::MenuViewModel>,
     route_kind: &str,
+    richtext_nonces: Option<&mut template_sec::RichTextNonceTable>,
 ) -> ApiResult<BuiltEntryPreviewContext> {
     let definition = &effective_schema.base.descriptor;
     let eligible = public_content::load_eligible_public_taxonomies_in_conn(
@@ -68,14 +69,18 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     )
     .await?;
     let terms = terms_map.remove(&record.id).unwrap_or_default();
-    let view = content_render::authenticated_preview_view_with_context(
+    let view = public_content::hydrate_single_entry_view_in_conn(
+        &mut **tx,
         record,
         effective_schema,
         None,
         &terms,
         &eligible,
         actor_role,
-    );
+        true,
+        richtext_nonces,
+    )
+    .await?;
     let archive_url = permalinks::canonical_archive_path_in_tx(
         &mut **tx,
         &record.content_type_key,
@@ -233,6 +238,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
             &options,
             &menus,
             route_kind_for_candidate(target.kind),
+            Some(&mut budget.richtext_nonces),
         )
         .await?;
         let definition = &effective_schema.base.descriptor;

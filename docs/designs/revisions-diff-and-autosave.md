@@ -4,9 +4,9 @@
 * **Status:** Approved
 * **Approved By:** Owner
 * **Approval Evidence:** Owner phê duyệt trực tiếp ("duyệt") ngày 2026-11-27 cho PRD delta (`docs/product/PRODUCT_REQUIREMENTS.md`) và Design Spec này.
-* **Date:** 2026-11-26 *(rebased onto `9e17cca` on 2026-11-27)*
-* **Baseline:** `9e17cca` (`origin/main`, đã hợp nhất PR #615 Gettext `.pot`/`.po`/`.mo` L10n & PR #616 Unified Field Engine S04 `0056_unified_field_content_cutover.sql`, `cms/migrations/` kết thúc ở `0056`, tổng thực tế `223` objects `sqlite_schema` tính cả `sqlite_sequence` và `_sqlx_migrations`)
-* **Goldfish Review:** 3-agent fresh-context verification on `origin/main@43c19c2` · 2026-11-27 · `egm-implementation-readiness` `GO` (`0 Blocker / 0 Major / 0 Minor`), `egm-codebase-details` (`0 Blocker / 0 Major / 0 Minor`), `egm-design` `APPROVED` (`0 Blocker / 0 Major / 0 Minor`) · pre-stamp SHA-256 `54c56b1cdcb6206fbaffa22f489235e2f97da8bf408569c43e8ace6cff9e840d` · đồng bộ sau duyệt sang `origin/main@9e17cca` (`0057`, UFE S04 `FieldSpec`/`sync_entry_field_media_refs_in_conn`, Gettext `.pot`/`.po`).
+* **Date:** 2026-11-26 *(synced onto `origin/main@ecbea04` on 2026-11-27)*
+* **Baseline:** `ecbea04` (`origin/main`, đã hợp nhất PR #615 Gettext `.pot`/`.po`/`.mo`, PR #616 UFE S04 `0056`, PR #619 Manual Redirects & 404 Log `0057` nâng nền DB lên `229` objects `sqlite_schema`, PR #620 Build/Test Quick Wins, PR #621 Test Routing & PR #622 UFE Drift R1)
+* **Goldfish Review:** 3-agent fresh-context verification on `origin/main@43c19c2` · 2026-11-27 · `egm-implementation-readiness` `GO` (`0 Blocker / 0 Major / 0 Minor`), `egm-codebase-details` (`0 Blocker / 0 Major / 0 Minor`), `egm-design` `APPROVED` (`0 Blocker / 0 Major / 0 Minor`) · pre-stamp SHA-256 `54c56b1cdcb6206fbaffa22f489235e2f97da8bf408569c43e8ace6cff9e840d` · đồng bộ sau duyệt sang `origin/main@ecbea04` (`0058` nối sau `0057`, UFE S04 + Drift R1, Gettext `.pot`/`.po`).
 * **Related Contracts & Specs:**
   * [Yêu cầu Sản phẩm OpenDash](../product/PRODUCT_REQUIREMENTS.md)
   * [Core Foundation & Quy chuẩn Code](../contracts/CORE_FOUNDATION.md)
@@ -52,7 +52,7 @@ Hai cơ chế hợp thành "lưới an toàn" chuẩn WordPress tương thích t
 * **G4 — Không ghim Media/Term/Pattern/Entry cũ; dọn an toàn khi khôi phục:** Revisions và Autosaves **không** chặn xóa media trong `media_refs.rs` và **không** cấp quyền truy cập media công khai trong `media_is_referenced.rs`. API đọc/so sánh trả về `missing_refs` (`missing_media`, `missing_term_ids` + `TermRef.taxonomy_from_field` kèm `site_locales.deleted_at IS NULL`, `missing_entry_ids`, `missing_pattern_ids`, `missing_contact_form_ids`, `missing_dynamic_options` đủ cả 8 `SelectOptionsSource` gồm `CORE_CONTEXT_FIELDS`, `missing_list_refs`, `missing_block_types`, `cleared_binding_nodes` theo `visible_builder_field` bao gồm `RouteContext` tùy chỉnh & `Field` trên `binding.type_key`, `missing_templates` kiểm `allowed_types`, `dropped_field_keys`/`dropped_block_field_keys` và `non_editable_fields`). Restore chưa xác nhận trả `409 revision_missing_refs`; khi client gửi `acknowledge_missing_refs: true`, server chạy `sanitize_snapshot_for_restore` trên phạm vi editable (tự dọn trường ẩn/tùy chọn và loại bỏ item/block hỏng với ràng buộc không thể để trống gồm `Repeater` `min_items > 0`, trường `required` và fallback prop sau tháo binding) trước khi validate `422` JSON chuẩn `ContentBeforeSaveVeto`.
 * **G5 — Autosave server-side theo từng user, cô lập hoàn toàn khỏi bản công khai:** Lưu tự động vào `entry_autosaves` theo khóa `(entry_id, user_id)` mỗi 15 giây debounce (max-wait 60 giây) cho entry đã có ID trên cả Single Edit và Studio Mode 2 (kể cả `pattern` cho Admin), dùng `PatchField<T>` (`Omitted` / `Clear` / `Set(T)`) cho các trường nullable có cờ `*_touched` và `cleared_fields_json`, chống ghi đè ngược thứ tự bằng `AbortController` + `client_seq` đơn điệu. Autosave cho phép `title` rỗng (`""`) khi đang gõ dở (nhưng từ chối `"title": null` với `400`), không ghi đè `content_entries`, không tăng `version`, không kích hoạt hook/projection/cache, tự xóa bản autosave của actor sau khi Save/Restore/Discard thành công và xóa toàn bộ autosaves của entry khi chuyển vào Thùng rác.
 * **G6 — Giao diện hợp nhất trên Single Edit & Studio Mode 2 (tuân thủ ratchet LOC):** Cung cấp `AutosaveRecoveryBanner` (quy tắc ưu tiên dứt khoát nhường `EditorDraftStore` RAM draft sau re-auth `401` gồm cả sửa `page_layout_key`/`custom_template_key`, khôi phục vào editor / xem so sánh `current ↔ autosave` / bỏ qua, cảnh báo rõ và tạm dừng timer khi `bannerPendingDecision === true`) và `RevisionHistoryModal` trên cả `SingleEditWorkspace.tsx` (tách `PublishBoxPanel.tsx`, `SingleEditBuilderPromptDialog.tsx`, `SingleEditTranslationModal.tsx`, `useSingleEditRevisions.ts`, `SingleEditRevisionsOverlay.tsx`) lẫn `StudioWorkspace.tsx` Mode 2 (tách `ContentWorkspaces.tsx` từ `App.tsx`, `useStudioMode2Revisions.ts` kèm `handleSaveMode2`, `StudioMode2RevisionsOverlay.tsx` bao gồm banner khôi phục), dùng chuỗi chuẩn Gettext `__()` / `_n()` qua [`i18n/index.tsx`](../../cms/admin/src/i18n/index.tsx) & `cms/l10n/{opendash.pot,vi.po}` + `node cms/scripts/check-i18n.mjs` và giữ mọi file `<= 600` LOC hoặc đúng baseline trong [`loc-baseline.json`](../../cms/scripts/loc-baseline.json).
-* **G7 — An toàn nâng cấp, Backup/Restore & Writer Lock:** Migration `0057_entry_revisions_and_autosaves.sql` nối tiếp trực tiếp `0056_unified_field_content_cutover.sql` trên `origin/main@9e17cca` (không tạo khoảng trống trên `_sqlx_migrations`), chỉ tăng `+6` đối tượng `sqlite_schema` (nâng tổng số SQLite objects tính cả `sqlite_sequence` và `_sqlx_migrations` trong [`restore.rs:130`](../../cms/crates/opendash-server/src/storage/restore.rs#L130) từ `223` lên `229 / 256`, an toàn dưới ngưỡng `MAX_SCHEMA_OBJECTS = 256`). Tuân thủ `SiteCoordinator` / `AdmittedMutation`, ghi đầy đủ vào [M8_WRITER_INVENTORY.md](../contracts/M8_WRITER_INVENTORY.md) §2–§3, dọn `entry_autosaves` (và giữ `entry_revisions`) khi `restore::validate_and_rebase_copy`.
+* **G7 — An toàn nâng cấp, Backup/Restore & Writer Lock:** Migration `0058_entry_revisions_and_autosaves.sql` nối tiếp trực tiếp `0057_manual_redirects_and_404_log.sql` trên `origin/main@ecbea04` (không tạo khoảng trống trên `_sqlx_migrations`), chỉ tăng `+6` đối tượng `sqlite_schema` (nâng tổng số SQLite objects tính cả `sqlite_sequence` và `_sqlx_migrations` trong [`restore.rs:130`](../../cms/crates/opendash-server/src/storage/restore.rs#L130) từ `229` lên `235 / 256`, an toàn dưới ngưỡng `MAX_SCHEMA_OBJECTS = 256`). Tuân thủ `SiteCoordinator` / `AdmittedMutation`, ghi đầy đủ vào [M8_WRITER_INVENTORY.md](../contracts/M8_WRITER_INVENTORY.md) §2–§3, dọn `entry_autosaves` (và giữ `entry_revisions`) khi `restore::validate_and_rebase_copy`.
 
 ---
 
@@ -97,31 +97,31 @@ Hai cơ chế hợp thành "lưới an toàn" chuẩn WordPress tương thích t
 ### CUJ 6: Bảo toàn Phân quyền 3 trục, Trash/Purge, Xóa User & Backup/Restore
 * **Given:** Một CPT có trường `internal_notes` (`min_view_role = admin`, `min_edit_role = admin`) và trường `editorial_flag` (`min_view_role = editor`, `min_edit_role = admin`); một bài viết từng được User X (`Editor`) sửa để lại cả revisions lẫn 1 bản autosave.
 * **When:** (a) Editor gọi `GET .../revisions/{rev_id}`, `compare`, `GET/PUT .../autosave`, và `POST .../restore`; (b) Bài viết bị chuyển vào Thùng rác rồi Purge vĩnh viễn; (c) Admin xóa User X khỏi hệ thống; (d) Hệ thống sao lưu và phục hồi sang site root mới qua Safe Mode.
-* **Then:** (a) Mọi response đọc/diff đều **ẩn hoàn toàn tên và giá trị `internal_notes`** khỏi Editor (chỉ trả cờ boolean `has_hidden_admin_fields` / `has_hidden_admin_changes` mà không lộ tên/số lượng); cho phép Editor xem `editorial_flag` dưới dạng read-only (`editable: false`) và liệt kê trong `missing_refs.non_editable_fields` nếu có khác biệt với DB; và khi Editor restore hoặc autosave, cả `internal_notes` lẫn `editorial_flag` trên DB được giữ nguyên bất biến (**không bao giờ bị `409 missing_refs` chặn bởi ref chết trong field `!editable`**); (b) Trash xóa sạch `entry_autosaves` của entry và chặn toàn bộ endpoint revisions/autosave với `409 entry_trashed`, còn `Purge` xóa sạch cả `entry_revisions` qua `ON DELETE CASCADE`; (c) Xóa User X cascade xóa `entry_autosaves` của User X nhưng giữ `entry_revisions` (`author_user_id = NULL`, giữ nguyên `author_username`); (d) Backup/Restore vượt qua `validate_restored_db_read_only` (`229 <= 256` schema objects) và `validate_and_rebase_copy` dọn sạch `entry_autosaves` lỗi thời nhưng giữ nguyên lịch sử `entry_revisions`.
+* **Then:** (a) Mọi response đọc/diff đều **ẩn hoàn toàn tên và giá trị `internal_notes`** khỏi Editor (chỉ trả cờ boolean `has_hidden_admin_fields` / `has_hidden_admin_changes` mà không lộ tên/số lượng); cho phép Editor xem `editorial_flag` dưới dạng read-only (`editable: false`) và liệt kê trong `missing_refs.non_editable_fields` nếu có khác biệt với DB; và khi Editor restore hoặc autosave, cả `internal_notes` lẫn `editorial_flag` trên DB được giữ nguyên bất biến (**không bao giờ bị `409 missing_refs` chặn bởi ref chết trong field `!editable`**); (b) Trash xóa sạch `entry_autosaves` của entry và chặn toàn bộ endpoint revisions/autosave với `409 entry_trashed`, còn `Purge` xóa sạch cả `entry_revisions` qua `ON DELETE CASCADE`; (c) Xóa User X cascade xóa `entry_autosaves` của User X nhưng giữ `entry_revisions` (`author_user_id = NULL`, giữ nguyên `author_username`); (d) Backup/Restore vượt qua `validate_restored_db_read_only` (`235 <= 256` schema objects) và `validate_and_rebase_copy` dọn sạch `entry_autosaves` lỗi thời nhưng giữ nguyên lịch sử `entry_revisions`.
 
 ---
 
 ## Technical Plan (Architecture)
 
-### 1. Schema SQLite, Chiến lược Baseline `9e17cca` & Kiểm toán `restore.rs` (`0057_entry_revisions_and_autosaves.sql`)
+### 1. Schema SQLite, Chiến lược Baseline `ecbea04` & Kiểm toán `restore.rs` (`0058_entry_revisions_and_autosaves.sql`)
 
-- **Chiến lược đánh số Migration & Hợp nhất với `unified-field-engine` S04:**
-  - Tại baseline `origin/main@9e17cca`, `cms/migrations/` gồm 55 file `0001`–`0056` (kết thúc ở [`0056_unified_field_content_cutover.sql`](../../cms/migrations/0056_unified_field_content_cutover.sql) với `+0` net schema objects, tổng thực tế `223` object tính cả `sqlite_sequence` và `_sqlx_migrations`). [`restore.rs:157-179`](../../cms/crates/opendash-server/src/storage/restore.rs#L157-L179) kiểm tra `_sqlx_migrations` tuần tự theo chỉ số tăng dần và [`cms/migrations/README.md:41`](../../cms/migrations/README.md#L41) cấm nhảy cóc số thứ tự migration.
-  - Vì `unified-field-engine.md` S04 (`0056_unified_field_content_cutover.sql`, PR #616) đã hợp nhất lên `origin/main@9e17cca`, đặc tả này cấp phát **`0057_entry_revisions_and_autosaves.sql`** (tổng `56` file `0001`–`0057`) và đọc thẳng nền tảng UFE S04 đang chạy trên `9e17cca`:
+- **Chiến lược đánh số Migration & Hợp nhất với `origin/main`:**
+  - Tại baseline `origin/main@ecbea04`, `cms/migrations/` gồm 56 file `0001`–`0057` (kết thúc ở [`0057_manual_redirects_and_404_log.sql`](../../cms/migrations/0057_manual_redirects_and_404_log.sql) với `+6` net schema objects, tổng thực tế `229` object tính cả `sqlite_sequence` và `_sqlx_migrations`). [`restore.rs:157-179`](../../cms/crates/opendash-server/src/storage/restore.rs#L157-L179) kiểm tra `_sqlx_migrations` tuần tự theo chỉ số tăng dần và [`cms/migrations/README.md:41`](../../cms/migrations/README.md#L41) cấm nhảy cóc số thứ tự migration.
+  - Vì `unified-field-engine.md` (`0056` + PR #622) và `manual-redirects-and-404-log.md` (`0057`) đã hợp nhất lên `origin/main@ecbea04`, đặc tả này cấp phát **`0058_entry_revisions_and_autosaves.sql`** (tổng `57` file `0001`–`0058`) và đọc thẳng nền tảng UFE hiện hành:
     - **Custom Content Fields & Studio Blocks (`PluginBlock`):** cả hai cùng dùng thống nhất **`FieldSpec`** (`opendash_core::field_schema::{FieldSpec, FieldType, collect_media_ids, collect_relational_refs}`), truy xuất quyền qua `definition.effective_acl()` (`(min_view_role, min_edit_role, public_exposure)` tại [`field_spec.rs:215-224`](../../cms/crates/opendash-core/src/field_schema/spec/field_spec.rs#L215-L224)), `FieldType::Richtext` cho trường `body`, [`collect_effective_image_ids`](../../cms/crates/opendash-server/src/storage/media.rs#L202-L221) bọc `collect_media_ids`, và [`sync_entry_field_media_refs_in_conn`](../../cms/crates/opendash-server/src/storage/entries/body_and_refs/field_media_refs.rs#L12) (`source_kind = 'field'`).
 - **Kiểm toán giới hạn `sqlite_schema` ([`restore.rs:14,125-145`](../../cms/crates/opendash-server/src/storage/restore.rs#L125-L145)):**
-  - `restore::validate_restored_db_read_only` đếm `SELECT COUNT(*) AS cnt FROM sqlite_schema` **bao gồm cả `sqlite_sequence` và `_sqlx_migrations`**. Trên `9e17cca`, DB khởi tạo thực tế có `223` object (`221` từ migrations `0001`–`0056` tính cả `sqlite_sequence` + `2` từ bảng `_sqlx_migrations` của SQLx; kiểm chứng trực tiếp bằng test thực thi trên `0057` trong S01).
-  - Migration `0057` bổ sung đúng **6 đối tượng** trong `sqlite_schema`:
+  - `restore::validate_restored_db_read_only` đếm `SELECT COUNT(*) AS cnt FROM sqlite_schema` **bao gồm cả `sqlite_sequence` và `_sqlx_migrations`**. Trên `ecbea04`, DB khởi tạo thực tế có `229` object (`227` từ migrations `0001`–`0057` tính cả `sqlite_sequence` + `2` từ bảng `_sqlx_migrations` của SQLx; kiểm chứng trực tiếp bằng test thực thi trên `0058` trong S01).
+  - Migration `0058` bổ sung đúng **6 đối tượng** trong `sqlite_schema`:
     1. Table `entry_revisions`
     2. Autoindex `sqlite_autoindex_entry_revisions_1` (từ `UNIQUE (entry_id, revision_number)`)
     3. Index `idx_entry_revisions_author`
     4. Table `entry_autosaves`
     5. Autoindex `sqlite_autoindex_entry_autosaves_1` (từ `PRIMARY KEY (entry_id, user_id)`)
     6. Index `idx_entry_autosaves_user`
-  - Tổng sau `0057`: `223 + 6 = 229` đối tượng (`228` không tính `sqlite_sequence`) — nằm dưới xa ngưỡng **`MAX_SCHEMA_OBJECTS = 256`**. Không thêm `TRIGGER` hay bảng phụ mới trong `0057`.
+  - Tổng sau `0058`: `229 + 6 = 235` đối tượng (`234` không tính `sqlite_sequence`) — nằm dưới xa ngưỡng **`MAX_SCHEMA_OBJECTS = 256`**. Không thêm `TRIGGER` hay bảng phụ mới trong `0058`.
 
 ```sql
--- 0057_entry_revisions_and_autosaves.sql
+-- 0058_entry_revisions_and_autosaves.sql
 -- Additive revision history and per-user server autosaves for content_entries (including pattern CPT).
 -- +6 sqlite_schema objects total (2 tables, 2 unique autoindexes, 2 secondary indexes; 0 triggers).
 
@@ -766,10 +766,10 @@ pub enum RestoreRevisionOutcome {
 
 | Phương án thay thế | Lý do cân nhắc | Lý do bác bỏ |
 |---|---|---|
-| **1. Gộp chung `entry_revisions` / `entry_autosaves` vào `0056` hoặc nhảy số migration** | Giảm số lượng file migration. | `0056_unified_field_content_cutover.sql` đã hợp nhất trên `origin/main@9e17cca`; [`cms/migrations/README.md:41`](../../cms/migrations/README.md#L41) và [`restore.rs:157-179`](../../cms/crates/opendash-server/src/storage/restore.rs#L157-L179) bắt buộc đánh số tuần tự nên `0057_entry_revisions_and_autosaves.sql` nối tiếp chuẩn xác (`223 + 6 = 229 <= 256`). |
+| **1. Gộp chung `entry_revisions` / `entry_autosaves` vào `0056`/`0057` hoặc nhảy số migration** | Giảm số lượng file migration. | `0057_manual_redirects_and_404_log.sql` đã hợp nhất trên `origin/main@ecbea04`; [`cms/migrations/README.md:41`](../../cms/migrations/README.md#L41) và [`restore.rs:157-179`](../../cms/crates/opendash-server/src/storage/restore.rs#L157-L179) bắt buộc đánh số tuần tự nên `0058_entry_revisions_and_autosaves.sql` nối tiếp chuẩn xác (`229 + 6 = 235 <= 256`). |
 | **2. Cho Revisions & Autosaves khóa xóa Media (`collect_pins_in_tx`)** | Đảm bảo 100% bản lưu cũ còn nguyên ảnh sau nhiều tháng. | Khóa cứng thư viện Media suốt 25 chu kỳ sửa bài. Phát hiện `missing_refs` + dọn an toàn giải quyết triệt để cả hai phía. |
 | **3. Lưu Autosave bằng `localStorage` / IndexedDB** | Không tốn ghi DB server và chạy offline. | Mất nháp khi đổi thiết bị/trình duyệt, dễ rò rỉ dữ liệu private/admin nếu dùng chung máy, và không dùng chung được Rust Diff Engine. |
-| **4. Lưu Revision ngay trong `content_entries` (`post_type = 'revision'`)** | Quen thuộc từ WordPress. | Làm ô nhiễm hàng trăm truy vấn `content_entries`, `UNIQUE` constraints và triggers `0008`/`0044`/`0047`. Tách `entry_revisions` và `entry_autosaves` (`+6` → `229 / 256`) an toàn tuyệt đối. |
+| **4. Lưu Revision ngay trong `content_entries` (`post_type = 'revision'`)** | Quen thuộc từ WordPress. | Làm ô nhiễm hàng trăm truy vấn `content_entries`, `UNIQUE` constraints và triggers `0008`/`0044`/`0047`. Tách `entry_revisions` và `entry_autosaves` (`+6` → `235 / 256`) an toàn tuyệt đối. |
 | **5. Khôi phục cả `slug`, `custom_path` và `publication_status`** | Phản ánh nguyên xi mọi cột cũ. | Có thể âm thầm hạ bài chạy traffic về `draft`, đụng `UNIQUE (content_type_key, locale, slug)` và gãy SEO redirect. |
 
 ---
@@ -785,18 +785,18 @@ pub enum RestoreRevisionOutcome {
    - `MAX_DIFF_LINES = 2_000`, `MAX_DIFF_TOKENS_PER_LINE = 512`, `MAX_DP_CELLS = 500_000`, `MAX_TOTAL_WORD_DP_CELLS = 500_000`, `MAX_BLOCK_DIFF_NODES = 1_024` (`< 20ms` trên `768 KiB`).
    - `POST .../restore` chạy Preflight & `ContentBeforeSave` ngoài `BEGIN IMMEDIATE` writer lock.
 3. **Bảo toàn Dữ liệu, Nâng cấp & Rollback:**
-   - Migration `0057` additive thuần túy (`+6` → `229 / 256`), tương thích với `restore::validate_restored_db_read_only` / `validate_and_rebase_copy`.
+   - Migration `0058` additive thuần túy (`+6` → `235 / 256`), tương thích với `restore::validate_restored_db_read_only` / `validate_and_rebase_copy`.
 
 ---
 
 ## Detailed Implementation Plan
 
-### Slice S01: Migration `0057`, Core Diff Engine (`opendash_core::revisions/`), Storage Persistence & Test Runner
+### Slice S01: Migration `0058`, Core Diff Engine (`opendash_core::revisions/`), Storage Persistence & Test Runner
 
-- **Dependencies:** Baseline `origin/main@9e17cca` (đã có `0056_unified_field_content_cutover.sql`, Gettext `.pot`/`.po`/`.mo`, `field_schema::{collect_media_ids, collect_relational_refs}` & `sync_entry_field_media_refs_in_conn`).
+- **Dependencies:** Baseline `origin/main@ecbea04` (đã có `0057_manual_redirects_and_404_log.sql`, Gettext `.pot`/`.po`/`.mo`, `field_schema::{collect_media_ids, collect_relational_refs}` & `sync_entry_field_media_refs_in_conn`).
 - **File Ownership:**
-  - `cms/migrations/0057_entry_revisions_and_autosaves.sql` (new)
-  - `cms/migrations/README.md` (modify: cập nhật tổng `56` file `0001`–`0057` và mô tả `entry_revisions` / `entry_autosaves`)
+  - `cms/migrations/0058_entry_revisions_and_autosaves.sql` (new)
+  - `cms/migrations/README.md` (modify: cập nhật tổng `57` file `0001`–`0058` và mô tả `entry_revisions` / `entry_autosaves`)
   - `cms/crates/opendash-core/src/lib.rs` (modify: `pub mod revisions;`)
   - `cms/crates/opendash-core/src/builder/document.rs` (modify: mở `pub fn is_preserved`, đã re-export qua `builder::*`)
   - `cms/crates/opendash-core/src/revisions/{mod.rs,types.rs,canonical.rs,text_diff.rs,block_diff.rs,tests.rs}` (new feature-first submodules, mỗi file `<= 600 LOC`)
@@ -812,12 +812,12 @@ pub enum RestoreRevisionOutcome {
   - `cms/scripts/run-tests.py` (modify trong S01: thêm `"storage::revisions"` vào `unit_filters` của `"content"` & `"builder"` trong `GROUPS` tuple; đặt nhánh prefix **trước** `filename in core_routes` / `sub in server_routes`: `cms/crates/opendash-core/src/revisions/` → `{"builder", "content"}`, `storage/revisions/` → `{"builder", "content"}`; cập nhật **`keyword_map` thêm `"revision"`, `"autosave"` vào CẢ hai tuple `"content"` lẫn `"builder"`** và thêm test case vào `RunTestsSelfTest`)
   - `cms/crates/opendash-server/tests/{content.rs,content/revisions_storage.rs}` (new domain test submodule `<= 600 LOC`: spawn `CARGO_BIN_EXE_opendash`, kiểm chứng HTTP & `SqlitePool` trên `entry_revisions` / `entry_autosaves`, còn unit test trực tiếp `storage::revisions` nằm trong `src/storage/revisions/` và chạy bằng `--bin opendash storage::revisions`)
 - **Acceptance Criteria:**
-  - [ ] Migration `0057` chạy sạch trên DB trống và DB có dữ liệu sẵn; `SELECT COUNT(*) FROM sqlite_schema` thực tế `<= 256` (`229`).
+  - [ ] Migration `0058` chạy sạch trên DB trống và DB có dữ liệu sẵn; `SELECT COUNT(*) FROM sqlite_schema` thực tế `<= 256` (`235`).
   - [ ] Mọi file mới trong `revisions/` và các file đã chỉnh (`forbid_generic_pattern_write.rs` từ `508 LOC`, `execute_sample_import_with_cutpoint.rs` từ `576 LOC`) có `<= 600 LOC`, không thêm dependency mới; `opendash_core::revisions` và `storage::revisions` PASS 100%.
   - [ ] Đủ 11 điểm Ma trận §2 tự động tạo baseline, dedup `content_hash`, prune giữ `25` bản, và dọn `entry_autosaves` đúng quy tắc.
   - [ ] `media_refs` và `public_content::media_is_referenced` không ghim và không cấp ACL công khai cho `entry_revisions` / `entry_autosaves`.
   - [ ] `restore::validate_restored_db_read_only`, `validate_and_rebase_copy`, `run-tests.py --list`, `run-tests.py --self-test` và `content::revisions_storage` PASS 100%.
-- **Rollback:** Revert commit S01; `0057` chỉ thêm 2 bảng mới.
+- **Rollback:** Revert commit S01; `0058` chỉ thêm 2 bảng mới.
 
 ### Slice S02: Restore Preflight, Missing-Ref Sanitization, HTTP Revision & Autosave APIs
 
@@ -886,8 +886,8 @@ pub enum RestoreRevisionOutcome {
 *(Danh sách khớp 1-1 với `File Ownership` của Slice S01–S04; mọi file nguồn mới `<= 600 LOC`, không đặt tên `part_*`):*
 
 1. **Database Migration:**
-   - `cms/migrations/0057_entry_revisions_and_autosaves.sql` — DDL tạo `entry_revisions`, `entry_autosaves` (`cleared_fields_json`, `*_touched`, `client_seq`) và 2 secondary indexes (`+6` `sqlite_schema` objects).
-   - `cms/migrations/README.md` — Cập nhật số lượng migration (`56` files `0001`–`0057`) và mô tả 2 bảng mới.
+   - `cms/migrations/0058_entry_revisions_and_autosaves.sql` — DDL tạo `entry_revisions`, `entry_autosaves` (`cleared_fields_json`, `*_touched`, `client_seq`) và 2 secondary indexes (`+6` `sqlite_schema` objects).
+   - `cms/migrations/README.md` — Cập nhật số lượng migration (`57` files `0001`–`0058`) và mô tả 2 bảng mới.
 2. **Core Crate (`cms/crates/opendash-core/src/`):**
    - `lib.rs` — Khai báo `pub mod revisions;`.
    - `builder/document.rs` — Mở `pub fn is_preserved(...) -> bool` (đã re-export qua `builder::*`).
@@ -976,5 +976,5 @@ Bắt buộc chạy **đúng thứ tự** theo từng Slice (build `cms/admin` *
      - Single Edit diff (`word` + `field` + `taxonomy`), restore và hoàn tác về bản trước đó, giữ nguyên `slug` + `published`, đồng bộ permalink `%category%`, Trash entry không dính `409` khi xóa.
      - Studio Mode 2 Landing Page & Pattern CPT: Block-Aware Diff (`added`/`removed`/`moved`+`prop_changes`/`modified`, gồm `PluginBlock` trên `BlockSchemaV1`), autosave merge không làm mất metadata, restore (kể cả `builder_reset` và `content_mode == 'editor'`) cập nhật `entryTitle` + live preview, rời Mode 2 qua sidebar/Back sạch sẽ không kẹt confirm/dirty nền.
      - RBAC & ACL 3 trục: Editor bị chặn `403` trên `pattern` và `source_surface = "studio"` khi `body` khóa; ẩn hoàn toàn trường `admin`-only (cả `builder_document`, Text/Block Diff lẫn `RestoreRevisionOutcome`); không chặn `409 missing_refs` và bỏ qua `sync_entry_body_refs_in_conn` trên trường `!editable`; media/form/entry/pattern/options xóa/tắt thành công không bị revision ghim, restore báo `409 revision_missing_refs` và dọn sạch khi xác nhận.
-     - Backup & Restore qua Safe Mode: pass fingerprint (`229 <= 256` objects), giữ nguyên `entry_revisions` và dọn `entry_autosaves`.
+     - Backup & Restore qua Safe Mode: pass fingerprint (`235 <= 256` objects), giữ nguyên `entry_revisions` và dọn `entry_autosaves`.
 4. **Đóng Spec theo EGM:** Chạy `/egm-drift-report`, cập nhật `Status` trong [SITEMAP.md](SITEMAP.md) sang `**Verified**` kèm biên bản tại `docs/verification/` và chạy `node cms/scripts/codegraph-index-docs.mjs`.

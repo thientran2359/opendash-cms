@@ -132,7 +132,8 @@ impl AdminExtensions {
             if !valid_label(&panel.label) || !matches!(panel.kind.as_str(), "category" | "tag") {
                 return Err("admin_extensions term panel label/kind không hợp lệ.");
             }
-            if panel.fields.is_empty() || panel.fields.len() > 16 {
+            let data_count = panel.fields.iter().filter(|f| !f.is_ui_only()).count();
+            if data_count == 0 || data_count > 16 {
                 return Err("admin_extensions term panel cần 1..16 fields.");
             }
             for field in &panel.fields {
