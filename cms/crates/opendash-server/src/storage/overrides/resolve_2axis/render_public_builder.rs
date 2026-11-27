@@ -1,0 +1,276 @@
+use super::*;
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::storage) async fn render_public_builder(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    slot: Option<&str>,
+    depth: usize,
+    stack: &[String],
+    ctx: &PublicBuilderContext<'_>,
+    budget: &mut PublicCompositionBudget,
+    scope: &str,
+) -> ApiResult<RenderedLayout> {
+    let mut parts = BTreeMap::new();
+    let mut child_diagnostics = Vec::new();
+    let mut child_forms = false;
+    let schemas = ctx.state.unified_block_schemas()?;
+    // Count every occurrence, including repeated references. A stored Builder
+    // part wins before consulting the immutable active-theme source.
+    for key in document_parts_and_slot_count_with_schemas(document, &schemas)?.0 {
+        budget.charge(1)?;
+        if let Some(mut rendered) =
+            Box::pin(render_public_part(tx, &key, depth + 1, stack, ctx, budget)).await?
+        {
+            child_forms |= rendered.has_active_contact_form;
+            child_diagnostics.append(&mut rendered.diagnostics);
+            parts.insert(key, rendered.html);
+        }
+    }
+    let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
+        tx,
+        document,
+        false,
+        ctx.route_entry,
+        Some(ctx.render_locale),
+    )
+    .await?;
+    let lists = builder::resolve_lists_in_tx_for_locale(
+        tx,
+        document,
+        &BTreeMap::new(),
+        Some(ctx.render_locale),
+    )
+    .await?;
+    let forms = resolve_contact_forms_in_tx(tx, document).await?;
+    let empty_patterns = page::PatternResults::new();
+    let mut rendered = page::render_builder_with_budget(
+        ctx.state,
+        document,
+        false,
+        &bindings,
+        &lists,
+        &forms,
+        Some(&page::BuilderTemplateContext {
+            content_html: slot,
+            parts: &parts,
+        }),
+        &empty_patterns,
+        false,
+        RenderAnnotationScope::None,
+        scope,
+        &mut budget.render_budget,
+        ctx.cache,
+    )?;
+    rendered.has_active_contact_form |= child_forms;
+    rendered.diagnostics.append(&mut child_diagnostics);
+    Ok(rendered)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::storage) async fn inspect_part_slot_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    depth: usize,
+    stack: &[String],
+    active: Option<&ActiveThemeV3>,
+    url_policy: &template_sec::ThemeUrlPolicy,
+    schemas: &opendash_core::registry::RegistryCatalog<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >,
+    uses_related_entries: &mut bool,
+    uses_recent_posts: &mut bool,
+) -> ApiResult<(bool, Option<Arc<template_sec::CompiledCsecComposition>>)> {
+    let target = TemplateCandidate {
+        part_key: Some(key.to_owned()),
+        ..candidate(TemplateCandidateKind::Part)
+    };
+    let canonical = target.canonical_key().map_err(ApiError::internal)?;
+    if stack.contains(&canonical) || depth > 3 {
+        return Err(ApiError::internal("Template part cycle or depth limit."));
+    }
+    if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
+        let (_, slots) = document_parts_and_slot_count_with_schemas(&row.document, schemas)?;
+        validate_content_slots(&target, slots)?;
+        let mut next_stack = stack.to_vec();
+        next_stack.push(canonical);
+        Box::pin(inspect_db_document_surfaces_in_tx(
+            tx,
+            &row.document,
+            depth,
+            &next_stack,
+            active,
+            url_policy,
+            schemas,
+            uses_related_entries,
+            uses_recent_posts,
+        ))
+        .await?;
+        return Ok((true, None));
+    }
+    let Some(active) = active else {
+        return Ok((false, None));
+    };
+    let Some(source) = active.parts.get(key) else {
+        return Ok((false, None));
+    };
+    let compiled = template_sec::ThemeCompositionCache::global()
+        .get_or_compile(
+            &active.revision_digest,
+            &canonical,
+            source,
+            &active.parts,
+            template_sec::CsecContentKind::NonEntry,
+            url_policy,
+        )
+        .map_err(ApiError::internal)?;
+    if depth + compiled.max_part_depth > 3 {
+        return Err(ApiError::internal("Template part depth exceeds 3."));
+    }
+    *uses_related_entries |= compiled.uses_related_entries;
+    *uses_recent_posts |= compiled.uses_recent_posts;
+    Ok((true, Some(compiled)))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::storage) async fn inspect_db_document_surfaces_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    depth: usize,
+    stack: &[String],
+    active: Option<&ActiveThemeV3>,
+    url_policy: &template_sec::ThemeUrlPolicy,
+    schemas: &opendash_core::registry::RegistryCatalog<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >,
+    uses_related_entries: &mut bool,
+    uses_recent_posts: &mut bool,
+) -> ApiResult<()> {
+    for key in document_parts_and_slot_count_with_schemas(document, schemas)?.0 {
+        Box::pin(inspect_part_slot_in_tx(
+            tx,
+            &key,
+            depth + 1,
+            stack,
+            active,
+            url_policy,
+            schemas,
+            uses_related_entries,
+            uses_recent_posts,
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn resolve_and_render_header_footer_with_context_for_locale(
+    db: &SqlitePool,
+    active_v3: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    precompiled_shell: &PrecompiledPublicShell,
+    locale: Option<&str>,
+    fmt_cfg: &template_sec::RenderFormattingConfig,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<(Option<String>, Option<String>, bool)> {
+    let mut tx = db.begin().await?;
+    let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
+    let mut state =
+        builder::read_render_context_for_locale_tx(&mut tx, Some(&effective_locale), false, None)
+            .await?;
+    let mut part_docs = Vec::new();
+    for slot_key in ["header", "footer"] {
+        let target = TemplateCandidate {
+            part_key: Some(slot_key.to_owned()),
+            ..candidate(TemplateCandidateKind::Part)
+        };
+        let canonical = target.canonical_key().map_err(ApiError::internal)?;
+        if let Some(row) = get_typed_override_on_connection(&mut *tx, &canonical).await? {
+            part_docs.push(row.document);
+        }
+    }
+    if !part_docs.is_empty() {
+        let part_refs: Vec<&BuilderDocument> = part_docs.iter().collect();
+        collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &part_refs, false).await?;
+    }
+    let url_policy = active_theme_url_policy(active_v3)?;
+    let context = PublicBuilderContext {
+        state: &state,
+        active: active_v3,
+        theme_context,
+        route_entry: None,
+        render_locale: &effective_locale,
+        cache,
+        url_policy: &url_policy,
+        fmt_cfg,
+    };
+
+    async fn render_shell_slot(
+        tx: &mut Transaction<'_, Sqlite>,
+        slot_key: &str,
+        precompiled: Option<&template_sec::CompiledCsecComposition>,
+        context: &PublicBuilderContext<'_>,
+        budget: &mut PublicCompositionBudget,
+    ) -> ApiResult<Option<RenderedLayout>> {
+        let target = TemplateCandidate {
+            part_key: Some(slot_key.to_owned()),
+            ..candidate(TemplateCandidateKind::Part)
+        };
+        let canonical = target.canonical_key().map_err(ApiError::internal)?;
+        if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
+            let schemas = context.state.unified_block_schemas()?;
+            let (_, slots) = document_parts_and_slot_count_with_schemas(&row.document, &schemas)?;
+            validate_content_slots(&target, slots)?;
+            let scope = part_scope_prefix(slot_key, budget.expansions);
+            return Ok(Some(
+                Box::pin(render_public_builder(
+                    tx,
+                    &row.document,
+                    None,
+                    0,
+                    &[canonical],
+                    context,
+                    budget,
+                    &scope,
+                ))
+                .await?,
+            ));
+        }
+        if let Some(compiled) = precompiled {
+            let html = budget.render_theme_with_config(
+                compiled,
+                context.theme_context,
+                None,
+                context.fmt_cfg,
+            )?;
+            return Ok(Some(RenderedLayout {
+                html,
+                diagnostics: Vec::new(),
+                has_active_contact_form: false,
+            }));
+        }
+        render_public_part(tx, slot_key, 0, &[], context, budget).await
+    }
+
+    let header = render_shell_slot(
+        &mut tx,
+        "header",
+        precompiled_shell.header.as_deref(),
+        &context,
+        budget,
+    )
+    .await?;
+    let footer = render_shell_slot(
+        &mut tx,
+        "footer",
+        precompiled_shell.footer.as_deref(),
+        &context,
+        budget,
+    )
+    .await?;
+    let has_form = header.as_ref().is_some_and(|r| r.has_active_contact_form)
+        || footer.as_ref().is_some_and(|r| r.has_active_contact_form);
+    tx.commit().await?;
+    Ok((header.map(|r| r.html), footer.map(|r| r.html), has_form))
+}
