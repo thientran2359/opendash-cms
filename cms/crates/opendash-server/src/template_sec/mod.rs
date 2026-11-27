@@ -25,3 +25,6 @@ mod spec1_s01_tests;
 #[cfg(test)]
 #[path = "tests/trusted_theme_markup_tests.rs"]
 mod trusted_theme_markup_tests;
+#[cfg(test)]
+#[path = "tests/search_form_csec_tests.rs"]
+mod search_form_csec_tests;

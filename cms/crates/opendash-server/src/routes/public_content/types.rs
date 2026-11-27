@@ -204,18 +204,27 @@ pub(super) async fn render_resolved_public_template_html(
             let canvas_layout = record.target.kind
                 == opendash_core::theme::TemplateCandidateKind::PageLayout
                 && overrides::is_canvas_page_layout(active, record.target.layout_key.as_deref());
-            let rendered = overrides::render_resolved_public_builder_with_cache_for_locale(
-                db,
-                &record,
-                active,
-                &context,
-                route_entry,
-                locale,
-                Some(&slot_html),
-                budget,
-                cache,
-            )
-            .await?;
+            let search_data = route_ctx.search.is_search_route.then_some(
+                crate::page::BuilderSearchData {
+                    view: route_ctx.search,
+                    entries: route_ctx.entries,
+                    pagination: route_ctx.pagination,
+                },
+            );
+            let rendered =
+                overrides::render_resolved_public_builder_with_search_and_cache_for_locale(
+                    db,
+                    &record,
+                    active,
+                    &context,
+                    route_entry,
+                    locale,
+                    Some(&slot_html),
+                    search_data,
+                    budget,
+                    cache,
+                )
+                .await?;
             Ok(ResolvedPublicHtml {
                 html: rendered.html,
                 has_active_contact_form: rendered.has_active_contact_form,

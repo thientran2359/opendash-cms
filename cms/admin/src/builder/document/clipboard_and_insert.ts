@@ -63,6 +63,8 @@ export function appendNode(
     'core/button': { label: __("New button"), url: '/' },
     'core/list': { type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6 },
     'core/contact_form': { form_id: 1, submit_label: __("Send message") },
+    'core/search_form': { placeholder: __("Search the site..."), submit_label: __("Search"), show_type_filter: false, preserve_type_filter: false },
+    'core/search_results': { show_facets: true, show_excerpt: true, empty_message: '' },
     'core/pattern_ref': { pattern_id: 0 },
     'core/content_slot': {},
     'core/template_part': { part_key: 'header' },

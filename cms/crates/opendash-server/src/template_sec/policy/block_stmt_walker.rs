@@ -13,8 +13,8 @@ pub(crate) fn walk_block_ast_stmt(
             for initial in states {
                 let mut cur = initial;
                 for ch in raw.raw.chars() {
-                    let depth = cur.trusted_depth();
-                    cur = step_theme_raw_char(cur, ch, BLOCK_HTML_STEP_OPTIONS, depth)?;
+                    let depths = cur.depths();
+                    cur = step_theme_raw_char(cur, ch, BLOCK_HTML_STEP_OPTIONS, depths)?;
                 }
                 next_states.insert(cur);
             }
@@ -124,7 +124,7 @@ pub(crate) fn walk_block_ast_stmt(
             let mut expected_url_slot: Option<Option<UrlAttrSlot>> = None;
             let mut updated_states = BTreeSet::new();
             for state in states {
-                let svg_depth = state.trusted_depth();
+                let depths = state.depths();
                 let ThemeHtmlState::Tag {
                     tag_name,
                     is_close,
@@ -137,6 +137,7 @@ pub(crate) fn walk_block_ast_stmt(
                     link_rel_stylesheet,
                     mut link_has_valid_href,
                     meta_ok,
+                    form_has_action,
                     attr_static_buf,
                 } = state.into_inner()
                 else {
@@ -147,7 +148,7 @@ pub(crate) fn walk_block_ast_stmt(
                         "C-SEC chỉ cho phép nội suy bên trong giá trị thuộc tính có dấu ngoặc kép.",
                     );
                 }
-                if forbids_dynamic_interpolation(&attr_name)
+                if forbids_dynamic_interpolation(&tag_name, &attr_name)
                     || matches!(attr_name.as_str(), "style" | "srcset" | "ping")
                     || (tag_name == "link" && attr_name == "rel")
                     || tag_name == "meta"
@@ -162,7 +163,7 @@ pub(crate) fn walk_block_ast_stmt(
                             "URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.",
                         );
                     }
-                    let Some(slot) = classify_theme_url_slot(&tag_name, &attr_name) else {
+                    let Some(slot) = classify_theme_url_slot(&tag_name, &attr_name, false) else {
                         return Err("C-SEC cấm nội suy URL động trên thuộc tính hoặc thẻ này.");
                     };
                     if let Some(prev_slot) = expected_url_slot {
@@ -198,7 +199,7 @@ pub(crate) fn walk_block_ast_stmt(
                     }
                     attr_expr_count = attr_expr_count.saturating_add(1);
                 }
-                updated_states.insert(ThemeHtmlState::with_trust(
+                updated_states.insert(ThemeHtmlState::with_depths(
                     ThemeHtmlState::Tag {
                         tag_name,
                         is_close,
@@ -211,10 +212,11 @@ pub(crate) fn walk_block_ast_stmt(
                         link_rel_stylesheet,
                         link_has_valid_href,
                         meta_ok,
+                        form_has_action,
                         attr_static_buf,
                     },
                     true,
-                    svg_depth,
+                    depths,
                 ));
             }
             Ok((updated_states, scopes))
@@ -359,13 +361,17 @@ pub(crate) fn walk_block_ast_stmt(
             }
             let (sb_states, sb_scopes) = walk_block_ast_sequence(
                 &sb.body,
-                BTreeSet::from([ThemeHtmlState::with_trust(ThemeHtmlState::Body, true, 0)]),
+                BTreeSet::from([ThemeHtmlState::with_depths(
+                    ThemeHtmlState::Body,
+                    true,
+                    HtmlDepths::default(),
+                )]),
                 scopes.clone(),
                 policy,
             )?;
             if sb_states
                 .iter()
-                .any(|s| s.inner() != &ThemeHtmlState::Body || s.trusted_depth() != 0)
+                .any(|s| s.inner() != &ThemeHtmlState::Body || s.has_open_depths())
             {
                 return Err("Khối set block phải đóng đủ thẻ/comment HTML bên trong.");
             }
@@ -486,13 +492,17 @@ pub fn validate_block_template_csec(
 
     let (final_states, _) = walk_block_ast_stmt(
         &ast,
-        BTreeSet::from([ThemeHtmlState::with_trust(ThemeHtmlState::Body, true, 0)]),
+        BTreeSet::from([ThemeHtmlState::with_depths(
+            ThemeHtmlState::Body,
+            true,
+            HtmlDepths::default(),
+        )]),
         ctx.root_scopes,
         &ctx.policy,
     )?;
     if final_states
         .iter()
-        .any(|s| s.inner() != &ThemeHtmlState::Body || s.trusted_depth() != 0)
+        .any(|s| s.inner() != &ThemeHtmlState::Body || s.has_open_depths())
     {
         return Err(
             "Template block phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment/svg).",

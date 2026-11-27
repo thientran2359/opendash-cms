@@ -116,6 +116,10 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
             include_bytes!("opendash-starter/patterns/pricing-tiers.json").to_vec(),
         ),
         (
+            "search.html".to_owned(),
+            include_bytes!("opendash-starter/search.html").to_vec(),
+        ),
+        (
             "single-post.html".to_owned(),
             include_bytes!("opendash-starter/single-post.html").to_vec(),
         ),

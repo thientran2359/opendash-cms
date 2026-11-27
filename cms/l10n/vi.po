@@ -18960,3 +18960,36 @@ msgstr "Không tìm thấy kết quả phù hợp."
 #: server:core_l10n.search_clear_type
 msgid "Show all types"
 msgstr "Xem tất cả loại nội dung"
+
+msgid "Search form"
+msgstr "Khung tìm kiếm"
+
+msgid "Search results"
+msgstr "Kết quả tìm kiếm"
+
+msgid "Placeholder"
+msgstr "Văn bản gợi ý"
+
+msgid "Show type filter"
+msgstr "Hiện bộ lọc loại nội dung"
+
+msgid "Preserve type filter"
+msgstr "Giữ bộ lọc loại nội dung"
+
+msgid "Show content type facets"
+msgstr "Hiện bộ lọc theo loại nội dung"
+
+msgid "Show excerpt / snippet"
+msgstr "Hiện đoạn trích kết quả"
+
+msgid "Empty state message"
+msgstr "Thông báo khi không có kết quả"
+
+msgid "Site search box"
+msgstr "Ô tìm kiếm toàn trang"
+
+msgid "Paginated search results"
+msgstr "Danh sách kết quả tìm kiếm phân trang"
+
+msgid "Search Results blocks only display items on the search route."
+msgstr "Khối Kết quả tìm kiếm chỉ hiển thị nội dung trên trang tìm kiếm."

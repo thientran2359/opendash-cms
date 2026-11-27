@@ -18963,3 +18963,36 @@ msgstr ""
 #: server:core_l10n.search_clear_type
 msgid "Show all types"
 msgstr ""
+
+msgid "Search form"
+msgstr ""
+
+msgid "Search results"
+msgstr ""
+
+msgid "Placeholder"
+msgstr ""
+
+msgid "Show type filter"
+msgstr ""
+
+msgid "Preserve type filter"
+msgstr ""
+
+msgid "Show content type facets"
+msgstr ""
+
+msgid "Show excerpt / snippet"
+msgstr ""
+
+msgid "Empty state message"
+msgstr ""
+
+msgid "Site search box"
+msgstr ""
+
+msgid "Paginated search results"
+msgstr ""
+
+msgid "Search Results blocks only display items on the search route."
+msgstr ""

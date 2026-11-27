@@ -58,13 +58,19 @@ impl SearchView {
         Self::inactive(search_url)
     }
 
-    pub fn preview_sample(search_url: &str, _locale: &str) -> Self {
+    pub fn preview_sample(search_url: &str, locale: &str) -> Self {
         let base = if search_url.trim().is_empty() {
             "/"
         } else {
             search_url.trim()
         };
-        let sample_query = "kiến trúc";
+        let is_en = locale.starts_with("en");
+        let sample_query = if is_en { "architecture" } else { "kiến trúc" };
+        let (post_label, page_label) = if is_en {
+            ("Posts", "Pages")
+        } else {
+            ("Bài viết", "Trang")
+        };
         Self {
             is_search_route: true,
             has_query: true,
@@ -76,20 +82,130 @@ impl SearchView {
             facets: vec![
                 SearchFacetView {
                     type_key: "post".to_owned(),
-                    label: "Bài viết".to_owned(),
+                    label: post_label.to_owned(),
                     count: 1,
                     url: build_search_url(base, Some(sample_query), Some("post"), 1),
                     is_active: false,
                 },
                 SearchFacetView {
                     type_key: "page".to_owned(),
-                    label: "Trang".to_owned(),
+                    label: page_label.to_owned(),
                     count: 1,
                     url: build_search_url(base, Some(sample_query), Some("page"), 1),
                     is_active: false,
                 },
             ],
         }
+    }
+
+    pub fn preview_sample_entries(locale: &str) -> Vec<EntryView> {
+        let is_en = locale.starts_with("en");
+        let (post_label, post_title, post_pre, post_match, post_post) = if is_en {
+            (
+                "Post",
+                "OpenDash Search Architecture",
+                "Lightweight SQLite FTS5 ",
+                "architecture",
+                " for instant full-site search.",
+            )
+        } else {
+            (
+                "Bài viết",
+                "Kiến trúc tìm kiếm OpenDash",
+                "Tìm kiếm toàn site với SQLite FTS5 và ",
+                "kiến trúc",
+                " lõi gọn nhẹ.",
+            )
+        };
+        let (page_label, page_title, page_pre, page_match, page_post) = if is_en {
+            (
+                "Page",
+                "Documentation Overview",
+                "Modular system ",
+                "architecture",
+                " with zero external daemon.",
+            )
+        } else {
+            (
+                "Trang",
+                "Tổng quan tài liệu",
+                "Tài liệu hướng dẫn ",
+                "kiến trúc",
+                " không cần dịch vụ ngoài.",
+            )
+        };
+        vec![
+            EntryView {
+                id: 0,
+                type_key: "post".to_owned(),
+                title: post_title.to_owned(),
+                slug: "sample-post".to_owned(),
+                url: Some("/posts/sample-post".to_owned()),
+                created_at: String::new(),
+                updated_at: String::new(),
+                published_at: None,
+                excerpt: format!("{post_pre}{post_match}{post_post}"),
+                reading_time_minutes: 2,
+                fields: Default::default(),
+                field_list: Vec::new(),
+                cover_url: None,
+                terms: Default::default(),
+                all_terms: Vec::new(),
+                primary_category: None,
+                ext: Default::default(),
+                theme_ext: Default::default(),
+                snippet_segments: vec![
+                    SnippetSegment {
+                        text: post_pre.to_owned(),
+                        matched: false,
+                    },
+                    SnippetSegment {
+                        text: post_match.to_owned(),
+                        matched: true,
+                    },
+                    SnippetSegment {
+                        text: post_post.to_owned(),
+                        matched: false,
+                    },
+                ],
+                type_label: post_label.to_owned(),
+            },
+            EntryView {
+                id: 0,
+                type_key: "page".to_owned(),
+                title: page_title.to_owned(),
+                slug: "sample-page".to_owned(),
+                url: Some("/sample-page".to_owned()),
+                created_at: String::new(),
+                updated_at: String::new(),
+                published_at: None,
+                excerpt: format!("{page_pre}{page_match}{page_post}"),
+                reading_time_minutes: 1,
+                fields: Default::default(),
+                field_list: Vec::new(),
+                cover_url: None,
+                terms: Default::default(),
+                all_terms: Vec::new(),
+                primary_category: None,
+                ext: Default::default(),
+                theme_ext: Default::default(),
+                snippet_segments: vec![
+                    SnippetSegment {
+                        text: page_pre.to_owned(),
+                        matched: false,
+                    },
+                    SnippetSegment {
+                        text: page_match.to_owned(),
+                        matched: true,
+                    },
+                    SnippetSegment {
+                        text: page_post.to_owned(),
+                        matched: false,
+                    },
+                ],
+                type_label: page_label.to_owned(),
+            },
+        ]
     }
 
     pub fn from_public_output(output: &PublicSearchOutput, base_search_url: &str) -> Self {
@@ -239,7 +355,11 @@ pub fn render_default_search_html(
     }
 
     if pagination.has_prev || pagination.has_next {
-        let nav_label = escape_html_attr(&l10n.search_title);
+        let nav_label = if locale.starts_with("en") {
+            "Pagination"
+        } else {
+            "Phân trang"
+        };
         html.push_str(&format!(r#"<nav aria-label="{nav_label}">"#));
         if let Some(prev) = pagination.previous_url.as_deref() {
             html.push_str(&format!(

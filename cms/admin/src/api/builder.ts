@@ -34,7 +34,7 @@ export interface EntryBuilderOpen {
  * optimistic If-Match, and reset is scoped to the immutable row ID. */
 export type TemplateCandidateKind =
   | 'home' | 'page' | 'page_layout' | 'single' | 'single_custom'
-  | 'archive' | 'taxonomy' | 'singular' | 'index' | 'not_found' | 'part';
+  | 'archive' | 'taxonomy' | 'singular' | 'index' | 'not_found' | 'search' | 'part';
 
 export interface TemplateTargetInput {
   kind: TemplateCandidateKind;

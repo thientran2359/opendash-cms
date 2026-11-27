@@ -68,6 +68,8 @@ export function BuilderBindingFields({
     'core/list': [],
     'core/video': [],
     'core/contact_form': [],
+    'core/search_form': [],
+    'core/search_results': [],
   };
   const existing = readBinding(element);
   const signature = JSON.stringify(existing);

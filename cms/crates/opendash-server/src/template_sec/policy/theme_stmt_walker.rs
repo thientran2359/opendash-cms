@@ -1,5 +1,6 @@
 use super::*;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn walk_theme_stmt_with_url_scopes(
     stmt: &Stmt<'_>,
     states: BTreeSet<ThemeHtmlState>,
@@ -8,6 +9,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
     is_full_doctype_doc: bool,
     policy: &ThemeUrlPolicy,
     allow_trusted_theme_markup: bool,
+    allow_search_form: bool,
     usage: &mut ThemeTemplateUsageFlags,
 ) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
     match stmt {
@@ -19,6 +21,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
             is_full_doctype_doc,
             policy,
             allow_trusted_theme_markup,
+            allow_search_form,
             usage,
         ),
         Stmt::EmitRaw(raw) => {
@@ -26,7 +29,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
             for initial in states {
                 let mut cur = initial;
                 for ch in raw.raw.chars() {
-                    let depth = cur.trusted_depth();
+                    let depths = cur.depths();
                     cur = step_theme_raw_char(
                         cur,
                         ch,
@@ -34,9 +37,10 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                             is_part,
                             is_full_doctype_doc,
                             allow_trusted_theme_markup,
+                            allow_search_form,
                             forbid_style_tag: false,
                         },
-                        depth,
+                        depths,
                     )?;
                 }
                 next_states.insert(cur);
@@ -77,6 +81,9 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
             if parse_composition_call(&expr.expr)?.is_some() {
                 if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_part/od_content chỉ được xuất hiện trong thân HTML.");
+                }
+                if states.iter().any(|s| s.form_depth() > 0) {
+                    return Err("C-SEC cấm gọi od_part/od_content bên trong <form>.");
                 }
                 return Ok((states, scopes));
             }
@@ -121,8 +128,8 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
             let mut expected_url_slot: Option<Option<UrlAttrSlot>> = None;
             let mut updated_states = BTreeSet::new();
             for state in states {
-                let trusted = allow_trusted_theme_markup;
-                let svg_depth = state.trusted_depth();
+                let track_depths = allow_trusted_theme_markup || allow_search_form;
+                let depths = state.depths();
                 let ThemeHtmlState::Tag {
                     tag_name,
                     is_close,
@@ -135,6 +142,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                     link_rel_stylesheet,
                     mut link_has_valid_href,
                     meta_ok,
+                    mut form_has_action,
                     attr_static_buf,
                 } = state.into_inner()
                 else {
@@ -145,7 +153,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                         "C-SEC chỉ cho phép nội suy bên trong giá trị thuộc tính có dấu ngoặc kép.",
                     );
                 }
-                if forbids_dynamic_interpolation(&attr_name)
+                if forbids_dynamic_interpolation(&tag_name, &attr_name)
                     || matches!(attr_name.as_str(), "style" | "srcset" | "ping")
                     || (tag_name == "link" && attr_name == "rel")
                     || tag_name == "meta"
@@ -166,7 +174,9 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                             "URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.",
                         );
                     }
-                    let Some(slot) = classify_theme_url_slot(&tag_name, &attr_name) else {
+                    let Some(slot) =
+                        classify_theme_url_slot(&tag_name, &attr_name, allow_search_form)
+                    else {
                         return Err("C-SEC cấm nội suy URL động trên thuộc tính hoặc thẻ này.");
                     };
                     if let Some(prev_slot) = expected_url_slot {
@@ -184,6 +194,8 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                     attr_expr_count = 1;
                     if slot == UrlAttrSlot::LinkCss {
                         link_has_valid_href = true;
+                    } else if slot == UrlAttrSlot::FormAction {
+                        form_has_action = true;
                     }
                 } else {
                     if let Some(prev_slot) = expected_url_slot {
@@ -197,7 +209,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                     }
                     attr_expr_count = attr_expr_count.saturating_add(1);
                 }
-                updated_states.insert(ThemeHtmlState::with_trust(
+                updated_states.insert(ThemeHtmlState::with_depths(
                     ThemeHtmlState::Tag {
                         tag_name,
                         is_close,
@@ -210,10 +222,11 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                         link_rel_stylesheet,
                         link_has_valid_href,
                         meta_ok,
+                        form_has_action,
                         attr_static_buf,
                     },
-                    trusted,
-                    svg_depth,
+                    track_depths,
+                    depths,
                 ));
             }
             Ok((updated_states, scopes))
@@ -230,6 +243,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 is_full_doctype_doc,
                 policy,
                 allow_trusted_theme_markup,
+                allow_search_form,
                 usage,
             )?;
             let (false_states, false_scopes) = walk_theme_stmts_with_url_scopes(
@@ -240,6 +254,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 is_full_doctype_doc,
                 policy,
                 allow_trusted_theme_markup,
+                allow_search_form,
                 usage,
             )?;
             true_states.extend(false_states);
@@ -274,6 +289,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 is_full_doctype_doc,
                 policy,
                 allow_trusted_theme_markup,
+                allow_search_form,
                 usage,
             )?;
             out_scopes.pop_frame();
@@ -308,21 +324,22 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
             }
             let (sb_states, sb_scopes) = walk_theme_stmts_with_url_scopes(
                 &sb.body,
-                BTreeSet::from([ThemeHtmlState::with_trust(
+                BTreeSet::from([ThemeHtmlState::with_depths(
                     ThemeHtmlState::Body,
-                    allow_trusted_theme_markup,
-                    0,
+                    allow_trusted_theme_markup || allow_search_form,
+                    HtmlDepths::default(),
                 )]),
                 scopes.clone(),
                 is_part,
                 is_full_doctype_doc,
                 policy,
                 allow_trusted_theme_markup,
+                allow_search_form,
                 usage,
             )?;
             if sb_states
                 .iter()
-                .any(|s| s.inner() != &ThemeHtmlState::Body || s.trusted_depth() != 0)
+                .any(|s| s.inner() != &ThemeHtmlState::Body || s.has_open_depths())
             {
                 return Err("Khối set block phải đóng đủ thẻ/comment HTML bên trong.");
             }
@@ -350,6 +367,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 is_full_doctype_doc,
                 policy,
                 allow_trusted_theme_markup,
+                allow_search_form,
                 usage,
             )?;
 
@@ -413,6 +431,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                     is_full_doctype_doc,
                     policy,
                     allow_trusted_theme_markup,
+                    allow_search_form,
                     usage,
                 )?;
                 let mut next_states = loop_states.clone();

@@ -159,14 +159,27 @@ pub(super) enum ThemeHtmlState {
         link_rel_stylesheet: bool,
         link_has_valid_href: bool,
         meta_ok: bool,
+        form_has_action: bool,
         attr_static_buf: String,
     },
-    // Only trusted Theme/Block templates track foreign-content nesting. The
-    // wrapper preserves SVG depth across tags, comments, and Jinja branches.
+    // Only trusted Theme/Block templates track foreign-content & form nesting.
     Trusted {
         inner: Box<ThemeHtmlState>,
-        svg_depth: usize,
+        depths: HtmlDepths,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct HtmlDepths {
+    pub(super) svg: usize,
+    pub(super) math: usize,
+    pub(super) form: usize,
+}
+
+impl HtmlDepths {
+    pub(super) fn is_empty(self) -> bool {
+        self.svg == 0 && self.math == 0 && self.form == 0
+    }
 }
 
 impl ThemeHtmlState {
@@ -177,11 +190,19 @@ impl ThemeHtmlState {
         }
     }
 
-    pub(super) fn trusted_depth(&self) -> usize {
+    pub(super) fn depths(&self) -> HtmlDepths {
         match self {
-            Self::Trusted { svg_depth, .. } => *svg_depth,
-            _ => 0,
+            Self::Trusted { depths, .. } => *depths,
+            _ => HtmlDepths::default(),
         }
+    }
+
+    pub(super) fn form_depth(&self) -> usize {
+        self.depths().form
+    }
+
+    pub(super) fn has_open_depths(&self) -> bool {
+        !self.depths().is_empty()
     }
 
     pub(super) fn into_inner(self) -> Self {
@@ -191,11 +212,11 @@ impl ThemeHtmlState {
         }
     }
 
-    pub(super) fn with_trust(inner: Self, trusted: bool, svg_depth: usize) -> Self {
-        if trusted {
+    pub(super) fn with_depths(inner: Self, track_depths: bool, depths: HtmlDepths) -> Self {
+        if track_depths || !depths.is_empty() {
             Self::Trusted {
                 inner: Box::new(inner),
-                svg_depth,
+                depths,
             }
         } else {
             inner
@@ -216,6 +237,7 @@ pub(super) fn new_theme_tag_state(first_char: char, is_close: bool) -> ThemeHtml
         link_rel_stylesheet: false,
         link_has_valid_href: false,
         meta_ok: false,
+        form_has_action: false,
         attr_static_buf: String::new(),
     }
 }
@@ -224,7 +246,7 @@ pub(super) fn check_theme_tag_name(
     tag_name: &str,
     is_close: bool,
     opts: HtmlStepOptions,
-    svg_depth: usize,
+    depths: HtmlDepths,
 ) -> Result<(), &'static str> {
     if tag_name.is_empty() {
         return Err("Thẻ HTML không có tên hợp lệ.");
@@ -232,34 +254,52 @@ pub(super) fn check_theme_tag_name(
     if opts.forbid_style_tag && tag_name == "style" {
         return Err("Template block không được chứa thẻ <style> trực tiếp (dùng css_var).");
     }
-    if is_close && matches!(tag_name, "link" | "meta" | "title" | "style" | "script") {
+    if is_close && matches!(tag_name, "link" | "meta" | "title" | "style" | "script" | "input") {
         return Err("Thẻ đóng HTML không hợp lệ ở vị trí này.");
     }
+    if tag_name == "form" {
+        if !is_close && depths.form > 0 {
+            return Err("C-SEC cấm lồng thẻ <form> bên trong <form>.");
+        }
+        if is_close && depths.form == 0 {
+            return Err("Thẻ </form> không có thẻ mở.");
+        }
+    }
+    let allowed_search_form = opts.allow_search_form
+        && depths.svg == 0
+        && depths.math == 0
+        && is_search_form_tag(tag_name);
     if FORBIDDEN_TAGS.contains(&tag_name)
         && !(opts.allow_trusted_theme_markup
             && matches!(tag_name, "script" | "svg" | "foreignobject" | "math"))
+        && !allowed_search_form
         && !(tag_name == "title"
             && !is_close
             && ((!opts.is_part && opts.is_full_doctype_doc)
-                || (opts.allow_trusted_theme_markup && svg_depth > 0)))
+                || (opts.allow_trusted_theme_markup && depths.svg > 0)))
     {
         return Err("Template chứa thẻ HTML bị C-SEC cấm.");
     }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn finalize_theme_tag(
     tag_name: &str,
     is_close: bool,
     link_rel_stylesheet: bool,
     link_has_valid_href: bool,
     meta_ok: bool,
+    form_has_action: bool,
     opts: HtmlStepOptions,
-    svg_depth: usize,
+    depths: HtmlDepths,
 ) -> Result<ThemeHtmlState, &'static str> {
-    check_theme_tag_name(tag_name, is_close, opts, svg_depth)?;
+    check_theme_tag_name(tag_name, is_close, opts, depths)?;
     if is_close {
         return Ok(ThemeHtmlState::Body);
+    }
+    if tag_name == "form" && !form_has_action {
+        return Err("C-SEC yêu cầu <form> có thuộc tính action hợp lệ.");
     }
     if tag_name == "link" && !(link_rel_stylesheet && link_has_valid_href) {
         return Err("C-SEC chỉ cho phép <link rel=\"stylesheet\" href=\"/theme/...\">.");
@@ -326,8 +366,8 @@ pub(super) fn reject_style_control_flow(
             ThemeHtmlState::Style { .. } | ThemeHtmlState::Script { .. }
         ) || matches!(
             s.inner(),
-            ThemeHtmlState::Tag { attr_name, .. }
-                if forbids_dynamic_interpolation(attr_name)
+            ThemeHtmlState::Tag { tag_name, attr_name, .. }
+                if forbids_dynamic_interpolation(tag_name, attr_name)
         )
     }) {
         return Err("C-SEC cấm Jinja trong <style>/<script> và thuộc tính sự kiện/namespace HTML.");

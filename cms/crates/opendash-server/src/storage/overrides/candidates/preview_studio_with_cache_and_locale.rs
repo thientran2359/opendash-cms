@@ -174,6 +174,7 @@ pub async fn preview_studio_with_cache_and_locale(
             &site_options,
             &options,
             &menus,
+            &effective_locale,
         )?;
         (
             theme_context,
@@ -207,6 +208,19 @@ pub async fn preview_studio_with_cache_and_locale(
     .await?;
     content_render::sync_preview_locale_and_search(&mut theme_context, &preview_locale_ctx);
     public_budget.set_locale_context(active.as_ref(), &effective_locale, preview_locale_ctx);
+    let preview_search_view = (target.kind == K::Search)
+        .then(|| content_render::SearchView::preview_sample(&state.locale_search_url, &effective_locale));
+    let preview_search_entries = if target.kind == K::Search {
+        content_render::SearchView::preview_sample_entries(&effective_locale)
+    } else {
+        Vec::new()
+    };
+    let preview_search_pagination = PaginationView::empty();
+    let preview_search = preview_search_view.as_ref().map(|view| page::BuilderSearchData {
+        view,
+        entries: &preview_search_entries,
+        pagination: &preview_search_pagination,
+    });
     let mut canvas_layout = is_canvas_target(active.as_ref(), target);
     let main_scope = if target.kind == K::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
@@ -294,6 +308,7 @@ pub async fn preview_studio_with_cache_and_locale(
                 cache,
                 url_policy: &url_policy,
                 fmt_cfg: &fmt_cfg,
+                search: preview_search,
             };
             let mut rendered = render_preview_builder(
                 &mut tx,
@@ -328,6 +343,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     cache,
                     url_policy: &url_policy,
                     fmt_cfg: &fmt_cfg,
+                    search: preview_search,
                 };
                 let slot = if target.kind == K::Part {
                     None

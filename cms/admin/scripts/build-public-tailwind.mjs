@@ -21,14 +21,16 @@ const scanRoots = [
   'cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.1.1',
   'cms/fixtures/demo-website',
 ];
-const rustSources = [
-  'cms/crates/opendash-server/src/content_render.rs',
-  'cms/crates/opendash-server/src/page.rs',
+const rustDirs = [
+  'cms/crates/opendash-server/src/content_render',
+  'cms/crates/opendash-server/src/page',
+  'cms/crates/opendash-server/src/routes/public_content',
+];
+const rustFiles = [
   'cms/crates/opendash-server/src/routes/public.rs',
-  'cms/crates/opendash-server/src/routes/public_content.rs',
 ];
 
-async function scanDir(relative, files) {
+async function scanDir(relative, files, extPattern = /\.(html|json)$/) {
   const location = join(repoRoot, relative);
   let entries;
   try {
@@ -39,8 +41,8 @@ async function scanDir(relative, files) {
   }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
     const path = join(relative, entry.name);
-    if (entry.isDirectory()) await scanDir(path, files);
-    else if (entry.isFile() && /\.(html|json)$/.test(entry.name)) files.push(join(repoRoot, path));
+    if (entry.isDirectory()) await scanDir(path, files, extPattern);
+    else if (entry.isFile() && extPattern.test(entry.name)) files.push(join(repoRoot, path));
   }
 }
 
@@ -57,7 +59,8 @@ async function loadStylesheet(id, base) {
 async function main() {
   const files = [];
   for (const root of scanRoots) await scanDir(root, files);
-  files.push(...rustSources.map(path => join(repoRoot, path)));
+  for (const dir of rustDirs) await scanDir(dir, files, /\.rs$/);
+  files.push(...rustFiles.map(path => join(repoRoot, path)));
   files.push(join(adminDir, 'src/tailwind-public-safelist.txt'));
   const scanner = new Scanner({ sources: [] });
   const scanned = await Promise.all(files.map(async file => ({

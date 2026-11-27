@@ -8,6 +8,8 @@ mod pattern_library;
 mod pattern_private_crud;
 #[path = "builder/pattern_references.rs"]
 mod pattern_references;
+#[path = "builder/public_site_search_studio.rs"]
+mod public_site_search_studio;
 #[path = "builder/studio_builder.rs"]
 mod studio_builder;
 #[path = "builder/studio_preview_api.rs"]

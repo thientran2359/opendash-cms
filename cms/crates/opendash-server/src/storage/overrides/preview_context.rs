@@ -15,6 +15,7 @@ pub(in crate::storage) struct PreviewRenderContext<'a> {
     pub(in crate::storage) cache: &'a page::BlockTemplateCache,
     pub(in crate::storage) url_policy: &'a template_sec::ThemeUrlPolicy,
     pub(in crate::storage) fmt_cfg: &'a template_sec::RenderFormattingConfig,
+    pub(in crate::storage) search: Option<page::BuilderSearchData<'a>>,
 }
 
 pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> EntryView {
@@ -306,6 +307,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
             &site_options,
             &options,
             &menus,
+            &effective_locale,
         )?;
         (
             theme_context,
@@ -322,6 +324,19 @@ pub async fn preview_typed_override_with_cache_and_locale(
     )
     .await?;
     content_render::sync_preview_locale_and_search(&mut theme_context, &preview_locale_ctx);
+    let preview_search_view = (target.kind == TemplateCandidateKind::Search)
+        .then(|| content_render::SearchView::preview_sample(&state.locale_search_url, &effective_locale));
+    let preview_search_entries = if target.kind == TemplateCandidateKind::Search {
+        content_render::SearchView::preview_sample_entries(&effective_locale)
+    } else {
+        Vec::new()
+    };
+    let preview_search_pagination = PaginationView::empty();
+    let preview_search = preview_search_view.as_ref().map(|view| page::BuilderSearchData {
+        view,
+        entries: &preview_search_entries,
+        pagination: &preview_search_pagination,
+    });
     collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[document], true).await?;
     let ctx = PreviewRenderContext {
         state: &state,
@@ -332,6 +347,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
         cache,
         url_policy: &url_policy,
         fmt_cfg: &fmt_cfg,
+        search: preview_search,
     };
     let root_scope = if target.kind == TemplateCandidateKind::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
@@ -504,6 +520,7 @@ pub(in crate::storage) async fn render_preview_named_part_in_tx(
             cache,
             url_policy: &url_policy,
             fmt_cfg: &fmt_cfg,
+            search: None,
         };
         let scope = part_scope_prefix(key, budget.expansions);
         let rendered = render_preview_builder(
@@ -533,6 +550,7 @@ pub(in crate::storage) async fn render_preview_named_part_in_tx(
             cache,
             url_policy: &url_policy,
             fmt_cfg: &fmt_cfg,
+            search: None,
         };
         return render_preview_part(tx, key, &ctx, budget).await;
     }

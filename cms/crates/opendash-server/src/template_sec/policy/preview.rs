@@ -79,7 +79,7 @@ pub(crate) fn preview_composition_sites(
     {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
-    composition_sites(name, source, true, policy)
+    composition_sites(name, source, true, policy, true)
 }
 
 /// Private preview bridge. Theme descendants share their parent's lexical
@@ -152,7 +152,7 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
     compiler.flatten(name, source, 0, &mut program)?;
     // Revalidate across source boundaries; the original source checks alone
     // cannot detect markup or syntax introduced by concatenation.
-    validate_template_csec_with_usage_flags(name, &program, policy, true, true)?;
+    validate_template_csec_with_usage_flags(name, &program, policy, true, true, true)?;
     let mut env = restricted_environment_with_config(fmt_cfg);
     let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -194,7 +194,7 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
     if shell.len() > MAX_RENDERED_HTML_BYTES {
         return Err("HTML render vượt quá giới hạn 512 KiB.");
     }
-    validate_html_and_css_context(shell, true, true)?;
+    validate_html_and_css_context(shell, true, true, true)?;
     let out = insert_preview_fragments(shell, &compiler.nonces)?;
     let additions = local_icons
         .lock()

@@ -94,11 +94,16 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
     site_options: &BTreeMap<String, serde_json::Value>,
     options: &BTreeMap<String, serde_json::Value>,
     menus: &BTreeMap<String, menu::MenuViewModel>,
+    preview_locale: &str,
 ) -> ApiResult<serde_json::Value> {
     use TemplateCandidateKind as K;
     let route_kind = route_kind_for_candidate(target.kind);
     let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
-    let empty_entries = Vec::new();
+    let sample_entries = if target.kind == K::Search {
+        content_render::SearchView::preview_sample_entries(preview_locale)
+    } else {
+        Vec::new()
+    };
     let pagination = PaginationView::empty();
 
     let archive_url: Option<&str> = match target.kind {
@@ -186,7 +191,7 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         K::Search => content_render::search_breadcrumbs(
             content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
             Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
-            content_render::core_l10n("vi").search_title.as_ref(),
+            content_render::core_l10n(preview_locale).search_title.as_ref(),
         ),
         K::Part => Vec::new(),
         _ => {
@@ -213,7 +218,7 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
     };
 
     let search = if target.kind == K::Search {
-        content_render::SearchView::preview_sample("/", "vi")
+        content_render::SearchView::preview_sample("/", preview_locale)
     } else {
         content_render::SearchView::inactive("/")
     };
@@ -231,9 +236,9 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         archive_url,
         previous_url: None,
         next_url: None,
-        entries: &empty_entries,
-        related_entries: &empty_entries,
-        recent_posts: &empty_entries,
+        entries: &sample_entries,
+        related_entries: &sample_entries[..0],
+        recent_posts: &sample_entries[..0],
         taxonomy: taxonomy_value.as_ref(),
         content_type: ct_value.as_ref(),
         entry: placeholder_entry.as_ref(),
