@@ -291,6 +291,14 @@ pub async fn dev_sync(
         crate::storage::content::load_content_type_catalog(&db).await?;
     plugins.invalidate_active_theme_cache().await;
     plugins.invalidate_cache().await;
+    let _ = crate::l10n::CatalogRegistry::global()
+        .reload_site_with_active_packages(
+            &db,
+            &crate::paths::SitePaths::from_env().unwrap_or_else(|_| {
+                crate::paths::SitePaths::resolve_from(None, None, std::path::Path::new("."))
+            }),
+        )
+        .await;
     crate::cache::SiteCacheEpoch::global().bump();
 
     Ok((

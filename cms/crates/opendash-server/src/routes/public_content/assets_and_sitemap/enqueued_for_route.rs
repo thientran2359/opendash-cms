@@ -59,7 +59,7 @@ pub(crate) async fn render_not_found_response_for_locale(
     budget.set_locale_context(active.as_ref(), &resolved_locale, locale_ctx);
     let l10n = content_render::core_l10n(&resolved_locale);
     let breadcrumbs = content_render::not_found_breadcrumbs(
-        content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+        &l10n.home_label,
         Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
         content_render::DEFAULT_BREADCRUMB_NOT_FOUND_LABEL,
     );
