@@ -121,15 +121,24 @@ async fn check_binding_access(
                 "title" | "slug" | "url" => false,
                 "cover_url" => live
                     .effective
-                    .base
-                    .descriptor
-                    .fields
-                    .iter()
-                    .find(|f| {
-                        f.field_type == FieldType::Media
-                            && f.effective_acl().2 == PublicExposure::Public
+                    .effective_fields
+                    .values()
+                    .find(|entry| {
+                        entry.effective_status
+                            == opendash_core::content::EffectiveFieldStatus::Active
+                            && entry.definition.field_type == FieldType::Media
+                            && entry.definition.effective_acl().2 == PublicExposure::Public
+                            && (entry.owner == opendash_core::registry::ResourceOwner::Core
+                                || live
+                                    .effective
+                                    .attached_groups
+                                    .iter()
+                                    .find(|g| g.group_id == entry.source_id)
+                                    .is_some_and(|g| g.is_runtime_active()))
                     })
-                    .is_some_and(|f| !visible_builder_field(&live.effective, &f.key, caller_role)),
+                    .is_some_and(|entry| {
+                        !visible_builder_field(&live.effective, &entry.definition.key, caller_role)
+                    }),
                 other => !visible_builder_field(&live.effective, other, caller_role),
             };
             if clear {

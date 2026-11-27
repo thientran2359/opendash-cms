@@ -60,6 +60,40 @@ pub async fn set_publication_status(
     }
     if status == "draft" {
         crate::storage::plugin_projections::delete_entry_projections_in_tx(&mut tx, id).await?;
+    } else if status == "published" {
+        let effective = crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
+            .await?;
+        if let Some(ref eff) = effective {
+            let term_ids = read_term_ids(&mut tx, id).await?;
+            let (layout, custom): (Option<String>, Option<String>) = sqlx::query_as(
+                "SELECT page_layout_key, custom_template_key FROM content_entries WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let loc_ctx = build_entry_location_ctx_in_conn(
+                &mut *tx,
+                type_key,
+                Some(id),
+                &locale,
+                FieldRole::Admin,
+                layout,
+                custom,
+                &term_ids,
+            )
+            .await?;
+            enforce_taxonomy_publish_rules_in_tx(
+                &mut tx,
+                type_key,
+                id,
+                &locale,
+                Some(eff),
+                Some(&loc_ctx),
+            )
+            .await?;
+        } else {
+            enforce_taxonomy_publish_rules_in_tx(&mut tx, type_key, id, &locale, None, None).await?;
+        }
     }
     crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
     let needs_claim_sync = if type_key == "page" {

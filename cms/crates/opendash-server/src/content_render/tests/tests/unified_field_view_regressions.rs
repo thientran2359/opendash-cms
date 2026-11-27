@@ -32,9 +32,27 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
     let schema_def = ContentTypeDefinition {
         key: "product".into(),
         label: "Sản phẩm".into(),
-        fields: vec![doc_file, extra_img, featured, gallery, link, body],
+        singular_label: None,
+        description: None,
         settings: ContentTypeSettings::default(),
     };
+    let group = opendash_core::content::AttachedFieldGroupSnapshot {
+        group_id: "user:prod_fields".into(),
+        owner: ResourceOwner::User,
+        local_key: "prod_fields".into(),
+        title: "Product Fields".into(),
+        description: String::new(),
+        domain: opendash_core::content::FieldGroupDomain::Content,
+        location: vec![vec![opendash_core::content::LocationRule::content_type_eq("product")]],
+        presentation: opendash_core::content::FieldGroupPresentation::default(),
+        active: true,
+        fields: vec![doc_file, extra_img, gallery, link],
+        status: opendash_core::content::FieldGroupStatus::Active,
+        association_state: DeclarationState::Declared,
+        version: 1,
+    };
+    let _ = featured;
+    let _ = body;
     let effective = EffectiveContentSchema::assemble(
         OwnedDescriptor {
             owner: ResourceOwner::User,
@@ -43,7 +61,7 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
             descriptor: schema_def.clone(),
         },
         1,
-        vec![],
+        vec![group],
     )
     .unwrap();
 
@@ -120,6 +138,8 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
         term_ids: vec![],
         primary_category_term_id: None,
         publication_status: "published".into(),
+        parent_id: None,
+        menu_order: 0,
         page_layout_key: None,
         custom_template_key: None,
         content_mode: ContentMode::Editor,
@@ -217,9 +237,12 @@ fn b02_entry_view_with_url_pure_media_fallback_renders_default_single_and_archiv
     let schema_def = ContentTypeDefinition {
         key: "article".into(),
         label: "Article".into(),
-        fields: vec![featured, gallery],
+        singular_label: None,
+        description: None,
         settings: ContentTypeSettings::default(),
     };
+    let _ = featured;
+    let _ = gallery;
     let mut values = BTreeMap::new();
     values.insert("featured_image".into(), json!(media_hex));
     values.insert("photos".into(), json!([gallery_hex]));
@@ -236,6 +259,8 @@ fn b02_entry_view_with_url_pure_media_fallback_renders_default_single_and_archiv
         term_ids: vec![],
         primary_category_term_id: None,
         publication_status: "published".into(),
+        parent_id: None,
+        menu_order: 0,
         page_layout_key: None,
         custom_template_key: None,
         content_mode: ContentMode::Editor,
@@ -333,19 +358,36 @@ fn r2_01_entry_view_strips_private_children_inside_public_group_and_repeater() {
     let mut pub_rep = FieldSpec::new(FieldType::Repeater, "pub_rep", "Public Rep");
     pub_rep.fields = vec![pub_text, priv_rep_rt];
 
-    let mut schema_def = ContentTypeDefinition {
-        key: "case_r2".into(),
-        label: "Case R2".into(),
-        fields: vec![pub_group, pub_rep],
-        settings: ContentTypeSettings::default(),
-    };
-    for f in &mut schema_def.fields {
+    let mut group_fields = vec![pub_group, pub_rep];
+    for f in &mut group_fields {
         f.acl = Some(FieldAcl {
             min_view_role: Some(FieldRole::Editor),
             min_edit_role: Some(FieldRole::Editor),
             public_exposure: Some(PublicExposure::Public),
         });
     }
+    let schema_def = ContentTypeDefinition {
+        key: "case_r2".into(),
+        label: "Case R2".into(),
+        singular_label: None,
+        description: None,
+        settings: ContentTypeSettings::default(),
+    };
+    let group = opendash_core::content::AttachedFieldGroupSnapshot {
+        group_id: "user:case_r2_fg".into(),
+        owner: ResourceOwner::User,
+        local_key: "case_r2_fg".into(),
+        title: "Case R2 FG".into(),
+        description: String::new(),
+        domain: opendash_core::content::FieldGroupDomain::Content,
+        location: vec![vec![opendash_core::content::LocationRule::content_type_eq("case_r2")]],
+        presentation: opendash_core::content::FieldGroupPresentation::default(),
+        active: true,
+        fields: group_fields,
+        status: opendash_core::content::FieldGroupStatus::Active,
+        association_state: DeclarationState::Declared,
+        version: 1,
+    };
     let effective = EffectiveContentSchema::assemble(
         OwnedDescriptor {
             owner: ResourceOwner::User,
@@ -354,7 +396,7 @@ fn r2_01_entry_view_strips_private_children_inside_public_group_and_repeater() {
             descriptor: schema_def,
         },
         1,
-        vec![],
+        vec![group],
     )
     .unwrap();
 
@@ -412,6 +454,8 @@ fn r2_01_entry_view_strips_private_children_inside_public_group_and_repeater() {
         term_ids: vec![],
         primary_category_term_id: None,
         publication_status: "published".into(),
+        parent_id: None,
+        menu_order: 0,
         page_layout_key: None,
         custom_template_key: None,
         content_mode: ContentMode::Editor,

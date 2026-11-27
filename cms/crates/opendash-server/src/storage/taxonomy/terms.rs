@@ -5,6 +5,8 @@ pub(in crate::storage) type DefinitionRow = (
     String,
     i64,
     i64,
+    String,
+    Option<String>,
     i64,
     String,
     Option<String>,

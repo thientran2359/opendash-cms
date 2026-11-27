@@ -23,7 +23,9 @@ pub struct TaxonomyTerm {
     pub featured_image_media_id: Option<String>,
     pub translations: Vec<TermTranslationSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extensions: Option<BTreeMap<String, BTreeMap<String, Value>>>,
+    pub values: Option<BTreeMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seo: Option<TermSeoInput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_token: Option<String>,
 }
@@ -68,7 +70,8 @@ pub(in crate::storage) fn term(row: TermRow) -> TaxonomyTerm {
         version: row.5,
         featured_image_media_id: row.8,
         translations: Vec::new(),
-        extensions: None,
+        values: None,
+        seo: None,
         schema_token: None,
     }
 }
@@ -378,9 +381,20 @@ pub async fn term_with_effective_extensions(
     mut record: TaxonomyTerm,
     role: &str,
 ) -> ApiResult<TaxonomyTerm> {
-    let config =
-        crate::storage::admin_extensions::effective_term(db, record.id, &record.kind, role).await?;
-    record.extensions = Some(config.extensions);
+    let field_role = if role == "admin" {
+        FieldRole::Admin
+    } else {
+        FieldRole::Editor
+    };
+    let config = super::super::meta::effective_term_editor_config(
+        db,
+        record.id,
+        &record.kind,
+        field_role,
+    )
+    .await?;
+    record.values = Some(config.values);
+    record.seo = Some(config.seo);
     record.schema_token = Some(config.schema_token);
     Ok(record)
 }
@@ -393,5 +407,8 @@ pub async fn create_term(
     slug: &str,
     parent_id: Option<i64>,
 ) -> ApiResult<TaxonomyTerm> {
-    create_term_with_locale(db, actor, kind, name, slug, parent_id, None, None, None).await
+    create_term_with_locale(
+        db, actor, kind, name, slug, parent_id, None, None, None, None, None, None,
+    )
+    .await
 }

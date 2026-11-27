@@ -44,6 +44,16 @@ pub struct PermalinkSettings {
     pub taxonomy_bases: BTreeMap<String, Option<String>>,
 }
 
+impl PermalinkSettings {
+    pub fn input(&self) -> PermalinkSettingsInput {
+        PermalinkSettingsInput {
+            post_structure: self.post_structure.clone(),
+            content_type_bases: self.content_type_bases.clone(),
+            taxonomy_bases: self.taxonomy_bases.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PublicRouteTarget {

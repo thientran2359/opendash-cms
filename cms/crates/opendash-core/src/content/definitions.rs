@@ -169,6 +169,14 @@ pub struct AttachedFieldGroupSnapshot {
     pub version: i64,
 }
 
+impl AttachedFieldGroupSnapshot {
+    pub fn is_runtime_active(&self) -> bool {
+        self.active
+            && self.status == FieldGroupStatus::Active
+            && self.association_state == DeclarationState::Declared
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectiveContentSchema {
     pub base: OwnedDescriptor<ContentTypeDefinition>,

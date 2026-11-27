@@ -8,7 +8,8 @@ use axum::{
 };
 
 use opendash_core::content::{
-    TaxonomyDefinition, TaxonomyDefinitionInput, TaxonomyDefinitionPatch, valid_content_type_key,
+    TaxonomyDefinition, TaxonomyDefinitionInput, TaxonomyDefinitionPatch, TermSeoInput,
+    valid_content_type_key,
 };
 
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
@@ -84,6 +85,12 @@ pub struct NewTaxonomyTerm {
     source_term_id: Option<i64>,
     #[serde(default)]
     featured_image_media_id: Option<String>,
+    #[serde(default)]
+    values: Option<BTreeMap<String, Value>>,
+    #[serde(default)]
+    schema_token: Option<String>,
+    #[serde(default)]
+    seo: Option<TermSeoInput>,
 }
 
 // Missing parent_id means "keep current parent"; explicit null means root.
@@ -115,9 +122,13 @@ pub struct PatchTaxonomyTerm {
     #[serde(default, deserialize_with = "present_optional_media_id")]
     featured_image_media_id: Option<Option<String>>,
     #[serde(default)]
+    values: Option<BTreeMap<String, Value>>,
+    #[serde(default)]
     extensions: Option<BTreeMap<String, Value>>,
     #[serde(default)]
     schema_token: Option<String>,
+    #[serde(default)]
+    seo: Option<TermSeoInput>,
 }
 
 fn parse_body<T: DeserializeOwned>(payload: Result<Json<T>, JsonRejection>) -> ApiResult<T> {
@@ -338,7 +349,7 @@ pub async fn taxonomy_create(
     headers: HeaderMap,
     payload: Result<Json<NewTaxonomyTerm>, JsonRejection>,
 ) -> ApiResult<Response> {
-    let actor = require_admin_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     let input = parse_body(payload)?;
     let featured_image_media_id = input
         .featured_image_media_id
@@ -355,9 +366,17 @@ pub async fn taxonomy_create(
         input.locale.as_deref(),
         input.source_term_id,
         featured_image_media_id,
+        input.values.as_ref(),
+        input.schema_token.as_deref(),
+        input.seo.as_ref(),
     )
     .await?;
-    let created = taxonomy::term_with_effective_extensions(&db, created, "admin").await?;
+    let role = if actor.user.role == crate::auth::Role::Admin {
+        "admin"
+    } else {
+        "editor"
+    };
+    let created = taxonomy::term_with_effective_extensions(&db, created, role).await?;
     Ok(term_response(StatusCode::CREATED, created))
 }
 
@@ -372,14 +391,16 @@ pub async fn taxonomy_patch(
     valid_id(id)?;
     let version = expected_version(&headers)?;
     let input = parse_body(payload)?;
+    let merged_values = input.values.as_ref().or(input.extensions.as_ref());
     if input.name.is_none()
         && input.slug.is_none()
         && input.parent_id.is_none()
         && input.featured_image_media_id.is_none()
-        && input.extensions.is_none()
+        && merged_values.is_none()
+        && input.seo.is_none()
     {
         return Err(ApiError::bad_request(
-            "Cần name, slug, parent_id, featured_image_media_id hoặc extensions để cập nhật.",
+            "Cần name, slug, parent_id, featured_image_media_id, values hoặc seo để cập nhật.",
         ));
     }
     let updated = taxonomy::patch_term(
@@ -394,8 +415,9 @@ pub async fn taxonomy_patch(
             .featured_image_media_id
             .as_ref()
             .map(|opt| opt.as_deref()),
-        input.extensions.as_ref(),
+        merged_values,
         input.schema_token.as_deref(),
+        input.seo.as_ref(),
     )
     .await?;
     let role = if actor.user.role == crate::auth::Role::Admin {
@@ -407,8 +429,7 @@ pub async fn taxonomy_patch(
     Ok(term_response(StatusCode::OK, updated))
 }
 
-/// Separate authenticated projection of readable panel definitions. This is
-/// never a write grant: the PATCH transaction recomputes role+schema token.
+/// Separate authenticated projection of readable field definitions & values for term Edit.
 pub async fn taxonomy_effective_editor_config(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
@@ -420,12 +441,11 @@ pub async fn taxonomy_effective_editor_config(
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy term."))?;
     let role = if actor.user.role == crate::auth::Role::Admin {
-        "admin"
+        opendash_core::content::FieldRole::Admin
     } else {
-        "editor"
+        opendash_core::content::FieldRole::Editor
     };
-    let config =
-        crate::storage::admin_extensions::effective_term(&db, id, &term.kind, role).await?;
+    let config = taxonomy::effective_term_editor_config(&db, id, &term.kind, role).await?;
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(config)).into_response())
 }
 

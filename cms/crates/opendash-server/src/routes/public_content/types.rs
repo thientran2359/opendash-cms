@@ -415,7 +415,8 @@ pub(crate) async fn render_canonical_taxonomy(
     let schema = ContentTypeDefinition {
         key: kind_key,
         label: term.name,
-        fields: Vec::new(),
+        singular_label: None,
+        description: None,
         settings: Default::default(),
     };
     let active_v3 = match themes_root {

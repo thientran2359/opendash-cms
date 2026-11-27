@@ -96,8 +96,10 @@ pub(in crate::storage::settings) async fn count_locale_data_in_conn(
               + (SELECT COUNT(*) FROM entry_redirects WHERE locale = ?1)
               + (SELECT COUNT(*) FROM permalink_route_redirects WHERE locale = ?1),
             (SELECT COUNT(*) FROM plugin_entry_projections WHERE locale = ?1),
-            (SELECT COUNT(*) FROM seo_public_media_refs WHERE source_kind = 'entry_seo'
-                AND source_id IN (SELECT id FROM content_entries WHERE locale = ?1 AND content_type_key != 'pattern'))",
+            (SELECT COUNT(*) FROM seo_public_media_refs WHERE (source_kind = 'entry_seo'
+                AND source_id IN (SELECT id FROM content_entries WHERE locale = ?1 AND content_type_key != 'pattern'))
+                OR (source_kind = 'term_seo' AND source_id IN (SELECT id FROM taxonomy_terms WHERE locale = ?1)))
+              + (SELECT COUNT(*) FROM term_field_media_refs WHERE term_id IN (SELECT id FROM taxonomy_terms WHERE locale = ?1))",
     )
     .bind(code)
     .fetch_one(conn)
@@ -205,6 +207,8 @@ pub async fn purge_orphan_locale(
     ).bind(&code).execute(&mut *tx).await?;
     let media_seo_refs = delete_locale_rows(&mut tx, &code, &[
         "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id IN (SELECT id FROM content_entries WHERE locale = ?)",
+        "DELETE FROM seo_public_media_refs WHERE source_kind = 'term_seo' AND source_id IN (SELECT id FROM taxonomy_terms WHERE locale = ?)",
+        "DELETE FROM term_field_media_refs WHERE term_id IN (SELECT id FROM taxonomy_terms WHERE locale = ?)",
     ]).await?;
     delete_locale_rows(&mut tx, &code, &[
         "DELETE FROM entry_terms WHERE entry_id IN (SELECT id FROM content_entries WHERE locale = ?1) OR term_id IN (SELECT id FROM taxonomy_terms WHERE locale = ?1)",
@@ -247,6 +251,12 @@ pub async fn purge_orphan_locale(
         &code,
         &["DELETE FROM plugin_entry_projections WHERE locale = ?"],
     )
+    .await?;
+    sqlx::query(
+        "UPDATE content_entries SET parent_id = NULL WHERE locale = ? AND parent_id IS NOT NULL",
+    )
+    .bind(&code)
+    .execute(&mut *tx)
     .await?;
     let entries = delete_locale_rows(
         &mut tx,

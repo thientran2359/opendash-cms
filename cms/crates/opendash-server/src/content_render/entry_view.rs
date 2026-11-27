@@ -370,11 +370,6 @@ pub fn ordered_public_field_defs<'a>(
 ) -> Vec<&'a opendash_core::field_schema::FieldSpec> {
     let mut seen = BTreeSet::new();
     let mut ordered_keys: Vec<&str> = Vec::with_capacity(effective_schema.effective_fields.len());
-    for field in &effective_schema.base.descriptor.fields {
-        if seen.insert(field.key.as_str()) {
-            ordered_keys.push(field.key.as_str());
-        }
-    }
     for group in &effective_schema.attached_groups {
         for field in &group.fields {
             if seen.insert(field.key.as_str()) {
@@ -406,11 +401,8 @@ pub fn entry_view_with_url(
     schema: &ContentTypeDefinition,
     url: Option<String>,
 ) -> EntryView {
-    let vis = opendash_core::field_schema::HydrationVisibility::ContentPublic {
-        max_view_role: FieldRole::Editor,
-    };
-    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> =
-        schema.fields.iter().filter(|d| vis.allows(d)).collect();
+    let core_specs = core_specs_for_settings(&schema.key, &schema.settings);
+    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = core_specs.iter().collect();
     build_entry_view_with_defs(
         &record,
         &schema.key,
@@ -422,6 +414,30 @@ pub fn entry_view_with_url(
         None,
         None,
     )
+}
+
+fn core_specs_for_settings(
+    type_key: &str,
+    settings: &opendash_core::content::ContentTypeSettings,
+) -> Vec<opendash_core::field_schema::FieldSpec> {
+    use opendash_core::content::ContentSupport;
+    use opendash_core::field_schema::{FieldSpec, FieldType, MediaFieldKind};
+    if matches!(type_key, "pattern" | "section") {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if settings.supports(ContentSupport::Editor) || settings.supports(ContentSupport::Builder) {
+        out.push(FieldSpec::new(FieldType::Richtext, "body", "Nội dung"));
+    }
+    if settings.supports(ContentSupport::FeaturedImage) {
+        let mut fi = FieldSpec::new(FieldType::Media, "featured_image", "Ảnh đại diện");
+        fi.media_kind = Some(MediaFieldKind::Image);
+        out.push(fi);
+    }
+    if settings.supports(ContentSupport::Excerpt) {
+        out.push(FieldSpec::new(FieldType::Textarea, "excerpt", "Tóm tắt"));
+    }
+    out
 }
 
 #[allow(clippy::too_many_arguments)]

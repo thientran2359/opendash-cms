@@ -23,6 +23,8 @@ pub(super) use crate::{
 
 mod forbid_generic_pattern_write;
 pub use forbid_generic_pattern_write::*;
+mod schema_fenced;
+pub use schema_fenced::*;
 mod field_media_refs;
 pub use field_media_refs::*;
 mod prepare_composite_entry_save;

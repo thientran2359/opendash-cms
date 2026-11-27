@@ -11,6 +11,9 @@ pub async fn create_term_with_locale(
     locale: Option<&str>,
     source_term_id: Option<i64>,
     featured_image_media_id: Option<&str>,
+    values: Option<&BTreeMap<String, Value>>,
+    schema_token: Option<&str>,
+    seo: Option<&TermSeoInput>,
 ) -> ApiResult<TaxonomyTerm> {
     if !opendash_core::content::valid_content_type_key(kind) {
         return Err(ApiError::bad_request("Khóa taxonomy không hợp lệ."));
@@ -24,7 +27,8 @@ pub async fn create_term_with_locale(
     if source_term_id.is_some_and(|sid| sid <= 0) {
         return Err(ApiError::bad_request("source_term_id không hợp lệ."));
     }
-    let mut tx = begin_admin_write(db, actor, false).await?;
+    // TaxonomyController C4-R1: both Admin and Editor may create terms.
+    let mut tx = begin_admin_write(db, actor, true).await?;
     let taxonomy = definition_in_write(&mut tx, kind)
         .await?
         .ok_or_else(|| ApiError::bad_request("Taxonomy không tồn tại."))?;
@@ -131,6 +135,24 @@ pub async fn create_term_with_locale(
     .await
     .map_err(mutation_error)?
     .last_insert_rowid();
+    if values.is_some() || seo.is_some() {
+        let actor_role = if actor.user.role == crate::auth::Role::Admin {
+            FieldRole::Admin
+        } else {
+            FieldRole::Editor
+        };
+        super::super::meta::write_term_meta_and_seo_in_tx(
+            &mut tx,
+            id,
+            kind,
+            &target_locale,
+            actor_role,
+            schema_token,
+            values,
+            seo,
+        )
+        .await?;
+    }
     let created = term_in_write(&mut tx, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải term vừa tạo."))?;
@@ -150,8 +172,9 @@ pub async fn patch_term(
     slug: Option<&str>,
     parent_id: Option<Option<i64>>,
     featured_image_media_id: Option<Option<&str>>,
-    extensions: Option<&BTreeMap<String, Value>>,
+    values: Option<&BTreeMap<String, Value>>,
     schema_token: Option<&str>,
+    seo: Option<&TermSeoInput>,
 ) -> ApiResult<TaxonomyTerm> {
     let name = name.map(normalized_name).transpose()?;
     if slug.is_some_and(|s| !opendash_core::id::valid_kebab_segment_with_limit(s, 64)) {
@@ -164,7 +187,8 @@ pub async fn patch_term(
         && slug.is_none()
         && parent_id.is_none()
         && featured_image_media_id.is_none()
-        && extensions.is_some();
+        && seo.is_none()
+        && values.is_some();
     let mut tx = begin_admin_write(db, actor, editor_extension_only).await?;
     if actor.user.role != crate::auth::Role::Admin && !editor_extension_only {
         return Err(ApiError::forbidden(
@@ -198,22 +222,21 @@ pub async fn patch_term(
         )
         .await?;
     }
-    if let Some(patch) = extensions {
-        let token = schema_token
-            .ok_or_else(|| ApiError::bad_request("Thiếu schema_token để ghi extension field."))?;
-        // All validation and writes happen inside the same writer reservation
-        // as the core version CAS, so any failed field rolls everything back.
-        crate::storage::admin_extensions::update_term_values_in_conn(
+    if values.is_some() || seo.is_some() {
+        let actor_role = if actor.user.role == crate::auth::Role::Admin {
+            FieldRole::Admin
+        } else {
+            FieldRole::Editor
+        };
+        super::super::meta::write_term_meta_and_seo_in_tx(
             &mut tx,
             id,
             &existing.kind,
-            if actor.user.role == crate::auth::Role::Admin {
-                "admin"
-            } else {
-                "editor"
-            },
-            token,
-            patch,
+            &existing.locale,
+            actor_role,
+            schema_token,
+            values,
+            seo,
         )
         .await?;
     }

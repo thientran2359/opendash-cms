@@ -240,7 +240,7 @@ impl TaxonomyDefinitionPatch {
     }
 }
 
-pub(crate) fn validate_taxonomy_target_cpts(keys: &[String]) -> Result<(), &'static str> {
+pub fn validate_taxonomy_target_cpts(keys: &[String]) -> Result<(), &'static str> {
     if keys.len() > 64 {
         return Err("Mỗi taxonomy hỗ trợ tối đa 64 loại nội dung.");
     }

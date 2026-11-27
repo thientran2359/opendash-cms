@@ -1,4 +1,70 @@
 use super::*;
+use crate::storage::content::builtins::sync_field_groups::{
+    TargetDomainSnapshots, collect_target_snapshots_in_tx, upsert_group_targets_in_tx,
+    verify_snapshots_after_write_in_tx,
+};
+
+pub async fn create_user_field_group(
+    db: &SqlitePool,
+    input: &UserFieldGroupInput,
+) -> ApiResult<FieldGroupRecord> {
+    let (scoped_id, norm) = input
+        .validate_and_normalize(None)
+        .map_err(map_input_validation_error)?;
+    let group_id = scoped_id.to_canonical();
+    let targets = extract_materialized_targets(&norm.location)
+        .map_err(|e| map_transition_error(e, true))?;
+    let fields_json = serde_json::to_string(&norm.fields)?;
+    let location_json = serde_json::to_string(&norm.location)?;
+    let presentation_json = serde_json::to_string(&norm.presentation)?;
+    let domain_str = domain_to_db(norm.domain);
+
+    let mut tx = begin_content_write_tx(db).await?;
+    let existing: Option<String> =
+        sqlx::query_scalar("SELECT group_id FROM content_field_groups WHERE group_id = ?")
+            .bind(&group_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if existing.is_some() {
+        return Err(ApiError::conflict(
+            "group_id hoặc local_key của nhóm trường đã tồn tại.",
+        ));
+    }
+
+    let snapshots = collect_target_snapshots_in_tx(&mut tx, norm.domain, &targets, false).await?;
+
+    sqlx::query(
+        "INSERT INTO content_field_groups
+         (group_id, owner_kind, owner_id, local_key, title, description, fields_json,
+          domain, location_rules_json, presentation_json, active,
+          default_region, default_order, collapsible, status, version)
+         VALUES (?, 'user', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1)",
+    )
+    .bind(&group_id)
+    .bind(&scoped_id.local_key)
+    .bind(&input.title)
+    .bind(&input.description)
+    .bind(&fields_json)
+    .bind(domain_str)
+    .bind(&location_json)
+    .bind(&presentation_json)
+    .bind(i64::from(norm.active))
+    .bind(norm.presentation.region.as_str())
+    .bind(norm.presentation.order)
+    .bind(i64::from(norm.presentation.collapsible))
+    .execute(&mut *tx)
+    .await?;
+
+    upsert_group_targets_in_tx(&mut tx, &group_id, &[], &targets, &[], false).await?;
+    verify_snapshots_after_write_in_tx(&mut tx, &snapshots, true).await?;
+
+    let created = load_field_group_in_tx(&mut tx, &group_id)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không thể tải field group vừa tạo."))?;
+    tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
+    Ok(created)
+}
 
 pub async fn update_user_field_group(
     db: &SqlitePool,
@@ -6,11 +72,16 @@ pub async fn update_user_field_group(
     expected_version: i64,
     input: &UserFieldGroupInput,
 ) -> ApiResult<FieldGroupRecord> {
-    let (scoped_id, incoming_fields) = input
+    let (scoped_id, norm) = input
         .validate_and_normalize(Some(group_id_param))
         .map_err(map_input_validation_error)?;
     let group_id = scoped_id.to_canonical();
-    let fields_json = serde_json::to_string(&incoming_fields)?;
+    let incoming_targets = extract_materialized_targets(&norm.location)
+        .map_err(|e| map_transition_error(e, true))?;
+    let fields_json = serde_json::to_string(&norm.fields)?;
+    let location_json = serde_json::to_string(&norm.location)?;
+    let presentation_json = serde_json::to_string(&norm.presentation)?;
+    let domain_str = domain_to_db(norm.domain);
 
     let mut tx = begin_content_write_tx(db).await?;
     let existing = load_field_group_in_tx(&mut tx, &group_id)
@@ -32,43 +103,53 @@ pub async fn update_user_field_group(
         ));
     }
 
-    let old_targets: Vec<String> = existing
-        .targets
-        .iter()
-        .map(|t| t.type_key.clone())
-        .collect();
-    let mut all_affected_types = BTreeSet::new();
-    for t in &old_targets {
-        all_affected_types.insert(t.clone());
-    }
-    for t in &input.target_types {
-        all_affected_types.insert(t.clone());
-    }
-
-    let mut old_snapshots = HashMap::new();
-    let mut any_target_has_entries = false;
-    for t in &all_affected_types {
-        let Some(old_eff) = load_effective_content_schema_in_tx(&mut tx, t).await? else {
-            return Err(ApiError::not_found("Loại nội dung mục tiêu không tồn tại."));
-        };
-        let has_entries: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ?)",
+    let mut old_has_persisted_data = false;
+    for old_t in &existing.targets {
+        if has_persisted_group_values_for_target_in_tx(
+            &mut tx,
+            &old_t.target_kind,
+            &old_t.target_key,
+            &existing.fields,
         )
-        .bind(t)
-        .fetch_one(&mut *tx)
-        .await?;
-        if has_entries {
-            any_target_has_entries = true;
+        .await?
+        {
+            old_has_persisted_data = true;
+            break;
         }
-        old_snapshots.insert(t.clone(), (old_eff, has_entries));
+    }
+    if existing.domain != norm.domain && old_has_persisted_data {
+        return Err(ApiError::conflict(
+            "incompatible_schema_change: Không thể chuyển phạm vi domain của nhóm trường khi đã có dữ liệu.",
+        ));
     }
 
-    // Check if any field key was removed completely when any linked type has entries
-    let incoming_keys: HashSet<&str> = incoming_fields.iter().map(|f| f.key.as_str()).collect();
+    let mut old_snapshots = TargetDomainSnapshots::default();
+    if existing.domain == norm.domain {
+        let mut combined: Vec<(String, String)> = existing
+            .targets
+            .iter()
+            .map(|t| (t.target_kind.clone(), t.target_key.clone()))
+            .collect();
+        combined.extend(incoming_targets.iter().cloned());
+        old_snapshots = collect_target_snapshots_in_tx(&mut tx, norm.domain, &combined, false).await?;
+    } else {
+        old_snapshots =
+            collect_target_snapshots_in_tx(&mut tx, norm.domain, &incoming_targets, false).await?;
+    }
+
+    let any_target_has_data = old_has_persisted_data
+        || old_snapshots.content.values().any(|(_, h)| *h)
+        || old_snapshots.term.values().any(|(_, h)| *h);
+    let incoming_keys: HashSet<&str> = norm
+        .fields
+        .iter()
+        .filter(|f| !f.is_ui_only())
+        .map(|f| f.key.as_str())
+        .collect();
     for old_f in &existing.fields {
-        if !incoming_keys.contains(old_f.key.as_str()) && any_target_has_entries {
+        if !old_f.is_ui_only() && !incoming_keys.contains(old_f.key.as_str()) && any_target_has_data {
             return Err(ApiError::conflict(format!(
-                "cannot_remove_field_with_data: Không thể xóa hẳn trường '{}' khi đã có dữ liệu; hãy đặt declaration_state = withdrawn.",
+                "cannot_remove_field_with_data: Không thể xóa hẳn trường '{}' khi đã có dữ liệu; hãy tắt nhóm trường hoặc thu hồi.",
                 old_f.key
             )));
         }
@@ -76,80 +157,107 @@ pub async fn update_user_field_group(
 
     sqlx::query(
         "UPDATE content_field_groups
-         SET title = ?, description = ?, fields_json = ?, default_region = ?,
-             default_order = ?, collapsible = ?, version = version + 1,
+         SET title = ?, description = ?, fields_json = ?,
+             domain = ?, location_rules_json = ?, presentation_json = ?, active = ?,
+             default_region = ?, default_order = ?, collapsible = ?, version = version + 1,
              updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          WHERE group_id = ? AND version = ?",
     )
     .bind(&input.title)
     .bind(&input.description)
     .bind(&fields_json)
-    .bind(input.default_region.as_str())
-    .bind(input.default_order)
-    .bind(if input.collapsible { 1_i64 } else { 0_i64 })
+    .bind(domain_str)
+    .bind(&location_json)
+    .bind(&presentation_json)
+    .bind(i64::from(norm.active))
+    .bind(norm.presentation.region.as_str())
+    .bind(norm.presentation.order)
+    .bind(i64::from(norm.presentation.collapsible))
     .bind(&group_id)
     .bind(expected_version)
     .execute(&mut *tx)
     .await?;
 
-    let new_target_set: HashSet<&str> = input.target_types.iter().map(|s| s.as_str()).collect();
-    for t in &input.target_types {
-        sqlx::query(
-            "INSERT INTO content_field_group_targets (group_id, type_key, association_state)
-             VALUES (?, ?, 'declared')
-             ON CONFLICT(group_id, type_key) DO UPDATE SET
-                 association_state = 'declared',
-                 updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+    if existing.domain != norm.domain {
+        sqlx::query("DELETE FROM content_field_group_targets WHERE group_id = ?")
+            .bind(&group_id)
+            .execute(&mut *tx)
+            .await?;
+        upsert_group_targets_in_tx(&mut tx, &group_id, &[], &incoming_targets, &[], false).await?;
+    } else {
+        upsert_group_targets_in_tx(
+            &mut tx,
+            &group_id,
+            &existing.targets,
+            &incoming_targets,
+            &existing.fields,
+            true,
         )
-        .bind(&group_id)
-        .bind(t)
-        .execute(&mut *tx)
         .await?;
     }
 
-    for old_t in &old_targets {
-        if !new_target_set.contains(old_t.as_str()) {
-            let has_values =
-                has_persisted_group_values_for_type_in_tx(&mut tx, old_t, &existing.fields).await?;
-            let has_layout_ref: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM content_editor_layouts WHERE type_key = ? AND instr(layout_json, ?) > 0)",
-            )
-            .bind(old_t)
-            .bind(&group_id)
-            .fetch_one(&mut *tx)
-            .await?;
+    verify_snapshots_after_write_in_tx(&mut tx, &old_snapshots, true).await?;
 
-            if has_values || has_layout_ref {
-                sqlx::query(
-                    "UPDATE content_field_group_targets
-                     SET association_state = 'withdrawn',
-                         updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                     WHERE group_id = ? AND type_key = ?",
-                )
-                .bind(&group_id)
-                .bind(old_t)
-                .execute(&mut *tx)
-                .await?;
-            } else {
-                sqlx::query(
-                    "DELETE FROM content_field_group_targets WHERE group_id = ? AND type_key = ?",
-                )
-                .bind(&group_id)
-                .bind(old_t)
-                .execute(&mut *tx)
-                .await?;
-            }
-        }
-    }
+    let updated = load_field_group_in_tx(&mut tx, &group_id)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không thể tải field group sau cập nhật."))?;
+    tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
+    Ok(updated)
+}
 
-    for t in &all_affected_types {
-        let (old_eff, has_entries) = old_snapshots.get(t).expect("snapshot preloaded");
-        let new_eff = load_effective_content_schema_in_tx(&mut tx, t)
-            .await?
-            .ok_or_else(|| ApiError::internal("Không thể tải schema sau cập nhật."))?;
-        verify_effective_schema_transition(Some(old_eff), &new_eff, *has_entries)
-            .map_err(|e| map_transition_error(e, true))?;
+pub async fn set_user_field_group_active(
+    db: &SqlitePool,
+    group_id_param: &str,
+    expected_version: i64,
+    active: bool,
+) -> ApiResult<FieldGroupRecord> {
+    let parsed = if group_id_param.contains(':') {
+        ScopedResourceId::parse(group_id_param).map_err(map_input_validation_error)?
+    } else {
+        ScopedResourceId::new(ResourceOwner::User, group_id_param.to_owned())
+            .map_err(map_input_validation_error)?
+    };
+    if parsed.owner != ResourceOwner::User {
+        return Err(ApiError::forbidden(
+            "Chỉ có thể bật/tắt nhóm trường thuộc quyền sở hữu của User.",
+        ));
     }
+    let group_id = parsed.to_canonical();
+    let mut tx = begin_content_write_tx(db).await?;
+    let existing = load_field_group_in_tx(&mut tx, &group_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy nhóm trường."))?;
+    if existing.owner != ResourceOwner::User {
+        return Err(ApiError::forbidden(
+            "Chỉ có thể bật/tắt nhóm trường thuộc quyền sở hữu của User.",
+        ));
+    }
+    if existing.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nhóm trường đã thay đổi. Vui lòng tải lại.",
+        ));
+    }
+    let targets: Vec<(String, String)> = existing
+        .targets
+        .iter()
+        .map(|t| (t.target_kind.clone(), t.target_key.clone()))
+        .collect();
+    let snapshots = collect_target_snapshots_in_tx(&mut tx, existing.domain, &targets, false).await?;
+
+    sqlx::query(
+        "UPDATE content_field_groups
+         SET active = ?, version = version + 1,
+             updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         WHERE group_id = ? AND version = ?",
+    )
+    .bind(i64::from(active))
+    .bind(&group_id)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?;
+
+    verify_snapshots_after_write_in_tx(&mut tx, &snapshots, true).await?;
 
     let updated = load_field_group_in_tx(&mut tx, &group_id)
         .await?
@@ -219,4 +327,122 @@ pub async fn withdraw_user_field_group(
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(withdrawn)
+}
+
+pub async fn delete_user_field_group(
+    db: &SqlitePool,
+    group_id_param: &str,
+    expected_version: i64,
+    purge: bool,
+) -> ApiResult<()> {
+    let parsed = if group_id_param.contains(':') {
+        ScopedResourceId::parse(group_id_param).map_err(map_input_validation_error)?
+    } else {
+        ScopedResourceId::new(ResourceOwner::User, group_id_param.to_owned())
+            .map_err(map_input_validation_error)?
+    };
+    if parsed.owner != ResourceOwner::User {
+        return Err(ApiError::forbidden(
+            "Chỉ có thể xóa nhóm trường thuộc quyền sở hữu của User.",
+        ));
+    }
+    let group_id = parsed.to_canonical();
+    let mut tx = begin_content_write_tx(db).await?;
+    let existing = load_field_group_in_tx(&mut tx, &group_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy nhóm trường."))?;
+    if existing.owner != ResourceOwner::User {
+        return Err(ApiError::forbidden(
+            "Chỉ có thể xóa nhóm trường thuộc quyền sở hữu của User.",
+        ));
+    }
+    if existing.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nhóm trường đã thay đổi. Vui lòng tải lại.",
+        ));
+    }
+
+    let mut has_data = false;
+    for t in &existing.targets {
+        if has_persisted_group_values_for_target_in_tx(
+            &mut tx,
+            &t.target_kind,
+            &t.target_key,
+            &existing.fields,
+        )
+        .await?
+        {
+            has_data = true;
+            break;
+        }
+    }
+    if !purge && has_data {
+        return Err(ApiError::conflict(
+            "cannot_delete_field_group_with_data: Nhóm trường đã có dữ liệu; hãy thu hồi hoặc thêm ?purge=true.",
+        ));
+    }
+    if purge {
+        let data_keys: Vec<String> = existing
+            .fields
+            .iter()
+            .filter(|f| !f.is_ui_only())
+            .map(|f| f.key.clone())
+            .collect();
+        match existing.domain {
+            FieldGroupDomain::Content => {
+                for key in &data_keys {
+                    sqlx::query("UPDATE content_entries SET values_json = json_remove(values_json, ?) WHERE json_type(values_json, ?) IS NOT NULL")
+                        .bind(format!("$.{key}"))
+                        .bind(format!("$.{key}"))
+                        .execute(&mut *tx)
+                        .await?;
+                }
+            }
+            FieldGroupDomain::Term => {
+                for key in &data_keys {
+                    sqlx::query("UPDATE taxonomy_terms SET values_json = json_remove(values_json, ?) WHERE json_type(values_json, ?) IS NOT NULL")
+                        .bind(format!("$.{key}"))
+                        .bind(format!("$.{key}"))
+                        .execute(&mut *tx)
+                        .await?;
+                    sqlx::query("DELETE FROM term_field_media_refs WHERE field_key = ?")
+                        .bind(key)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+            }
+            FieldGroupDomain::OptionsPage => {
+                for t in &existing.targets {
+                    for key in &data_keys {
+                        for tbl in [
+                            "theme_option_values",
+                            "theme_option_locale_values",
+                            "theme_option_media_refs",
+                        ] {
+                            let sql = format!(
+                                "DELETE FROM {tbl} WHERE owner_kind = 'options_page' AND owner_id = ? AND option_key = ?"
+                            );
+                            sqlx::query(sqlx::AssertSqlSafe(sql))
+                                .bind(&t.target_key)
+                                .bind(key)
+                                .execute(&mut *tx)
+                                .await?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    sqlx::query("DELETE FROM content_field_group_targets WHERE group_id = ?")
+        .bind(&group_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM content_field_groups WHERE group_id = ? AND version = ?")
+        .bind(&group_id)
+        .bind(expected_version)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
+    Ok(())
 }

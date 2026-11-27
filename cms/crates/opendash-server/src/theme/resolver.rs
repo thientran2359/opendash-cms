@@ -78,7 +78,7 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
             obj.insert("field_groups".into(), top_fg);
         }
     }
-    let parsed: ThemeDeclarations = serde_json::from_value(raw_decl)
+    let mut parsed: ThemeDeclarations = serde_json::from_value(raw_decl)
         .map_err(|_| "Khai báo declarations trong theme.json không đúng định dạng.")?;
     let mut seen_keys = std::collections::HashSet::new();
     let declared_taxonomies: std::collections::HashSet<&str> = parsed
@@ -90,13 +90,7 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
         return Err("Theme khai báo taxonomy trùng key.");
     }
     for tax in &parsed.taxonomy_definitions {
-        opendash_core::content::TaxonomyDefinitionInput {
-            key: tax.key.clone(),
-            label: tax.label.clone(),
-            hierarchical: tax.hierarchical,
-            public: tax.public,
-        }
-        .validate()?;
+        tax.validate()?;
     }
     for ct in &parsed.content_types {
         if !seen_keys.insert(ct.key.as_str()) {
@@ -107,10 +101,12 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
         let def = opendash_core::content::ContentTypeDefinition {
             key: ct.key.clone(),
             label: ct.label.clone(),
-            fields: ct.fields.clone(),
+            singular_label: ct.singular_label.clone(),
+            description: ct.description.clone(),
             settings,
         };
         def.validate()?;
+        opendash_core::content::validate_provider_rewrite_base(ct.rewrite_base.as_deref())?;
         for tax in &ct.taxonomies {
             if !opendash_core::content::valid_content_type_key(tax) {
                 return Err("Theme taxonomy eligibility key không hợp lệ.");
@@ -137,7 +133,19 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
                 "duplicate_panel_id: Trùng local_key trong danh sách field_groups của theme.",
             );
         }
-        fg.validate_and_normalize()?;
+        fg.validate_and_normalize_full(
+            opendash_core::field_schema::FieldScopeKind::ExtensionGroupField,
+        )?;
+    }
+    if parsed.options_pages.len() > opendash_core::content::MAX_CUSTOM_OPTIONS_PAGES_PER_PACKAGE {
+        return Err("Theme vượt quá số lượng tối đa custom_options_pages cho phép.");
+    }
+    let mut seen_pages = std::collections::HashSet::new();
+    for page in &mut parsed.options_pages {
+        if !seen_pages.insert(page.page_key.clone()) {
+            return Err("Theme khai báo trùng page_key trong options_pages.");
+        }
+        page.validate_and_normalize()?;
     }
     Ok(parsed)
 }
@@ -170,12 +178,41 @@ pub fn declared_fields_for_cpt(
     let mut fields = Vec::new();
     for ct in &declarations.content_types {
         if ct.key == cpt_key {
-            fields.extend(ct.fields.iter().cloned());
+            let mut settings = ct.settings.clone().unwrap_or_default();
+            if settings.validate_and_normalize().is_ok()
+                && let Ok(eff) = opendash_core::content::EffectiveContentSchema::assemble(
+                    opendash_core::registry::OwnedDescriptor {
+                        owner: opendash_core::registry::ResourceOwner::User,
+                        status: opendash_core::registry::ProviderStatus::Active,
+                        declaration_state: opendash_core::registry::DeclarationState::Declared,
+                        descriptor: opendash_core::content::ContentTypeDefinition {
+                            key: ct.key.clone(),
+                            label: ct.label.clone(),
+                            singular_label: ct.singular_label.clone(),
+                            description: ct.description.clone(),
+                            settings,
+                        },
+                    },
+                    1,
+                    Vec::new(),
+                )
+            {
+                fields.extend(eff.effective_fields.into_values().map(|e| e.definition));
+            }
         }
     }
     for fg in &declarations.field_groups {
-        if fg.target_types.iter().any(|t| t == cpt_key) {
-            fields.extend(fg.fields.iter().cloned());
+        if let Ok(norm) = fg.validate_and_normalize_full(
+            opendash_core::field_schema::FieldScopeKind::ExtensionGroupField,
+        ) && norm.domain == opendash_core::content::FieldGroupDomain::Content
+            && opendash_core::content::group_allows_role_for_target(
+                &norm.location,
+                "content_type",
+                cpt_key,
+                opendash_core::content::FieldRole::Admin,
+            )
+        {
+            fields.extend(norm.fields);
         }
     }
     fields

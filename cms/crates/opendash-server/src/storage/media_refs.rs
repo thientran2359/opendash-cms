@@ -191,6 +191,7 @@ pub async fn collect_pins_in_tx(
         let pin_kind = match owner_kind.as_str() {
             "plugin" => "plugin_option",
             "theme_functions" => "theme_functions_option",
+            "options_page" => "options_page_option",
             _ => "theme_option",
         };
         if parse_json_and_check_pin(&value_json, media_id, "theme_option_values")? {
@@ -200,19 +201,25 @@ pub async fn collect_pins_in_tx(
         }
     }
     let opt_loc_rows = sqlx::query(
-        "SELECT theme_id, locale, option_key, value_json FROM theme_option_locale_values",
+        "SELECT owner_kind, owner_id, locale, option_key, value_json FROM theme_option_locale_values",
     )
     .fetch_all(&mut *conn)
     .await?;
     for row in opt_loc_rows {
-        let theme_id: String = row.try_get("theme_id")?;
+        let owner_kind: String = row.try_get("owner_kind")?;
+        let owner_id: String = row.try_get("owner_id")?;
         let locale: String = row.try_get("locale")?;
         let option_key: String = row.try_get("option_key")?;
         let value_json: String = row.try_get("value_json")?;
         if parse_json_and_check_pin(&value_json, media_id, "theme_option_locale_values")? {
-            let entity = format!("{theme_id}:{option_key}:{locale}");
-            seen_owner_opts.insert(("theme".to_owned(), format!("{theme_id}:{option_key}")));
-            push_pin(&mut summary, "theme_option", entity);
+            let pin_kind = if owner_kind == "options_page" {
+                "options_page_option"
+            } else {
+                "theme_option"
+            };
+            let entity = format!("{owner_id}:{option_key}:{locale}");
+            seen_owner_opts.insert((owner_kind, format!("{owner_id}:{option_key}")));
+            push_pin(&mut summary, pin_kind, entity);
         }
     }
     let opt_ref_rows = sqlx::query(
@@ -228,6 +235,7 @@ pub async fn collect_pins_in_tx(
         let pin_kind = match owner_kind.as_str() {
             "plugin" => "plugin_option",
             "theme_functions" => "theme_functions_option",
+            "options_page" => "options_page_option",
             _ => "theme_option",
         };
         let entity = format!("{owner_id}:{option_key}");
@@ -261,24 +269,28 @@ pub async fn collect_pins_in_tx(
         }
     }
 
-    // 6. Entry SEO + Home SEO
-    let term_ext_rows = sqlx::query(
-        "SELECT term_id, owner_kind, owner_id, local_key, values_json FROM term_extension_values",
-    )
-    .fetch_all(&mut *conn)
-    .await?;
-    for row in term_ext_rows {
-        let term_id: i64 = row.try_get("term_id")?;
-        let owner_kind: String = row.try_get("owner_kind")?;
-        let owner_id: String = row.try_get("owner_id")?;
-        let local_key: String = row.try_get("local_key")?;
+    // 6. Term meta values_json & term_field_media_refs
+    let mut seen_term_meta = std::collections::HashSet::new();
+    let term_meta_rows =
+        sqlx::query("SELECT id, values_json FROM taxonomy_terms WHERE values_json != '{}'")
+            .fetch_all(&mut *conn)
+            .await?;
+    for row in term_meta_rows {
+        let term_id: i64 = row.try_get("id")?;
         let raw_json: String = row.try_get("values_json")?;
-        if parse_json_and_check_pin(&raw_json, media_id, "term_extension_values")? {
-            push_pin(
-                &mut summary,
-                "term_extension",
-                format!("term:{term_id}:{owner_kind}:{owner_id}:{local_key}"),
-            );
+        if parse_json_and_check_pin(&raw_json, media_id, "taxonomy_terms.values_json")? {
+            seen_term_meta.insert(term_id);
+            push_pin(&mut summary, "term_meta", term_id.to_string());
+        }
+    }
+    let term_media_ref_rows: Vec<i64> =
+        sqlx::query_scalar("SELECT DISTINCT term_id FROM term_field_media_refs WHERE media_id = ?")
+            .bind(media_id)
+            .fetch_all(&mut *conn)
+            .await?;
+    for term_id in term_media_ref_rows {
+        if seen_term_meta.insert(term_id) {
+            push_pin(&mut summary, "term_meta", term_id.to_string());
         }
     }
 
@@ -353,7 +365,7 @@ pub async fn collect_pins_in_tx(
         }
     }
 
-    // 9. Taxonomy term featured images
+    // 9. Taxonomy term featured images & term SEO og_image
     let term_rows: Vec<i64> = sqlx::query_scalar(
         "SELECT id FROM taxonomy_terms WHERE featured_image_media_id = ? ORDER BY id",
     )
@@ -362,6 +374,14 @@ pub async fn collect_pins_in_tx(
     .await?;
     for term_id in term_rows {
         push_pin(&mut summary, "taxonomy_term", term_id.to_string());
+    }
+    let term_seo_rows: Vec<i64> =
+        sqlx::query_scalar("SELECT id FROM taxonomy_terms WHERE seo_og_image_id = ? ORDER BY id")
+            .bind(media_id)
+            .fetch_all(&mut *conn)
+            .await?;
+    for term_id in term_seo_rows {
+        push_pin(&mut summary, "term_seo", term_id.to_string());
     }
 
     Ok(summary)

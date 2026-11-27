@@ -35,3 +35,5 @@ mod preflight_plugin_lifecycle_confirmation;
 pub use preflight_plugin_lifecycle_confirmation::*;
 mod commit_metadata_patch;
 pub use commit_metadata_patch::*;
+mod restore_compatibility;
+pub use restore_compatibility::*;

@@ -12,6 +12,8 @@ pub async fn commit_composite_entry_save(
     let effective =
         verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
+    let caller_role = actor_field_role(actor.user.role);
+    check_entry_role_gate_before_lookup(&effective, type_key, caller_role, &input.values)?;
     let (existing_locale, previous_values): (Option<String>, Option<BTreeMap<String, Value>>) =
         if let Some(id) = entry_id {
             let expected_ver = input
@@ -64,10 +66,19 @@ pub async fn commit_composite_entry_save(
         ));
     }
 
-    crate::storage::media::require_existing_references_in_tx(
+    crate::storage::media::require_existing_effective_references_in_tx(
         &mut tx,
-        &plan.effective_ct_def,
-        &plan.merged_input,
+        &effective,
+        &plan.merged_input.values,
+    )
+    .await?;
+    validate_entry_parent_in_conn(
+        &mut tx,
+        type_key,
+        &effective.base.descriptor.settings,
+        &entry_locale,
+        entry_id,
+        plan.parent_id,
     )
     .await?;
     validate_effective_relational_refs_in_conn(
@@ -140,8 +151,8 @@ pub async fn commit_composite_entry_save(
                 "published"
             };
             let res = sqlx::query(
-                "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id, created_at, updated_at, published_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')), CASE WHEN ? = 'published' THEN datetime('now') ELSE NULL END)",
+                "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id, parent_id, menu_order, created_at, updated_at, published_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')), CASE WHEN ? = 'published' THEN datetime('now') ELSE NULL END)",
             )
             .bind(type_key)
             .bind(&entry_locale)
@@ -154,6 +165,8 @@ pub async fn commit_composite_entry_save(
             .bind(page_layout_key.as_deref())
             .bind(custom_template_key.as_deref())
             .bind(next_primary_category)
+            .bind(plan.parent_id)
+            .bind(plan.menu_order)
             .bind(custom_created_at.as_deref())
             .bind(custom_updated_at.as_deref())
             .bind(custom_created_at.as_deref())
@@ -205,6 +218,7 @@ pub async fn commit_composite_entry_save(
                      END,
                      page_layout_key = ?, custom_template_key = ?,
                      primary_category_term_id = ?,
+                     parent_id = ?, menu_order = ?,
                      content_mode = COALESCE(?, content_mode),
                      created_at = COALESCE(?, created_at),
                      version = version + 1,
@@ -219,6 +233,8 @@ pub async fn commit_composite_entry_save(
             .bind(page_layout_key.as_deref())
             .bind(custom_template_key.as_deref())
             .bind(next_primary_category)
+            .bind(plan.parent_id)
+            .bind(plan.menu_order)
             .bind(requested_mode)
             .bind(custom_created_at.as_deref())
             .bind(custom_updated_at.as_deref())
@@ -245,6 +261,28 @@ pub async fn commit_composite_entry_save(
 
     if let Some(ids) = &plan.merged_input.term_ids {
         replace_term_ids(&mut tx, saved_id, ids).await?;
+    }
+    let is_effectively_published = !is_draft_capable
+        || plan.publication_status.as_deref() == Some("published")
+        || (entry_id.is_some()
+            && plan.publication_status.is_none()
+            && sqlx::query_scalar::<_, String>(
+                "SELECT publication_status FROM content_entries WHERE id = ?",
+            )
+            .bind(saved_id)
+            .fetch_one(&mut *tx)
+            .await?
+                == "published");
+    if is_effectively_published {
+        enforce_taxonomy_publish_rules_in_tx(
+            &mut tx,
+            type_key,
+            saved_id,
+            &entry_locale,
+            Some(&effective),
+            Some(&plan.loc_ctx),
+        )
+        .await?;
     }
     sync_entry_body_refs_in_conn(
         &mut *tx,
@@ -399,10 +437,19 @@ pub async fn commit_entry_translation(
         } else {
             "published"
         };
+    validate_entry_parent_in_conn(
+        &mut tx,
+        type_key,
+        &effective.base.descriptor.settings,
+        &plan.target_locale,
+        None,
+        plan.parent_id,
+    )
+    .await?;
     let values_json = serde_json::to_string(&plan.values)?;
     let res = sqlx::query(
-        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, published_at, content_mode, page_layout_key, custom_template_key, primary_category_term_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'published' THEN datetime('now') ELSE NULL END, ?, ?, ?, ?)",
+        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, published_at, content_mode, page_layout_key, custom_template_key, primary_category_term_id, parent_id, menu_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'published' THEN datetime('now') ELSE NULL END, ?, ?, ?, ?, ?, ?)",
     )
     .bind(type_key)
     .bind(&plan.target_locale)
@@ -416,6 +463,8 @@ pub async fn commit_entry_translation(
     .bind(plan.page_layout_key.as_deref())
     .bind(plan.custom_template_key.as_deref())
     .bind(plan.primary_category_term_id)
+    .bind(plan.parent_id)
+    .bind(plan.menu_order)
     .execute(&mut *tx)
     .await;
     let new_id = match res {
@@ -429,6 +478,10 @@ pub async fn commit_entry_translation(
         validate_term_ids_for_locale(&mut tx, type_key, &plan.term_ids, &plan.target_locale)
             .await?;
         replace_term_ids(&mut tx, new_id, &plan.term_ids).await?;
+    }
+    if status == "published" {
+        enforce_taxonomy_publish_rules_in_tx(&mut tx, type_key, new_id, &plan.target_locale, None, None)
+            .await?;
     }
 
     let source_seo: Option<(String, String, Option<String>, i64)> = sqlx::query_as(

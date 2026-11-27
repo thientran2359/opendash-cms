@@ -61,20 +61,9 @@ pub async fn prepare_composite_entry_save(
     }
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
 
-    // Check Field ACL BEFORE reading existing entry / comparing values (no value-comparison oracle)
+    // Step B — Role Gate BEFORE reading existing entry / comparing values (no oracle leak)
     let caller_role = actor_field_role(actor.user.role);
-    for key in input.values.keys() {
-        let Some(fe) = effective.effective_fields.get(key) else {
-            return Err(ApiError::unprocessable(format!(
-                "unknown_field_key: Trường '{key}' không thuộc loại nội dung '{type_key}'."
-            )));
-        };
-        if caller_role < fe.definition.effective_acl().1 {
-            return Err(ApiError::forbidden(format!(
-                "field_edit_forbidden: Vai trò hiện tại không có quyền sửa trường '{key}'."
-            )));
-        }
-    }
+    check_entry_role_gate_before_lookup(&effective, type_key, caller_role, &input.values)?;
 
     // Validate patch syntax before DB merge/tx
     if let PatchField::Set(raw_path) = &input.custom_path {
@@ -138,91 +127,245 @@ pub async fn prepare_composite_entry_save(
         }
     }
 
-    let (plan_locale, plan_group_id, merged_values, preflight_prev_body, preflight_prev_values) =
-        match entry_id {
-            None => {
-                let mut conn = db.acquire().await?;
-                let loc =
-                    resolve_entry_write_locale_in_tx(&mut conn, input.locale.as_deref(), None)
-                        .await?;
-                let mut out = BTreeMap::new();
-                for (k, fe) in &effective.effective_fields {
-                    if !input.values.contains_key(k)
-                        && fe.effective_status != EffectiveFieldStatus::Withdrawn
-                        && let Some(def) = &fe.definition.default
-                    {
-                        out.insert(k.clone(), def.clone());
-                    }
-                }
-                for (k, v) in &input.values {
-                    if !v.is_null() {
-                        out.insert(k.clone(), v.clone());
-                    }
-                }
-                (loc, None, out, None, None)
-            }
-            Some(id) => {
-                let expected_ver = input.expected_version.unwrap();
-                crate::storage::entry_lifecycle::ensure_active_entry_version(
-                    db,
-                    type_key,
-                    id,
-                    expected_ver,
-                )
-                .await?;
-                let existing = get_entry(db, type_key, id)
-                    .await?
-                    .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
-                if existing.version != expected_ver {
-                    return Err(ApiError::precondition_failed(
-                        "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
-                    ));
-                }
-                let mut conn = db.acquire().await?;
-                let loc = resolve_entry_write_locale_in_tx(
+    let candidate_layout_override = match &input.page_layout_key {
+        PatchField::Set(k) => Some(Some(k.clone())),
+        PatchField::Clear => Some(None),
+        PatchField::Omitted => None,
+    };
+    let candidate_template_override = match &input.custom_template_key {
+        PatchField::Set(k) => Some(Some(k.clone())),
+        PatchField::Clear => Some(None),
+        PatchField::Omitted => None,
+    };
+
+    let (
+        plan_locale,
+        plan_group_id,
+        merged_values,
+        merged_term_ids,
+        preflight_prev_body,
+        preflight_prev_values,
+        next_parent_id,
+        next_menu_order,
+        loc_ctx,
+    ) = match entry_id {
+        None => {
+            let mut conn = db.acquire().await?;
+            let loc =
+                resolve_entry_write_locale_in_tx(&mut conn, input.locale.as_deref(), None).await?;
+            let (next_parent_id, next_menu_order) = resolve_entry_hierarchy_patch_in_conn(
+                &mut conn,
+                type_key,
+                None,
+                &input.parent_id,
+                input.menu_order,
+            )
+            .await?;
+            validate_entry_parent_in_conn(
+                &mut conn,
+                type_key,
+                &effective.base.descriptor.settings,
+                &loc,
+                None,
+                next_parent_id,
+            )
+            .await?;
+            let layout = candidate_layout_override.flatten();
+            let template = candidate_template_override.flatten();
+            let non_tax_ctx = build_entry_location_ctx_in_conn(
+                &mut conn,
+                type_key,
+                None,
+                &loc,
+                caller_role,
+                layout.clone(),
+                template.clone(),
+                &[],
+            )
+            .await?;
+            let synced_terms = compute_sync_entry_terms_step_a_in_conn(
+                &mut conn,
+                &effective,
+                &non_tax_ctx,
+                caller_role,
+                &input.values,
+                input.term_ids.as_deref(),
+                &[],
+            )
+            .await?;
+            let ctx_terms = synced_terms.as_deref().unwrap_or(&[]);
+            let loc_ctx = build_entry_location_ctx_in_conn(
+                &mut conn,
+                type_key,
+                None,
+                &loc,
+                caller_role,
+                layout,
+                template,
+                ctx_terms,
+            )
+            .await?;
+            let mut out = apply_location_aware_value_merge(
+                &effective,
+                &loc_ctx,
+                &input.values,
+                None,
+                true,
+            );
+            if let Some(ref tids) = synced_terms {
+                sync_term_ref_fields_from_entry_terms_in_conn(
                     &mut conn,
-                    input.locale.as_deref(),
-                    Some(&existing.locale),
+                    &effective,
+                    &loc_ctx,
+                    &mut out,
+                    tids,
+                    Some(&input.values),
                 )
                 .await?;
-                let prev_body = existing
-                    .values
-                    .get("body")
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned);
-                let prev_values = existing.values.clone();
-                let mut out = existing.values;
-                for (k, v) in &input.values {
-                    if v.is_null() {
-                        out.remove(k);
-                    } else {
-                        out.insert(k.clone(), v.clone());
-                    }
-                }
-                (
-                    loc,
-                    Some(existing.translation_group_id),
-                    out,
-                    prev_body,
-                    Some(prev_values),
-                )
             }
-        };
+            (
+                loc,
+                None,
+                out,
+                synced_terms,
+                None,
+                None,
+                next_parent_id,
+                next_menu_order,
+                loc_ctx,
+            )
+        }
+        Some(id) => {
+            let expected_ver = input.expected_version.unwrap();
+            crate::storage::entry_lifecycle::ensure_active_entry_version(
+                db,
+                type_key,
+                id,
+                expected_ver,
+            )
+            .await?;
+            let existing = get_entry(db, type_key, id)
+                .await?
+                .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+            if existing.version != expected_ver {
+                return Err(ApiError::precondition_failed(
+                    "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
+                ));
+            }
+            let mut conn = db.acquire().await?;
+            let loc = resolve_entry_write_locale_in_tx(
+                &mut conn,
+                input.locale.as_deref(),
+                Some(&existing.locale),
+            )
+            .await?;
+            let (next_parent_id, next_menu_order) = resolve_entry_hierarchy_patch_in_conn(
+                &mut conn,
+                type_key,
+                Some(id),
+                &input.parent_id,
+                input.menu_order,
+            )
+            .await?;
+            validate_entry_parent_in_conn(
+                &mut conn,
+                type_key,
+                &effective.base.descriptor.settings,
+                &loc,
+                Some(id),
+                next_parent_id,
+            )
+            .await?;
+            let layout = candidate_layout_override.unwrap_or(existing.page_layout_key);
+            let template = candidate_template_override.unwrap_or(existing.custom_template_key);
+            let non_tax_ctx = build_entry_location_ctx_in_conn(
+                &mut conn,
+                type_key,
+                Some(id),
+                &loc,
+                caller_role,
+                layout.clone(),
+                template.clone(),
+                &[],
+            )
+            .await?;
+            let synced_terms = compute_sync_entry_terms_step_a_in_conn(
+                &mut conn,
+                &effective,
+                &non_tax_ctx,
+                caller_role,
+                &input.values,
+                input.term_ids.as_deref(),
+                &existing.term_ids,
+            )
+            .await?;
+            let ctx_terms = synced_terms.as_deref().unwrap_or(&existing.term_ids);
+            let loc_ctx = build_entry_location_ctx_in_conn(
+                &mut conn,
+                type_key,
+                Some(id),
+                &loc,
+                caller_role,
+                layout,
+                template,
+                ctx_terms,
+            )
+            .await?;
+            let prev_body = existing
+                .values
+                .get("body")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            let prev_values = existing.values.clone();
+            let mut out = apply_location_aware_value_merge(
+                &effective,
+                &loc_ctx,
+                &input.values,
+                Some(&existing.values),
+                false,
+            );
+            if let Some(ref tids) = synced_terms {
+                sync_term_ref_fields_from_entry_terms_in_conn(
+                    &mut conn,
+                    &effective,
+                    &loc_ctx,
+                    &mut out,
+                    tids,
+                    Some(&input.values),
+                )
+                .await?;
+            }
+            (
+                loc,
+                Some(existing.translation_group_id),
+                out,
+                synced_terms,
+                prev_body,
+                Some(prev_values),
+                next_parent_id,
+                next_menu_order,
+                loc_ctx,
+            )
+        }
+    };
 
     let merged_input = ContentEntryInput {
         title: input.title.clone(),
         slug: input.slug.clone(),
         locale: Some(plan_locale.clone()),
         values: merged_values,
-        term_ids: input.term_ids.clone(),
+        term_ids: merged_term_ids,
     };
     merged_input
-        .validate_against_effective(&effective)
+        .validate_against_effective(&effective, &loc_ctx)
         .map_err(ApiError::unprocessable)?;
 
-    let effective_ct_def = effective_as_ct_def(&effective);
-    crate::storage::media::require_existing_references(db, &effective_ct_def, &merged_input)
-        .await?;
+    crate::storage::media::require_existing_effective_references(
+        db,
+        &effective,
+        &merged_input.values,
+    )
+    .await?;
     let mut conn = db.acquire().await?;
     validate_effective_relational_refs_in_conn(
         &mut conn,
@@ -267,8 +410,10 @@ pub async fn prepare_composite_entry_save(
         locale: plan_locale,
         translation_group_id: plan_group_id,
         effective,
-        effective_ct_def,
         merged_input,
         publication_status: input.publication_status.clone(),
+        parent_id: next_parent_id,
+        menu_order: next_menu_order,
+        loc_ctx,
     })
 }

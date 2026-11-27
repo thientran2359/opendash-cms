@@ -135,6 +135,7 @@ pub async fn content_entry_publication(
             publication_after: Some(entry.publication_status.clone()),
             trashed_at: None,
             published_at: entry.published_at.clone(),
+            detached_parent_id: None,
         };
         let hook_out = hooks.enqueue_entry_lifecycle_hooks(principal, &receipt, lease);
         (hook_out.enqueued, hook_out.dropped)

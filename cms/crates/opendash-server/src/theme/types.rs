@@ -350,6 +350,8 @@ pub struct ThemeDeclarations {
     pub taxonomy_definitions: Vec<opendash_core::content::TaxonomyDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub field_groups: Vec<opendash_core::content::ManifestFieldGroupInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options_pages: Vec<opendash_core::content::CustomOptionsPageDeclaration>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -357,8 +359,10 @@ pub struct ThemeDeclarations {
 pub struct ThemeContentTypeDeclaration {
     pub key: String,
     pub label: String,
-    #[serde(default)]
-    pub fields: Vec<opendash_core::field_schema::FieldSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singular_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

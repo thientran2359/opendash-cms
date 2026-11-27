@@ -7,7 +7,7 @@ use opendash_core::{
     builder::{
         BindingSource, BindingTarget, BuilderDocument, ElementBinding, ElementContent, KnownElement,
     },
-    content::{ContentTypeDefinition, PublicExposure},
+    content::{EffectiveContentSchema, EffectiveFieldStatus, PublicExposure},
 };
 use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -25,7 +25,7 @@ pub enum BindingResult {
 }
 
 pub type BindingResults = BTreeMap<String, BindingResult>;
-type SourceRow = (String, String, String, Option<String>);
+type SourceRow = (EffectiveContentSchema, String, String, Option<String>);
 
 pub async fn resolve(
     db: &SqlitePool,
@@ -108,8 +108,8 @@ pub async fn resolve_in_tx_with_route_and_locale(
                         }
                         // An entry's values NEVER leave storage on the public path until
                         // the published predicate and active provider check both hold.
-                        let source_row: Option<(i64, String, String, String)> = sqlx::query_as(
-                            "SELECT e.id, t.definition_json, e.title, e.values_json
+                        let source_row: Option<(i64, String, String)> = sqlx::query_as(
+                            "SELECT e.id, e.title, e.values_json
                                FROM content_entries e
                                JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
                                JOIN content_types t ON t.key = e.content_type_key
@@ -130,7 +130,12 @@ pub async fn resolve_in_tx_with_route_and_locale(
                         .bind(i64::from(authenticated_preview))
                         .fetch_optional(&mut **tx)
                         .await?;
-                        let source = if let Some((entry_id, definition, title, values)) = source_row
+                        let source = if let Some((entry_id, title, values)) = source_row
+                            && let Some(schema) =
+                                crate::storage::content::load_effective_content_schema_in_tx(
+                                    &mut **tx, &key.0,
+                                )
+                                .await?
                         {
                             // Preview may read draft fields, but an unpublished
                             // route must never become a public binding URL.
@@ -147,7 +152,7 @@ pub async fn resolve_in_tx_with_route_and_locale(
                             } else {
                                 None
                             };
-                            Some((definition, title, values, url))
+                            Some((schema, title, values, url))
                         } else {
                             None
                         };
@@ -182,13 +187,11 @@ pub async fn resolve_in_tx_with_route_and_locale(
 
 fn extract(
     binding: &ElementBinding,
-    (definition, title, values, _custom_path): &SourceRow,
+    (schema, title, values, _custom_path): &SourceRow,
     heading: bool,
 ) -> BindingResult {
-    let Ok(schema) = serde_json::from_str::<ContentTypeDefinition>(definition) else {
-        return BindingResult::Incompatible;
-    };
-    if schema.key != binding.type_key || schema.validate().is_err() {
+    if schema.base.descriptor.key != binding.type_key || schema.base.descriptor.validate().is_err()
+    {
         return BindingResult::Incompatible;
     }
     let Ok(values) = serde_json::from_str::<BTreeMap<String, Value>>(values) else {
@@ -202,7 +205,7 @@ fn extract(
             title.clone()
         }
         BindingSource::Field { key } => {
-            match extract_field_value(&schema, &values, key, binding.target) {
+            match extract_field_value(schema, &values, key, binding.target) {
                 Ok(v) => v,
                 Err(res) => return res,
             }
@@ -217,13 +220,10 @@ fn extract_route_context(
     field_key: &str,
     type_key: &str,
     slug: &str,
-    (definition, title, values, canonical_url): &SourceRow,
+    (schema, title, values, canonical_url): &SourceRow,
     heading: bool,
 ) -> BindingResult {
-    let Ok(schema) = serde_json::from_str::<ContentTypeDefinition>(definition) else {
-        return BindingResult::Incompatible;
-    };
-    if schema.key != type_key || schema.validate().is_err() {
+    if schema.base.descriptor.key != type_key || schema.base.descriptor.validate().is_err() {
         return BindingResult::Incompatible;
     }
     let Ok(values) = serde_json::from_str::<BTreeMap<String, Value>>(values) else {
@@ -249,12 +249,23 @@ fn extract_route_context(
             u
         }
         "cover_url" => {
-            let Some(img_field) = schema.fields.iter().find(|f| {
-                f.field_type == FieldType::Media && f.effective_acl().2 == PublicExposure::Public
+            let Some(img_entry) = schema.effective_fields.values().find(|entry| {
+                entry.effective_status == EffectiveFieldStatus::Active
+                    && entry.definition.field_type == FieldType::Media
+                    && entry.definition.effective_acl().2 == PublicExposure::Public
+                    && (entry.owner == opendash_core::registry::ResourceOwner::Core
+                        || schema
+                            .attached_groups
+                            .iter()
+                            .find(|g| g.group_id == entry.source_id)
+                            .is_some_and(|g| g.is_runtime_active()))
             }) else {
                 return BindingResult::Unavailable;
             };
-            let Some(media_id) = values.get(&img_field.key).and_then(Value::as_str) else {
+            let Some(media_id) = values
+                .get(&img_entry.definition.key)
+                .and_then(Value::as_str)
+            else {
                 return BindingResult::Unavailable;
             };
             if !valid_media_id(media_id) {
@@ -266,7 +277,7 @@ fn extract_route_context(
                 _ => return BindingResult::Incompatible,
             }
         }
-        other => match extract_field_value(&schema, &values, other, target) {
+        other => match extract_field_value(schema, &values, other, target) {
             Ok(v) => v,
             Err(res) => return res,
         },
@@ -275,18 +286,28 @@ fn extract_route_context(
 }
 
 fn extract_field_value(
-    schema: &ContentTypeDefinition,
+    schema: &EffectiveContentSchema,
     values: &BTreeMap<String, Value>,
     key: &str,
     target: BindingTarget,
 ) -> Result<String, BindingResult> {
-    let Some(field) = schema
-        .fields
-        .iter()
-        .find(|field| field.key == key && field.effective_acl().2 == PublicExposure::Public)
-    else {
+    let Some(entry) = schema.effective_fields.get(key) else {
         return Err(BindingResult::Unavailable);
     };
+    if entry.effective_status != EffectiveFieldStatus::Active
+        || (entry.owner != opendash_core::registry::ResourceOwner::Core
+            && !schema
+                .attached_groups
+                .iter()
+                .find(|g| g.group_id == entry.source_id)
+                .is_some_and(|g| g.is_runtime_active()))
+    {
+        return Err(BindingResult::Unavailable);
+    }
+    let field = &entry.definition;
+    if field.effective_acl().2 != PublicExposure::Public {
+        return Err(BindingResult::Unavailable);
+    }
     let compatible = match target {
         BindingTarget::Text => matches!(
             field.field_type,

@@ -1,26 +1,34 @@
 use super::*;
 
+#[derive(sqlx::FromRow)]
+struct FieldGroupRow {
+    group_id: String,
+    owner_kind: String,
+    owner_id: Option<String>,
+    local_key: String,
+    title: String,
+    description: String,
+    fields_json: String,
+    domain: String,
+    location_rules_json: String,
+    presentation_json: String,
+    active: i64,
+    default_region: String,
+    default_order: i32,
+    collapsible: i64,
+    status: String,
+    version: i64,
+    created_at: String,
+    updated_at: String,
+}
+
 pub(in crate::storage) async fn load_field_group_in_tx(
     conn: &mut SqliteConnection,
     group_id: &str,
 ) -> ApiResult<Option<FieldGroupRecord>> {
-    let row: Option<(
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        String,
-        String,
-        String,
-        i32,
-        i64,
-        String,
-        i64,
-        String,
-        String,
-    )> = sqlx::query_as(
+    let row: Option<FieldGroupRow> = sqlx::query_as(
         "SELECT group_id, owner_kind, owner_id, local_key, title, description, fields_json,
+                domain, location_rules_json, presentation_json, active,
                 default_region, default_order, collapsible, status, version, created_at, updated_at
          FROM content_field_groups WHERE group_id = ?",
     )
@@ -28,7 +36,7 @@ pub(in crate::storage) async fn load_field_group_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
 
-    let Some((
+    let Some(FieldGroupRow {
         group_id,
         owner_kind,
         owner_id,
@@ -36,40 +44,51 @@ pub(in crate::storage) async fn load_field_group_in_tx(
         title,
         description,
         fields_json,
-        default_region_str,
+        domain: domain_str,
+        location_rules_json: location_json,
+        presentation_json,
+        active: active_int,
+        default_region: default_region_str,
         default_order,
-        collapsible_int,
-        status_str,
+        collapsible: collapsible_int,
+        status: status_str,
         version,
         created_at,
         updated_at,
-    )) = row
+    }) = row
     else {
         return Ok(None);
     };
 
-    let target_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT type_key, association_state
+    let target_rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT target_kind, target_key, association_state
          FROM content_field_group_targets
          WHERE group_id = ?
-         ORDER BY type_key ASC",
+         ORDER BY target_kind ASC, target_key ASC",
     )
     .bind(&group_id)
     .fetch_all(&mut *conn)
     .await?;
 
     let mut targets = Vec::with_capacity(target_rows.len());
-    for (type_key, assoc_str) in target_rows {
+    for (target_kind, target_key, assoc_str) in target_rows {
         targets.push(FieldGroupTargetBinding {
-            type_key,
+            target_kind,
+            target_key,
             association_state: parse_declaration_state(&assoc_str)?,
         });
     }
 
     let fields: Vec<opendash_core::field_schema::FieldSpec> = serde_json::from_str(&fields_json)
         .map_err(|_| ApiError::internal("Dữ liệu fields_json của field group không hợp lệ."))?;
-    let default_region = EditorRegion::from_db(&default_region_str)
-        .ok_or_else(|| ApiError::internal("default_region của field group không hợp lệ."))?;
+    let domain = parse_domain(&domain_str)?;
+    let location = parse_location_rules(&location_json)?;
+    let presentation = parse_presentation(
+        &presentation_json,
+        &default_region_str,
+        default_order,
+        collapsible_int != 0,
+    )?;
     let status = FieldGroupStatus::from_db(&status_str)
         .ok_or_else(|| ApiError::internal("Trạng thái field group không hợp lệ."))?;
 
@@ -79,11 +98,12 @@ pub(in crate::storage) async fn load_field_group_in_tx(
         local_key,
         title,
         description,
+        domain,
+        location,
+        presentation,
+        active: active_int != 0,
         fields,
         targets,
-        default_region,
-        default_order,
-        collapsible: collapsible_int != 0,
         status,
         version,
         created_at,
@@ -92,10 +112,26 @@ pub(in crate::storage) async fn load_field_group_in_tx(
 }
 
 pub async fn list_field_groups(db: &SqlitePool) -> ApiResult<Vec<FieldGroupRecord>> {
-    let ids: Vec<String> =
-        sqlx::query_scalar("SELECT group_id FROM content_field_groups ORDER BY group_id ASC")
-            .fetch_all(db)
-            .await?;
+    list_field_groups_by_domain(db, None).await
+}
+
+pub async fn list_field_groups_by_domain(
+    db: &SqlitePool,
+    domain: Option<opendash_core::content::FieldGroupDomain>,
+) -> ApiResult<Vec<FieldGroupRecord>> {
+    let ids: Vec<String> = match domain {
+        Some(dom) => sqlx::query_scalar(
+            "SELECT group_id FROM content_field_groups WHERE domain = ? ORDER BY group_id ASC",
+        )
+        .bind(domain_to_db(dom))
+        .fetch_all(db)
+        .await?,
+        None => sqlx::query_scalar(
+            "SELECT group_id FROM content_field_groups ORDER BY group_id ASC",
+        )
+        .fetch_all(db)
+        .await?,
+    };
     let mut conn = db.acquire().await?;
     let mut out = Vec::with_capacity(ids.len());
     for gid in ids {
@@ -114,6 +150,8 @@ pub async fn sync_theme_declarations_in_tx(
     declarations: &ThemeDeclarations,
 ) -> ApiResult<()> {
     crate::storage::taxonomy::deactivate_other_theme_definitions_in_tx(conn, theme_id).await?;
+    crate::storage::options_pages::deactivate_other_theme_options_pages_in_tx(conn, theme_id)
+        .await?;
     crate::storage::permalinks::deactivate_other_theme_rewrites_in_tx(conn, theme_id).await?;
     // 1. Mark other themes' declared/withdrawn resources as provider_inactive (preserving ownership & declaration_state)
     let mut changed_keys: BTreeSet<String> = sqlx::query_scalar(
@@ -174,7 +212,8 @@ pub async fn sync_theme_declarations_in_tx(
             .map(|ct| opendash_core::content::ContentTypeDeclaration {
                 key: ct.key.clone(),
                 label: ct.label.clone(),
-                fields: ct.fields.clone(),
+                singular_label: ct.singular_label.clone(),
+                description: ct.description.clone(),
                 taxonomies: ct.taxonomies.clone(),
                 settings: ct.settings.clone(),
                 rewrite_base: ct.rewrite_base.clone(),
@@ -190,6 +229,7 @@ pub async fn sync_theme_declarations_in_tx(
             .collect(),
         taxonomy_definitions: declarations.taxonomy_definitions.clone(),
         field_groups: declarations.field_groups.clone(),
+        options_pages: declarations.options_pages.clone(),
     };
     sync_owner_cnt_declarations_in_tx(conn, "theme", theme_id, &neutral, false).await?;
     crate::storage::permalinks::sync_claims_in_tx(conn).await
@@ -312,6 +352,10 @@ pub async fn set_plugin_cnt_provider_status_in_tx(
         }
     }
     crate::storage::taxonomy::set_provider_definitions_status_in_tx(
+        conn, "plugin", plugin_id, active,
+    )
+    .await?;
+    crate::storage::options_pages::set_provider_options_pages_status_in_tx(
         conn, "plugin", plugin_id, active,
     )
     .await?;

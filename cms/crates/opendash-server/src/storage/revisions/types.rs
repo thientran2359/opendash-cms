@@ -102,6 +102,10 @@ pub struct RevisionDetailDto {
     pub page_layout_key: Option<String>,
     pub custom_template_key: Option<String>,
     pub seo: Option<CanonicalRevisionSeo>,
+    #[serde(default)]
+    pub parent_id: Option<i64>,
+    #[serde(default)]
+    pub menu_order: i32,
     pub has_hidden_admin_fields: bool,
     pub missing_refs: MissingRefsReport,
 }
@@ -163,6 +167,14 @@ pub struct AutosaveSnapshotDto {
     pub seo: Option<CanonicalRevisionSeo>,
     pub builder_document: Option<BuilderDocument>,
     pub term_ids: Vec<i64>,
+    #[serde(default)]
+    pub parent_id_touched: bool,
+    #[serde(default)]
+    pub parent_id: Option<i64>,
+    #[serde(default)]
+    pub menu_order_touched: bool,
+    #[serde(default)]
+    pub menu_order: Option<i32>,
     pub has_hidden_admin_fields: bool,
     pub missing_refs: MissingRefsReport,
 }
@@ -195,6 +207,10 @@ pub struct AutosaveUpsertInput {
     pub custom_template_key: PatchField<String>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub seo: PatchField<SeoMetadataInput>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub parent_id: PatchField<i64>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub menu_order: PatchField<i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]

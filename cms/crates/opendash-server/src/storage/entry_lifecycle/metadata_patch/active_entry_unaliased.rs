@@ -31,6 +31,8 @@ pub struct EntryCommitReceipt {
     pub publication_after: Option<String>,
     pub trashed_at: Option<String>,
     pub published_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detached_parent_id: Option<i64>,
 }
 
 /// Secondary post-commit projection work outcome, kept separate from durable DB commit.
@@ -481,6 +483,10 @@ pub(in crate::storage) async fn resolve_taxonomy_delta_in_conn(
             "invalid_taxonomy_delta: Tổng số term hoạt động của nội dung vượt quá giới hạn 96.",
         ));
     }
+    let mut single_check = std::collections::HashMap::new();
+    single_check.insert(delta.key.clone(), next_kind_ids.len());
+    crate::storage::entries::enforce_taxonomy_selection_mode_in_conn(conn, type_key, &single_check)
+        .await?;
 
     let merged: Vec<i64> = other_ids.union(&next_kind_ids).copied().collect();
     Ok((merged, next_kind_ids))

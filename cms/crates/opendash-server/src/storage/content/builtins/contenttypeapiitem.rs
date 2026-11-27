@@ -13,7 +13,8 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
         return Some(ContentTypeDefinition {
             key: "pattern".into(),
             label: "Patterns".into(),
-            fields: Vec::new(),
+            singular_label: None,
+            description: None,
             settings: ContentTypeSettings::private_pattern(),
         });
     }
@@ -22,30 +23,11 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
         "page" => "Trang",
         _ => return None,
     };
-    let mut fi = opendash_core::field_schema::FieldSpec::new(
-        opendash_core::field_schema::FieldType::Media,
-        "featured_image",
-        "Ảnh đại diện",
-    );
-    fi.media_kind = Some(opendash_core::field_schema::MediaFieldKind::Image);
-    let mut fields = vec![
-        opendash_core::field_schema::FieldSpec::new(
-            opendash_core::field_schema::FieldType::Richtext,
-            "body",
-            "Nội dung",
-        ),
-        fi,
-    ];
-    opendash_core::field_schema::normalize_field_specs_for_scope(
-        &mut fields,
-        opendash_core::field_schema::FieldContext::Content,
-        opendash_core::field_schema::FieldScopeKind::BaseCptField,
-    )
-    .expect("builtin fields must be valid");
     Some(ContentTypeDefinition {
         key: key.to_owned(),
         label: label.to_owned(),
-        fields,
+        singular_label: None,
+        description: None,
         settings: ContentTypeSettings::default_for_type_key(key),
     })
 }
@@ -56,12 +38,14 @@ pub(in crate::storage) fn legacy_section_definition() -> ContentTypeDefinition {
     ContentTypeDefinition {
         key: "section".into(),
         label: "Section".into(),
-        fields: Vec::new(),
+        singular_label: None,
+        description: None,
         settings: ContentTypeSettings {
             public: false,
             has_archive: false,
             publication: ContentPublication::DraftPublish,
             supports: Vec::new(),
+            ..ContentTypeSettings::default()
         },
     }
 }
@@ -99,23 +83,30 @@ pub async fn preflight_builtin_key_collisions(
                     == Some(canonical.key.as_str());
                 let label_ok = obj.and_then(|o| o.get("label")).and_then(|v| v.as_str())
                     == Some(canonical.label.as_str());
-                let fields_ok = if let Ok(def) =
-                    serde_json::from_value::<ContentTypeDefinition>(val.clone())
-                {
-                    def.fields == canonical.fields
-                } else if matches!(key.as_str(), "post" | "page") {
-                    obj.and_then(|o| o.get("fields"))
-                        .and_then(|v| v.as_array())
-                        .is_some_and(|arr| {
-                            arr.len() == 2
-                                && arr[0].get("key").and_then(|v| v.as_str()) == Some("body")
-                                && arr[0].get("type").and_then(|v| v.as_str()) == Some("rich_text")
-                                && arr[1].get("key").and_then(|v| v.as_str())
-                                    == Some("featured_image")
-                                && arr[1].get("type").and_then(|v| v.as_str()) == Some("image")
-                        })
-                } else {
-                    false
+                let fields_ok = match obj.and_then(|o| o.get("fields")) {
+                    None | Some(serde_json::Value::Null) => true,
+                    Some(serde_json::Value::Array(arr)) => {
+                        if matches!(key.as_str(), "section" | "pattern") {
+                            arr.is_empty()
+                        } else if matches!(key.as_str(), "post" | "page") {
+                            arr.is_empty()
+                                || (arr.len() == 2
+                                    && arr[0].get("key").and_then(|v| v.as_str()) == Some("body")
+                                    && matches!(
+                                        arr[0].get("type").and_then(|v| v.as_str()),
+                                        Some("rich_text" | "richtext")
+                                    )
+                                    && arr[1].get("key").and_then(|v| v.as_str())
+                                        == Some("featured_image")
+                                    && matches!(
+                                        arr[1].get("type").and_then(|v| v.as_str()),
+                                        Some("image" | "media")
+                                    ))
+                        } else {
+                            false
+                        }
+                    }
+                    Some(_) => false,
                 };
                 let settings_ok = match obj.and_then(|o| o.get("settings")) {
                     None => true,
@@ -123,8 +114,14 @@ pub async fn preflight_builtin_key_collisions(
                         if let Ok(settings) =
                             serde_json::from_value::<ContentTypeSettings>(s_val.clone())
                         {
-                            if matches!(key.as_str(), "section" | "pattern") {
+                            if key == "section" {
                                 settings == canonical.settings
+                            } else if key == "pattern" {
+                                !settings.public
+                                    && !settings.has_archive
+                                    && settings.publication == ContentPublication::Immediate
+                                    && settings.supports
+                                        == vec![opendash_core::content::ContentSupport::Builder]
                             } else {
                                 settings.publication == ContentPublication::DraftPublish
                             }
@@ -236,6 +233,7 @@ pub async fn insert_user_content_type(
         }
         other => {
             other?;
+            apply_cpt_taxonomies_and_rewrite_in_tx(&mut tx, &definition.key, input).await?;
             let effective = load_effective_content_schema_in_tx(&mut tx, &definition.key)
                 .await?
                 .ok_or_else(|| ApiError::internal("Không thể tải schema vừa tạo."))?;
@@ -251,6 +249,48 @@ pub async fn insert_user_content_type(
             })
         }
     }
+}
+
+async fn apply_cpt_taxonomies_and_rewrite_in_tx(
+    tx: &mut SqliteConnection,
+    type_key: &str,
+    input: &ContentTypeDefinitionInput,
+) -> ApiResult<()> {
+    if let Some(taxonomies) = &input.taxonomies {
+        let mut sorted = taxonomies.clone();
+        sorted.sort();
+        sorted.dedup();
+        for tax_key in &sorted {
+            let exists: Option<i64> =
+                sqlx::query_scalar("SELECT 1 FROM taxonomy_definitions WHERE key = ?")
+                    .bind(tax_key)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if exists.is_none() {
+                return Err(ApiError::bad_request("Taxonomy được chọn không tồn tại."));
+            }
+        }
+        let canonical = serde_json::to_string(&sorted)?;
+        sqlx::query(
+            "INSERT INTO content_type_taxonomy_overrides(content_type_key, taxonomies_json)
+             VALUES (?, ?)
+             ON CONFLICT(content_type_key) DO UPDATE SET
+               taxonomies_json = excluded.taxonomies_json,
+               updated_at = datetime('now')",
+        )
+        .bind(type_key)
+        .bind(&canonical)
+        .execute(&mut *tx)
+        .await?;
+    }
+    crate::storage::permalinks::set_site_rewrite_override_in_tx(
+        tx,
+        "content_type",
+        type_key,
+        &input.rewrite_base,
+    )
+    .await?;
+    Ok(())
 }
 
 /// Updates a `ResourceOwner::User` CPT definition (`PUT /api/admin/content-types/{type_key}`).
@@ -300,15 +340,32 @@ pub async fn update_user_content_type(
         .ok_or_else(|| ApiError::internal("Không thể tải schema hiện tại."))?;
     if is_builtin
         && (incoming.key != old_effective.base.descriptor.key
-            || incoming.label != old_effective.base.descriptor.label
-            || incoming.fields != old_effective.base.descriptor.fields)
+            || incoming.label != old_effective.base.descriptor.label)
     {
         return Err(ApiError::forbidden(
-            "Post/Page chỉ hỗ trợ đổi cấu hình hành vi; schema Core phải giữ nguyên.",
+            "Post/Page chỉ hỗ trợ đổi cấu hình hành vi; tên và khóa Core phải giữ nguyên.",
+        ));
+    }
+    if is_builtin && !matches!(input.rewrite_base, PatchField::Omitted) {
+        return Err(ApiError::forbidden(
+            "Post/Page giữ định tuyến chuẩn WordPress, không nhận rewrite_base riêng.",
         ));
     }
     if input.settings.is_none() {
         incoming.settings = old_effective.base.descriptor.settings.clone();
+    }
+    if old_effective.base.descriptor.settings.hierarchical && !incoming.settings.hierarchical {
+        let has_children: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND parent_id IS NOT NULL)",
+        )
+        .bind(type_key)
+        .fetch_one(&mut *tx)
+        .await?;
+        if has_children {
+            return Err(ApiError::conflict(
+                "incompatible_schema_change: Không thể tắt phân cấp khi đang có bài viết con (parent_id).",
+            ));
+        }
     }
     if old_effective.base.descriptor.settings.publication == ContentPublication::DraftPublish
         && incoming.settings.publication == ContentPublication::Immediate
@@ -344,6 +401,7 @@ pub async fn update_user_content_type(
     .execute(&mut *tx)
     .await?;
 
+    apply_cpt_taxonomies_and_rewrite_in_tx(&mut tx, type_key, input).await?;
     let new_effective = load_effective_content_schema_in_tx(&mut tx, type_key)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải schema sau cập nhật."))?;
@@ -358,6 +416,113 @@ pub async fn update_user_content_type(
         version: new_effective.base_version,
         schema_token: new_effective.schema_token,
     })
+}
+
+pub async fn delete_user_content_type(
+    db: &SqlitePool,
+    type_key: &str,
+    expected_version: i64,
+    purge: bool,
+) -> ApiResult<()> {
+    if !valid_content_type_key(type_key) {
+        return Err(ApiError::bad_request("Khóa loại nội dung không hợp lệ."));
+    }
+    if matches!(type_key, "post" | "page" | "pattern" | "section") {
+        return Err(ApiError::forbidden("Không thể xóa loại nội dung hệ thống Core."));
+    }
+    let mut tx = begin_content_write_tx(db).await?;
+    let row: Option<(String, i64)> =
+        sqlx::query_as("SELECT owner_kind, version FROM content_types WHERE key = ?")
+            .bind(type_key)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((owner_kind, current_version)) = row else {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    };
+    if owner_kind != "user" {
+        return Err(ApiError::forbidden(
+            "Chỉ có thể xóa loại nội dung thuộc quyền sở hữu của User.",
+        ));
+    }
+    if current_version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản loại nội dung đã thay đổi. Vui lòng tải lại.",
+        ));
+    }
+
+    let entry_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM content_entries WHERE content_type_key = ?")
+            .bind(type_key)
+            .fetch_one(&mut *tx)
+            .await?;
+    if entry_count > 0 && !purge {
+        return Err(ApiError::conflict(
+            "cannot_delete_cpt_with_entries: Loại nội dung còn dữ liệu; hãy xóa bài viết trước hoặc thêm ?purge=true.",
+        ));
+    }
+    if entry_count > 0 && purge {
+        sqlx::query("UPDATE content_entries SET parent_id = NULL WHERE content_type_key = ?")
+            .bind(type_key)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "DELETE FROM seo_public_media_refs
+              WHERE source_kind = 'entry_seo'
+                AND source_id IN (SELECT id FROM content_entries WHERE content_type_key = ?)",
+        )
+        .bind(type_key)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM plugin_entry_projections
+              WHERE entry_id IN (SELECT id FROM content_entries WHERE content_type_key = ?)",
+        )
+        .bind(type_key)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM content_entries WHERE content_type_key = ?")
+            .bind(type_key)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    sqlx::query("DELETE FROM content_type_taxonomy_eligibility WHERE content_type_key = ?")
+        .bind(type_key)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM content_type_taxonomy_overrides WHERE content_type_key = ?")
+        .bind(type_key)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM content_editor_layouts WHERE type_key = ?")
+        .bind(type_key)
+        .execute(&mut *tx)
+        .await?;
+    if table_exists_in_tx(&mut tx, "content_field_group_targets").await? {
+        sqlx::query(
+            "DELETE FROM content_field_group_targets
+              WHERE target_kind = 'content_type' AND target_key = ?",
+        )
+        .bind(type_key)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let _ = crate::storage::permalinks::set_site_rewrite_override_in_tx(
+        &mut tx,
+        "content_type",
+        type_key,
+        &PatchField::Clear,
+    )
+    .await;
+    sqlx::query("DELETE FROM content_types WHERE key = ? AND version = ?")
+        .bind(type_key)
+        .bind(expected_version)
+        .execute(&mut *tx)
+        .await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    tx.commit().await?;
+    crate::cache::SiteCacheEpoch::global().bump();
+    Ok(())
 }
 
 pub async fn list_content_types_with_meta(db: &SqlitePool) -> ApiResult<Vec<ContentTypeApiItem>> {
@@ -376,87 +541,4 @@ pub async fn list_content_types_with_meta(db: &SqlitePool) -> ApiResult<Vec<Cont
         }
     }
     Ok(items)
-}
-
-pub async fn create_user_field_group(
-    db: &SqlitePool,
-    input: &UserFieldGroupInput,
-) -> ApiResult<FieldGroupRecord> {
-    let (scoped_id, fields) = input
-        .validate_and_normalize(None)
-        .map_err(map_input_validation_error)?;
-    let group_id = scoped_id.to_canonical();
-    let fields_json = serde_json::to_string(&fields)?;
-
-    let mut tx = begin_content_write_tx(db).await?;
-    let existing: Option<String> =
-        sqlx::query_scalar("SELECT group_id FROM content_field_groups WHERE group_id = ?")
-            .bind(&group_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-    if existing.is_some() {
-        return Err(ApiError::conflict(
-            "group_id hoặc local_key của nhóm trường đã tồn tại.",
-        ));
-    }
-
-    let mut old_snapshots = HashMap::new();
-    for target in &input.target_types {
-        let Some(old_eff) = load_effective_content_schema_in_tx(&mut tx, target).await? else {
-            return Err(ApiError::not_found("Loại nội dung mục tiêu không tồn tại."));
-        };
-        let has_entries: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ?)",
-        )
-        .bind(target)
-        .fetch_one(&mut *tx)
-        .await?;
-        old_snapshots.insert(target.clone(), (old_eff, has_entries));
-    }
-
-    sqlx::query(
-        "INSERT INTO content_field_groups
-         (group_id, owner_kind, owner_id, local_key, title, description, fields_json,
-          default_region, default_order, collapsible, status, version)
-         VALUES (?, 'user', NULL, ?, ?, ?, ?, ?, ?, ?, 'active', 1)",
-    )
-    .bind(&group_id)
-    .bind(&scoped_id.local_key)
-    .bind(&input.title)
-    .bind(&input.description)
-    .bind(&fields_json)
-    .bind(input.default_region.as_str())
-    .bind(input.default_order)
-    .bind(if input.collapsible { 1_i64 } else { 0_i64 })
-    .execute(&mut *tx)
-    .await?;
-
-    for target in &input.target_types {
-        sqlx::query(
-            "INSERT INTO content_field_group_targets (group_id, type_key, association_state)
-             VALUES (?, ?, 'declared')",
-        )
-        .bind(&group_id)
-        .bind(target)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    for target in &input.target_types {
-        let (old_eff, has_entries) = old_snapshots
-            .get(target)
-            .expect("target snapshot preloaded");
-        let new_eff = load_effective_content_schema_in_tx(&mut tx, target)
-            .await?
-            .ok_or_else(|| ApiError::internal("Không thể tải schema mục tiêu."))?;
-        verify_effective_schema_transition(Some(old_eff), &new_eff, *has_entries)
-            .map_err(|e| map_transition_error(e, true))?;
-    }
-
-    let created = load_field_group_in_tx(&mut tx, &group_id)
-        .await?
-        .ok_or_else(|| ApiError::internal("Không thể tải field group vừa tạo."))?;
-    tx.commit().await?;
-    crate::cache::SiteCacheEpoch::global().bump();
-    Ok(created)
 }

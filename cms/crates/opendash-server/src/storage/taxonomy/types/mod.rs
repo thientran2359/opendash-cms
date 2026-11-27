@@ -6,7 +6,10 @@ use super::*;
 pub(super) use std::collections::BTreeMap;
 
 pub(super) use opendash_core::{
-    content::{TaxonomyDefinition, TaxonomyDefinitionInput, TaxonomyDefinitionPatch},
+    content::{
+        FieldRole, TaxonomyDefinition, TaxonomyDefinitionInput, TaxonomyDefinitionPatch,
+        TermSeoInput,
+    },
     registry::{DeclarationState, ProviderStatus, ResourceOwner},
 };
 
