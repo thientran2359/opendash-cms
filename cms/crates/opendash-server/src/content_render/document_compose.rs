@@ -69,6 +69,22 @@ pub fn finalize_document_icons(
         .map_err(ApiError::internal)
 }
 
+/// Server-owned responsive `<picture>` / `<img>` substitution happens only after document normalization.
+pub fn finalize_document_images(
+    mut html: String,
+    image_nonces: &crate::template_sec::ImageNonceTable,
+) -> ApiResult<String> {
+    if html.contains(HEAD_END_MARKER) {
+        html = html.replace(HEAD_END_MARKER, "");
+    }
+    if image_nonces.is_empty() {
+        return Ok(html);
+    }
+    image_nonces
+        .substitute_into_document(html)
+        .map_err(ApiError::internal)
+}
+
 /// Server-owned sanitized RichText nonce substitution happens strictly after
 /// document normalization inside safe `HtmlScanState::Body` regions.
 pub fn finalize_document_richtext(
@@ -208,13 +224,37 @@ pub fn compose_document_with_seo_with_assets(
     enqueued: &ResolvedEnqueuedAssets,
     allow_trusted_theme_markup: bool,
 ) -> ApiResult<String> {
+    compose_document_with_seo_with_policy(
+        header_html,
+        rendered_layout,
+        footer_html,
+        seo,
+        body_classes,
+        enqueued,
+        allow_trusted_theme_markup,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn compose_document_with_seo_with_policy(
+    header_html: Option<&str>,
+    rendered_layout: &str,
+    footer_html: Option<&str>,
+    seo: &crate::seo::SeoView,
+    body_classes: &[&str],
+    enqueued: &ResolvedEnqueuedAssets,
+    allow_trusted_theme_markup: bool,
+    allow_admin_media_preview: bool,
+) -> ApiResult<String> {
+    let normalize_opts = crate::document::DocumentNormalizeOptions {
+        allow_trusted_theme_markup,
+        allow_admin_media_preview,
+    };
     let mut styles = Vec::new();
     let mut authorized_head_scripts = Vec::new();
     let (mut body_attributes, body_fragment) =
-        match crate::document::normalize_public_document_with_options(
-            rendered_layout,
-            allow_trusted_theme_markup,
-        ) {
+        match crate::document::normalize_document_with_policy(rendered_layout, normalize_opts) {
             Ok(parts) => {
                 styles.extend(parts.authorized_styles);
                 authorized_head_scripts.extend(parts.authorized_head_scripts);
@@ -282,10 +322,7 @@ pub fn compose_document_with_seo_with_assets(
             let Some(raw) = slot.filter(|s| !s.is_empty()) else {
                 return String::new();
             };
-            match crate::document::normalize_public_document_with_options(
-                raw,
-                allow_trusted_theme_markup,
-            ) {
+            match crate::document::normalize_document_with_policy(raw, normalize_opts) {
                 Ok(parts) => {
                     styles.extend(parts.authorized_styles);
                     scripts.extend(parts.authorized_head_scripts);

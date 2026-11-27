@@ -102,7 +102,8 @@ pub(crate) async fn render_entry_response_with_cache(
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: site.timezone.clone(),
     };
-    let (archive_path, mut proj_map) = {
+    let entry_media_ids = content_render::collect_entry_media_ids(&[&entry], &effective_schema);
+    let (archive_path, mut proj_map, entry_media_map) = {
         let mut conn = db.acquire().await?;
         let path =
             permalinks::canonical_archive_path_in_tx(&mut conn, &type_key, &entry_locale).await?;
@@ -111,15 +112,22 @@ pub(crate) async fn render_entry_response_with_cache(
             &[entry.id],
         )
         .await?;
-        (path, proj_map)
+        let media_map = if entry_media_ids.is_empty() {
+            std::collections::BTreeMap::new()
+        } else {
+            crate::storage::fields::load_media_hydration_map_in_conn(&mut conn, &entry_media_ids)
+                .await?
+        };
+        (path, proj_map, media_map)
     };
-    let mut view = content_render::entry_view_with_context(
+    let mut view = content_render::entry_view_with_context_and_media(
         &entry,
         &effective_schema,
         Some(canonical_path_for_seo.clone()),
         &terms,
         &eligible_public_taxonomies,
         FieldRole::Editor,
+        &entry_media_map,
     );
     if let Some(proj) = proj_map.remove(&entry.id) {
         view.ext = proj.ext;
@@ -271,7 +279,13 @@ pub(crate) async fn render_entry_response_with_cache(
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::finalize_document_richtext(
-            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            content_render::finalize_document_images(
+                content_render::finalize_document_icons(
+                    composed,
+                    &budget.render_budget.icon_nonces,
+                )?,
+                &budget.render_budget.image_nonces,
+            )?,
             &budget.render_budget.richtext_nonces,
         )?,
         body.has_active_contact_form || entry_has_form || shell_has_form,

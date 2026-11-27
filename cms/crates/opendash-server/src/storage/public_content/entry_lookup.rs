@@ -271,6 +271,7 @@ pub async fn load_entry_render_snapshot_with_options(
             Some(entry_locale.as_str()),
         )
         .await?;
+        builder::hydrate_binding_media_in_conn(&mut tx, &mut state, &doc, &bindings).await?;
         let lists = builder::resolve_lists_in_tx_for_locale(
             &mut tx,
             &doc,

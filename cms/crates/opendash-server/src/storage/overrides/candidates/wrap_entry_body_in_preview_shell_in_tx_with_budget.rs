@@ -91,14 +91,19 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         active.as_ref().map(|a| &a.page_layouts),
     )
     .await?;
-    let slot_fragment =
-        crate::document::normalize_public_document_with_options(&entry_rendered.html, true)
-            .map(|parts| {
-                let mut f = parts.authorized_styles.concat();
-                f.push_str(&parts.body_fragment);
-                f
-            })
-            .unwrap_or_else(|_| entry_rendered.html.clone());
+    let slot_fragment = crate::document::normalize_document_with_policy(
+        &entry_rendered.html,
+        crate::document::DocumentNormalizeOptions {
+            allow_trusted_theme_markup: true,
+            allow_admin_media_preview: true,
+        },
+    )
+    .map(|parts| {
+        let mut f = parts.authorized_styles.concat();
+        f.push_str(&parts.body_fragment);
+        f
+    })
+    .unwrap_or_else(|_| entry_rendered.html.clone());
 
     let mut preview_budget =
         PreviewCompositionBudget::with_render_budget(entry_render_budget.clone());
@@ -249,13 +254,14 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         EnqueueCondition::Single
     };
     let enqueued = preview_enqueued_styles(active.as_ref(), condition);
-    let full_html = content_render::compose_document_with_seo_with_assets(
+    let full_html = content_render::compose_document_with_seo_with_policy(
         header_html.as_deref(),
         &template_html,
         footer_html.as_deref(),
         &seo,
         &[],
         &enqueued,
+        true,
         true,
     )?;
     let full_html = if !preview_budget.hook_nonces.is_empty() {
@@ -271,6 +277,8 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
     };
     let full_html =
         content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
+    let full_html =
+        content_render::finalize_document_images(full_html, &preview_budget.image_nonces)?;
     let full_html =
         content_render::finalize_document_richtext(full_html, &preview_budget.richtext_nonces)?;
     Ok(RenderedLayout {

@@ -135,6 +135,7 @@ pub(crate) async fn render_not_found_response_for_locale(
     )
     .await?;
     let html = content_render::finalize_document_icons(html, &budget.render_budget.icon_nonces)?;
+    let html = content_render::finalize_document_images(html, &budget.render_budget.image_nonces)?;
     let html =
         content_render::finalize_document_richtext(html, &budget.render_budget.richtext_nonces)?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
@@ -219,18 +220,27 @@ pub(crate) async fn render_canonical_archive(
     let archive_ids: Vec<i64> = records.iter().map(|r| r.id).collect();
     let mut proj_map =
         crate::storage::plugin_projections::batch_load_entry_projections(&db, &archive_ids).await?;
+    let rec_refs: Vec<_> = records.iter().collect();
+    let media_ids = content_render::collect_entry_media_ids(&rec_refs, &effective_schema);
+    let media_map = if media_ids.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        let mut conn = db.acquire().await?;
+        crate::storage::fields::load_media_hydration_map_in_conn(&mut conn, &media_ids).await?
+    };
     let entries: Vec<_> = records
         .into_iter()
         .map(|record| {
             let u = entry_urls.get(&record.id).cloned();
             let terms = terms_map.remove(&record.id).unwrap_or_default();
-            let mut view = content_render::entry_view_with_context(
+            let mut view = content_render::entry_view_with_context_and_media(
                 &record,
                 &effective_schema,
                 u,
                 &terms,
                 &eligible_taxonomies,
                 FieldRole::Editor,
+                &media_map,
             );
             if let Some(proj) = proj_map.remove(&record.id) {
                 view.ext = proj.ext;
@@ -421,7 +431,13 @@ pub(crate) async fn render_canonical_archive(
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::finalize_document_richtext(
-            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            content_render::finalize_document_images(
+                content_render::finalize_document_icons(
+                    composed,
+                    &budget.render_budget.icon_nonces,
+                )?,
+                &budget.render_budget.image_nonces,
+            )?,
             &budget.render_budget.richtext_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,

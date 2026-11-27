@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Clone)]
 pub struct BuilderRenderContext {
     pub declared_blocks: BTreeMap<String, crate::storage::page::RegisteredBlockDef>,
     pub site_options: BTreeMap<String, serde_json::Value>,
@@ -216,35 +217,13 @@ pub(crate) async fn hydrate_render_context_for_documents_in_conn(
     let mut entry_ids = BTreeSet::new();
     let mut term_ids = BTreeSet::new();
     for doc in docs {
-        for section in &doc.sections {
-            for row in &section.children {
-                for column in &row.children {
-                    for element in &column.children {
-                        let ElementContent::Known(KnownElement::PluginBlock(props)) =
-                            &element.content
-                        else {
-                            continue;
-                        };
-                        let Some(def) = state.declared_blocks.get(&props.block_id) else {
-                            continue;
-                        };
-                        if def.status != ProviderStatus::Active
-                            || def.declaration_state != DeclarationState::Declared
-                        {
-                            continue;
-                        }
-                        crate::field_hydrate::collect_hydration_ids(
-                            &def.schema.schema.fields,
-                            &props.values,
-                            false,
-                            &mut media_ids,
-                            &mut entry_ids,
-                            &mut term_ids,
-                        );
-                    }
-                }
-            }
-        }
+        collect_builder_document_media_ids(
+            doc,
+            &state.declared_blocks,
+            &mut media_ids,
+            &mut entry_ids,
+            &mut term_ids,
+        );
     }
 
     let missing_entries: BTreeSet<i64> = entry_ids
@@ -360,6 +339,7 @@ pub async fn resolve_patterns_in_tx_with_budget(
             Some(("pattern", &slug)),
         )
         .await?;
+        hydrate_binding_media_in_conn(&mut **tx, state, &doc, &bindings).await?;
         let forms = resolve_contact_forms_in_tx(tx, &doc).await?;
         let scope = format!("pat_{id}");
         let rendered = page::render_builder_with_budget(

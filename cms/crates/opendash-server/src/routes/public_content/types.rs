@@ -350,6 +350,13 @@ pub(crate) async fn render_canonical_taxonomy(
     let mut proj_map =
         crate::storage::plugin_projections::batch_load_entry_projections(db, &tax_entry_ids)
             .await?;
+    let media_ids = content_render::collect_multi_type_entry_media_ids(&page.entries, &schemas);
+    let media_map = if media_ids.is_empty() {
+        BTreeMap::new()
+    } else {
+        let mut conn = db.acquire().await?;
+        crate::storage::fields::load_media_hydration_map_in_conn(&mut conn, &media_ids).await?
+    };
     let mut entries = Vec::with_capacity(page.entries.len());
     for record in page.entries {
         if let Some(eff) = schemas.get(&record.content_type_key) {
@@ -359,13 +366,14 @@ pub(crate) async fn render_canonical_taxonomy(
                 .get(&record.content_type_key)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            let mut view = content_render::entry_view_with_context(
+            let mut view = content_render::entry_view_with_context_and_media(
                 &record,
                 eff,
                 u,
                 &terms,
                 eligible,
                 FieldRole::Editor,
+                &media_map,
             );
             if let Some(proj) = proj_map.remove(&record.id) {
                 view.ext = proj.ext;
@@ -567,7 +575,13 @@ pub(crate) async fn render_canonical_taxonomy(
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::finalize_document_richtext(
-            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            content_render::finalize_document_images(
+                content_render::finalize_document_icons(
+                    composed,
+                    &budget.render_budget.icon_nonces,
+                )?,
+                &budget.render_budget.image_nonces,
+            )?,
             &budget.render_budget.richtext_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,

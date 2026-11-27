@@ -12,6 +12,16 @@ pub fn render_content_with_config(
         .map_err(|_| "Không thể render template nội dung.")
 }
 
+pub fn render_default_content_with_config(
+    template: &str,
+    data: &serde_json::Value,
+    fmt_cfg: &crate::template_sec::RenderFormattingConfig,
+) -> Result<String, &'static str> {
+    let context = crate::template_sec::json_to_safe_value(data);
+    crate::template_sec::render_csec_with_images_and_config("content", template, context, fmt_cfg)
+        .map_err(|_| "Không thể render template nội dung.")
+}
+
 pub(super) fn required_v3_utf8<'a>(
     files: &'a BTreeMap<String, Vec<u8>>,
     path: &str,

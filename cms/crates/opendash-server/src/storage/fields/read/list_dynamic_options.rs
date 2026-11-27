@@ -293,25 +293,57 @@ pub async fn load_media_hydration_map_in_conn(
     }
     for chunk in ids.chunks(HYDRATE_SQL_CHUNK) {
         let raw_json = serde_json::to_string(chunk)?;
-        let rows: Vec<(String, String, Option<i64>, Option<i64>)> = sqlx::query_as(
-            "SELECT id, kind, width, height
+        let rows: Vec<(String, String, String, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT id, kind, mime_type, version, width, height
                FROM media_assets
               WHERE lifecycle_state = 'active'
                 AND id IN (SELECT value FROM json_each(?1))",
         )
-        .bind(raw_json)
+        .bind(&raw_json)
         .fetch_all(&mut *conn)
         .await?;
-        for (id, kind, width, height) in rows {
+        for (id, kind, mime_type, version, width, height) in rows {
             out.insert(
                 id.clone(),
                 HydratedMediaRow {
                     id,
                     kind,
+                    mime_type,
+                    version: version.max(1),
                     width,
                     height,
+                    variants: Vec::new(),
                 },
             );
+        }
+        let variant_rows: Vec<(String, String, String, i64, i64, i64)> = sqlx::query_as(
+            "SELECT v.media_id, v.spec, v.format, v.width, v.height, v.byte_size
+               FROM media_variants v
+               JOIN media_assets a
+                 ON a.id = v.media_id AND a.version = v.version
+              WHERE a.lifecycle_state = 'active'
+                AND v.media_id IN (SELECT value FROM json_each(?1))
+              ORDER BY v.width ASC, v.format ASC",
+        )
+        .bind(&raw_json)
+        .fetch_all(&mut *conn)
+        .await?;
+        for (media_id, spec_raw, format_raw, vw, vh, byte_size) in variant_rows {
+            let (Some(spec), Some(format)) = (
+                opendash_core::media::MediaVariantSpec::parse(&spec_raw),
+                opendash_core::media::MediaVariantFormat::parse_db(&format_raw),
+            ) else {
+                continue;
+            };
+            if let Some(entry) = out.get_mut(&media_id) {
+                entry.variants.push(HydratedMediaVariantRow {
+                    spec,
+                    format,
+                    width: u32::try_from(vw.max(0)).unwrap_or(0),
+                    height: u32::try_from(vh.max(0)).unwrap_or(0),
+                    byte_size: u64::try_from(byte_size.max(0)).unwrap_or(0),
+                });
+            }
         }
     }
     Ok(out)
@@ -449,7 +481,7 @@ pub async fn load_entry_ref_hydration_map_in_conn(
             cover_media_map
                 .get(&mid)
                 .filter(|m| m.kind == "image")
-                .map(|m| format!("{media_prefix}/{}/file", m.id))
+                .map(|m| format!("{media_prefix}/{}/file?v={}", m.id, m.version.max(1)))
         });
         out.insert(
             id,

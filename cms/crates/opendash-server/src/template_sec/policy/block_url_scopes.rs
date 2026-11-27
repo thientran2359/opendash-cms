@@ -54,7 +54,9 @@ pub(crate) fn classify_node_and_tail(
         (FieldTemplateNode::Media, &["url" | "thumbnail_url"]) => {
             Some(BlockSensitiveKind::MediaUrl)
         }
-        (FieldTemplateNode::Media, &["id" | "alt" | "width" | "height" | "kind"]) => None,
+        (FieldTemplateNode::Media, &["id" | "alt" | "width" | "height" | "kind" | "version"]) => {
+            None
+        }
         (FieldTemplateNode::Media, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
         (FieldTemplateNode::Gallery, _)
         | (FieldTemplateNode::Group(_), _)
@@ -79,7 +81,10 @@ pub(crate) fn classify_node_and_tail(
         ) => Some(BlockSensitiveKind::MediaUrl),
         (
             FieldTemplateNode::TermRef { multiple: false },
-            &["featured_image", "id" | "alt" | "width" | "height" | "kind"],
+            &[
+                "featured_image",
+                "id" | "alt" | "width" | "height" | "kind" | "version",
+            ],
         ) => None,
         (
             FieldTemplateNode::TermRef { multiple: false },

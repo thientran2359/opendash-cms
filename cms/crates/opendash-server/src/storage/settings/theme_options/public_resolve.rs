@@ -30,7 +30,34 @@ pub(in crate::storage) async fn resolve_merged_public_options_with_overrides_in_
     transient_theme: Option<&BTreeMap<String, serde_json::Value>>,
     is_preview: bool,
     requested_locale: Option<&str>,
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
+    resolve_merged_public_options_with_overrides_in_conn_with_options(
+        conn,
+        active_theme,
+        transient_global,
+        transient_theme,
+        is_preview,
+        requested_locale,
+        richtext_nonces,
+        true,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn resolve_merged_public_options_with_overrides_in_conn_with_options(
+    conn: &mut SqliteConnection,
+    active_theme: Option<(&str, &str)>,
+    transient_global: Option<&BTreeMap<String, serde_json::Value>>,
+    transient_theme: Option<&BTreeMap<String, serde_json::Value>>,
+    is_preview: bool,
+    requested_locale: Option<&str>,
     mut richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+    tag_media_provenance: bool,
 ) -> ApiResult<(
     BTreeMap<String, serde_json::Value>,
     BTreeMap<String, serde_json::Value>,
@@ -199,6 +226,7 @@ pub(in crate::storage) async fn resolve_merged_public_options_with_overrides_in_
         entries: &entries,
         terms: &terms,
         is_preview,
+        tag_media_provenance,
     };
     let site_options = crate::field_hydrate::hydrate_field_values(
         &global_fields,
@@ -316,7 +344,33 @@ pub async fn get_active_public_theme_options_for_locale(
     BTreeMap<String, serde_json::Value>,
     BTreeMap<String, serde_json::Value>,
 )> {
-    get_active_public_theme_options_for_locale_with_nonces(db, requested_locale, None).await
+    let mut conn = db.acquire().await?;
+    let active = if let Some(dev) = crate::dev_mode::DevOverlayConfig::global()
+        && let Ok(Some(snap)) = dev.load_dev_theme()
+    {
+        Some((snap.manifest.theme_id, snap.manifest_json))
+    } else {
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT r.theme_id, r.manifest_json
+             FROM theme_active_selection AS a
+             JOIN theme_revisions AS r ON r.revision_id = a.revision_id
+             WHERE a.id = 1 AND r.source_format = 'v3'",
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+    };
+    let active_ref = active.as_ref().map(|(id, m)| (id.as_str(), m.as_str()));
+    resolve_merged_public_options_with_overrides_in_conn_with_options(
+        &mut conn,
+        active_ref,
+        None,
+        None,
+        false,
+        requested_locale,
+        None,
+        false,
+    )
+    .await
 }
 
 pub async fn get_active_public_theme_options(
@@ -339,7 +393,7 @@ pub(in crate::storage) async fn get_public_theme_options_in_conn_for_locale_with
     BTreeMap<String, serde_json::Value>,
     BTreeMap<String, serde_json::Value>,
 )> {
-    resolve_merged_public_options_with_overrides_in_conn_with_nonces(
+    resolve_merged_public_options_with_overrides_in_conn_with_options(
         conn,
         Some((theme_id, manifest_json)),
         None,
@@ -347,6 +401,7 @@ pub(in crate::storage) async fn get_public_theme_options_in_conn_for_locale_with
         false,
         requested_locale,
         richtext_nonces,
+        true,
     )
     .await
 }
@@ -360,12 +415,15 @@ pub(in crate::storage) async fn get_public_theme_options_in_conn_for_locale(
     BTreeMap<String, serde_json::Value>,
     BTreeMap<String, serde_json::Value>,
 )> {
-    get_public_theme_options_in_conn_for_locale_with_nonces(
+    resolve_merged_public_options_with_overrides_in_conn_with_options(
         conn,
-        theme_id,
-        manifest_json,
+        Some((theme_id, manifest_json)),
+        None,
+        None,
+        false,
         requested_locale,
         None,
+        false,
     )
     .await
 }

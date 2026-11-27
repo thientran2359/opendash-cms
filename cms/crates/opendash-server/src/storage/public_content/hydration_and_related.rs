@@ -214,6 +214,12 @@ pub(in crate::storage) async fn hydrate_entry_views_in_conn(
         crate::storage::plugin_projections::batch_load_entry_projections_in_conn(conn, &entry_ids)
             .await?;
 
+    let media_ids = crate::content_render::collect_multi_type_entry_media_ids(&records, &schemas);
+    let media_map = if media_ids.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        crate::storage::fields::load_media_hydration_map_in_conn(conn, &media_ids).await?
+    };
     let mut views = Vec::with_capacity(records.len());
     for record in records {
         let Some(eff) = schemas.get(&record.content_type_key) else {
@@ -225,13 +231,14 @@ pub(in crate::storage) async fn hydrate_entry_views_in_conn(
             .get(&record.content_type_key)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        let mut view = crate::content_render::entry_view_with_context(
+        let mut view = crate::content_render::entry_view_with_context_and_media(
             &record,
             eff,
             url,
             &terms,
             eligible_taxonomies,
             opendash_core::content::FieldRole::Editor,
+            &media_map,
         );
         view.ext = proj_map
             .remove(&record.id)

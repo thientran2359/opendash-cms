@@ -513,8 +513,8 @@ async fn video_range_head_conditional_csp_and_public_acl() {
         .to_string();
     assert!(home_csp.contains("media-src 'self'"), "CSP: {home_csp}");
     let home_html = home.text().await.unwrap();
-    assert!(home_html.contains(&format!("<video src=\"/media/{video_id}/file\"")));
-    assert!(home_html.contains(&format!("poster=\"/media/{poster_id}/file\"")));
+    assert!(home_html.contains(&format!("<video src=\"/media/{video_id}/file?v=1\"")));
+    assert!(home_html.contains(&format!("poster=\"/media/{poster_id}/file?v=1\"")));
     assert!(!home_html.contains("autoplay"));
 
     // 3. Public Range, HEAD, 416, 304, If-Range

@@ -186,8 +186,17 @@ pub async fn content_entry_preview(
     let (_, bcp47_tag, dir) =
         crate::storage::settings::get_locale_bcp47_and_dir(&db, Some(&entry_locale)).await?;
     let seo_view = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &entry_title);
-    let html = content_render::compose_document_with_seo(None, &raw, None, &seo_view)?
-        .replace(content_render::HEAD_END_MARKER, "");
+    let html = content_render::compose_document_with_seo_with_policy(
+        None,
+        &raw,
+        None,
+        &seo_view,
+        &[],
+        &opendash_core::theme::ResolvedEnqueuedAssets::default(),
+        false,
+        true,
+    )?
+    .replace(content_render::HEAD_END_MARKER, "");
     Ok((
         [
             (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),

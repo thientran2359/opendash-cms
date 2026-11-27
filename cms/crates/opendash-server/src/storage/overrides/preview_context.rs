@@ -35,6 +35,7 @@ pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> Ent
         values: BTreeMap::new(),
         fields: Vec::new(),
         cover_url: None,
+        cover_media: None,
         terms,
         all_terms: Vec::new(),
         primary_category: None,
@@ -68,13 +69,20 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     )
     .await?;
     let terms = terms_map.remove(&record.id).unwrap_or_default();
-    let view = content_render::authenticated_preview_view_with_context(
+    let media_ids = content_render::collect_entry_media_ids(&[record], effective_schema);
+    let media_map = if media_ids.is_empty() {
+        BTreeMap::new()
+    } else {
+        crate::storage::fields::load_media_hydration_map_in_conn(&mut **tx, &media_ids).await?
+    };
+    let view = content_render::authenticated_preview_view_with_context_and_media(
         record,
         effective_schema,
         None,
         &terms,
         &eligible,
         actor_role,
+        &media_map,
     );
     let archive_url = permalinks::canonical_archive_path_in_tx(
         &mut **tx,
@@ -279,9 +287,15 @@ pub async fn preview_typed_override_with_cache_and_locale(
                 &fmt_cfg,
                 &effective_locale,
             )?;
-            crate::document::normalize_public_document(&html)
-                .map(|doc| doc.body_fragment)
-                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+            crate::document::normalize_document_with_policy(
+                &html,
+                crate::document::DocumentNormalizeOptions {
+                    allow_trusted_theme_markup: false,
+                    allow_admin_media_preview: true,
+                },
+            )
+            .map(|doc| doc.body_fragment)
+            .map_err(|_| ApiError::bad_request("Invalid preview body."))
         })?;
         (built.theme_context, body)
     } else {
@@ -345,6 +359,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
         )?;
     }
     rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
+    rendered.html = content_render::finalize_document_images(rendered.html, &budget.image_nonces)?;
     rendered.html =
         content_render::finalize_document_richtext(rendered.html, &budget.richtext_nonces)?;
     tx.rollback().await?;

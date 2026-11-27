@@ -1,6 +1,10 @@
 //! Pure responsive media variant models, `ETag` parsers, and `srcset` builders.
 
+mod render;
+
 use serde::{Deserialize, Serialize};
+
+pub use render::*;
 
 pub const MEDIUM_MAX_WIDTH: u32 = 768;
 pub const LARGE_MAX_WIDTH: u32 = 1536;

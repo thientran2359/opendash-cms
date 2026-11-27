@@ -130,13 +130,21 @@ pub(crate) async fn render_admin_single_fallback_html(
         .await?
         .remove(&record.id)
         .unwrap_or_default();
-    let view = content_render::authenticated_preview_view_with_context(
-        record, effective, None, &terms, &eligible, actor_role,
-    );
-    let archive_url = {
+    let media_ids = content_render::collect_entry_media_ids(&[record], effective);
+    let (archive_url, media_map) = {
         let mut conn = db.acquire().await?;
-        permalinks::canonical_archive_path_in_tx(&mut conn, type_key, &record.locale).await?
+        let path =
+            permalinks::canonical_archive_path_in_tx(&mut conn, type_key, &record.locale).await?;
+        let mm = if media_ids.is_empty() {
+            std::collections::BTreeMap::new()
+        } else {
+            crate::storage::fields::load_media_hydration_map_in_conn(&mut conn, &media_ids).await?
+        };
+        (path, mm)
     };
+    let view = content_render::authenticated_preview_view_with_context_and_media(
+        record, effective, None, &terms, &eligible, actor_role, &media_map,
+    );
     let general = settings::get_general_for_locale(db, Some(&record.locale)).await?;
     let pub_settings = settings::get_public(db).await?;
     let site_ctx = content_render::SiteContext {

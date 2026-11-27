@@ -124,7 +124,7 @@ pub const DEFAULT_ARCHIVE: &str = r##"<!doctype html>
 <h1 class="mb-6 text-3xl font-od-heading font-bold">{{ content_type.label }}</h1>
 {% for entry in entries %}
 <article class="od-prose border-b border-od-border py-5"><h2>{% if entry.url %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</h2>
-{% if entry.cover_url %}{% if entry.url %}<a href="{{ entry.url }}">{% endif %}<img class="max-h-64 max-w-full rounded-lg object-contain" src="{{ entry.cover_url }}" alt="{{ l10n.image_alt_prefix }}{{ entry.title }}" loading="lazy">{% if entry.url %}</a>{% endif %}{% endif %}
+{% if entry.cover_media is defined and entry.cover_media %}{% if entry.url %}<a href="{{ entry.url }}">{% endif %}{{ od_image(entry.cover_media, class="max-h-64 max-w-full rounded-lg object-contain", alt=l10n.image_alt_prefix ~ entry.title) }}{% if entry.url %}</a>{% endif %}{% elif entry.cover_url %}{% if entry.url %}<a href="{{ entry.url }}">{% endif %}<img class="max-h-64 max-w-full rounded-lg object-contain" src="{{ entry.cover_url }}" alt="{{ l10n.image_alt_prefix }}{{ entry.title }}" loading="lazy">{% if entry.url %}</a>{% endif %}{% endif %}
 </article>
 {% else %}<p>{{ l10n.empty_content }}</p>{% endfor %}
 <nav class="mt-8 flex gap-4">{% if previous_url %}<a href="{{ previous_url }}">{{ l10n.previous_page }}</a>{% endif %}
@@ -141,7 +141,9 @@ pub const DEFAULT_SINGLE: &str = r##"<!doctype html>
 <dl class="mt-8">{% for field in entry.fields %}
 {% if field.text or field.image_url or field.gallery_urls %}
 <dt class="mt-6 font-semibold">{{ field.label }}</dt>
-{% if field.image_url %}<dd class="my-2"><img class="h-auto max-w-full rounded-lg" src="{{ field.image_url }}" alt="{{ field.label }}" loading="lazy"></dd>
+{% if field.image_media is defined and field.image_media %}<dd class="my-2">{{ od_image(field.image_media, class="h-auto max-w-full rounded-lg", alt=field.label) }}</dd>
+{% elif field.image_url %}<dd class="my-2"><img class="h-auto max-w-full rounded-lg" src="{{ field.image_url }}" alt="{{ field.label }}" loading="lazy"></dd>
+{% elif field.gallery_media is defined and field.gallery_media %}<dd class="my-2 flex flex-wrap gap-3">{% for img in field.gallery_media %}{{ od_image(img, class="h-36 w-48 rounded-lg object-contain", alt=field.label) }}{% endfor %}</dd>
 {% elif field.gallery_urls %}<dd class="my-2 flex flex-wrap gap-3">{% for url in field.gallery_urls %}<img class="h-36 w-48 rounded-lg object-contain" src="{{ url }}" alt="{{ field.label }}" loading="lazy">{% endfor %}</dd>
 {% else %}<dd class="my-2 whitespace-pre-wrap break-words">{{ field.text }}</dd>{% endif %}
 {% endif %}
@@ -192,7 +194,8 @@ pub fn render_archive_with_site_and_config_for_locale(
             return Ok(html);
         }
     }
-    theme::render_content_with_config(DEFAULT_ARCHIVE, &data, fmt_cfg).map_err(ApiError::internal)
+    theme::render_default_content_with_config(DEFAULT_ARCHIVE, &data, fmt_cfg)
+        .map_err(ApiError::internal)
 }
 
 pub fn render_single(
@@ -227,5 +230,6 @@ pub fn render_single_with_context_for_locale(
             return Ok(html);
         }
     }
-    theme::render_content_with_config(DEFAULT_SINGLE, &data, fmt_cfg).map_err(ApiError::internal)
+    theme::render_default_content_with_config(DEFAULT_SINGLE, &data, fmt_cfg)
+        .map_err(ApiError::internal)
 }

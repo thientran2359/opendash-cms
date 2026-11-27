@@ -80,8 +80,17 @@ fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
             HydratedMediaRow {
                 id: img_id.clone(),
                 kind: "image".into(),
+                mime_type: "image/jpeg".into(),
+                version: 1,
                 width: Some(1200),
                 height: Some(630),
+                variants: vec![crate::storage::fields::HydratedMediaVariantRow {
+                    spec: opendash_core::media::MediaVariantSpec::Medium,
+                    format: opendash_core::media::MediaVariantFormat::Webp,
+                    width: 768,
+                    height: 403,
+                    byte_size: 12_345,
+                }],
             },
         ),
         (
@@ -89,8 +98,11 @@ fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
             HydratedMediaRow {
                 id: vid_id.clone(),
                 kind: "video".into(),
+                mime_type: "video/mp4".into(),
+                version: 1,
                 width: Some(1920),
                 height: Some(1080),
+                variants: Vec::new(),
             },
         ),
         (
@@ -98,8 +110,11 @@ fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
             HydratedMediaRow {
                 id: term_img_id.clone(),
                 kind: "image".into(),
+                mime_type: "image/png".into(),
+                version: 1,
                 width: Some(400),
                 height: Some(400),
+                variants: Vec::new(),
             },
         ),
     ]);
@@ -111,7 +126,7 @@ fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
             title: "Post Ten".into(),
             slug: "post-ten".into(),
             url: "/post-ten".into(),
-            cover_url: Some(format!("/media/{img_id}/file")),
+            cover_url: Some(format!("/media/{img_id}/file?v=1")),
             excerpt: "Summary".into(),
             published_at: None,
         },
@@ -132,6 +147,7 @@ fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
         entries: &entries,
         terms: &terms,
         is_preview: false,
+        tag_media_provenance: false,
     };
 
     let mut nonces = RichTextNonceTable::default();
@@ -142,11 +158,21 @@ fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
     assert_eq!(hydrated["headline"], json!("OpenDash V1"));
     assert_eq!(
         hydrated["hero_img"]["url"],
-        json!(format!("/media/{img_id}/file"))
+        json!(format!("/media/{img_id}/file?v=1"))
     );
     assert_eq!(
         hydrated["hero_img"]["thumbnail_url"],
-        json!(format!("/media/{img_id}/thumbnail"))
+        json!(format!("/media/{img_id}/thumbnail?v=1"))
+    );
+    assert_eq!(hydrated["hero_img"]["version"], json!(1));
+    assert_eq!(
+        hydrated["hero_img"]["webp_srcset"],
+        json!(format!("/media/{img_id}/variant/medium.webp?v=1 768w"))
+    );
+    assert!(
+        hydrated["hero_img"]
+            .get(crate::template_sec::MEDIA_PROVENANCE_KEY)
+            .is_none()
     );
     assert_eq!(hydrated["hero_img"]["width"], json!(1200));
     assert_eq!(hydrated["slides"].as_array().unwrap().len(), 2);
@@ -179,7 +205,7 @@ fn hydrates_all_option_field_shapes_with_nonces_and_public_filter() {
     assert_eq!(hydrated["topic"]["kind"], json!("category"));
     assert_eq!(
         hydrated["topic"]["featured_image"]["url"],
-        json!(format!("/media/{term_img_id}/file"))
+        json!(format!("/media/{term_img_id}/file?v=1"))
     );
     assert_eq!(hydrated["banner"]["bg"]["id"], json!(img_id));
     assert_eq!(hydrated["banner"]["btn"], Value::Null);
@@ -289,6 +315,7 @@ fn hydrates_responsive_studio_block_scalars_and_nested_repeater_groups() {
         entries: &entries,
         terms: &terms,
         is_preview: false,
+        tag_media_provenance: false,
     };
     let hydrated = hydrate_field_values(&specs, &raw, &ctx, None, false).unwrap();
     assert_eq!(hydrated["align"], json!("left"));

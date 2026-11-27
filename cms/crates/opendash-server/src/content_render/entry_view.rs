@@ -169,9 +169,11 @@ pub(super) fn build_entry_view_with_defs(
     url: Option<String>,
     terms: &[PublicTermView],
     eligible_public_taxonomies: &[String],
+    media_map: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
 ) -> EntryView {
     let l10n = core_l10n(&record.locale);
     let mut cover_url = None;
+    let mut cover_media = None;
     let mut public_values = BTreeMap::new();
     let mut fields = Vec::with_capacity(ordered_defs.len());
 
@@ -220,23 +222,48 @@ pub(super) fn build_entry_view_with_defs(
             ContentFieldType::Image => "image",
             ContentFieldType::Gallery => "gallery",
         };
-        let image_url = if definition.field_type == ContentFieldType::Image {
-            media_url(value)
+        let (image_url, image_media) = if definition.field_type == ContentFieldType::Image {
+            if let Some(row) = value
+                .as_str()
+                .filter(|id| valid_media_id(id))
+                .and_then(|id| media_map.get(id))
+            {
+                (
+                    Some(format!("/media/{}/file?v={}", row.id, row.version.max(1))),
+                    Some(crate::field_hydrate::hydrate_media_row_for_template(
+                        row, false,
+                    )),
+                )
+            } else {
+                (media_url(value), None)
+            }
         } else {
-            None
+            (None, None)
         };
         if cover_url.is_none() {
             cover_url = image_url.clone();
+            cover_media = image_media.clone();
         }
-        let gallery_urls = if definition.field_type == ContentFieldType::Gallery {
-            value
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(media_url)
-                .collect()
+        let (gallery_urls, gallery_media) = if definition.field_type == ContentFieldType::Gallery {
+            let mut urls = Vec::new();
+            let mut hydrated = Vec::new();
+            for item in value.as_array().into_iter().flatten() {
+                if let Some(row) = item
+                    .as_str()
+                    .filter(|id| valid_media_id(id))
+                    .and_then(|id| media_map.get(id))
+                {
+                    urls.push(format!("/media/{}/file?v={}", row.id, row.version.max(1)));
+                    hydrated.push(crate::field_hydrate::hydrate_media_row_for_template(
+                        row, false,
+                    ));
+                } else if let Some(u) = media_url(item) {
+                    urls.push(u);
+                }
+            }
+            (urls, hydrated)
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
         let text = match definition.field_type {
             ContentFieldType::Image | ContentFieldType::Gallery => String::new(),
@@ -260,6 +287,8 @@ pub(super) fn build_entry_view_with_defs(
             text,
             image_url,
             gallery_urls,
+            image_media,
+            gallery_media,
         });
     }
 
@@ -330,12 +359,86 @@ pub(super) fn build_entry_view_with_defs(
         values: public_values,
         fields,
         cover_url,
+        cover_media,
         terms: terms_map,
         all_terms,
         primary_category,
         ext: BTreeMap::new(),
         theme_ext: BTreeMap::new(),
     }
+}
+
+pub(super) fn rewrite_hydrated_media_preview(val: &mut Value) {
+    let Some(obj) = val.as_object_mut() else {
+        return;
+    };
+    let rewrite_str = |s: &str| {
+        if s.starts_with("/media/") || s.contains(", /media/") {
+            s.replace("/media/", "/api/admin/media/")
+        } else {
+            s.to_owned()
+        }
+    };
+    for key in ["url", "thumbnail_url", "webp_srcset", "fallback_srcset"] {
+        if let Some(Value::String(s)) = obj.get_mut(key) {
+            *s = rewrite_str(s);
+        }
+    }
+    if let Some(Value::Array(variants)) = obj.get_mut("variants") {
+        for item in variants {
+            if let Some(Value::String(u)) = item.as_object_mut().and_then(|m| m.get_mut("url")) {
+                *u = rewrite_str(u);
+            }
+        }
+    }
+}
+
+pub fn collect_entry_media_ids(
+    records: &[&ContentEntryRecord],
+    effective_schema: &EffectiveContentSchema,
+) -> BTreeSet<String> {
+    let mut ids = BTreeSet::new();
+    for record in records {
+        for fe in effective_schema.effective_fields.values() {
+            if fe.effective_status != EffectiveFieldStatus::Active
+                || fe.definition.public_exposure != PublicExposure::Public
+            {
+                continue;
+            }
+            let Some(val) = record.values.get(&fe.definition.key) else {
+                continue;
+            };
+            match fe.definition.field_type {
+                ContentFieldType::Image => {
+                    if let Some(id) = val.as_str().filter(|s| valid_media_id(s)) {
+                        ids.insert(id.to_owned());
+                    }
+                }
+                ContentFieldType::Gallery => {
+                    for item in val.as_array().into_iter().flatten() {
+                        if let Some(id) = item.as_str().filter(|s| valid_media_id(s)) {
+                            ids.insert(id.to_owned());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    ids
+}
+
+pub fn collect_multi_type_entry_media_ids(
+    records: &[ContentEntryRecord],
+    schemas: &BTreeMap<String, EffectiveContentSchema>,
+) -> BTreeSet<String> {
+    let mut ids = BTreeSet::new();
+    for record in records {
+        if let Some(schema) = schemas.get(&record.content_type_key) {
+            ids.extend(collect_entry_media_ids(&[record], schema));
+        }
+    }
+    ids
 }
 
 pub fn entry_view(record: ContentEntryRecord, schema: &ContentTypeDefinition) -> EntryView {
@@ -352,7 +455,16 @@ pub fn entry_view_with_url(
         .iter()
         .filter(|d| d.public_exposure == PublicExposure::Public)
         .collect();
-    build_entry_view_with_defs(&record, &schema.key, &ordered_defs, url, &[], &[])
+    let empty_media = BTreeMap::new();
+    build_entry_view_with_defs(
+        &record,
+        &schema.key,
+        &ordered_defs,
+        url,
+        &[],
+        &[],
+        &empty_media,
+    )
 }
 
 pub fn entry_view_with_context(
@@ -362,6 +474,27 @@ pub fn entry_view_with_context(
     terms: &[PublicTermView],
     eligible_public_taxonomies: &[String],
     max_view_role: FieldRole,
+) -> EntryView {
+    let empty_media = BTreeMap::new();
+    entry_view_with_context_and_media(
+        record,
+        effective_schema,
+        url,
+        terms,
+        eligible_public_taxonomies,
+        max_view_role,
+        &empty_media,
+    )
+}
+
+pub fn entry_view_with_context_and_media(
+    record: &ContentEntryRecord,
+    effective_schema: &EffectiveContentSchema,
+    url: Option<String>,
+    terms: &[PublicTermView],
+    eligible_public_taxonomies: &[String],
+    max_view_role: FieldRole,
+    media_map: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
 ) -> EntryView {
     let mut seen = BTreeSet::new();
     let mut ordered_keys: Vec<&str> = Vec::with_capacity(effective_schema.effective_fields.len());
@@ -401,6 +534,7 @@ pub fn entry_view_with_context(
         url,
         terms,
         eligible_public_taxonomies,
+        media_map,
     )
 }
 
@@ -412,13 +546,35 @@ pub fn authenticated_preview_view_with_context(
     eligible_public_taxonomies: &[String],
     actor_role: FieldRole,
 ) -> EntryView {
-    let view = entry_view_with_context(
+    let empty_media = BTreeMap::new();
+    authenticated_preview_view_with_context_and_media(
         record,
         effective_schema,
         url,
         terms,
         eligible_public_taxonomies,
         actor_role,
+        &empty_media,
+    )
+}
+
+pub fn authenticated_preview_view_with_context_and_media(
+    record: &ContentEntryRecord,
+    effective_schema: &EffectiveContentSchema,
+    url: Option<String>,
+    terms: &[PublicTermView],
+    eligible_public_taxonomies: &[String],
+    actor_role: FieldRole,
+    media_map: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
+) -> EntryView {
+    let view = entry_view_with_context_and_media(
+        record,
+        effective_schema,
+        url,
+        terms,
+        eligible_public_taxonomies,
+        actor_role,
+        media_map,
     );
     rewrite_preview_media_urls(view, &effective_schema.base.descriptor.key)
 }

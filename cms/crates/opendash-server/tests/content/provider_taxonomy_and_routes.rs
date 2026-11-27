@@ -1958,9 +1958,9 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     // Taxonomy Featured Image adds 0052 (`taxonomy_terms.featured_image_media_id`),
     // and Spec B S01 adds 0053 (owner_kind isolation for Theme Functions runtime),
     // and Entry Lifecycle S01 adds 0054 (`content_entries.trashed_at` + lifecycle indexes),
-    // and Unified Field Engine S02 adds 0055 (`theme_option_media_refs.locale`);
+    // and Unified Field Engine S02 adds 0055 (`theme_option_media_refs.locale`) and Responsive Media S01 adds 0056;
     // the 0040→0041 permalink preservation assertions above must still hold.
-    assert_eq!(migration_version, 55);
+    assert_eq!(migration_version, 56);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

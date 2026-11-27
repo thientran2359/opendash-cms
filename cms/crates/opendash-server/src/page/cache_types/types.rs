@@ -82,6 +82,7 @@ pub(crate) fn collect_scoped_css_for_fields(
     path_prefix: Option<&str>,
     node_scope: &str,
     is_preview: bool,
+    hydration_media: &std::collections::BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
     desktop_props: &mut String,
     tablet_props: &mut String,
     mobile_props: &mut String,
@@ -115,6 +116,7 @@ pub(crate) fn collect_scoped_css_for_fields(
                     Some(&field_path),
                     node_scope,
                     is_preview,
+                    hydration_media,
                     desktop_props,
                     tablet_props,
                     mobile_props,
@@ -302,11 +304,11 @@ pub(crate) fn collect_scoped_css_for_fields(
                     .or(default_str)
                     .filter(|s| !s.is_empty() && valid_sha256_media_id(s))
                 {
-                    let url_path = if is_preview {
-                        format!("/api/admin/media/{id}/file")
-                    } else {
-                        format!("/media/{id}/file")
-                    };
+                    let url_path = super::media_render::versioned_media_file_url(
+                        id,
+                        hydration_media,
+                        is_preview,
+                    );
                     desktop_props.push_str(&format!("{var_name}:url(\"{url_path}\");"));
                 }
             }
@@ -368,6 +370,7 @@ pub fn serialize_scoped_block_css(
                         None,
                         &node_scope,
                         is_preview,
+                        &state.hydration_media,
                         &mut desktop_props,
                         &mut tablet_props,
                         &mut mobile_props,
@@ -446,7 +449,7 @@ pub fn render_builder_with_budget_and_base_path(
 ) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
-    let mut html = builder_responsive_css(document, is_preview);
+    let mut html = builder_responsive_css(document, is_preview, &state.hydration_media);
     let block_css = serialize_scoped_block_css(state, document, scope, is_preview)?;
     html.push_str(&block_css);
     if pattern_document {
@@ -581,40 +584,18 @@ pub fn render_builder_with_budget_and_base_path(
                             }
                         }
                         ElementContent::Known(KnownElement::Image(props)) => {
-                            let path = if is_preview {
-                                "/api/admin/media"
-                            } else {
-                                "/media"
-                            };
-                            Some(format!(
-                                "<img src=\"{path}/{id}/file\" alt=\"{alt}\" loading=\"lazy\">",
-                                id = escape_html(&props.media_id),
-                                alt = escape_html(&props.alt)
+                            Some(super::media_render::render_builder_image_html(
+                                props,
+                                &state.hydration_media,
+                                is_preview,
                             ))
                         }
                         ElementContent::Known(KnownElement::Video(props)) => {
-                            let path = if is_preview {
-                                "/api/admin/media"
-                            } else {
-                                "/media"
-                            };
-                            let mut attrs = format!(
-                                "src=\"{path}/{id}/file\" preload=\"metadata\" playsinline",
-                                id = escape_html(&props.media_id),
-                            );
-                            if let Some(poster) = props.poster_image_id.as_deref() {
-                                attrs.push_str(&format!(
-                                    " poster=\"{path}/{poster}/file\"",
-                                    poster = escape_html(poster)
-                                ));
-                            }
-                            if props.controls {
-                                attrs.push_str(" controls");
-                            }
-                            if props.muted {
-                                attrs.push_str(" muted");
-                            }
-                            Some(format!("<video {attrs}></video>"))
+                            Some(super::media_render::render_builder_video_html(
+                                props,
+                                &state.hydration_media,
+                                is_preview,
+                            ))
                         }
                         ElementContent::Known(KnownElement::Button(props)) => {
                             let target_attr = if props.new_tab {
@@ -778,6 +759,7 @@ pub fn render_builder_with_budget_and_base_path(
                                         entries: &state.hydration_entries,
                                         terms: &state.hydration_terms,
                                         is_preview,
+                                        tag_media_provenance: true,
                                     };
                                     let mut local_rt =
                                         crate::template_sec::RichTextNonceTable::default();

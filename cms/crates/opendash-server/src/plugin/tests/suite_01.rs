@@ -1921,7 +1921,18 @@ mod tests {
 
         let media_res = read_captured_kv(&db, "s01-ops", 7).await;
         assert_eq!(media_res["ok"], true);
-        assert_eq!(media_res["data"]["media"]["id"], med_pub);
+        let media_obj = &media_res["data"]["media"];
+        assert_eq!(media_obj["id"], med_pub);
+        assert_eq!(media_obj["version"], 1);
+        assert_eq!(
+            media_obj["url"],
+            format!("/api/admin/media/{med_pub}/file?v=1")
+        );
+        assert_eq!(
+            media_obj["thumbnail_url"],
+            format!("/api/admin/media/{med_pub}/thumbnail?v=1")
+        );
+        assert!(media_obj["variants"].is_array());
 
         let site_opt_res = read_captured_kv(&db, "s01-ops", 8).await;
         assert_eq!(site_opt_res["ok"], true);

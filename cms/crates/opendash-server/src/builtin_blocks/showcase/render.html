@@ -2,7 +2,7 @@
   <div class="od-block-showcase border {{ box_padding.classes }}{% if theme_variant == 'dark' %} bg-slate-900 text-white border-slate-800{% elif theme_variant == 'tinted' %} bg-od-surface-alt text-od-text border-od-border{% elif theme_variant == 'bordered' %} bg-od-surface text-od-text border-2 border-slate-300{% elif theme_variant == 'elevated' %} bg-od-surface text-od-text border-od-border shadow-xl{% else %} bg-od-surface text-od-text border-od-border shadow-sm{% endif %}" data-od-spacing="box_padding" style="border-radius:var(--od-showcase-radius,16px);border-top:4px solid var(--od-showcase-accent,#0284c7);text-align:var(--od-showcase-align,left);">
     {% if hero_card and hero_card.cover_image and hero_card.cover_image.url %}
       <div class="mb-5 overflow-hidden rounded-xl">
-        <img class="h-56 w-full object-cover" src="{{ hero_card.cover_image.url }}" alt="{{ hero_card.cover_image.alt }}" />
+        {{ od_image(hero_card.cover_image, "(min-width: 1024px) 640px, 100vw", "h-56 w-full object-cover") }}
       </div>
     {% endif %}
     <div class="inline-flex items-center gap-2 rounded-full border border-od-border bg-od-surface-alt px-3 py-1 text-xs font-semibold text-od-text mb-3">
@@ -19,7 +19,7 @@
     {% if photos %}
       <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {% for photo in photos %}
-          <img class="h-24 w-full rounded-lg object-cover" src="{{ photo.url }}" alt="{{ photo.alt }}" />
+          {{ od_image(photo, "(min-width: 640px) 25vw, 50vw", "h-24 w-full rounded-lg object-cover") }}
         {% endfor %}
       </div>
     {% endif %}

@@ -152,6 +152,12 @@ pub(crate) fn resolve_collection_source(
                 {
                     Some(UrlSourceKind::TrustedRawUrl)
                 }
+                Expr::Var(v)
+                    if g.name == "gallery_media"
+                        && scopes.lookup(v.id) == Some(&UrlSourceKind::TrustedField) =>
+                {
+                    Some(UrlSourceKind::FieldNode(FieldTemplateNode::Media))
+                }
                 _ => None,
             }
         }

@@ -8,6 +8,8 @@ pub struct FieldView {
     pub text: String,
     pub image_url: Option<String>,
     pub gallery_urls: Vec<String>,
+    pub image_media: Option<Value>,
+    pub gallery_media: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -268,6 +270,7 @@ pub struct EntryView {
     pub values: BTreeMap<String, Value>,
     pub fields: Vec<FieldView>,
     pub cover_url: Option<String>,
+    pub cover_media: Option<Value>,
     pub terms: BTreeMap<String, Vec<PublicTermView>>,
     pub all_terms: Vec<PublicTermView>,
     pub primary_category: Option<PublicTermView>,
@@ -300,6 +303,9 @@ pub(super) fn media_url(value: &Value) -> Option<String> {
 pub(super) fn rewrite_preview_media_urls(mut view: EntryView, type_key: &str) -> EntryView {
     let admin_media = |url: &str| url.replacen("/media/", "/api/admin/media/", 1);
     view.cover_url = view.cover_url.as_deref().map(admin_media);
+    if let Some(ref mut cm) = view.cover_media {
+        rewrite_hydrated_media_preview(cm);
+    }
     for field in &mut view.fields {
         field.image_url = field.image_url.as_deref().map(admin_media);
         field.gallery_urls = field
@@ -307,6 +313,12 @@ pub(super) fn rewrite_preview_media_urls(mut view: EntryView, type_key: &str) ->
             .iter()
             .map(|url| admin_media(url))
             .collect();
+        if let Some(ref mut im) = field.image_media {
+            rewrite_hydrated_media_preview(im);
+        }
+        for gm in &mut field.gallery_media {
+            rewrite_hydrated_media_preview(gm);
+        }
     }
     if view.url.is_none() {
         view.url = Some(format!(
