@@ -19872,3 +19872,15 @@ msgstr "Tệp gốc"
 #: admin:feature.operations.reconcile.showing_first_50
 msgid "Showing first 50 of {{value1}} orphaned candidates."
 msgstr "Hiển thị 50 mục đầu tiên trong tổng số {{value1}} tệp mồ côi."
+
+#: admin:shell.install
+msgid "Install"
+msgstr "Cài đặt"
+
+#: admin:shell.template_library
+msgid "Template library"
+msgstr "Thư viện mẫu"
+
+#: admin:feature.themes.themespanel.install_v3_zip_subtitle
+msgid "Upload a Theme v3 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder."
+msgstr "Tải lên gói Theme v3 dạng ZIP. Kích hoạt theme không làm thay đổi block, trường hay dữ liệu đã lưu trong trình dựng trang."

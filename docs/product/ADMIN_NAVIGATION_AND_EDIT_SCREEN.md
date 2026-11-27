@@ -8,24 +8,25 @@ Người quen WordPress có thể tìm đúng công cụ trong Admin, quản lý
 
 ## 2. Nhóm Menu Chính, Submenu và Hash Routes
 
-Thanh điều hướng Admin (desktop sidebar thu gọn được + mobile drawer) tổ chức thành `Tổng quan` và 3 nhóm có nhãn rõ ràng. Bảng dùng nhãn Tiếng Việt; giao diện mặc định là English (`en`), và nhãn thay đổi theo CMS Language.
+Thanh điều hướng Admin (desktop sidebar thu gọn được + mobile drawer, áp dụng Pure Accordion cho mục cha có submenu và thẻ `<a href>` cho mục lá/mục con) tổ chức thành `Tổng quan` và 3 nhóm có nhãn rõ ràng, kèm lối vào **Hồ sơ của tôi** (`#/users/profile`) đặt cố định trên thanh đầu trang (`#user-info`) và chân sidebar (`.od-sidebar-bottom`) để mọi vai trò (kể cả trên mobile) truy cập trực tiếp. Bảng dùng nhãn Tiếng Việt; giao diện mặc định là English (`en`), và nhãn thay đổi theo CMS Language.
 
 | Nhóm | Menu chính | Submenu & Hash Route chính | Quyền |
 | --- | --- | --- | --- |
 | — | **Tổng quan** | Dashboard (`#/dashboard`) | Admin, Editor |
 | **Nội dung** | **Bài viết** | Tất cả bài viết (`#/posts`) · Thêm mới (`#/posts/new`) · Chuyên mục (`#/posts/categories`) · Thẻ (`#/posts/tags`) | Admin, Editor |
 | **Nội dung** | **Trang** | Tất cả trang (`#/pages`) · Thêm mới (`#/pages/new`) | Admin, Editor |
-| **Nội dung** | **CPT tùy chỉnh** | Danh sách (`#/cpt/:typeKey`) · Thêm mới (`#/cpt/:typeKey/new`) · Taxonomy gắn với CPT | Admin, Editor |
-| **Nội dung** | **Thư viện media** | Media (`#/media`) | Admin, Editor |
-| **Nội dung** | **Liên hệ** | Cấu hình và quản lý liên hệ (`#/settings/contact`) | Admin |
+| **Nội dung** | **CPT tùy chỉnh** | Danh sách (`#/cpt/:typeKey`) · Thêm mới (`#/cpt/:typeKey/new`) · Taxonomy gắn với CPT (nhãn số nhiều `Chuyên mục`/`Thẻ` với taxonomy tích hợp) | Admin, Editor |
+| **Nội dung** | **Thư viện media** | Media (`#/media`, có liên kết Admin tới Đối soát Media) | Admin, Editor |
+| **Nội dung** | **Liên hệ** | Cấu hình và quản lý liên hệ (`#/contact`, alias `#/settings/contact`, liên thông hai chiều với SMTP) | Admin |
+| **Giao diện** | **Theme** | Themes đã cài (`#/appearance/themes`) · Cài theme (`#/appearance/themes/install`, alias `#/themes/install`) | Admin |
 | **Giao diện** | **Tùy chỉnh giao diện** | OpenDash Studio (`#/studio`) | Admin |
-| **Giao diện** | **Theme** | Themes đã cài (`#/appearance/themes`) · Cài theme (`#/appearance/library`) | Admin |
-| **Giao diện** | **Patterns** | Tất cả Pattern (`#/patterns`) · Thêm Pattern (`#/patterns/new`) | Admin |
-| **Hệ thống** | **Cấu trúc nội dung** | Loại nội dung & Trường (`#/appearance/content-types`) · Taxonomy tùy chỉnh (`#/taxonomy/definitions`) | Admin |
+| **Giao diện** | **Menus** | Quản lý Menu & Vị trí (`#/studio?panel=menus`, alias `#/appearance/menus`) | Admin |
+| **Giao diện** | **Patterns** | Tất cả Pattern (`#/patterns`) · Thêm Pattern (`#/patterns/new`) · Thư viện mẫu (`#/appearance/library`) | Admin |
+| **Hệ thống** | **Cấu trúc nội dung** | Loại nội dung & Trường (`#/content-structure/content-types`, alias `#/appearance/content-types`, `#/settings/content-types`) · Taxonomy tùy chỉnh (`#/content-structure/taxonomies`, alias `#/taxonomy/definitions`) | Admin |
 | **Hệ thống** | **Plugins** | Plugins đã cài (`#/plugins`) · Cài plugin (`#/plugins/install`) | Admin |
-| **Hệ thống** | **Người dùng** | Tất cả người dùng (`#/users`) · Thêm người dùng (`#/users/new`) · Hồ sơ của tôi (`#/users/profile`) | Admin; Editor chỉ thấy Hồ sơ của tôi |
-| **Hệ thống** | **Công cụ** | Sao lưu & Phục hồi (`#/tools/backup`) · Đối soát Media (`#/tools/media-reconcile`) · Chuyển hướng & 404 (`#/tools/redirects`, alias `#/tools/404-log`) · Tình trạng hệ thống (`#/tools/health`) | Admin |
-| **Hệ thống** | **Cài đặt** | Tổng quát (`#/settings/general`) · Đa ngôn ngữ (`#/settings/multilingual`) · Trang chủ & Bài viết (`#/settings/reading`) · Đường dẫn tĩnh (`#/settings/permalinks`) · SEO (`#/settings/seo`) · Thông báo Email (SMTP) (`#/settings/smtp`) | Admin |
+| **Hệ thống** | **Người dùng** | Tất cả người dùng (`#/users`) · Thêm người dùng (`#/users/new`) | Admin *(Editor không thấy nhóm Hệ thống)* |
+| **Hệ thống** | **Công cụ** | Chuyển hướng & 404 (`#/tools/redirects`, alias `#/tools/404-log`) · Sao lưu & Phục hồi (`#/tools/backup`) · Đối soát Media (`#/tools/media-reconcile`) · Tình trạng hệ thống (`#/tools/health`) | Admin |
+| **Hệ thống** | **Cài đặt** | Tổng quát (`#/settings/general`) · Trang chủ & Bài viết (`#/settings/reading`) · Đường dẫn tĩnh (`#/settings/permalinks`) · SEO trang chủ (`#/settings/seo`, liên thông tới Chuyển hướng & 404) · Đa ngôn ngữ (`#/settings/multilingual`) · Thông báo Email (SMTP) (`#/settings/smtp`, liên thông về Liên hệ) | Admin |
 
 - Mỗi màn hình có URL riêng hỗ trợ reload, back/forward; ẩn menu không thay thế kiểm quyền server.
 - Tổng quát lưu CMS Language (`cms_locale`) toàn site; màn hình Đa ngôn ngữ riêng quản lý ngôn ngữ nội dung, công tắc `multilingual_enabled`, xóa và dọn dữ liệu mồ côi. Tắt đa ngôn ngữ ẩn các công cụ ngôn ngữ phụ nhưng giữ dữ liệu và vẫn cho phép mở màn hình cấu hình này.
