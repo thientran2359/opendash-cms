@@ -43,7 +43,7 @@ SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from media_smoke import make_png  # noqa: E402
+from e2e_helpers import make_png  # noqa: E402
 
 FORBIDDEN_LIVE_PORT = 18964
 ADMIN_USER = "admin"
@@ -479,7 +479,7 @@ def build_canonical_seed(
                 )
                 tag_ids[loc][tname] = int(term["id"])
 
-        # Upload 20 deterministic PNGs via media_smoke.make_png(seed=1..20, 2x2).
+        # Upload 20 deterministic PNGs via e2e_helpers.make_png(seed=1..20, 2x2).
         for seed in range(1, 21):
             png = make_png(seed=seed, width=2, height=2)
             st, data, _ = srv.client.raw(

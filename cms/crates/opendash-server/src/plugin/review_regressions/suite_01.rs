@@ -11,7 +11,7 @@ async fn invocation_timeout_must_not_commit_later() {
             std::thread::spawn(move || {
                 let mut buf = [0; 4096];
                 let _ = socket.read(&mut buf);
-                std::thread::sleep(Duration::from_secs(3));
+                std::thread::sleep(Duration::from_millis(800));
             });
         }
     });
@@ -80,20 +80,23 @@ async fn invocation_timeout_must_not_commit_later() {
         ..Default::default()
     };
     let result = PluginRuntime::new()
-        .run_plugin(
+        .run_plugin_with_mode(
             wat::parse_str(wat).unwrap(),
             manifest,
             json!({}),
             pool.clone(),
             "review-timeout".into(),
             true,
+            None,
+            opendash_core::hooks::HookExecutionMode::Standard,
+            Some(Duration::from_millis(1200)),
         )
         .await;
     assert!(
         matches!(result, Err(PluginError::Timeout)),
         "expected timeout, got {result:?}"
     );
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_millis(900)).await;
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM plugin_kv WHERE key='late'")
         .fetch_one(&pool)
         .await
@@ -128,7 +131,7 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
             std::thread::spawn(move || {
                 let mut buf = [0; 4096];
                 let _ = socket.read(&mut buf);
-                std::thread::sleep(Duration::from_millis(1400));
+                std::thread::sleep(Duration::from_millis(350));
                 let _ = socket.write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 );
@@ -145,7 +148,7 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
         .filename(&file)
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete)
-        .busy_timeout(Duration::from_secs(5));
+        .busy_timeout(Duration::from_millis(1500));
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(3)
         .connect_with(options)
@@ -156,14 +159,14 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
         .await
         .unwrap();
 
-    // Lock 1: Writer holds lock, blocking INSERT from ~4200ms to 4600ms (400ms wait)
+    // Lock 1: Writer holds lock, blocking INSERT from ~1050ms to 1250ms (200ms wait)
     let mut writer_lock = pool.begin().await.unwrap();
     sqlx::query("INSERT INTO plugin_kv (plugin_id, key, value_json, updated_at) VALUES ('holder','wlock','1','now')")
         .execute(&mut *writer_lock)
         .await
         .unwrap();
 
-    // Lock 2: Reader holds SHARED lock, blocking COMMIT from 4600ms to 5050ms (450ms wait)
+    // Lock 2: Reader holds SHARED lock, blocking COMMIT from 1250ms to 1550ms (300ms wait)
     let mut reader_lock = pool.begin().await.unwrap();
     sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM plugin_kv")
         .fetch_one(&mut *reader_lock)
@@ -171,12 +174,12 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
         .unwrap();
 
     let unlock = tokio::spawn(async move {
-        // Unblock INSERT at 4600ms
-        tokio::time::sleep(Duration::from_millis(4600)).await;
+        // Unblock INSERT at 1250ms
+        tokio::time::sleep(Duration::from_millis(1250)).await;
         let _ = writer_lock.rollback().await;
 
-        // Unblock COMMIT at 5050ms (past the 5000ms deadline)
-        tokio::time::sleep(Duration::from_millis(450)).await;
+        // Unblock COMMIT at 1550ms (past the 1500ms deadline)
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _ = reader_lock.rollback().await;
     });
 
@@ -237,13 +240,16 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
     };
 
     let result = PluginRuntime::new()
-        .run_plugin(
+        .run_plugin_with_mode(
             wat::parse_str(wat).unwrap(),
             manifest,
             json!({}),
             pool.clone(),
             "review-commit-success".into(),
             true,
+            None,
+            opendash_core::hooks::HookExecutionMode::Standard,
+            Some(Duration::from_millis(1500)),
         )
         .await;
 
