@@ -3,7 +3,7 @@ use std::sync::Mutex;
 #[tokio::test]
 async fn ordered_handlers_continue_after_failure_and_timeout() {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
+    crate::storage::MIGRATOR.run(&pool).await.unwrap();
     let mut dispatcher = HookDispatcher::new(Arc::new(PluginManager::new(pool, false)));
     let seen = Arc::new(Mutex::new(Vec::new()));
     for (id, priority) in [("core/last", 30), ("core/first", 10)] {
@@ -90,7 +90,7 @@ async fn async_hook_queue_drains_for_maintenance_and_survives_drop() {
         .filename(&db_path)
         .create_if_missing(true);
     let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
-    sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
+    crate::storage::MIGRATOR.run(&pool).await.unwrap();
 
     let coord = Arc::new(
         crate::operations::SiteCoordinator::acquire(crate::paths::SitePaths::from_parts(

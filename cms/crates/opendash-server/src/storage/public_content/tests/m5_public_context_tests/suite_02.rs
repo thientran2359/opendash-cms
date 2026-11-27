@@ -7,7 +7,7 @@ async fn c1_visibility_hides_single_archive_taxonomy_media_seo_and_sitemap() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key,definition_json,owner_kind)
            VALUES('news', '{"key":"news","label":"News","fields":[{"key":"hero","label":"Hero","type":"media"}],"settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":["editor","featured_image"]}}', 'user')"#,
@@ -235,7 +235,7 @@ async fn s01_generic_builder_body_and_media_follow_capability_and_publication_wi
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key, definition_json, owner_kind)
             VALUES('project', '{"key":"project","label":"Project","fields":[],"settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
@@ -370,7 +370,7 @@ async fn s01_one_hop_pattern_acl_and_private_cpt_follow_unified_body_without_con
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key, definition_json, owner_kind)
             VALUES('service', '{"key":"service","label":"Service","fields":[],"settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,

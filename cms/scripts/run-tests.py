@@ -582,6 +582,14 @@ def canonical_tmpdir_env(base_env: dict[str, str], platform: str | None = None) 
     return env
 
 
+def test_runner_env(base_env: dict[str, str], platform: str | None = None) -> dict[str, str]:
+    """Build subprocess environment with canonical TMPDIR and bounded default parallelism."""
+    env = canonical_tmpdir_env(base_env, platform=platform)
+    if not env.get("RUST_TEST_THREADS", "").strip():
+        env["RUST_TEST_THREADS"] = "4"
+    return env
+
+
 def build_cargo_commands(plan: SelectionPlan, release: bool) -> list[list[str]]:
     base = ["cargo", "test", "--manifest-path", str(CARGO_MANIFEST), "--locked"]
     if release:
@@ -722,6 +730,16 @@ class RunTestsSelfTest(unittest.TestCase):
         env = canonical_tmpdir_env({"TMPDIR": "/var/tmp"}, platform="darwin")
         self.assertTrue(env["TMPDIR"].startswith("/private/"))
 
+    def test_runner_env_defaults_rust_test_threads_to_4(self) -> None:
+        env = test_runner_env({"TMPDIR": "/private/tmp"}, platform="linux")
+        self.assertEqual(env["RUST_TEST_THREADS"], "4")
+
+    def test_runner_env_preserves_explicit_rust_test_threads(self) -> None:
+        env = test_runner_env(
+            {"TMPDIR": "/private/tmp", "RUST_TEST_THREADS": "8"}, platform="linux"
+        )
+        self.assertEqual(env["RUST_TEST_THREADS"], "8")
+
 
 def run_self_test() -> int:
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RunTestsSelfTest)
@@ -833,7 +851,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    env = canonical_tmpdir_env(dict(os.environ))
+    env = test_runner_env(dict(os.environ))
     started = time.monotonic()
     for cmd in commands:
         printable = " ".join(cmd)

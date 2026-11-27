@@ -74,7 +74,7 @@ fn canonical_block_revision_digest_detects_disk_tampering() {
 #[tokio::test]
 async fn install_rejects_cross_provider_claim_before_disk_staging() {
     let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     let schema = sample_schema();
     let schema_json = serde_json::to_string(&schema).unwrap();
     sqlx::query(

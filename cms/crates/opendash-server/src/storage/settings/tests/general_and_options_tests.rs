@@ -69,7 +69,7 @@ async fn cms_locale_is_global_canonical_and_backward_compatible() {
     crate::storage::content::preflight_builtin_key_collisions(&db)
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     let initial = get_general(&db).await.unwrap();
     assert_eq!(initial.cms_locale, "en");
     let input = |cms_locale: Option<&str>| GeneralSettingsInput {
@@ -161,7 +161,7 @@ async fn global_site_options_crud_cas_empty_url_and_unified_theme_options() {
     crate::storage::content::preflight_builtin_key_collisions(&db)
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
 
     let snap = get_global_site_options(&db).await.unwrap();
     assert_eq!(snap.version, 1);
@@ -285,7 +285,7 @@ async fn public_theme_options_merge_locale_overlays_over_global_defaults() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         "INSERT INTO site_locales (code, bcp47_tag, label, direction, is_default, enabled, position)
          VALUES ('en', 'en', 'English', 'ltr', 0, 1, 1)",
@@ -370,7 +370,7 @@ async fn translatable_media_gallery_group_repeater_and_orphan_locale_cleanup_wor
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         "INSERT INTO site_locales (code, bcp47_tag, label, direction, is_default, enabled, position)
          VALUES ('en', 'en', 'English', 'ltr', 0, 1, 1)",
