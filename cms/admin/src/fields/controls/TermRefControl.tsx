@@ -60,7 +60,7 @@ export const TermRefControl: React.FC<{
   onChange,
   onApiError,
 }) => {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const id = useId();
   const multiple = Boolean(field.multiple);
   const maxItems = Math.max(1, Math.min(50, field.max_items ?? 50));
@@ -125,7 +125,7 @@ export const TermRefControl: React.FC<{
       })
       .catch(err => {
         if (!controller.signal.aborted) {
-          onApiError(err, t('fields.errors.load_terms'));
+          onApiError(err, __("Could not load taxonomy terms."));
         }
       })
       .finally(() => {
@@ -140,7 +140,7 @@ export const TermRefControl: React.FC<{
       <div className="space-y-1" data-testid={`field-term-ref-${field.key}`}>
         <FieldLabelHeader label={field.label} required={field.required} />
         <p className="rounded border border-dashed border-zinc-300 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-500">
-          {t('fields.term_ref.select_taxonomy_first')}
+          {__("Select a taxonomy in the controlling field first.")}
         </p>
       </div>
     );
@@ -179,7 +179,7 @@ export const TermRefControl: React.FC<{
           onChange={e => onChange(e.target.value ? Number(e.target.value) : null)}
           className={STUDIO_INPUT_CLASS}
         >
-          <option value="">{loading ? t('fields.common.loading') : t('fields.select.empty_option')}</option>
+          <option value="">{loading ? __("Loading…") : __("— Select —")}</option>
           {unknownIds.map(uid => (
             <option key={`unknown-${uid}`} value={String(uid)}>
               #{uid}
@@ -207,7 +207,7 @@ export const TermRefControl: React.FC<{
             onClick={() => onChange(null)}
             className="text-[11px] text-sky-700 hover:underline"
           >
-            {t('fields.common.clear')}
+            {__("Clear")}
           </button>
         )}
         <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-zinc-200 bg-white p-2">
@@ -250,7 +250,7 @@ export const TermRefControl: React.FC<{
                   disabled={disabled}
                   onClick={() => toggleMulti(tid)}
                   className="text-sky-700 hover:text-rose-700"
-                  aria-label={t('fields.common.remove')}
+                  aria-label={__("Remove")}
                 >
                   ×
                 </button>
@@ -263,7 +263,7 @@ export const TermRefControl: React.FC<{
           type="search"
           value={search}
           disabled={disabled}
-          placeholder={t('fields.term_ref.search_placeholder')}
+          placeholder={__("Filter terms…")}
           onChange={e => setSearch(e.target.value)}
           className={STUDIO_INPUT_CLASS}
         />
@@ -317,15 +317,15 @@ export const TermRefControl: React.FC<{
         type="search"
         value={search}
         disabled={disabled}
-        placeholder={t('fields.term_ref.search_placeholder')}
+        placeholder={__("Filter terms…")}
         onChange={e => setSearch(e.target.value)}
         className={STUDIO_INPUT_CLASS}
       />
       <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-zinc-200 bg-white p-2">
         {loading ? (
-          <p className="text-xs text-zinc-500">{t('fields.common.loading')}</p>
+          <p className="text-xs text-zinc-500">{__("Loading…")}</p>
         ) : filteredTerms.length === 0 ? (
-          <p className="text-xs italic text-zinc-400">{t('fields.term_ref.empty')}</p>
+          <p className="text-xs italic text-zinc-400">{__("No terms found.")}</p>
         ) : (
           filteredTerms.map(({ term, depth }) => {
             const checked = selectedIds.includes(term.id);

@@ -40,7 +40,7 @@
 
 1. **`F-01` (`Major` -> RESOLVED):** Bổ sung khóa dịch `feature.taxonomy.taxonomypage.parent_prefix` (`"Parent: {{parent}}"` / `"Cha: {{parent}}"`) & `.extensions` thay thế `"Cha: ..."` trong [`TaxonomyPage.tsx`](../../cms/admin/src/features/taxonomy/TaxonomyPage.tsx), đồng thời thay toàn bộ `'vi'` hardcode trong `localeCompare`/`toLocaleLowerCase` bằng `getEffectiveBcp47()` trên 4 module taxonomy.
 2. **`F-02` (`Minor` -> RESOLVED):** Chỉnh điều kiện `size_hint().upper()` tại [`cms/crates/opendash-server/src/i18n.rs`](../../cms/crates/opendash-server/src/i18n.rs) sang `.is_some_and(|n| n > MAX_LOCALIZED_ERROR_BYTES as u64)` để stream không rõ độ dài vẫn đi qua bộ đệm có chặn `1 MiB` (`ErrorBodyReplay`), kèm unit test mới `error_body_limit_buffers_unsized_streams_until_cap`.
-3. **`F-03`, `F-04`, `F-07` (`Minor`/`Nit` -> RESOLVED):** Dịch `studio.copy_options`/`paste_options` trong [`vi.ts`](../../cms/admin/src/i18n/locales/vi.ts); chuẩn hóa toàn bộ nhãn/placeholder còn sót ở 13 file React (`2424` khóa cân bằng 100%); đồng bộ `'Đã chèn bản sao'` trong [`template_library_e2e.py`](../../cms/scripts/template_library_e2e.py).
+3. **`F-03`, `F-04`, `F-07` (`Minor`/`Nit` -> RESOLVED):** Dịch `studio.copy_options`/`paste_options` trong `cms/admin/src/i18n/locales/vi.ts` (nay đã chuyển sang [`vi.po`](../../cms/l10n/vi.po)); chuẩn hóa toàn bộ nhãn/placeholder còn sót ở 13 file React (`2424` khóa cân bằng 100%); đồng bộ `'Đã chèn bản sao'` trong [`template_library_e2e.py`](../../cms/scripts/template_library_e2e.py).
 
 ---
 

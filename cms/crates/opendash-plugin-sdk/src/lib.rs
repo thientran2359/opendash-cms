@@ -8,9 +8,9 @@ pub use serde_json;
 
 pub use host::{
     content_delete, content_get, content_list, content_purge, content_restore, content_save,
-    content_trash_get, content_trash_list, http_request, kv_delete, kv_get, kv_list, kv_set, log,
-    media_get, plugin_secret_get, plugin_settings_get, read_envelope, site_options_get,
-    taxonomy_list, write_output,
+    content_trash_get, content_trash_list, http_request, kv_delete, kv_get, kv_list, kv_set,
+    l10n_translate, log, media_get, plugin_secret_get, plugin_settings_get, read_envelope,
+    site_options_get, taxonomy_list, write_output,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use mock::{MockHost, MockHostOutcome, run_in_mock_host};

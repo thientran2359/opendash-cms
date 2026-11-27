@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, _x, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import {
@@ -42,7 +42,7 @@ export const ThemesPanel: React.FC<Props> = ({
   onInstalled,
   onActivated,
 }) => {
-  const { t: translate } = useI18n();
+  const { __, _x } = useI18n();
   const [data, setData] = useState<ThemesSummary | null>(null);
   const [busy, setBusy] = useState(false);
   // The chosen revision is an explicit Admin draft, not the active selection.
@@ -95,8 +95,8 @@ export const ThemesPanel: React.FC<Props> = ({
       return mounted.current;
     } catch (cause) {
       if (mounted.current) {
-        setError(cause instanceof Error ? cause.message : tStatic('feature.themes.themespanel.could_not_load_themes'));
-        onErrorRef.current(cause, tStatic('feature.themes.themespanel.could_not_load_themes'));
+        setError(cause instanceof Error ? cause.message : _x("Could not load themes.", "feature.themes"));
+        onErrorRef.current(cause, _x("Could not load themes.", "feature.themes"));
       }
       return false;
     } finally {
@@ -121,13 +121,13 @@ export const ThemesPanel: React.FC<Props> = ({
       if (mounted.current) {
         setFnSettings(saved);
         setFnDraft(saved.values);
-        setFnNotice(tStatic('feature.themes.themespanel.theme_functions_saved'));
+        setFnNotice(__("Theme Functions settings saved."));
       }
     } catch (cause) {
       if (mounted.current) {
-        setFnError(cause instanceof Error ? cause.message : tStatic('api.themes.save_theme_functions_settings'));
+        setFnError(cause instanceof Error ? cause.message : __("Could not save Theme Functions settings."));
       }
-      onErrorRef.current(cause, tStatic('api.themes.save_theme_functions_settings'));
+      onErrorRef.current(cause, __("Could not save Theme Functions settings."));
     } finally {
       if (mounted.current) setFnSaving(false);
     }
@@ -146,9 +146,9 @@ export const ThemesPanel: React.FC<Props> = ({
       if (mounted.current) setFnLogs(logsResp.items);
     } catch (cause) {
       if (mounted.current) {
-        setFnError(cause instanceof Error ? cause.message : tStatic('api.themes.run_theme_action'));
+        setFnError(cause instanceof Error ? cause.message : __("Could not execute theme action."));
       }
-      onErrorRef.current(cause, tStatic('api.themes.run_theme_action'));
+      onErrorRef.current(cause, __("Could not execute theme action."));
     } finally {
       if (mounted.current) setRunningActionId(null);
     }
@@ -165,13 +165,13 @@ export const ThemesPanel: React.FC<Props> = ({
       const item = await installTheme(file, csrfToken);
       if (isV3ThemeInstall(item)) {
         setSelectedRevisionId(item.revision_id);
-        setNotice(tStatic('feature.themes.themespanel.installed_value1_v_value2_revision_value3_not_activated', { value1: item.theme_id, value2: item.version, value3: item.revision_id.slice(0, 16) }));
+        setNotice(__("Installed {{value1}} v{{value2}} (revision {{value3}}…). Not activated.", { value1: item.theme_id, value2: item.version, value3: item.revision_id.slice(0, 16) }));
       }
       onInstalled();
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : tStatic('feature.themes.themespanel.could_not_install_the_theme'));
-      onErrorRef.current(cause, tStatic('feature.themes.themespanel.could_not_install_the_theme'));
+      setError(cause instanceof Error ? cause.message : __("Could not install the theme."));
+      onErrorRef.current(cause, __("Could not install the theme."));
     } finally {
       setBusy(false);
     }
@@ -194,14 +194,14 @@ export const ThemesPanel: React.FC<Props> = ({
       setImportOutcome(null);
       setAckPublic(false);
       onActivated();
-      if (reloaded) setNotice(tStatic('feature.themes.themespanel.activated_the_selected_revision_content_menus_and_saved_options_were_retained'));
-      else setError(tStatic('feature.themes.themespanel.activation_was_requested_but_server_status_could_not_be_refreshed_the_selected_r'));
+      if (reloaded) setNotice(__("Activated the selected revision. Content, menus and saved options were retained."));
+      else setError(__("Activation was requested but server status could not be refreshed. The selected revision is retained."));
     } catch (cause) {
       const stale = cause instanceof ApiClientError && cause.status === 412;
       setError(stale
-        ? tStatic('feature.themes.themespanel.the_theme_changed_in_another_tab_412_the_selected_revision_is_retained_reload_to')
-        : cause instanceof Error ? cause.message : tStatic('feature.themes.themespanel.could_not_activate_the_revision'));
-      onErrorRef.current(cause, tStatic('feature.themes.themespanel.could_not_activate_the_revision'));
+        ? __("The theme changed in another tab (412). The selected revision is retained. Reload to see the latest version before retrying.")
+        : cause instanceof Error ? cause.message : __("Could not activate the revision."));
+      onErrorRef.current(cause, __("Could not activate the revision."));
     } finally {
       setBusy(false);
     }
@@ -213,36 +213,36 @@ export const ThemesPanel: React.FC<Props> = ({
     : null;
 
   return (
-    <section className="min-w-0 space-y-5" aria-label={translate('feature.themes.themespanel.manage_themes')} data-testid="themes-panel">
+    <section className="min-w-0 space-y-5" aria-label={__("Manage themes")} data-testid="themes-panel">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{translate('feature.themes.themespanel.appearance_themes')}</p>
-          <h2 className="mt-1.5 text-xl font-bold tracking-tight text-zinc-950">{translate('feature.themes.themespanel.manage_themes')}</h2>
-          <p className="mt-1 text-sm text-zinc-600">{translate('feature.themes.themespanel.activating_a_theme_does_not_change_blocks_fields_or_data_saved_in_the_builder')}</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{__("Appearance / Themes")}</p>
+          <h2 className="mt-1.5 text-xl font-bold tracking-tight text-zinc-950">{__("Manage themes")}</h2>
+          <p className="mt-1 text-sm text-zinc-600">{__("Activating a theme does not change blocks, fields or data saved in the builder.")}</p>
         </div>
-        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>{translate('feature.plugins.pluginspanel.reload_list')}</AdminButton>
+        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>{__("Reload list")}</AdminButton>
       </div>
       <label className="block rounded-xl border border-dashed border-zinc-300 bg-zinc-50/70 p-4 transition-colors hover:border-od-accent/60 hover:bg-od-accent-soft/25">
-        <span className="block text-sm font-semibold text-zinc-900">{translate('feature.themes.themespanel.install_theme_from_zip')}</span>
-        <span className="mt-0.5 block text-xs text-zinc-600">{translate('feature.themes.themespanel.theme_v3_manifest_version_3_theme_json_templates_parts_and_declared_assets')}</span>
+        <span className="block text-sm font-semibold text-zinc-900">{__("Install theme from ZIP")}</span>
+        <span className="mt-0.5 block text-xs text-zinc-600">{__("Theme v3 (manifest_version=3, theme.json, templates, parts and declared assets).")}</span>
         <input data-testid="themes-upload" type="file" accept=".zip,application/zip" onChange={upload} disabled={!csrfToken || busy} className="mt-3 block max-w-full text-sm text-zinc-700 file:mr-3 file:rounded-md file:border file:border-zinc-300 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-zinc-800 hover:file:bg-zinc-50" />
       </label>
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-2.5">
-        <h3 className="text-base font-semibold text-zinc-900">{translate('feature.themes.themespanel.installed')}{v3Revisions.length}{' '}{translate('feature.themes.themespanel.v3_revisions')}</h3>
+        <h3 className="text-base font-semibold text-zinc-900">{__("Installed (")}{v3Revisions.length}{' '}{__("v3 revisions)")}</h3>
         {!loading && data && (
-          <p className="text-xs text-zinc-600" data-testid="active-theme">{translate('feature.themes.themespanel.active_theme')}{' '}<strong className="font-semibold text-zinc-900">{data.selection.source_format === 'v3' ? `${data.selection.theme_id} (v3)` : translate('feature.themes.themespanel.no_theme')}</strong>{' '}{translate('feature.themes.themespanel.selected_version')}{' '}{data.selection.version}
+          <p className="text-xs text-zinc-600" data-testid="active-theme">{__("Active theme:")}{' '}<strong className="font-semibold text-zinc-900">{data.selection.source_format === 'v3' ? `${data.selection.theme_id} (v3)` : __("No theme")}</strong>{' '}{__("· Selected version")}{' '}{data.selection.version}
           </p>
         )}
       </div>
-      {loading && <p role="status" className="text-sm text-zinc-600">{translate('feature.themes.themespanel.loading_themes')}</p>}
+      {loading && <p role="status" className="text-sm text-zinc-600">{__("Loading themes…")}</p>}
       {!loading && data && (
         <>
-          {v3Revisions.length === 0 && <p className="text-sm text-zinc-500">{translate('feature.themes.themespanel.no_themes_yet_install_a_zip_to_get_started')}</p>}
+          {v3Revisions.length === 0 && <p className="text-sm text-zinc-500">{__("No themes yet. Install a ZIP to get started.")}</p>}
           {v3Revisions.length > 0 && (
-            <section className="space-y-3" aria-label={translate('feature.themes.themespanel.theme_v3_revisions')} data-testid="theme-v3-revisions">
-              <h4 className="text-sm font-semibold text-zinc-700">{translate('feature.themes.themespanel.installed_v3_revisions')}{v3Revisions.length})</h4>
+            <section className="space-y-3" aria-label={__("Theme v3 revisions")} data-testid="theme-v3-revisions">
+              <h4 className="text-sm font-semibold text-zinc-700">{__("Installed v3 revisions (")}{v3Revisions.length})</h4>
               <ul className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
                 {v3Revisions.map(revision => {
                   const isActive = data.selection.revision_id === revision.revision_id;
@@ -258,14 +258,14 @@ export const ThemesPanel: React.FC<Props> = ({
                       }`}>
                       <div className="flex items-start justify-between gap-2">
                         <div className="break-all font-semibold text-zinc-950">{revision.theme_id}</div>
-                        {isActive && <AdminBadge tone="success">{translate('feature.themes.themespanel.active')}</AdminBadge>}
+                        {isActive && <AdminBadge tone="success">{_x("Active", "feature.themes")}</AdminBadge>}
                       </div>
-                      <p className="break-all font-mono text-xs text-zinc-500">{translate('feature.users.userspanel.version')}{' '}{revision.version} · SHA {revision.revision_digest.slice(0, 12)}…</p>
+                      <p className="break-all font-mono text-xs text-zinc-500">{__("Version")}{' '}{revision.version} · SHA {revision.revision_digest.slice(0, 12)}…</p>
                       {!isActive && (
                         <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-zinc-700">
                           <input type="radio" name="selected-theme-revision" value={revision.revision_id}
                             checked={isSelected}
-                            onChange={() => setSelectedRevisionId(revision.revision_id)} disabled={busy || loading} />{translate('feature.themes.themespanel.select_a_revision_to_activate')}</label>
+                            onChange={() => setSelectedRevisionId(revision.revision_id)} disabled={busy || loading} />{__("Select a revision to activate")}</label>
                       )}
                     </li>
                   );
@@ -273,20 +273,20 @@ export const ThemesPanel: React.FC<Props> = ({
               </ul>
               <div className="flex flex-wrap items-center gap-3">
                 <AdminButton variant="primary" size="md" onClick={() => void activateRevision()}
-                  disabled={!csrfToken || busy || loading || !selectedRevisionId || !v3Revisions.some(rev => rev.revision_id === selectedRevisionId && data.selection.revision_id !== rev.revision_id)}>{translate('feature.themes.themespanel.activate_selected_revision')}</AdminButton>
-                <p className="text-xs text-zinc-500">{translate('feature.themes.themespanel.installing_a_zip_does_not_activate_it_automatically_the_active_revision_comes_fr')}</p>
+                  disabled={!csrfToken || busy || loading || !selectedRevisionId || !v3Revisions.some(rev => rev.revision_id === selectedRevisionId && data.selection.revision_id !== rev.revision_id)}>{__("Activate selected revision")}</AdminButton>
+                <p className="text-xs text-zinc-500">{__("Installing a ZIP does not activate it automatically. The active revision comes from the version selected on the server.")}</p>
               </div>
             </section>
           )}
           {data.selection.source_format === 'v3' && (
-            <nav aria-label={translate('feature.themes.themespanel.edit_theme_templates')} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-4 text-sm">
-              <p className="text-zinc-700">{translate('feature.themes.themespanel.to_edit_header_footer_single_or_archive_open_the_visual_builder_and_select_the_a')}</p>
-              <a href="#/studio" className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50">{translate('feature.themes.themespanel.open_visual_builder')}</a>
+            <nav aria-label={__("Edit theme templates")} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-4 text-sm">
+              <p className="text-zinc-700">{__("To edit header, footer, single or archive, open the visual builder and select the appropriate role.")}</p>
+              <a href="#/studio" className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50">{__("Open visual builder")}</a>
             </nav>
           )}
           {activeThemeKey && (
             <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4" data-testid="sample-import-box">
-              <h3 className="text-sm font-semibold text-zinc-900">{translate('feature.themes.themespanel.selective_sample_data_import')}</h3>
+              <h3 className="text-sm font-semibold text-zinc-900">{__("Selective sample data import")}</h3>
               <div className="flex flex-wrap gap-3 text-sm text-zinc-700">
                 {(['pages', 'menus', 'media', 'settings'] as SampleGroup[]).map(g => (
                   <label key={g} className="inline-flex items-center gap-1.5">
@@ -315,12 +315,12 @@ export const ThemesPanel: React.FC<Props> = ({
                     setImportOutcome(null);
                     void dryRunSampleImport(activeThemeKey, sampleGroups, csrfToken)
                       .then(plan => { setImportPlan(plan); setAckPublic(false); })
-                      .catch(cause => setError(cause instanceof Error ? cause.message : translate('feature.themes.themespanel.dry_run_failed')))
+                      .catch(cause => setError(cause instanceof Error ? cause.message : __("Dry run failed.")))
                       .finally(() => setBusy(false));
                   }}
-                >{translate('feature.themes.themespanel.preview_dry_run')}</AdminButton>
+                >{__("Preview (dry run)")}</AdminButton>
                 {importPlan && (
-                  <AdminButton variant="ghost" size="sm" disabled={busy} onClick={() => { setImportPlan(null); setAckPublic(false); }}>{translate('feature.themes.themespanel.cancel_preview')}</AdminButton>
+                  <AdminButton variant="ghost" size="sm" disabled={busy} onClick={() => { setImportPlan(null); setAckPublic(false); }}>{__("Cancel preview")}</AdminButton>
                 )}
                 {importPlan && (
                   <AdminButton
@@ -333,28 +333,28 @@ export const ThemesPanel: React.FC<Props> = ({
                       setError('');
                       void executeSampleImport(activeThemeKey, importPlan, ackPublic, csrfToken)
                         .then(out => { setImportOutcome(out); setImportPlan(null); })
-                        .catch(cause => setError(cause instanceof Error ? cause.message : translate('feature.themes.themespanel.import_failed')))
+                        .catch(cause => setError(cause instanceof Error ? cause.message : __("Import failed.")))
                         .finally(() => setBusy(false));
                     }}
-                  >{translate('feature.themes.themespanel.import_sample_data')}</AdminButton>
+                  >{__("Import sample data")}</AdminButton>
                 )}
               </div>
               {importPlan && (
                 <div className="space-y-2 rounded-lg border border-zinc-200 bg-white p-3 text-xs text-zinc-700">
-                  <p>{translate('feature.themes.themespanel.plan_digest')}{' '}<code className="rounded bg-zinc-100 px-1 py-0.5 font-mono">{importPlan.plan_digest.slice(0, 12)}</code> · {importPlan.items.length}{' '}{translate('feature.themes.themespanel.items')}</p>
+                  <p>{__("Plan digest:")}{' '}<code className="rounded bg-zinc-100 px-1 py-0.5 font-mono">{importPlan.plan_digest.slice(0, 12)}</code> · {importPlan.items.length}{' '}{__("items")}</p>
                   {importPlan.unselected_dependencies.length > 0 && (
-                    <p className="text-amber-800">{translate('feature.themes.themespanel.missing_dependency_groups')}{' '}{importPlan.unselected_dependencies.map(d => `${d.required_group}:${d.object_key}`).join(', ')}</p>
+                    <p className="text-amber-800">{__("Missing dependency groups:")}{' '}{importPlan.unselected_dependencies.map(d => `${d.required_group}:${d.object_key}`).join(', ')}</p>
                   )}
                   {importPlan.requires_public_ack && (
                     <label className="flex items-center gap-2 text-amber-900">
                       <input type="checkbox" checked={ackPublic} onChange={e => setAckPublic(e.target.checked)} />
-                      <span>{translate('feature.themes.themespanel.i_confirm_that_changes_to_menus_options_affect_the_public_site')}</span>
+                      <span>{__("I confirm that changes to menus/options affect the public site.")}</span>
                     </label>
                   )}
                 </div>
               )}
               {importOutcome && (
-                <AdminAlert tone="success">{translate('feature.themes.themespanel.imported')}{' '}{importOutcome.created.length}{' '}{translate('feature.themes.themespanel.skipped')}{' '}{importOutcome.skipped.length}
+                <AdminAlert tone="success">{__("Imported:")}{' '}{importOutcome.created.length}{' '}{__("· Skipped:")}{' '}{importOutcome.skipped.length}
                 </AdminAlert>
               )}
             </div>
@@ -362,24 +362,24 @@ export const ThemesPanel: React.FC<Props> = ({
           {fnSettings?.has_functions && (
             <section
               className="space-y-4 rounded-xl border border-zinc-200 bg-white p-4"
-              aria-label={translate('feature.themes.themespanel.theme_functions_heading')}
+              aria-label={__("Theme Functions")}
               data-testid="theme-functions-section"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-base font-semibold text-zinc-950">
-                      {translate('feature.themes.themespanel.theme_functions_heading')}
+                      {__("Theme Functions")}
                     </h3>
                     {fnSettings.theme_id && (
                       <AdminBadge tone="neutral">{fnSettings.theme_id}</AdminBadge>
                     )}
                     {devTheme && devTheme === fnSettings.theme_id && (
-                      <AdminBadge tone="warning">{translate('shell.dev_mode_badge')}</AdminBadge>
+                      <AdminBadge tone="warning">{__("DEV MODE")}</AdminBadge>
                     )}
                   </div>
                   <p className="mt-0.5 text-xs text-zinc-600">
-                    {translate('feature.themes.themespanel.theme_functions_description')}
+                    {__("Configure settings, secrets, actions, and recent execution logs for the active theme's functions.js.")}
                   </p>
                 </div>
                 <AdminButton
@@ -388,14 +388,14 @@ export const ThemesPanel: React.FC<Props> = ({
                   disabled={fnSaving || Boolean(runningActionId)}
                   onClick={() => void loadThemeFunctions()}
                 >
-                  {translate('feature.themes.themespanel.theme_functions_reload_logs')}
+                  {__("Reload logs")}
                 </AdminButton>
               </div>
               {fnSettings.fields.length > 0 && (
                 <OwnerOptionsForm
                   ownerKind="theme_functions"
                   ownerId={fnSettings.theme_id ?? 'active'}
-                  title={translate('feature.themes.themespanel.theme_functions_settings_title')}
+                  title={__("Theme Functions settings")}
                   fields={fnSettings.fields}
                   values={fnDraft}
                   savedValues={fnSettings.values}
@@ -416,7 +416,7 @@ export const ThemesPanel: React.FC<Props> = ({
               {fnSettings.actions.length > 0 && (
                 <div className="space-y-2 border-t border-zinc-100 pt-3" data-testid="theme-functions-actions">
                   <h4 className="text-sm font-semibold text-zinc-900">
-                    {translate('feature.themes.themespanel.theme_functions_actions_heading')}
+                    {__("Theme actions")}
                   </h4>
                   <div className="flex flex-wrap gap-2">
                     {fnSettings.actions.map(action => (
@@ -428,7 +428,7 @@ export const ThemesPanel: React.FC<Props> = ({
                         onClick={() => void handleRunThemeAction(action.id)}
                       >
                         {runningActionId === action.id
-                          ? translate('feature.themes.themespanel.theme_functions_running')
+                          ? __("Running…")
                           : `${action.title || action.id} (${action.required_role})`}
                       </AdminButton>
                     ))}
@@ -436,7 +436,7 @@ export const ThemesPanel: React.FC<Props> = ({
                   {actionOutput && (
                     <div className="space-y-1">
                       <p className="text-xs font-medium text-zinc-700">
-                        {translate('feature.themes.themespanel.theme_functions_action_result')}
+                        {__("Last action output")}
                       </p>
                       <pre className="max-h-48 overflow-auto rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 font-mono text-xs text-zinc-800">
                         {actionOutput}
@@ -447,11 +447,11 @@ export const ThemesPanel: React.FC<Props> = ({
               )}
               <div className="space-y-2 border-t border-zinc-100 pt-3" data-testid="theme-functions-logs">
                 <h4 className="text-sm font-semibold text-zinc-900">
-                  {translate('feature.themes.themespanel.theme_functions_logs_heading')}
+                  {__("Recent Theme Functions logs")}
                 </h4>
                 {fnLogs.length === 0 ? (
                   <p className="text-xs text-zinc-500">
-                    {translate('feature.themes.themespanel.theme_functions_logs_empty')}
+                    {__("No Theme Functions logs recorded yet.")}
                   </p>
                 ) : (
                   <ul className="space-y-1.5 text-xs">

@@ -154,7 +154,13 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                         "C-SEC cấm nội suy bên trong thuộc tính bảo mật hoặc sự kiện HTML.",
                     );
                 }
-                if matches!(attr_name.as_str(), "href" | "src" | "poster" | "cite") {
+                if matches!(
+                    attr_name.as_str(),
+                    "href" | "src" | "poster" | "cite" | "action" | "formaction"
+                ) {
+                    if is_l10n_call_expr(&expr.expr) {
+                        return Err("C-SEC cấm gọi __/_x/_n bên trong thuộc tính URL.");
+                    }
                     if attr_has_static_bytes || attr_expr_count != 0 {
                         return Err(
                             "URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.",

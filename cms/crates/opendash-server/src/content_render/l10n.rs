@@ -3,6 +3,7 @@
 
 use super::*;
 
+pub(super) use std::borrow::Cow;
 pub(super) use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) use opendash_core::content::{
@@ -23,95 +24,98 @@ pub(super) use crate::{
     theme,
 };
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CoreL10n {
-    pub lang: &'static str,
-    pub yes: &'static str,
-    pub no: &'static str,
-    pub empty_content: &'static str,
-    pub previous_page: &'static str,
-    pub next_page: &'static str,
-    pub invalid_template_content: &'static str,
-    pub image_alt_prefix: &'static str,
-    pub list_unavailable: &'static str,
-    pub page_empty: &'static str,
-    pub back_to_first_page: &'static str,
-    pub list_prev: &'static str,
-    pub list_next: &'static str,
-    pub contact_unavailable: &'static str,
-    pub pattern_missing: &'static str,
-    pub select_placeholder: &'static str,
-    pub select_empty: &'static str,
-    pub home_unconfigured: &'static str,
-    pub not_found_title: &'static str,
-    pub contact_error_title: &'static str,
-    pub contact_error_heading: &'static str,
-    pub contact_received_title: &'static str,
-    pub contact_received_heading: &'static str,
-    pub contact_received_body: &'static str,
+    pub lang: Cow<'static, str>,
+    pub yes: Cow<'static, str>,
+    pub no: Cow<'static, str>,
+    pub empty_content: Cow<'static, str>,
+    pub previous_page: Cow<'static, str>,
+    pub next_page: Cow<'static, str>,
+    pub invalid_template_content: Cow<'static, str>,
+    pub image_alt_prefix: Cow<'static, str>,
+    pub list_unavailable: Cow<'static, str>,
+    pub page_empty: Cow<'static, str>,
+    pub back_to_first_page: Cow<'static, str>,
+    pub list_prev: Cow<'static, str>,
+    pub list_next: Cow<'static, str>,
+    pub contact_unavailable: Cow<'static, str>,
+    pub pattern_missing: Cow<'static, str>,
+    pub select_placeholder: Cow<'static, str>,
+    pub select_empty: Cow<'static, str>,
+    pub home_unconfigured: Cow<'static, str>,
+    pub not_found_title: Cow<'static, str>,
+    pub contact_error_title: Cow<'static, str>,
+    pub contact_error_heading: Cow<'static, str>,
+    pub contact_received_title: Cow<'static, str>,
+    pub contact_received_heading: Cow<'static, str>,
+    pub contact_received_body: Cow<'static, str>,
 }
 
-pub(super) const CORE_L10N_VI: CoreL10n = CoreL10n {
-    lang: "vi",
-    yes: "Có",
-    no: "Không",
-    empty_content: "Chưa có nội dung.",
-    previous_page: "← Trang trước",
-    next_page: "Trang sau →",
-    invalid_template_content: "Nội dung mẫu không hợp lệ.",
-    image_alt_prefix: "Ảnh minh họa ",
-    list_unavailable: "Danh sách chưa khả dụng.",
-    page_empty: "Trang này không có nội dung.",
-    back_to_first_page: "Về trang đầu",
-    list_prev: "Trang trước",
-    list_next: "Trang sau",
-    contact_unavailable: "Biểu mẫu liên hệ hiện không khả dụng.",
-    pattern_missing: "Pattern không còn tồn tại.",
-    select_placeholder: "-- Chọn --",
-    select_empty: "Để trống",
-    home_unconfigured: "Chưa cấu hình trang chủ.",
-    not_found_title: "404 — Không tìm thấy trang",
-    contact_error_title: "Lỗi gửi biểu mẫu",
-    contact_error_heading: "Không thể gửi biểu mẫu",
-    contact_received_title: "Đã nhận liên hệ",
-    contact_received_heading: "Cảm ơn bạn đã liên hệ",
-    contact_received_body: "Thông tin của bạn đã được tiếp nhận.",
-};
+fn embedded_vi_catalog() -> &'static opendash_core::l10n::Catalog {
+    static CAT: std::sync::OnceLock<opendash_core::l10n::Catalog> = std::sync::OnceLock::new();
+    CAT.get_or_init(|| {
+        opendash_core::l10n::parse_mo(crate::l10n::EMBEDDED_VI_MO).unwrap_or_default()
+    })
+}
 
-pub(super) const CORE_L10N_EN: CoreL10n = CoreL10n {
-    lang: "en",
-    yes: "Yes",
-    no: "No",
-    empty_content: "No content yet.",
-    previous_page: "← Previous",
-    next_page: "Next →",
-    invalid_template_content: "Invalid template content.",
-    image_alt_prefix: "Illustration ",
-    list_unavailable: "List is currently unavailable.",
-    page_empty: "This page has no content.",
-    back_to_first_page: "Back to first page",
-    list_prev: "Previous",
-    list_next: "Next",
-    contact_unavailable: "Contact form is currently unavailable.",
-    pattern_missing: "Pattern no longer exists.",
-    select_placeholder: "-- Select --",
-    select_empty: "Leave blank",
-    home_unconfigured: "Homepage is not configured.",
-    not_found_title: "404 — Page not found",
-    contact_error_title: "Form submission error",
-    contact_error_heading: "Unable to submit form",
-    contact_received_title: "Message received",
-    contact_received_heading: "Thank you for contacting us",
-    contact_received_body: "Your message has been received.",
-};
+/// Returns Core fallback strings resolved from `CatalogRegistry` (or embedded `.mo` / English fallback).
+pub fn core_l10n(locale_code: &str) -> CoreL10n {
+    core_l10n_with_registry(None, locale_code)
+}
 
-/// Returns built-in Core fallback strings (`vi` for Vietnamese, `en` fallback for all other locales).
-pub fn core_l10n(locale_code: &str) -> &'static CoreL10n {
+pub fn core_l10n_with_registry(
+    registry: Option<&crate::l10n::CatalogRegistry>,
+    locale_code: &str,
+) -> CoreL10n {
     let lower = locale_code.trim().to_ascii_lowercase();
-    if lower == "vi" || lower.starts_with("vi-") {
-        &CORE_L10N_VI
-    } else {
-        &CORE_L10N_EN
+    let cat: Option<std::sync::Arc<opendash_core::l10n::Catalog>> = registry
+        .and_then(|r| r.resolve(crate::l10n::L10nScope::Core, "opendash", locale_code))
+        .map(|l| l.catalog);
+
+    let tr = |en: &'static str| -> Cow<'static, str> {
+        if let Some(ref c) = cat
+            && let Some(found) = c.get_with_context(None, en)
+        {
+            return Cow::Owned(found.to_owned());
+        }
+        if (lower == "vi" || lower.starts_with("vi-"))
+            && let Some(found) = embedded_vi_catalog().get_with_context(None, en)
+        {
+            return Cow::Owned(found.to_owned());
+        }
+        Cow::Borrowed(en)
+    };
+
+    CoreL10n {
+        lang: if lower.is_empty() {
+            Cow::Borrowed("en")
+        } else {
+            Cow::Owned(lower.clone())
+        },
+        yes: tr("Yes"),
+        no: tr("No"),
+        empty_content: tr("No content yet."),
+        previous_page: tr("← Previous"),
+        next_page: tr("Next →"),
+        invalid_template_content: tr("Invalid template content."),
+        image_alt_prefix: tr("Illustration "),
+        list_unavailable: tr("List is currently unavailable."),
+        page_empty: tr("This page has no content."),
+        back_to_first_page: tr("Back to first page"),
+        list_prev: tr("Previous"),
+        list_next: tr("Next"),
+        contact_unavailable: tr("Contact form is currently unavailable."),
+        pattern_missing: tr("Pattern no longer exists."),
+        select_placeholder: tr("-- Select --"),
+        select_empty: tr("Leave blank"),
+        home_unconfigured: tr("Homepage is not configured."),
+        not_found_title: tr("404 — Page not found"),
+        contact_error_title: tr("Form submission error"),
+        contact_error_heading: tr("Unable to submit form"),
+        contact_received_title: tr("Message received"),
+        contact_received_heading: tr("Thank you for contacting us"),
+        contact_received_body: tr("Your message has been received."),
     }
 }
 

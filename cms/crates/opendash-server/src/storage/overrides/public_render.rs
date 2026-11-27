@@ -4,7 +4,10 @@ use super::*;
 pub struct PublicCompositionBudget {
     pub render_budget: page::RenderBudget,
     pub(in crate::storage) expansions: usize,
-    pub(in crate::storage) shared_t: Option<minijinja::Value>,
+    pub(in crate::storage) shared_l10n:
+        BTreeMap<String, std::sync::Arc<opendash_core::l10n::Catalog>>,
+    pub(in crate::storage) shared_locale_code: String,
+    pub(in crate::storage) shared_domain: Option<String>,
     pub(in crate::storage) shared_locale: Option<minijinja::Value>,
 }
 
@@ -13,7 +16,9 @@ impl Default for PublicCompositionBudget {
         Self {
             render_budget: page::RenderBudget::new(),
             expansions: 0,
-            shared_t: None,
+            shared_l10n: BTreeMap::new(),
+            shared_locale_code: "en".to_owned(),
+            shared_domain: None,
             shared_locale: None,
         }
     }
@@ -24,12 +29,14 @@ impl PublicCompositionBudget {
         Self {
             render_budget,
             expansions: 0,
-            shared_t: None,
+            shared_l10n: BTreeMap::new(),
+            shared_locale_code: "en".to_owned(),
+            shared_domain: None,
             shared_locale: None,
         }
     }
 
-    /// Pre-computes and shares `Arc`-backed `t` and `locale` MiniJinja values
+    /// Pre-computes and shares `Arc`-backed `l10n` catalogs and `locale` MiniJinja values
     /// once per request across header, body and footer segments.
     pub fn set_locale_context(
         &mut self,
@@ -37,14 +44,16 @@ impl PublicCompositionBudget {
         locale_code: &str,
         locale_ctx: serde_json::Value,
     ) {
-        let t_map = active
-            .map(|v| v.merged_translations(locale_code))
+        self.shared_locale_code = locale_code.to_owned();
+        self.shared_domain = active.map(|v| {
+            v.manifest
+                .text_domain
+                .clone()
+                .unwrap_or_else(|| v.manifest.theme_id.clone())
+        });
+        self.shared_l10n = active
+            .map(|v| v.l10n_catalog_map(locale_code))
             .unwrap_or_default();
-        self.shared_t = Some(minijinja::Value::from_pairs(
-            t_map
-                .into_iter()
-                .map(|(k, v)| (k, minijinja::Value::from(v))),
-        ));
         self.shared_locale = Some(template_sec::json_to_safe_value(&locale_ctx));
     }
 
@@ -65,16 +74,28 @@ impl PublicCompositionBudget {
         fmt_cfg: &template_sec::RenderFormattingConfig,
     ) -> ApiResult<String> {
         self.charge(compiled.part_expansions())?;
+        let owned_cfg;
+        let effective_cfg = if fmt_cfg.l10n_catalogs.is_empty() && !self.shared_l10n.is_empty() {
+            owned_cfg = template_sec::RenderFormattingConfig {
+                timezone: fmt_cfg.timezone.clone(),
+                l10n_locale: Some(self.shared_locale_code.clone()),
+                l10n_domain: self.shared_domain.clone(),
+                l10n_catalogs: self.shared_l10n.clone(),
+            };
+            &owned_cfg
+        } else {
+            fmt_cfg
+        };
         let html = compiled
             .render_with_config_and_budget(
                 template_sec::json_context_with_shared_locale(
                     context,
-                    self.shared_t.as_ref(),
+                    None,
                     self.shared_locale.as_ref(),
                 ),
                 slot,
                 &mut self.render_budget,
-                fmt_cfg,
+                effective_cfg,
             )
             .map_err(ApiError::internal)?;
         let own_bytes = html.len().saturating_sub(slot.map_or(0, str::len));
@@ -118,6 +139,15 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
     let url_policy = active_theme_url_policy(active)?;
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
+        l10n_locale: Some(effective_locale.clone()),
+        l10n_domain: active.map(|a| {
+            a.manifest
+                .text_domain
+                .clone()
+                .unwrap_or_else(|| a.manifest.theme_id.clone())
+        }),
+        l10n_catalogs: active.map(|a| a.l10n_catalogs.clone()).unwrap_or_default(),
+        ..Default::default()
     };
     let context = PublicBuilderContext {
         state: &state,

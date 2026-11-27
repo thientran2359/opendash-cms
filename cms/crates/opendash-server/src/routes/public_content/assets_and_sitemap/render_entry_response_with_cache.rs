@@ -101,6 +101,7 @@ pub(crate) async fn render_entry_response_with_cache(
     };
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: site.timezone.clone(),
+        ..Default::default()
     };
     let (archive_path, mut proj_map) = {
         let mut conn = db.acquire().await?;

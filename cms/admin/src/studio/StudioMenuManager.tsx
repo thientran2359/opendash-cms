@@ -1,4 +1,4 @@
-import { useI18n, type TranslationKey } from '../i18n/index.tsx';
+import { __, _x, useI18n } from '../i18n/index.tsx';
 import React, { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ApiClientError } from '../api/client.ts';
 import { listContentEntries, listContentTypes } from '../api/content.ts';
@@ -149,9 +149,9 @@ function buildItemInputs(drafts: DraftItem[]): MenuItemInput[] {
   });
 }
 
-function targetKindLabel(kind: MenuTargetKind, t: (key: TranslationKey) => string): string {
-  if (kind === 'entry') return t("studio.page_post");
-  if (kind === 'term') return t("studio.taxonomy_term");
+function targetKindLabel(kind: MenuTargetKind): string {
+  if (kind === 'entry') return __("Page/post");
+  if (kind === 'term') return _x("Taxonomy term", "studio.taxonomy_term");
   return 'URL';
 }
 
@@ -167,7 +167,7 @@ export const StudioMenuManager: React.FC<Props> = ({
   onApiError,
   onMessage,
 }) => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   // Level 1 (list & slots) vs Level 2 (editing specific menu)
   const [editingMenuId, setEditingMenuId] = useState<number | null>(null);
   const [loadedMenu, setLoadedMenu] = useState<MenuWithItems | null>(null);
@@ -240,11 +240,11 @@ export const StudioMenuManager: React.FC<Props> = ({
       if (availableTerms.length > 0 && addTermId === null) setAddTermId(availableTerms[0].id);
       setRefsLoaded(true);
     } catch (reason) {
-      onApiError(reason, t("studio.cannot_load_pages_posts_and_taxonomy_terms_for_the_menu"));
+      onApiError(reason, __("Cannot load pages, posts and taxonomy terms for the menu."));
     } finally {
       setRefsLoading(false);
     }
-  }, [refsLoaded, refsLoading, addEntryId, addTermId, onApiError, t]);
+  }, [refsLoaded, refsLoading, addEntryId, addTermId, onApiError]);
 
   const loadMoreEntries = async () => {
     const pending = Object.entries(entryNextOffsets);
@@ -274,7 +274,7 @@ export const StudioMenuManager: React.FC<Props> = ({
         return next;
       });
     } catch (reason) {
-      onApiError(reason, t("studio.cannot_load_more_posts_or_pages"));
+      onApiError(reason, __("Cannot load more posts or pages."));
     } finally {
       setRefsLoading(false);
     }
@@ -296,9 +296,9 @@ export const StudioMenuManager: React.FC<Props> = ({
       setShowAddDrawer(false);
       void loadRefsIfNeeded();
     } catch (reason) {
-      const msg = reason instanceof Error ? reason.message : t("studio.cannot_load_menu_details");
+      const msg = reason instanceof Error ? reason.message : __("Cannot load menu details.");
       setLocalError(msg);
-      onApiError(reason, t("studio.cannot_load_menu_details"));
+      onApiError(reason, __("Cannot load menu details."));
     } finally {
       setBusy(false);
     }
@@ -324,7 +324,7 @@ export const StudioMenuManager: React.FC<Props> = ({
     const title = newTitle.trim();
     const key = (newKey.trim() || slugifyMenuKey(title)).trim();
     if (!title || !key) {
-      setLocalError(t("studio.enter_the_menu_name_and_key"));
+      setLocalError(__("Enter the menu name and key."));
       return;
     }
     setBusy(true);
@@ -337,7 +337,7 @@ export const StudioMenuManager: React.FC<Props> = ({
       setKeyManuallyEdited(false);
       setShowCreateForm(false);
       await onMenusMutated();
-      onMessage(t("studio.created_menu_title", { title: created.menu.title }));
+      onMessage(__("Created menu \"{{title}}\".", { title: created.menu.title }));
       const drafted = draftFromMenu(created);
       setEditingMenuId(created.menu.id);
       setLoadedMenu(created);
@@ -347,8 +347,8 @@ export const StudioMenuManager: React.FC<Props> = ({
       setShowAddDrawer(true);
       void loadRefsIfNeeded();
     } catch (reason) {
-      setLocalError(reason instanceof Error ? reason.message : t("studio.cannot_create_menu"));
-      onApiError(reason, t("studio.cannot_create_menu"));
+      setLocalError(reason instanceof Error ? reason.message : __("Cannot create menu."));
+      onApiError(reason, __("Cannot create menu."));
     } finally {
       setBusy(false);
     }
@@ -357,7 +357,7 @@ export const StudioMenuManager: React.FC<Props> = ({
   const handleSaveMenu = async () => {
     if (!loadedMenu || !csrfToken || busy) return;
     if (!titleDraft.trim()) {
-      setLocalError(t("studio.menu_title_cannot_be_empty"));
+      setLocalError(__("Menu title cannot be empty."));
       return;
     }
     setBusy(true);
@@ -377,16 +377,16 @@ export const StudioMenuManager: React.FC<Props> = ({
       setTitleDraft(updated.menu.title);
       setItemsDraft(drafted);
       setSavedItemsSnapshot(JSON.stringify({ title: updated.menu.title, items: drafted }));
-      setLocalNotice(t("studio.menu_saved_and_preview_updated"));
+      setLocalNotice(__("Menu saved and preview updated."));
       await onMenusMutated();
-      onMessage(t("studio.saved_menu_title", { title: updated.menu.title }));
+      onMessage(__("Saved menu \"{{title}}\".", { title: updated.menu.title }));
     } catch (reason) {
       if (reason instanceof ApiClientError && reason.status === 412) {
-        setLocalError(t("studio.menu_changed_in_another_session_412_the_current_draft_is_retained"));
+        setLocalError(__("Menu changed in another session (412). The current draft is retained."));
       } else {
-        setLocalError(reason instanceof Error ? reason.message : t("studio.cannot_save_menu"));
+        setLocalError(reason instanceof Error ? reason.message : __("Cannot save menu."));
       }
-      onApiError(reason, t("studio.cannot_save_menu"));
+      onApiError(reason, __("Cannot save menu."));
     } finally {
       setBusy(false);
     }
@@ -394,7 +394,7 @@ export const StudioMenuManager: React.FC<Props> = ({
 
   const handleDeleteMenu = async () => {
     if (!loadedMenu || !csrfToken || busy) return;
-    if (!window.confirm(t("studio.delete_menu_title_key", { title: loadedMenu.menu.title, key: loadedMenu.menu.menu_key }))) return;
+    if (!window.confirm(__("Delete menu \"{{title}}\" ({{key}})?", { title: loadedMenu.menu.title, key: loadedMenu.menu.menu_key }))) return;
     setBusy(true);
     setLocalError('');
     setLocalNotice('');
@@ -404,10 +404,10 @@ export const StudioMenuManager: React.FC<Props> = ({
       setLoadedMenu(null);
       setItemsDraft([]);
       await onMenusMutated();
-      onMessage(t("studio.menu_deleted"));
+      onMessage(__("Menu deleted."));
     } catch (reason) {
-      setLocalError(reason instanceof Error ? reason.message : t("studio.cannot_delete_menu"));
-      onApiError(reason, t("studio.cannot_delete_menu"));
+      setLocalError(reason instanceof Error ? reason.message : __("Cannot delete menu."));
+      onApiError(reason, __("Cannot delete menu."));
     } finally {
       setBusy(false);
     }
@@ -420,11 +420,11 @@ export const StudioMenuManager: React.FC<Props> = ({
     if (addTab === 'entry') {
       const targetId = addEntryId ?? entries[0]?.id ?? null;
       if (!targetId) {
-        setLocalError(t("studio.no_published_pages_or_posts_are_available_to_add"));
+        setLocalError(__("No published pages or posts are available to add."));
         return;
       }
       const found = entries.find(item => item.id === targetId);
-      if (!label) label = found?.title ?? t("studio.entry_id", { id: targetId });
+      if (!label) label = found?.title ?? __("Entry #{{id}}", { id: targetId });
       setItemsDraft(prev => [...prev, {
         localKey,
         id: null,
@@ -438,11 +438,11 @@ export const StudioMenuManager: React.FC<Props> = ({
     } else if (addTab === 'term') {
       const targetId = addTermId ?? terms[0]?.id ?? null;
       if (!targetId) {
-        setLocalError(t("studio.no_public_taxonomy_terms_are_available_to_add"));
+        setLocalError(__("No public taxonomy terms are available to add."));
         return;
       }
       const found = terms.find(item => item.id === targetId);
-      if (!label) label = found?.name ?? t("studio.term_id", { id: targetId });
+      if (!label) label = found?.name ?? __("Term #{{id}}", { id: targetId });
       setItemsDraft(prev => [...prev, {
         localKey,
         id: null,
@@ -456,7 +456,7 @@ export const StudioMenuManager: React.FC<Props> = ({
     } else {
       const url = addExternalUrl.trim();
       if (!url) {
-        setLocalError(t("studio.enter_a_url"));
+        setLocalError(__("Enter a URL."));
         return;
       }
       if (!label) label = url;
@@ -523,7 +523,7 @@ export const StudioMenuManager: React.FC<Props> = ({
             disabled={busy}
             data-testid="studio-menu-back"
             onClick={() => {
-              if (menuDirty && !window.confirm(t("studio.the_menu_has_unsaved_changes_return_to_the_menu_list_and_discard_the_draft"))) {
+              if (menuDirty && !window.confirm(__("The menu has unsaved changes. Return to the menu list and discard the draft?"))) {
                 return;
               }
               setEditingMenuId(null);
@@ -534,7 +534,7 @@ export const StudioMenuManager: React.FC<Props> = ({
             className="flex items-center gap-1 rounded px-1.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200/70 hover:text-zinc-950"
           >
             <span aria-hidden="true">‹</span>
-            <span>{t("studio.menu_list")}</span>
+            <span>{__("Menu list")}</span>
           </button>
           <button
             type="button"
@@ -542,7 +542,7 @@ export const StudioMenuManager: React.FC<Props> = ({
             onClick={() => void handleDeleteMenu()}
             className="rounded px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-45"
           >
-            {t("studio.delete_menu")}
+            {__("Delete menu")}
           </button>
         </div>
 
@@ -553,7 +553,7 @@ export const StudioMenuManager: React.FC<Props> = ({
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-2">
               <label htmlFor="studio-menu-title" className="text-xs font-semibold text-zinc-800">
-                {t("studio.menu_name")}
+                {__("Menu name")}
               </label>
               <div className="flex items-center gap-1">
                 <span className="font-mono text-[10px] text-zinc-500">{loadedMenu.menu.menu_key}</span>
@@ -573,7 +573,7 @@ export const StudioMenuManager: React.FC<Props> = ({
           <div className="space-y-2 border-t border-zinc-200 pt-2.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-zinc-800">
-                {t("studio.menu_items_count", { count: itemsDraft.length })}
+                {__("Menu items ({{count}})", { count: itemsDraft.length })}
               </span>
               <button
                 type="button"
@@ -585,7 +585,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                 }}
                 className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-45"
               >
-                {showAddDrawer ? t("studio.close") : t("studio.add_item")}
+                {showAddDrawer ? __("Close") : __("+ Add item")}
               </button>
             </div>
 
@@ -597,8 +597,8 @@ export const StudioMenuManager: React.FC<Props> = ({
               >
                 <div className="grid grid-cols-3 gap-1 rounded bg-white p-0.5 border border-zinc-200">
                   {([
-                    ['entry', t("studio.page_post_203")],
-                    ['term', t("studio.taxonomy_term")],
+                    ['entry', _x("Page / post", "studio.page_post_203")],
+                    ['term', _x("Taxonomy term", "studio.taxonomy_term")],
                     ['external', 'URL'],
                   ] as const).map(([kind, text]) => (
                     <button
@@ -618,13 +618,13 @@ export const StudioMenuManager: React.FC<Props> = ({
                 {addTab === 'entry' && (
                   <div className="space-y-1.5">
                     <select
-                      aria-label={t("studio.select_a_page_or_post")}
+                      aria-label={__("Select a page or post")}
                       className={INPUT_CLASS}
                       value={addEntryId ?? ''}
                       disabled={refsLoading}
                       onChange={e => setAddEntryId(e.target.value ? Number(e.target.value) : null)}
                     >
-                      {entries.length === 0 && <option value="">{refsLoading ? t("studio.loading") : t("studio.no_published_entries")}</option>}
+                      {entries.length === 0 && <option value="">{refsLoading ? __("Loading…") : __("(No published entries)")}</option>}
                       {entries.map(entry => (
                         <option key={entry.id} value={entry.id}>
                           {entry.title} ({entry.content_type_key})
@@ -638,7 +638,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                         onClick={() => void loadMoreEntries()}
                         className="text-[11px] font-medium text-sky-700 hover:underline"
                       >
-                        {refsLoading ? t("studio.loading_more") : t("studio.load_more_posts_pages")}
+                        {refsLoading ? __("Loading more…") : __("Load more posts/pages…")}
                       </button>
                     )}
                   </div>
@@ -646,13 +646,13 @@ export const StudioMenuManager: React.FC<Props> = ({
 
                 {addTab === 'term' && (
                   <select
-                    aria-label={t("studio.select_taxonomy_term")}
+                    aria-label={__("Select taxonomy term")}
                     className={INPUT_CLASS}
                     value={addTermId ?? ''}
                     disabled={refsLoading}
                     onChange={e => setAddTermId(e.target.value ? Number(e.target.value) : null)}
                   >
-                    {terms.length === 0 && <option value="">{refsLoading ? t("studio.loading") : t("studio.no_taxonomy_terms")}</option>}
+                    {terms.length === 0 && <option value="">{refsLoading ? __("Loading…") : __("(No taxonomy terms)")}</option>}
                     {terms.map(term => (
                       <option key={term.id} value={term.id}>
                         {term.name} ({taxonomyDefs.find(d => d.key === term.kind)?.label ?? term.kind})
@@ -664,8 +664,8 @@ export const StudioMenuManager: React.FC<Props> = ({
                 {addTab === 'external' && (
                   <input
                     type="text"
-                    placeholder={t("studio.https_or_contact")}
-                    aria-label={t("studio.url")}
+                    placeholder={__("https://... or /contact")}
+                    aria-label={_x("URL", "studio.url")}
                     className={INPUT_CLASS}
                     value={addExternalUrl}
                     onChange={e => setAddExternalUrl(e.target.value)}
@@ -674,8 +674,8 @@ export const StudioMenuManager: React.FC<Props> = ({
 
                 <input
                   type="text"
-                  placeholder={t("studio.display_label_leave_blank_to_use_the_title")}
-                  aria-label={t("studio.display_label")}
+                  placeholder={__("Display label (leave blank to use the title)")}
+                  aria-label={__("Display label")}
                   className={INPUT_CLASS}
                   value={addLabel}
                   onChange={e => setAddLabel(e.target.value)}
@@ -685,14 +685,14 @@ export const StudioMenuManager: React.FC<Props> = ({
                   type="submit"
                   className="w-full rounded-md bg-sky-600 py-1.5 text-xs font-semibold text-white hover:bg-sky-700"
                 >
-                  {t("studio.add_to_menu")}
+                  {__("Add to menu")}
                 </button>
               </form>
             )}
 
             {itemsDraft.length === 0 ? (
               <p className="rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-xs text-zinc-500">
-                {t("studio.this_menu_is_empty_select_add_item_to_get_started")}
+                {__("This menu is empty. Select + Add item to get started.")}
               </p>
             ) : (
               <div className="space-y-1.5">
@@ -716,24 +716,24 @@ export const StudioMenuManager: React.FC<Props> = ({
                           <span className="shrink-0 text-zinc-400" aria-hidden="true">
                             {expanded ? '▾' : '▸'}
                           </span>
-                          <span className="truncate">{item.label || t("studio.untitled")}</span>
+                          <span className="truncate">{item.label || _x("(Untitled)", "studio.untitled")}</span>
                           <span className="shrink-0 rounded bg-zinc-100 px-1 py-0.5 text-[10px] font-normal text-zinc-500">
-                            {targetKindLabel(item.target_kind, t)}
+                            {targetKindLabel(item.target_kind)}
                           </span>
                         </button>
                         <div className="flex shrink-0 items-center gap-0.5">
-                          <button type="button" title={t("studio.up")} className={MINI_BTN_CLASS} disabled={busy || idx === 0} onClick={() => moveItem(idx, -1)}>↑</button>
-                          <button type="button" title={t("studio.down")} className={MINI_BTN_CLASS} disabled={busy || idx === itemsDraft.length - 1} onClick={() => moveItem(idx, 1)}>↓</button>
-                          <button type="button" title={t("studio.outdent")} className={MINI_BTN_CLASS} disabled={busy || !item.parentLocalKey} onClick={() => outdentItem(idx)}>←</button>
-                          <button type="button" title={t("studio.indent_as_child")} className={MINI_BTN_CLASS} disabled={busy || !canIndent} onClick={() => indentItem(idx)}>→</button>
-                          <button type="button" title={t("studio.delete_item")} className={MINI_BTN_CLASS + ' text-rose-700 hover:bg-rose-50'} disabled={busy} onClick={() => removeItem(idx)}>×</button>
+                          <button type="button" title={__("Up")} className={MINI_BTN_CLASS} disabled={busy || idx === 0} onClick={() => moveItem(idx, -1)}>↑</button>
+                          <button type="button" title={__("Down")} className={MINI_BTN_CLASS} disabled={busy || idx === itemsDraft.length - 1} onClick={() => moveItem(idx, 1)}>↓</button>
+                          <button type="button" title={__("Outdent")} className={MINI_BTN_CLASS} disabled={busy || !item.parentLocalKey} onClick={() => outdentItem(idx)}>←</button>
+                          <button type="button" title={__("Indent as child")} className={MINI_BTN_CLASS} disabled={busy || !canIndent} onClick={() => indentItem(idx)}>→</button>
+                          <button type="button" title={__("Delete item")} className={MINI_BTN_CLASS + ' text-rose-700 hover:bg-rose-50'} disabled={busy} onClick={() => removeItem(idx)}>×</button>
                         </div>
                       </div>
 
                       {expanded && (
                         <div className="space-y-2 border-t border-zinc-100 bg-zinc-50/70 p-2.5">
                           <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                            <span>{t("studio.display_label")}</span>
+                            <span>{__("Display label")}</span>
                             <input
                               type="text"
                               className={INPUT_CLASS}
@@ -748,7 +748,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                           </label>
 
                           <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                            <span>{t("studio.target_type")}</span>
+                            <span>{__("Target type")}</span>
                             <select
                               className={INPUT_CLASS}
                               value={item.target_kind}
@@ -759,15 +759,15 @@ export const StudioMenuManager: React.FC<Props> = ({
                                 setItemsDraft(next);
                               }}
                             >
-                              <option value="entry">{t("studio.page_post_223")}</option>
-                              <option value="term">{t("studio.taxonomy_term_224")}</option>
-                              <option value="external">{t("studio.custom_url")}</option>
+                              <option value="entry">{_x("Page / post", "studio.page_post_223")}</option>
+                              <option value="term">{_x("Taxonomy term", "studio.taxonomy_term_224")}</option>
+                              <option value="external">{__("Custom URL")}</option>
                             </select>
                           </label>
 
                           {item.target_kind === 'entry' && (
                             <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                              <span>{t("studio.post_page_target")}</span>
+                              <span>{__("Post/page target")}</span>
                               <select
                                 className={INPUT_CLASS}
                                 value={item.target_entry_id ?? ''}
@@ -781,9 +781,9 @@ export const StudioMenuManager: React.FC<Props> = ({
                                   setItemsDraft(next);
                                 }}
                               >
-                                <option value="">{t("studio.select_entry")}</option>
+                                <option value="">{__("-- Select entry --")}</option>
                                 {item.target_entry_id !== null && !entries.some(en => en.id === item.target_entry_id) && (
-                                  <option value={item.target_entry_id}>{t("studio.id_current_target", { id: item.target_entry_id })}</option>
+                                  <option value={item.target_entry_id}>{__("#{{id}} (current target)", { id: item.target_entry_id })}</option>
                                 )}
                                 {entries.map(en => (
                                   <option key={en.id} value={en.id}>
@@ -796,7 +796,7 @@ export const StudioMenuManager: React.FC<Props> = ({
 
                           {item.target_kind === 'term' && (
                             <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                              <span>{t("studio.taxonomy_term_target")}</span>
+                              <span>{__("Taxonomy term target")}</span>
                               <select
                                 className={INPUT_CLASS}
                                 value={item.target_term_id ?? ''}
@@ -810,9 +810,9 @@ export const StudioMenuManager: React.FC<Props> = ({
                                   setItemsDraft(next);
                                 }}
                               >
-                                <option value="">{t("studio.select_term")}</option>
+                                <option value="">{__("-- Select term --")}</option>
                                 {item.target_term_id !== null && !terms.some(t => t.id === item.target_term_id) && (
-                                  <option value={item.target_term_id}>{t("studio.id_current_target", { id: item.target_term_id })}</option>
+                                  <option value={item.target_term_id}>{__("#{{id}} (current target)", { id: item.target_term_id })}</option>
                                 )}
                                 {terms.map(t => (
                                   <option key={t.id} value={t.id}>
@@ -825,7 +825,7 @@ export const StudioMenuManager: React.FC<Props> = ({
 
                           {item.target_kind === 'external' && (
                             <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                              <span>{t("studio.url")}</span>
+                              <span>{_x("URL", "studio.url")}</span>
                               <input
                                 type="text"
                                 placeholder="https://example.com"
@@ -858,7 +858,7 @@ export const StudioMenuManager: React.FC<Props> = ({
             onClick={() => void handleSaveMenu()}
             className="flex w-full items-center justify-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-sky-700 disabled:opacity-45"
           >
-            {busy ? t("studio.saving_menu") : (menuDirty ? t("studio.save_menu_structure") : t("studio.save_menu_structure_232"))}
+            {busy ? __("Saving menu…") : (menuDirty ? __("Save menu structure *") : __("Save menu structure"))}
           </button>
         </div>
       </div>
@@ -873,17 +873,17 @@ export const StudioMenuManager: React.FC<Props> = ({
 
         <div>
           <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-700">
-            {t("studio.display_locations_theme_slots")}
+            {__("Display locations (theme slots)")}
           </h2>
           {!activeThemeId || !menuSlots ? (
             <div className="mt-2">
               <AdminAlert tone="info">
-                {t("studio.no_active_theme_or_the_active_theme_has_no_menu_locations")}
+                {__("No active theme or the active theme has no menu locations.")}
               </AdminAlert>
             </div>
           ) : menuSlots.available_slots.length === 0 ? (
             <p className="mt-1.5 text-xs text-zinc-500">
-              {t("studio.theme_theme_has_no_menu_slots", { theme: activeThemeId })}
+              {__("Theme {{theme}} has no menu slots.", { theme: activeThemeId })}
             </p>
           ) : (
             <div className="mt-2.5 space-y-2.5">
@@ -896,7 +896,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                     htmlFor={`studio-menu-slot-${slot}`}
                   >
                     <span>
-                      {t("studio.location")} <code className="font-mono text-zinc-900">{slot}</code>
+                      {__("Location:")} <code className="font-mono text-zinc-900">{slot}</code>
                     </span>
                     <select
                       id={`studio-menu-slot-${slot}`}
@@ -905,7 +905,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                       value={assigned ?? ''}
                       onChange={e => onMenuSlotChange(slot, pageChoiceValue(e.target.value))}
                     >
-                      <option value="">{t("studio.no_menu_assigned")}</option>
+                      <option value="">{__("(No menu assigned)")}</option>
                       {menusList.map(menu => (
                         <option key={menu.id} value={menu.id}>
                           {menu.title} ({menu.menu_key})
@@ -922,7 +922,7 @@ export const StudioMenuManager: React.FC<Props> = ({
         <div className="space-y-2.5 border-t border-zinc-200 pt-3.5">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-700">
-              {t("studio.menu_list_count", { count: menusList.length })}
+              {__("Menu list ({{count}})", { count: menusList.length })}
             </h2>
             <button
               type="button"
@@ -931,7 +931,7 @@ export const StudioMenuManager: React.FC<Props> = ({
               onClick={() => setShowCreateForm(v => !v)}
               className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-45"
             >
-              {showCreateForm ? t("studio.close") : t("studio.create_menu")}
+              {showCreateForm ? __("Close") : __("+ Create menu")}
             </button>
           </div>
 
@@ -942,11 +942,11 @@ export const StudioMenuManager: React.FC<Props> = ({
               className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 p-2.5"
             >
               <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                <span>{t("studio.menu_name")}</span>
+                <span>{__("Menu name")}</span>
                 <input
                   type="text"
                   required
-                  placeholder={t("studio.example_main_menu")}
+                  placeholder={__("Example: Main menu")}
                   className={INPUT_CLASS}
                   value={newTitle}
                   onChange={e => {
@@ -957,7 +957,7 @@ export const StudioMenuManager: React.FC<Props> = ({
                 />
               </label>
               <label className="block space-y-1 text-[11px] font-medium text-zinc-700">
-                <span>{t("studio.identifier_menu_key")}</span>
+                <span>{__("Identifier (menu_key)")}</span>
                 <input
                   type="text"
                   required
@@ -975,13 +975,13 @@ export const StudioMenuManager: React.FC<Props> = ({
                 disabled={!csrfToken || busy}
                 className="w-full rounded-md bg-sky-600 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-45"
               >
-                {busy ? t("studio.creating") : t("studio.create_new_menu")}
+                {busy ? __("Creating…") : __("Create new menu")}
               </button>
             </form>
           )}
 
           {menusList.length === 0 ? (
-            <p className="text-xs text-zinc-500">{t("studio.no_menus_yet_create_menu")}</p>
+            <p className="text-xs text-zinc-500">{__("No menus yet. Select + Create menu to create one.")}</p>
           ) : (
             <ul className="m-0 list-none space-y-1.5 p-0">
               {menusList.map(menu => (

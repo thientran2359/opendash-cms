@@ -120,6 +120,13 @@ fn resolve_logical_dest(stage_root: &Path, record: &BackupFileRecord) -> ApiResu
             }
             Ok(p)
         }
+        BackupFileKind::LanguagePack => {
+            let mut p = stage_root.to_path_buf();
+            for seg in segments {
+                p.push(seg);
+            }
+            Ok(p)
+        }
     }
 }
 
@@ -223,6 +230,14 @@ pub async fn restore_to_new_root(
             return Err(ApiError::bad_request(
                 "Payload khôi phục không khớp manifest.",
             ));
+        }
+        if record.kind == BackupFileKind::LanguagePack {
+            let raw = fs::read(&dest_path).map_err(|_| {
+                ApiError::internal(String::from("Không đọc lại được tệp ngôn ngữ khôi phục."))
+            })?;
+            let is_po = record.logical_key.ends_with(".po");
+            crate::l10n::registry::validate_language_pack_bytes(is_po, &raw)
+                .map_err(|err| ApiError::bad_request(err.message))?;
         }
     }
 

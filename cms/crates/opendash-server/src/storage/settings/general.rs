@@ -94,7 +94,17 @@ pub struct AdminI18nBootstrap {
     pub effective_direction: &'static str,
     pub configured_installed: bool,
     pub catalog_version: &'static str,
-    pub available_locales: &'static [CmsLocaleOption],
+    pub available_locales: Vec<CmsLocaleOption>,
+    pub catalog_etag: String,
+    pub catalog_url: String,
+}
+
+fn core_pot_document() -> &'static opendash_core::l10n::PotDocument {
+    static POT: std::sync::OnceLock<opendash_core::l10n::PotDocument> = std::sync::OnceLock::new();
+    POT.get_or_init(|| {
+        opendash_core::l10n::PotDocument::parse(include_str!("../../../../../l10n/opendash.pot"))
+            .unwrap_or_default()
+    })
 }
 
 pub async fn get_cms_locale_in_conn(conn: &mut SqliteConnection) -> ApiResult<String> {
@@ -106,11 +116,50 @@ pub async fn get_cms_locale_in_conn(conn: &mut SqliteConnection) -> ApiResult<St
 }
 
 pub async fn get_admin_i18n_bootstrap(db: &SqlitePool) -> ApiResult<AdminI18nBootstrap> {
+    get_admin_i18n_bootstrap_with_registry(db, None).await
+}
+
+pub async fn get_admin_i18n_bootstrap_with_registry(
+    db: &SqlitePool,
+    registry: Option<&crate::l10n::CatalogRegistry>,
+) -> ApiResult<AdminI18nBootstrap> {
     let mut conn = db.acquire().await?;
     let configured_locale = get_cms_locale_in_conn(&mut conn).await?;
-    let effective = resolve_effective_ui_locale(&configured_locale);
-    let configured_installed =
-        find_cms_locale(&configured_locale).is_some_and(|option| option.installed);
+    let mut available_locales: Vec<CmsLocaleOption> = CMS_LANGUAGE_CATALOG.to_vec();
+    let pot = core_pot_document();
+
+    if let Some(reg) = registry {
+        for option in &mut available_locales {
+            if option.code == "en" {
+                option.installed = true;
+                option.translation_coverage = 100;
+            } else if let Some(loaded) =
+                reg.resolve(crate::l10n::L10nScope::Core, "opendash", option.code)
+            {
+                option.installed = true;
+                option.translation_coverage = loaded.catalog.coverage_against_pot(pot);
+            }
+        }
+    }
+
+    let matched = find_cms_locale(&configured_locale).and_then(|opt| {
+        available_locales
+            .iter()
+            .find(|a| a.code == opt.code && a.installed)
+            .copied()
+    });
+    let configured_installed = matched.is_some();
+    let effective = matched.unwrap_or(available_locales[0]);
+    let catalog_etag = registry
+        .and_then(|reg| {
+            reg.snapshot()
+                .admin_json_cache
+                .get(effective.code)
+                .map(|c| c.etag.clone())
+        })
+        .unwrap_or_else(|| "\"en-builtin\"".to_owned());
+    let catalog_url = format!("/api/i18n/admin/catalog?locale={}", effective.code);
+
     Ok(AdminI18nBootstrap {
         configured_locale,
         effective_locale: effective.code,
@@ -118,7 +167,9 @@ pub async fn get_admin_i18n_bootstrap(db: &SqlitePool) -> ApiResult<AdminI18nBoo
         effective_direction: effective.direction,
         configured_installed,
         catalog_version: CMS_CATALOG_VERSION,
-        available_locales: CMS_LANGUAGE_CATALOG,
+        available_locales,
+        catalog_etag,
+        catalog_url,
     })
 }
 

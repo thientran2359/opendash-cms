@@ -59,7 +59,7 @@ pub struct DevThemeSnapshot {
     pub templates: BTreeMap<String, String>,
     pub parts: BTreeMap<String, String>,
     pub page_layouts: BTreeMap<String, String>,
-    pub locales: BTreeMap<String, BTreeMap<String, String>>,
+    pub l10n_catalogs: BTreeMap<String, std::sync::Arc<opendash_core::l10n::Catalog>>,
     pub blocks: Vec<(BlockSchemaV1, String)>,
     pub functions_js: Option<Vec<u8>>,
     pub admin_extensions: Option<AdminExtensions>,
@@ -257,22 +257,37 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     let blocks = crate::theme::collect_package_blocks(&block_files, &manifest.theme_id)
         .map_err(str::to_owned)?;
 
-    // Locales under locales/*.json
-    let mut locale_rel_paths = Vec::new();
-    scan_contract_subdir_files(canonical_root, "locales", 0, &mut locale_rel_paths)?;
-    let mut locales = BTreeMap::new();
-    for rel in locale_rel_paths {
+    // Languages under languages/*.{pot,po,mo}
+    let mut lang_rel_paths = Vec::new();
+    scan_contract_subdir_files(canonical_root, "languages", 0, &mut lang_rel_paths)?;
+    let mut l10n_catalogs = BTreeMap::new();
+    let domain = manifest
+        .text_domain
+        .as_deref()
+        .unwrap_or(&manifest.theme_id);
+    for rel in lang_rel_paths {
         validate_theme_relative_path(&rel).map_err(str::to_owned)?;
-        let Some(code) = rel
-            .strip_prefix("locales/")
-            .and_then(|r| r.strip_suffix(".json"))
-        else {
-            return Err(format!("File trong locales/ phải có đuôi .json: '{rel}'."));
-        };
         let cap = crate::theme::v3_entry_cap_and_allowlist(&rel).map_err(str::to_owned)?;
         let bytes = add_read(&rel, cap)?;
-        let dict = crate::theme::parse_theme_locale_json(&bytes).map_err(str::to_owned)?;
-        locales.insert(code.to_owned(), dict);
+        if let Some(stem) = rel
+            .strip_prefix("languages/")
+            .and_then(|r| r.strip_suffix(".mo"))
+            && let Some(raw_loc) = stem.strip_prefix(&format!("{domain}-"))
+            && let Ok(canon) = opendash_core::l10n::canonicalize_locale_code(raw_loc)
+            && let Ok(cat) = opendash_core::l10n::parse_mo(&bytes)
+        {
+            l10n_catalogs.insert(canon, std::sync::Arc::new(cat));
+        } else if let Some(stem) = rel
+            .strip_prefix("languages/")
+            .and_then(|r| r.strip_suffix(".po"))
+            && let Some(raw_loc) = stem.strip_prefix(&format!("{domain}-"))
+            && let Ok(canon) = opendash_core::l10n::canonicalize_locale_code(raw_loc)
+            && !l10n_catalogs.contains_key(&canon)
+            && let Ok(text) = std::str::from_utf8(&bytes)
+            && let Ok(cat) = opendash_core::l10n::parse_po(text)
+        {
+            l10n_catalogs.insert(canon, std::sync::Arc::new(cat));
+        }
     }
 
     drop(add_read);
@@ -305,7 +320,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
         templates,
         parts,
         page_layouts,
-        locales,
+        l10n_catalogs,
         blocks,
         functions_js,
         admin_extensions,

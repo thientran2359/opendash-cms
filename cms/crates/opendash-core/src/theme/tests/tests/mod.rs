@@ -21,6 +21,7 @@ fn v3_manifest() -> ThemeV3Manifest {
         name: "Ocean Theme".into(),
         version: "1.2.3-beta.1".into(),
         default_locale: None,
+        text_domain: None,
         templates: vec![
             template(TemplateCandidateKind::Index, "index.html"),
             template(TemplateCandidateKind::Page, "page.html"),

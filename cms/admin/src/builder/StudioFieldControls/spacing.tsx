@@ -24,7 +24,7 @@ export function SpacingBoxControl({
   resetLabel?: string;
   testIdPrefix?: string;
 }) {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const baseSteps = min < 0 ? TW_MARGIN_STEPS : TW_PADDING_STEPS;
   const twSteps = baseSteps.filter(step => step * 4 >= min && step * 4 <= max);
   const allowTw = allowTailwind && unit === 'px' && twSteps.length > 0;
@@ -140,9 +140,9 @@ export function SpacingBoxControl({
         <div className="flex flex-wrap items-center gap-1">
           <div className="inline-flex rounded border border-zinc-200 bg-zinc-100/80 p-0.5">
             {([
-              { id: 'equal', label: t('builder.studio_field_controls.equal') },
+              { id: 'equal', label: __("Equal") },
               { id: 'xy', label: 'X · Y' },
-              { id: 'sides', label: t('builder.studio_field_controls.sides') },
+              { id: 'sides', label: __("4 sides") },
             ] as const).map(opt => (
               <button
                 key={opt.id}
@@ -187,11 +187,11 @@ export function SpacingBoxControl({
       {mode === 'equal' && (
         <label className="flex items-center gap-2">
           <span className="shrink-0 text-[11px] text-zinc-500">
-            {t('builder.studio_field_controls.equal_unit', { unit: unitMode === 'tw' && allowTw ? `${propPrefix}-*` : unit })}
+            {__("4 sides ({{unit}}):", { unit: unitMode === 'tw' && allowTw ? `${propPrefix}-*` : unit })}
           </span>
           <div className="min-w-0 flex-1">
             {renderTwOrPxField(
-              t('builder.studio_field_controls.equal_label', { label }),
+              __("{{label}} all four sides", { label }),
               curT,
               v => emitBox(v, v, v, v),
               testIdPrefix ? `${testIdPrefix}-all` : undefined,
@@ -204,10 +204,10 @@ export function SpacingBoxControl({
         <div className="grid grid-cols-2 gap-2">
           <label className="space-y-0.5">
             <span className="block text-[10px] text-zinc-500">
-              {t('builder.studio_field_controls.horizontal_unit', { unit: unitMode === 'tw' && allowTw ? `${propPrefix}x-*` : unit })}
+              {__("Horizontal ({{unit}})", { unit: unitMode === 'tw' && allowTw ? `${propPrefix}x-*` : unit })}
             </span>
             {renderTwOrPxField(
-              t('builder.studio_field_controls.horizontal_label', { label }),
+              __("{{label}} horizontal", { label }),
               curL,
               v => emitBox(curT, v, curB, v),
               testIdPrefix ? `${testIdPrefix}-x` : undefined,
@@ -215,10 +215,10 @@ export function SpacingBoxControl({
           </label>
           <label className="space-y-0.5">
             <span className="block text-[10px] text-zinc-500">
-              {t('builder.studio_field_controls.vertical_unit', { unit: unitMode === 'tw' && allowTw ? `${propPrefix}y-*` : unit })}
+              {__("Vertical ({{unit}})", { unit: unitMode === 'tw' && allowTw ? `${propPrefix}y-*` : unit })}
             </span>
             {renderTwOrPxField(
-              t('builder.studio_field_controls.vertical_label', { label }),
+              __("{{label}} vertical", { label }),
               curT,
               v => emitBox(v, curR, v, curL),
               testIdPrefix ? `${testIdPrefix}-y` : undefined,
@@ -230,10 +230,10 @@ export function SpacingBoxControl({
       {mode === 'sides' && (
         <div className="grid grid-cols-4 gap-1.5">
           {([
-            { key: 'top', label: t('builder.studio_field_controls.top'), val: curT, apply: (v: number) => emitBox(v, curR, curB, curL) },
-            { key: 'right', label: t('builder.studio_field_controls.right'), val: curR, apply: (v: number) => emitBox(curT, v, curB, curL) },
-            { key: 'bottom', label: t('builder.studio_field_controls.bottom'), val: curB, apply: (v: number) => emitBox(curT, curR, v, curL) },
-            { key: 'left', label: t('builder.studio_field_controls.left'), val: curL, apply: (v: number) => emitBox(curT, curR, curB, v) },
+            { key: 'top', label: __("Top"), val: curT, apply: (v: number) => emitBox(v, curR, curB, curL) },
+            { key: 'right', label: __("Right"), val: curR, apply: (v: number) => emitBox(curT, v, curB, curL) },
+            { key: 'bottom', label: __("Bottom"), val: curB, apply: (v: number) => emitBox(curT, curR, v, curL) },
+            { key: 'left', label: __("Left"), val: curL, apply: (v: number) => emitBox(curT, curR, curB, v) },
           ] as const).map(side => (
             <label key={side.key} className="space-y-0.5 text-center">
               <span className="block text-[10px] text-zinc-500">{side.label}</span>

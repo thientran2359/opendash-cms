@@ -358,7 +358,7 @@ pub(crate) fn check_block_expr_restrictions(
             }
             Ok(())
         }
-        Expr::Call(_) => Err("C-SEC cấm lời gọi hàm Call trong template block."),
+        Expr::Call(c) => validate_l10n_call(c),
     }
 }
 

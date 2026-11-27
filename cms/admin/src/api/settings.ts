@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import type { FieldSpec } from '../fields/types.ts';
 import { requestJson } from './client.ts';
 
@@ -30,14 +30,14 @@ export function getGeneralSettings(
 ): Promise<GeneralSettings> {
   return requestJson<GeneralSettings>(`/api/admin/settings/general${localeQuery(locale)}`, {
     signal,
-    defaultErrorMessage: tStatic("api.settings.load_general"),
+    defaultErrorMessage: __("Could not load site settings."),
   });
 }
 
 export function getTimezoneCatalog(signal?: AbortSignal): Promise<TimezoneCatalog> {
   return requestJson<TimezoneCatalog>('/api/admin/settings/timezones', {
     signal,
-    defaultErrorMessage: tStatic("api.settings.load_timezones"),
+    defaultErrorMessage: __("Could not load time zones."),
   });
 }
 
@@ -53,7 +53,7 @@ export function saveGeneralSettings(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(draft),
-    defaultErrorMessage: tStatic("api.settings.save_general"),
+    defaultErrorMessage: __("Could not save site settings."),
   });
 }
 
@@ -73,7 +73,7 @@ export type PublicSiteSettingsDraft = Pick<
 export function getPublicSiteSettings(signal?: AbortSignal): Promise<PublicSiteSettings> {
   return requestJson<PublicSiteSettings>('/api/admin/settings/public', {
     signal,
-    defaultErrorMessage: tStatic("api.settings.load_public"),
+    defaultErrorMessage: __("Could not load public site settings."),
   });
 }
 
@@ -88,7 +88,7 @@ export function savePublicSiteSettings(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(draft),
-    defaultErrorMessage: tStatic("api.settings.save_public"),
+    defaultErrorMessage: __("Could not save public site settings."),
   });
 }
 
@@ -105,7 +105,7 @@ export type PermalinkSettingsDraft = Omit<PermalinkSettings, 'version'>;
 export function getPermalinkSettings(signal?: AbortSignal): Promise<PermalinkSettings> {
   return requestJson<PermalinkSettings>('/api/admin/settings/permalinks', {
     signal,
-    defaultErrorMessage: tStatic("api.settings.load_permalinks"),
+    defaultErrorMessage: __("Could not load permalink settings."),
   });
 }
 
@@ -120,7 +120,7 @@ export function savePermalinkSettings(
     ifMatchVersion: expectedVersion,
     contentType: 'application/json',
     body: JSON.stringify(draft),
-    defaultErrorMessage: tStatic("api.settings.save_permalinks"),
+    defaultErrorMessage: __("Could not save permalink settings."),
   });
 }
 
@@ -144,7 +144,7 @@ export function getReadingSettings(
 ): Promise<ReadingSettings> {
   return requestJson<ReadingSettings>(`/api/admin/settings/reading${localeQuery(locale)}`, {
     signal,
-    defaultErrorMessage: tStatic("api.settings.load_reading"),
+    defaultErrorMessage: __("Could not load homepage and posts page settings."),
   });
 }
 
@@ -160,7 +160,7 @@ export function saveReadingSettings(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(draft),
-    defaultErrorMessage: tStatic("api.settings.save_reading"),
+    defaultErrorMessage: __("Could not save homepage and posts page settings."),
   });
 }
 
@@ -173,7 +173,7 @@ export interface GlobalSiteOptionsSnapshot {
 export function getGlobalSiteOptions(signal?: AbortSignal): Promise<GlobalSiteOptionsSnapshot> {
   return requestJson<GlobalSiteOptionsSnapshot>('/api/admin/settings/site-options', {
     signal,
-    defaultErrorMessage: tStatic("api.settings.load_site_options"),
+    defaultErrorMessage: __("Could not load global site options."),
   });
 }
 
@@ -188,6 +188,6 @@ export function saveGlobalSiteOptions(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify({ values }),
-    defaultErrorMessage: tStatic("api.settings.save_site_options"),
+    defaultErrorMessage: __("Could not save global site options."),
   });
 }

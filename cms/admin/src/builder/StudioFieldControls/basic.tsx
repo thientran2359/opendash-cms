@@ -63,7 +63,7 @@ export function RangeNumberControl({
   onReset?: () => void;
   resetLabel?: string;
 }) {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const autoId = useId();
   const inputId = id ?? autoId;
   const effective = value ?? fallbackValue;
@@ -83,7 +83,7 @@ export function RangeNumberControl({
           {readout && <span className="font-mono text-[11px] text-zinc-500">{readout}</span>}
           {onReset && (
             <button type="button" disabled={disabled} className={RESET_BTN_CLASS} onClick={onReset}>
-              {resetLabel ?? t('builder.studio_field_controls.default')}
+              {resetLabel ?? __("Default")}
             </button>
           )}
         </div>
@@ -142,8 +142,8 @@ export function TailwindGapControl({
   onChange: (px: number) => void;
   testIdPrefix?: string;
 }) {
-  const { t } = useI18n();
-  const displayLabel = label ?? t('builder.studio_field_controls.gap');
+  const { __ } = useI18n();
+  const displayLabel = label ?? __("Gap");
   const autoId = useId();
   const inputId = id ?? autoId;
   const matchedStep = pxToTwStep(value, TW_GAP_STEPS);
@@ -242,7 +242,7 @@ export function TailwindGapControl({
             }}
             className="h-7 w-24 rounded-md border border-zinc-300 bg-white px-2 font-mono text-xs text-zinc-900 tabular-nums focus-visible:outline-2 focus-visible:outline-sky-600"
           />
-          <span className="text-[11px] text-zinc-500">{t('builder.studio_field_controls.free_px')}</span>
+          <span className="text-[11px] text-zinc-500">{__("px (custom, outside Tailwind scale)")}</span>
         </div>
       )}
     </div>
@@ -264,7 +264,7 @@ export function SegmentedButtonsControl({
   resetLabel?: string;
   testIdPrefix?: string;
 }) {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const colsClass = options.length <= 2
     ? 'grid-cols-2'
     : options.length === 3
@@ -288,7 +288,7 @@ export function SegmentedButtonsControl({
           {readout && <span className="font-mono text-[11px] text-zinc-500">{readout}</span>}
           {onReset && (
             <button type="button" disabled={disabled} className={RESET_BTN_CLASS} onClick={onReset}>
-              {resetLabel ?? t('builder.studio_field_controls.default')}
+              {resetLabel ?? __("Default")}
             </button>
           )}
         </div>

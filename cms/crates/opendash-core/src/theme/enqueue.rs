@@ -143,6 +143,7 @@ impl ThemeV3Manifest {
             render_cache: func.render_cache,
             declarations: Default::default(),
             editor_panels: Vec::new(),
+            text_domain: self.text_domain.clone(),
             settings_schema: func.settings_schema.clone(),
         })
     }

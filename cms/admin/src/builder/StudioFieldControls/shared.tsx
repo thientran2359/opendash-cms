@@ -67,11 +67,11 @@ export interface ResponsiveDotInfo {
 }
 
 export function ResponsiveDot({ info }: { info?: ResponsiveDotInfo }) {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   if (!info?.differs) return null;
   const actionHint = info.viewport === 'desktop'
-    ? t('builder.studio_field_controls.sync')
-    : t('builder.studio_field_controls.unset');
+    ? __("Click to synchronize all three viewports")
+    : __("Click to remove this viewport override");
   const tipText = `${info.summary} — ${actionHint}`;
   return (
     <span className="group relative inline-flex items-center">

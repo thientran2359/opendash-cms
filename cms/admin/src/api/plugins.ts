@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __, _x } from '../i18n/index.tsx';
 import { PluginRunResult, PluginSettingsSnapshot, PluginSummary } from '../types.ts';
 import { requestJson, requestText } from './client.ts';
 
@@ -6,7 +6,7 @@ export async function getPlugins(signal?: AbortSignal): Promise<PluginSummary[]>
   return requestJson<PluginSummary[]>('/api/admin/plugins', {
     method: 'GET',
     signal,
-    defaultErrorMessage: tStatic('api.plugins.load_plugins'),
+    defaultErrorMessage: _x("Could not load plugins.", "api.plugins"),
   });
 }
 
@@ -19,8 +19,8 @@ export async function installPlugin(
     csrfToken,
     contentType: 'application/zip',
     body: file,
-    defaultErrorMessage: tStatic('api.plugins.install_the_plugin'),
-    oversizeErrorMessage: tStatic('api.plugins.the_zip_file_exceeds_the_5_mib_plugin_limit'),
+    defaultErrorMessage: _x("Could not install the plugin.", "api.plugins"),
+    oversizeErrorMessage: __("The ZIP file exceeds the 5 MiB plugin limit."),
   });
 }
 
@@ -34,8 +34,8 @@ export async function runPlugin(
     csrfToken,
     contentType: 'application/json',
     body: inputJson || '{}',
-    defaultErrorMessage: tStatic('api.plugins.run_the_plugin'),
-    oversizeErrorMessage: tStatic('api.plugins.the_payload_exceeds_the_1_mib_json_input_limit'),
+    defaultErrorMessage: _x("Could not run the plugin.", "api.plugins"),
+    oversizeErrorMessage: __("The payload exceeds the 1 MiB JSON input limit."),
   });
 }
 
@@ -43,7 +43,7 @@ export async function disablePlugin(id: string, csrfToken: string): Promise<void
   await requestText(`/api/admin/plugins/${encodeURIComponent(id)}/disable`, {
     method: 'POST',
     csrfToken,
-    defaultErrorMessage: tStatic('api.plugins.disable_the_plugin'),
+    defaultErrorMessage: __("Could not disable the plugin."),
   });
 }
 
@@ -51,7 +51,7 @@ export async function enablePlugin(id: string, csrfToken: string): Promise<void>
   await requestText(`/api/admin/plugins/${encodeURIComponent(id)}/enable`, {
     method: 'POST',
     csrfToken,
-    defaultErrorMessage: tStatic('api.plugins.enable_the_plugin'),
+    defaultErrorMessage: __("Could not enable the plugin."),
   });
 }
 
@@ -62,7 +62,7 @@ export async function getPluginUiSchema(
   return requestJson<unknown>(`/api/admin/plugins/${encodeURIComponent(id)}/ui-schema`, {
     method: 'GET',
     signal,
-    defaultErrorMessage: tStatic('api.plugins.load_the_declarative_ui'),
+    defaultErrorMessage: __("Could not load the declarative UI."),
   });
 }
 
@@ -82,7 +82,7 @@ export async function invokePluginAction(
       body: JSON.stringify(payload ?? {}),
       signal,
       expectLifecycleConfirmation: true,
-      defaultErrorMessage: tStatic('api.plugins.execute_the_action'),
+      defaultErrorMessage: __("Could not execute the action."),
     },
   );
 }
@@ -102,7 +102,7 @@ export async function runPluginAction(
       contentType: 'application/json',
       body: JSON.stringify(payload ?? {}),
       expectLifecycleConfirmation: true,
-      defaultErrorMessage: tStatic('api.plugins.execute_the_plugin_action'),
+      defaultErrorMessage: __("Could not execute the plugin action."),
     },
   );
 }
@@ -123,7 +123,7 @@ export async function confirmPluginLifecycleAction(
       contentType: 'application/json',
       body: JSON.stringify({ confirmation_id: confirmationId, decision }),
       signal,
-      defaultErrorMessage: tStatic('api.plugins.confirm_lifecycle_action'),
+      defaultErrorMessage: __("Could not resolve plugin lifecycle confirmation."),
     },
   );
 }
@@ -136,7 +136,7 @@ export function getPluginSettings(
     `/api/admin/plugins/${encodeURIComponent(id)}/settings`,
     {
       signal,
-      defaultErrorMessage: tStatic('api.plugins.load_plugin_settings'),
+      defaultErrorMessage: __("Could not load plugin settings."),
     },
   );
 }
@@ -155,7 +155,7 @@ export function savePluginSettings(
       ifMatchVersion: version,
       contentType: 'application/json',
       body: JSON.stringify({ values }),
-      defaultErrorMessage: tStatic('api.plugins.save_plugin_settings'),
+      defaultErrorMessage: __("Could not save plugin settings."),
     },
   );
 }

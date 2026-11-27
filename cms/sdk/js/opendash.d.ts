@@ -304,6 +304,12 @@ export interface OpenDashHostApi {
     error(message: string): void;
   };
 
+  readonly i18n: {
+    __(msgid: string, domain?: string): string;
+    _x(msgid: string, context: string, domain?: string): string;
+    _n(singular: string, plural: string, count: number, domain?: string): string;
+  };
+
   escapeHtml(text: string): string;
   escapeAttr(text: string): string;
 }

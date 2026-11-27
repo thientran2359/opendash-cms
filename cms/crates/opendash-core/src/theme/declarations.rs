@@ -300,6 +300,8 @@ pub struct ThemeV3Manifest {
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_locale: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_domain: Option<String>,
     #[serde(default)]
     pub templates: Vec<ThemeTemplateDecl>,
     #[serde(default)]

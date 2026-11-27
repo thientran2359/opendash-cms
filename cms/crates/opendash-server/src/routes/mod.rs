@@ -8,6 +8,7 @@ pub mod extensions;
 pub mod fields;
 pub mod health;
 pub mod import;
+pub mod l10n;
 pub mod media;
 pub mod menu;
 pub mod operations;

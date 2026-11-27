@@ -249,9 +249,9 @@ pub(super) fn build_entry_view_with_defs(
             | opendash_core::field_schema::FieldType::Gallery => String::new(),
             opendash_core::field_schema::FieldType::Boolean if value.is_boolean() => {
                 if value == &Value::Bool(true) {
-                    l10n.yes
+                    l10n.yes.as_ref()
                 } else {
-                    l10n.no
+                    l10n.no.as_ref()
                 }
                 .to_string()
             }

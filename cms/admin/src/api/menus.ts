@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import { requestJson, requestText } from './client.ts';
 
 export type MenuTargetKind = 'entry' | 'term' | 'external';
@@ -60,7 +60,7 @@ export interface MenuSlotsSnapshot {
 export function listMenus(limit = 20, offset = 0, signal?: AbortSignal): Promise<MenuListPage> {
   return requestJson<MenuListPage>(`/api/admin/menus?limit=${limit}&offset=${offset}`, {
     signal,
-    defaultErrorMessage: tStatic('api.menus.load_menus'),
+    defaultErrorMessage: __("Could not load menus."),
   });
 }
 
@@ -74,14 +74,14 @@ export function createMenu(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify({ menu_key: menuKey, title }),
-    defaultErrorMessage: tStatic('api.menus.create_the_menu'),
+    defaultErrorMessage: __("Could not create the menu."),
   });
 }
 
 export function getMenu(id: number, signal?: AbortSignal): Promise<MenuWithItems> {
   return requestJson<MenuWithItems>(`/api/admin/menus/${id}`, {
     signal,
-    defaultErrorMessage: tStatic('api.menus.load_menu_details'),
+    defaultErrorMessage: __("Could not load menu details."),
   });
 }
 
@@ -98,7 +98,7 @@ export function updateMenu(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify({ title, items }),
-    defaultErrorMessage: tStatic('api.menus.save_the_menu'),
+    defaultErrorMessage: __("Could not save the menu."),
   });
 }
 
@@ -107,7 +107,7 @@ export async function deleteMenu(id: number, version: number, csrfToken: string)
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: tStatic('api.menus.delete_the_menu'),
+    defaultErrorMessage: __("Could not delete the menu."),
   });
 }
 
@@ -121,7 +121,7 @@ export function getMenuSlots(
     `/api/admin/menu-slots/${encodeURIComponent(themeId)}${query}`,
     {
       signal,
-      defaultErrorMessage: tStatic('api.menus.load_theme_menu_slots'),
+      defaultErrorMessage: __("Could not load theme menu slots."),
     },
   );
 }
@@ -142,7 +142,7 @@ export function putMenuSlots(
       ifMatchVersion: version,
       contentType: 'application/json',
       body: JSON.stringify({ assignments }),
-      defaultErrorMessage: tStatic('api.menus.save_menu_slot_assignments'),
+      defaultErrorMessage: __("Could not save menu slot assignments."),
     },
   );
 }

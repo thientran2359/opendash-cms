@@ -22,7 +22,7 @@ pub const MAX_WASM_BYTES: usize = 2 * 1024 * 1024;
 
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024; // 64 KB
 
-pub const MAX_PLUGIN_FILES: usize = 72;
+pub const MAX_PLUGIN_FILES: usize = 104;
 
 pub const MAX_PLUGIN_DIR_DEPTH: usize = 4;
 
@@ -48,6 +48,10 @@ pub(crate) fn plugin_entry_max_bytes(name: &str) -> Option<usize> {
         Some(MAX_UNCOMPRESSED_TOTAL_BYTES)
     } else if name.starts_with("blocks/") {
         Some(crate::package::V2_MAX_TEXT_BYTES)
+    } else if name.starts_with("languages/")
+        && (name.ends_with(".pot") || name.ends_with(".po") || name.ends_with(".mo"))
+    {
+        Some(256 * 1024)
     } else {
         None
     }

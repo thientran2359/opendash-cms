@@ -29,6 +29,8 @@ pub const MAX_HOST_CALLS: usize = 100;
 
 pub const MAX_RENDER_HOST_CALLS: usize = 64;
 
+pub const MAX_L10N_CALLS: usize = 256;
+
 pub const MAX_RENDER_HTTP_CALLS: usize = 2;
 
 pub const MAX_KV_KEY_BYTES: usize = 256;
@@ -58,6 +60,8 @@ pub struct HostContext {
     pub last_resp_bytes: Option<Vec<u8>>,
     pub host_calls_count: usize,
     pub http_calls_count: usize,
+    pub l10n_calls_count: usize,
+    pub default_locale: Option<String>,
     pub db_pool: Option<SqlitePool>,
     pub secrets_root: Option<PathBuf>,
     pub read_ipc:
@@ -177,6 +181,37 @@ pub enum HostReadRequest {
     PluginSecretGet {
         key: String,
     },
+    L10nTranslate {
+        #[serde(default)]
+        text_domain: Option<String>,
+        msgid: String,
+        #[serde(default)]
+        msgid_plural: Option<String>,
+        #[serde(default)]
+        count: Option<i64>,
+        #[serde(default)]
+        context: Option<String>,
+        #[serde(default)]
+        locale: Option<String>,
+    },
+    L10nTranslateBatch {
+        items: Vec<L10nTranslateItem>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct L10nTranslateItem {
+    #[serde(default)]
+    pub text_domain: Option<String>,
+    pub msgid: String,
+    #[serde(default)]
+    pub msgid_plural: Option<String>,
+    #[serde(default)]
+    pub count: Option<i64>,
+    #[serde(default)]
+    pub context: Option<String>,
+    #[serde(default)]
+    pub locale: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,6 +326,22 @@ pub enum HostOperationRequest {
     PluginSettingsGet,
     PluginSecretGet {
         key: String,
+    },
+    L10nTranslate {
+        #[serde(default)]
+        text_domain: Option<String>,
+        msgid: String,
+        #[serde(default)]
+        msgid_plural: Option<String>,
+        #[serde(default)]
+        count: Option<i64>,
+        #[serde(default)]
+        context: Option<String>,
+        #[serde(default)]
+        locale: Option<String>,
+    },
+    L10nTranslateBatch {
+        items: Vec<L10nTranslateItem>,
     },
     Log {
         level: String,

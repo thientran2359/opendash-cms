@@ -12,7 +12,7 @@ interface Props {
 /** Theme Library is a read-only source. Only the parent's explicit insertion
  * handler is allowed to change the unsaved Builder document. */
 export function PatternLibraryModal({ onClose, onInsert, onApiError }: Props) {
-  const { t } = useI18n();
+  const { __ } = useI18n();
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
@@ -51,9 +51,9 @@ export function PatternLibraryModal({ onClose, onInsert, onApiError }: Props) {
       })
       .catch(cause => {
         if (controller.signal.aborted) return;
-        setError(t('builder.pattern_library_modal.load_error'));
+        setError(__("Could not load patterns. Try searching again."));
         setItems([]);
-        onApiError(cause, t('builder.pattern_library_modal.library_error'));
+        onApiError(cause, __("Could not load the pattern library."));
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -69,14 +69,14 @@ export function PatternLibraryModal({ onClose, onInsert, onApiError }: Props) {
       const result = await getThemePattern(item.key, controller.signal);
       if (controller.signal.aborted) return;
       if (result.source !== 'theme' || result.key !== item.key) {
-        throw new Error(t('builder.pattern_library_modal.mismatch'));
+        throw new Error(__("The returned pattern does not match the selected item."));
       }
       if (onInsert(result.document, result.title)) onClose();
-      else setError(t('builder.pattern_library_modal.not_inserted'));
+      else setError(__("The pattern was not inserted. Check the Builder message."));
     } catch (cause) {
       if (controller.signal.aborted) return;
-      setError(t('builder.pattern_library_modal.insert_error'));
-      onApiError(cause, t('builder.pattern_library_modal.theme_error'));
+      setError(__("Could not insert the pattern. The current layout is preserved."));
+      onApiError(cause, __("Could not load the theme pattern."));
     } finally {
       if (!controller.signal.aborted) setInserting(null);
     }
@@ -107,40 +107,40 @@ export function PatternLibraryModal({ onClose, onInsert, onApiError }: Props) {
         }}>
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 p-5">
           <div>
-            <h2 id="pattern-library-heading" className="!m-0 text-xl font-semibold text-slate-900">{t('builder.pattern_library_modal.heading')}
+            <h2 id="pattern-library-heading" className="!m-0 text-xl font-semibold text-slate-900">{__("Explore all patterns")}
             </h2>
-            <p className="mt-1 text-sm text-slate-600">{t('builder.pattern_library_modal.description')}</p>
+            <p className="mt-1 text-sm text-slate-600">{__("Patterns from the active theme. Insert a copy to edit independently.")}</p>
           </div>
-          <button type="button" className="btn-secondary" aria-label={t('builder.pattern_library_modal.close_label')}
-            disabled={Boolean(inserting)} onClick={onClose}>{t('builder.pattern_library_modal.close')}</button>
+          <button type="button" className="btn-secondary" aria-label={__("Close pattern library")}
+            disabled={Boolean(inserting)} onClick={onClose}>{__("Close")}</button>
         </header>
         <div className="border-b border-slate-200 p-4 sm:px-5">
-          <label htmlFor="pattern-library-search" className="mb-1 block text-xs font-semibold text-slate-700">{t('builder.pattern_library_modal.search')}
+          <label htmlFor="pattern-library-search" className="mb-1 block text-xs font-semibold text-slate-700">{__("Find patterns")}
           </label>
           <input ref={searchRef} id="pattern-library-search" type="search"
-            className="w-full max-w-lg text-sm" placeholder={t('builder.pattern_library_modal.placeholder')}
+            className="w-full max-w-lg text-sm" placeholder={__("Search by name, description or category…")}
             value={search} onChange={event => setSearch(event.target.value)} />
         </div>
         <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-          <nav aria-label={t('builder.pattern_library_modal.categories')} className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 p-3 sm:w-52 sm:flex-col sm:overflow-y-auto sm:border-b-0 sm:border-r">
+          <nav aria-label={__("Pattern categories")} className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 p-3 sm:w-52 sm:flex-col sm:overflow-y-auto sm:border-b-0 sm:border-r">
             {categories.map(name => <button key={name} type="button"
               className={'shrink-0 rounded-lg px-3 py-2 text-left text-sm ' +
                 (name === category ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700 hover:bg-slate-100')}
               aria-pressed={name === category} onClick={() => setCategory(name)}>
-              {name === 'all' ? t('builder.pattern_library_modal.all') : name}
+              {name === 'all' ? __("All") : name}
             </button>)}
           </nav>
           <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
             {error && <p role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-            {loading ? <p role="status" className="text-sm text-slate-600">{t('builder.pattern_library_modal.loading')}</p>
+            {loading ? <p role="status" className="text-sm text-slate-600">{__("Loading pattern library…")}</p>
               : items.length === 0
-                ? <p className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-600">{t('builder.pattern_library_modal.empty')}
+                ? <p className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-600">{__("No matching patterns in the active theme.")}
                 </p>
                 : <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" data-testid="pattern-library-grid">
                   {items.map(item => <article key={item.id}
                     className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                     {item.preview_url?.startsWith('/theme/') && !item.preview_url.startsWith('//')
-                      ? <img src={item.preview_url} alt={t('builder.pattern_library_modal.preview', { title: item.title })}
+                      ? <img src={item.preview_url} alt={__("Preview: {{title}}", { title: item.title })}
                           loading="lazy" className="h-40 w-full bg-slate-100 object-cover" />
                       : <div className="flex h-40 items-center justify-center bg-slate-100 text-sm text-slate-500">
                         {item.category}
@@ -152,7 +152,7 @@ export function PatternLibraryModal({ onClose, onInsert, onApiError }: Props) {
                       <button type="button" className="mt-auto w-full" disabled={Boolean(inserting)}
                         data-testid={'insert-theme-pattern-' + item.key}
                         onClick={() => void insert(item)}>
-                        {inserting === item.key ? t('builder.pattern_library_modal.inserting') : t('builder.pattern_library_modal.insert')}
+                        {inserting === item.key ? __("Inserting…") : __("Insert a copy")}
                       </button>
                     </div>
                   </article>)}

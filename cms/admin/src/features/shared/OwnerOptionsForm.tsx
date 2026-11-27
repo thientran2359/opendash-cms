@@ -1,4 +1,4 @@
-import { useI18n } from '../../i18n/index.tsx';
+import { __ } from '../../i18n/index.tsx';
 import React from 'react';
 import type { BuilderViewport } from '../../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
@@ -133,7 +133,6 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
   onSubmit,
   onApiError,
 }) => {
-  const { t: translate } = useI18n();
 
   const renderFields = () => (
     <UnifiedFieldForm
@@ -158,7 +157,7 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
       <div data-testid={testId} className="space-y-3">
         <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
           <span>
-            {ownerKind === 'theme' || ownerKind === 'theme_functions' ? translate('feature.shared.owneroptionsform.theme_prefix') : translate('feature.shared.owneroptionsform.plugin_prefix')}
+            {ownerKind === 'theme' || ownerKind === 'theme_functions' ? __("Theme: ") : __("Plugin: ")}
             <strong className="font-medium text-zinc-700">{ownerId}</strong>
           </span>
           <AdminBadge tone="neutral">v{version}</AdminBadge>
@@ -193,7 +192,7 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
       {afterFields}
       <div className="pt-1">
         <AdminButton type="submit" variant="primary" size="md" disabled={!csrfToken || saving}>
-          {submitLabel ?? (saving ? translate('general.saving') : translate('general.save'))}
+          {submitLabel ?? (saving ? __("Saving…") : __("Save settings"))}
         </AdminButton>
       </div>
     </form>

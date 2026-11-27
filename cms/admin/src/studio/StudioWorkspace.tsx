@@ -100,7 +100,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   onApiError,
   onSavedSettingsOrTheme,
 }) => {
-  const { t } = useI18n();
+  const { __, _x } = useI18n();
   const isMode2 = route.view === 'studio-entry';
   const entryTypeKey = isMode2 ? (route.typeKey ?? '') : '';
   const entryId = isMode2 ? (route.entryId ?? null) : null;
@@ -320,14 +320,14 @@ export const StudioWorkspace: React.FC<Props> = ({
     setLoading(false);
     if (mode1Dirty && !localeReloadPending) {
       setLocaleDraftConflict(hydratedPreviewLocale || previewLocale);
-      setStatus(t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale"), true);
+      setStatus(__("The preview language changed or is no longer available. Drafts are retained; reload to switch languages."), true);
     } else {
       mode1ForceReloadRef.current = true;
       mode1LoadedRef.current = false;
       setLoading(true);
       setMode1ReloadSeq(v => v + 1);
     }
-  }, [isMode2, previewLocaleInvalid, localeBaselineMismatch, localeReloadPending, localeDraftConflict, hydratedPreviewLocale, previewLocale, saving, mode1Dirty, t]);
+  }, [isMode2, previewLocaleInvalid, localeBaselineMismatch, localeReloadPending, localeDraftConflict, hydratedPreviewLocale, previewLocale, saving, mode1Dirty]);
 
   // Keep route-driven Mode 1 panel/target synchronized cleanly on navigation.
   useEffect(() => {
@@ -405,7 +405,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       }
       let alive = true;
       setLoading(true);
-      setStatus(t("studio.loading_appearance_customization"));
+      setStatus(__("Loading appearance customization..."));
       Promise.all([
         getStudioTargets(),
         getGeneralSettings(undefined, effectivePreviewLocale || undefined),
@@ -438,7 +438,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           if (!alive || seq !== loadSeqRef.current || authorityRef.current !== reqAuthority) return;
           if ((generalRes.locale && generalRes.locale !== effectivePreviewLocale)
               || (readingRes.locale && readingRes.locale !== effectivePreviewLocale)) {
-            throw new Error(t("studio.reload_preview_locale_before_saving"));
+            throw new Error(__("Reload the preview language successfully before saving. Your draft is retained until then."));
           }
           let slotsRes: MenuSlotsSnapshot | null = null;
           if (targetsRes.active_theme_id) {
@@ -496,12 +496,12 @@ export const StudioWorkspace: React.FC<Props> = ({
           setHydratedPreviewLocale(effectivePreviewLocale);
           setLocaleReloadPending(false);
           setConflict(false);
-          setStatus(t("studio.ready_to_customize_the_website_and_build_templates"));
+          setStatus(__("Ready to customize the website and build templates."));
         })
         .catch(cause => {
           if (alive && seq === loadSeqRef.current && authorityRef.current === reqAuthority) {
-            setStatus(t("studio.cannot_load_appearance_customization_data"), true);
-            onApiError(cause, t("studio.cannot_open_appearance_customization"));
+            setStatus(__("Cannot load appearance customization data."), true);
+            onApiError(cause, __("Cannot open appearance customization."));
           }
         })
         .finally(() => {
@@ -515,7 +515,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     const retainingEntryDraft = mode2LoadedKeyRef.current === entryIdentity && entryDirty;
     let alive = true;
     setLoading(true);
-    setStatus(t("studio.loading_the_page_builder"));
+    setStatus(__("Loading the page builder..."));
     Promise.allSettled([
       builderApi.getEntryBuilder(entryTypeKey, entryId),
       getContentEntry(entryTypeKey, entryId),
@@ -525,7 +525,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         if (!alive || seq !== loadSeqRef.current || authorityRef.current !== reqAuthority) return;
         if (builderRes.status === 'rejected' && isTrashedConflict(builderRes.reason)) {
           setEntryTrashedBlocked(true);
-          setStatus(t("entry_lifecycle.studio_entry_trashed_blocked"), true);
+          setStatus(__("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio."), true);
           return;
         }
         if (builderRes.status === 'rejected') throw builderRes.reason;
@@ -552,10 +552,10 @@ export const StudioWorkspace: React.FC<Props> = ({
           setEntrySelectedNodeId(visibleNodesInTree(serverDoc)[0]?.node.id ?? null);
           resetHistory();
           setConflict(false);
-          setStatus(t("studio.editing_title_v_version", { title: entryRec.title, version: opened.version }));
+          setStatus(__("Editing {{title}} (v{{version}}).", { title: entryRec.title, version: opened.version }));
         } else {
           setConflict(entryVersion !== opened.version);
-          setStatus(t("studio.restored_the_unsaved_page_builder_draft_from_the_previous_session"));
+          setStatus(__("Restored the unsaved page builder draft from the previous session."));
         }
         mode2LoadedKeyRef.current = entryIdentity;
       })
@@ -563,10 +563,10 @@ export const StudioWorkspace: React.FC<Props> = ({
         if (alive && seq === loadSeqRef.current && authorityRef.current === reqAuthority) {
           if (isTrashedConflict(cause)) {
             setEntryTrashedBlocked(true);
-            setStatus(t("entry_lifecycle.studio_entry_trashed_blocked"), true);
+            setStatus(__("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio."), true);
           } else {
-            setStatus(t("studio.cannot_open_the_page_builder_for_this_content"), true);
-            onApiError(cause, t("studio.cannot_open_the_page_builder"));
+            setStatus(__("Cannot open the page builder for this content."), true);
+            onApiError(cause, __("Cannot open the page builder."));
           }
         }
       })
@@ -609,7 +609,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     redoStackRef.current = [];
     setHistoryCounts({ undo: undoStackRef.current.length, redo: 0 });
     setActiveDocAndSelection(nextDoc, nextSelected);
-    setStatus(t("studio.there_are_unsaved_changes"));
+    setStatus(__("There are unsaved changes."));
     return true;
   };
 
@@ -688,10 +688,10 @@ export const StudioWorkspace: React.FC<Props> = ({
             if (controller.signal.aborted || seq !== previewSeqRef.current) return;
             if (isTrashedConflict(cause)) {
               setEntryTrashedBlocked(true);
-              setStatus(t("entry_lifecycle.studio_entry_trashed_blocked"), true);
+              setStatus(__("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio."), true);
               return;
             }
-            onApiError(cause, t("studio.cannot_create_a_page_builder_preview"));
+            onApiError(cause, __("Cannot create a page builder preview."));
           });
         return;
       }
@@ -724,7 +724,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           if (cause instanceof api.ApiClientError && cause.status === 412) {
             setConflict(true);
           } else {
-            onApiError(cause, t("studio.cannot_preview_appearance_customization"));
+            onApiError(cause, __("Cannot preview appearance customization."));
           }
         });
     }, 250);
@@ -763,7 +763,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   const handleSelectTarget = (nextKey: string | null) => {
     if (templateDirty && nextKey !== selectedTargetKey) {
-      if (!window.confirm(t("studio.the_current_template_has_unsaved_changes_discard_them_and_switch_targets"))) {
+      if (!window.confirm(__("The current template has unsaved changes. Discard them and switch targets?"))) {
         return;
       }
     }
@@ -777,7 +777,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     setMenuRequest(null);
     setPanel(nextPanel);
     if (nextPanel !== 'templates' && templateDirty) {
-      setStatus(t("studio.unsaved_template_changes_are_retained_in_the_current_session"));
+      setStatus(__("Unsaved template changes are retained in the current session."));
     }
   };
 
@@ -786,17 +786,17 @@ export const StudioWorkspace: React.FC<Props> = ({
 
     if (readingDirty && readingDraft && readingDraft.homepage_page_id !== null &&
         readingDraft.homepage_page_id === readingDraft.posts_page_id) {
-      setStatus(t("studio.the_homepage_and_posts_page_cannot_be_the_same_page"), true);
+      setStatus(__("The homepage and posts page cannot be the same page."), true);
       return;
     }
 
     if (templateDirty && selectedTarget) {
       if (selectedTarget.requires_content_slot && countElementsByType(templateDoc, 'core/content_slot') !== 1) {
-        setStatus(t("studio.this_template_requires_exactly_one_core_content_slot"), true);
+        setStatus(__("This template requires exactly one core/content_slot."), true);
         return;
       }
       if (selectedTarget.forbids_content_slot && countElementsByType(templateDoc, 'core/content_slot') > 0) {
-        setStatus(t("studio.this_template_must_not_contain_core_content_slot"), true);
+        setStatus(__("This template must not contain core/content_slot."), true);
         return;
       }
       const badPart = allNodes(templateDoc).some(
@@ -806,7 +806,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           !VALID_TEMPLATE_PART_KEY.test(String((n.node as BuilderElement).props.part_key ?? '')),
       );
       if (badPart) {
-        setStatus(t("studio.a_template_part_has_an_invalid_part_key"), true);
+        setStatus(__("A template part has an invalid part_key."), true);
         return;
       }
     }
@@ -820,25 +820,25 @@ export const StudioWorkspace: React.FC<Props> = ({
         const res = await saveGeneralSettings(generalDraft, generalSaved.version, csrfToken, effectivePreviewLocale || undefined);
         setGeneralSaved(res);
         setGeneralDraft({ site_title: res.site_title, tagline: res.tagline, timezone: res.timezone });
-        savedNames.push(t("studio.site_identity"));
+        savedNames.push(__("Site identity"));
       }
       if (readingDirty && readingSaved && readingDraft) {
         const res = await saveReadingSettings(readingDraft, readingSaved.version, csrfToken, effectivePreviewLocale || undefined);
         setReadingSaved(res);
         setReadingDraft({ homepage_page_id: res.homepage_page_id, posts_page_id: res.posts_page_id });
-        savedNames.push(t("studio.homepage_and_reading"));
+        savedNames.push(__("Homepage and reading"));
       }
       if (menuSlotsDirty && menuSlotsSaved && menuSlotsDraft) {
         const res = await putMenuSlots(menuSlotsSaved.theme_id, menuSlotsDraft, menuSlotsSaved.version, csrfToken, effectivePreviewLocale || undefined);
         setMenuSlotsSaved(res);
         setMenuSlotsDraft(buildSlotAssignmentsMap(res));
-        savedNames.push(t("studio.menu_locations"));
+        savedNames.push(__("Menu locations"));
       }
       if (globalOptionsDirty && globalOptionsSaved && globalOptionsDraft) {
         const res = await saveGlobalSiteOptions(globalOptionsDraft, globalOptionsSaved.version, csrfToken);
         setGlobalOptionsSaved(res);
         setGlobalOptionsDraft(res.values);
-        savedNames.push(t("studio.global_site_options"));
+        savedNames.push(__("Global site options"));
       }
       if (themeOptionsDirty && activeThemeId && themeOptionsDraft && themeOptionsVersion !== null) {
         const res = await saveThemeOptions(activeThemeId, themeOptionsDraft, themeOptionsVersion, csrfToken, effectivePreviewLocale || undefined);
@@ -846,7 +846,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         setThemeOptionsDraft(res.values);
         setThemeOptionsDirty(false);
         setThemeOptionsReloadToken(v => v + 1);
-        savedNames.push(t("studio.appearance_options"));
+        savedNames.push(__("Appearance options"));
       }
       if (templateDirty && selectedTarget) {
         const res = await builderApi.putTemplateOverride(
@@ -866,20 +866,20 @@ export const StudioWorkspace: React.FC<Props> = ({
 
       if (savedNames.length > 0) {
         onSavedSettingsOrTheme?.();
-        setStatus(t("studio.saved_names", { names: savedNames.join(", ") }));
+        setStatus(__("Saved: {{names}}.", { names: savedNames.join(", ") }));
       }
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
-        setStatus(t("studio.data_changed_in_another_session_412_your_unsaved_changes_are_retained"), true);
+        setStatus(__("Data changed in another session (412). Your unsaved changes are retained."), true);
       } else {
         setStatus(
           savedNames.length > 0
-            ? t("studio.saved_names_but_the_next_step_failed_remaining_changes_are_retained", { names: savedNames.join(", ") })
-            : t("studio.saving_failed_drafts_are_retained"),
+            ? __("Saved {{names}}, but the next step failed; remaining changes are retained.", { names: savedNames.join(", ") })
+            : __("Saving failed; drafts are retained."),
           true,
         );
-        onApiError(cause, t("studio.cannot_save_appearance_customization"));
+        onApiError(cause, __("Cannot save appearance customization."));
       }
     } finally {
       savingRef.current = false;
@@ -889,7 +889,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   const handleResetTemplate = async () => {
     if (!active || !csrfToken || savingRef.current || localeDraftBlocked || !selectedTarget?.override_id || !templateSavedVersion) return;
-    if (!window.confirm(t("studio.reset_template_label_to_the_theme_core_default", { label: selectedTarget.label }))) return;
+    if (!window.confirm(__("Reset template \"{{label}}\" to the theme/core default?", { label: selectedTarget.label }))) return;
     savingRef.current = true;
     setSaving(true);
     try {
@@ -903,10 +903,10 @@ export const StudioWorkspace: React.FC<Props> = ({
       hydrateTemplateTarget(selectedTarget.canonical_target_key, freshTargets.items, byKey);
       setClipboard(null);
       onSavedSettingsOrTheme?.();
-      setStatus(t("studio.template_reset_current_source_label", { label: res.next_effective_source.label }));
+      setStatus(__("Template reset. Current source: {{label}}", { label: res.next_effective_source.label }));
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) setConflict(true);
-      onApiError(cause, t("studio.cannot_reset_template_override"));
+      onApiError(cause, __("Cannot reset template override."));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -920,11 +920,11 @@ export const StudioWorkspace: React.FC<Props> = ({
       .filter(node => node.kind === 'element' && isElement(node.node) && node.node.type === 'core/pattern_ref')
       .map(node => Number((node.node as BuilderElement).props.pattern_id));
     if (refs.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(refs).size > 16) {
-      setStatus(t("studio.each_reusable_pattern_requires_a_valid_pattern_up_to_16_patterns_per_page"), true);
+      setStatus(__("Each reusable pattern requires a valid pattern (up to 16 patterns per page)."), true);
       return;
     }
     if (patternsLoaded && refs.some(id => !patterns.some(p => p.id === id))) {
-      setStatus(t("studio.a_referenced_pattern_was_deleted_select_another_pattern_before_saving"), true);
+      setStatus(__("A referenced pattern was deleted. Select another pattern before saving."), true);
       return;
     }
 
@@ -970,21 +970,21 @@ export const StudioWorkspace: React.FC<Props> = ({
       setEntryPublicationStatus(currentStatus);
       setStatus(
         isPatternEntry
-          ? t("studio.saved_pattern_v_version", { version: currentVersion })
+          ? __("Saved pattern (v{{version}}).", { version: currentVersion })
           : entryPublicationPolicy === 'draft_publish' && currentStatus === 'draft'
-            ? t("studio.saved_page_builder_draft_v_version_content_remains_a_draft", { version: currentVersion })
-            : t("studio.saved_and_published_changes_v_version", { version: currentVersion }),
+            ? __("Saved page builder draft (v{{version}}). Content remains a draft.", { version: currentVersion })
+            : __("Saved and published changes (v{{version}}).", { version: currentVersion }),
       );
     } catch (cause) {
       if (isTrashedConflict(cause)) {
         setEntryTrashedBlocked(true);
-        setStatus(t("entry_lifecycle.studio_entry_trashed_blocked"), true);
+        setStatus(__("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio."), true);
       } else if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
-        setStatus(t("studio.content_changed_in_another_session_412_your_page_builder_draft_is_retained"), true);
+        setStatus(__("Content changed in another session (412). Your page builder draft is retained."), true);
       } else {
-        setStatus(t("studio.could_not_save_the_page_builder_your_draft_is_retained"), true);
-        onApiError(cause, t("studio.cannot_save_the_page_builder"));
+        setStatus(__("Could not save the page builder; your draft is retained."), true);
+        onApiError(cause, __("Cannot save the page builder."));
       }
     } finally {
       savingRef.current = false;
@@ -994,7 +994,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   const handleReloadMode2 = () => {
     if (!isMode2 || !entryTypeKey || entryId === null) return;
-    if (entryDirty && !window.confirm(t("studio.reloading_the_server_version_discards_the_current_page_builder_draft_continue"))) return;
+    if (entryDirty && !window.confirm(__("Reloading the server version discards the current page builder draft. Continue?"))) return;
     mode2LoadedKeyRef.current = null;
     setConflict(false);
     const seq = ++loadSeqRef.current;
@@ -1016,8 +1016,8 @@ export const StudioWorkspace: React.FC<Props> = ({
       setAddTargetParentId(null);
       setClipboard(null);
       setMenuRequest(null);
-      setStatus(t("studio.loaded_latest_version_v_version", { version: opened.version }));
-    }).catch(cause => onApiError(cause, t("studio.cannot_reload_the_page_builder")))
+      setStatus(__("Loaded latest version v{{version}}.", { version: opened.version }));
+    }).catch(cause => onApiError(cause, __("Cannot reload the page builder.")))
       .finally(() => { if (seq === loadSeqRef.current) setLoading(false); });
   };
 
@@ -1040,7 +1040,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     if (!user || !csrfToken) return;
     listPatterns()
       .then(res => { setPatterns(res.items); setPatternsLoaded(true); })
-      .catch(cause => onApiError(cause, t("studio.cannot_reload_the_pattern_list")));
+      .catch(cause => onApiError(cause, __("Cannot reload the pattern list.")));
   };
 
   const handleMenusMutated = async () => {
@@ -1049,7 +1049,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setMenusList(res.items);
       setMenuPreviewSeq(v => v + 1);
     } catch (cause) {
-      onApiError(cause, t("studio.cannot_reload_the_menu_list"));
+      onApiError(cause, __("Cannot reload the menu list."));
     }
   };
 
@@ -1095,23 +1095,23 @@ export const StudioWorkspace: React.FC<Props> = ({
     ? entryTitle || `${entryTypeKey} #${entryId}`
     : selectedTarget && panel === 'templates'
       ? selectedTarget.label
-      : ({ root: activeThemeName ?? activeThemeId ?? t("studio.default_theme"),
-          identity: t("studio.site_identity"), 'theme-options': t("studio.appearance_options"),
-          menus: t("studio.menus_and_locations"), reading: t("studio.homepage_and_reading"), templates: t("studio.build_templates") } as Record<string, string>)[panel];
+      : ({ root: activeThemeName ?? activeThemeId ?? __("Default theme"),
+          identity: __("Site identity"), 'theme-options': __("Appearance options"),
+          menus: __("Menus and locations"), reading: __("Homepage and reading"), templates: __("Build templates") } as Record<string, string>)[panel];
   const contextBadge = isMode2
     ? (entryTypeKey === 'page'
-        ? t("studio.page")
+        ? __("Page")
         : entryTypeKey === 'post'
-          ? t("studio.post")
+          ? __("Post")
           : entryTypeKey === 'pattern'
-            ? t("builder.document.pattern")
+            ? _x("Reusable Pattern", "builder.document")
             : entryTypeKey)
-    : selectedTarget && panel === 'templates' ? t("studio.template") : panel === 'root' ? t("studio.theme") : undefined;
+    : selectedTarget && panel === 'templates' ? _x("Template", "studio.template") : panel === 'root' ? __("Theme") : undefined;
   const contextBack = isMode2
     ? undefined
     : panel === 'root'
       ? undefined
-      : panel === 'templates' && selectedTarget ? t("studio.template_list") : t("studio.customize");
+      : panel === 'templates' && selectedTarget ? __("Template list") : __("Customize");
   const handleContextBack = () => {
     if (panel === 'templates' && selectedTarget) handleSelectTarget(null);
     else handlePanelChange('root');
@@ -1122,7 +1122,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       return;
     }
     if (loading || savingRef.current) return;
-    if (mode1Dirty && !window.confirm(t("studio.reloading_from_the_server_discards_unsaved_studio_changes_continue"))) {
+    if (mode1Dirty && !window.confirm(__("Reloading from the server discards unsaved Studio changes. Continue?"))) {
       return;
     }
     setLocaleDraftConflict(null);
@@ -1143,7 +1143,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside
           className="flex max-h-[50vh] w-full shrink-0 flex-col overflow-hidden border-b border-zinc-200 bg-white md:max-h-none md:h-full md:w-[320px] md:border-r md:border-b-0"
-          aria-label={isMode2 ? t("studio.page_builder_content_panel") : t("studio.studio_customization_panel")}
+          aria-label={isMode2 ? __("Page builder content panel") : __("Studio customization panel")}
         >
           <StudioSidebarHeader
             mode={isMode2 ? 'entry' : 'customizer'}
@@ -1155,7 +1155,7 @@ export const StudioWorkspace: React.FC<Props> = ({
             backLabel={contextBack}
             onBack={contextBack ? handleContextBack : undefined}
             canReset={canResetStudio && builderActive}
-            resetLabel={t("studio.restore_theme_defaults")}
+            resetLabel={__("Restore theme defaults")}
             onReset={() => void handleResetTemplate()}
             conflict={conflict || localeDraftBlocked}
             onReloadConflict={handleReloadConflict}
@@ -1163,7 +1163,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           {!isMode2 && localeState.hasMultiplePublicLocales && (
             <div className="flex items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2" data-testid="studio-preview-locale-bar">
               <label htmlFor="studio-preview-locale" className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
-                {t("studio.preview_locale")}
+                {__("Preview locale")}
               </label>
               <select
                 id="studio-preview-locale"
@@ -1176,7 +1176,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                   if (next === effectivePreviewLocale) return;
                   const hasTransient = mode1Dirty;
                   if (hasTransient) {
-                    if (!window.confirm(t("studio.there_are_unsaved_changes_in_the_current_language_discard_them_to_switch_preview_locale"))) {
+                    if (!window.confirm(__("There are unsaved changes in the current language. Discard them to switch preview locale?"))) {
                       return;
                     }
                     setGeneralDraft(generalSaved ? { site_title: generalSaved.site_title, tagline: generalSaved.tagline, timezone: generalSaved.timezone } : null);
@@ -1208,8 +1208,8 @@ export const StudioWorkspace: React.FC<Props> = ({
               data-testid="studio-sidebar-alert"
               className="flex items-center justify-between gap-2 border-b border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-800"
             >
-              <span className="min-w-0 flex-1 truncate" title={entryTrashedBlocked ? t("entry_lifecycle.studio_entry_trashed_blocked") : localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : notice || t("studio.data_version_conflict")}>
-                {entryTrashedBlocked ? t("entry_lifecycle.studio_entry_trashed_blocked") : localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : error && notice ? notice : t("studio.data_changed_on_the_server_412")}
+              <span className="min-w-0 flex-1 truncate" title={entryTrashedBlocked ? __("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio.") : localeDraftConflict || previewLocaleInvalid ? __("The preview language changed or is no longer available. Drafts are retained; reload to switch languages.") : localeReloadPending ? __("Reload the preview language successfully before saving. Your draft is retained until then.") : notice || __("Data version conflict.")}>
+                {entryTrashedBlocked ? __("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio.") : localeDraftConflict || previewLocaleInvalid ? __("The preview language changed or is no longer available. Drafts are retained; reload to switch languages.") : localeReloadPending ? __("Reload the preview language successfully before saving. Your draft is retained until then.") : error && notice ? notice : __("Data changed on the server (412).")}
               </span>
               {entryTrashedBlocked && !isPatternEntry ? (
                 <button
@@ -1218,7 +1218,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                   onClick={() => onNavigateHash(mode2TrashHash)}
                   className="shrink-0 rounded border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100"
                 >
-                  {t("entry_lifecycle.open_trash_view")}
+                  {__("Open Trash")}
                 </button>
               ) : (conflict || localeDraftBlocked) && (
                 <button
@@ -1227,7 +1227,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                   disabled={loading || saving}
                   className="shrink-0 rounded border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100"
                 >
-                  {t("studio.reload")}
+                  {__("Reload")}
                 </button>
               )}
             </div>
@@ -1325,7 +1325,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               templateEditingEnabled={templateEditingEnabled}
               onInitializeTemplateOverride={() => {
                 setTemplateEditingEnabled(true);
-                setStatus(t("studio.initialized_the_page_builder_for_label_not_yet_saved_to_the_database", { label: selectedTarget?.label ?? "" }));
+                setStatus(__("Initialized the page builder for \"{{label}}\". Not yet saved to the database.", { label: selectedTarget?.label ?? "" }));
               }}
               templateDoc={templateDoc}
               templateSelectedNodeId={templateSelectedNodeId}
@@ -1384,7 +1384,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                 onEditNode={handleCanvasEdit}
                 onOpenNodeMenu={handleCanvasMenu}
                 onApiError={onApiError}
-                title={isMode2 ? t("studio.content_preview") : t("studio.website_preview")}
+                title={isMode2 ? __("Content preview") : __("Website preview")}
                 className="h-full w-full"
                 frameClassName={
                   viewport === 'desktop'
@@ -1394,7 +1394,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               />
             ) : (
               <div className="flex h-full min-h-[360px] items-center justify-center bg-white p-8 text-center text-sm text-zinc-500">
-                {loading ? t("studio.preparing_live_preview") : t("studio.no_preview_content_for_this_target_yet")}
+                {loading ? __("Preparing live preview…") : __("No preview content for this target yet.")}
               </div>
             )}
           </div>

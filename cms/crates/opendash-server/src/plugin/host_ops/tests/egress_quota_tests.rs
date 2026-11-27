@@ -12,6 +12,8 @@ fn test_ctx(manifest: PluginManifest, caps: Option<Vec<String>>) -> HostContext 
         last_resp_bytes: None,
         host_calls_count: 0,
         http_calls_count: 0,
+        l10n_calls_count: 0,
+        default_locale: None,
         db_pool: None,
         secrets_root: None,
         read_ipc: None,

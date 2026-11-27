@@ -9,7 +9,7 @@ import {
 } from '../../api/taxonomy.ts';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import { formatNumber } from '../../i18n/format.ts';
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, _x, useI18n } from '../../i18n/index.tsx';
 import type { AuthUser } from '../../types.ts';
 import {
   editorDraftStore,
@@ -247,9 +247,9 @@ export function QuickEditForm({
       .catch(cause => {
         if (controller.signal.aborted) return;
         setTimezoneLoading(false);
-        setTimezoneError(tStatic('quick_edit.timezone_error'));
+        setTimezoneError(__("Could not load site timezone; publication date editing is temporarily unavailable."));
         if (cause instanceof ApiClientError && cause.status === 401) {
-          onApiError(cause, tStatic('quick_edit.timezone_error'));
+          onApiError(cause, __("Could not load site timezone; publication date editing is temporarily unavailable."));
         }
       });
     return () => controller.abort();
@@ -275,9 +275,9 @@ export function QuickEditForm({
       .catch(cause => {
         if (controller.signal.aborted) return;
         setTermCatalogLoading(false);
-        setTermCatalogError(cause instanceof Error ? cause.message : tStatic('api.taxonomy.load_terms'));
+        setTermCatalogError(cause instanceof Error ? cause.message : __("Could not load terms."));
         if (cause instanceof ApiClientError && cause.status === 401) {
-          onApiError(cause, tStatic('api.taxonomy.load_terms'));
+          onApiError(cause, __("Could not load terms."));
         }
       });
     return () => controller.abort();
@@ -407,15 +407,15 @@ export function QuickEditForm({
 
     const payload = buildPayload();
     if (!payload) {
-      setErrorMessage(tStatic('quick_edit.no_changes'));
+      setErrorMessage(__("No metadata fields changed."));
       return;
     }
     if (payload.taxonomy && payload.taxonomy.operation === 'replace') {
       const defLabel = taxonomies.find(t => t.key === payload.taxonomy?.key)?.label ?? payload.taxonomy.key;
       const prompt =
         payload.taxonomy.term_ids.length === 0
-          ? tStatic('quick_edit.confirm_clear_terms', { value1: defLabel, value2: originalMeta.title })
-          : tStatic('quick_edit.confirm_replace_terms', {
+          ? __("Clear all {{value1}} terms on \"{{value2}}\"? Other taxonomies remain untouched.", { value1: defLabel, value2: originalMeta.title })
+          : __("Replace all {{value1}} terms on \"{{value2}}\" with {{value3}} selected term(s)? Other taxonomies remain untouched.", {
               value1: defLabel,
               value2: originalMeta.title,
               value3: formatNumber(payload.taxonomy.term_ids.length),
@@ -438,7 +438,7 @@ export function QuickEditForm({
     } catch (cause) {
       if (cause instanceof ApiClientError && cause.status === 401) {
         // Quick Edit draft stays quarantined in `quick_edit:` namespace via App's onApiError.
-        onApiError(cause, tStatic('api.content.patch_entry_metadata'));
+        onApiError(cause, __("Could not save quick metadata changes."));
         return;
       }
       if (cause instanceof ApiClientError && cause.status === 412) {
@@ -451,14 +451,14 @@ export function QuickEditForm({
         const sr = refreshed.row;
         const diffs: ConflictDiff[] = [];
         if (sr.title !== originalMeta.title) {
-          diffs.push({ field: tStatic('quick_edit.title_label'), server: sr.title, yours: title });
+          diffs.push({ field: __("Title"), server: sr.title, yours: title });
         }
         if (sr.slug !== originalMeta.slug) {
-          diffs.push({ field: tStatic('quick_edit.slug_label'), server: sr.slug, yours: slug });
+          diffs.push({ field: __("Slug"), server: sr.slug, yours: slug });
         }
         if (sr.publication_status !== originalMeta.publication_status) {
           diffs.push({
-            field: tStatic('quick_edit.status_label'),
+            field: __("Publication status"),
             server: sr.publication_status,
             yours: status,
           });
@@ -468,14 +468,14 @@ export function QuickEditForm({
           : (sr.published_at ?? '');
         if ((sr.published_at ?? null) !== originalMeta.published_at) {
           diffs.push({
-            field: tStatic('quick_edit.published_at_label', { value1: siteTimezone || 'UTC' }),
+            field: __("Publication date ({{value1}})", { value1: siteTimezone || 'UTC' }),
             server: serverLocal || '—',
             yours: publishedAtLocal || '—',
           });
         }
         if (JSON.stringify(sr.term_ids) !== JSON.stringify(originalMeta.term_ids)) {
           diffs.push({
-            field: tStatic('quick_edit.taxonomy_select_label'),
+            field: __("Taxonomy"),
             server: sr.term_ids.join(', ') || '—',
             yours: selectedTermIds.join(', ') || '—',
           });
@@ -496,7 +496,7 @@ export function QuickEditForm({
         setHookScopeConflict(true);
       }
       setErrorMessage(
-        cause instanceof Error ? cause.message : tStatic('api.content.patch_entry_metadata'),
+        cause instanceof Error ? cause.message : __("Could not save quick metadata changes."),
       );
     } finally {
       setSaving(false);
@@ -531,7 +531,7 @@ export function QuickEditForm({
   };
 
   const handleCancelClick = () => {
-    if (isDirty && !window.confirm(tStatic('quick_edit.confirm_discard'))) return;
+    if (isDirty && !window.confirm(__("Discard unsaved Quick Edit changes?"))) return;
     editorDraftStore.deleteQuickEdit(typeKey, row.id);
     onDirtyChange(false);
     onCancel();
@@ -557,21 +557,21 @@ export function QuickEditForm({
     <form
       onSubmit={handleSubmit}
       data-testid={`quick-edit-form-${row.id}`}
-      aria-label={tStatic('quick_edit.heading', { value1: row.title, value2: row.id })}
+      aria-label={__("Quick Edit: {{value1}} (#{{value2}})", { value1: row.title, value2: row.id })}
       className="space-y-3 rounded-lg border border-od-accent/30 bg-zinc-50/90 p-3.5 text-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 pb-2">
         <div className="font-semibold text-zinc-900">
-          {tStatic('quick_edit.heading', { value1: row.title, value2: row.id })}
+          {__("Quick Edit: {{value1}} (#{{value2}})", { value1: row.title, value2: row.id })}
         </div>
         <span className="text-xs text-zinc-500">
-          {tStatic('quick_edit.updated_at_note', { value1: row.updated_at })}
+          {__("Last updated (UTC): {{value1}}", { value1: row.updated_at })}
         </span>
       </div>
 
       {restoredNotice && (
         <AdminAlert tone="info" data-testid="quick-edit-restored-alert">
-          {tStatic('quick_edit.restored_after_relogin')}
+          {__("Restored your unsaved Quick Edit changes after signing back in.")}
         </AdminAlert>
       )}
 
@@ -581,10 +581,10 @@ export function QuickEditForm({
           data-testid="quick-edit-trashed-guard"
           className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950"
         >
-          <p className="font-semibold">{tStatic('quick_edit.trashed_title')}</p>
-          <p>{tStatic('quick_edit.trashed_hint')}</p>
+          <p className="font-semibold">{__("Entry moved to Trash (409)")}</p>
+          <p>{__("This entry can no longer be saved from Quick Edit. Copy any unsaved text below or restore it from Trash first.")}</p>
           <label className="block space-y-1">
-            <span className="font-medium">{tStatic('quick_edit.recoverable_draft_label')}</span>
+            <span className="font-medium">{__("Recoverable unsaved edits")}</span>
             <textarea
               readOnly
               rows={5}
@@ -600,10 +600,10 @@ export function QuickEditForm({
               variant="primary"
               onClick={() => onNavigateHash(trashHref)}
             >
-              {tStatic('entry_lifecycle.open_trash_view')}
+              {__("Open Trash")}
             </AdminButton>
             <AdminButton type="button" size="sm" variant="secondary" onClick={handleCancelClick}>
-              {tStatic('quick_edit.cancel')}
+              {_x("Cancel", "quick_edit.cancel")}
             </AdminButton>
           </div>
         </div>
@@ -615,13 +615,13 @@ export function QuickEditForm({
           data-testid="quick-edit-conflict-412"
           className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950"
         >
-          <p className="font-semibold">{tStatic('quick_edit.conflict_412_title')}</p>
-          <p>{tStatic('quick_edit.conflict_412_hint')}</p>
+          <p className="font-semibold">{__("Entry or schema changed on the server (412)")}</p>
+          <p>{__("Your unsaved Quick Edit changes were preserved. Review the server differences below before explicitly rebasing and saving again.")}</p>
           {conflictState.diffs.length > 0 && (
             <ul className="list-disc space-y-0.5 pl-4" data-testid="quick-edit-conflict-diffs">
               {conflictState.diffs.map(diff => (
                 <li key={diff.field}>
-                  {tStatic('quick_edit.conflict_diff_item', {
+                  {__("{{field}}: server \"{{server}}\" vs your edit \"{{yours}}\"", {
                     field: diff.field,
                     server: diff.server,
                     yours: diff.yours,
@@ -638,7 +638,7 @@ export function QuickEditForm({
               data-testid="quick-edit-rebase-btn"
               onClick={handleExplicitRebase}
             >
-              {tStatic('quick_edit.rebase_button')}
+              {__("Apply latest server version & keep my edits")}
             </AdminButton>
           </div>
         </div>
@@ -650,14 +650,14 @@ export function QuickEditForm({
             <p>{errorMessage}</p>
             {hookScopeConflict && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs">{tStatic('quick_edit.hook_scope_conflict_hint')}</span>
+                <span className="text-xs">{__("A plugin filter needs full-editor access to modify this entry. Open Single Edit to complete your changes.")}</span>
                 <AdminButton
                   type="button"
                   size="sm"
                   variant="secondary"
                   onClick={() => onNavigateHash(editHref)}
                 >
-                  {tStatic('quick_edit.open_single_edit')}
+                  {__("Open Single Edit")}
                 </AdminButton>
               </div>
             )}
@@ -667,7 +667,7 @@ export function QuickEditForm({
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-          <span>{tStatic('quick_edit.title_label')}</span>
+          <span>{__("Title")}</span>
           <input
             ref={titleInputRef}
             type="text"
@@ -681,7 +681,7 @@ export function QuickEditForm({
         </label>
 
         <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-          <span>{tStatic('quick_edit.slug_label')}</span>
+          <span>{__("Slug")}</span>
           <input
             type="text"
             data-testid="quick-edit-slug"
@@ -695,7 +695,7 @@ export function QuickEditForm({
 
         {supportsDraftPublish && (
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>{tStatic('quick_edit.status_label')}</span>
+            <span>{__("Publication status")}</span>
             <select
               data-testid="quick-edit-status"
               className={inputClass}
@@ -703,15 +703,15 @@ export function QuickEditForm({
               disabled={saving || trashedBlocked}
               onChange={e => setStatus(e.target.value as 'draft' | 'published')}
             >
-              <option value="draft">{tStatic('feature.content.entrylistpage.draft')}</option>
-              <option value="published">{tStatic('reading.published')}</option>
+              <option value="draft">{__("Draft")}</option>
+              <option value="published">{__("Published")}</option>
             </select>
           </label>
         )}
 
         <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
           <span>
-            {tStatic('quick_edit.published_at_label', {
+            {__("Publication date ({{value1}})", {
               value1: siteTimezone || 'UTC',
             })}
           </span>
@@ -726,17 +726,17 @@ export function QuickEditForm({
           />
           {timezoneLoading ? (
             <span className="text-[11px] font-normal text-zinc-500">
-              {tStatic('quick_edit.timezone_loading')}
+              {__("Loading site timezone...")}
             </span>
           ) : timezoneError ? (
             <span className="text-[11px] font-normal text-rose-600">{timezoneError}</span>
           ) : !canEditPublishedAt ? (
             <span className="text-[11px] font-normal text-zinc-500">
-              {tStatic('quick_edit.published_at_draft_hint')}
+              {__("Never-published drafts must be explicitly set to Published to assign a publication date.")}
             </span>
           ) : (
             <span className="text-[11px] font-normal text-zinc-500">
-              {tStatic('quick_edit.published_at_format_hint', { value1: siteTimezone })}
+              {__("Exact format YYYY-MM-DDTHH:mm:ss in site timezone {{value1}}. Historical dates on migrated entries may be estimates. Future dates are not supported.", { value1: siteTimezone })}
             </span>
           )}
         </label>
@@ -745,11 +745,11 @@ export function QuickEditForm({
       {taxonomies.length > 0 && (
         <fieldset className="space-y-2 rounded-md border border-zinc-200 bg-white p-3">
           <legend className="px-1 text-xs font-semibold text-zinc-700">
-            {tStatic('quick_edit.taxonomy_section')}
+            {__("Single taxonomy update (optional)")}
           </legend>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>{tStatic('quick_edit.taxonomy_select_label')}</span>
+              <span>{__("Taxonomy")}</span>
               <select
                 data-testid="quick-edit-taxonomy-key"
                 className={inputClass}
@@ -760,7 +760,7 @@ export function QuickEditForm({
                   setSelectedTermIds([]);
                 }}
               >
-                <option value="">{tStatic('quick_edit.taxonomy_none')}</option>
+                <option value="">{__("No taxonomy change")}</option>
                 {taxonomies.map(def => (
                   <option key={def.key} value={def.key}>
                     {def.label}
@@ -771,7 +771,7 @@ export function QuickEditForm({
 
             {taxonomyKey && (
               <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-                <span>{tStatic('quick_edit.taxonomy_op_label')}</span>
+                <span>{__("Operation")}</span>
                 <select
                   data-testid="quick-edit-taxonomy-op"
                   className={inputClass}
@@ -779,9 +779,9 @@ export function QuickEditForm({
                   disabled={saving || trashedBlocked}
                   onChange={e => setTaxonomyOp(e.target.value as TaxonomyDeltaOp)}
                 >
-                  <option value="add">{tStatic('quick_edit.taxonomy_op_add')}</option>
-                  <option value="remove">{tStatic('quick_edit.taxonomy_op_remove')}</option>
-                  <option value="replace">{tStatic('quick_edit.taxonomy_op_replace')}</option>
+                  <option value="add">{__("Add terms")}</option>
+                  <option value="remove">{__("Remove terms")}</option>
+                  <option value="replace">{__("Replace taxonomy terms")}</option>
                 </select>
               </label>
             )}
@@ -790,15 +790,15 @@ export function QuickEditForm({
           {taxonomyKey && (
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-zinc-600">
-                {tStatic('quick_edit.taxonomy_terms_label', { value1: row.locale ?? 'default' })}
+                {__("Terms ({{value1}})", { value1: row.locale ?? 'default' })}
               </p>
               {termCatalogLoading ? (
-                <p className="text-xs text-zinc-500">{tStatic('quick_edit.taxonomy_loading')}</p>
+                <p className="text-xs text-zinc-500">{__("Loading terms for this language...")}</p>
               ) : termCatalogError ? (
                 <p className="text-xs text-rose-600">{termCatalogError}</p>
               ) : availableTerms.length === 0 ? (
                 <p className="text-xs text-zinc-500">
-                  {tStatic('quick_edit.taxonomy_empty_catalog', { value1: row.locale ?? 'default' })}
+                  {__("No terms exist for this taxonomy in language {{value1}}.", { value1: row.locale ?? 'default' })}
                 </p>
               ) : (
                 <div
@@ -833,7 +833,7 @@ export function QuickEditForm({
               )}
               {taxonomyOp === 'replace' && (
                 <p className="text-[11px] text-zinc-500">
-                  {tStatic('quick_edit.taxonomy_clear_hint')}
+                  {__("Leave all terms unchecked with Replace to clear only this taxonomy.")}
                 </p>
               )}
             </div>
@@ -850,7 +850,7 @@ export function QuickEditForm({
             data-testid="quick-edit-save-btn"
             disabled={saving || !csrfToken || trashedBlocked || Boolean(conflictState)}
           >
-            {saving ? tStatic('quick_edit.saving') : tStatic('quick_edit.save')}
+            {saving ? __("Saving...") : __("Save Quick Edit")}
           </AdminButton>
           <AdminButton
             type="button"
@@ -860,7 +860,7 @@ export function QuickEditForm({
             disabled={saving}
             onClick={handleCancelClick}
           >
-            {tStatic('quick_edit.cancel')}
+            {_x("Cancel", "quick_edit.cancel")}
           </AdminButton>
         </div>
         <button
@@ -868,7 +868,7 @@ export function QuickEditForm({
           className="text-xs font-medium text-od-accent hover:underline"
           onClick={() => onNavigateHash(editHref)}
         >
-          {tStatic('quick_edit.open_single_edit')}
+          {__("Open Single Edit")}
         </button>
       </div>
     </form>

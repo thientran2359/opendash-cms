@@ -15,8 +15,9 @@ Gói plugin cài đặt vào OpenDash (dạng `.zip` qua Admin API hoặc thư m
    - `plugin.wasm` **hoặc** `plugin.js` (bắt buộc đúng 1 entrypoint khớp `manifest.entrypoint`, tối đa `2 MiB` — `MAX_WASM_BYTES`): Module WebAssembly (`wasm32-unknown-unknown`) hoặc script JavaScript ES2024 chạy zero-build trên `boa_engine = "=0.22.0"` dùng API `globalThis.od.*` (`cms/sdk/js/opendash.d.ts`). Theme v3 có thể đặt tùy chọn `functions.js` ở root khớp trường `functions` trong `theme.json`.
    - `README.md` (tùy chọn).
    - `blocks/<slug>/block.json` + `blocks/<slug>/render.html` (tùy chọn, luôn đủ cặp, mỗi file text tối đa `256 KiB` — `V2_MAX_TEXT_BYTES`): Khai báo block Builder theo `BlockSchemaV1` (`cms/crates/opendash-core`) và template MiniJinja C-SEC; tối đa **32 blocks**, mỗi `slug` tối đa 32 ký tự kebab-case, `schema.id == "<plugin-id>/<slug>"`, cấm `plugin-id` là `core` hoặc `legacy`.
+   - `languages/*.{pot,po,mo}` (tùy chọn, tối đa **32 file**, mỗi file tối đa `256 KiB`): File bản địa hóa GNU gettext theo `text_domain` (mặc định là `plugin_id`).
 2. **Quy tắc an toàn khi giải nén ZIP & quét thư mục:**
-   - Tối đa **72 file thường** (`MAX_PLUGIN_FILES`), tối đa **256 ZIP entries**; kích thước ZIP tối đa **5 MiB** (`MAX_PLUGIN_ZIP_BYTES`), tổng kích thước giải nén tối đa **10 MiB** (`MAX_UNCOMPRESSED_TOTAL_BYTES`), tỷ lệ giải nén mỗi file ZIP tối đa **100:1** (`V2_MAX_EXPANSION_RATIO`).
+   - Tối đa **104 file thường** (`MAX_PLUGIN_FILES`), tối đa **256 ZIP entries**; kích thước ZIP tối đa **5 MiB** (`MAX_PLUGIN_ZIP_BYTES`), tổng kích thước giải nén tối đa **10 MiB** (`MAX_UNCOMPRESSED_TOTAL_BYTES`), tỷ lệ giải nén mỗi file ZIP tối đa **100:1** (`V2_MAX_EXPANSION_RATIO`).
    - Từ chối đường dẫn tuyệt đối, traversal (`..`), backslash, entry ẩn (bắt đầu bằng `.`), tên non-UTF-8, FIFO/socket/device, symlink/reparse point nội bộ, độ sâu thư mục vượt quá **`MAX_PLUGIN_DIR_DEPTH = 4`**, file ngoài hợp đồng, hoặc xung đột tên không phân biệt chữ hoa/thường (`to_ascii_lowercase()`).
    - Đọc mọi file (ZIP và directory) qua `.take((cap + 1) as u64)` có giới hạn trước khi parse. Không thực thi Wasm hoặc JS lúc cài đặt hoặc kiểm tra; chỉ biên dịch tĩnh bằng `wasmi::Module::new` (cho `plugin.wasm`) hoặc kiểm tra cú pháp tĩnh bằng `boa_engine` (`validate_js_module_syntax`, không thực thi top-level, cho `plugin.js` / `functions.js`).
 3. **Validator CLI offline `opendash --check-plugin <path>` (`--check-plugin=<path>`):**
@@ -158,6 +159,7 @@ Gói plugin cài đặt vào OpenDash (dạng `.zip` qua Admin API hoặc thư m
 | `plugin_settings_get` | `plugin_settings_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | Trả settings của chính owner (`plugin` hoặc `theme_functions`); mọi trường `secret` chỉ xuất `{"configured": bool}`. |
 | `plugin_secret_get` | `plugin_secrets_read` chứa `key` | `Standard`, `AsyncPostCommit`, `FilterContactBeforeSubmit`, `RoutePost` | Giải mã plaintext từ `SecretStore` (`plugins/` hoặc `themes/`); bị cấm trong `FilterProjection`, `FilterRender`, `RouteGet` và `ContentBeforeSave`. |
 | `log` | *(mọi plugin/theme)* | Tất cả *(bị từ chối lúc gọi trong `FilterContactBeforeSubmit`; bị bỏ qua không ghi DB ở `FilterRender`/`RouteGet`)* | `{ level: "info"\|"warn"\|"error", message }`; tối đa `20` logs/invocation, sanitize `512` chars vào `plugin_logs` (theo `owner_kind`). |
+| `l10n_translate` | *(mọi plugin/theme)* | Tất cả | `{ text_domain?, msgid, msgid_plural?, count?, context?, locale? }` (và `od.i18n` trong JS); quota riêng `MAX_L10N_CALLS = 256` calls/run, không trừ vào `MAX_HOST_CALLS` (`100`). |
 
 ---
 

@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __, _x } from '../i18n/index.tsx';
 import { AdminI18nBootstrap, AuthResponse } from '../types.ts';
 import { requestJson, requestText } from './client.ts';
 
@@ -17,7 +17,7 @@ export interface UserPage {
 export async function getAuthMe(): Promise<AuthResponse> {
   return requestJson<AuthResponse>('/auth/me', {
     method: 'GET',
-    defaultErrorMessage: tStatic("api.auth.not_signed_in"),
+    defaultErrorMessage: __("You are not signed in."),
   });
 }
 
@@ -26,7 +26,7 @@ export async function setupAdmin(username: string, password: string): Promise<vo
     method: 'POST',
     contentType: 'application/json',
     body: JSON.stringify({ username, password }),
-    defaultErrorMessage: tStatic("api.auth.setup_failed"),
+    defaultErrorMessage: __("Could not set up the administrator."),
   });
 }
 
@@ -35,7 +35,7 @@ export async function login(username: string, password: string): Promise<AuthRes
     method: 'POST',
     contentType: 'application/json',
     body: JSON.stringify({ username, password }),
-    defaultErrorMessage: tStatic("api.auth.login_failed"),
+    defaultErrorMessage: __("Could not sign in."),
   });
 }
 
@@ -43,13 +43,13 @@ export async function logout(csrfToken: string | null): Promise<void> {
   await requestText('/auth/logout', {
     method: 'POST',
     csrfToken,
-    defaultErrorMessage: tStatic("api.auth.logout_failed"),
+    defaultErrorMessage: __("Could not sign out."),
   });
 }
 
 export function listUsers(limit: number, offset: number): Promise<UserPage> {
   return requestJson<UserPage>('/api/admin/users?limit=' + limit + '&offset=' + offset, {
-    defaultErrorMessage: tStatic("api.auth.list_users_failed"),
+    defaultErrorMessage: _x("Could not load users.", "api.auth"),
   });
 }
 
@@ -57,7 +57,7 @@ export function createUser(username: string, password: string, role: UserRole, c
   return requestJson<UserSummary>('/api/admin/users', {
     method: 'POST', contentType: 'application/json', csrfToken,
     body: JSON.stringify({ username, password, role }),
-    defaultErrorMessage: tStatic("api.auth.create_user_failed"),
+    defaultErrorMessage: __("Could not create the user."),
   });
 }
 
@@ -65,7 +65,7 @@ export function updateUser(id: number, version: number, changes: { username?: st
   return requestJson<UserSummary>('/api/admin/users/' + id, {
     method: 'PATCH', contentType: 'application/json', csrfToken, ifMatchVersion: version,
     body: JSON.stringify(changes),
-    defaultErrorMessage: tStatic("api.auth.update_user_failed"),
+    defaultErrorMessage: __("Could not update the user."),
   });
 }
 
@@ -73,14 +73,14 @@ export function resetUserPassword(id: number, version: number, password: string,
   return requestJson<UserSummary>('/api/admin/users/' + id + '/password', {
     method: 'POST', contentType: 'application/json', csrfToken, ifMatchVersion: version,
     body: JSON.stringify({ password }),
-    defaultErrorMessage: tStatic("api.auth.reset_password_failed"),
+    defaultErrorMessage: __("Could not reset the password."),
   });
 }
 
 export async function removeUser(id: number, version: number, csrfToken: string): Promise<void> {
   await requestText('/api/admin/users/' + id, {
     method: 'DELETE', csrfToken, ifMatchVersion: version,
-    defaultErrorMessage: tStatic("api.auth.remove_user_failed"),
+    defaultErrorMessage: __("Could not delete the account."),
   });
 }
 
@@ -89,6 +89,6 @@ export type { AdminI18nBootstrap, CmsLocaleOption } from '../types.ts';
 export function getAdminI18nBootstrap(signal?: AbortSignal): Promise<AdminI18nBootstrap> {
   return requestJson<AdminI18nBootstrap>('/api/i18n/admin', {
     signal,
-    defaultErrorMessage: tStatic("api.auth.bootstrap_failed"),
+    defaultErrorMessage: __("Could not load the CMS language settings."),
   });
 }

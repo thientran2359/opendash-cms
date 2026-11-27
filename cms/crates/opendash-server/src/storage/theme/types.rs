@@ -270,7 +270,7 @@ pub struct ActiveThemeV3 {
     pub templates: BTreeMap<String, String>,
     pub parts: BTreeMap<String, String>,
     pub page_layouts: BTreeMap<String, String>,
-    pub locales: BTreeMap<String, BTreeMap<String, String>>,
+    pub l10n_catalogs: BTreeMap<String, std::sync::Arc<opendash_core::l10n::Catalog>>,
 }
 
 /// Provider-owned selection metadata is kept separate from site-owned typed

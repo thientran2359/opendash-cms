@@ -1,0 +1,57 @@
+# Vietnamese translation for OpenDash Starter Theme.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: vi\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Primary navigation"
+msgstr "Điều hướng chính"
+
+msgid "Links"
+msgstr "Liên kết"
+
+msgid "Footer links"
+msgstr "Liên kết chân trang"
+
+msgid "News and insights"
+msgstr "Tin tức và kiến thức"
+
+msgid "Latest posts"
+msgstr "Bài viết mới nhất"
+
+msgid "No posts yet."
+msgstr "Chưa có bài viết nào."
+
+msgid "← Posts"
+msgstr "← Bài viết"
+
+msgid "No content yet."
+msgstr "Chưa có nội dung."
+
+msgid "← Previous"
+msgstr "← Trang trước"
+
+msgid "Next →"
+msgstr "Trang sau →"
+
+msgid "Pagination"
+msgstr "Phân trang"
+
+msgid "Topic"
+msgstr "Chủ đề"
+
+msgid "Illustration "
+msgstr "Ảnh minh họa "
+
+msgid "404 — Page not found"
+msgstr "404 — Không tìm thấy trang"
+
+msgid "This page does not exist or has been moved."
+msgstr "Đường dẫn này chưa tồn tại hoặc đã được chuyển đi."
+
+msgid "Back to Home"
+msgstr "Về Trang chủ"
+
+msgid "Language"
+msgstr "Ngôn ngữ"

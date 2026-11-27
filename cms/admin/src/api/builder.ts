@@ -1,4 +1,4 @@
-import { tStatic } from '../i18n/index.tsx';
+import { __ } from '../i18n/index.tsx';
 import type { BlockCatalogItemDto } from '../types.ts';
 import type { ContentMode } from '../features/content/types.ts';
 import type { BuilderDocument } from '../builder/document.ts';
@@ -69,7 +69,7 @@ export interface TypedTemplateOverride {
 
 export function getTemplateOverrides(): Promise<{ items: TypedTemplateOverride[] }> {
   return requestJson('/api/admin/template-overrides', {
-    defaultErrorMessage: tStatic('api.builder.load_site_template_overrides'),
+    defaultErrorMessage: __("Could not load site template overrides."),
   });
 }
 
@@ -83,7 +83,7 @@ export function putTemplateOverride(
     method: 'PUT', csrfToken, contentType: 'application/json',
     ifMatchVersion: expectedVersion,
     body: JSON.stringify({ target, document }),
-    defaultErrorMessage: tStatic('api.builder.save_the_site_template_override'),
+    defaultErrorMessage: __("Could not save the site template override."),
   });
 }
 
@@ -101,7 +101,7 @@ export interface TypedTemplateResetResult {
 export function resetTemplateOverride(id: number, version: number, csrfToken: string): Promise<TypedTemplateResetResult> {
   return requestJson(`/api/admin/template-overrides/${encodeURIComponent(id)}/reset`, {
     method: 'POST', csrfToken, ifMatchVersion: version,
-    defaultErrorMessage: tStatic('api.builder.reset_the_site_template_override'),
+    defaultErrorMessage: __("Could not reset the site template override."),
   });
 }
 
@@ -110,7 +110,7 @@ const entryBuilderPath = (typeKey: string, id: number): string =>
 
 export function getEntryBuilder(typeKey: string, id: number): Promise<EntryBuilderOpen> {
   return requestJson(entryBuilderPath(typeKey, id), {
-    defaultErrorMessage: tStatic('api.builder.open_the_entry_builder'),
+    defaultErrorMessage: __("Could not open the entry builder."),
   });
 }
 
@@ -120,7 +120,7 @@ export function previewEntryBuilder(
   return requestJson(entryBuilderPath(typeKey, id) + '/preview', {
     method: 'POST', csrfToken, contentType: 'application/json',
     body: JSON.stringify(document), signal,
-    defaultErrorMessage: tStatic('api.builder.preview_the_entry_builder'),
+    defaultErrorMessage: __("Could not preview the entry builder."),
   });
 }
 
@@ -130,7 +130,7 @@ export function saveEntryBuilder(
   return requestJson(entryBuilderPath(typeKey, id), {
     method: 'PUT', csrfToken, contentType: 'application/json', ifMatchVersion: version,
     body: JSON.stringify(document),
-    defaultErrorMessage: tStatic('api.builder.save_the_entry_builder'),
+    defaultErrorMessage: __("Could not save the entry builder."),
   });
 }
 
@@ -138,7 +138,7 @@ export function saveEntryBuilder(
 export async function getBlockSchemas(): Promise<BlockCatalogItemDto[]> {
   const response = await requestJson<{ items: BlockCatalogItemDto[] }>('/api/admin/builder/blocks', {
     method: 'GET',
-    defaultErrorMessage: tStatic('api.builder.load_blocks_for_the_page_builder'),
+    defaultErrorMessage: __("Could not load blocks for the page builder."),
   });
   return response.items;
 }
@@ -146,6 +146,6 @@ export async function getBlockSchemas(): Promise<BlockCatalogItemDto[]> {
 export function getPrivatePreviewMedia(path: string, signal: AbortSignal): Promise<Blob> {
   return requestBlob(path, {
     signal,
-    defaultErrorMessage: tStatic('api.builder.load_the_private_preview_image'),
+    defaultErrorMessage: __("Could not load the private preview image."),
   });
 }

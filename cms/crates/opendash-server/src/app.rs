@@ -1,5 +1,3 @@
-use std::{path::PathBuf, sync::Arc};
-
 use axum::{
     Extension, Router,
     extract::{DefaultBodyLimit, Request},
@@ -11,6 +9,7 @@ use axum::{
 use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
 use rust_embed::RustEmbed;
 use sqlx::SqlitePool;
+use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     hooks::HookDispatcher,
@@ -78,7 +77,7 @@ use crate::{
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
-    pub ui_locale: Arc<std::sync::atomic::AtomicU8>,
+    pub ui_locale: Arc<std::sync::RwLock<Option<String>>>,
     pub plugin_manager: Arc<PluginManager>,
     pub hooks: Arc<HookDispatcher>,
     pub media_store: Arc<MediaStore>,
@@ -92,6 +91,7 @@ pub struct AppState {
     pub block_template_cache: Arc<crate::page::BlockTemplateCache>,
     pub site_cache_epoch: Arc<crate::cache::SiteCacheEpoch>,
     pub render_cache: Arc<crate::cache::ExtensionRenderCache>,
+    pub catalog_registry: Arc<crate::l10n::CatalogRegistry>,
     pub recovery: crate::config::RecoveryState,
     pub runtime_config: crate::config::RuntimeConfigV1,
 }
@@ -196,6 +196,7 @@ pub fn build_router_with_themes_root(
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))
         .route("/api/health", get(crate::routes::health::status))
         .route("/api/i18n/admin", get(crate::routes::settings::admin_i18n_bootstrap))
+        .route("/api/i18n/admin/catalog", get(crate::routes::l10n::admin_i18n_catalog))
         .route("/api/public/contact/received", get(crate::routes::contact::public_received))
         .route(
             "/api/public/contact/{id}",
@@ -370,14 +371,9 @@ pub fn build_router_with_themes_root(
             "/api/admin/locales/orphans/{code}/purge",
             post(locales_orphans_purge).layer(DefaultBodyLimit::max(4096)),
         )
-        .route(
-            "/api/admin/locales/{code}",
-            put(locales_update).delete(locales_delete).layer(DefaultBodyLimit::max(4096)),
-        )
-        .route(
-            "/api/admin/locales/{code}/set-default",
-            post(locales_set_default).layer(DefaultBodyLimit::max(4096)),
-        )
+        .route("/api/admin/locales/{code}", put(locales_update).delete(locales_delete).layer(DefaultBodyLimit::max(4096)))
+        .route("/api/admin/locales/{code}/set-default", post(locales_set_default).layer(DefaultBodyLimit::max(4096)))
+        .merge(crate::routes::l10n::router())
         .route("/api/admin/settings/timezones", get(timezones_get))
         .route(
             "/api/admin/settings/permalinks",

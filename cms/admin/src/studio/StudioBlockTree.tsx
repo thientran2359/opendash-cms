@@ -74,8 +74,8 @@ export function StudioBlockTree({
   onSelect, onEdit, onAdd, onMove, onReorder, canReorder,
   onDuplicate, onCopy, onPaste, canPaste, onDelete, canDelete,
 }: StudioBlockTreeProps) {
-  const { t } = useI18n();
-  const CONTAINER_LABEL = { section: t("studio.section"), row: t("studio.row"), column: t("studio.column") };
+  const { __, _x } = useI18n();
+  const CONTAINER_LABEL = { section: _x("Section", "studio.section"), row: __("Row"), column: __("Column") };
   const nodes = useMemo(() => visibleNodesInTree(document), [document]);
   const byId = useMemo(() => new Map(nodes.map(item => [item.node.id, item])), [nodes]);
   const [focusedId, setFocusedId] = useState<string | null>(selectedId);
@@ -336,7 +336,7 @@ export function StudioBlockTree({
   };
 
   const renderLevel = (parentId: string | null, depth: number): ReactNode => (
-    <ul role={parentId ? 'group' : 'tree'} aria-label={parentId ? undefined : t("studio.page_structure")}
+    <ul role={parentId ? 'group' : 'tree'} aria-label={parentId ? undefined : __("Page structure")}
       className={'m-0 list-none space-y-0.5 p-0 ' + (parentId ? 'ml-2.5 border-l border-slate-200 pl-1' : '')}>
       {nodes.filter(entry => entry.visualParentId === parentId).map(item => {
         const id = item.node.id;
@@ -382,7 +382,7 @@ export function StudioBlockTree({
           >
             <div className="flex min-w-0 items-center gap-0.5 px-1 py-0.5">
               {isContainer ? (
-                <button type="button" aria-label={(expanded ? t("studio.collapse_label", { label }) : t("studio.expand_label", { label }))}
+                <button type="button" aria-label={(expanded ? __("Collapse {{label}}", { label }) : __("Expand {{label}}", { label }))}
                   aria-expanded={expanded} tabIndex={-1} onClick={toggleCollapse}
                   className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800">
                   <TreeIcon name={expanded ? 'chevron-down' : 'chevron-right'} />
@@ -390,7 +390,7 @@ export function StudioBlockTree({
               ) : (
                 <span className="w-4 shrink-0" aria-hidden="true" />
               )}
-              {locked && <span title={t("studio.preserved_block_can_only_be_deleted")} className="text-amber-700">
+              {locked && <span title={__("Preserved block; can only be deleted")} className="text-amber-700">
                 <TreeIcon name="lock" /></span>}
               <button type="button" role="treeitem" aria-level={depth + 1} aria-selected={selectedId === id}
                 aria-keyshortcuts="Shift+F10"
@@ -417,15 +417,15 @@ export function StudioBlockTree({
               <button type="button" ref={element => {
                 if (element) triggerRefs.current.set(id, element);
                 else triggerRefs.current.delete(id);
-              }} aria-label={t("studio.open_actions_for_label", { label })} aria-haspopup="menu" aria-expanded={openMenuId === id}
+              }} aria-label={__("Open actions for {{label}}", { label })} aria-haspopup="menu" aria-expanded={openMenuId === id}
                 tabIndex={-1}
-                title={t("studio.actions_for_label", { label })}
+                title={__("Actions for {{label}}", { label })}
                 className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-sky-600"
                 onClick={() => toggleMenu(id)}>
                 <TreeIcon name="settings" />
               </button>
             </div>
-            {openMenuId === id && <div role="menu" tabIndex={-1} aria-label={t("studio.actions_for_label", { label })}
+            {openMenuId === id && <div role="menu" tabIndex={-1} aria-label={__("Actions for {{label}}", { label })}
               ref={element => {
                 if (element) menuRefs.current.set(id, element);
                 else menuRefs.current.delete(id);
@@ -434,36 +434,36 @@ export function StudioBlockTree({
               style={menuPos ? { top: menuPos.top, left: menuPos.left } : undefined}
               className="fixed z-50 grid w-44 grid-cols-1 rounded-lg border border-slate-200 bg-white p-1 shadow-lg ring-1 ring-black/5"
               data-studio-menu-node-id={id}>
-              {menuItem(t("studio.edit"), 'pencil', () => invoke(id, onEdit), canOperate)}
-              {menuItem(t("studio.duplicate"), 'copy', () => invoke(id, onDuplicate), canOperate)}
-              {menuItem(t("studio.copy_options"), 'sliders', () => invoke(id, onCopy), canOperate)}
-              {menuItem(t("studio.paste_options"), 'paste', () => invoke(id, onPaste), canOperate && canPaste(id))}
-              {menuItem(t("studio.move_up"), 'up', () => invoke(id, nodeId => onMove(nodeId, -1)), up)}
-              {menuItem(t("studio.move_down"), 'down', () => invoke(id, nodeId => onMove(nodeId, 1)), down)}
-              {menuItem(t("studio.delete"), 'trash', () => invoke(id, onDelete), !disabled && (canDelete?.(id) ?? true))}
+              {menuItem(_x("Edit", "studio.edit"), 'pencil', () => invoke(id, onEdit), canOperate)}
+              {menuItem(__("Duplicate"), 'copy', () => invoke(id, onDuplicate), canOperate)}
+              {menuItem(__("Copy options"), 'sliders', () => invoke(id, onCopy), canOperate)}
+              {menuItem(__("Paste options"), 'paste', () => invoke(id, onPaste), canOperate && canPaste(id))}
+              {menuItem(_x("Move up", "studio.move_up"), 'up', () => invoke(id, nodeId => onMove(nodeId, -1)), up)}
+              {menuItem(_x("Move down", "studio.move_down"), 'down', () => invoke(id, nodeId => onMove(nodeId, 1)), down)}
+              {menuItem(__("Delete"), 'trash', () => invoke(id, onDelete), !disabled && (canDelete?.(id) ?? true))}
             </div>}
           </div>
           {isContainer && expanded && <>
             {renderLevel(id, depth + 1)}
             <button type="button" disabled={disabled} onClick={() => onAdd(id)}
               className="mb-1 ml-3 mt-0.5 flex w-[calc(100%-0.75rem)] items-center gap-1 rounded px-2 py-1 text-left text-xs text-sky-700 hover:bg-sky-50 disabled:opacity-50">
-              <TreeIcon name="plus" />{t("studio.add_to_container", { container: CONTAINER_LABEL[item.kind as 'section' | 'row' | 'column'] })}
+              <TreeIcon name="plus" />{__("Add to {{container}}", { container: CONTAINER_LABEL[item.kind as 'section' | 'row' | 'column'] })}
             </button>
           </>}
         </li>;
       })}
     </ul>
   );
-  return <section aria-label={t("studio.page_structure")} className="min-w-0 space-y-2.5 p-0"
+  return <section aria-label={__("Page structure")} className="min-w-0 space-y-2.5 p-0"
     onDragLeave={event => { if (leftBounds(event)) setDrop(null); }}>
     {nodes.length ? renderLevel(null, 0) : (
       <p className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-        {t("studio.this_page_is_empty_add_a_block_or_section_to_start_the_layout")}</p>
+        {__("This page is empty. Add a block or section to start the layout.")}</p>
     )}
     <button type="button" disabled={disabled} onClick={() => onAdd(null)}
       className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-50">
-      <TreeIcon name="plus" />{t("studio.add_block")}
+      <TreeIcon name="plus" />{_x("Add block", "studio.add_block")}
     </button>
-    <p className="px-1 text-[10px] text-slate-400">{t("studio.double_click_to_edit_right_click_for_actions_drag_to_reorder")}</p>
+    <p className="px-1 text-[10px] text-slate-400">{__("Double-click to edit · Right-click for actions · Drag to reorder.")}</p>
   </section>;
 }

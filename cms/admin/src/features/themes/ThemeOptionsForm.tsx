@@ -1,4 +1,4 @@
-import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { __, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import {
@@ -60,7 +60,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
   hideSubmitButton = false,
   reloadToken = 0,
 }) => {
-  const { t: translate } = useI18n();
+  const { __ } = useI18n();
   const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
   const [tabLocale, setTabLocale] = useState<string>(defaultLocaleCode);
   useEffect(() => {
@@ -116,8 +116,8 @@ export const ThemeOptionsForm: React.FC<Props> = ({
           setSnapshot(null);
           return;
         }
-        setError(cause instanceof Error ? cause.message : tStatic('api.themes.load_theme_options'));
-        onApiError(cause, tStatic('api.themes.load_theme_options'));
+        setError(cause instanceof Error ? cause.message : __("Could not load theme options."));
+        onApiError(cause, __("Could not load theme options."));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -149,14 +149,14 @@ export const ThemeOptionsForm: React.FC<Props> = ({
   }, [snapshot, isSecondaryLocale]);
 
   if (loading) {
-    return <p role="status" className="text-sm text-zinc-600">{translate('feature.themes.themeoptionsform.loading_theme_options')}</p>;
+    return <p role="status" className="text-sm text-zinc-600">{__("Loading theme options…")}</p>;
   }
   if (
     !snapshot ||
     (visibleFields.length === 0 && readOnlyGlobalOptions.length === 0)
   ) {
     return hideSubmitButton ? (
-      <p className="text-xs text-zinc-500">{translate('feature.themes.themeoptionsform.the_current_theme_does_not_declare_custom_options_theme_options')}</p>
+      <p className="text-xs text-zinc-500">{__("The current theme does not declare custom options (theme_options).")}</p>
     ) : null;
   }
 
@@ -197,17 +197,17 @@ export const ThemeOptionsForm: React.FC<Props> = ({
         dirty: false,
         fields: saved.fields,
       });
-      setNotice(tStatic('feature.themes.themeoptionsform.theme_options_saved'));
+      setNotice(__("Theme options saved."));
     } catch (cause) {
       const stale = cause instanceof ApiClientError && cause.status === 412;
       setError(
         stale
-          ? tStatic('feature.themes.themeoptionsform.theme_options_changed_in_another_session_412_reload_before_saving')
+          ? __("Theme options changed in another session (412). Reload before saving.")
           : cause instanceof Error
             ? cause.message
-            : tStatic('api.themes.save_theme_options'),
+            : __("Could not save theme options."),
       );
-      onApiError(cause, tStatic('api.themes.save_theme_options'));
+      onApiError(cause, __("Could not save theme options."));
     } finally {
       setSaving(false);
     }
@@ -217,7 +217,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
     <OwnerOptionsForm
       ownerKind="theme"
       ownerId={themeId}
-      title={translate('feature.themes.themeoptionsform.theme_options_value1', { value1: themeId })}
+      title={__("Theme options ({{value1}})", { value1: themeId })}
       fields={visibleFields}
       values={draft}
       savedValues={snapshot.values}
@@ -229,7 +229,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
       notice={notice}
       error={error}
       hideSubmitButton={hideSubmitButton}
-      submitLabel={saving ? translate('general.saving') : translate('feature.themes.themeoptionsform.save_options')}
+      submitLabel={saving ? __("Saving…") : __("Save options")}
       testId="theme-options-form"
       beforeFields={
         !controlledLocale ? (
@@ -247,7 +247,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
             className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700"
             data-testid="theme-options-readonly-globals"
           >
-            <p className="font-medium text-zinc-800">{translate('feature.themes.themeoptionsform.shared_options_in_the_default_language_read_only_in_secondary_languages')}</p>
+            <p className="font-medium text-zinc-800">{__("Shared options in the default language (read-only in secondary languages):")}</p>
             <dl className="grid gap-1.5 sm:grid-cols-2">
               {readOnlyGlobalOptions.map((def) => (
                 <div
