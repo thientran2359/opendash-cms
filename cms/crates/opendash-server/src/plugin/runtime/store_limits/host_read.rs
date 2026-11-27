@@ -313,22 +313,34 @@ pub async fn execute_host_read_request_for_owner(
                     Err(e) => return HostOperationResponse::err(e.1.to_string()),
                 }
             }
-            match media::find(db, &media_id).await {
-                Ok(Some(m)) => {
-                    let url = if is_public_scope {
-                        format!("/media/{}/file", m.id)
+            match media::find_details(db, &media_id, !is_public_scope).await {
+                Ok(Some(details)) => {
+                    let prefix = if is_public_scope {
+                        "/media"
                     } else {
-                        format!("/api/admin/media/{}/file", m.id)
+                        "/api/admin/media"
                     };
+                    let version = details.asset.version.max(1);
+                    let url = format!("{prefix}/{}/file?v={version}", details.asset.id);
+                    let thumbnail_url = (details.asset.kind == "image")
+                        .then(|| format!("{prefix}/{}/thumbnail?v={version}", details.asset.id));
                     HostOperationResponse::ok_data(json!({
                         "media": {
-                            "id": m.id,
-                            "filename": m.filename,
-                            "mime_type": m.mime_type,
+                            "id": details.asset.id,
+                            "filename": details.asset.filename,
+                            "mime_type": details.asset.mime_type,
+                            "kind": details.asset.kind,
+                            "version": version,
+                            "generation": details.asset.generation,
+                            "content_sha256": details.asset.content_sha256,
                             "url": url,
-                            "width": Some(m.width),
-                            "height": Some(m.height),
+                            "thumbnail_url": thumbnail_url,
+                            "width": Some(details.asset.width),
+                            "height": Some(details.asset.height),
                             "alt": Value::Null,
+                            "variants": details.variants,
+                            "webp_srcset": details.webp_srcset,
+                            "fallback_srcset": details.fallback_srcset,
                         }
                     }))
                 }

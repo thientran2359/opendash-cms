@@ -191,7 +191,9 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         K::Search => content_render::search_breadcrumbs(
             content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
             Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
-            content_render::core_l10n(preview_locale).search_title.as_ref(),
+            content_render::core_l10n(preview_locale)
+                .search_title
+                .as_ref(),
         ),
         K::Part => Vec::new(),
         _ => {

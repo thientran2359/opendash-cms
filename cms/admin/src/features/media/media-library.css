@@ -122,6 +122,26 @@
     font-size: .82rem; font-weight: 500; color: var(--color-od-accent, #2563eb); text-decoration: underline;
   }
   .od-media-help, .od-media-unselected p { color: var(--color-od-muted, #52525b); font-size: .78rem; line-height: 1.5; }
+  .od-media-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .74rem; }
+  .od-media-variants { margin-top: 14px; padding-top: 12px; border-top: 1px solid #f4f4f5; }
+  .od-media-variants-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .od-media-variants-head h4 { margin: 0; font-size: .82rem; font-weight: 600; color: var(--color-od-text, #09090b); }
+  .od-media-badge {
+    display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px;
+    font-size: .7rem; font-weight: 600; background: #fef3c7; color: #92400e;
+  }
+  .od-media-badge-ready { background: #dcfce7; color: #166534; }
+  .od-media-variants-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; }
+  .od-media-variant-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 5px 8px; border-radius: 6px; background: #fafafa; border: 1px solid #e4e4e7; font-size: .74rem;
+  }
+  .od-media-variant-row a { color: var(--color-od-accent, #2563eb); text-decoration: underline; flex-shrink: 0; }
+  .od-media-srcset-details { margin-top: 8px; font-size: .75rem; }
+  .od-media-srcset-details summary { cursor: pointer; font-weight: 500; color: var(--color-od-accent, #2563eb); }
+  .od-media-srcset-block { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+  .od-media-admin-actions { margin-top: 14px; padding-top: 12px; border-top: 1px solid #f4f4f5; display: flex; flex-direction: column; gap: 8px; }
+  .od-media-action-row { display: flex; flex-wrap: wrap; gap: 8px; }
   @media (max-width: 1100px) {
     .od-media-content { grid-template-columns: minmax(0, 1fr); }
     .od-media-details { position: static; max-height: none; max-width: none; }

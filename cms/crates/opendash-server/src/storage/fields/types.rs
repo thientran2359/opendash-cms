@@ -46,11 +46,23 @@ pub const MAX_HYDRATE_TERM_IDS: usize = 128;
 pub const HYDRATE_SQL_CHUNK: usize = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HydratedMediaVariantRow {
+    pub spec: opendash_core::media::MediaVariantSpec,
+    pub format: opendash_core::media::MediaVariantFormat,
+    pub width: u32,
+    pub height: u32,
+    pub byte_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HydratedMediaRow {
     pub id: String,
     pub kind: String,
+    pub mime_type: String,
+    pub version: i64,
     pub width: Option<i64>,
     pub height: Option<i64>,
+    pub variants: Vec<HydratedMediaVariantRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

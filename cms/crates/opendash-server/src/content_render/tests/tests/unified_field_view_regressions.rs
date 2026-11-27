@@ -53,8 +53,11 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
         HydratedMediaRow {
             id: media_hex.clone(),
             kind: "image".into(),
+            mime_type: "image/png".into(),
+            version: 1,
             width: Some(800),
             height: Some(600),
+            variants: Vec::new(),
         },
     );
     media_map.insert(
@@ -62,8 +65,11 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
         HydratedMediaRow {
             id: alt_hex.clone(),
             kind: "image".into(),
+            mime_type: "image/png".into(),
+            version: 1,
             width: Some(400),
             height: Some(300),
+            variants: Vec::new(),
         },
     );
     media_map.insert(
@@ -71,8 +77,11 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
         HydratedMediaRow {
             id: doc_hex.clone(),
             kind: "file".into(),
+            mime_type: "application/pdf".into(),
+            version: 1,
             width: None,
             height: None,
+            variants: Vec::new(),
         },
     );
     let entries_map: BTreeMap<i64, HydratedEntryRefRow> = BTreeMap::new();
@@ -82,6 +91,7 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
         entries: &entries_map,
         terms: &terms_map,
         is_preview: false,
+        tag_media_provenance: true,
     };
 
     let mut record = ContentEntryRecord {
@@ -133,7 +143,7 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
     // Cover prefers featured_image over earlier banner_img/spec_pdf.
     assert_eq!(
         view.cover_url.as_deref(),
-        Some(format!("/media/{media_hex}/file").as_str())
+        Some(format!("/media/{media_hex}/file?v=1").as_str())
     );
     let banner = view
         .field_list
@@ -143,7 +153,7 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
     assert_eq!(banner.field_type, "media");
     assert_eq!(
         banner.media.as_ref().unwrap()["url"],
-        format!("/media/{alt_hex}/file")
+        format!("/media/{alt_hex}/file?v=1")
     );
     let photos = view.field_list.iter().find(|f| f.key == "photos").unwrap();
     assert_eq!(photos.field_type, "gallery");
@@ -193,6 +203,101 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
         .unwrap();
     assert_eq!(body_field.text, "<p>Builder Copy</p>");
     assert!(builder_nonces.is_empty());
+}
+
+#[test]
+fn b02_entry_view_with_url_pure_media_fallback_renders_default_single_and_archive() {
+    let media_hex = "d".repeat(64);
+    let gallery_hex = "e".repeat(64);
+
+    let mut featured = FieldSpec::new(FieldType::Media, "featured_image", "Ảnh đại diện");
+    featured.media_kind = Some(MediaFieldKind::Image);
+    let gallery = FieldSpec::new(FieldType::Gallery, "photos", "Bộ ảnh");
+
+    let schema_def = ContentTypeDefinition {
+        key: "article".into(),
+        label: "Article".into(),
+        fields: vec![featured, gallery],
+        settings: ContentTypeSettings::default(),
+    };
+    let mut values = BTreeMap::new();
+    values.insert("featured_image".into(), json!(media_hex));
+    values.insert("photos".into(), json!([gallery_hex]));
+
+    let record = ContentEntryRecord {
+        id: 77,
+        content_type_key: "article".into(),
+        locale: "vi".into(),
+        translation_group_id: "grp-77".into(),
+        translations: vec![],
+        slug: "pure-media-fallback".into(),
+        title: "Pure Media Fallback".into(),
+        values,
+        term_ids: vec![],
+        primary_category_term_id: None,
+        publication_status: "published".into(),
+        page_layout_key: None,
+        custom_template_key: None,
+        content_mode: ContentMode::Editor,
+        version: 1,
+        created_at: String::new(),
+        updated_at: "2026-11-27T00:00:00Z".into(),
+        published_at: Some("2026-11-27T00:00:00Z".into()),
+    };
+
+    let view = entry_view_with_url(record, &schema_def, Some("/pure-media-fallback".into()));
+    let single_html = render_single_with_context_and_nonces_for_locale(
+        &schema_def,
+        &view,
+        None,
+        &DEFAULT_SITE,
+        Some("/articles"),
+        &[],
+        &RenderFormattingConfig::default(),
+        "vi",
+        None,
+    )
+    .expect("DEFAULT_SINGLE renders pure_media_fallback without od_image provenance error");
+    assert!(
+        single_html.contains(&format!("/media/{media_hex}/file")),
+        "{single_html}"
+    );
+    assert!(
+        single_html.contains(&format!("/media/{gallery_hex}/file")),
+        "{single_html}"
+    );
+    assert!(!single_html.contains("OD_IMAGE_"));
+
+    let pagination = PaginationView {
+        page: 1,
+        per_page: 10,
+        total_items: 1,
+        total_pages: 1,
+        has_prev: false,
+        has_next: false,
+        previous_url: None,
+        next_url: None,
+        pages: Vec::new(),
+    };
+    let archive_html = render_archive_with_site_and_config_for_locale(
+        &schema_def,
+        &[view],
+        None,
+        None,
+        &pagination,
+        &[],
+        None,
+        None,
+        &DEFAULT_SITE,
+        &RenderFormattingConfig::default(),
+        "vi",
+    )
+    .expect("DEFAULT_ARCHIVE renders pure_media_fallback without od_image provenance error");
+    assert!(
+        archive_html.contains(&format!("/media/{media_hex}/file")),
+        "{archive_html}"
+    );
+    assert!(!archive_html.contains("OD_IMAGE_"));
 }
 
 #[test]
@@ -259,8 +364,11 @@ fn r2_01_entry_view_strips_private_children_inside_public_group_and_repeater() {
         HydratedMediaRow {
             id: pub_hex.clone(),
             kind: "image".into(),
+            mime_type: "image/png".into(),
+            version: 1,
             width: Some(100),
             height: Some(100),
+            variants: Vec::new(),
         },
     );
     media_map.insert(
@@ -268,8 +376,11 @@ fn r2_01_entry_view_strips_private_children_inside_public_group_and_repeater() {
         HydratedMediaRow {
             id: priv_hex.clone(),
             kind: "image".into(),
+            mime_type: "image/png".into(),
+            version: 1,
             width: Some(100),
             height: Some(100),
+            variants: Vec::new(),
         },
     );
     let hctx = HydrationContext {
@@ -277,6 +388,7 @@ fn r2_01_entry_view_strips_private_children_inside_public_group_and_repeater() {
         entries: &BTreeMap::new(),
         terms: &BTreeMap::new(),
         is_preview: false,
+        tag_media_provenance: true,
     };
     let record = ContentEntryRecord {
         id: 22,

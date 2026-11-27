@@ -2,29 +2,31 @@
 
 Thư mục này là nơi lưu trữ các đặc tả thiết kế kỹ thuật (Design Specifications) của OpenDash theo quy trình **EGM (Elephant-Goldfish Model)**. Toàn bộ danh mục thiết kế được quản lý tại [`SITEMAP.md`](SITEMAP.md).
 
-## Quy trình Làm việc EGM
+## Quy trình Làm việc EGM (7 Bước Tinh gọn — `Owner Directive 2026-11-27`)
 
-1. **Khám phá & Phản biện ý tưởng (`/egm-brainstorm`):**
-   - **Elephant** thảo luận cùng chủ dự án để làm rõ bài toán, ràng buộc và các phương án đánh đổi, sau đó gọi **Goldfish** phản biện sớm và xuất `concepts_brief.md` (lưu tại vùng artifact/scratch của phiên làm việc).
-2. **Soạn thảo Đặc tả (`/egm-draft`):**
-   - **Elephant** nạp ngữ cảnh dự án (qua skill [`.agents/skills/opendash-elephant/SKILL.md`](../../.agents/skills/opendash-elephant/SKILL.md)) và soạn từng mục của `design_draft.md` với cổng phê duyệt của chủ dự án.
-   - Sau khi hoàn tất, đặc tả được ghi vào `docs/designs/<feature>.md` và đăng ký vào [`SITEMAP.md`](SITEMAP.md).
-3. **Review Độc lập bằng Goldfish (`/egm-review` / `/egm-review-loop` + `/egm-resolve`):**
-   - Các subagent **Goldfish** trong ngữ cảnh mới hoàn toàn kiểm tra tài liệu đối chiếu với mã nguồn thật trong `cms/` và 3 hợp đồng nền tảng ([`CORE_FOUNDATION.md`](../contracts/CORE_FOUNDATION.md), [`PLUGIN_ABI.md`](../contracts/PLUGIN_ABI.md), [`M8_WRITER_INVENTORY.md`](../contracts/M8_WRITER_INVENTORY.md)):
-     - **Kiến trúc lớn:** dùng `/egm-review` preset `uninterrupted` hoặc `interactive` (Stages `5 → 6 → 7 → 8 → 9`).
-     - **Tính năng nhỏ/vừa:** dùng `/egm-review-loop` với 3 reviewer lõi (`design_critic`, `codebase_details`, `implementation_readiness`).
-   - **Elephant** phân loại các phát hiện (`PROPOSE FIX` vs `CONTEST`), trình Owner (cho thay đổi PRD/kiến trúc lõi/breaking) hoặc Coordinator được ủy quyền (`Atlas`/`Aster`, cho spec trong phạm vi PRD) duyệt, và cập nhật vào file thiết kế:
+1. **Bước 1–2 — Đề bài & Nghiên cứu EGM (`/egm-brainstorm` + `/egm-draft` + Goldfish theo cỡ):**
+   - Chủ dự án nêu ý tưởng/tính năng. **Elephant** nạp ngữ cảnh qua [`.agents/skills/opendash-elephant/SKILL.md`](../../.agents/skills/opendash-elephant/SKILL.md), kiểm tra mã nguồn thật trong `cms/`, soạn `docs/designs/<feature>.md` (kèm `## Detailed Implementation Plan`, các `### Slice S01..Sn` nội bộ, `### Verification Plan`, và **đặt trước số migration** nếu làm song song nhiều tính năng) và đăng ký vào [`SITEMAP.md`](SITEMAP.md).
+   - **Chọn cỡ Goldfish đối chiếu `cms/` và các hợp đồng nền tảng ([`CORE_FOUNDATION.md`](../contracts/CORE_FOUNDATION.md), [`PLUGIN_ABI.md`](../contracts/PLUGIN_ABI.md), [`M8_WRITER_INVENTORY.md`](../contracts/M8_WRITER_INVENTORY.md)):**
+     - **Kiến trúc lớn / đụng lõi, DB, bảo mật, C-SEC, Plugin ABI:** chạy 1–2 vòng `/egm-review-loop` (hoặc `/egm-review`) + `/egm-resolve`.
+     - **Tính năng nhỏ / vừa / UI cô lập:** chạy 1 vòng Goldfish gọn (hoặc bỏ qua nếu chủ dự án yêu cầu làm nhanh).
+2. **Bước 3–4 — Giải thích Tự nhiên & Duyệt hướng (`Status: Approved`):**
+   - **Elephant** tóm tắt phương án thực hiện bằng **ngôn ngữ tự nhiên** trong chat: làm gì cho người dùng, thay đổi gì, phần không làm, và rủi ro/đánh đổi.
+   - Khi chủ dự án đồng ý, chốt vào đầu file thiết kế:
      - `**Status:** Approved`
-     - `**Approved By:** Owner | Atlas (delegated) | Aster (delegated)`
-     - `**Approval Evidence:** <link PR/comment hoặc ngày xác nhận>`
+     - `**Approved By:** Owner | <Coordinator> (delegated)`
+     - `**Approval Evidence:** <link PR/comment hoặc xác nhận ngày>`
      - `**Goldfish Review:** <preset/personas · ngày · reviewed baseline/SHA>`
    - CI (`check-plans.py`) tự động chặn spec `Approved` thiếu provenance, thiếu `Detailed Implementation Plan`/`Verification Plan`, thiếu Slice Contract (`**Dependencies:**`, `**File Ownership:**`, `**Acceptance Criteria:**`, `**Rollback:**`), hoặc còn `Open Questions`/`TODO`/`TBD`.
-4. **Triển khai & Kiểm chứng (Implement & Verify):**
-   - Chỉ bắt đầu viết code sau khi Design Spec đạt `Status: Approved` và merge vào `main`. Với spec lớn, chia nhỏ bằng heading `### Slice S01: <Tên slice>` (đủ 4 trường `Dependencies`, `File Ownership`, `Acceptance Criteria`, `Rollback`) và tạo GitHub Issue từng slice qua `python .agents/scripts/prepare-github-issue.py --source docs/designs/<feature>.md --slice S01`.
-   - Triển khai bám sát mục `## Detailed Implementation Plan` trong file thiết kế, chạy đầy đủ `python cms/scripts/check-standards.py`, `cargo test --manifest-path cms/Cargo.toml --workspace --release --locked` cùng các bài test E2E liên quan, và ghi bằng chứng thực chạy vào [`docs/verification/`](../verification/README.md).
-   - **Đóng vòng đời sau khi merge PR triển khai:** Coordinator chạy `/egm-drift-report` cho spec vừa triển khai, cập nhật `Status` trong [`SITEMAP.md`](SITEMAP.md) theo lộ trình `Approved` → `Implemented` → `**Verified**` (kèm link trực tiếp tới `docs/verification/*.md`); nếu đặc tả thay thế một phần hợp đồng nền tảng cũ trong `docs/contracts/`, gắn ghi chú `> Superseded by docs/designs/<feature>.md` tại mục bị thay thế và chạy `node cms/scripts/codegraph-index-docs.mjs`.
+3. **Bước 5 — Triển khai trọn gói trên Feature Worktree (`feat/<slug>`) & Test cuối tính năng:**
+   - **Không tạo Issue lẻ theo Slice và không mở PR cho từng Slice.** Agent triển khai tuần tự toàn bộ `S01..Sn` trên 1 worktree riêng (`feat/<slug>`).
+   - Giữa các Slice trung gian (`S01..S(n-1)`): **chỉ chạy Tầng 0** (`python3 cms/scripts/run-tests.py --check`, thêm `npm --prefix cms/admin run typecheck` nếu sửa Admin) và `git commit` checkpoint — **không build binary, không chạy test**.
+   - **Sau khi code xong toàn bộ tính năng:** chạy **1 lần duy nhất** Tầng 1 (`python3 cms/scripts/check-standards.py`, `python3 cms/scripts/check-plans.py`, `cargo fmt --check`, `npm run build` nếu sửa Admin, `python3 cms/scripts/run-tests.py --changed`, script E2E của tính năng) và 1 lượt kiểm tra drift gọn (`/egm-drift-report` ngay trên `feat/<slug>`).
+4. **Bước 6–7 — Báo cáo Tự nhiên, Chốt Merge & Dọn Worktree:**
+   - Agent báo cáo bằng **ngôn ngữ tự nhiên** trong chat: các tính năng đã làm xong, mức độ hoàn thiện, kết quả test thực chạy và link 1 Feature PR duy nhất.
+   - Khi chủ dự án chốt đồng ý: sync `origin/main` 1 lần cuối (nếu cần), merge PR vào `main`, ghi bằng chứng vào [`docs/verification/`](../verification/README.md) (khi chạy nghiệm thu đầy đủ), cập nhật [`SITEMAP.md`](SITEMAP.md) (`Implemented` → `**Verified**`), gắn `> Superseded by docs/designs/<feature>.md` ở hợp đồng cũ nếu có, chạy `node cms/scripts/codegraph-index-docs.mjs`, rồi **xóa branch + xóa worktree + dọn `cms/target`**.
+   - Bộ test nặng Tầng 2 (`run-tests.py --group all --release`) chỉ chạy theo đợt sau 3–5 tính năng hoặc trước release.
 5. **Đối chiếu Chống trôi Tài liệu (`/egm-drift-report`):**
-   - Trigger bắt buộc: sau khi mỗi Design Spec chuyển sang `Implemented` (trước khi đánh dấu `**Verified**`) và trước mỗi đợt release, do Coordinator phụ trách chạy và đính kèm kết quả vào PR closure.
+   - Thực hiện gọn ngay cuối Bước 5 trên `feat/<slug>` (shift-left) trước khi báo cáo ở Bước 6, và rà tổng hợp trước mỗi đợt release.
 
 ## Cấu trúc Chuẩn của một File Thiết kế (`docs/designs/<feature>.md`)
 

@@ -258,6 +258,8 @@ pub struct StagedMediaEntry {
     pub media_id: String,
     pub extension: String,
     pub sha256: String,
+    #[serde(default)]
+    pub content_sha256: String,
     pub already_existed: bool,
     pub filename: String,
     pub mime_type: String,
@@ -266,6 +268,8 @@ pub struct StagedMediaEntry {
     pub height: i64,
     pub thumb_width: i64,
     pub thumb_height: i64,
+    #[serde(default)]
+    pub variants: Vec<opendash_core::media::QueuedMediaVariant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,8 +286,25 @@ pub(in crate::storage) async fn write_staged_and_promote(
     ext: &str,
     original: &[u8],
     thumbnail: &[u8],
-) -> ApiResult<bool> {
+    variants: &[crate::media::GeneratedVariant],
+) -> ApiResult<(bool, Vec<opendash_core::media::QueuedMediaVariant>)> {
     use tokio::io::AsyncWriteExt;
+
+    let mut queued = Vec::with_capacity(variants.len());
+    for v in variants {
+        queued.push(opendash_core::media::QueuedMediaVariant {
+            spec: v.spec,
+            format: v.format,
+            width: v.width,
+            height: v.height,
+            byte_size: v.bytes.len() as u64,
+            relative_path: crate::media::MediaStore::variant_relative_path(
+                id, 1, v.spec, v.format,
+            )?,
+            sha256: v.sha256.clone(),
+            staged_rel_path: format!("{}_{}.{}", v.spec.as_str(), id, v.format.extension()),
+        });
+    }
 
     let media_dir = uploads_root.join("media").join(&id[..2]);
     let orig_dest = media_dir.join(format!("{id}.{ext}"));
@@ -293,8 +314,8 @@ pub(in crate::storage) async fn write_staged_and_promote(
         tokio::fs::read(&orig_dest).await,
         tokio::fs::read(&thumb_dest).await,
     ) {
-        if sha256_hex(&orig_bytes) == id && !thumb_bytes.is_empty() {
-            return Ok(true);
+        if !orig_bytes.is_empty() && !thumb_bytes.is_empty() {
+            return Ok((true, queued));
         }
     }
 
@@ -339,5 +360,40 @@ pub(in crate::storage) async fn write_staged_and_promote(
             .await
             .map_err(|_| ApiError::internal("Không thể di chuyển thumbnail từ staging."))?;
     }
-    Ok(already)
+
+    if !already && !variants.is_empty() {
+        let var_dest_dir = uploads_root
+            .join("variants")
+            .join(&id[..2])
+            .join(id)
+            .join("v1");
+        tokio::fs::create_dir_all(&var_dest_dir)
+            .await
+            .map_err(|_| ApiError::internal("Không tạo được thư mục biến thể sample."))?;
+        for (idx, v) in variants.iter().enumerate() {
+            let st_path = staging_dir.join(&queued[idx].staged_rel_path);
+            let mut f = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&st_path)
+                .await
+                .map_err(|_| ApiError::internal("Không mở được file biến thể staging."))?;
+            f.write_all(&v.bytes)
+                .await
+                .map_err(|_| ApiError::internal("Không ghi được biến thể staging."))?;
+            f.sync_all()
+                .await
+                .map_err(|_| ApiError::internal("Không đồng bộ được biến thể staging."))?;
+            drop(f);
+            let dst = uploads_root.join(&queued[idx].relative_path);
+            if !tokio::fs::try_exists(&dst).await.unwrap_or(false) {
+                tokio::fs::rename(&st_path, &dst)
+                    .await
+                    .map_err(|_| ApiError::internal("Không thể di chuyển biến thể sample."))?;
+            }
+        }
+    }
+
+    Ok((already, queued))
 }

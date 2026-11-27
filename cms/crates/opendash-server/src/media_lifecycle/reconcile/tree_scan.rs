@@ -15,10 +15,109 @@ pub(crate) async fn check_no_symlink_and_count(
     *scanned_files += 1;
     if *scanned_files > MAX_RECONCILE_FILES {
         return Err(ApiError::conflict(
-            "Số lượng tệp vượt giới hạn reconcile (tối đa 20.000 tệp).",
+            "Số lượng tệp vượt giới hạn reconcile (tối đa 100.000 tệp).",
         ));
     }
     Ok(meta)
+}
+
+async fn scan_variants_tree(
+    variants_root: &Path,
+    scanned_files: &mut usize,
+    media_files: &mut Vec<ScannedFile>,
+) -> ApiResult<()> {
+    let mut shards = fs::read_dir(variants_root)
+        .await
+        .map_err(|_| ApiError::conflict("Không thể đọc uploads/variants."))?;
+    while let Some(shard_entry) = shards
+        .next_entry()
+        .await
+        .map_err(|_| ApiError::conflict("Lỗi đọc shard trong uploads/variants."))?
+    {
+        let shard_name = shard_entry.file_name().to_string_lossy().to_string();
+        let shard_path = shard_entry.path();
+        let shard_meta = check_no_symlink_and_count(&shard_path, scanned_files).await?;
+        if !shard_meta.is_dir()
+            || shard_name.len() != 2
+            || !shard_name
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(ApiError::conflict(
+                "Phát hiện tệp hoặc thư mục không hợp lệ trong uploads/variants.",
+            ));
+        }
+
+        let mut asset_dirs = fs::read_dir(&shard_path).await.map_err(|_| {
+            ApiError::conflict("Không thể đọc thư mục asset trong uploads/variants.")
+        })?;
+        while let Some(asset_entry) = asset_dirs
+            .next_entry()
+            .await
+            .map_err(|_| ApiError::conflict("Lỗi đọc thư mục asset biến thể."))?
+        {
+            let media_id = asset_entry.file_name().to_string_lossy().to_string();
+            let asset_path = asset_entry.path();
+            let asset_meta = check_no_symlink_and_count(&asset_path, scanned_files).await?;
+            if !asset_meta.is_dir() || !is_64hex(&media_id) || !media_id.starts_with(&shard_name) {
+                return Err(ApiError::conflict(
+                    "Phát hiện thư mục định danh không hợp lệ trong uploads/variants.",
+                ));
+            }
+
+            let mut ver_dirs = fs::read_dir(&asset_path)
+                .await
+                .map_err(|_| ApiError::conflict("Không thể đọc thư mục phiên bản biến thể."))?;
+            while let Some(ver_entry) = ver_dirs
+                .next_entry()
+                .await
+                .map_err(|_| ApiError::conflict("Lỗi đọc thư mục phiên bản biến thể."))?
+            {
+                let vname = ver_entry.file_name().to_string_lossy().to_string();
+                let vpath = ver_entry.path();
+                let vmeta = check_no_symlink_and_count(&vpath, scanned_files).await?;
+                let valid_ver = vname
+                    .strip_prefix('v')
+                    .and_then(|n| n.parse::<i64>().ok())
+                    .is_some_and(|v| v >= 1);
+                if !vmeta.is_dir() || !valid_ver {
+                    return Err(ApiError::conflict(
+                        "Phát hiện thư mục phiên bản không hợp lệ trong uploads/variants.",
+                    ));
+                }
+
+                let mut files = fs::read_dir(&vpath)
+                    .await
+                    .map_err(|_| ApiError::conflict("Không đọc được tệp biến thể."))?;
+                while let Some(file_entry) = files
+                    .next_entry()
+                    .await
+                    .map_err(|_| ApiError::conflict("Lỗi đọc tệp biến thể."))?
+                {
+                    let fname = file_entry.file_name().to_string_lossy().to_string();
+                    let fpath = file_entry.path();
+                    let fmeta = check_no_symlink_and_count(&fpath, scanned_files).await?;
+                    if !fmeta.is_file()
+                        || opendash_core::media::parse_variant_spec_ext(&fname).is_none()
+                    {
+                        return Err(ApiError::conflict(
+                            "Phát hiện tệp không hợp lệ trong uploads/variants.",
+                        ));
+                    }
+                    let mtime = modified_unix_secs(&fmeta)?;
+                    media_files.push(ScannedFile {
+                        logical_key: format!("variants/{shard_name}/{media_id}/{vname}/{fname}"),
+                        abs_path: fpath,
+                        media_id: media_id.clone(),
+                        kind: ReconcileOrphanKind::Variant,
+                        size_bytes: fmeta.len(),
+                        modified_unix_secs: mtime,
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) async fn scan_uploads_tree(
@@ -100,6 +199,7 @@ pub(crate) async fn scan_uploads_tree(
                         logical_key: format!("media/{shard_name}/{fname}"),
                         abs_path: fpath,
                         media_id,
+                        kind: ReconcileOrphanKind::Canonical,
                         size_bytes: fmeta.len(),
                         modified_unix_secs: mtime,
                     });
@@ -144,6 +244,10 @@ pub(crate) async fn scan_uploads_tree(
                 }
                 quarantine_dirs.push((qname, qpath, newest_mtime));
             }
+        } else if name == ".staging" && meta.is_dir() {
+            continue;
+        } else if name == "variants" && meta.is_dir() {
+            scan_variants_tree(&path, scanned_files, &mut media_files).await?;
         } else {
             return Err(ApiError::conflict(
                 "Phát hiện tệp hoặc thư mục không xác định trong uploads.",

@@ -204,13 +204,15 @@ pub(super) async fn render_resolved_public_template_html(
             let canvas_layout = record.target.kind
                 == opendash_core::theme::TemplateCandidateKind::PageLayout
                 && overrides::is_canvas_page_layout(active, record.target.layout_key.as_deref());
-            let search_data = route_ctx.search.is_search_route.then_some(
-                crate::page::BuilderSearchData {
-                    view: route_ctx.search,
-                    entries: route_ctx.entries,
-                    pagination: route_ctx.pagination,
-                },
-            );
+            let search_data =
+                route_ctx
+                    .search
+                    .is_search_route
+                    .then_some(crate::page::BuilderSearchData {
+                        view: route_ctx.search,
+                        entries: route_ctx.entries,
+                        pagination: route_ctx.pagination,
+                    });
             let rendered =
                 overrides::render_resolved_public_builder_with_search_and_cache_for_locale(
                     db,
@@ -560,7 +562,13 @@ pub(crate) async fn render_canonical_taxonomy(
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::finalize_document_richtext(
-            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            content_render::finalize_document_images(
+                content_render::finalize_document_icons(
+                    composed,
+                    &budget.render_budget.icon_nonces,
+                )?,
+                &budget.render_budget.image_nonces,
+            )?,
             &budget.render_budget.richtext_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,

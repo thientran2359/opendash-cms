@@ -348,13 +348,7 @@ mod tests {
             None
         );
         assert_eq!(
-            canonical_route_key(
-                RenderCachePolicy::ByRoute,
-                "search",
-                "/",
-                "s=arch",
-                false
-            ),
+            canonical_route_key(RenderCachePolicy::ByRoute, "search", "/", "s=arch", false),
             None
         );
     }

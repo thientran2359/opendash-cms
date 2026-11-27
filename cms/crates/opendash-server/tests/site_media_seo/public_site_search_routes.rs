@@ -175,7 +175,10 @@ async fn public_ssr_and_json_search_enforces_locale_validation_csp_and_headers()
         .await
         .unwrap();
     assert_eq!(locales_get.status(), StatusCode::OK);
-    let mut locales_etag = locales_get.headers()[header::ETAG].to_str().unwrap().to_owned();
+    let mut locales_etag = locales_get.headers()[header::ETAG]
+        .to_str()
+        .unwrap()
+        .to_owned();
     let enable_ml = http
         .put(format!("{}/api/admin/locales/multilingual", srv.base))
         .header(header::COOKIE, &cookie)
@@ -187,7 +190,10 @@ async fn public_ssr_and_json_search_enforces_locale_validation_csp_and_headers()
         .await
         .unwrap();
     assert_eq!(enable_ml.status(), StatusCode::OK);
-    locales_etag = enable_ml.headers()[header::ETAG].to_str().unwrap().to_owned();
+    locales_etag = enable_ml.headers()[header::ETAG]
+        .to_str()
+        .unwrap()
+        .to_owned();
     let add_en = http
         .post(format!("{}/api/admin/locales", srv.base))
         .header(header::COOKIE, &cookie)
@@ -255,25 +261,56 @@ async fn public_ssr_and_json_search_enforces_locale_validation_csp_and_headers()
 
     // 1. Default homepage keeps form-action 'none' while SSR /?s= allows form-action 'self'.
     let home = http.get(format!("{}/", srv.base)).send().await.unwrap();
-    let home_csp = home.headers()[header::CONTENT_SECURITY_POLICY].to_str().unwrap().to_owned();
-    assert!(home_csp.contains("form-action 'none'"), "unexpected home CSP: {home_csp}");
+    let home_csp = home.headers()[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        home_csp.contains("form-action 'none'"),
+        "unexpected home CSP: {home_csp}"
+    );
 
-    let ssr = http.get(format!("{}/?s=kien+truc", srv.base)).send().await.unwrap();
+    let ssr = http
+        .get(format!("{}/?s=kien+truc", srv.base))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(ssr.status(), StatusCode::OK);
     assert_eq!(ssr.headers()[header::CACHE_CONTROL], "no-store");
     assert_eq!(ssr.headers()["x-robots-tag"], "noindex, follow");
-    let ssr_csp = ssr.headers()[header::CONTENT_SECURITY_POLICY].to_str().unwrap().to_owned();
-    assert!(ssr_csp.contains("form-action 'self'"), "unexpected search CSP: {ssr_csp}");
+    let ssr_csp = ssr.headers()[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        ssr_csp.contains("form-action 'self'"),
+        "unexpected search CSP: {ssr_csp}"
+    );
     let html = ssr.text().await.unwrap();
     assert!(html.contains("Kiến trúc xanh Hà Nội"));
     assert!(html.contains("<mark>"));
     assert!(!html.contains("Bí mật kiến trúc chưa xuất bản"));
 
     // 2. Empty ?s=, type filter, and out-of-range valid page <= 100.
-    assert_eq!(http.get(format!("{}/?s=", srv.base)).send().await.unwrap().status(), StatusCode::OK);
-    let page_100 = http.get(format!("{}/?s=kien&page=100", srv.base)).send().await.unwrap();
+    assert_eq!(
+        http.get(format!("{}/?s=", srv.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let page_100 = http
+        .get(format!("{}/?s=kien&page=100", srv.base))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(page_100.status(), StatusCode::OK);
-    let typed = http.get(format!("{}/?s=kien+truc&type=page", srv.base)).send().await.unwrap();
+    let typed = http
+        .get(format!("{}/?s=kien+truc&type=page", srv.base))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(typed.status(), StatusCode::OK);
     let typed_html = typed.text().await.unwrap();
     assert!(typed_html.contains("Giới thiệu Studio kiến trúc"));
@@ -288,28 +325,51 @@ async fn public_ssr_and_json_search_enforces_locale_validation_csp_and_headers()
         "/missing?%ZZ&s=abc",
     ] {
         let resp = http.get(format!("{}{bad}", srv.base)).send().await.unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "expected 400 for {bad}");
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "expected 400 for {bad}"
+        );
     }
 
     // 4. Secondary locale search works with unconfigured homepage and preserves ?s= on 301.
-    let en_search = http.get(format!("{}/en?s=green", srv.base)).send().await.unwrap();
+    let en_search = http
+        .get(format!("{}/en?s=green", srv.base))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(en_search.status(), StatusCode::OK);
     let en_html = en_search.text().await.unwrap();
     assert!(en_html.contains("Green Architecture Studio"));
     assert!(!en_html.contains("Kiến trúc xanh Hà Nội"));
 
     for (from, to) in [("/en/?s=", "/en?s="), ("/en/?s=green", "/en?s=green")] {
-        let redir = http.get(format!("{}{from}", srv.base)).send().await.unwrap();
-        assert_eq!(redir.status(), StatusCode::MOVED_PERMANENTLY, "expected 301 for {from}");
+        let redir = http
+            .get(format!("{}{from}", srv.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            redir.status(),
+            StatusCode::MOVED_PERMANENTLY,
+            "expected 301 for {from}"
+        );
         assert_eq!(redir.headers()[header::LOCATION], to);
     }
 
-    let fr = http.get(format!("{}/fr?s=hello", srv.base)).send().await.unwrap();
+    let fr = http
+        .get(format!("{}/fr?s=hello", srv.base))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(fr.status(), StatusCode::NOT_FOUND);
 
     // 5. Public JSON API returns hits, facets, pagination, and typed error envelopes.
     let api_ok = http
-        .get(format!("{}/api/public/search?s=kien+truc&limit=10", srv.base))
+        .get(format!(
+            "{}/api/public/search?s=kien+truc&limit=10",
+            srv.base
+        ))
         .send()
         .await
         .unwrap();

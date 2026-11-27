@@ -279,8 +279,8 @@ pub async fn public_fallback(
             is_home,
         } => {
             if is_home && crate::public_context::has_search_param(raw) {
-                let sq =
-                    crate::public_context::parse_search_query(raw).map_err(ApiError::bad_request)?;
+                let sq = crate::public_context::parse_search_query(raw)
+                    .map_err(ApiError::bad_request)?;
                 if resolved.redirect || had_trailing_slash {
                     let target = CanonicalUrlBuilder::search_url(
                         &resolved.canonical_path,
@@ -403,8 +403,8 @@ pub async fn public_fallback(
         }
         PublicRouteTarget::Home { locale } => {
             if crate::public_context::has_search_param(raw) {
-                let sq =
-                    crate::public_context::parse_search_query(raw).map_err(ApiError::bad_request)?;
+                let sq = crate::public_context::parse_search_query(raw)
+                    .map_err(ApiError::bad_request)?;
                 if resolved.redirect || had_trailing_slash {
                     let target = CanonicalUrlBuilder::search_url(
                         &resolved.canonical_path,

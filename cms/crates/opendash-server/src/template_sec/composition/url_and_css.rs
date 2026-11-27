@@ -39,9 +39,12 @@ pub fn validate_safe_scoped_block_css(css: &str, is_preview: bool) -> Result<(),
             })
             .unwrap_or(raw_inner)
             .trim();
-        let allowed_public = inner.starts_with("/theme/") || inner.starts_with("/media/");
-        let allowed_preview = is_preview && inner.starts_with("/api/admin/media/");
-        if !(allowed_public || allowed_preview)
+        let allowed_theme =
+            inner.starts_with("/theme/") && !inner.contains("..") && !inner.contains('?');
+        let allowed_media = (inner.starts_with("/media/")
+            || (is_preview && inner.starts_with("/api/admin/media/")))
+            && opendash_core::media::valid_media_render_url(inner, is_preview);
+        if !(allowed_theme || allowed_media)
             || inner.contains("..")
             || inner.contains('\\')
             || inner.contains('{')
@@ -145,10 +148,17 @@ pub fn json_to_safe_value(value: &serde_json::Value) -> Value {
         serde_json::Value::Array(v) => {
             Value::from(v.iter().map(json_to_safe_value).collect::<Vec<_>>())
         }
-        serde_json::Value::Object(v) => Value::from_pairs(
-            v.iter()
-                .map(|(k, val)| (k.clone(), json_to_safe_value(val))),
-        ),
+        serde_json::Value::Object(v) => {
+            if let Some(media_obj) = SafeMediaObject::try_from_tagged_json(v) {
+                Value::from_object(media_obj)
+            } else {
+                Value::from_pairs(
+                    v.iter()
+                        .filter(|(k, _)| k.as_str() != MEDIA_PROVENANCE_KEY)
+                        .map(|(k, val)| (k.clone(), json_to_safe_value(val))),
+                )
+            }
+        }
     }
 }
 

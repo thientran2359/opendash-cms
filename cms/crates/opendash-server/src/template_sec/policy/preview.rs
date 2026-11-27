@@ -7,6 +7,7 @@ impl Default for RenderBudget {
             html_bytes_used: 0,
             locale: "vi".to_owned(),
             icon_nonces: IconNonceTable::default(),
+            image_nonces: ImageNonceTable::default(),
             richtext_nonces: RichTextNonceTable::default(),
             hook_nonces: HookNonceTable::default(),
         }
@@ -35,6 +36,7 @@ impl Default for PreviewCompositionBudget {
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: IconNonceTable::default(),
+            image_nonces: ImageNonceTable::default(),
             richtext_nonces: RichTextNonceTable::default(),
             hook_nonces: HookNonceTable::default(),
         }
@@ -75,6 +77,7 @@ pub(crate) fn preview_composition_sites(
     if source.contains(PREVIEW_PART_NONCE_PREFIX)
         || source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(IMAGE_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
@@ -155,12 +158,20 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
     validate_template_csec_with_usage_flags(name, &program, policy, true, true, true)?;
     let mut env = restricted_environment_with_config(fmt_cfg);
     let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let local_images = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     install_icon_function(
         &mut env,
         &budget.icon_nonces,
         &local_icons,
+        budget.html_bytes_used,
+        &overflowed,
+    );
+    install_image_function(
+        &mut env,
+        &budget.image_nonces,
+        &local_images,
         budget.html_bytes_used,
         &overflowed,
     );
@@ -209,6 +220,19 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
         return Err("HTML preview chứa icon vượt giới hạn 512 KiB.");
     }
     budget.icon_nonces.extend(additions);
+    let image_additions = local_images
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let image_growth: usize = image_additions
+        .iter()
+        .map(|(n, s)| s.len().saturating_sub(n.len()))
+        .sum();
+    budget.html_bytes_used = budget.html_bytes_used.saturating_add(image_growth);
+    if budget.html_bytes_used > MAX_RENDERED_HTML_BYTES {
+        return Err("HTML preview chứa ảnh vượt giới hạn 512 KiB.");
+    }
+    budget.image_nonces.extend(image_additions);
     let hook_additions = local_hooks
         .lock()
         .unwrap_or_else(|e| e.into_inner())

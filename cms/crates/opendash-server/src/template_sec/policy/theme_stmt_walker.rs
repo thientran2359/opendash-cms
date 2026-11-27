@@ -69,6 +69,23 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 }
                 return Ok((states, scopes));
             }
+            if let Some(img_call) = parse_od_image_call(&expr.expr)? {
+                if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
+                    return Err("od_image() chỉ được xuất trong thân HTML.");
+                }
+                if !is_valid_od_image_media_target(
+                    img_call.media_root,
+                    &img_call.media_attrs,
+                    &scopes,
+                    policy,
+                ) {
+                    return Err("od_image() phải tham chiếu trường media hợp lệ.");
+                }
+                if let Some(alt_expr) = img_call.alt_expr {
+                    record_usage_flags_in_expr(alt_expr, usage);
+                }
+                return Ok((states, scopes));
+            }
             if let Some((_, arg_expr)) = parse_od_hook_call(&expr.expr)? {
                 if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_hook() chỉ được xuất trong thân HTML.");

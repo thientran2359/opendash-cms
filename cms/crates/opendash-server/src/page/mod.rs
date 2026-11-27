@@ -1,6 +1,7 @@
 mod budget_render;
 mod cache_types;
 mod html_helpers;
+mod media_render;
 mod render;
 mod scoped_css;
 mod search_blocks;

@@ -272,6 +272,30 @@ pub async fn validate_and_rebase_copy(db_path: &Path) -> ApiResult<i64> {
     )
     .execute(&mut conn)
     .await?;
+    sqlx::query("DELETE FROM media_variants")
+        .execute(&mut conn)
+        .await?;
+    sqlx::query("UPDATE media_assets SET variants_ready_version = 0")
+        .execute(&mut conn)
+        .await?;
+    sqlx::query(
+        "UPDATE media_replace_jobs
+         SET phase = 'rolled_back',
+             error_message = COALESCE(error_message, 'restored_cleanup'),
+             purged_at = COALESCE(purged_at, datetime('now')),
+             updated_at = datetime('now')
+         WHERE phase IN ('staged', 'moving_old', 'promoting_new')",
+    )
+    .execute(&mut conn)
+    .await?;
+    sqlx::query(
+        "UPDATE media_replace_jobs
+         SET purged_at = COALESCE(purged_at, datetime('now')),
+             updated_at = datetime('now')
+         WHERE purged_at IS NULL",
+    )
+    .execute(&mut conn)
+    .await?;
 
     crate::storage::search::rebuild_search_index_in_conn(&mut conn).await?;
 

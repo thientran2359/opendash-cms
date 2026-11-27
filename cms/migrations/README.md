@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **57** `.sql` files numbered `0001` through `0058` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `sqlx::migrate!("../../migrations")` in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
+`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **58** `.sql` files numbered `0001` through `0059` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `crate::storage::MIGRATOR` (`sqlx::migrate!("../../migrations")`) in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
 
 | Group / Milestone | Migrations | Primary Tables & Schema Objects |
 | --- | --- | --- |
@@ -29,7 +29,8 @@
 | **Unified Field Engine (`0055`)** | [`0055_theme_option_locale_media_refs.sql`](0055_theme_option_locale_media_refs.sql) | Rebuilds `theme_option_media_refs` adding `locale TEXT NOT NULL DEFAULT ''` to `PRIMARY KEY (owner_kind, owner_id, locale, option_key, media_id)` so translatable theme option media references track per-locale refs cleanly (`+0` net schema objects). |
 | **Unified Field Engine (`0056`)** | [`0056_unified_field_content_cutover.sql`](0056_unified_field_content_cutover.sql) | Rebuilds `entry_builder_media_refs` adding `source_kind` (`'builder'` \| `'field'`) and `'file'` `ref_role`, normalizes `content_types`/`content_field_groups`/`admin_extensions` to `FieldSpec`, and backfills `source_kind = 'field'` (`+0` net schema objects). |
 | **Manual Redirects & 404 Log (`0057`)** | [`0057_manual_redirects_and_404_log.sql`](0057_manual_redirects_and_404_log.sql) | Adds `manual_redirects` (`source_path COLLATE BINARY UNIQUE`, `301`/`302`, `version` CAS, `hit_count`), `not_found_logs` (`path COLLATE BINARY UNIQUE`, `hit_count`, `first_seen_at`/`last_seen_at` `%Y-%m-%dT%H:%M:%fZ`), and 2 secondary indexes (`+6` net schema objects: `221 -> 227` migration objects). |
-| **Public Site Search (`0058`)** | [`0058_public_site_search_fts5.sql`](0058_public_site_search_fts5.sql) | Creates SQLite FTS5 virtual table `entry_search_fts` (`content=''`, `contentless_delete=1`, `unicode61 remove_diacritics 2`, `+5` schema objects: `227 -> 232`), and rebuilds `template_overrides` (`+'search'`) + `operation_jobs` (`+'search_reindex'` in `CHECK` & `idx_operation_jobs_single_active_heavy`). |
+| **Responsive Media & In-Place Replace (`0058`)** | [`0058_responsive_media_and_replace.sql`](0058_responsive_media_and_replace.sql) | Adds `media_assets.{content_sha256,variants_ready_version,updated_at}` + 2 indexes, creates `media_variants` and `media_replace_jobs` (`STRICT, WITHOUT ROWID`), and rebuilds `operation_jobs` adding `media_regenerate` (`+7` net schema objects: `227 -> 234` migration objects). |
+| **Public Site Search (`0059`)** | [`0059_public_site_search_fts5.sql`](0059_public_site_search_fts5.sql) | Creates SQLite FTS5 virtual table `entry_search_fts` (`content=''`, `contentless_delete=1`, `unicode61 remove_diacritics 2`, `+5` schema objects: `234 -> 239`), and rebuilds `template_overrides` (`+'search'`) + `operation_jobs` (`+'search_reindex'` in `CHECK` & `idx_operation_jobs_single_active_heavy`). |
 
 ## Interface
 

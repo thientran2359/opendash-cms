@@ -1960,9 +1960,10 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     // and Entry Lifecycle S01 adds 0054 (`content_entries.trashed_at` + lifecycle indexes),
     // and Unified Field Engine adds 0055 (`theme_option_media_refs.locale`) and 0056 (`unified_field_content_cutover`),
     // Manual Redirects & 404 Log S01 adds 0057 (`manual_redirects` + `not_found_logs`),
-    // and Public Site Search S01 adds 0058 (`entry_search_fts` + `'search'`/`'search_reindex'`);
+    // Responsive Media & Replace S01 adds 0058 (`media_variants` + `media_replace_jobs` + `'media_regenerate'`),
+    // and Public Site Search S01 adds 0059 (`entry_search_fts` + `'search'`/`'search_reindex'`);
     // the 0040→0041 permalink preservation assertions above must still hold.
-    assert_eq!(migration_version, 58);
+    assert_eq!(migration_version, 59);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

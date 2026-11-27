@@ -175,6 +175,7 @@ pub struct EntryView {
     pub fields: BTreeMap<String, Value>,
     pub field_list: Vec<FieldView>,
     pub cover_url: Option<String>,
+    pub cover_media: Option<Value>,
     pub terms: BTreeMap<String, Vec<PublicTermView>>,
     pub all_terms: Vec<PublicTermView>,
     pub primary_category: Option<PublicTermView>,
@@ -218,6 +219,13 @@ fn rewrite_media_urls_in_value(val: &mut Value) {
                     *s = s.replacen("/media/", "/api/admin/media/", 1);
                 }
             }
+            for k in ["webp_srcset", "fallback_srcset"] {
+                if let Some(Value::String(s)) = obj.get_mut(k)
+                    && (s.starts_with("/media/") || s.contains(", /media/"))
+                {
+                    *s = s.replace("/media/", "/api/admin/media/");
+                }
+            }
             for child in obj.values_mut() {
                 if child.is_object() || child.is_array() {
                     rewrite_media_urls_in_value(child);
@@ -236,6 +244,9 @@ fn rewrite_media_urls_in_value(val: &mut Value) {
 pub(crate) fn rewrite_preview_media_urls(mut view: EntryView, type_key: &str) -> EntryView {
     let admin_media = |url: &str| url.replacen("/media/", "/api/admin/media/", 1);
     view.cover_url = view.cover_url.as_deref().map(admin_media);
+    if let Some(ref mut cm) = view.cover_media {
+        rewrite_media_urls_in_value(cm);
+    }
     for val in view.fields.values_mut() {
         rewrite_media_urls_in_value(val);
     }

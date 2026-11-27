@@ -254,7 +254,12 @@ pub(super) fn check_theme_tag_name(
     if opts.forbid_style_tag && tag_name == "style" {
         return Err("Template block không được chứa thẻ <style> trực tiếp (dùng css_var).");
     }
-    if is_close && matches!(tag_name, "link" | "meta" | "title" | "style" | "script" | "input") {
+    if is_close
+        && matches!(
+            tag_name,
+            "link" | "meta" | "title" | "style" | "script" | "input"
+        )
+    {
         return Err("Thẻ đóng HTML không hợp lệ ở vị trí này.");
     }
     if tag_name == "form" {

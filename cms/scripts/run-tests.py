@@ -8,8 +8,10 @@ providing `--group all --release` for pre-release full verification.
 
 Usage:
     python3 cms/scripts/run-tests.py --list
+    python3 cms/scripts/run-tests.py --check
     python3 cms/scripts/run-tests.py --changed
     python3 cms/scripts/run-tests.py --group theme,builder
+    python3 cms/scripts/run-tests.py --group content --filter revisions
     python3 cms/scripts/run-tests.py --group all --release
     python3 cms/scripts/run-tests.py --self-test
 """
@@ -21,6 +23,7 @@ from dataclasses import dataclass
 import fnmatch
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -311,11 +314,11 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         keyword_map = (
             (("theme", "override", "layout"), "theme"),
             (("plugin", "projection", "extension", "hook", "functions_runtime"), "plugin"),
-            (("entry", "content", "taxonomy", "field", "lifecycle", "trash", "search", "fts5"), "content"),
+            (("entry", "content", "taxonomy", "field", "lifecycle", "trash", "search", "fts", "fts5", "revision", "autosave"), "content"),
             (("builder", "pattern", "section", "block"), "builder"),
             (("i18n", "multilingual", "locale"), "i18n"),
-            (("permalink", "redirect", "404", "seo", "menu", "media", "contact", "smtp", "option", "setting", "search", "fts5"), "site-media-seo"),
-            (("backup", "operation", "maintenance", "restore", "job", "search", "fts5"), "ops"),
+            (("permalink", "redirect", "404", "seo", "menu", "media", "responsive", "variant", "contact", "smtp", "option", "setting"), "site-media-seo"),
+            (("backup", "operation", "maintenance", "restore", "job", "replace"), "ops"),
         )
         matched_any = False
         for keywords, target in keyword_map:
@@ -343,7 +346,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "template_sec.rs": {"theme"},
             "content_render.rs": {"theme", "content"},
             "document.rs": {"theme"},
-            "public_context.rs": {"theme"},
+            "public_context.rs": {"theme", "site-media-seo"},
             "package.rs": {"theme", "plugin"},
             "cache.rs": {"theme", "plugin"},
             "storage/theme.rs": {"theme"},
@@ -378,6 +381,8 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "routes/taxonomy.rs": {"content"},
             "routes/taxonomy_tests.rs": {"content"},
             "routes/dashboard.rs": {"content"},
+            "search.rs": {"content"},
+            "revisions.rs": {"content"},
             # Plugins & Hooks
             "hooks.rs": {"plugin"},
             "storage/plugin.rs": {"plugin"},
@@ -461,15 +466,23 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             ("storage/fields/", {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"}),
             ("storage/taxonomy/", {"content"}),
             ("routes/entries/", {"content"}),
+            ("search/", {"content"}),
+            ("storage/search/", {"content"}),
+            ("routes/search/", {"content"}),
+            ("revisions/", {"content"}),
+            ("storage/revisions/", {"content"}),
+            ("routes/revisions/", {"content"}),
             ("routes/extensions/", {"plugin", "content"}),
             ("hooks/", {"plugin"}),
             ("storage/plugin/", {"plugin"}),
             ("storage/plugin_projections/", {"plugin"}),
             ("routes/plugin/", {"plugin"}),
             ("l10n/", {"i18n"}),
-            ("media/", {"site-media-seo"}),
+            ("media/", {"site-media-seo", "ops"}),
             ("media_lifecycle/", {"site-media-seo", "ops"}),
             ("media_video/", {"site-media-seo"}),
+            ("storage/media/", {"site-media-seo", "ops"}),
+            ("routes/media/", {"site-media-seo", "ops"}),
             ("storage/menu/", {"site-media-seo", "theme"}),
             ("storage/permalinks/", {"site-media-seo", "content"}),
             ("storage/redirects/", {"site-media-seo"}),
@@ -552,16 +565,117 @@ def build_plan_from_groups(
     )
 
 
-def build_plan_from_files(changed_files: list[str], all_tests: list[str]) -> SelectionPlan:
+WIRING_ONLY_FILES: frozenset[str] = frozenset(
+    {
+        "cms/crates/opendash-core/src/lib.rs",
+        "cms/crates/opendash-server/src/routes/mod.rs",
+        "cms/crates/opendash-server/src/storage/mod.rs",
+        "cms/crates/opendash-server/src/main.rs",
+        "cms/crates/opendash-server/src/app.rs",
+    }
+)
+
+_MOD_DECL_RE = re.compile(
+    r"^(?:pub(?:\s*\([^)]+\))?\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\s*;$"
+)
+_USE_DECL_RE = re.compile(
+    r"^(?:pub(?:\s*\([^)]+\))?\s+)?use\s+[A-Za-z0-9_:{},\s\*]+\s*;$"
+)
+_ATTR_DECL_RE = re.compile(r"^#\[(?:cfg|allow)\([^)\n]+\)\]$")
+_FORBIDDEN_DECL_TOKENS_RE = re.compile(
+    r"\b(?:fn|struct|enum|impl|static|const|let|unsafe|async|extern|trait|type|macro_rules)\b"
+)
+
+_APP_FORBIDDEN_TOKENS_RE = re.compile(
+    r"\b(?:fn|let|const|static|struct|enum|impl|layer|with_state|from_fn|"
+    r"middleware|cors|if|match|return|async|auth)\b|Router::|\bAppState\b"
+)
+_APP_USE_START_RE = re.compile(
+    r"^use\s+(?:crate::)?routes::[A-Za-z0-9_:{},\s\*]*;?$"
+)
+_APP_IMPORT_ITEM_RE = re.compile(
+    r"^(?:[A-Za-z_][A-Za-z0-9_]*(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?"
+    r"(?:::[A-Za-z0-9_:{},\s\*]*)?|\}[,;]?)$"
+)
+_APP_ROUTE_STRING_RE = re.compile(r'"/[A-Za-z0-9_/{}.*:-]*"')
+_APP_ROUTE_ALLOWED_CHARS_RE = re.compile(r"^[A-Za-z0-9_:,().\s]+$")
+_APP_CALL_NAME_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+_APP_ALLOWED_CALLS = frozenset({"route", "nest", "get", "post", "put", "patch", "delete"})
+
+
+def _extract_diff_changed_lines(diff_text: str) -> list[str]:
+    changed: list[str] = []
+    for raw in diff_text.splitlines():
+        if raw.startswith(("+++", "---", "@@", "diff ", "index ", "\\")):
+            continue
+        if not raw.startswith(("+", "-")):
+            continue
+        stripped = raw[1:].strip()
+        if not stripped or stripped.startswith("//"):
+            continue
+        changed.append(stripped)
+    return changed
+
+
+def _is_app_wiring_line(line: str) -> bool:
+    if _APP_FORBIDDEN_TOKENS_RE.search(line):
+        return False
+    if line.startswith("use ") or line.startswith("use\t"):
+        return bool(_APP_USE_START_RE.match(line))
+    if _APP_IMPORT_ITEM_RE.match(line):
+        return True
+    if line in {")", "),", ");"}:
+        return True
+    without_strings = _APP_ROUTE_STRING_RE.sub("", line)
+    if '"' in without_strings or not _APP_ROUTE_ALLOWED_CHARS_RE.match(without_strings):
+        return False
+    for match in _APP_CALL_NAME_RE.finditer(without_strings):
+        if match.group(1) not in _APP_ALLOWED_CALLS:
+            return False
+    return True
+
+
+def is_wiring_only_diff(rel: str, diff_text: str) -> bool:
+    """Return True if a diff in a WIRING_ONLY_FILES entrypoint only registers mods/routes."""
+    path = normalize_relpath(rel)
+    if path not in WIRING_ONLY_FILES:
+        return False
+    changed_lines = _extract_diff_changed_lines(diff_text)
+    if not changed_lines:
+        return False
+    if path == "cms/crates/opendash-server/src/app.rs":
+        return all(_is_app_wiring_line(line) for line in changed_lines)
+    for line in changed_lines:
+        if _FORBIDDEN_DECL_TOKENS_RE.search(line):
+            return False
+        if not (
+            _MOD_DECL_RE.match(line)
+            or _USE_DECL_RE.match(line)
+            or _ATTR_DECL_RE.match(line)
+        ):
+            return False
+    return True
+
+
+def build_plan_from_files(
+    changed_files: list[str],
+    all_tests: list[str],
+    wiring_only_files: set[str] | None = None,
+) -> SelectionPlan:
     groups: set[str] = set()
     extra_tests: set[str] = set()
     escalate_all = False
     saw_admin_only = False
     reasons: list[str] = []
+    wiring_set = {normalize_relpath(item) for item in (wiring_only_files or ())}
+    deferred_wiring: list[str] = []
 
     for raw in changed_files:
         rel = normalize_relpath(raw)
         if not rel:
+            continue
+        if rel in wiring_set:
+            deferred_wiring.append(rel)
             continue
         file_groups, file_extra, file_all, is_admin = classify_changed_file(rel)
         if file_all:
@@ -574,6 +688,15 @@ def build_plan_from_files(changed_files: list[str], all_tests: list[str]) -> Sel
             reasons.append(f"{rel} -> {tag}")
         elif is_admin:
             saw_admin_only = True
+
+    if deferred_wiring:
+        if groups or extra_tests:
+            for rel in deferred_wiring:
+                reasons.append(f"{rel} -> wiring-only (deferred to matched domain)")
+        else:
+            escalate_all = True
+            for rel in deferred_wiring:
+                reasons.append(f"{rel} -> all (wiring-only without domain file)")
 
     if escalate_all:
         return build_plan_from_groups(
@@ -597,7 +720,7 @@ def build_plan_from_files(changed_files: list[str], all_tests: list[str]) -> Sel
     )
 
 
-def detect_git_changed_files(base_ref: str, repo_root: Path = ROOT) -> list[str]:
+def resolve_git_diff_target(base_ref: str, repo_root: Path = ROOT) -> str | None:
     candidates = [base_ref, "origin/main", "HEAD^", "HEAD"]
     resolved_base: str | None = None
     for ref in candidates:
@@ -611,16 +734,22 @@ def detect_git_changed_files(base_ref: str, repo_root: Path = ROOT) -> list[str]
             resolved_base = ref
             break
 
+    if resolved_base is None:
+        return None
+    mb = subprocess.run(
+        ["git", "-C", str(repo_root), "merge-base", resolved_base, "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else resolved_base
+
+
+def detect_git_changed_files(base_ref: str, repo_root: Path = ROOT) -> list[str]:
+    diff_target = resolve_git_diff_target(base_ref, repo_root=repo_root)
     files: set[str] = set()
-    if resolved_base is not None:
+    if diff_target is not None:
         # Compare working tree (committed + staged + unstaged) against merge-base.
-        mb = subprocess.run(
-            ["git", "-C", str(repo_root), "merge-base", resolved_base, "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        diff_target = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else resolved_base
         diff = subprocess.run(
             ["git", "-C", str(repo_root), "diff", "--name-only", diff_target],
             capture_output=True,
@@ -637,6 +766,28 @@ def detect_git_changed_files(base_ref: str, repo_root: Path = ROOT) -> list[str]
     )
     files.update(line.strip() for line in untracked.stdout.splitlines() if line.strip())
     return sorted(files)
+
+
+def detect_wiring_only_files(
+    changed_files: list[str], base_ref: str, repo_root: Path = ROOT
+) -> set[str]:
+    diff_target = resolve_git_diff_target(base_ref, repo_root=repo_root)
+    if diff_target is None:
+        return set()
+    wiring_only: set[str] = set()
+    for raw in changed_files:
+        rel = normalize_relpath(raw)
+        if rel not in WIRING_ONLY_FILES:
+            continue
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "diff", "-U0", diff_target, "--", rel],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0 and is_wiring_only_diff(rel, proc.stdout):
+            wiring_only.add(rel)
+    return wiring_only
 
 
 def canonical_tmpdir_env(base_env: dict[str, str], platform: str | None = None) -> dict[str, str]:
@@ -660,25 +811,39 @@ def test_runner_env(base_env: dict[str, str], platform: str | None = None) -> di
     return env
 
 
-def build_cargo_commands(plan: SelectionPlan, release: bool) -> list[list[str]]:
+def build_cargo_commands(
+    plan: SelectionPlan, release: bool, test_filter: str | None = None
+) -> list[list[str]]:
     base = ["cargo", "test", "--manifest-path", str(CARGO_MANIFEST), "--locked"]
     if release:
         base.append("--release")
 
     if plan.run_all_workspace:
-        return [[*base, "--workspace"]]
+        cmd = [*base, "--workspace"]
+        if test_filter:
+            cmd.extend(["--", test_filter])
+        return [cmd]
 
     commands: list[list[str]] = []
     if plan.run_core:
-        commands.append([*base, "-p", "opendash-core"])
+        cmd = [*base, "-p", "opendash-core"]
+        if test_filter:
+            cmd.extend(["--", test_filter])
+        commands.append(cmd)
     if plan.run_plugin_sdk:
-        commands.append([*base, "-p", "opendash-plugin-sdk"])
+        cmd = [*base, "-p", "opendash-plugin-sdk"]
+        if test_filter:
+            cmd.extend(["--", test_filter])
+        commands.append(cmd)
     if plan.unit_filters:
-        commands.append([*base, "-p", "opendash-server", "--bin", "opendash", "--", *plan.unit_filters])
+        filters = [test_filter] if test_filter else list(plan.unit_filters)
+        commands.append([*base, "-p", "opendash-server", "--bin", "opendash", "--", *filters])
     if plan.integration_tests:
         cmd = [*base, "-p", "opendash-server"]
         for stem in plan.integration_tests:
             cmd.extend(["--test", stem])
+        if test_filter:
+            cmd.extend(["--", test_filter])
         commands.append(cmd)
     return commands
 
@@ -828,6 +993,119 @@ class RunTestsSelfTest(unittest.TestCase):
         shared = build_plan_from_files(["cms/crates/opendash-core/src/field_schema/spec/mod.rs"], all_tests)
         self.assertTrue(shared.run_all_workspace)
 
+    def test_wiring_only_diff_accepts_mod_use_and_route_registrations(self) -> None:
+        mod_diff = (
+            "diff --git a/cms/crates/opendash-server/src/routes/mod.rs "
+            "b/cms/crates/opendash-server/src/routes/mod.rs\n"
+            "@@ -20,0 +21 @@\n"
+            "+pub mod revisions;\n"
+        )
+        self.assertTrue(is_wiring_only_diff("cms/crates/opendash-server/src/routes/mod.rs", mod_diff))
+
+        main_diff = (
+            "diff --git a/cms/crates/opendash-server/src/main.rs "
+            "b/cms/crates/opendash-server/src/main.rs\n"
+            "@@ -31,0 +32 @@\n"
+            "+mod revisions;\n"
+        )
+        self.assertTrue(is_wiring_only_diff("cms/crates/opendash-server/src/main.rs", main_diff))
+
+        app_diff = (
+            "diff --git a/cms/crates/opendash-server/src/app.rs "
+            "b/cms/crates/opendash-server/src/app.rs\n"
+            "@@ -40,0 +41 @@\n"
+            "+        revisions::{revision_list, revision_restore},\n"
+            "@@ -250,0 +252,4 @@\n"
+            "+        .route(\n"
+            '+            "/api/admin/entries/{id}/revisions",\n'
+            "+            get(revision_list).post(revision_restore),\n"
+            "+        )\n"
+        )
+        self.assertTrue(is_wiring_only_diff("cms/crates/opendash-server/src/app.rs", app_diff))
+
+    def test_wiring_only_diff_rejects_runtime_or_security_edits(self) -> None:
+        bad_storage = (
+            "@@ -50,0 +51,2 @@\n"
+            "+pub async fn init_db_extra() {}\n"
+        )
+        self.assertFalse(is_wiring_only_diff("cms/crates/opendash-server/src/storage/mod.rs", bad_storage))
+
+        bad_app_layer = (
+            "@@ -100,0 +101 @@\n"
+            '+        .route("/api/admin/x", post(handler).layer(DefaultBodyLimit::max(4096)))\n'
+        )
+        self.assertFalse(is_wiring_only_diff("cms/crates/opendash-server/src/app.rs", bad_app_layer))
+
+        bad_app_middleware = (
+            "@@ -100,0 +101 @@\n"
+            "+        .layer(middleware::from_fn(require_admin))\n"
+        )
+        self.assertFalse(is_wiring_only_diff("cms/crates/opendash-server/src/app.rs", bad_app_middleware))
+
+        bad_app_use = (
+            "@@ -10,0 +11 @@\n"
+            "+use crate::auth::require_admin;\n"
+        )
+        self.assertFalse(is_wiring_only_diff("cms/crates/opendash-server/src/app.rs", bad_app_use))
+
+    def test_wiring_only_files_defer_to_domain_or_escalate_alone(self) -> None:
+        all_tests = discover_integration_tests()
+        wiring = {
+            "cms/crates/opendash-server/src/routes/mod.rs",
+            "cms/crates/opendash-server/src/app.rs",
+        }
+        plan = build_plan_from_files(
+            [
+                "cms/crates/opendash-server/src/routes/mod.rs",
+                "cms/crates/opendash-server/src/app.rs",
+                "cms/crates/opendash-server/src/storage/revisions/list.rs",
+            ],
+            all_tests,
+            wiring_only_files=wiring,
+        )
+        self.assertFalse(plan.run_all_workspace)
+        self.assertEqual(plan.groups, ("content",))
+
+        alone = build_plan_from_files(
+            ["cms/crates/opendash-server/src/app.rs"],
+            all_tests,
+            wiring_only_files={"cms/crates/opendash-server/src/app.rs"},
+        )
+        self.assertTrue(alone.run_all_workspace)
+
+    def test_feature_migrations_stay_targeted(self) -> None:
+        all_tests = discover_integration_tests()
+        search_plan = build_plan_from_files(
+            ["cms/migrations/0059_public_site_search_fts5.sql"], all_tests
+        )
+        self.assertFalse(search_plan.run_all_workspace)
+        self.assertEqual(set(search_plan.groups), {"theme", "content"})
+
+        rev_plan = build_plan_from_files(
+            ["cms/migrations/0060_entry_revisions_autosave.sql"], all_tests
+        )
+        self.assertFalse(rev_plan.run_all_workspace)
+        self.assertEqual(set(rev_plan.groups), {"theme", "content"})
+
+        media_plan = build_plan_from_files(
+            ["cms/migrations/0061_responsive_media_variants.sql"], all_tests
+        )
+        self.assertFalse(media_plan.run_all_workspace)
+        self.assertEqual(set(media_plan.groups), {"theme", "site-media-seo"})
+
+    def test_build_cargo_commands_applies_test_filter(self) -> None:
+        all_tests = discover_integration_tests()
+        plan = build_plan_from_files(
+            ["cms/crates/opendash-server/src/routes/revisions/list.rs"], all_tests
+        )
+        cmds = build_cargo_commands(plan, release=False, test_filter="revisions")
+        self.assertTrue(any("--bin" in c and c[-2:] == ["--", "revisions"] for c in cmds))
+        self.assertTrue(any("--test" in c and c[-2:] == ["--", "revisions"] for c in cmds))
+        self.assertTrue(any("-p" in c and "opendash-core" in c and c[-2:] == ["--", "revisions"] for c in cmds))
+
+    def test_check_dry_run_exits_zero(self) -> None:
+        self.assertEqual(main(["--check", "--dry-run"]), 0)
+
 
 def run_self_test() -> int:
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RunTestsSelfTest)
@@ -841,6 +1119,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--list", action="store_true", help="List groups and verify test coverage.")
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Tier-0 fast syntax/type check (cargo check --workspace --bins --lib).",
+    )
     mode.add_argument(
         "--group",
         help=f"Comma-separated group names: core, all, {', '.join(ALL_GROUP_NAMES)}",
@@ -862,6 +1145,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Explicit list of changed repo-relative paths (implies --changed routing).",
     )
     parser.add_argument(
+        "--filter",
+        help="Optional test name filter passed after `--` for targeted inner-loop runs.",
+    )
+    parser.add_argument(
         "--release",
         action="store_true",
         help="Run Cargo in --release mode (default uses fast dev profile with opt-level=2 deps).",
@@ -880,6 +1167,41 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         return run_self_test()
 
+    if args.check:
+        if not args.dry_run and not ADMIN_DIST_INDEX.is_file():
+            print(
+                "ERROR: cms/admin/dist/index.html is missing (required by rust-embed in opendash-server).\n"
+                "Run first: npm --prefix cms/admin ci && npm --prefix cms/admin run build",
+                file=sys.stderr,
+            )
+            return 1
+        cmd = [
+            "cargo",
+            "check",
+            "--manifest-path",
+            str(CARGO_MANIFEST),
+            "--locked",
+            "--workspace",
+            "--bins",
+            "--lib",
+        ]
+        if args.release:
+            cmd.append("--release")
+        profile_label = "release" if args.release else "fast-dev (check)"
+        print(f"Profile : {profile_label}")
+        print(f"> {' '.join(cmd)}")
+        if args.dry_run:
+            return 0
+        env = test_runner_env(dict(os.environ))
+        started = time.monotonic()
+        proc = subprocess.run(cmd, cwd=str(ROOT), env=env, check=False)
+        elapsed = time.monotonic() - started
+        if proc.returncode != 0:
+            print(f"FAILED (exit {proc.returncode}) after {elapsed:.1f}s", file=sys.stderr)
+            return proc.returncode
+        print(f"PASS ({elapsed:.1f}s)")
+        return 0
+
     all_tests = discover_integration_tests()
 
     if args.list:
@@ -889,7 +1211,8 @@ def main(argv: list[str] | None = None) -> int:
         plan = build_plan_from_files(args.files, all_tests)
     elif args.changed:
         changed = detect_git_changed_files(args.base)
-        plan = build_plan_from_files(changed, all_tests)
+        wiring_only = detect_wiring_only_files(changed, args.base)
+        plan = build_plan_from_files(changed, all_tests, wiring_only_files=wiring_only)
     elif args.group:
         requested = [item.strip() for item in args.group.split(",") if item.strip()]
         valid = {"core", "all", *ALL_GROUP_NAMES}
@@ -902,10 +1225,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         plan = build_plan_from_groups(requested, all_tests)
     else:
-        print("Specify one of --list, --group <name>, --changed, --files <paths>, or --self-test.", file=sys.stderr)
+        print("Specify one of --list, --check, --group <name>, --changed, --files <paths>, or --self-test.", file=sys.stderr)
         return 2
 
-    commands = build_cargo_commands(plan, release=args.release)
+    commands = build_cargo_commands(plan, release=args.release, test_filter=args.filter)
     profile_label = "release" if args.release else "fast-dev (deps opt-level=2)"
 
     print(f"Profile : {profile_label}")

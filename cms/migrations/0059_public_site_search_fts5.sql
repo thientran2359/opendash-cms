@@ -1,4 +1,4 @@
--- Public Site Search (S01, 0058): SQLite FTS5 contentless_delete=1 index + template_overrides ('search') + operation_jobs ('search_reindex').
+-- Public Site Search (S01, 0059): SQLite FTS5 contentless_delete=1 index + template_overrides ('search') + operation_jobs ('search_reindex').
 -- Adds +5 net sqlite_schema objects (entry_search_fts and its 4 shadow tables: _data, _idx, _config, _docsize).
 -- Rebuilds template_overrides (+ template_override_media_refs) and operation_jobs cleanly without PRAGMA foreign_keys=OFF.
 
@@ -13,8 +13,8 @@ CREATE VIRTUAL TABLE entry_search_fts USING fts5(
 );
 
 -- Copy-and-rebuild template_overrides + template_override_media_refs to allow target_kind = 'search' (+0 net objects).
-CREATE TABLE template_overrides_0058_copy AS SELECT * FROM template_overrides;
-CREATE TABLE template_override_media_refs_0058_copy AS SELECT * FROM template_override_media_refs;
+CREATE TABLE template_overrides_0059_copy AS SELECT * FROM template_overrides;
+CREATE TABLE template_override_media_refs_0059_copy AS SELECT * FROM template_override_media_refs;
 
 DROP TABLE template_override_media_refs;
 DROP TABLE template_overrides;
@@ -55,7 +55,7 @@ SELECT
     base_revision_digest,
     version,
     updated_at
-FROM template_overrides_0058_copy;
+FROM template_overrides_0059_copy;
 
 CREATE INDEX idx_template_overrides_kind ON template_overrides (target_kind);
 
@@ -68,22 +68,22 @@ CREATE TABLE template_override_media_refs (
 
 INSERT INTO template_override_media_refs (override_id, media_id, ref_role)
 SELECT override_id, media_id, ref_role
-FROM template_override_media_refs_0058_copy;
+FROM template_override_media_refs_0059_copy;
 
 CREATE INDEX idx_template_override_media_refs_media
     ON template_override_media_refs (media_id);
 
-DROP TABLE template_override_media_refs_0058_copy;
-DROP TABLE template_overrides_0058_copy;
+DROP TABLE template_override_media_refs_0059_copy;
+DROP TABLE template_overrides_0059_copy;
 
 -- Copy-and-rebuild operation_jobs to allow kind = 'search_reindex' in CHECK and single-active-heavy partial index (+0 net objects).
-CREATE TABLE operation_jobs_0058_copy AS SELECT * FROM operation_jobs;
+CREATE TABLE operation_jobs_0059_copy AS SELECT * FROM operation_jobs;
 
 DROP TABLE operation_jobs;
 
 CREATE TABLE operation_jobs (
     id TEXT PRIMARY KEY CHECK (length(id) = 64),
-    kind TEXT NOT NULL CHECK (kind IN ('backup', 'restore', 'reconcile', 'purge', 'media_delete', 'search_reindex')),
+    kind TEXT NOT NULL CHECK (kind IN ('backup', 'restore', 'reconcile', 'purge', 'media_delete', 'media_regenerate', 'search_reindex')),
     state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted')),
     version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
     actor_user_id TEXT,
@@ -126,7 +126,7 @@ SELECT
     started_at,
     finished_at,
     updated_at
-FROM operation_jobs_0058_copy;
+FROM operation_jobs_0059_copy;
 
 CREATE INDEX idx_operation_jobs_state_requested
     ON operation_jobs (state, requested_at DESC, id DESC);
@@ -139,4 +139,4 @@ CREATE UNIQUE INDEX idx_operation_jobs_single_active_heavy
     WHERE kind IN ('backup', 'restore', 'reconcile', 'purge', 'search_reindex')
       AND state IN ('queued', 'running');
 
-DROP TABLE operation_jobs_0058_copy;
+DROP TABLE operation_jobs_0059_copy;

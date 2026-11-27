@@ -6,7 +6,7 @@ use super::super::*;
 use super::TempDirGuard;
 
 #[tokio::test]
-async fn migration_0058_fresh_and_baseline_upgrade_and_restore_validation() {
+async fn migration_0059_fresh_and_baseline_upgrade_and_restore_validation() {
     let tmp = TempDirGuard::new("mig58");
 
     // 1. Fresh init_db: verify version 58, <= 256 objects, FTS5 shadow tables, CHECKs & unique index.
@@ -18,7 +18,7 @@ async fn migration_0058_fresh_and_baseline_upgrade_and_restore_validation() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(max_ver, 58);
+    assert_eq!(max_ver, 59);
 
     let obj_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
@@ -84,7 +84,7 @@ async fn migration_0058_fresh_and_baseline_upgrade_and_restore_validation() {
             .fetch_one(&up_pool)
             .await
             .unwrap();
-    assert_eq!(up_ver, 58);
+    assert_eq!(up_ver, 59);
     let up_objs: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
             .fetch_one(&up_pool)
@@ -128,12 +128,12 @@ async fn migration_0058_fresh_and_baseline_upgrade_and_restore_validation() {
     let ro_ver = crate::storage::restore::validate_restored_db_read_only(&up_db)
         .await
         .unwrap();
-    assert_eq!(ro_ver, 58);
+    assert_eq!(ro_ver, 59);
 
     let rebased_ver = crate::storage::restore::validate_and_rebase_copy(&up_db)
         .await
         .unwrap();
-    assert_eq!(rebased_ver, 58);
+    assert_eq!(rebased_ver, 59);
 
     let verify_pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&up_db))
         .await

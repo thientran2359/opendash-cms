@@ -35,6 +35,9 @@ pub(in crate::storage) async fn render_public_builder(
         Some(ctx.render_locale),
     )
     .await?;
+    let effective_state =
+        builder::hydrate_binding_media_cow_in_conn(&mut **tx, ctx.state, document, &bindings)
+            .await?;
     let lists = builder::resolve_lists_in_tx_for_locale(
         tx,
         document,
@@ -45,7 +48,7 @@ pub(in crate::storage) async fn render_public_builder(
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
     let empty_patterns = page::PatternResults::new();
     let mut rendered = page::render_builder_with_budget(
-        ctx.state,
+        effective_state.as_ref(),
         document,
         false,
         &bindings,
@@ -205,11 +208,13 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
             s
         });
     let header_pagination = content_render::PaginationView::empty();
-    let header_search = header_search_view.as_ref().map(|view| page::BuilderSearchData {
-        view,
-        entries: &[],
-        pagination: &header_pagination,
-    });
+    let header_search = header_search_view
+        .as_ref()
+        .map(|view| page::BuilderSearchData {
+            view,
+            entries: &[],
+            pagination: &header_pagination,
+        });
     let context = PublicBuilderContext {
         state: &state,
         active: active_v3,

@@ -27,7 +27,7 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_scope(
     annotation_scope: RenderAnnotationScope,
 ) -> ApiResult<RenderedLayout> {
     let mut budget = page::RenderBudget::new();
-    render_entry_builder_preview_with_budget(
+    let mut rendered = render_entry_builder_preview_with_budget(
         tx,
         current,
         state,
@@ -37,7 +37,14 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_scope(
         &mut budget,
         page::BlockTemplateCache::global(),
     )
-    .await
+    .await?;
+    rendered.html =
+        crate::content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
+    rendered.html =
+        crate::content_render::finalize_document_images(rendered.html, &budget.image_nonces)?;
+    rendered.html =
+        crate::content_render::finalize_document_richtext(rendered.html, &budget.richtext_nonces)?;
+    Ok(rendered)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -60,6 +67,7 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_budget(
         Some(current.locale.as_str()),
     )
     .await?;
+    hydrate_binding_media_in_conn(&mut **tx, state, document, &bindings).await?;
     let lists = resolve_lists_in_tx_for_locale(
         tx,
         document,

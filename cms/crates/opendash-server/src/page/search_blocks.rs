@@ -172,7 +172,11 @@ pub(super) fn render_search_results_block(
         } else {
             ""
         };
-        let all_href = if is_preview { "#" } else { &view.clear_type_url };
+        let all_href = if is_preview {
+            "#"
+        } else {
+            &view.clear_type_url
+        };
         html.push_str(&format!(
             r#"<nav class="od-search-facets-nav" aria-label="{}"><ul class="od-search-facets"><li><a href="{}"{all_active}>{}</a></li>"#,
             escape_html(&l10n.search_title),

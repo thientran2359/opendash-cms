@@ -2,8 +2,10 @@
 //! filesystem detail may enter a public context.
 use std::collections::{BTreeMap, HashSet};
 
-pub mod search_query;
-pub use search_query::*;
+pub use opendash_core::search::{
+    MAX_SEARCH_PAGE, PublicSearchQuery, SEARCH_PAGE_SIZE, build_search_url, has_search_param,
+    parse_search_query, validate_percent_encoding,
+};
 
 use opendash_core::{
     content::valid_content_type_key,
@@ -250,7 +252,7 @@ impl CanonicalUrlBuilder {
         content_type: Option<&str>,
         page: i64,
     ) -> String {
-        search_query::build_search_url(base_path, query, content_type, page)
+        build_search_url(base_path, query, content_type, page)
     }
 
     pub fn valid_type(type_key: &str) -> bool {

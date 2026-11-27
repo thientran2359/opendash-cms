@@ -83,7 +83,8 @@ impl SearchRateLimiter {
         let window = guard.window;
         let max_requests = guard.max_requests;
 
-        if guard.buckets.len() >= SEARCH_RATE_LIMIT_MAX_BUCKETS && !guard.buckets.contains_key(key) {
+        if guard.buckets.len() >= SEARCH_RATE_LIMIT_MAX_BUCKETS && !guard.buckets.contains_key(key)
+        {
             guard.buckets.retain(|_, q| {
                 while let Some(&front) = q.front() {
                     if now.duration_since(front) >= window {
@@ -110,7 +111,12 @@ impl SearchRateLimiter {
         if queue.len() >= max_requests {
             let retry_after = queue
                 .front()
-                .map(|&oldest| window.saturating_sub(now.duration_since(oldest)).as_secs().max(1))
+                .map(|&oldest| {
+                    window
+                        .saturating_sub(now.duration_since(oldest))
+                        .as_secs()
+                        .max(1)
+                })
                 .unwrap_or_else(|| window.as_secs().max(1));
             return Err(retry_after);
         }
@@ -162,9 +168,14 @@ impl Default for PublicSearchApiQuery {
     }
 }
 
-pub fn parse_public_search_api_query(raw: Option<&str>) -> Result<PublicSearchApiQuery, &'static str> {
+pub fn parse_public_search_api_query(
+    raw: Option<&str>,
+) -> Result<PublicSearchApiQuery, &'static str> {
     validate_percent_encoding(raw)?;
-    let raw = raw.unwrap_or("").strip_prefix('?').unwrap_or(raw.unwrap_or(""));
+    let raw = raw
+        .unwrap_or("")
+        .strip_prefix('?')
+        .unwrap_or(raw.unwrap_or(""));
     let mut out = PublicSearchApiQuery::default();
     let mut seen = std::collections::BTreeSet::new();
 
@@ -209,7 +220,9 @@ pub fn parse_public_search_api_query(raw: Option<&str>) -> Result<PublicSearchAp
                 if !seen.insert("page") {
                     return Err("Tham số page không được lặp lại.");
                 }
-                let page: i64 = value.parse().map_err(|_| "Số trang tìm kiếm không hợp lệ.")?;
+                let page: i64 = value
+                    .parse()
+                    .map_err(|_| "Số trang tìm kiếm không hợp lệ.")?;
                 if !(1..=MAX_SEARCH_PAGE).contains(&page) {
                     return Err("Số trang tìm kiếm vượt quá giới hạn.");
                 }
@@ -219,7 +232,9 @@ pub fn parse_public_search_api_query(raw: Option<&str>) -> Result<PublicSearchAp
                 if !seen.insert("limit") {
                     return Err("Tham số limit không được lặp lại.");
                 }
-                let limit: i64 = value.parse().map_err(|_| "Giới hạn kết quả không hợp lệ.")?;
+                let limit: i64 = value
+                    .parse()
+                    .map_err(|_| "Giới hạn kết quả không hợp lệ.")?;
                 if !(1..=PUBLIC_SEARCH_API_MAX_LIMIT).contains(&limit) {
                     return Err("Giới hạn kết quả phải từ 1 đến 20.");
                 }
@@ -251,10 +266,17 @@ fn decode_form_utf8(raw: &str) -> Result<String, &'static str> {
                 i += 1;
             }
             b'%' => {
-                let hi = bytes.get(i + 1).copied().ok_or("Query có mã hóa không hợp lệ.")?;
-                let lo = bytes.get(i + 2).copied().ok_or("Query có mã hóa không hợp lệ.")?;
+                let hi = bytes
+                    .get(i + 1)
+                    .copied()
+                    .ok_or("Query có mã hóa không hợp lệ.")?;
+                let lo = bytes
+                    .get(i + 2)
+                    .copied()
+                    .ok_or("Query có mã hóa không hợp lệ.")?;
                 let hex = [hi, lo];
-                let hex_str = std::str::from_utf8(&hex).map_err(|_| "Query có mã hóa không hợp lệ.")?;
+                let hex_str =
+                    std::str::from_utf8(&hex).map_err(|_| "Query có mã hóa không hợp lệ.")?;
                 let byte =
                     u8::from_str_radix(hex_str, 16).map_err(|_| "Query có mã hóa không hợp lệ.")?;
                 out.push(byte);
@@ -303,7 +325,12 @@ fn api_error_json(
     {
         obj.insert("retry_after_secs".to_owned(), serde_json::json!(secs));
     }
-    (status, api_no_store_headers(retry_after_secs), Json(payload)).into_response()
+    (
+        status,
+        api_no_store_headers(retry_after_secs),
+        Json(payload),
+    )
+        .into_response()
 }
 
 pub async fn public_search(
@@ -543,9 +570,10 @@ mod tests {
 
     #[test]
     fn api_query_parser_handles_defaults_and_bounds() {
-        let parsed =
-            parse_public_search_api_query(Some("s=nh%C3%A0+%C4%91%E1%BA%B9p&locale=en&limit=15&page=3"))
-                .unwrap();
+        let parsed = parse_public_search_api_query(Some(
+            "s=nh%C3%A0+%C4%91%E1%BA%B9p&locale=en&limit=15&page=3",
+        ))
+        .unwrap();
         assert_eq!(parsed.s, "nhà đẹp");
         assert_eq!(parsed.locale.as_deref(), Some("en"));
         assert_eq!(parsed.limit, 15);

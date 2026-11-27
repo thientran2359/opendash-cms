@@ -1,7 +1,10 @@
 use super::*;
 
 pub(crate) fn is_search_form_tag(tag_name: &str) -> bool {
-    matches!(tag_name, "form" | "input" | "select" | "option" | "optgroup")
+    matches!(
+        tag_name,
+        "form" | "input" | "select" | "option" | "optgroup"
+    )
 }
 
 pub(crate) fn is_non_void_search_form_tag(tag_name: &str) -> bool {
@@ -51,7 +54,10 @@ pub(crate) fn advance_depths(
     match tag_name {
         "svg" => {
             next.svg = if is_close {
-                depths.svg.checked_sub(1).ok_or("Thẻ </svg> không có thẻ mở.")?
+                depths
+                    .svg
+                    .checked_sub(1)
+                    .ok_or("Thẻ </svg> không có thẻ mở.")?
             } else if self_closing {
                 depths.svg
             } else {

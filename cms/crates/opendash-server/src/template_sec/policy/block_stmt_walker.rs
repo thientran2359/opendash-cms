@@ -42,6 +42,28 @@ pub(crate) fn walk_block_ast_stmt(
                 }
                 return Ok((states, scopes));
             }
+            if let Some(img_call) = parse_od_image_call(&e.expr)? {
+                if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
+                    return Err("od_image() chỉ được xuất trong thân HTML của block.");
+                }
+                if !is_valid_od_image_media_target(
+                    img_call.media_root,
+                    &img_call.media_attrs,
+                    &scopes,
+                    policy,
+                ) {
+                    return Err("od_image() động phải tham chiếu trường kiểu media.");
+                }
+                if let Some(alt_expr) = img_call.alt_expr {
+                    check_block_expr_restrictions(alt_expr, &scopes, policy)?;
+                    if block_expr_touches_sensitive(alt_expr, &scopes, policy) {
+                        return Err(
+                            "od_image() alt động chỉ được tham chiếu trường văn bản an toàn.",
+                        );
+                    }
+                }
+                return Ok((states, scopes));
+            }
             if let Some((_, arg_expr)) = parse_od_hook_call(&e.expr)? {
                 if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_hook() chỉ được xuất trong thân HTML của block.");
@@ -480,6 +502,7 @@ pub fn validate_block_template_csec(
         || source.contains(CONTENT_SLOT_TOKEN)
         || source.contains(PREVIEW_PART_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(IMAGE_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {
         return Err("Template block chứa chuỗi nonce nội bộ bị cấm.");

@@ -65,7 +65,11 @@ impl SearchView {
             search_url.trim()
         };
         let is_en = locale.starts_with("en");
-        let sample_query = if is_en { "architecture" } else { "kiến trúc" };
+        let sample_query = if is_en {
+            "architecture"
+        } else {
+            "kiến trúc"
+        };
         let (post_label, page_label) = if is_en {
             ("Posts", "Pages")
         } else {
@@ -149,6 +153,7 @@ impl SearchView {
                 fields: Default::default(),
                 field_list: Vec::new(),
                 cover_url: None,
+                cover_media: None,
                 terms: Default::default(),
                 all_terms: Vec::new(),
                 primary_category: None,
@@ -184,6 +189,7 @@ impl SearchView {
                 fields: Default::default(),
                 field_list: Vec::new(),
                 cover_url: None,
+                cover_media: None,
                 terms: Default::default(),
                 all_terms: Vec::new(),
                 primary_category: None,
@@ -242,7 +248,10 @@ impl SearchView {
     }
 }
 
-pub(crate) fn render_snippet_segments_html(segments: &[SnippetSegment], fallback_excerpt: &str) -> String {
+pub(crate) fn render_snippet_segments_html(
+    segments: &[SnippetSegment],
+    fallback_excerpt: &str,
+) -> String {
     if segments.is_empty() {
         return escape_html_attr(fallback_excerpt);
     }
@@ -286,7 +295,9 @@ pub fn render_default_search_html(
             escape_html_attr(type_filter)
         ));
     }
-    html.push_str(&format!(r#"<button type="submit">{submit}</button></form></search>"#));
+    html.push_str(&format!(
+        r#"<button type="submit">{submit}</button></form></search>"#
+    ));
 
     if !search.has_query {
         html.push_str(&format!(
@@ -397,7 +408,10 @@ pub fn sync_preview_locale_and_search(
         return;
     };
     root.insert("locale".to_owned(), locale_ctx.clone());
-    let Some(search_obj) = root.get_mut("search").and_then(serde_json::Value::as_object_mut) else {
+    let Some(search_obj) = root
+        .get_mut("search")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
         return;
     };
     search_obj.insert(
@@ -433,8 +447,12 @@ pub fn sync_preview_locale_and_search(
                     .and_then(serde_json::Value::as_str)
                     .map(str::to_owned)
             {
-                let facet_url =
-                    build_search_url(search_url, has_query.then_some(query.as_str()), Some(&type_key), 1);
+                let facet_url = build_search_url(
+                    search_url,
+                    has_query.then_some(query.as_str()),
+                    Some(&type_key),
+                    1,
+                );
                 fobj.insert("url".to_owned(), serde_json::Value::String(facet_url));
             }
         }

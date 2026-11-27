@@ -123,8 +123,7 @@ async fn admin_search_tools_rbac_csrf_drift_recovery_and_job_audit() {
         .await
         .unwrap();
     assert_eq!(ed_create.status(), StatusCode::CREATED);
-    let (ed_cookie, ed_csrf) =
-        login(&http, &srv.origin, "editor1", "EditorPassword123!").await;
+    let (ed_cookie, ed_csrf) = login(&http, &srv.origin, "editor1", "EditorPassword123!").await;
 
     // 1. Editor receives 403 on status and reindex; missing CSRF rejected.
     let ed_status = http

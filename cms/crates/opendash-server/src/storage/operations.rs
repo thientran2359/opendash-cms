@@ -14,6 +14,7 @@ pub enum OperationKind {
     Reconcile,
     Purge,
     MediaDelete,
+    MediaRegenerate,
     SearchReindex,
 }
 
@@ -25,6 +26,7 @@ impl OperationKind {
             Self::Reconcile => "reconcile",
             Self::Purge => "purge",
             Self::MediaDelete => "media_delete",
+            Self::MediaRegenerate => "media_regenerate",
             Self::SearchReindex => "search_reindex",
         }
     }
@@ -36,6 +38,7 @@ impl OperationKind {
             "reconcile" => Ok(Self::Reconcile),
             "purge" => Ok(Self::Purge),
             "media_delete" => Ok(Self::MediaDelete),
+            "media_regenerate" => Ok(Self::MediaRegenerate),
             "search_reindex" => Ok(Self::SearchReindex),
             _ => Err(ApiError::bad_request("Loại tác vụ vận hành không hợp lệ.")),
         }
@@ -205,7 +208,10 @@ pub async fn get_job(db: &SqlitePool, id: &str) -> ApiResult<Option<OperationJob
     row.as_ref().map(map_job_row).transpose()
 }
 
-pub async fn latest_job_by_kind(db: &SqlitePool, kind: OperationKind) -> ApiResult<Option<OperationJob>> {
+pub async fn latest_job_by_kind(
+    db: &SqlitePool,
+    kind: OperationKind,
+) -> ApiResult<Option<OperationJob>> {
     let row = sqlx::query(
         r#"
         SELECT id, kind, state, version, actor_user_id, reason, summary_json,
@@ -304,19 +310,20 @@ pub async fn transition_job_cas(
 }
 
 pub async fn prune_old_receipts(db: &SqlitePool, max_retained: i64) -> ApiResult<u64> {
-    let active_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM operation_jobs WHERE state IN ('queued', 'running')",
+    let protected_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM operation_jobs WHERE state IN ('queued', 'running') OR kind = 'backup'",
     )
     .fetch_one(db)
     .await?;
 
-    let keep_terminal = (max_retained - active_count).max(0);
+    let keep_terminal = (max_retained - protected_count).max(0);
     let deleted = sqlx::query(
         r#"
         DELETE FROM operation_jobs
         WHERE id IN (
             SELECT id FROM operation_jobs
             WHERE state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
+              AND kind != 'backup'
             ORDER BY requested_at DESC, rowid DESC
             LIMIT -1 OFFSET ?
         )

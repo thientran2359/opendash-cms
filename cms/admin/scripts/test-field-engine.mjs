@@ -144,7 +144,7 @@ describe('helpers.ts pure logic', () => {
     );
     assert.deepEqual(
       helpers.normalizeSpacingValue({ top: -200, bottom: -300 }, 'margin'),
-      { top: -200, bottom: -256 },
+      { top: -128, bottom: -128 },
     );
   });
 

@@ -36,6 +36,7 @@ pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> Ent
         fields: BTreeMap::new(),
         field_list: Vec::new(),
         cover_url: None,
+        cover_media: None,
         terms,
         all_terms: Vec::new(),
         primary_category: None,
@@ -294,9 +295,15 @@ pub async fn preview_typed_override_with_cache_and_locale(
                 &fmt_cfg,
                 &effective_locale,
             )?;
-            crate::document::normalize_public_document(&html)
-                .map(|doc| doc.body_fragment)
-                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+            crate::document::normalize_document_with_policy(
+                &html,
+                crate::document::DocumentNormalizeOptions {
+                    allow_trusted_theme_markup: false,
+                    allow_admin_media_preview: true,
+                },
+            )
+            .map(|doc| doc.body_fragment)
+            .map_err(|_| ApiError::bad_request("Invalid preview body."))
         })?;
         (built.theme_context, body)
     } else {
@@ -324,19 +331,22 @@ pub async fn preview_typed_override_with_cache_and_locale(
     )
     .await?;
     content_render::sync_preview_locale_and_search(&mut theme_context, &preview_locale_ctx);
-    let preview_search_view = (target.kind == TemplateCandidateKind::Search)
-        .then(|| content_render::SearchView::preview_sample(&state.locale_search_url, &effective_locale));
+    let preview_search_view = (target.kind == TemplateCandidateKind::Search).then(|| {
+        content_render::SearchView::preview_sample(&state.locale_search_url, &effective_locale)
+    });
     let preview_search_entries = if target.kind == TemplateCandidateKind::Search {
         content_render::SearchView::preview_sample_entries(&effective_locale)
     } else {
         Vec::new()
     };
     let preview_search_pagination = PaginationView::empty();
-    let preview_search = preview_search_view.as_ref().map(|view| page::BuilderSearchData {
-        view,
-        entries: &preview_search_entries,
-        pagination: &preview_search_pagination,
-    });
+    let preview_search = preview_search_view
+        .as_ref()
+        .map(|view| page::BuilderSearchData {
+            view,
+            entries: &preview_search_entries,
+            pagination: &preview_search_pagination,
+        });
     collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[document], true).await?;
     let ctx = PreviewRenderContext {
         state: &state,
@@ -382,6 +392,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
         )?;
     }
     rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
+    rendered.html = content_render::finalize_document_images(rendered.html, &budget.image_nonces)?;
     rendered.html =
         content_render::finalize_document_richtext(rendered.html, &budget.richtext_nonces)?;
     tx.rollback().await?;

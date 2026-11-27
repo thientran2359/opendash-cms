@@ -10,6 +10,8 @@ mod public_context;
 mod public_site_search_theme;
 #[path = "theme/reading_page_templates.rs"]
 mod reading_page_templates;
+#[path = "theme/responsive_media_render.rs"]
+mod responsive_media_render;
 #[path = "theme/revision_discovery.rs"]
 mod revision_discovery;
 #[path = "theme/sample_import_dry_run.rs"]

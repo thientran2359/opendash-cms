@@ -11,9 +11,9 @@ pub fn contains_html_form_tag(html: &str) -> bool {
     let Ok(tokens) = normalize::tokenize(html, true) else {
         return false;
     };
-    tokens
-        .into_iter()
-        .any(|(kind, name_lower)| matches!(kind, types::TokenKind::OpenTag { .. }) && name_lower == "form")
+    tokens.into_iter().any(|(kind, name_lower)| {
+        matches!(kind, types::TokenKind::OpenTag { .. }) && name_lower == "form"
+    })
 }
 
 #[cfg(test)]
@@ -26,9 +26,15 @@ mod search_form_tag_tests {
 
     #[test]
     fn detects_form_open_tags_and_ignores_text_or_comments() {
-        assert!(contains_html_form_tag(r#"<main><form method="get" action="/"></form></main>"#));
-        assert!(contains_html_form_tag(r#"<SECTION><FORM action="/en"></FORM></SECTION>"#));
-        assert!(!contains_html_form_tag(r#"<main><p>&lt;form&gt; literal</p></main>"#));
+        assert!(contains_html_form_tag(
+            r#"<main><form method="get" action="/"></form></main>"#
+        ));
+        assert!(contains_html_form_tag(
+            r#"<SECTION><FORM action="/en"></FORM></SECTION>"#
+        ));
+        assert!(!contains_html_form_tag(
+            r#"<main><p>&lt;form&gt; literal</p></main>"#
+        ));
         assert!(!contains_html_form_tag(r#"<main><!-- <form> --></main>"#));
         assert!(!contains_html_form_tag(""));
     }

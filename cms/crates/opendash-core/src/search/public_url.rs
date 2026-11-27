@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use opendash_core::{content::valid_content_type_key, search::sanitize_search_query};
+use crate::{content::valid_content_type_key, search::sanitize_search_query};
 
 pub const SEARCH_PAGE_SIZE: i64 = 20;
 pub const MAX_SEARCH_PAGE: i64 = 100;
@@ -50,10 +50,17 @@ fn decode_form_component(raw: &str) -> Result<String, &'static str> {
                 i += 1;
             }
             b'%' => {
-                let hi = bytes.get(i + 1).copied().ok_or("Query có mã hóa không hợp lệ.")?;
-                let lo = bytes.get(i + 2).copied().ok_or("Query có mã hóa không hợp lệ.")?;
+                let hi = bytes
+                    .get(i + 1)
+                    .copied()
+                    .ok_or("Query có mã hóa không hợp lệ.")?;
+                let lo = bytes
+                    .get(i + 2)
+                    .copied()
+                    .ok_or("Query có mã hóa không hợp lệ.")?;
                 let hex = [hi, lo];
-                let hex_str = std::str::from_utf8(&hex).map_err(|_| "Query có mã hóa không hợp lệ.")?;
+                let hex_str =
+                    std::str::from_utf8(&hex).map_err(|_| "Query có mã hóa không hợp lệ.")?;
                 let byte =
                     u8::from_str_radix(hex_str, 16).map_err(|_| "Query có mã hóa không hợp lệ.")?;
                 out.push(byte);
@@ -130,7 +137,9 @@ pub fn parse_search_query(raw: Option<&str>) -> Result<PublicSearchQuery, &'stat
                 if !seen_known.insert("page") {
                     return Err("Tham số query không được lặp lại.");
                 }
-                let page: i64 = value.parse().map_err(|_| "Số trang tìm kiếm không hợp lệ.")?;
+                let page: i64 = value
+                    .parse()
+                    .map_err(|_| "Số trang tìm kiếm không hợp lệ.")?;
                 if !(1..=MAX_SEARCH_PAGE).contains(&page) {
                     return Err("Số trang tìm kiếm vượt quá giới hạn.");
                 }
@@ -226,9 +235,6 @@ mod tests {
             build_search_url("/en", Some("nhà đẹp"), Some("post"), 1),
             "/en?s=nh%C3%A0+%C4%91%E1%BA%B9p&type=post"
         );
-        assert_eq!(
-            build_search_url("/", Some("a"), None, 3),
-            "/?s=a&page=3"
-        );
+        assert_eq!(build_search_url("/", Some("a"), None, 3), "/?s=a&page=3");
     }
 }

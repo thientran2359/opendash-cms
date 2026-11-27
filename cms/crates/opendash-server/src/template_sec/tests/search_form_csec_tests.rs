@@ -6,8 +6,7 @@ fn compile_theme(source: &str) -> Result<CompiledCsecComposition, &'static str> 
         source,
         &BTreeMap::new(),
         CsecContentKind::NonEntry,
-        ThemeTemplateRole::ThemeMain,
-        true,
+        &ThemeUrlPolicy::default(),
     )
 }
 
@@ -79,28 +78,34 @@ fn non_theme_render_and_blocks_still_forbid_search_forms() {
             form_src,
             Value::UNDEFINED,
             &RenderFormattingConfig::default(),
-            false,
         )
         .is_err()
     );
 
-    let schema: opendash_core::block_schema::BlockSchemaV1 = serde_json::from_value(serde_json::json!({
-        "schema_version": 1,
-        "id": "search/test",
-        "title": "Search test",
-        "category": "content",
-        "render": "render.html",
-        "fields": [{ "type": "text", "key": "q", "label": "Q" }]
-    }))
-    .unwrap();
+    let schema: opendash_core::block_schema::BlockSchemaV1 =
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "id": "search/test",
+            "title": "Search test",
+            "category": "content",
+            "render": "render.html",
+            "fields": [{ "type": "text", "key": "q", "label": "Q" }]
+        }))
+        .unwrap();
     assert!(validate_block_template_csec("search/test", form_src, &schema).is_err());
     assert!(validate_html_and_css_context(form_src, true, false, false).is_err());
     assert!(validate_html_and_css_context(form_src, true, true, true).is_ok());
     assert!(
-        validate_html_and_css_context(r#"<form method="post" action="/"></form>"#, true, true, true)
-            .is_err()
+        validate_html_and_css_context(
+            r#"<form method="post" action="/"></form>"#,
+            true,
+            true,
+            true
+        )
+        .is_err()
     );
     assert!(
-        validate_html_and_css_context(r#"<form action="/api/x"></form>"#, true, true, true).is_err()
+        validate_html_and_css_context(r#"<form action="/api/x"></form>"#, true, true, true)
+            .is_err()
     );
 }

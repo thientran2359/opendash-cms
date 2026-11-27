@@ -1,7 +1,5 @@
 use super::*;
 
-pub use opendash_core::richtext::strip_richtext_to_plain;
-
 pub(super) fn plain_text_from_field(
     definition: &opendash_core::field_schema::FieldSpec,
     value: &Value,
@@ -148,6 +146,11 @@ fn pure_media_fallback(val: &Value) -> Option<Value> {
         "width": null,
         "height": null,
         "alt": "",
+        "version": 1,
+        "variants": [],
+        "webp_srcset": null,
+        "fallback_srcset": null,
+        crate::template_sec::MEDIA_PROVENANCE_KEY: crate::template_sec::media_provenance_token(),
     }))
 }
 
@@ -167,7 +170,9 @@ pub(super) fn build_entry_view_with_defs(
 
     let l10n = core_l10n(&record.locale);
     let mut featured_cover_url: Option<String> = None;
+    let mut featured_cover_media: Option<Value> = None;
     let mut first_image_cover_url: Option<String> = None;
+    let mut first_image_cover_media: Option<Value> = None;
     let mut public_values = BTreeMap::new();
     let mut fields = Vec::with_capacity(ordered_defs.len());
 
@@ -244,8 +249,10 @@ pub(super) fn build_entry_view_with_defs(
             {
                 if definition.key == "featured_image" {
                     featured_cover_url = Some(u.to_owned());
+                    featured_cover_media = Some(hydrated.clone());
                 } else if first_image_cover_url.is_none() {
                     first_image_cover_url = Some(u.to_owned());
+                    first_image_cover_media = Some(hydrated.clone());
                 }
             }
             Some(hydrated.clone())
@@ -275,6 +282,7 @@ pub(super) fn build_entry_view_with_defs(
         });
     }
     let cover_url = featured_cover_url.or(first_image_cover_url);
+    let cover_media = featured_cover_media.or(first_image_cover_media);
 
     let excerpt_source = if let Some(ref summary) = summary_plain {
         summary.as_str().to_owned()
@@ -343,6 +351,7 @@ pub(super) fn build_entry_view_with_defs(
         fields: public_values,
         field_list: fields,
         cover_url,
+        cover_media,
         terms: terms_map,
         all_terms,
         primary_category,
@@ -399,11 +408,11 @@ pub fn entry_view_with_url(
     schema: &ContentTypeDefinition,
     url: Option<String>,
 ) -> EntryView {
-    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = schema
-        .fields
-        .iter()
-        .filter(|d| !d.is_ui_only() && d.effective_acl().2 == PublicExposure::Public)
-        .collect();
+    let vis = opendash_core::field_schema::HydrationVisibility::ContentPublic {
+        max_view_role: FieldRole::Editor,
+    };
+    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> =
+        schema.fields.iter().filter(|d| vis.allows(d)).collect();
     build_entry_view_with_defs(
         &record,
         &schema.key,

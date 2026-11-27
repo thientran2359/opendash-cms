@@ -14,6 +14,23 @@ pub(crate) fn extract_origin_host(headers: &HeaderMap) -> String {
         .unwrap_or_default()
 }
 
+fn strip_media_provenance(val: serde_json::Value) -> serde_json::Value {
+    match val {
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(strip_media_provenance).collect())
+        }
+        serde_json::Value::Object(mut map) => {
+            map.remove(crate::template_sec::MEDIA_PROVENANCE_KEY);
+            for v in map.values_mut() {
+                let taken = std::mem::replace(v, serde_json::Value::Null);
+                *v = strip_media_provenance(taken);
+            }
+            serde_json::Value::Object(map)
+        }
+        other => other,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn apply_public_render_hooks(
     html: String,
@@ -44,16 +61,26 @@ pub(super) async fn apply_public_render_hooks(
         is_not_found,
         locale,
         origin_host: &services.origin_host,
-        site: theme_context
-            .get("site")
+        site: strip_media_provenance(
+            theme_context
+                .get("site")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        ),
+        options: strip_media_provenance(
+            theme_context
+                .get("options")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        ),
+        entry: theme_context
+            .get("entry")
             .cloned()
-            .unwrap_or(serde_json::Value::Null),
-        options: theme_context
-            .get("options")
+            .map(strip_media_provenance),
+        entries: theme_context
+            .get("entries")
             .cloned()
-            .unwrap_or(serde_json::Value::Null),
-        entry: theme_context.get("entry").cloned(),
-        entries: theme_context.get("entries").cloned(),
+            .map(strip_media_provenance),
         principal: opendash_core::hooks::ExecutionPrincipal::Public,
     };
     let output = services

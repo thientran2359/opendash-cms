@@ -14,6 +14,7 @@ pub(crate) fn validate_stmt_with_icons(
 
 pub(crate) const RESERVED_CONTEXT_VARS: &[&str] = &[
     "od_icon",
+    "od_image",
     "od_hook",
     "options",
     "site_options",
@@ -364,7 +365,12 @@ pub(crate) fn collect_t_keys_expr(expr: &Expr<'_>, out: &mut BTreeSet<String>) {
                 collect_t_keys_call_arg(arg, out);
             }
         }
-        Expr::Var(_) | Expr::Const(_) | Expr::Call(_) => {}
+        Expr::Call(call) => {
+            for arg in &call.args {
+                collect_t_keys_call_arg(arg, out);
+            }
+        }
+        Expr::Var(_) | Expr::Const(_) => {}
     }
 }
 
