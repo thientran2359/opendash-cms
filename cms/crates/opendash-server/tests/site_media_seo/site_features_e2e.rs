@@ -515,7 +515,7 @@ async fn m7_s08_t01_deterministic_e2e_and_adversarial_corpus() {
     assert!(csp.contains("media-src 'self'"), "CSP: {csp}");
     let home_html = home.text().await.unwrap();
     assert!(!home_html.contains("<script>alert(1)</script>"));
-    assert!(home_html.contains(&format!("<video src=\"/media/{expected_sha}/file\"")));
+    assert!(home_html.contains(&format!("<video src=\"/media/{expected_sha}/file?v=1\"")));
 
     // Range 206 + 416 + HEAD
     let r206 = client
@@ -597,5 +597,5 @@ async fn m7_s08_t01_deterministic_e2e_and_adversarial_corpus() {
         .unwrap();
     assert_eq!(after_restart.status(), StatusCode::OK);
     let after_html = after_restart.text().await.unwrap();
-    assert!(after_html.contains(&format!("<video src=\"/media/{expected_sha}/file\"")));
+    assert!(after_html.contains(&format!("<video src=\"/media/{expected_sha}/file?v=1\"")));
 }

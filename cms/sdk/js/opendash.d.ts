@@ -90,24 +90,45 @@ export interface OdTaxonomyTerm {
   parent_id: number | null;
 }
 
+export interface OdMediaVariantView {
+  spec: "thumbnail" | "medium" | "large" | "full";
+  format: "jpeg" | "png" | "webp";
+  width: number;
+  height: number;
+  byte_size: number;
+  url: string;
+}
+
 export interface OdMediaAsset {
   id: string;
   filename: string;
   mime_type: string;
+  kind: string;
+  version: number;
+  generation: number;
+  content_sha256: string;
   url: string;
+  thumbnail_url: string | null;
   width: number | null;
   height: number | null;
   alt: string | null;
+  variants: OdMediaVariantView[];
+  webp_srcset: string | null;
+  fallback_srcset: string | null;
 }
 
 export interface OdHydratedMedia {
   id: string;
+  version: number;
   url: string;
   thumbnail_url: string;
   alt: string;
   width: number | null;
   height: number | null;
   kind: string;
+  variants: OdMediaVariantView[];
+  webp_srcset: string | null;
+  fallback_srcset: string | null;
 }
 
 export interface OdHydratedLink {

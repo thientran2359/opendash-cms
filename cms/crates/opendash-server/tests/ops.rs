@@ -10,6 +10,8 @@ mod macos_jetsam_stress;
 mod media_delete_quarantine;
 #[path = "ops/media_reconcile.rs"]
 mod media_reconcile;
+#[path = "ops/media_replace_and_lifecycle.rs"]
+mod media_replace_and_lifecycle;
 #[path = "ops/proxy_and_restore_cancel.rs"]
 mod proxy_and_restore_cancel;
 #[path = "ops/restore_admin_safe_mode.rs"]

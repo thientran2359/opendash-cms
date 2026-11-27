@@ -12,8 +12,9 @@ Custom React + TypeScript 4-layer AST visual page builder (`Section -> Row -> Co
   - Immutable mutations: `[document.ts:newNodeId]`, `[document.ts:appendNode]`, `[document.ts:appendRowWithColumns]`, `[document.ts:appendFreeformElement]`, `[document.ts:duplicateNode]`, `[document.ts:removeNode]`, `[document.ts:moveNode]`, `[document.ts:reorderSiblingNode]`, `[document.ts:copyNodeOptions]`, `[document.ts:canPasteOptions]`, `[document.ts:pasteNodeOptions]`, `[document.ts:setNodeField]`, `[document.ts:patchNodeFields]`, `[document.ts:setNodeMeta]`, `[document.ts:setResponsiveField]`, `[document.ts:setContainerBoxSpacing]`, `[document.ts:syncContainerResponsiveToDesktop]`, `[document.ts:setSectionStyle]`, `[document.ts:setElementBinding]`, `[document.ts:setListProps]`, `[document.ts:cloneWithFreshNodeIds]`, `[document.ts:createStarterTemplateDocument]`.
 - **Core Editor (`BuilderEditorCore.tsx`):**
   - `[BuilderEditorCore.tsx:BuilderEditorCore]` (`StudioBuilderView` `'tree' | 'properties' | 'add'`): Shared editing core used by `StudioWorkspace` and `StudioCustomizerNav` (paired with `[../studio/StudioBlockTree.tsx:StudioBlockTree]` and `[BuilderPreviewFrame.tsx:BuilderPreviewFrame]`).
-- **Sandboxed Live Preview (`BuilderPreviewFrame.tsx`):**
+- **Sandboxed Live Preview (`BuilderPreviewFrame.tsx`, `previewMediaRewrite.ts`):**
   - `[BuilderPreviewFrame.tsx:preparePreviewMarkup]`, `[BuilderPreviewFrame.tsx:PreparePreviewOptions]`, `[BuilderPreviewFrame.tsx:BuilderPreviewFrame]`, `[BuilderPreviewFrame.tsx:BuilderPreviewFrameProps]`: Prepares server-rendered preview HTML for `<iframe sandbox>` and bridges interactive pick/edit/menu/hover/scroll messages.
+  - `[previewMediaRewrite.ts:PRIVATE_MEDIA_PATH]`, `[previewMediaRewrite.ts:CSS_MEDIA_URL]`, `[previewMediaRewrite.ts:rewriteRootRelativeUrl]`, `[previewMediaRewrite.ts:rewritePreviewSrcset]`, `[previewMediaRewrite.ts:collectPrivateMediaPaths]`, `[previewMediaRewrite.ts:applyPreviewMediaRewrites]`: Handles versioned private/public media URLs, CSS `url(...)`, and responsive `img`/`source[srcset]` rewriting in preview markup.
 - **Inspector & Specialized Field Panels (`BuilderInspector.tsx`, `BuilderBindingFields.tsx`, `BuilderListFields.tsx`, `BuilderContactFormFields.tsx`, `PatternLibraryModal.tsx`):**
   - `[BuilderInspector.tsx:BuilderInspector]`: Contextual property editor for containers, core blocks, `legacy/block`, and declarative `plugin/block` elements (delegated to `[../fields/UnifiedFieldForm.tsx:UnifiedFieldForm]` with `context="studio_block"`).
   - `[BuilderBindingFields.tsx:BuilderBindingFields]`, `[BuilderListFields.tsx:BuilderListFields]`, `[BuilderContactFormFields.tsx:BuilderContactFormFields]`, `[PatternLibraryModal.tsx:PatternLibraryModal]`.
@@ -41,6 +42,7 @@ Custom React + TypeScript 4-layer AST visual page builder (`Section -> Row -> Co
   ```powershell
   npm --prefix cms/admin run typecheck
   npm --prefix cms/admin run build
+  npm --prefix cms/admin run test:media-preview
   ```
 - Standards, i18n, and Builder E2E checks (`cms/scripts/`):
   ```powershell

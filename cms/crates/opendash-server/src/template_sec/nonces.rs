@@ -167,6 +167,7 @@ pub struct RenderBudget {
     pub html_bytes_used: usize,
     pub locale: String,
     pub icon_nonces: IconNonceTable,
+    pub image_nonces: ImageNonceTable,
     pub richtext_nonces: RichTextNonceTable,
     pub hook_nonces: HookNonceTable,
 }
@@ -181,6 +182,7 @@ pub(crate) struct PreviewCompositionBudget {
     pub expansions: usize,
     pub stack: Vec<String>,
     pub icon_nonces: IconNonceTable,
+    pub image_nonces: ImageNonceTable,
     pub richtext_nonces: RichTextNonceTable,
     pub hook_nonces: HookNonceTable,
 }
@@ -197,6 +199,7 @@ impl PreviewCompositionBudget {
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: rb.icon_nonces,
+            image_nonces: rb.image_nonces,
             richtext_nonces: rb.richtext_nonces,
             hook_nonces: rb.hook_nonces,
         }
@@ -208,6 +211,7 @@ impl PreviewCompositionBudget {
             html_bytes_used: self.html_bytes_used,
             locale: "vi".to_owned(),
             icon_nonces: self.icon_nonces.clone(),
+            image_nonces: self.image_nonces.clone(),
             richtext_nonces: self.richtext_nonces.clone(),
             hook_nonces: self.hook_nonces.clone(),
         }
@@ -217,6 +221,7 @@ impl PreviewCompositionBudget {
         self.fuel_remaining = rb.fuel_remaining;
         self.html_bytes_used = rb.html_bytes_used;
         self.icon_nonces = rb.icon_nonces.clone();
+        self.image_nonces = rb.image_nonces.clone();
         self.richtext_nonces = rb.richtext_nonces.clone();
         self.hook_nonces = rb.hook_nonces.clone();
     }

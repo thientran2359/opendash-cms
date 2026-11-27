@@ -129,36 +129,17 @@ pub async fn execute_sample_import_with_cutpoint(
                 .map_err(|_| ApiError::internal("Không đọc được file media từ revision theme."))?;
             let mime = infer_media_mime(&safe_rel, m.mime_type.as_deref())?;
             let decoded = crate::media::decode_image(bytes, mime)?;
-            let already_existed = write_staged_and_promote(
+            let entry = stage_and_dedup_sample_media(
+                db,
                 uploads_root,
                 &run_id,
-                &decoded.id,
-                decoded.extension,
-                &decoded.original,
-                &decoded.thumbnail,
+                &m.object_key,
+                &safe_rel,
+                decoded,
             )
             .await?;
-            let filename = safe_rel
-                .rsplit('/')
-                .next()
-                .unwrap_or("sample.png")
-                .to_string();
-            let asset = decoded.metadata(filename);
-            media_id_by_object.insert(m.object_key.clone(), asset.id.clone());
-            media_entries.push(StagedMediaEntry {
-                object_key: m.object_key.clone(),
-                media_id: asset.id.clone(),
-                extension: asset.extension,
-                sha256: asset.id,
-                already_existed,
-                filename: asset.filename,
-                mime_type: asset.mime_type,
-                byte_size: asset.byte_size,
-                width: asset.width,
-                height: asset.height,
-                thumb_width: asset.thumb_width.unwrap_or(0),
-                thumb_height: asset.thumb_height.unwrap_or(0),
-            });
+            media_id_by_object.insert(m.object_key.clone(), entry.media_id.clone());
+            media_entries.push(entry);
         }
     }
 
@@ -221,48 +202,14 @@ pub async fn execute_sample_import_with_cutpoint(
             }
         }
 
-        // Insert media_assets + provenance
-        for m in &media_entries {
-            sqlx::query(
-                "INSERT INTO media_assets
-                 (id, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
-            )
-            .bind(&m.media_id)
-            .bind(&m.filename)
-            .bind(&m.mime_type)
-            .bind(&m.extension)
-            .bind(m.byte_size)
-            .bind(m.width)
-            .bind(m.height)
-            .bind(m.thumb_width)
-            .bind(m.thumb_height)
-            .execute(&mut *conn)
-            .await?;
-
-            sqlx::query(
-                "INSERT INTO import_provenance
-                 (theme_id, sample_key, resource_kind, object_key, revision_id, revision_digest, target_id, target_hash)
-                 VALUES (?, ?, 'media', ?, ?, ?, ?, ?)",
-            )
-            .bind(theme_id)
-            .bind(&plan.sample_key)
-            .bind(&m.object_key)
-            .bind(&plan.revision_id)
-            .bind(&plan.revision_digest)
-            .bind(&m.media_id)
-            .bind(&m.sha256)
-            .execute(&mut *conn)
-            .await?;
-
-            created.push(ImportOutcomeItem {
-                resource_kind: SampleGroup::Media,
-                object_key: m.object_key.clone(),
-                target_id: m.media_id.clone(),
-                status: "created".to_string(),
-                reason: None,
-            });
-        }
+        persist_imported_media_entries_in_tx(
+            &mut conn,
+            &media_entries,
+            theme_id,
+            &plan,
+            &mut created,
+        )
+        .await?;
 
         // Insert pages (always draft) + provenance
         for item in &plan.items {

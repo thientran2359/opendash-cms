@@ -256,7 +256,7 @@ async fn f04_load_entry_ref_hydration_prefers_featured_image_and_ignores_non_ima
         .unwrap();
     assert_eq!(
         map2.get(&entry_id).unwrap().cover_url.as_deref(),
-        Some(format!("/api/admin/media/{img_id}/file").as_str())
+        Some(format!("/api/admin/media/{img_id}/file?v=1").as_str())
     );
 }
 

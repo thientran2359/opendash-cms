@@ -4,6 +4,103 @@ pub(crate) fn tokenize(
     raw: &str,
     allow_trusted_theme_markup: bool,
 ) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormalizationDiagnostic> {
+    tokenize_with_policy(
+        raw,
+        DocumentNormalizeOptions {
+            allow_trusted_theme_markup,
+            allow_admin_media_preview: false,
+        },
+    )
+}
+
+pub(crate) fn validate_media_element_attrs(
+    name_lower: &str,
+    attrs: &[(String, String)],
+    allow_admin_media_preview: bool,
+) -> Result<(), DocumentNormalizationDiagnostic> {
+    if !matches!(name_lower, "img" | "source" | "video") {
+        return Ok(());
+    }
+    for (k, raw_val) in attrs {
+        if k == "srcset" && matches!(name_lower, "img" | "source") {
+            let decoded = opendash_core::richtext::decode_html5_entities(raw_val);
+            if !opendash_core::media::valid_media_srcset(&decoded, allow_admin_media_preview) {
+                return Err(DocumentNormalizationDiagnostic::new(
+                    "invalid_media_srcset",
+                    "Thuộc tính srcset chứa URL hoặc mô tả không hợp lệ.",
+                ));
+            }
+        } else if k == "src" || (name_lower == "video" && k == "poster") {
+            let decoded = opendash_core::richtext::decode_html5_entities(raw_val);
+            let trimmed = decoded.trim();
+            if trimmed.is_empty()
+                || trimmed.contains('\0')
+                || trimmed.bytes().any(|b| b <= 0x1f || b == 0x7f)
+                || trimmed.contains('\\')
+                || trimmed.contains("..")
+            {
+                return Err(DocumentNormalizationDiagnostic::new(
+                    "invalid_media_src",
+                    "Thuộc tính src/poster của thẻ media không hợp lệ.",
+                ));
+            }
+            if trimmed.starts_with('/') {
+                if trimmed.starts_with("//") {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "invalid_media_src",
+                        "Thuộc tính src/poster không được dùng scheme-relative URL.",
+                    ));
+                }
+                let lower = trimmed.to_ascii_lowercase();
+                if lower.starts_with("/api/admin/media/") {
+                    if !allow_admin_media_preview {
+                        return Err(DocumentNormalizationDiagnostic::new(
+                            "forbidden_admin_media_url",
+                            "URL media nội bộ admin không được phép trong tài liệu công khai.",
+                        ));
+                    }
+                    if !opendash_core::media::valid_media_render_url(trimmed, true) {
+                        return Err(DocumentNormalizationDiagnostic::new(
+                            "invalid_media_src",
+                            "URL preview admin media không hợp lệ.",
+                        ));
+                    }
+                } else if lower.starts_with("/media/")
+                    && !opendash_core::media::valid_media_render_url(trimmed, false)
+                {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "invalid_media_src",
+                        "URL công khai của media không hợp lệ.",
+                    ));
+                }
+            } else {
+                let parsed = url::Url::parse(trimmed).map_err(|_| {
+                    DocumentNormalizationDiagnostic::new(
+                        "invalid_media_src",
+                        "URL tuyệt đối trong src/poster không hợp lệ.",
+                    )
+                })?;
+                if !matches!(parsed.scheme(), "http" | "https")
+                    || !parsed.has_host()
+                    || !parsed.username().is_empty()
+                    || parsed.password().is_some()
+                {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "invalid_media_src",
+                        "Chỉ cho phép URL http(s) an toàn trong src/poster.",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn tokenize_with_policy(
+    raw: &str,
+    opts: DocumentNormalizeOptions,
+) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormalizationDiagnostic> {
+    let allow_trusted_theme_markup = opts.allow_trusted_theme_markup;
     if raw.len() > MAX_PUBLIC_DOCUMENT_BYTES {
         return Err(DocumentNormalizationDiagnostic::new(
             "document_too_large",
@@ -108,6 +205,12 @@ pub(crate) fn tokenize(
                         format!("Thẻ `{name_lower}` không được phép."),
                     ));
                 }
+                if name_lower == "source" {
+                    return Err(DocumentNormalizationDiagnostic::new(
+                        "unexpected_void_close_tag",
+                        "Thẻ tự đóng `<source>` không được có thẻ đóng `</source>`.",
+                    ));
+                }
                 if name_lower == "script" {
                     return Err(DocumentNormalizationDiagnostic::new(
                         "unexpected_close_script",
@@ -151,6 +254,7 @@ pub(crate) fn tokenize(
                 }
                 let attrs_raw = &inner_clean[name_end..];
                 let attrs = parse_attributes(attrs_raw, allow_trusted_theme_markup)?;
+                validate_media_element_attrs(&name_lower, &attrs, opts.allow_admin_media_preview)?;
                 if name_lower == "script" {
                     if self_closing {
                         return Err(DocumentNormalizationDiagnostic::new(

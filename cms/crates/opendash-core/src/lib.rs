@@ -11,6 +11,7 @@ pub mod i18n;
 pub mod icons;
 pub mod id;
 pub mod l10n;
+pub mod media;
 pub mod plugin;
 pub mod redirects;
 pub mod registry;

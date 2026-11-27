@@ -24,8 +24,17 @@ pub(super) use crate::media::MediaStore;
 
 pub(super) use crate::operations::{ExclusiveOpsContext, MutationLease};
 
+pub(super) use crate::storage::media::{
+    MediaReplaceJob, find_replace_jobs_by_ids, list_active_variant_paths_bounded,
+    mark_replace_job_purged, prune_purged_replace_jobs,
+};
+
 pub use crate::storage::media_lifecycle::{
     MediaDeleteJob, MediaDeletePhase, TombstoneError, get_delete_job, tombstone_media_in_tx,
+};
+
+pub(super) use crate::storage::media_lifecycle::{
+    find_delete_jobs_by_ids, list_pending_delete_jobs,
 };
 
 pub(super) use crate::storage::media_refs::{
@@ -41,11 +50,22 @@ pub(super) use crate::storage::operations::{
 
 pub const MAX_RECONCILE_RECORDS: usize = 10_000;
 
-pub const MAX_RECONCILE_FILES: usize = 20_000;
+pub const MAX_RECONCILE_FILES: usize = 100_000;
 
 pub const ORPHAN_GRACE_SECS: u64 = 24 * 3600;
 
 pub const PURGE_GRACE_SECS: u64 = 7 * 24 * 3600;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReconcileOrphanKind {
+    Canonical,
+    Variant,
+}
+
+fn default_orphan_kind() -> ReconcileOrphanKind {
+    ReconcileOrphanKind::Canonical
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissingCanonicalDiagnostic {
@@ -58,6 +78,8 @@ pub struct MissingCanonicalDiagnostic {
 pub struct ReconcileOrphanCandidate {
     pub media_id: String,
     pub logical_key: String,
+    #[serde(default = "default_orphan_kind")]
+    pub kind: ReconcileOrphanKind,
     pub size_bytes: u64,
     pub modified_unix_secs: u64,
     pub sha256: String,
@@ -143,6 +165,7 @@ pub(super) struct ScannedFile {
     pub(super) logical_key: String,
     pub(super) abs_path: PathBuf,
     pub(super) media_id: String,
+    pub(super) kind: ReconcileOrphanKind,
     pub(super) size_bytes: u64,
     pub(super) modified_unix_secs: u64,
 }

@@ -8,3 +8,5 @@ mod execute_sample_import_with_cutpoint;
 pub use execute_sample_import_with_cutpoint::*;
 mod recover_orphaned_import_runs;
 pub use recover_orphaned_import_runs::*;
+mod sample_media_persistence;
+pub use sample_media_persistence::*;

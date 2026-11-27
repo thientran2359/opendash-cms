@@ -277,7 +277,13 @@ pub(crate) async fn render_entry_response_with_cache(
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::finalize_document_richtext(
-            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            content_render::finalize_document_images(
+                content_render::finalize_document_icons(
+                    composed,
+                    &budget.render_budget.icon_nonces,
+                )?,
+                &budget.render_budget.image_nonces,
+            )?,
             &budget.render_budget.richtext_nonces,
         )?,
         body.has_active_contact_form || entry_has_form || shell_has_form,
@@ -292,44 +298,29 @@ pub(crate) async fn media_response(
     id: &str,
     thumbnail: bool,
 ) -> ApiResult<Response> {
-    if !media::valid_media_id(id) {
+    if !media::valid_media_id(id) || !public_content::media_is_referenced(db, id).await? {
         return Err(ApiError::not_found("Ảnh công khai không tồn tại."));
     }
+    let read_lease = store.acquire_read_lease(id).await?;
     let asset = media::find(db, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Ảnh công khai không tồn tại."))?;
-    if !public_content::media_is_referenced(db, id).await? {
-        return Err(ApiError::not_found("Ảnh công khai không tồn tại."));
-    }
     if thumbnail && asset.kind != "image" {
         return Err(ApiError::not_found("Ảnh công khai không tồn tại."));
     }
     if !thumbnail && asset.kind == "video" {
         let path = store.canonical_path(id, &asset.extension)?;
-        return crate::media::stream_authorized_video(method, headers, &asset, &path, store, false)
-            .await;
+        return crate::media::stream_authorized_video(
+            method, headers, &asset, &path, read_lease, false,
+        )
+        .await;
     }
-    let bytes = store.read(id, &asset.extension, thumbnail).await?;
-    let mime = if thumbnail {
-        "image/png"
+    let target = if thumbnail {
+        crate::media::LeasedImageTarget::Thumbnail(&asset)
     } else {
-        asset.mime_type.as_str()
+        crate::media::LeasedImageTarget::Original(&asset)
     };
-    Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, mime),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-            (header::CACHE_CONTROL, "no-store"),
-            (
-                header::CONTENT_SECURITY_POLICY,
-                "default-src 'none'; sandbox",
-            ),
-            (header::REFERRER_POLICY, "no-referrer"),
-        ],
-        bytes,
-    )
-        .into_response())
+    crate::media::serve_leased_image(store, &read_lease, method, headers, target, true).await
 }
 
 pub async fn media_file(
@@ -350,4 +341,45 @@ pub async fn media_thumb(
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
     media_response(&method, &headers, &db, &store, &id, true).await
+}
+
+pub async fn media_variant(
+    method: Method,
+    headers: HeaderMap,
+    State(db): State<SqlitePool>,
+    State(store): State<Arc<MediaStore>>,
+    Path((id, spec_ext)): Path<(String, String)>,
+) -> ApiResult<Response> {
+    let (spec, format) = opendash_core::media::parse_variant_spec_ext(&spec_ext)
+        .ok_or_else(|| ApiError::not_found("Biến thể media công khai không tồn tại."))?;
+    if !media::valid_media_id(&id) || !public_content::media_is_referenced(&db, &id).await? {
+        return Err(ApiError::not_found(
+            "Biến thể media công khai không tồn tại.",
+        ));
+    }
+    let read_lease = store.acquire_read_lease(&id).await?;
+    let asset = media::find(&db, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Biến thể media công khai không tồn tại."))?;
+    if asset.kind != "image" {
+        return Err(ApiError::not_found(
+            "Biến thể media công khai không tồn tại.",
+        ));
+    }
+    media::find_variant(&db, &id, asset.version, spec, format)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Biến thể media công khai không tồn tại."))?;
+    crate::media::serve_leased_image(
+        store.as_ref(),
+        &read_lease,
+        &method,
+        &headers,
+        crate::media::LeasedImageTarget::Variant {
+            asset: &asset,
+            spec,
+            format,
+        },
+        true,
+    )
+    .await
 }

@@ -35,6 +35,9 @@ pub(in crate::storage) async fn render_public_builder(
         Some(ctx.render_locale),
     )
     .await?;
+    let effective_state =
+        builder::hydrate_binding_media_cow_in_conn(&mut **tx, ctx.state, document, &bindings)
+            .await?;
     let lists = builder::resolve_lists_in_tx_for_locale(
         tx,
         document,
@@ -45,7 +48,7 @@ pub(in crate::storage) async fn render_public_builder(
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
     let empty_patterns = page::PatternResults::new();
     let mut rendered = page::render_builder_with_budget(
-        ctx.state,
+        effective_state.as_ref(),
         document,
         false,
         &bindings,

@@ -161,9 +161,15 @@ pub async fn preview_studio_with_cache_and_locale(
                 &fmt_cfg,
                 &effective_locale,
             )?;
-            crate::document::normalize_public_document(&html)
-                .map(|doc| doc.body_fragment)
-                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+            crate::document::normalize_document_with_policy(
+                &html,
+                crate::document::DocumentNormalizeOptions {
+                    allow_trusted_theme_markup: false,
+                    allow_admin_media_preview: true,
+                },
+            )
+            .map(|doc| doc.body_fragment)
+            .map_err(|_| ApiError::bad_request("Invalid preview body."))
         })?;
         (built.theme_context, body)
     } else {
@@ -184,13 +190,19 @@ pub async fn preview_studio_with_cache_and_locale(
         return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
     }
 
-    let slot_fragment = crate::document::normalize_public_document_with_options(&body, true)
-        .map(|parts| {
-            let mut f = parts.authorized_styles.concat();
-            f.push_str(&parts.body_fragment);
-            f
-        })
-        .unwrap_or_else(|_| body.clone());
+    let slot_fragment = crate::document::normalize_document_with_policy(
+        &body,
+        crate::document::DocumentNormalizeOptions {
+            allow_trusted_theme_markup: true,
+            allow_admin_media_preview: true,
+        },
+    )
+    .map(|parts| {
+        let mut f = parts.authorized_styles.concat();
+        f.push_str(&parts.body_fragment);
+        f
+    })
+    .unwrap_or_else(|_| body.clone());
 
     let scope = if preview_annotations {
         RenderAnnotationScope::TemplateAll
@@ -424,13 +436,14 @@ pub async fn preview_studio_with_cache_and_locale(
         settings::get_locale_bcp47_and_dir_in_conn(&mut *tx, Some(&effective_locale)).await?;
     let seo = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &general.site_title);
     let enqueued = preview_enqueued_styles(active.as_ref(), preview_condition(target.kind));
-    let full_html = content_render::compose_document_with_seo_with_assets(
+    let full_html = content_render::compose_document_with_seo_with_policy(
         header_html.as_deref(),
         &main_html,
         footer_html.as_deref(),
         &seo,
         &[],
         &enqueued,
+        true,
         true,
     )?;
     let full_html = if !preview_budget.hook_nonces.is_empty() {
@@ -446,6 +459,8 @@ pub async fn preview_studio_with_cache_and_locale(
     };
     let full_html =
         content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
+    let full_html =
+        content_render::finalize_document_images(full_html, &preview_budget.image_nonces)?;
     let full_html =
         content_render::finalize_document_richtext(full_html, &preview_budget.richtext_nonces)?;
     tx.rollback().await?;
