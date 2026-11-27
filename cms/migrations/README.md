@@ -55,8 +55,5 @@ Run from the repository root:
 
 ```powershell
 cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
-python cms/scripts/egm_pattern_s02_migration.py
-python cms/scripts/windows_auth_smoke.py --binary cms/target/debug/opendash.exe --baseline-db cms/fixtures/baseline_0001.sqlite
+cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test content migration_0056_upgrades_baseline_0001
 ```
-
-On Linux/macOS, pass `--binary cms/target/debug/opendash` to smoke scripts.

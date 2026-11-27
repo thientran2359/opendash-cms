@@ -14,7 +14,7 @@ import traceback
 from urllib.parse import urlparse
 
 from playwright.sync_api import expect, sync_playwright
-from menu_picker_e2e import admin_login, api_json, launch_server, set_cms_locale, stop_server
+from e2e_helpers import admin_login, api_json, launch_server, set_cms_locale, stop_server
 
 
 def digest(path: pathlib.Path) -> str:

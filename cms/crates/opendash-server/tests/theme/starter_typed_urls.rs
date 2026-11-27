@@ -401,6 +401,7 @@ async fn typed_url_fresh_public_saved_and_unsaved_preview() {
 }
 
 #[tokio::test]
+#[ignore = "requires external OPENDASH_STARTER_V100_BIN legacy binary"]
 async fn actual_old_new_old_binary_roundtrip_preserves_data_and_cas() {
     let Some(old_bin) = std::env::var_os("OPENDASH_STARTER_V100_BIN") else {
         eprintln!("NOT_RUN: old/new/old binary receipt requires OPENDASH_STARTER_V100_BIN");
