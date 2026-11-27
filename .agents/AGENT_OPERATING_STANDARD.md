@@ -1,6 +1,10 @@
-# Chuẩn thao tác chung cho 5 agent OpenDash (thủ công trong chat)
+# Chuẩn thao tác vận hành OpenDash
 
-> **Ủy quyền của chủ dự án:** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao các Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`) điều phối và merge mọi PR đủ gate. Tất cả 6 agent (`Atlas`, `Aster`, `Nova`, `Orion`, `Harbor`, `Forge`) đều có quyền tự nhận, tự review và merge task đủ điều kiện của chính mình. Design Spec EGM (`Status: Approved` trong `docs/designs/`) / Issue / Project Ready, acceptance, required CI và security/data cần bằng chứng. Trạng thái `Done` / `Verified` cần kiểm chứng thực tế riêng sau merge.
+> **Cập nhật quy trình mới (Owner Directive 2026-11-27):** Chủ dự án đã **ngừng giao task/Slice cho Harbor và Forge** (chuyển luồng CoS dispatch `Harbor ↔ Aster` và tạo Issue lẻ theo Slice ở bên dưới sang trạng thái **Standby / Lưu trữ lịch sử**). Luồng chuẩn hiện hành theo [`AGENTS.md`](../AGENTS.md) và [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md):
+> 1. **7 bước gọn:** Đề bài → Nghiên cứu EGM (đặt trước số migration nếu song song, Goldfish theo cỡ) → Giải thích tự nhiên cho Owner → Owner duyệt (`Approved`) → Agent tự code tuần tự các Slice trên worktree riêng `feat/<slug>` (**chỉ chạy `run-tests.py --check` / `tsc --noEmit` giữa các Slice; chỉ build & chạy Tầng 1 `run-tests.py --changed` + drift-check 1 lần khi code xong toàn bộ tính năng**) → Báo cáo tự nhiên + 1 Feature PR → Owner chốt → sync `main` 1 lần cuối, merge PR, cập nhật [`docs/designs/SITEMAP.md`](../docs/designs/SITEMAP.md) và **xóa branch/worktree/`cms/target`**.
+> 2. **Tầng 2 (`--group all --release`):** chỉ chạy theo đợt (sau 3–5 tính năng) hoặc trước release / khi Owner yêu cầu.
+
+> **Hồ sơ vận hành cũ (tham chiếu trước `2026-11-27`):** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao các Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`) điều phối và merge mọi PR đủ gate. Tất cả 6 agent (`Atlas`, `Aster`, `Nova`, `Orion`, `Harbor`, `Forge`) từng có quyền tự nhận, tự review và merge task đủ điều kiện của chính mình. Phần bên dưới được giữ để tham chiếu lịch sử khi cần đọc lại PR/Issue cũ.
 
 > **Áp dụng:** Atlas, Aster, Nova, Orion, Forge, Harbor. Đây là hướng dẫn cho **chính agent đang được người dùng gọi**, không phải Agent Preflight Check, agent thứ bảy, script, cronjob hoặc Task Watcher. [AGENTS.md](../AGENTS.md) và [GitHub workflow](GITHUB_WORKFLOW.md) là các quy định nền tảng; quyền review/merge tuân theo ADR-0010 và workflow.
 

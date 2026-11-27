@@ -5,6 +5,8 @@ description: "Dùng khi người dùng yêu cầu lấy task GitHub, tiếp tụ
 
 # Nhận task thủ công từ GitHub Issues (Chuẩn EGM + Multi-Agent)
 
+> **Trạng thái (Owner Directive 2026-11-27): STANDBY / RETIRED.** Chủ dự án đã ngừng giao task/Slice cho **Harbor** và **Forge** (bao gồm cả `Scheduled Auto-Pickup`) và bỏ cơ chế tạo Issue lẻ cho từng Slice. Mọi tính năng mới do agent làm việc trực tiếp với Owner thực hiện trọn gói trên Feature Worktree `feat/<slug>` theo [`AGENTS.md`](../../../AGENTS.md) và [`opendash-elephant`](../opendash-elephant/SKILL.md). Chỉ dùng skill này nếu chủ dự án yêu cầu xử lý Issue cũ còn tồn đọng.
+
 ## Kích hoạt, vai trò và nguồn sự thật
 
 - Chạy **một lần trong lượt chat hiện tại** khi người dùng yêu cầu lấy/làm task, **hoặc chạy theo lịch định kỳ được chủ dự án cấu hình (Scheduled Auto-Pickup, ví dụ 1 giờ/lần cho Harbor và Forge)** theo đúng khóa an toàn ở mục **Scheduled Auto-Pickup** bên dưới. Không gọi Task Watcher cũ, không gửi input tới CoS Local Control API.

@@ -1,13 +1,24 @@
 name: OpenDash CMS Build & Test
 
 # Always run on PRs to main so this job can serve as a Required Check on Ruleset #26833341.
-# Docs-only PRs fast-pass in seconds; any change under cms/ or this workflow runs full Rust + Admin checks.
+# Docs-only PRs fast-pass in seconds; Admin-only PRs skip Rust completely;
+# Rust PRs run Tier-1 change-aware tests (dev profile with opt-level=2 deps),
+# while Tier-2 full --release suite runs on workflow_dispatch (or release-validation.yml).
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Rust test suite to execute on manual dispatch'
+        required: true
+        default: 'all-release'
+        type: choice
+        options:
+          - all-release
+          - changed
 
 permissions:
   contents: read
@@ -27,7 +38,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "run_cms=true" >> "$GITHUB_OUTPUT"
+            echo "run_admin=true" >> "$GITHUB_OUTPUT"
+            echo "run_rust=true" >> "$GITHUB_OUTPUT"
+            echo "base_sha=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -37,22 +50,34 @@ jobs:
             BASE_SHA="${{ github.event.before }}"
             HEAD_SHA="${{ github.sha }}"
           fi
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            echo "run_cms=true" >> "$GITHUB_OUTPUT"
+            echo "run_admin=true" >> "$GITHUB_OUTPUT"
+            echo "run_rust=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'cms/crates/**' 'cms/migrations/**' 'cms/admin/**' 'cms/sdk/**' 'cms/Cargo.toml' 'cms/Cargo.lock' 'cms/rust-toolchain.toml' '.github/workflows/cms-ci.yml')"
-          if [ -n "$CHANGED" ]; then
-            echo "CMS changes detected:"
-            echo "$CHANGED"
-            echo "run_cms=true" >> "$GITHUB_OUTPUT"
+          CHANGED_ADMIN="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'cms/admin/**' 'cms/l10n/**' '.github/workflows/cms-ci.yml')"
+          CHANGED_RUST="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'cms/crates/**' 'cms/migrations/**' 'cms/sdk/**' 'cms/fixtures/**' 'cms/scripts/run-tests.py' 'cms/Cargo.toml' 'cms/Cargo.lock' 'cms/rust-toolchain.toml' '.github/workflows/cms-ci.yml')"
+          if [ -n "$CHANGED_ADMIN" ]; then
+            echo "Admin/l10n changes detected:"
+            echo "$CHANGED_ADMIN"
+            echo "run_admin=true" >> "$GITHUB_OUTPUT"
           else
+            echo "run_admin=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$CHANGED_RUST" ]; then
+            echo "Rust/CMS changes detected:"
+            echo "$CHANGED_RUST"
+            echo "run_rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_rust=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -z "$CHANGED_ADMIN" ] && [ -z "$CHANGED_RUST" ]; then
             echo "Docs/governance-only change: skipping Rust & Admin build."
-            echo "run_cms=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Node 22.16.0
-        if: steps.changes.outputs.run_cms == 'true'
+        if: steps.changes.outputs.run_admin == 'true' || steps.changes.outputs.run_rust == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
@@ -60,30 +85,34 @@ jobs:
           cache-dependency-path: 'cms/admin/package-lock.json'
 
       - name: Build React Admin
-        if: steps.changes.outputs.run_cms == 'true'
+        if: steps.changes.outputs.run_admin == 'true' || steps.changes.outputs.run_rust == 'true'
         working-directory: cms/admin
         run: |
           npm ci
           npm run build
 
+      - name: Check Admin i18n catalogs
+        if: steps.changes.outputs.run_admin == 'true'
+        run: node cms/scripts/check-i18n.mjs --strict
+
       - name: Setup Rust 1.99.1
-        if: steps.changes.outputs.run_cms == 'true'
+        if: steps.changes.outputs.run_rust == 'true'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: '1.99.1'
           components: rustfmt
 
       - name: Rust cache
-        if: steps.changes.outputs.run_cms == 'true'
+        if: steps.changes.outputs.run_rust == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: cms
 
       - name: Check Rust formatting on changed files
-        if: steps.changes.outputs.run_cms == 'true'
+        if: steps.changes.outputs.run_rust == 'true'
         shell: bash
         run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          BASE_SHA="${{ steps.changes.outputs.base_sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
           if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
             CHANGED_RS="$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- 'cms/crates/**/*.rs')"
@@ -94,6 +123,19 @@ jobs:
             fi
           fi
 
-      - name: Run Rust workspace tests (release, locked)
-        if: steps.changes.outputs.run_cms == 'true'
-        run: cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
+      - name: Verify test runner self-test
+        if: steps.changes.outputs.run_rust == 'true'
+        run: python3 cms/scripts/run-tests.py --self-test
+
+      - name: Run Rust tests (Tier-1 changed or manual Tier-2 release)
+        if: steps.changes.outputs.run_rust == 'true'
+        shell: bash
+        run: |
+          BASE_SHA="${{ steps.changes.outputs.base_sha }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.suite }}" = "all-release" ]; then
+            python3 cms/scripts/run-tests.py --group all --release
+          elif [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            python3 cms/scripts/run-tests.py --changed --base "$BASE_SHA"
+          else
+            python3 cms/scripts/run-tests.py --group all
+          fi
