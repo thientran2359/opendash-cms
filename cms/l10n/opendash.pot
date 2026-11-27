@@ -18947,3 +18947,195 @@ msgstr ""
 #: server:error:redirects.csv_http_payload_too_large
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr ""
+
+#: admin:api.media.could_not_load_media_details
+msgid "Could not load media details."
+msgstr ""
+
+#: admin:api.media.could_not_replace_media
+msgid "Could not replace the media file."
+msgstr ""
+
+#: admin:api.media.could_not_load_variants_status
+msgid "Could not load responsive variant status."
+msgstr ""
+
+#: admin:api.media.could_not_regenerate_variants
+msgid "Could not regenerate responsive media variants."
+msgstr ""
+
+#: admin:feature.media.validation.replace_video_expected
+msgid "This asset is a video. Select an MP4 video file to replace it."
+msgstr ""
+
+#: admin:feature.media.validation.replace_image_expected
+msgid "This asset is an image. Select a JPEG, PNG or WebP image to replace it."
+msgstr ""
+
+#: admin:feature.media.details.readers_active
+msgid "This file is currently open or streaming. Wait a moment and try replacing it again."
+msgstr ""
+
+#: admin:feature.media.details.etag_mismatch
+msgid "Media version changed concurrently (ETag mismatch). Latest details have been reloaded."
+msgstr ""
+
+#: admin:feature.media.details.kind_mismatch
+msgid "Cannot replace across media kinds: images must be JPEG/PNG/WebP and videos must be MP4."
+msgstr ""
+
+#: admin:feature.media.details.version_gen
+msgid "v{{value1}} · generation {{value2}}"
+msgstr ""
+
+#: admin:feature.media.details.etag
+msgid "ETag"
+msgstr ""
+
+#: admin:feature.media.details.updated
+msgid "Updated"
+msgstr ""
+
+#: admin:feature.media.details.responsive_variants
+msgid "Responsive variants"
+msgstr ""
+
+#: admin:feature.media.details.ready_version
+msgid "Ready (v{{value1}})"
+msgstr ""
+
+#: admin:feature.media.details.pending_generation
+msgid "Pending generation"
+msgstr ""
+
+#: admin:feature.media.details.loading_variants
+msgid "Loading variant details…"
+msgstr ""
+
+#: admin:feature.media.details.open_variant
+msgid "Open"
+msgstr ""
+
+#: admin:feature.media.details.no_variants
+msgid "No responsive variants stored (fits base size limit)."
+msgstr ""
+
+#: admin:feature.media.details.view_srcset
+msgid "View srcset markup"
+msgstr ""
+
+#: admin:feature.media.details.replacing
+msgid "Replacing…"
+msgstr ""
+
+#: admin:feature.media.details.replace_file
+msgid "Replace file"
+msgstr ""
+
+#: admin:feature.media.details.choose_replacement
+msgid "Choose replacement file (keeps current media ID)"
+msgstr ""
+
+#: admin:feature.media.details.replace_help
+msgid "Replacing keeps the existing media ID and bumps its version query token."
+msgstr ""
+
+#: admin:feature.media.regenerate.requested_stop
+msgid "Requested stopping variant regeneration ({{value1}}…)."
+msgstr ""
+
+#: admin:feature.media.regenerate.already_finished
+msgid "The variant regeneration job already finished."
+msgstr ""
+
+#: admin:feature.media.regenerate.could_not_stop
+msgid "Could not stop the variant regeneration job."
+msgstr ""
+
+#: admin:feature.media.regenerate.confirm_force
+msgid "Force regenerate responsive variants for all existing images? This re-encodes every active image in batches."
+msgstr ""
+
+#: admin:feature.media.regenerate.completed
+msgid "Variant regeneration completed: {{value1}} succeeded, {{value2}} failed, {{value3}} skipped."
+msgstr ""
+
+#: admin:feature.media.regenerate.paused
+msgid "Variant regeneration paused at {{value1}} processed ({{value2}} remaining)."
+msgstr ""
+
+#: admin:feature.media.regenerate.stopped
+msgid "Variant regeneration was stopped."
+msgstr ""
+
+#: admin:feature.media.regenerate.already_running
+msgid "Another variant regeneration run is already in progress."
+msgstr ""
+
+#: admin:feature.media.regenerate.aria_label
+msgid "Responsive image variant regeneration"
+msgstr ""
+
+#: admin:feature.media.regenerate.heading
+msgid "Responsive image variants"
+msgstr ""
+
+#: admin:feature.media.regenerate.status_summary
+msgid "Ready {{value1}}/{{value2}} images · Pending {{value3}} · Variant disk usage {{value4}}"
+msgstr ""
+
+#: admin:feature.media.regenerate.loading_status
+msgid "Loading variant status…"
+msgstr ""
+
+#: admin:feature.media.regenerate.generate_missing
+msgid "Generate missing variants"
+msgstr ""
+
+#: admin:feature.media.regenerate.force_all
+msgid "Force regenerate all"
+msgstr ""
+
+#: admin:feature.media.regenerate.stopping
+msgid "Stopping…"
+msgstr ""
+
+#: admin:feature.media.regenerate.stop
+msgid "Stop"
+msgstr ""
+
+#: admin:feature.media.regenerate.progress
+msgid "Processed {{value1}} · Succeeded {{value2}} · Failed {{value3}} · Skipped {{value4}} · Remaining {{value5}}"
+msgstr ""
+
+#: admin:feature.media.regenerate.failed_ids
+msgid "Failed media IDs:"
+msgstr ""
+
+#: admin:feature.media.library.replaced_notice
+msgid "Replaced media file (now v{{value1}} · generation {{value2}})."
+msgstr ""
+
+#: admin:feature.operations.reconcile.orphan_split
+msgid "(canonical: {{value1}}, variants: {{value2}})"
+msgstr ""
+
+#: admin:feature.operations.reconcile.orphan_type
+msgid "Type"
+msgstr ""
+
+#: admin:feature.operations.reconcile.logical_path
+msgid "Logical path"
+msgstr ""
+
+#: admin:feature.operations.reconcile.kind_variant
+msgid "Variant"
+msgstr ""
+
+#: admin:feature.operations.reconcile.kind_canonical
+msgid "Canonical"
+msgstr ""
+
+#: admin:feature.operations.reconcile.showing_first_50
+msgid "Showing first 50 of {{value1}} orphaned candidates."
+msgstr ""

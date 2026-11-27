@@ -2,11 +2,10 @@ import { useI18n, __ } from '../i18n/index.tsx';
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
 import { type BuilderDocument, type BuilderViewport, VIEWPORT_WIDTHS, locate } from './document.ts';
+import { applyPreviewMediaRewrites, collectPrivateMediaPaths } from './previewMediaRewrite.ts';
 
 const MEDIA_PREVIEW_LIMIT = 64;
 const MEDIA_PREVIEW_BYTES_LIMIT = 48 * 1024 * 1024;
-const PRIVATE_MEDIA_PATH = /^\/api\/admin\/media\/([a-zA-Z0-9_-]{1,128})\/file$/;
-const CSS_MEDIA_URL = /url\(\s*(["']?)(\/api\/admin\/media\/[a-zA-Z0-9_-]{1,128}\/file|\/media\/[a-zA-Z0-9_-]{1,128}\/file)\1\s*\)/g;
 
 const BRIDGE_SCRIPT = [
   '(function(){',
@@ -139,14 +138,6 @@ function generateStudioNonce(): string {
   return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function rewriteRootRelativeUrl(raw: string | null, origin: string): string | null {
-  if (!raw || !origin) return null;
-  if (raw.startsWith('/theme/') || raw.startsWith('/media/') || raw === '/assets/opendash-tailwind.css') {
-    return `${origin}${raw}`;
-  }
-  return null;
-}
-
 export interface PreparePreviewOptions {
   interactive?: boolean;
   nonce?: string;
@@ -182,24 +173,8 @@ export async function preparePreviewMarkup(
   });
 
   // Resolve private admin media paths into inline raster data URLs.
-  const privateTargets = [
-    ...Array.from(parsed.querySelectorAll('img[src]')).map(el => ({ el, attr: 'src' })),
-    ...Array.from(parsed.querySelectorAll('video[poster]')).map(el => ({ el, attr: 'poster' })),
-  ];
   const scopedStyles = Array.from(parsed.querySelectorAll<HTMLStyleElement>('style[data-od-block-styles], style[data-builder-responsive]'));
-  const cssPrivatePaths = scopedStyles.flatMap(style =>
-    Array.from((style.textContent ?? '').matchAll(CSS_MEDIA_URL))
-      .map(match => match[2])
-      .filter(path => PRIVATE_MEDIA_PATH.test(path)),
-  );
-  const mediaPaths = [
-    ...new Set(
-      [
-        ...privateTargets.map(t => t.el.getAttribute(t.attr) ?? ''),
-        ...cssPrivatePaths,
-      ].filter(path => PRIVATE_MEDIA_PATH.test(path)),
-    ),
-  ];
+  const mediaPaths = collectPrivateMediaPaths(parsed, scopedStyles);
   const replacements = new Map<string, string>();
   let skipped = Math.max(0, mediaPaths.length - MEDIA_PREVIEW_LIMIT);
   let bytes = 0;
@@ -233,38 +208,10 @@ export async function preparePreviewMarkup(
     });
     replacements.set(path, dataUrl);
   }
-  privateTargets.forEach(({ el, attr }) => {
-    const replacement = replacements.get(el.getAttribute(attr) ?? '');
-    if (replacement) el.setAttribute(attr, replacement);
-  });
 
-  // Rewrite root-relative `/theme/...` & `/media/...` URLs to `${origin}/...`.
+  // Rewrite root-relative `/theme/...` & `/media/...` URLs (including srcset) and inline private media.
   const resolvedOrigin = options.origin ?? (typeof window !== 'undefined' ? window.location.origin : '');
-  for (const style of scopedStyles) {
-    style.textContent = (style.textContent ?? '').replace(CSS_MEDIA_URL, (original, _quote: string, path: string) => {
-      if (PRIVATE_MEDIA_PATH.test(path)) {
-        const replacement = replacements.get(path);
-        return replacement ? `url("${replacement}")` : original;
-      }
-      const rewritten = rewriteRootRelativeUrl(path, resolvedOrigin);
-      return rewritten ? `url("${rewritten}")` : original;
-    });
-  }
-  if (resolvedOrigin) {
-    const urlAttributes: Array<[string, string]> = [
-      ['link[href]', 'href'],
-      ['img[src]', 'src'],
-      ['video[src]', 'src'],
-      ['video[poster]', 'poster'],
-      ['source[src]', 'src'],
-    ];
-    for (const [selector, attr] of urlAttributes) {
-      parsed.querySelectorAll(selector).forEach(el => {
-        const rewritten = rewriteRootRelativeUrl(el.getAttribute(attr), resolvedOrigin);
-        if (rewritten) el.setAttribute(attr, rewritten);
-      });
-    }
-  }
+  applyPreviewMediaRewrites(parsed, scopedStyles, replacements, resolvedOrigin);
 
   let head = parsed.querySelector('head');
   if (!head) {
