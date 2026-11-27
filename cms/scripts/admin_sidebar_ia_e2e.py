@@ -55,7 +55,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         expected=201,
                     )
                     # Create a custom CPT with built-in category and tag taxonomies to test plural labels.
-                    api_json(
+                    created_cpt = api_json(
                         ctx,
                         "POST",
                         base,
@@ -63,18 +63,28 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         {
                             "key": "project",
                             "label": "Projects",
-                            "taxonomies": ["category", "tag"],
                             "fields": [{"key": "summary", "label": "Summary", "type": "text"}],
                         },
                         csrf,
                         expected=201,
+                    )
+                    cpt_ver = created_cpt["version"]
+                    api_json(
+                        ctx,
+                        "PUT",
+                        base,
+                        "/api/admin/taxonomy/eligibility/project",
+                        {"taxonomies": ["category", "tag"], "expected_version": cpt_ver},
+                        csrf,
+                        {"If-Match": f'"v{cpt_ver}"'},
+                        expected=200,
                     )
 
                     # Login through UI so AdminShell mounts authenticated session cleanly.
                     page.goto(base + "/admin/#/dashboard", wait_until="domcontentloaded")
                     expect(page.get_by_test_id("admin-layout")).to_be_visible(timeout=20000)
 
-                    nav = page.get_by_role("navigation", name="Admin sections")
+                    nav = page.locator("#admin-navigation nav")
 
                     # Verify reorganized Admin sidebar groups, ordering, and CPT plurals.
                     menu_ids = nav.locator("[data-menu-id]").evaluate_all(
@@ -148,7 +158,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     expect(page).to_have_url(base + "/admin/#/contact")
 
                     page.goto(base + "/admin/#/contact/submissions", wait_until="domcontentloaded")
-                    expect(page.get_by_test_id("contact-panel-inbox")).to_be_visible(timeout=15000)
+                    expect(page.locator("#contact-panel-inbox")).to_be_visible(timeout=15000)
 
                     page.goto(base + "/admin/#/settings/seo", wait_until="domcontentloaded")
                     expect(page.get_by_test_id("breadcrumb")).to_have_text(
@@ -175,9 +185,9 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         dialog_fired.append(dialog.message)
                         dialog.dismiss()
                     page.on("dialog", reject_dialog)
-                    settings_btn = nav.locator('button[data-menu-id="settings"]')
-                    settings_btn.click()
-                    expect(settings_btn).to_have_attribute("aria-expanded", "true")
+                    plugins_btn = nav.locator('button[data-menu-id="plugins"]')
+                    plugins_btn.click()
+                    expect(plugins_btn).to_have_attribute("aria-expanded", "true")
                     assert not dialog_fired, f"Accordion expand must not trigger leave dialog: {dialog_fired}"
                     # Active Posts parent can be collapsed cleanly.
                     posts_btn = nav.locator('button[data-menu-id="posts"]')
@@ -243,7 +253,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         {"username": "ia_editor", "password": editor_pw},
                     )
                     editor_page.goto(base + "/admin/#/dashboard", wait_until="domcontentloaded")
-                    ed_nav = editor_page.get_by_role("navigation", name="Admin sections")
+                    ed_nav = editor_page.locator("#admin-navigation nav")
                     expect(ed_nav.locator('[data-menu-id="dashboard"]')).to_be_visible(timeout=20000)
                     expect(ed_nav.locator('[data-nav-group="appearance"]')).to_have_count(0)
                     expect(ed_nav.locator('[data-nav-group="system"]')).to_have_count(0)
