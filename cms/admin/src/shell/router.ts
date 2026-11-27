@@ -16,7 +16,9 @@ export type AdminView =
   | 'profile'
   | 'tools'
   | 'settings'
-  | 'content';
+  | 'content'
+  | 'content-structure'
+  | 'options-page';
 
 export type StudioPanelId =
   | 'root'
@@ -75,11 +77,56 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
 
   if (first === 'content') {
     return {
-      view: 'settings',
+      view: 'content-structure',
       sub: 'content-types',
       rawHash: '#/content',
       isLegacyContentRedirect: true,
     };
+  }
+  if (first === 'content-structure') {
+    const sub = segs[1] ?? 'content-types';
+    if (sub === 'content-types') {
+      const typeKey = segs[2] ? decodeURIComponent(segs[2]) : undefined;
+      return {
+        view: 'content-structure',
+        sub: 'content-types',
+        typeKey,
+        rawHash: typeKey
+          ? `#/content-structure/content-types/${encodeURIComponent(typeKey)}`
+          : '#/content-structure/content-types',
+      };
+    }
+    if (sub === 'taxonomies') {
+      return {
+        view: 'content-structure',
+        sub: 'taxonomies',
+        rawHash: '#/content-structure/taxonomies',
+      };
+    }
+    if (sub === 'field-groups' || sub === 'options-pages') {
+      const typeKey = segs[2] ? decodeURIComponent(segs[2]) : undefined;
+      return {
+        view: 'content-structure',
+        sub,
+        typeKey,
+        rawHash: typeKey
+          ? `#/content-structure/${sub}/${encodeURIComponent(typeKey)}`
+          : `#/content-structure/${sub}`,
+      };
+    }
+    return { view: 'content-structure', sub: 'invalid', rawHash: hash };
+  }
+  if (first === 'options') {
+    const pageKey = segs[1] ? decodeURIComponent(segs[1]) : undefined;
+    if (pageKey && /^[a-z][a-z0-9_]{0,63}$/.test(pageKey)) {
+      return {
+        view: 'options-page',
+        sub: 'view',
+        typeKey: pageKey,
+        rawHash: `#/options/${encodeURIComponent(pageKey)}`,
+      };
+    }
+    return { view: 'options-page', sub: 'invalid', rawHash: hash };
   }
   if (first === 'dashboard') {
     return { view: 'dashboard', sub: 'dashboard', rawHash: '#/dashboard' };
@@ -189,7 +236,7 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     if (sub === 'content-types') {
       const typeKey = segs[2] ? decodeURIComponent(segs[2]) : undefined;
       return {
-        view: 'settings', sub: 'content-types', typeKey,
+        view: 'content-structure', sub: 'content-types', typeKey,
         rawHash: typeKey ? `#/appearance/content-types/${typeKey}` : '#/appearance/content-types',
       };
     }
@@ -364,11 +411,19 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
   if (first === 'settings') {
     const sub = segs[1] ?? 'general';
     const typeKey = sub === 'content-types' && segs[2] ? decodeURIComponent(segs[2]) : undefined;
+    if (sub === 'content-types') {
+      return {
+        view: 'content-structure',
+        sub: 'content-types',
+        typeKey,
+        rawHash: typeKey ? `#/settings/content-types/${typeKey}` : '#/settings/content-types',
+      };
+    }
     return {
       view: 'settings',
       sub,
       typeKey,
-      rawHash: typeKey ? `#/settings/content-types/${typeKey}` : `#/settings/${sub}`,
+      rawHash: `#/settings/${sub}`,
     };
   }
 
@@ -378,6 +433,8 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
 export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
   if (route.view === 'patterns' && route.sub === 'invalid') return false;
   if (route.view === 'taxonomy' && route.taxonomyMode === 'invalid') return false;
+  if (route.view === 'content-structure' && route.sub === 'invalid') return false;
+  if (route.view === 'options-page' && route.sub === 'invalid') return false;
   if (route.view === 'studio' && (route.sub === 'invalid' || role !== 'admin')) return false;
   if (route.view === 'studio-entry') {
     if (route.typeKey === 'pattern' && role !== 'admin') return false;
@@ -390,10 +447,16 @@ export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
   }
   if (role === 'admin') return true;
   if (route.view === 'patterns') return false;
-  // Editors may update term extension values on an existing term. Creating
-  // terms and editing definition/eligibility schemas remain Admin-only.
-  if (route.view === 'taxonomy' && !['list', 'edit'].includes(route.taxonomyMode ?? '')) return false;
-  if (route.view === 'themes' || route.view === 'plugins' || route.view === 'users' || route.view === 'tools' || route.view === 'settings') {
+  // Editors may list, create (guarded by `editor_can_create_terms`), and edit terms.
+  if (route.view === 'taxonomy' && !['list', 'new', 'edit'].includes(route.taxonomyMode ?? '')) return false;
+  if (
+    route.view === 'themes' ||
+    route.view === 'plugins' ||
+    route.view === 'users' ||
+    route.view === 'tools' ||
+    route.view === 'settings' ||
+    route.view === 'content-structure'
+  ) {
     return false;
   }
   return true;
@@ -405,5 +468,5 @@ export function parseAdminView(hash: string, pathname: string = '/admin/'): Admi
 
 export function isViewAllowed(view: AdminView, role: Role): boolean {
   if (role === 'admin') return true;
-  return !['themes', 'plugins', 'users', 'tools', 'settings', 'patterns', 'studio'].includes(view);
+  return !['themes', 'plugins', 'users', 'tools', 'settings', 'content-structure', 'patterns', 'studio'].includes(view);
 }

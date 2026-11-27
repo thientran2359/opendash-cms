@@ -35,24 +35,56 @@ const entryPath = (key: string, id: number): string =>
 export const contentEntryPreviewPath = (key: string, id: number): string =>
   `${entryPath(key, id)}/preview`;
 
-/** C1 settings extend the existing schema DTO without changing legacy callers. */
-export type ContentSupport = 'editor' | 'featured_image' | 'builder';
+/** ACF + C1 settings extend the schema DTO while preserving existing callers. */
+export type ContentSupport =
+  | 'editor'
+  | 'featured_image'
+  | 'builder'
+  | 'excerpt'
+  | 'menu_order'
+  | 'custom_template';
 export type ContentPublicationPolicy = 'immediate' | 'draft_publish';
+export type ContentDefaultSort =
+  | 'published_at_desc'
+  | 'created_at_desc'
+  | 'updated_at_desc'
+  | 'title_asc'
+  | 'menu_order_asc';
+export type ContentListColumnKind = 'field' | 'taxonomy' | 'menu_order' | 'parent';
+
+export interface ContentListColumn {
+  kind: ContentListColumnKind;
+  key: string;
+  label?: string | null;
+}
 
 export interface ContentTypeSettings {
   public: boolean;
   has_archive: boolean;
   publication: ContentPublicationPolicy;
   supports: ContentSupport[];
+  hierarchical?: boolean;
+  archive_per_page?: number;
+  default_sort?: ContentDefaultSort;
+  exclude_from_sitemap?: boolean;
+  menu_name?: string | null;
+  menu_icon?: string | null;
+  menu_position?: number;
+  show_in_menu?: boolean;
+  list_columns?: ContentListColumn[];
 }
 
 export type ContentTypeDefinitionWithSettings = ContentTypeDefinition & {
   /** Optional on update: omission preserves the canonical stored settings. */
   settings?: ContentTypeSettings;
+  taxonomies?: string[];
+  rewrite_base?: string | null;
 };
 
 export type OwnedContentTypeWithSettings = Omit<OwnedContentType, 'descriptor'> & {
   descriptor: ContentTypeDefinitionWithSettings;
+  taxonomies?: string[];
+  rewrite_base?: string | null;
 };
 
 export type EffectiveEditorConfigWithSettings = EffectiveEditorConfigProjection & {
@@ -60,21 +92,47 @@ export type EffectiveEditorConfigWithSettings = EffectiveEditorConfigProjection 
   settings?: ContentTypeSettings;
 };
 
-/** Compatibility while an older binary or stored CPT is being upgraded. */
+/** Compatibility defaults matching `opendash_core::content::ContentTypeSettings`. */
 export function effectiveContentTypeSettings(
   typeKey: string,
   settings?: ContentTypeSettings,
-): ContentTypeSettings {
-  const effective: ContentTypeSettings = settings ?? {
-    public: typeKey !== 'pattern' && typeKey !== 'section',
-    has_archive: typeKey !== 'pattern' && typeKey !== 'section',
-    publication: typeKey === 'post' || typeKey === 'page' || typeKey === 'section'
-      ? 'draft_publish' : 'immediate',
-    supports: typeKey === 'pattern' ? ['builder']
-      : typeKey === 'page' ? ['editor', 'featured_image', 'builder'] : ['editor', 'featured_image'],
+): Required<Omit<ContentTypeSettings, 'menu_name' | 'menu_icon'>> & Pick<ContentTypeSettings, 'menu_name' | 'menu_icon'> {
+  const effective = {
+    public: settings?.public ?? (typeKey !== 'pattern' && typeKey !== 'section'),
+    has_archive: settings?.has_archive ?? (typeKey !== 'pattern' && typeKey !== 'section' && typeKey !== 'page'),
+    publication: settings?.publication ?? (
+      typeKey === 'post' || typeKey === 'page' || typeKey === 'section'
+        ? 'draft_publish'
+        : 'immediate'
+    ),
+    supports: settings?.supports ?? (
+      typeKey === 'pattern'
+        ? ['builder']
+        : typeKey === 'page'
+          ? ['editor', 'featured_image', 'builder']
+          : ['editor', 'featured_image']
+    ),
+    hierarchical: settings?.hierarchical ?? (typeKey === 'page'),
+    archive_per_page: settings?.archive_per_page ?? (typeKey === 'post' ? 20 : 12),
+    default_sort: settings?.default_sort ?? 'published_at_desc',
+    exclude_from_sitemap: settings?.exclude_from_sitemap ?? (typeKey === 'pattern'),
+    menu_name: settings?.menu_name ?? null,
+    menu_icon: settings?.menu_icon ?? null,
+    menu_position: settings?.menu_position ?? 50,
+    show_in_menu: settings?.show_in_menu ?? (typeKey !== 'pattern'),
+    list_columns: settings?.list_columns ? settings.list_columns.map(c => ({ ...c })) : [],
   };
   if (typeKey === 'pattern') {
-    return { ...effective, public: false, has_archive: false, publication: 'immediate', supports: ['builder'] };
+    return {
+      ...effective,
+      public: false,
+      has_archive: false,
+      publication: 'immediate',
+      supports: ['builder'],
+      hierarchical: false,
+      exclude_from_sitemap: true,
+      show_in_menu: false,
+    };
   }
   if (typeKey === 'section') {
     return { ...effective, public: false, has_archive: false, publication: 'draft_publish' };
@@ -119,6 +177,19 @@ export function updateContentType(
   });
 }
 
+export function deleteContentType(
+  key: string,
+  version: number,
+  csrfToken: string,
+): Promise<{ deleted_key: string }> {
+  return requestJson(contentTypePath(key), {
+    method: 'DELETE',
+    csrfToken,
+    ifMatchVersion: version,
+    defaultErrorMessage: __("Could not delete the content type."),
+  });
+}
+
 export function listFieldGroups(): Promise<FieldGroupRecord[]> {
   return requestJson('/api/admin/content-field-groups', {
     defaultErrorMessage: __("Could not load custom field groups."),
@@ -151,16 +222,36 @@ export function updateFieldGroup(
   });
 }
 
+export function setFieldGroupActive(
+  groupId: string,
+  version: number,
+  active: boolean,
+  csrfToken: string,
+): Promise<FieldGroupRecord> {
+  return requestJson(`/api/admin/content-field-groups/${encodeURIComponent(groupId)}/active`, {
+    method: 'POST',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify({ active }),
+    defaultErrorMessage: __("Could not update field group active state."),
+  });
+}
+
 export function deleteFieldGroup(
   groupId: string,
   version: number,
   csrfToken: string,
+  purge = false,
 ): Promise<FieldGroupRecord> {
-  return requestJson(`/api/admin/content-field-groups/${encodeURIComponent(groupId)}`, {
+  const suffix = purge ? '?purge=true' : '';
+  return requestJson(`/api/admin/content-field-groups/${encodeURIComponent(groupId)}${suffix}`, {
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: __("Could not withdraw the field group."),
+    defaultErrorMessage: purge
+      ? __("Could not permanently delete the field group.")
+      : __("Could not withdraw the field group."),
   });
 }
 

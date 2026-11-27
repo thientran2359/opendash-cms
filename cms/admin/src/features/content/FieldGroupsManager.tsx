@@ -66,7 +66,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
     void reload();
   }, [typeKey]);
 
-  const relevantGroups = groups.filter(g => g.targets.some(t => t.type_key === typeKey));
+  const relevantGroups = groups.filter(g => g.targets.some(t => t.target_kind === 'content_type' && t.target_key === typeKey));
 
   useEffect(() => {
     onCountChangeRef.current?.(relevantGroups.length);
@@ -103,8 +103,15 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
         {
           local_key: localKey.trim(),
           title: title.trim(),
-          target_types: [typeKey],
-          default_region: defaultRegion,
+          location: [[{ param: 'content_type', op: 'eq', value: typeKey }]],
+          presentation: {
+            region: defaultRegion,
+            order: 50,
+            collapsible: true,
+            collapsed_by_default: false,
+            style: 'card',
+            label_placement: 'top',
+          },
           fields,
         },
         csrfToken,
@@ -138,18 +145,17 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
   const handleDetachTarget = async (g: FieldGroupRecord) => {
     if (!csrfToken) return;
     const remainingTargets = g.targets
-      .filter(t => t.type_key !== typeKey && t.association_state === 'active')
-      .map(t => t.type_key);
+      .filter(t => !(t.target_kind === 'content_type' && t.target_key === typeKey) && t.association_state === 'active')
+      .map(t => t.target_key);
     try {
       await updateFieldGroup(
         g.group_id,
         g.version,
         {
-          local_key: g.group_id.replace(/^user:/, ''),
+          local_key: g.local_key || g.group_id.replace(/^user:/, ''),
           title: g.title,
-          target_types: remainingTargets,
-          default_region: g.default_region,
-          default_order: g.default_order,
+          location: remainingTargets.map(k => [{ param: 'content_type', op: 'eq', value: k }]),
+          presentation: g.presentation,
           fields: g.fields,
         },
         csrfToken,
@@ -191,7 +197,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
                   <AdminBadge tone={g.status === 'active' ? 'success' : 'neutral'}>{g.status}</AdminBadge>
                 </div>
                 <div className="mt-0.5 text-xs text-zinc-600">
-                  {__("Default region:")}{' '}<code className="font-mono">{g.default_region}</code> · {g.fields.length} {__("fields")}
+                  {__("Default region:")}{' '}<code className="font-mono">{g.presentation.region}</code> · {g.fields.length} {__("fields")}
                 </div>
               </div>
               {g.owner.kind === 'user' && g.status === 'active' && (

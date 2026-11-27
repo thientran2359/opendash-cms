@@ -62,7 +62,8 @@ export interface SelectOption {
 export interface ContentTypeDefinition {
   key: string;
   label: string;
-  fields: FieldSpec[];
+  singular_label?: string | null;
+  description?: string | null;
 }
 
 export interface ResourceOwner {
@@ -75,6 +76,8 @@ export interface OwnedContentType {
   status: ProviderStatus;
   declaration_state?: DeclarationState;
   descriptor: ContentTypeDefinition;
+  taxonomies?: string[];
+  rewrite_base?: string | null;
   version: number;
   schema_token: string;
 }
@@ -103,12 +106,16 @@ export interface ContentEntryInput {
   values: Record<string, ContentFieldValue>;
   /** Omitted on legacy updates to preserve existing links; [] removes every link. */
   term_ids?: number[];
+  parent_id?: number | null;
+  menu_order?: number;
   locale?: string;
 }
 
 export interface ContentEntryRecord extends ContentEntryInput {
   term_ids: number[];
   primary_category_term_id?: number | null;
+  parent_id?: number | null;
+  menu_order?: number;
   id: number;
   content_type_key: string;
   publication_status: 'draft' | 'published';
@@ -194,9 +201,12 @@ export interface EntryTableRow {
   updated_at: string;
   published_at?: string | null;
   trashed_at?: string | null;
+  parent_id?: number | null;
+  menu_order?: number;
   term_ids: number[];
   locale?: string;
   translation_group_id?: string;
+  translations?: TranslationLinkSummary[];
   /** Null for draft, Trash, or any entry without a publicly routable URL. */
   public_url: string | null;
   /** Only custom fields the current actor is authorized to read (empty for Trash). */
@@ -223,52 +233,84 @@ export interface EntryTableQuery {
   tag_id?: number;
   include_descendants?: boolean;
   updated_month?: string;
-  sort?: 'title' | 'created_at' | 'updated_at' | 'trashed_at' | 'id';
+  sort?: 'title' | 'created_at' | 'updated_at' | 'trashed_at' | 'menu_order' | 'id';
   order?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
   retained_trash?: boolean;
 }
 
+export type LocationOp = 'eq' | 'neq';
+export type LocationParam =
+  | 'content_type'
+  | 'taxonomy_term'
+  | 'options_page'
+  | 'page_layout'
+  | 'custom_template'
+  | 'special_page'
+  | 'entry_taxonomy'
+  | 'entry_id'
+  | 'user_role';
+
+export interface LocationRule {
+  param: LocationParam;
+  op: LocationOp;
+  value: string;
+}
+
+export type LocationRuleGroups = LocationRule[][];
+export type FieldGroupDomain = 'content' | 'term' | 'options_page';
+export type FieldGroupStyle = 'card' | 'seamless';
+export type FieldGroupLabelPlacement = 'top' | 'left';
+
+export interface FieldGroupPresentation {
+  region: EditorRegion;
+  order: number;
+  collapsible: boolean;
+  collapsed_by_default: boolean;
+  style: FieldGroupStyle;
+  label_placement: FieldGroupLabelPlacement;
+}
+
 export interface UserFieldGroupInput {
   local_key: string;
   title: string;
-  target_types: string[];
+  description?: string;
+  location: LocationRuleGroups;
+  presentation?: FieldGroupPresentation;
+  active?: boolean;
   fields: FieldSpec[];
-  default_region?: EditorRegion;
-  default_order?: number;
 }
 
 export interface FieldGroupTargetBinding {
-  type_key: string;
+  target_kind: string;
+  target_key: string;
   association_state: DeclarationState;
 }
 
 export interface FieldGroupRecord {
   group_id: string;
   owner: ResourceOwner;
+  local_key: string;
   title: string;
-  provider_status: ProviderStatus;
+  description: string;
+  domain: FieldGroupDomain;
+  location: LocationRuleGroups;
+  presentation: FieldGroupPresentation;
+  active: boolean;
+  provider_status?: ProviderStatus;
   status: DeclarationState;
-  default_region: EditorRegion;
-  default_order: number;
   version: number;
   targets: FieldGroupTargetBinding[];
   fields: FieldSpec[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface LayoutFieldSubgroup {
   subgroup_id: string;
   title: string;
   field_keys: string[];
-}
-
-export interface BaseFieldSlicePanelConfig {
-  panel_id: string;
-  title: string;
-  collapsible: boolean;
-  field_keys: string[];
-  subgroups: LayoutFieldSubgroup[];
 }
 
 export interface PanelPlacementConfig {
@@ -290,13 +332,11 @@ export interface EditorLayoutConfigV1 {
   schema_version: number;
   type_key: string;
   version: number;
-  base_field_panels: BaseFieldSlicePanelConfig[];
   regions: EditorRegionsConfig;
 }
 
 export type PanelKind =
   | { kind: 'core_built_in'; core_key: string }
-  | { kind: 'base_fields_slice'; slice_key: string; field_keys: string[] }
   | { kind: 'content_fields'; field_group_id: string }
   | {
       kind: 'action';
@@ -318,6 +358,7 @@ export interface PanelDefinition {
   min_view_role: FieldRole;
   min_edit_role: FieldRole;
   collapsible: boolean;
+  presentation: FieldGroupPresentation;
   required_core: boolean;
   effective_status: 'active' | 'provider_inactive' | 'withdrawn';
 }
@@ -343,6 +384,7 @@ export interface EffectivePanelProjection {
   field_keys: string[];
   subgroups: LayoutFieldSubgroup[];
   panel_fields?: FieldSpec[];
+  location?: LocationRuleGroups | null;
 }
 
 export interface EffectiveEditorRegionsProjection {
@@ -376,6 +418,8 @@ export interface CompositeEntrySaveInput {
   values: Record<string, ContentFieldValue>;
   term_ids?: number[];
   primary_category_term_id?: number | null;
+  parent_id?: number | null;
+  menu_order?: number;
   auto_unique_slug?: boolean;
   custom_path?: string | null;
   seo?: {

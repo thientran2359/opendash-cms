@@ -110,6 +110,8 @@ export function buildRestoredEditorPayload(
       cleared_fields: [],
       term_ids: res.entry.term_ids ?? [],
       primary_category_term_id: res.entry.primary_category_term_id ?? null,
+      parent_id: res.entry.parent_id ?? null,
+      menu_order: res.entry.menu_order ?? 0,
       page_layout_key: pageLayoutKey,
       custom_template_key: customTemplateKey,
       custom_path: res.custom_path ?? '',

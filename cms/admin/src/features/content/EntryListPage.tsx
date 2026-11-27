@@ -2,9 +2,12 @@ import { formatNumber } from '../../i18n/format.ts';
 import { __, _x, useI18n } from '../../i18n/index.tsx';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  effectiveContentTypeSettings,
   getEffectiveContentTypeTaxonomies,
+  listContentTypes,
   purgeContentEntry, queryContentEntryTable, getEffectiveEntryListConfig,
   restoreContentEntry, runEntryProviderAction, contentEntryPreviewPath, trashContentEntry,
+  type ContentTypeSettings,
 } from '../../api/content.ts';
 import {
   AdminColumnCell, type EffectiveListConfig, type ProviderColumn,
@@ -33,7 +36,19 @@ import {
   type BulkResultItem,
 } from './bulkEntryActions.ts';
 import { QuickEditForm } from './QuickEditForm.tsx';
+import {
+  buildHierarchicalDisplayRows,
+  EntryListColumnCell,
+  entryTableHash,
+  parseEntryTableHash,
+  readableEntryTableError as readableError,
+  resolveListColumnLabel,
+  safePublicPath,
+  type TaxonomyTableQuery,
+} from './EntryListColumns.tsx';
 import type { EntryTableQuery, EntryTableResult, EntryTableRow, TaxonomyDeltaOp } from './types.ts';
+
+export { entryTableHash, parseEntryTableHash, safePublicPath };
 
 interface Props {
   typeKey: string;
@@ -56,88 +71,9 @@ const sortButton =
 const statuses = ['all', 'draft', 'published', 'trash'] as const;
 const TERM_RESOLVE_BATCH = 100;
 const TERM_RESOLVE_CONCURRENCY = 2;
-type TaxonomyTableQuery = EntryTableQuery & { taxonomy_key?: string; term_id?: number };
 
 function rootHash(typeKey: string): string {
   return typeKey === 'post' ? '#/posts' : typeKey === 'page' ? '#/pages' : `#/cpt/${encodeURIComponent(typeKey)}`;
-}
-
-function boundedInt(raw: string | null, fallback: number, min: number, max: number): number {
-  if (!raw || !/^\d+$/.test(raw)) return fallback;
-  const value = Number(raw);
-  return Number.isSafeInteger(value) && value >= min && value <= max ? value : fallback;
-}
-
-export function parseEntryTableHash(hash: string): TaxonomyTableQuery {
-  const p = new URLSearchParams(hash.split('?')[1] ?? '');
-  const query: TaxonomyTableQuery = {};
-  const q = p.get('q')?.trim();
-  if (q && [...q].length <= 200 && !/[\u0000-\u001f\u007f]/.test(q)) query.q = q;
-  const status = p.get('status');
-  if (status === 'draft' || status === 'published' || status === 'trash') query.status = status;
-  const locale = p.get('locale')?.trim();
-  if (locale && locale !== 'all') query.locale = locale;
-  const category = boundedInt(p.get('category_id'), 0, 1, Number.MAX_SAFE_INTEGER);
-  const tag = boundedInt(p.get('tag_id'), 0, 1, Number.MAX_SAFE_INTEGER);
-  if (category) query.category_id = category;
-  if (tag) query.tag_id = tag;
-  if (p.has('taxonomy_key')) query.taxonomy_key = p.get('taxonomy_key') ?? '';
-  if (p.has('term_id')) query.term_id = Number(p.get('term_id'));
-  if (p.get('include_descendants') === 'true') query.include_descendants = true;
-  const month = p.get('updated_month');
-  if (month && /^\d{4}-(0[1-9]|1[0-2])$/.test(month) && month.slice(0, 4) !== '0000') {
-    query.updated_month = month;
-  }
-  const sort = p.get('sort');
-  if (
-    sort === 'title' ||
-    sort === 'id' ||
-    sort === 'created_at' ||
-    sort === 'updated_at' ||
-    sort === 'trashed_at'
-  ) {
-    query.sort = sort;
-  }
-  if (p.get('order') === 'asc') query.order = 'asc';
-  const limit = boundedInt(p.get('limit'), 20, 1, 100);
-  if (limit !== 20) query.limit = limit;
-  const offset = boundedInt(p.get('offset'), 0, 0, 1000000);
-  if (offset) query.offset = offset;
-  return query;
-}
-
-export function entryTableHash(base: string, filter: TaxonomyTableQuery): string {
-  const p = new URLSearchParams();
-  if (filter.q) p.set('q', filter.q);
-  if (filter.status && filter.status !== 'all') p.set('status', filter.status);
-  if (filter.locale && filter.locale !== 'all') p.set('locale', filter.locale);
-  if (filter.status !== 'trash') {
-    if (filter.category_id) p.set('category_id', String(filter.category_id));
-    if (filter.tag_id) p.set('tag_id', String(filter.tag_id));
-    if (filter.taxonomy_key !== undefined) p.set('taxonomy_key', filter.taxonomy_key);
-    if (filter.term_id !== undefined) p.set('term_id', String(filter.term_id));
-    if (filter.include_descendants) p.set('include_descendants', 'true');
-    if (filter.updated_month) p.set('updated_month', filter.updated_month);
-  }
-  const defaultSort = filter.status === 'trash' ? 'trashed_at' : 'updated_at';
-  if (filter.sort && filter.sort !== defaultSort) p.set('sort', filter.sort);
-  if (filter.order && filter.order !== 'desc') p.set('order', filter.order);
-  if (filter.limit && filter.limit !== 20) p.set('limit', String(filter.limit));
-  if (filter.offset) p.set('offset', String(filter.offset));
-  return `${base}${p.size ? `?${p.toString()}` : ''}`;
-}
-
-/** Never render a user-supplied URL with a protocol or scheme-relative origin. */
-export function safePublicPath(path: string | null | undefined): string | null {
-  return path && path.startsWith('/') && !path.startsWith('//') && !/[\\\u0000-\u001f\u007f]/.test(path)
-    ? path : null;
-}
-
-function readableError(cause: unknown): string {
-  if (cause instanceof ApiClientError && cause.status === 412) return __("412 — The item changed. Reload the list to get the latest version.");
-  if (cause instanceof ApiClientError && cause.status === 403) return __("403 — You do not have permission to perform this action.");
-  if (cause instanceof ApiClientError && cause.status === 401) return __("401 — Your session is no longer valid.");
-  return cause instanceof Error ? cause.message : __("The request did not complete.");
 }
 
 export function EntryListPage({
@@ -176,6 +112,9 @@ export function EntryListPage({
   } | null>(null);
   const [providerState, setProviderState] = useState<{
     accountScope: string; config: EffectiveListConfig;
+  } | null>(null);
+  const [typeSettingsState, setTypeSettingsState] = useState<{
+    accountScope: string; settings: ContentTypeSettings;
   } | null>(null);
   const [providerError, setProviderError] = useState('');
   const [providerBusy, setProviderBusy] = useState(false);
@@ -434,10 +373,18 @@ export function EntryListPage({
     const controller = new AbortController();
     setProviderState(null);
     setProviderError('');
-    void getEffectiveEntryListConfig(typeKey, controller.signal)
-      .then(config => {
+    void Promise.all([
+      getEffectiveEntryListConfig(typeKey, controller.signal),
+      listContentTypes().catch(() => null),
+    ])
+      .then(([config, typesList]) => {
         if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
         setProviderState({ accountScope, config });
+        const matched = typesList?.find(item => item.descriptor.key === typeKey);
+        setTypeSettingsState({
+          accountScope,
+          settings: effectiveContentTypeSettings(typeKey, matched?.descriptor.settings),
+        });
       })
       .catch(cause => {
         if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
@@ -829,8 +776,28 @@ export function EntryListPage({
   const captionId = `entry-table-caption-${typeKey}`;
   const activeSort = filters.sort ?? (isTrashView ? 'trashed_at' : 'updated_at');
   const activeOrder = filters.order ?? 'desc';
-  const ariaSortFor = (field: 'title' | 'updated_at' | 'trashed_at'): 'ascending' | 'descending' | undefined =>
+  const ariaSortFor = (field: 'title' | 'updated_at' | 'trashed_at' | 'menu_order'): 'ascending' | 'descending' | undefined =>
     activeSort === field ? (activeOrder === 'asc' ? 'ascending' : 'descending') : undefined;
+  const activeTypeSettings = typeSettingsState?.accountScope === accountScope
+    ? typeSettingsState.settings
+    : null;
+  const listColumns = !isTrashView ? (activeTypeSettings?.list_columns ?? []) : [];
+  const showHierarchyTree = Boolean(
+    !isTrashView &&
+      activeTypeSettings?.hierarchical &&
+      !filters.q &&
+      !filters.category_id &&
+      !filters.tag_id &&
+      !filters.term_id,
+  );
+  const displayRows = useMemo(
+    () => buildHierarchicalDisplayRows(currentRows, showHierarchyTree),
+    [currentRows, showHierarchyTree],
+  );
+  const rowTitleById = useMemo(
+    () => new Map(currentRows.map(row => [row.id, row.title])),
+    [currentRows],
+  );
   const bulkRemainingRetryCount = reconciledBulk?.retryableRows.length ?? 0;
   const displayBulkResults = reconciledBulk?.annotatedResults ?? bulkResults;
   const unresolvedUncertainCount = reconciledBulk?.unresolvedUncertainIds.length ?? 0;
@@ -1436,6 +1403,20 @@ export function EntryListPage({
               {!isTrashView && terms?.categoryEnabled && <th scope="col" className="px-3 py-2.5">{_x("Category", "feature.content")}</th>}
               {!isTrashView && terms?.tagEnabled && <th scope="col" className="px-3 py-2.5">{__("Tags")}</th>}
               {!isTrashView && customDefinitions.map(def => <th key={def.key} scope="col" className="px-3 py-2.5">{def.label}</th>)}
+              {!isTrashView && listColumns.map((col, idx) => (
+                <th key={`listcol-${col.kind}-${col.key}-${idx}`} scope="col"
+                  aria-sort={col.kind === 'menu_order' ? ariaSortFor('menu_order') : undefined}
+                  className="min-w-[100px] px-3 py-2.5">
+                  {col.kind === 'menu_order' ? (
+                    <button type="button" className={sortButton} disabled={bulkBusy} onClick={() => sortBy('menu_order')}>
+                      <span>{resolveListColumnLabel(col, terms?.definitions ?? [])}</span>
+                      {activeSort === 'menu_order' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
+                    </button>
+                  ) : (
+                    resolveListColumnLabel(col, terms?.definitions ?? [])
+                  )}
+                </th>
+              ))}
               {!isTrashView && providerColumns.map(column => <th key={column.key} scope="col"
                 className="min-w-[120px] px-3 py-2.5">{column.label}</th>)}
               {isTrashView ? (
@@ -1459,17 +1440,17 @@ export function EntryListPage({
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {!loading && !error && currentRows.length === 0 && <tr>
-              <td colSpan={isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length}
+              <td colSpan={isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + listColumns.length + providerColumns.length}
                 className="px-4 py-8 text-center text-sm text-zinc-500">
                 {data?.total === 0 ? __("No matching content. Clear filters to see more.") : __("No items on this page.")}
               </td>
             </tr>}
-            {currentRows.map(row => {
+            {displayRows.map(({ row, depth }) => {
               const path = !isTrashView && row.publication_status === 'published' ? safePublicPath(row.public_url) : null;
               const thumbId = !isTrashView && typeof row.fields?.featured_image === 'string' ? row.fields.featured_image.trim() : '';
               const readingBlocked = row.blocked_reasons?.trash === 'reading_page_assigned';
               const restoreLocaleBlocked = row.blocked_reasons?.restore === 'locale_disabled';
-              const totalCols = isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + providerColumns.length;
+              const totalCols = isTrashView ? 4 : 5 + (terms?.definitions.length ?? 0) + listColumns.length + providerColumns.length;
               const isQuickEditing = !isTrashView && quickEditRowId === row.id;
               return <Fragment key={row.id}><tr data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
                 <td className="px-3 py-2.5"><input type="checkbox" aria-label={__("Select item #{{value1}}", { value1: row.id })}
@@ -1499,7 +1480,12 @@ export function EntryListPage({
                   </td>
                 )}
                 <td className="break-words px-3 py-2.5">
-                  <div className="leading-snug">
+                  <div className="leading-snug" style={depth > 0 ? { paddingLeft: `${depth * 18}px` } : undefined}>
+                    {depth > 0 && (
+                      <span className="mr-1 text-zinc-400 select-none" aria-hidden="true">
+                        {'— '.repeat(depth)}
+                      </span>
+                    )}
                     {isTrashView ? (
                       <span className="inline text-left text-sm font-semibold text-zinc-900">
                         {row.title}
@@ -1680,6 +1666,9 @@ export function EntryListPage({
                 {!isTrashView && terms?.categoryEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'category')}</td>}
                 {!isTrashView && terms?.tagEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'tag')}</td>}
                 {!isTrashView && customDefinitions.map(def => <td key={def.key} className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, def.key)}</td>)}
+                {!isTrashView && listColumns.map((col, idx) => (
+                  <td key={`listcell-${row.id}-${col.kind}-${col.key}-${idx}`} className="break-words px-3 py-2.5"><EntryListColumnCell column={col} row={row} rowTitleById={rowTitleById} renderTermsCell={renderTermsCell} /></td>
+                ))}
                 {!isTrashView && providerColumns.map(column => <td key={column.key} className="break-words px-3 py-2.5">
                   <AdminColumnCell column={column} row={row} busy={providerBusy || bulkBusy}
                     onRun={(col, entry) => void performProviderAction(col, entry)} />

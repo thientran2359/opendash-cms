@@ -15,7 +15,13 @@ export type {
   TaxonomyKind, TaxonomyTerm, TaxonomyTermPage, TaxonomyTermInput, TaxonomyTermChanges,
 } from './taxonomy.ts';
 export {
-  listMenus, createMenu, getMenu, updateMenu, deleteMenu, getMenuSlots, putMenuSlots,
+  getMenuSlots,
+  putMenuSlots,
+  listMenus,
+  createMenu,
+  getMenu,
+  updateMenu,
+  deleteMenu,
 } from './menus.ts';
 export type {
   MenuTargetKind, MenuRecord, MenuItemRecord, MenuWithItems, MenuListPage,
@@ -27,6 +33,16 @@ export {
 export type {
   EntryRouteSnapshot, SeoMetadataInput, EntrySeoSnapshot, HomeSeoSnapshot,
 } from './seo.ts';
+export type {
+  ContentSupport,
+  ContentPublicationPolicy,
+  ContentDefaultSort,
+  ContentListColumnKind,
+  ContentListColumn,
+  ContentTypeSettings,
+  ContentTypeDefinitionWithSettings,
+  OwnedContentTypeWithSettings,
+} from './content.ts';
 export * from './contact.ts';
 export * from './smtp.ts';
 export * from './operations.ts';

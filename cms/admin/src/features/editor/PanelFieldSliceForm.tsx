@@ -14,6 +14,7 @@ interface Props {
   proj: EffectivePanelProjection;
   fieldKeys: readonly string[];
   usePanelFields?: boolean;
+  labelPlacement?: 'top' | 'left';
   values: Record<string, ContentFieldValue>;
   clearedFields: readonly string[];
   fieldErrors: Record<string, string>;
@@ -30,6 +31,7 @@ export const PanelFieldSliceForm: React.FC<Props> = ({
   proj,
   fieldKeys,
   usePanelFields = false,
+  labelPlacement = 'top',
   values,
   clearedFields,
   fieldErrors,
@@ -88,7 +90,10 @@ export const PanelFieldSliceForm: React.FC<Props> = ({
   if (sliceSpecs.length === 0) return null;
 
   return (
-    <div className="space-y-2.5">
+    <div
+      className={labelPlacement === 'left' ? 'space-y-2.5 [&_.space-y-1]:md:flex [&_.space-y-1]:md:items-start [&_.space-y-1]:md:gap-3' : 'space-y-2.5'}
+      data-label-placement={labelPlacement}
+    >
       {statusItems.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
           {statusItems.map(({ fk, eff }) => {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/index.tsx';
 import type { AuthUser } from '../types.ts';
-import type { OwnedContentType } from '../features/content/types.ts';
+import type { OwnedContentTypeWithSettings } from '../api/content.ts';
 import { AuthPanel } from './AuthPanel.tsx';
 import {
   isRouteAllowed,
@@ -21,7 +21,12 @@ export {
   type ParsedRoute,
 };
 
-import { buildMenuTree, NavIcon, type NavigationGroup } from './AdminShellMenu';
+import {
+  buildMenuTree,
+  NavIcon,
+  type NavigationGroup,
+  type OptionsPageMenuItem,
+} from './AdminShellMenu';
 
 interface AdminShellProps {
   user: AuthUser | null;
@@ -37,8 +42,9 @@ interface AdminShellProps {
   onLogout: () => void;
   route: ParsedRoute;
   routeForbidden: boolean;
-  cptTypes: OwnedContentType[];
+  cptTypes: OwnedContentTypeWithSettings[];
   cptTaxonomies?: Record<string, Array<{ key: string; label: string }>>;
+  optionsPages?: OptionsPageMenuItem[];
   onNavigateHash: (hash: string) => void;
   hasUnsavedChanges: boolean;
   devMode?: boolean;
@@ -48,6 +54,8 @@ interface AdminShellProps {
   onSyncDevManifest?: () => void;
   contentContent: React.ReactNode;
   schemaSettingsContent: React.ReactNode;
+  contentStructureContent?: React.ReactNode;
+  optionsPageContent?: React.ReactNode;
   postsContent: React.ReactNode;
   pagesContent: React.ReactNode;
   patternsContent: React.ReactNode;
@@ -67,9 +75,9 @@ interface AdminShellProps {
 export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
-  route, routeForbidden, cptTypes, cptTaxonomies, onNavigateHash, hasUnsavedChanges,
+  route, routeForbidden, cptTypes, cptTaxonomies, optionsPages = [], onNavigateHash, hasUnsavedChanges,
   devMode = false, devTheme = null, devPlugins = [], devSyncing = false, onSyncDevManifest,
-  contentContent, schemaSettingsContent,
+  contentContent, schemaSettingsContent, contentStructureContent, optionsPageContent,
   postsContent, pagesContent, patternsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
   libraryContent, studioContent,
@@ -78,10 +86,14 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const menuTree = buildMenuTree(cptTypes, user?.role === 'admin', cptTaxonomies);
+  const menuTree = buildMenuTree(cptTypes, user?.role === 'admin', cptTaxonomies, optionsPages);
   const activeParentId =
     route.view === 'cpt' && route.typeKey
       ? `cpt:${route.typeKey}`
+      : route.view === 'content-structure'
+        ? 'schema'
+        : route.view === 'options-page'
+          ? (route.typeKey ? `options:${route.typeKey}` : 'schema')
       : route.view === 'taxonomy'
         ? (route.typeKey
           ? `cpt:${route.typeKey}`
@@ -139,17 +151,19 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   // Legacy deep links keep rendering their canonical feature; highlighting
   // follows the resolved route, not a potentially obsolete URL spelling.
   const selectedNavHash =
+    route.view === 'content-structure' ? `#/content-structure/${route.sub}` :
+    route.view === 'options-page' && route.typeKey ? `#/options/${encodeURIComponent(route.typeKey)}` :
     route.view === 'themes' ? `#/appearance/${route.sub}` :
     route.view === 'taxonomy'
       ? (route.typeKey && route.taxonomyKind
         ? `#/cpt/${encodeURIComponent(route.typeKey)}/taxonomy/${encodeURIComponent(route.taxonomyKind)}`
         : route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
-          ? '#/taxonomy/definitions' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
+          ? '#/content-structure/taxonomies' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
     route.view === 'profile' ? '#/users/profile' :
     route.view === 'studio' ? '#/studio' :
     route.view === 'tools' ? (route.sub === '404-log' ? '#/tools/redirects' : `#/tools/${route.sub}`) :
     route.view === 'settings'
-      ? (route.sub === 'content-types' ? '#/appearance/content-types' : `#/settings/${route.sub}`) :
+      ? (route.sub === 'content-types' ? '#/content-structure/content-types' : `#/settings/${route.sub}`) :
     route.view === 'media' ? '#/media' :
     route.view === 'plugins' ? (route.sub === 'install' ? '#/plugins/install' : '#/plugins') :
     route.view === 'users' ? (route.sub === 'new' ? '#/users/new' : '#/users') :
@@ -158,7 +172,8 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const subLabels: Record<string, string> = {
     list: __("List"), new: __("Add new"), edit: _x("Edit", "shell.edit"), library: __("Library"),
     general: __("General"), multilingual: __("Multilingual"), reading: __("Homepage & posts"), permalinks: __("Permalinks"), seo: __("SEO"), contact: __("Contact"), smtp: __("Email notifications (SMTP)"),
-    'content-types': __("Content types & fields"), themes: __("Themes"), menus: __("Menus"),
+    'content-types': __("Content types"), taxonomies: __("Taxonomies"), 'field-groups': __("Field groups"), 'options-pages': __("Options pages"), view: __("Options page"),
+    themes: __("Themes"), menus: __("Menus"),
     definitions: __("Custom taxonomies"), terms: _x("Terms", "shell.terms"),
     options: __("Theme options"), health: __("System health"),
     'media-reconcile': __("Media reconciliation"), backup: __("Backup & restore"),
@@ -434,6 +449,14 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 </section>
                 {user && route.view === 'profile' && <div className="od-admin-card min-w-0">{profileContent}</div>}
                 {user?.role === 'admin' && route.view === 'tools' && <div className="od-admin-card min-w-0">{toolsContent}</div>}
+                {user?.role === 'admin' && route.view === 'content-structure' && (
+                  <div className="od-admin-card min-w-0">
+                    {contentStructureContent ?? schemaSettingsContent}
+                  </div>
+                )}
+                {user && route.view === 'options-page' && (
+                  <div className="od-admin-card min-w-0">{optionsPageContent}</div>
+                )}
                 {user?.role === 'admin' && route.view === 'settings' && (
                   <div className="od-admin-card min-w-0">
                     {route.sub === 'content-types' ? schemaSettingsContent : settingsContent}
