@@ -547,7 +547,13 @@ pub(crate) async fn render_canonical_taxonomy(
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::finalize_document_richtext(
-            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            content_render::finalize_document_images(
+                content_render::finalize_document_icons(
+                    composed,
+                    &budget.render_budget.icon_nonces,
+                )?,
+                &budget.render_budget.image_nonces,
+            )?,
             &budget.render_budget.richtext_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,

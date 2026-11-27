@@ -10,7 +10,7 @@
 
 | Check | Subagent ID | Scope Audited | Initial Verdict | Final Status after Fix |
 |---|---|---|---|---|
-| **Compact Drift Audit** | `9596a715` (`egm-codebase-details`) | S01–S04 code, [`0058_entry_revisions_and_autosaves.sql`](../../cms/migrations/0058_entry_revisions_and_autosaves.sql), `opendash-core::revisions`, `opendash-server` (`routes/revisions/`, `storage/revisions/`, `http_middleware.rs`, `i18n.rs`), `cms/admin/` (`features/revisions/`, `SingleEdit*`, `Studio*`), [`M8_WRITER_INVENTORY.md`](../../docs/contracts/M8_WRITER_INVENTORY.md), tests & scripts | **NEEDS FIXES** (`0 Blocker / 1 Major / 1 Minor / 2 Nit`) | **PASS** (Major đã vá + thêm regression test; Minor/Nits đã xác nhận & ghi nhận) |
+| **Compact Drift Audit** | `9596a715` (`egm-codebase-details`) | S01–S04 code, [`0059_entry_revisions_and_autosaves.sql`](../../cms/migrations/0059_entry_revisions_and_autosaves.sql) (nối tiếp `0058_responsive_media_and_replace.sql` khi đồng bộ `origin/main@4bfbeae`), `opendash-core::revisions`, `opendash-server` (`routes/revisions/`, `storage/revisions/`, `app_origin.rs`, `i18n.rs`), `cms/admin/` (`features/revisions/`, `SingleEdit*`, `Studio*`), [`M8_WRITER_INVENTORY.md`](../../docs/contracts/M8_WRITER_INVENTORY.md), tests & scripts | **NEEDS FIXES** (`0 Blocker / 1 Major / 1 Minor / 2 Nit`) | **PASS** (Major đã vá + thêm regression test; Minor/Nits đã xác nhận & ghi nhận) |
 
 ---
 

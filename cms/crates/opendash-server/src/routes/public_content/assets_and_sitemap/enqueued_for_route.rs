@@ -136,6 +136,7 @@ pub(crate) async fn render_not_found_response_for_locale(
     )
     .await?;
     let html = content_render::finalize_document_icons(html, &budget.render_budget.icon_nonces)?;
+    let html = content_render::finalize_document_images(html, &budget.render_budget.image_nonces)?;
     let html =
         content_render::finalize_document_richtext(html, &budget.render_budget.richtext_nonces)?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
@@ -406,7 +407,13 @@ pub(crate) async fn render_canonical_archive(
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::finalize_document_richtext(
-            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            content_render::finalize_document_images(
+                content_render::finalize_document_icons(
+                    composed,
+                    &budget.render_budget.icon_nonces,
+                )?,
+                &budget.render_budget.image_nonces,
+            )?,
             &budget.render_budget.richtext_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,

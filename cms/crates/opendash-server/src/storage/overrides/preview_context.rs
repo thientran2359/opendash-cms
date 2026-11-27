@@ -35,6 +35,7 @@ pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> Ent
         fields: BTreeMap::new(),
         field_list: Vec::new(),
         cover_url: None,
+        cover_media: None,
         terms,
         all_terms: Vec::new(),
         primary_category: None,
@@ -286,9 +287,15 @@ pub async fn preview_typed_override_with_cache_and_locale(
                 &fmt_cfg,
                 &effective_locale,
             )?;
-            crate::document::normalize_public_document(&html)
-                .map(|doc| doc.body_fragment)
-                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+            crate::document::normalize_document_with_policy(
+                &html,
+                crate::document::DocumentNormalizeOptions {
+                    allow_trusted_theme_markup: false,
+                    allow_admin_media_preview: true,
+                },
+            )
+            .map(|doc| doc.body_fragment)
+            .map_err(|_| ApiError::bad_request("Invalid preview body."))
         })?;
         (built.theme_context, body)
     } else {
@@ -352,6 +359,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
         )?;
     }
     rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
+    rendered.html = content_render::finalize_document_images(rendered.html, &budget.image_nonces)?;
     rendered.html =
         content_render::finalize_document_richtext(rendered.html, &budget.richtext_nonces)?;
     tx.rollback().await?;

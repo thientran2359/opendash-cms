@@ -19680,3 +19680,195 @@ msgstr "Bản tự động lưu này dựa trên phiên bản v{{value1}}."
 
 msgid "This restored revision uses the standard Editor mode (editor)."
 msgstr "Phiên bản vừa khôi phục đang dùng chế độ Trình soạn thảo chuẩn (editor)."
+
+#: admin:api.media.could_not_load_media_details
+msgid "Could not load media details."
+msgstr "Không thể tải chi tiết media."
+
+#: admin:api.media.could_not_replace_media
+msgid "Could not replace the media file."
+msgstr "Không thể thay thế tệp media."
+
+#: admin:api.media.could_not_load_variants_status
+msgid "Could not load responsive variant status."
+msgstr "Không thể tải trạng thái biến thể ảnh responsive."
+
+#: admin:api.media.could_not_regenerate_variants
+msgid "Could not regenerate responsive media variants."
+msgstr "Không thể tái tạo biến thể ảnh responsive."
+
+#: admin:feature.media.validation.replace_video_expected
+msgid "This asset is a video. Select an MP4 video file to replace it."
+msgstr "Tài nguyên này là video. Hãy chọn tệp video MP4 để thay thế."
+
+#: admin:feature.media.validation.replace_image_expected
+msgid "This asset is an image. Select a JPEG, PNG or WebP image to replace it."
+msgstr "Tài nguyên này là ảnh. Hãy chọn tệp ảnh JPEG, PNG hoặc WebP để thay thế."
+
+#: admin:feature.media.details.readers_active
+msgid "This file is currently open or streaming. Wait a moment and try replacing it again."
+msgstr "Tệp này đang được mở hoặc truyền phát. Hãy đợi một chút rồi thử thay thế lại."
+
+#: admin:feature.media.details.etag_mismatch
+msgid "Media version changed concurrently (ETag mismatch). Latest details have been reloaded."
+msgstr "Phiên bản media vừa thay đổi đồng thời (lệch ETag). Đã tải lại thông tin mới nhất."
+
+#: admin:feature.media.details.kind_mismatch
+msgid "Cannot replace across media kinds: images must be JPEG/PNG/WebP and videos must be MP4."
+msgstr "Không thể thay thế chéo loại media: ảnh phải là JPEG/PNG/WebP và video phải là MP4."
+
+#: admin:feature.media.details.version_gen
+msgid "v{{value1}} · generation {{value2}}"
+msgstr "v{{value1}} · thế hệ {{value2}}"
+
+#: admin:feature.media.details.etag
+msgid "ETag"
+msgstr "ETag"
+
+#: admin:feature.media.details.updated
+msgid "Updated"
+msgstr "Cập nhật"
+
+#: admin:feature.media.details.responsive_variants
+msgid "Responsive variants"
+msgstr "Biến thể responsive"
+
+#: admin:feature.media.details.ready_version
+msgid "Ready (v{{value1}})"
+msgstr "Sẵn sàng (v{{value1}})"
+
+#: admin:feature.media.details.pending_generation
+msgid "Pending generation"
+msgstr "Chờ tạo biến thể"
+
+#: admin:feature.media.details.loading_variants
+msgid "Loading variant details…"
+msgstr "Đang tải chi tiết biến thể…"
+
+#: admin:feature.media.details.open_variant
+msgid "Open"
+msgstr "Mở"
+
+#: admin:feature.media.details.no_variants
+msgid "No responsive variants stored (fits base size limit)."
+msgstr "Không lưu biến thể phụ nào (ảnh nằm gọn trong kích thước gốc)."
+
+#: admin:feature.media.details.view_srcset
+msgid "View srcset markup"
+msgstr "Xem mã srcset"
+
+#: admin:feature.media.details.replacing
+msgid "Replacing…"
+msgstr "Đang thay thế…"
+
+#: admin:feature.media.details.replace_file
+msgid "Replace file"
+msgstr "Thay thế tệp"
+
+#: admin:feature.media.details.choose_replacement
+msgid "Choose replacement file (keeps current media ID)"
+msgstr "Chọn tệp thay thế (giữ nguyên mã media hiện tại)"
+
+#: admin:feature.media.details.replace_help
+msgid "Replacing keeps the existing media ID and bumps its version query token."
+msgstr "Thay thế giữ nguyên ID media cũ và tăng token phiên bản truy vấn."
+
+#: admin:feature.media.regenerate.requested_stop
+msgid "Requested stopping variant regeneration ({{value1}}…)."
+msgstr "Đã gửi yêu cầu dừng tái tạo biến thể ({{value1}}…)."
+
+#: admin:feature.media.regenerate.already_finished
+msgid "The variant regeneration job already finished."
+msgstr "Tác vụ tái tạo biến thể đã kết thúc trước đó."
+
+#: admin:feature.media.regenerate.could_not_stop
+msgid "Could not stop the variant regeneration job."
+msgstr "Không thể dừng tác vụ tái tạo biến thể."
+
+#: admin:feature.media.regenerate.confirm_force
+msgid "Force regenerate responsive variants for all existing images? This re-encodes every active image in batches."
+msgstr "Tái tạo ép buộc biến thể responsive cho toàn bộ ảnh hiện có? Hệ thống sẽ nén lại từng lô cho mọi ảnh đang hoạt động."
+
+#: admin:feature.media.regenerate.completed
+msgid "Variant regeneration completed: {{value1}} succeeded, {{value2}} failed, {{value3}} skipped."
+msgstr "Hoàn tất tái tạo biến thể: {{value1}} thành công, {{value2}} lỗi, {{value3}} bỏ qua."
+
+#: admin:feature.media.regenerate.paused
+msgid "Variant regeneration paused at {{value1}} processed ({{value2}} remaining)."
+msgstr "Đã tạm dừng tái tạo biến thể tại {{value1}} ảnh đã xử lý (còn lại {{value2}})."
+
+#: admin:feature.media.regenerate.stopped
+msgid "Variant regeneration was stopped."
+msgstr "Đã dừng tiến trình tái tạo biến thể."
+
+#: admin:feature.media.regenerate.already_running
+msgid "Another variant regeneration run is already in progress."
+msgstr "Đang có một tiến trình tái tạo biến thể khác chạy nền."
+
+#: admin:feature.media.regenerate.aria_label
+msgid "Responsive image variant regeneration"
+msgstr "Tái tạo biến thể ảnh responsive"
+
+#: admin:feature.media.regenerate.heading
+msgid "Responsive image variants"
+msgstr "Biến thể ảnh responsive"
+
+#: admin:feature.media.regenerate.status_summary
+msgid "Ready {{value1}}/{{value2}} images · Pending {{value3}} · Variant disk usage {{value4}}"
+msgstr "Sẵn sàng {{value1}}/{{value2}} ảnh · Chờ xử lý {{value3}} · Dung lượng biến thể {{value4}}"
+
+#: admin:feature.media.regenerate.loading_status
+msgid "Loading variant status…"
+msgstr "Đang tải trạng thái biến thể…"
+
+#: admin:feature.media.regenerate.generate_missing
+msgid "Generate missing variants"
+msgstr "Tạo biến thể còn thiếu"
+
+#: admin:feature.media.regenerate.force_all
+msgid "Force regenerate all"
+msgstr "Tái tạo lại toàn bộ"
+
+#: admin:feature.media.regenerate.stopping
+msgid "Stopping…"
+msgstr "Đang dừng…"
+
+#: admin:feature.media.regenerate.stop
+msgid "Stop"
+msgstr "Dừng"
+
+#: admin:feature.media.regenerate.progress
+msgid "Processed {{value1}} · Succeeded {{value2}} · Failed {{value3}} · Skipped {{value4}} · Remaining {{value5}}"
+msgstr "Đã xử lý {{value1}} · Thành công {{value2}} · Lỗi {{value3}} · Bỏ qua {{value4}} · Còn lại {{value5}}"
+
+#: admin:feature.media.regenerate.failed_ids
+msgid "Failed media IDs:"
+msgstr "Các ID media bị lỗi:"
+
+#: admin:feature.media.library.replaced_notice
+msgid "Replaced media file (now v{{value1}} · generation {{value2}})."
+msgstr "Đã thay thế tệp media (hiện ở v{{value1}} · thế hệ {{value2}})."
+
+#: admin:feature.operations.reconcile.orphan_split
+msgid "(canonical: {{value1}}, variants: {{value2}})"
+msgstr "(tệp gốc: {{value1}}, biến thể: {{value2}})"
+
+#: admin:feature.operations.reconcile.orphan_type
+msgid "Type"
+msgstr "Loại"
+
+#: admin:feature.operations.reconcile.logical_path
+msgid "Logical path"
+msgstr "Đường dẫn logic"
+
+#: admin:feature.operations.reconcile.kind_variant
+msgid "Variant"
+msgstr "Biến thể"
+
+#: admin:feature.operations.reconcile.kind_canonical
+msgid "Canonical"
+msgstr "Tệp gốc"
+
+#: admin:feature.operations.reconcile.showing_first_50
+msgid "Showing first 50 of {{value1}} orphaned candidates."
+msgstr "Hiển thị 50 mục đầu tiên trong tổng số {{value1}} tệp mồ côi."

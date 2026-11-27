@@ -1770,25 +1770,7 @@ mod tests {
         for (id, filename) in [(&med_pub, "hero.png"), (&med_priv, "priv.png")] {
             crate::storage::media::save(
                 &db,
-                &crate::storage::media::MediaAsset {
-                    id: id.clone(),
-                    kind: "image".into(),
-                    filename: filename.into(),
-                    mime_type: "image/png".into(),
-                    extension: "png".into(),
-                    byte_size: 123,
-                    width: 100,
-                    height: 100,
-                    thumb_width: Some(50),
-                    thumb_height: Some(50),
-                    duration_ms: None,
-                    video_codec: None,
-                    audio_codec: None,
-                    lifecycle_state: "active".into(),
-                    generation: 1,
-                    version: 1,
-                    created_at: String::new(),
-                },
+                &crate::storage::media::MediaAsset::test_image_stub(id.clone(), filename.into()),
             )
             .await
             .unwrap();
@@ -1938,7 +1920,18 @@ mod tests {
 
         let media_res = read_captured_kv(&db, "s01-ops", 7).await;
         assert_eq!(media_res["ok"], true);
-        assert_eq!(media_res["data"]["media"]["id"], med_pub);
+        let media_obj = &media_res["data"]["media"];
+        assert_eq!(media_obj["id"], med_pub);
+        assert_eq!(media_obj["version"], 1);
+        assert_eq!(
+            media_obj["url"],
+            format!("/api/admin/media/{med_pub}/file?v=1")
+        );
+        assert_eq!(
+            media_obj["thumbnail_url"],
+            format!("/api/admin/media/{med_pub}/thumbnail?v=1")
+        );
+        assert!(media_obj["variants"].is_array());
 
         let site_opt_res = read_captured_kv(&db, "s01-ops", 8).await;
         assert_eq!(site_opt_res["ok"], true);
@@ -2032,25 +2025,7 @@ mod tests {
         for (id, filename) in [(&med_pub, "a.png"), (&med_unpub, "b.png")] {
             crate::storage::media::save(
                 &db,
-                &crate::storage::media::MediaAsset {
-                    id: id.clone(),
-                    kind: "image".into(),
-                    filename: filename.into(),
-                    mime_type: "image/png".into(),
-                    extension: "png".into(),
-                    byte_size: 100,
-                    width: 100,
-                    height: 100,
-                    thumb_width: Some(50),
-                    thumb_height: Some(50),
-                    duration_ms: None,
-                    video_codec: None,
-                    audio_codec: None,
-                    lifecycle_state: "active".into(),
-                    generation: 1,
-                    version: 1,
-                    created_at: String::new(),
-                },
+                &crate::storage::media::MediaAsset::test_image_stub(id.clone(), filename.into()),
             )
             .await
             .unwrap();

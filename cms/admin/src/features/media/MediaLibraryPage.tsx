@@ -3,17 +3,16 @@ import { __, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import type { AuthUser } from '../../types.ts';
 import {
-  deleteMedia,
   listMedia,
-  MediaDeleteConflictError,
-  mediaOriginalUrl,
   mediaThumbnailUrl,
   uploadMedia,
   uploadVideo,
 } from '../../api/media.ts';
-import type { MediaAsset, MediaKind, MediaPinSummary } from '../../api/media.ts';
+import type { MediaAsset, MediaAssetDetails, MediaKind } from '../../api/media.ts';
+import { MediaDetailsPanel } from './MediaDetailsPanel.tsx';
+import { MediaVariantsRegenerateCard } from './MediaVariantsRegenerateCard.tsx';
 import { MediaUploadValidationError, validateImageUpload, validateVideoUpload } from './library/fileValidation.ts';
-import { formatMediaBytes, formatMediaDate } from './library/format.ts';
+import { formatMediaBytes } from './library/format.ts';
 import './media-library.css';
 
 export interface MediaLibraryPageProps {
@@ -38,17 +37,21 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
   const [uploadError, setUploadError] = useState('');
   const [notice, setNotice] = useState('');
   const [uploadProgress, setUploadProgress] = useState('');
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [deleteDiagnostics, setDeleteDiagnostics] = useState<{
-    message: string;
-    pins: MediaPinSummary | null;
-  } | null>(null);
   const fileUploadRef = useRef<HTMLInputElement>(null);
   const errorHandler = useRef(onApiError);
   errorHandler.current = onApiError;
+  const prevQueryRef = useRef<{ userId: number | undefined; offset: number; kindFilter: 'all' | MediaKind }>({
+    userId: user?.id,
+    offset,
+    kindFilter,
+  });
 
   useEffect(() => {
-  if (!user) {
+    const prev = prevQueryRef.current;
+    const queryChanged = prev.userId !== user?.id || prev.offset !== offset || prev.kindFilter !== kindFilter;
+    prevQueryRef.current = { userId: user?.id, offset, kindFilter };
+
+    if (!user) {
       setAssets([]);
       setSelectedId(null);
       setLoading(false);
@@ -57,8 +60,10 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
     let active = true;
     setLoading(true);
     setError('');
-    setAssets([]);
-    setSelectedId(null);
+    if (queryChanged) {
+      setAssets([]);
+      setSelectedId(null);
+    }
     listMedia(PAGE_SIZE, offset, kindFilter === 'all' ? undefined : kindFilter)
       .then(items => {
         if (active) setAssets(items);
@@ -75,6 +80,21 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
   }, [user?.id, offset, refreshVersion, kindFilter]);
 
   const refresh = () => setRefreshVersion(previous => previous + 1);
+
+  const handleReplaced = (updated: MediaAssetDetails) => {
+    setAssets(previous => previous.map(item => (item.id === updated.id ? { ...item, ...updated } : item)));
+    setNotice(__("Replaced media file (now v{{value1}} · generation {{value2}}).", {
+      value1: updated.version,
+      value2: updated.generation,
+    }));
+    refresh();
+  };
+
+  const handleDeleted = (deleteNotice: string) => {
+    setNotice(deleteNotice);
+    setSelectedId(null);
+    refresh();
+  };
 
   const isVideoFile = (file: File): boolean =>
     file.type === 'video/mp4' || file.name.toLowerCase().endsWith('.mp4');
@@ -192,6 +212,17 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
         </div>
       </section>
 
+      {user?.role === 'admin' && csrfToken && (
+        <div className="mb-3.5">
+          <MediaVariantsRegenerateCard
+            compact
+            csrfToken={csrfToken}
+            onApiError={(cause, fallback) => errorHandler.current(cause, fallback ?? __("Could not regenerate responsive media variants."))}
+            onCompleted={refresh}
+          />
+        </div>
+      )}
+
       {uploadProgress && <p className="od-media-notice" role="status">{uploadProgress}</p>}
       {notice && <p className="od-media-notice od-media-success" role="status">{notice}</p>}
       {uploadError && <p className="od-media-notice od-media-error" role="alert">{uploadError}</p>}
@@ -199,10 +230,10 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
 
       <div className="od-media-content">
         <section className="od-media-gallery" aria-label={__("Media list")}>
-          {loading && <p className="od-media-empty" role="status">{__("Loading the media library…")}</p>}
+          {loading && assets.length === 0 && <p className="od-media-empty" role="status">{__("Loading the media library…")}</p>}
           {!loading && !error && assets.length === 0 && <p className="od-media-empty">{__("No media files on this page. Upload files or go back to the previous page.")}</p>}
           {!loading && !error && assets.length > 0 && visibleAssets.length === 0 && <p className="od-media-empty">{__("No matching files on this page.")}</p>}
-          {!loading && visibleAssets.length > 0 && (
+          {!(loading && assets.length === 0) && visibleAssets.length > 0 && (
             <ul className="od-media-grid" aria-label={__("Files loaded on this page")}>
               {visibleAssets.map(asset => (
                 <li key={asset.id}>
@@ -212,7 +243,7 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
                     <span className="od-media-thumb">{asset.kind === 'video' ? (
                       <span className="od-media-video-placeholder">▶ MP4 · {formatNumber((asset.duration_ms ?? 0) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s</span>
                     ) : (
-                      <img src={mediaThumbnailUrl(asset.id)} alt=""
+                      <img src={mediaThumbnailUrl(asset.id, asset.version)} alt=""
                         width={asset.thumb_width ?? undefined} height={asset.thumb_height ?? undefined} loading="lazy" />
                     )}</span>
 
@@ -234,90 +265,16 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
 
         <aside className="od-media-details" aria-label={__("File details")}>
           {selected ? (
-            <>
-              <h3>{__("File details")}</h3>
-              <div className="od-media-original">
-                {selected.kind === 'video' ? (
-                  <video src={mediaOriginalUrl(selected.id)} controls preload="metadata" playsInline style={{ width: '100%', maxHeight: 260 }} />
-                ) : (
-                  <img src={mediaOriginalUrl(selected.id)} alt={__("Preview image {{value1}}", { value1: selected.filename })} />
-                )}
-              </div>
-              <dl>
-                <dt>{__("Filename")}</dt><dd className="od-media-break">{selected.filename}</dd>
-                <dt>{__("Format")}</dt><dd>{selected.extension.toUpperCase()} · {selected.mime_type}</dd>
-                <dt>{__("Dimensions")}</dt><dd>{selected.width} × {selected.height} px</dd>
-                <dt>{__("File size")}</dt><dd>{formatMediaBytes(selected.byte_size)}</dd>
-                {selected.kind !== 'video' && (
-                  <>
-                    <dt>{__("Thumbnail")}</dt><dd>{selected.thumb_width} × {selected.thumb_height} px</dd>
-                  </>
-                )}
-                <dt>{__("Uploaded")}</dt><dd>{formatMediaDate(selected.created_at)}</dd>
-              </dl>
-              <a href={mediaOriginalUrl(selected.id)} target="_blank" rel="noopener noreferrer" className="od-media-original-link">{__("Open original file in a new tab")}</a>
-              {user?.role === 'admin' && csrfToken && (
-                <div className="od-media-delete-panel">
-                  <button
-                    type="button"
-                    className="od-media-secondary"
-                    disabled={deletingId === selected.id || uploading}
-                    onClick={async () => {
-                      setDeletingId(selected.id);
-                      setDeleteDiagnostics(null);
-                      setNotice('');
-                      try {
-                        const job = await deleteMedia(
-                          selected.id,
-                          selected.generation,
-                          selected.version,
-                          csrfToken,
-                        );
-                        setNotice(
-                          job.phase === 'finalized'
-                            ? __("Moved media to quarantine ({{value1}}…).", { value1: job.job_id.slice(0, 8) })
-                            : __("Deletion is pending ({{value1}}, job {{value2}}…).", { value1: job.phase, value2: job.job_id.slice(0, 8) }),
-                        );
-                        setSelectedId(null);
-                        refresh();
-                      } catch (cause) {
-                        if (cause instanceof MediaDeleteConflictError) {
-                          setDeleteDiagnostics({
-                            message: cause.message,
-                            pins: cause.pins,
-                          });
-                        } else {
-                          setDeleteDiagnostics({
-                            message: cause instanceof Error ? cause.message : __("Could not delete media."),
-                            pins: null,
-                          });
-                          errorHandler.current(cause, __("Could not delete media."));
-                        }
-                      } finally {
-                        setDeletingId(null);
-                      }
-                    }}
-                  >
-                    {deletingId === selected.id ? __("Deleting…") : __("Delete media (quarantine)")}
-                  </button>
-                  {deleteDiagnostics && (
-                    <div className="od-media-notice od-media-error" role="alert">
-                      <p>{deleteDiagnostics.message}</p>
-                      {deleteDiagnostics.pins && deleteDiagnostics.pins.pins.length > 0 && (
-                        <ul>
-                          {deleteDiagnostics.pins.pins.map((pin, idx) => (
-                            <li key={`${pin.source_kind}-${pin.entity_id}-${idx}`}>
-                              {pin.source_kind}: {pin.entity_id}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-              <p className="od-media-help">{__("The original file requires a signed-in session. Draft media has no public URL.")}</p>
-            </>
+            <MediaDetailsPanel
+              selected={selected}
+              user={user}
+              csrfToken={csrfToken}
+              busy={uploading}
+              onReplaced={handleReplaced}
+              onDeleted={handleDeleted}
+              onRefreshRequested={refresh}
+              onApiError={(cause, fallback) => errorHandler.current(cause, fallback)}
+            />
           ) : (
             <div className="od-media-unselected"><h3>{__("File details")}</h3><p>{__("Select a file to view its original, dimensions and details.")}</p></div>
           )}

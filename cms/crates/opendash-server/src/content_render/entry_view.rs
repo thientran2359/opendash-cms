@@ -1,114 +1,5 @@
 use super::*;
 
-pub fn strip_richtext_to_plain(html: &str) -> String {
-    fn is_block_tag(name: &str) -> bool {
-        matches!(
-            name,
-            "p" | "div"
-                | "br"
-                | "li"
-                | "h1"
-                | "h2"
-                | "h3"
-                | "h4"
-                | "h5"
-                | "h6"
-                | "tr"
-                | "td"
-                | "th"
-                | "blockquote"
-                | "section"
-                | "article"
-                | "header"
-                | "footer"
-                | "pre"
-                | "hr"
-                | "ul"
-                | "ol"
-        )
-    }
-
-    let mut stripped = String::with_capacity(html.len());
-    let mut i = 0;
-    let bytes = html.as_bytes();
-    while i < bytes.len() {
-        if bytes[i] == b'<' {
-            let next = bytes.get(i + 1).copied();
-            let looks_like_tag =
-                next.is_some_and(|b| b.is_ascii_alphabetic() || matches!(b, b'/' | b'!' | b'?'));
-            if looks_like_tag {
-                let mut quote: Option<u8> = None;
-                let mut j = i + 1;
-                let mut closed = false;
-                while j < bytes.len() {
-                    let b = bytes[j];
-                    if let Some(q) = quote {
-                        if b == q {
-                            quote = None;
-                        }
-                    } else if b == b'"' || b == b'\'' {
-                        quote = Some(b);
-                    } else if b == b'>' {
-                        closed = true;
-                        break;
-                    }
-                    j += 1;
-                }
-                if closed {
-                    let inner = html[i + 1..j].trim_start();
-                    let inner = inner.strip_prefix('/').unwrap_or(inner);
-                    let tag_name = inner
-                        .split(|c: char| c.is_ascii_whitespace() || c == '/')
-                        .next()
-                        .unwrap_or("")
-                        .to_ascii_lowercase();
-                    if is_block_tag(&tag_name) && !stripped.ends_with(' ') {
-                        stripped.push(' ');
-                    }
-                    i = j + 1;
-                    continue;
-                }
-            }
-        }
-        let ch = html[i..].chars().next().unwrap_or('\0');
-        stripped.push(ch);
-        i += ch.len_utf8();
-    }
-
-    // Single-pass basic HTML entity decoding so "&amp;lt;" stays "&lt;".
-    let mut decoded = String::with_capacity(stripped.len());
-    let mut rest = stripped.as_str();
-    while let Some(pos) = rest.find('&') {
-        decoded.push_str(&rest[..pos]);
-        let tail = &rest[pos..];
-        let mut matched = None;
-        for (entity, replacement) in [
-            ("&nbsp;", " "),
-            ("&#160;", " "),
-            ("&amp;", "&"),
-            ("&lt;", "<"),
-            ("&gt;", ">"),
-            ("&quot;", "\""),
-            ("&#39;", "'"),
-            ("&#x27;", "'"),
-            ("&apos;", "'"),
-        ] {
-            if tail.starts_with(entity) {
-                decoded.push_str(replacement);
-                rest = &tail[entity.len()..];
-                matched = Some(());
-                break;
-            }
-        }
-        if matched.is_none() {
-            decoded.push('&');
-            rest = &tail[1..];
-        }
-    }
-    decoded.push_str(rest);
-    decoded.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 pub(super) fn plain_text_from_field(
     definition: &opendash_core::field_schema::FieldSpec,
     value: &Value,
@@ -255,6 +146,11 @@ fn pure_media_fallback(val: &Value) -> Option<Value> {
         "width": null,
         "height": null,
         "alt": "",
+        "version": 1,
+        "variants": [],
+        "webp_srcset": null,
+        "fallback_srcset": null,
+        crate::template_sec::MEDIA_PROVENANCE_KEY: crate::template_sec::media_provenance_token(),
     }))
 }
 
@@ -274,7 +170,9 @@ pub(super) fn build_entry_view_with_defs(
 
     let l10n = core_l10n(&record.locale);
     let mut featured_cover_url: Option<String> = None;
+    let mut featured_cover_media: Option<Value> = None;
     let mut first_image_cover_url: Option<String> = None;
+    let mut first_image_cover_media: Option<Value> = None;
     let mut public_values = BTreeMap::new();
     let mut fields = Vec::with_capacity(ordered_defs.len());
 
@@ -351,8 +249,10 @@ pub(super) fn build_entry_view_with_defs(
             {
                 if definition.key == "featured_image" {
                     featured_cover_url = Some(u.to_owned());
+                    featured_cover_media = Some(hydrated.clone());
                 } else if first_image_cover_url.is_none() {
                     first_image_cover_url = Some(u.to_owned());
+                    first_image_cover_media = Some(hydrated.clone());
                 }
             }
             Some(hydrated.clone())
@@ -382,6 +282,7 @@ pub(super) fn build_entry_view_with_defs(
         });
     }
     let cover_url = featured_cover_url.or(first_image_cover_url);
+    let cover_media = featured_cover_media.or(first_image_cover_media);
 
     let excerpt_source = if let Some(ref summary) = summary_plain {
         summary.as_str().to_owned()
@@ -450,6 +351,7 @@ pub(super) fn build_entry_view_with_defs(
         fields: public_values,
         field_list: fields,
         cover_url,
+        cover_media,
         terms: terms_map,
         all_terms,
         primary_category,

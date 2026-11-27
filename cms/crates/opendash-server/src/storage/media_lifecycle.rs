@@ -163,6 +163,18 @@ pub async fn tombstone_media_in_tx(
         .into());
     }
 
+    let active_replace: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM media_replace_jobs
+         WHERE media_id = ? AND phase IN ('staged', 'moving_old', 'promoting_new')
+         LIMIT 1",
+    )
+    .bind(media_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if active_replace.is_some() {
+        return Err(ApiError::conflict("Media đang được thay thế; không thể xóa lúc này.").into());
+    }
+
     let pins = collect_pins_in_tx(&mut *conn, media_id).await?;
     if pins.is_referenced() {
         return Err(TombstoneError::Referenced(pins));
@@ -316,6 +328,7 @@ pub async fn list_pending_delete_jobs(db: &SqlitePool) -> ApiResult<Vec<MediaDel
     rows.iter().map(map_delete_job_row).collect()
 }
 
+#[allow(dead_code)]
 pub async fn list_all_delete_jobs(db: &SqlitePool) -> ApiResult<Vec<MediaDeleteJob>> {
     let rows = sqlx::query(
         r#"
@@ -333,4 +346,35 @@ pub async fn list_all_delete_jobs(db: &SqlitePool) -> ApiResult<Vec<MediaDeleteJ
     .await?;
 
     rows.iter().map(map_delete_job_row).collect()
+}
+
+pub async fn find_delete_jobs_by_ids(
+    db: &SqlitePool,
+    job_ids: &[String],
+) -> ApiResult<std::collections::HashMap<String, MediaDeleteJob>> {
+    let mut out = std::collections::HashMap::new();
+    if job_ids.is_empty() {
+        return Ok(out);
+    }
+    for chunk in job_ids.chunks(200) {
+        let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
+            "SELECT job_id, media_id, generation, expected_version, phase,
+                    original_rel_path, thumbnail_rel_path,
+                    quarantine_original_rel_path, quarantine_thumbnail_rel_path,
+                    original_moved, thumbnail_moved, error_code,
+                    created_at, updated_at, completed_at
+             FROM media_delete_jobs
+             WHERE job_id IN (",
+        );
+        let mut sep = qb.separated(", ");
+        for id in chunk {
+            sep.push_bind(id);
+        }
+        sep.push_unseparated(")");
+        for row in qb.build().fetch_all(db).await? {
+            let job = map_delete_job_row(&row)?;
+            out.insert(job.job_id.clone(), job);
+        }
+    }
+    Ok(out)
 }

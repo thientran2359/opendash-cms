@@ -27,6 +27,7 @@ pub struct HydrationContext<'a> {
     pub entries: &'a BTreeMap<i64, HydratedEntryRefRow>,
     pub terms: &'a BTreeMap<i64, HydratedTermRefRow>,
     pub is_preview: bool,
+    pub tag_media_provenance: bool,
 }
 
 fn filter_specs_for_visibility(
@@ -69,26 +70,105 @@ pub fn collect_hydration_ids(
     term_ids.extend(collected_rels.term_ids);
 }
 
-pub fn hydrate_media_row(row: &HydratedMediaRow, is_preview: bool) -> Value {
+pub(crate) fn build_media_urls_and_srcsets(
+    row: &HydratedMediaRow,
+    is_preview: bool,
+) -> (
+    String,
+    String,
+    Vec<opendash_core::media::MediaVariantView>,
+    Option<String>,
+    Option<String>,
+) {
     let prefix = if is_preview {
         "/api/admin/media"
     } else {
         "/media"
     };
+    let version = row.version.max(1);
+    let file_url = format!("{prefix}/{}/file?v={version}", row.id);
     let thumbnail_url = if row.kind == "image" {
-        format!("{prefix}/{}/thumbnail", row.id)
+        format!("{prefix}/{}/thumbnail?v={version}", row.id)
     } else {
         String::new()
     };
+    let variants: Vec<opendash_core::media::MediaVariantView> = row
+        .variants
+        .iter()
+        .map(|v| opendash_core::media::MediaVariantView {
+            spec: v.spec,
+            format: v.format,
+            width: v.width,
+            height: v.height,
+            byte_size: v.byte_size,
+            url: format!(
+                "{prefix}/{}/variant/{}.{}?v={version}",
+                row.id,
+                v.spec.as_str(),
+                v.format.extension()
+            ),
+        })
+        .collect();
+    let (webp_srcset, fallback_srcset) = if row.kind == "image" {
+        let orig_w = row.width.and_then(|w| u32::try_from(w).ok()).unwrap_or(0);
+        if orig_w > 0 {
+            opendash_core::media::build_responsive_srcsets(
+                &row.mime_type,
+                orig_w,
+                &file_url,
+                &variants,
+            )
+        } else {
+            (None, None)
+        }
+    } else {
+        (None, None)
+    };
+    (
+        file_url,
+        thumbnail_url,
+        variants,
+        webp_srcset,
+        fallback_srcset,
+    )
+}
+
+pub fn hydrate_media_row(row: &HydratedMediaRow, is_preview: bool) -> Value {
+    let version = row.version.max(1);
+    let (file_url, thumbnail_url, variants, webp_srcset, fallback_srcset) =
+        build_media_urls_and_srcsets(row, is_preview);
     json!({
         "id": row.id,
-        "url": format!("{prefix}/{}/file", row.id),
+        "version": version,
+        "url": file_url,
         "thumbnail_url": thumbnail_url,
         "alt": "",
         "width": row.width,
         "height": row.height,
         "kind": row.kind,
+        "variants": variants,
+        "webp_srcset": webp_srcset,
+        "fallback_srcset": fallback_srcset,
     })
+}
+
+pub fn hydrate_media_row_for_template(row: &HydratedMediaRow, is_preview: bool) -> Value {
+    let mut val = hydrate_media_row(row, is_preview);
+    if let Value::Object(ref mut map) = val {
+        map.insert(
+            crate::template_sec::MEDIA_PROVENANCE_KEY.to_owned(),
+            Value::String(crate::template_sec::media_provenance_token().to_owned()),
+        );
+    }
+    val
+}
+
+fn hydrate_media_for_ctx(row: &HydratedMediaRow, ctx: &HydrationContext<'_>) -> Value {
+    if ctx.tag_media_provenance {
+        hydrate_media_row_for_template(row, ctx.is_preview)
+    } else {
+        hydrate_media_row(row, ctx.is_preview)
+    }
 }
 
 fn hydrate_entry_row(row: &HydratedEntryRefRow) -> Value {
@@ -108,7 +188,7 @@ fn hydrate_term_row(row: &HydratedTermRefRow, ctx: &HydrationContext<'_>) -> Val
         .featured_image_media_id
         .as_deref()
         .and_then(|id| ctx.media.get(id))
-        .map(|m| hydrate_media_row(m, ctx.is_preview))
+        .map(|m| hydrate_media_for_ctx(m, ctx))
         .unwrap_or(Value::Null);
     json!({
         "id": row.id,
@@ -234,6 +314,7 @@ pub fn hydrate_field_value_stateless(
         entries: &entries,
         terms: &terms,
         is_preview: false,
+        tag_media_provenance: false,
     };
     hydrate_field_value(spec, raw_val, &ctx, None, visibility)
 }
@@ -352,7 +433,7 @@ pub fn hydrate_field_value(
             Ok(ctx
                 .media
                 .get(media_id)
-                .map(|row| hydrate_media_row(row, ctx.is_preview))
+                .map(|row| hydrate_media_for_ctx(row, ctx))
                 .unwrap_or(Value::Null))
         }
         FieldType::Gallery => {
@@ -364,7 +445,7 @@ pub fn hydrate_field_value(
                 .filter_map(Value::as_str)
                 .filter(|id| valid_sha256_media_id(id))
                 .filter_map(|id| ctx.media.get(id))
-                .map(|row| hydrate_media_row(row, ctx.is_preview))
+                .map(|row| hydrate_media_for_ctx(row, ctx))
                 .collect();
             Ok(Value::Array(items))
         }

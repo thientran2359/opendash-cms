@@ -399,6 +399,10 @@ pub struct MediaInventoryRow {
     pub kind: String,
     pub extension: String,
     pub lifecycle_state: String,
+    #[allow(dead_code)]
+    pub generation: i64,
+    #[allow(dead_code)]
+    pub version: i64,
 }
 
 fn extract_64hex_tokens(text: &str, out: &mut HashSet<String>) {
@@ -425,7 +429,8 @@ pub async fn load_media_inventory_bounded(
 ) -> ApiResult<Vec<MediaInventoryRow>> {
     let limit = (max_records + 1) as i64;
     let rows = sqlx::query(
-        "SELECT id, kind, extension, lifecycle_state FROM media_assets ORDER BY id ASC LIMIT ?",
+        "SELECT id, kind, extension, lifecycle_state, generation, version
+         FROM media_assets ORDER BY id ASC LIMIT ?",
     )
     .bind(limit)
     .fetch_all(db)
@@ -444,6 +449,8 @@ pub async fn load_media_inventory_bounded(
             kind: row.try_get("kind")?,
             extension: row.try_get("extension")?,
             lifecycle_state: row.try_get("lifecycle_state")?,
+            generation: row.try_get("generation")?,
+            version: row.try_get("version")?,
         });
     }
     Ok(out)
@@ -456,14 +463,19 @@ pub async fn count_reconcile_records_bounded(
     let media_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media_assets")
         .fetch_one(db)
         .await?;
-    let delete_job_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media_delete_jobs")
-        .fetch_one(db)
-        .await?;
+    let delete_job_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM media_delete_jobs WHERE phase != 'finalized'")
+            .fetch_one(db)
+            .await?;
+    let replace_job_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM media_replace_jobs WHERE purged_at IS NULL")
+            .fetch_one(db)
+            .await?;
     let attempt_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM contact_notification_attempts")
             .fetch_one(db)
             .await?;
-    let total = media_count + delete_job_count + attempt_count;
+    let total = media_count + delete_job_count + replace_job_count + attempt_count;
     if total as usize > max_records {
         return Err(ApiError::conflict(
             "Tổng số bản ghi cần đối soát vượt giới hạn reconcile (tối đa 10.000 bản ghi).",

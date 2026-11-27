@@ -7,38 +7,9 @@ pub fn parse_media_if_match(headers: &HeaderMap) -> ApiResult<(i64, i64)> {
         .map(str::trim)
         .ok_or_else(|| ApiError::precondition_required("Thiếu header If-Match."))?;
 
-    if raw.is_empty() || raw.starts_with("W/") || raw == "*" {
-        return Err(ApiError::precondition_failed(
-            "Header If-Match phải có dạng \"gv<generation>-v<version>\".",
-        ));
-    }
-
-    let inner = raw
-        .strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .unwrap_or(raw);
-
-    let Some((gen_part, ver_part)) = inner.split_once("-v") else {
-        return Err(ApiError::precondition_failed(
-            "Header If-Match không đúng định dạng gv<generation>-v<version>.",
-        ));
-    };
-    let Some(gen_str) = gen_part.strip_prefix("gv") else {
-        return Err(ApiError::precondition_failed(
-            "Header If-Match không đúng định dạng gv<generation>-v<version>.",
-        ));
-    };
-    let generation: i64 =
-        gen_str.parse().ok().filter(|&v| v >= 1).ok_or_else(|| {
-            ApiError::precondition_failed("Generation trong If-Match không hợp lệ.")
-        })?;
-    let version: i64 = ver_part
-        .parse()
-        .ok()
-        .filter(|&v| v >= 1)
-        .ok_or_else(|| ApiError::precondition_failed("Version trong If-Match không hợp lệ."))?;
-
-    Ok((generation, version))
+    opendash_core::media::parse_media_etag_token(raw).ok_or_else(|| {
+        ApiError::precondition_failed("Header If-Match phải có dạng \"gv<generation>-v<version>\".")
+    })
 }
 
 pub(crate) async fn move_one_file_to_quarantine(
@@ -142,6 +113,16 @@ pub(crate) async fn execute_delete_job_inner(
         job.generation,
     )
     .await?;
+
+    if job.media_id.len() >= 2 {
+        let _ = fs::remove_dir_all(
+            media_store
+                .variants_root()
+                .join(&job.media_id[..2])
+                .join(&job.media_id),
+        )
+        .await;
+    }
 
     get_delete_job(db, &job.job_id)
         .await?

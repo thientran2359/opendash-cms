@@ -157,7 +157,11 @@ pub(super) fn plan_container_styles(
 
 /// Emits `<style data-builder-responsive>` only for properties that cannot be represented
 /// as static Tailwind utility classes: Section backgrounds, node Visibility, and custom pixel fallbacks.
-pub(super) fn builder_responsive_css(document: &BuilderDocument, is_preview: bool) -> String {
+pub(super) fn builder_responsive_css(
+    document: &BuilderDocument,
+    is_preview: bool,
+    hydration_media: &std::collections::BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
+) -> String {
     let mut desktop = String::new();
     let mut tablet = String::new();
     let mut mobile = String::new();
@@ -202,13 +206,13 @@ pub(super) fn builder_responsive_css(document: &BuilderDocument, is_preview: boo
                     .as_deref()
                     .filter(|id| !id.is_empty() && valid_package_id(id))
                 {
-                    let media_prefix = if is_preview {
-                        "/api/admin/media"
-                    } else {
-                        "/media"
-                    };
+                    let bg_url = super::media_render::versioned_media_file_url(
+                        bg_media,
+                        hydration_media,
+                        is_preview,
+                    );
                     sec_css.push_str(&format!(
-                        "background-image:url(\"{media_prefix}/{bg_media}/file\");background-size:cover;background-position:center;"
+                        "background-image:url(\"{bg_url}\");background-size:cover;background-position:center;"
                     ));
                 }
                 push_scoped_rule(&mut desktop, &section.id, &sec_css);

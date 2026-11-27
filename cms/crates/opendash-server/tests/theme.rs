@@ -8,6 +8,8 @@ mod package_install;
 mod public_context;
 #[path = "theme/reading_page_templates.rs"]
 mod reading_page_templates;
+#[path = "theme/responsive_media_render.rs"]
+mod responsive_media_render;
 #[path = "theme/revision_discovery.rs"]
 mod revision_discovery;
 #[path = "theme/sample_import_dry_run.rs"]

@@ -14,6 +14,7 @@ pub(crate) fn collect_composition_sites(
         }
         Stmt::EmitExpr(e) => {
             if parse_od_icon_call_ext(&e.expr, true)?.is_some()
+                || parse_od_image_call(&e.expr)?.is_some()
                 || parse_od_hook_call(&e.expr)?.is_some()
             {
                 return Ok(());
@@ -115,6 +116,7 @@ pub(crate) fn validate_stmt_with_icons_ext(
             if allow_od_icon
                 && !in_set_block
                 && (parse_od_icon_call_ext(&e.expr, allow_dynamic_icon)?.is_some()
+                    || parse_od_image_call(&e.expr)?.is_some()
                     || parse_od_hook_call(&e.expr)?.is_some())
             {
                 Ok(())

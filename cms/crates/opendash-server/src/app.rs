@@ -1,7 +1,8 @@
 use axum::{
     Extension, Router,
-    extract::DefaultBodyLimit,
-    middleware,
+    extract::{DefaultBodyLimit, Request},
+    http::header,
+    middleware::{self, Next},
     routing::{delete, get, post, put},
 };
 use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
@@ -32,8 +33,9 @@ use crate::{
         },
         import::{import_dry_run, import_execute},
         media::{
-            media_delete, media_get, media_list, media_original, media_thumbnail, media_upload,
-            media_video_upload,
+            media_delete, media_get, media_list, media_original, media_replace, media_thumbnail,
+            media_upload, media_variant as admin_media_variant, media_variants_regenerate,
+            media_variants_status, media_video_upload,
         },
         menu::{
             MAX_MENU_JSON_BYTES, menu_slots_get, menu_slots_put, menus_create, menus_delete,
@@ -45,7 +47,7 @@ use crate::{
             plugin_list, plugin_put_settings, plugin_run, plugin_ui_schema,
         },
         public::public_page,
-        public_content::{media_file, media_thumb},
+        public_content::{media_file, media_thumb, media_variant},
         redirects,
         settings::{
             general_get, general_put, locales_create, locales_delete, locales_get,
@@ -72,7 +74,8 @@ use crate::{
 
 pub use crate::state::AppState;
 
-pub(crate) use crate::http_middleware::HostOriginRejected;
+#[derive(Clone, Copy)]
+pub(crate) struct HostOriginRejected;
 
 #[derive(RustEmbed)]
 #[folder = "../../admin/dist/"]
@@ -119,12 +122,15 @@ pub fn build_router_with_telemetry(
         state.recovery.clone(),
     );
     let recovery_for_mw = state.recovery.clone();
-    let runtime_config_for_mw = state.runtime_config.clone();
+    let trusted_host = state.runtime_config.trusted_host();
+    let trusted_origin = state.runtime_config.trusted_origin_normalized();
+    let trusted_is_https = state.runtime_config.trusted_origin_is_https();
 
     let router_without_telemetry = Router::new()
         .route("/", get(public_page))
         .route("/media/{id}/file", get(media_file))
         .route("/media/{id}/thumbnail", get(media_thumb))
+        .route("/media/{id}/variant/{spec_ext}", get(media_variant))
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))
         .route("/api/health", get(crate::routes::health::status))
         .route("/api/i18n/admin", get(crate::routes::settings::admin_i18n_bootstrap))
@@ -670,11 +676,25 @@ pub fn build_router_with_telemetry(
                 .layer(DefaultBodyLimit::max(MAX_MEDIA_BYTES)),
         )
         .route(
-            "/api/admin/media/{id}",
-            get(media_get).delete(media_delete),
+            "/api/admin/media/variants/status",
+            get(media_variants_status),
         )
-        .route("/api/admin/media/{id}/file", get(media_original))
+        .route(
+            "/api/admin/media/variants/regenerate",
+            post(media_variants_regenerate).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route("/api/admin/media/{id}", get(media_get).delete(media_delete))
+        .route(
+            "/api/admin/media/{id}/file",
+            get(media_original)
+                .put(media_replace)
+                .layer(DefaultBodyLimit::max(MAX_VIDEO_BYTES)),
+        )
         .route("/api/admin/media/{id}/thumbnail", get(media_thumbnail))
+        .route(
+            "/api/admin/media/{id}/variant/{spec_ext}",
+            get(admin_media_variant),
+        )
         .route(
             "/api/admin/plugins",
             get(plugin_list)
@@ -707,7 +727,9 @@ pub fn build_router_with_telemetry(
             "/api/admin/settings/smtp",
             get(crate::routes::smtp::get_smtp_settings)
                 .put(crate::routes::smtp::put_smtp_settings)
-                .layer(DefaultBodyLimit::max(crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES)),
+                .layer(DefaultBodyLimit::max(
+                    crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES,
+                )),
         )
         .route(
             "/api/admin/settings/smtp/test",
@@ -716,7 +738,9 @@ pub fn build_router_with_telemetry(
         .route(
             "/api/admin/contact/submissions/{id}/notify",
             post(crate::routes::smtp::notify_submission)
-                .layer(DefaultBodyLimit::max(crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES)),
+                .layer(DefaultBodyLimit::max(
+                    crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES,
+                )),
         )
         .route(
             "/api/admin/redirects",
@@ -763,28 +787,37 @@ pub fn build_router_with_telemetry(
         .layer(axum::Extension(crate::contact::ContactAdmissionLimiter::new()))
         .layer(axum::Extension(
             crate::routes::extensions::ExtensionRouteRateLimiter::new(),
-        ))
-        .layer(axum::Extension(crate::routes::contact::ExpectedListenerOrigin(format!(
-            "http://{expected_host}"
-        ))));
+        ));
 
-    let router_without_telemetry = crate::http_middleware::apply_host_origin_layer(
+    let router_without_telemetry = crate::app_origin::attach_host_origin_guards(
         router_without_telemetry,
         expected_host,
-        &runtime_config_for_mw,
+        trusted_host,
+        trusted_origin,
+        trusted_is_https,
     )
     .layer(middleware::from_fn_with_state(
         state.clone(),
         crate::i18n::localize_error_response,
     ))
-    .fallback(crate::routes::seo::public_fallback);
-
-    let router = crate::http_middleware::apply_safe_mode_robots_layer(
-        router_without_telemetry,
-        recovery_for_mw,
-    )
-    .layer(Extension(telemetry_buf))
-    .layer(Extension(ThemeStoreRoot(themes_root)));
+    .fallback(crate::routes::seo::public_fallback)
+    .layer(middleware::from_fn(move |request: Request, next: Next| {
+        let recovery = recovery_for_mw.clone();
+        let path = request.uri().path().to_string();
+        async move {
+            let mut resp = next.run(request).await;
+            if recovery.is_safe_mode() && !path.starts_with("/api/admin/") {
+                resp.headers_mut().insert(
+                    header::HeaderName::from_static("x-robots-tag"),
+                    header::HeaderValue::from_static("noindex, nofollow"),
+                );
+            }
+            resp
+        }
+    }));
+    let router = router_without_telemetry
+        .layer(Extension(telemetry_buf))
+        .layer(Extension(ThemeStoreRoot(themes_root)));
     let router = if let Some(guard) = telemetry_drop_guard {
         router.layer(Extension(guard))
     } else {
