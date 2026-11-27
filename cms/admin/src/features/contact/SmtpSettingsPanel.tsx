@@ -97,9 +97,16 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
 
   return (
     <section id="smtp-settings-panel" className="space-y-4">
-      <div>
-        <h2 className="text-base font-semibold text-zinc-950">{__("Email notifications (SMTP)")}</h2>
-        <p className="mt-0.5 text-sm text-zinc-600">{__("Configure a TLS-secured SMTP server to send notifications for new contact messages. The password is stored separately and is never displayed again.")}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-zinc-950">{__("Email notifications (SMTP)")}</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">{__("Configure a TLS-secured SMTP server to send notifications for new contact messages. The password is stored separately and is never displayed again.")}</p>
+        </div>
+        <a
+          href="#/contact"
+          data-testid="smtp-contact-link"
+          className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 no-underline hover:bg-zinc-50"
+        >{__("Contact forms & inbox")}</a>
       </div>
 
       {notice && <AdminAlert tone="success" className="mt-3 max-w-2xl">{notice}</AdminAlert>}

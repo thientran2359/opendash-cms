@@ -300,7 +300,7 @@ const AppContent: React.FC = () => {
       let target = normalizeEditorHash(window.location.hash || '#/dashboard');
       const requested = parseAdminRoute(target, window.location.pathname);
       if (userRef.current && requested.isLegacyContentRedirect) {
-        target = userRef.current.role === 'admin' ? '#/appearance/content-types' : '#/posts';
+        target = userRef.current.role === 'admin' ? '#/content-structure/content-types' : '#/posts';
       } else if (requested.redirectHash) {
         target = requested.redirectHash;
       }
@@ -629,7 +629,7 @@ const AppContent: React.FC = () => {
       cptTypes={cptTypes}
       cptTaxonomies={Object.fromEntries(Object.entries(cptTaxonomies).map(([type, terms]) => [
         type, terms.map(term => ({
-          ...term, label: term.key === 'category' ? _x("Category", "app.category") : term.key === 'tag' ? __("Tag") : term.label,
+          ...term, label: term.key === 'category' ? __("Categories") : term.key === 'tag' ? __("Tags") : term.label,
         })),
       ]))}
       onNavigateHash={navigateHash}
@@ -656,7 +656,10 @@ const AppContent: React.FC = () => {
         onApiError={handleApiError}
         onSavedSettingsOrTheme={() => setThemeRevision(v => v + 1)}
       /> : null}
-      themesContent={<ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
+      themesContent={<ThemesPanel
+        mode={route.view === 'themes' && route.sub === 'install' ? 'install' : 'list'}
+        csrfToken={csrfToken}
+        onApiError={handleApiError}
         devTheme={devTheme}
         themeRevision={themeRevision}
         onInstalled={() => setThemeRevision(value => value + 1)}
@@ -674,7 +677,7 @@ const AppContent: React.FC = () => {
           onSelectTypeKey={key => {
             if (key) {
               if (routeRef.current.view === 'settings' && routeRef.current.sub === 'content-types') {
-                navigateHash(`#/appearance/content-types/${key}`);
+                navigateHash(`#/content-structure/content-types/${encodeURIComponent(key)}`);
               }
             } else {
               setSelectedSchemaTypeKey(null);
@@ -726,11 +729,16 @@ const AppContent: React.FC = () => {
               onDirtyChange={markReadingDirty} />
         : route.sub === 'seo'
           ? <SeoPanel csrfToken={csrfToken} localeState={localeState} onApiError={(error) => handleApiError(error, __("Homepage SEO failed."))} />
-          : route.sub === 'contact'
-            ? <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("Contact form management failed."))} />
-            : route.sub === 'smtp'
-              ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("SMTP settings failed."))} />
-              : null}
+          : route.sub === 'smtp'
+            ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("SMTP settings failed."))} />
+            : null}
+      contactContent={
+        <ContactPanel
+          csrfToken={csrfToken}
+          initialTab={route.view === 'contact' && route.sub === 'inbox' ? 'inbox' : 'forms'}
+          onApiError={(error) => handleApiError(error, __("Contact form management failed."))}
+        />
+      }
       usersContent={accountContextRole === 'admin' && <UsersPanel
         key={accountContextId ?? 'anonymous'}
         mode={route.view === 'users' && route.sub === 'new' ? 'new' : 'list'}
