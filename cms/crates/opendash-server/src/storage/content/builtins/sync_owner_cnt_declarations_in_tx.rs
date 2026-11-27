@@ -534,6 +534,9 @@ pub(in crate::storage) async fn sync_owner_cnt_declarations_in_tx(
         &rewrites,
     )
     .await?;
+    for t in &candidate_types {
+        crate::storage::search::sync_entries_for_type_in_conn(conn, t).await?;
+    }
 
     Ok(())
 }

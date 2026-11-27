@@ -524,6 +524,7 @@ pub(in crate::storage) async fn commit_metadata_patch_inner(
         published_at: committed_row.published_at.clone(),
     };
 
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, entry_id).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok((committed_row, effective.schema_token, receipt))

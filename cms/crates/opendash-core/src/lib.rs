@@ -14,4 +14,5 @@ pub mod l10n;
 pub mod plugin;
 pub mod registry;
 pub mod richtext;
+pub mod search;
 pub mod theme;

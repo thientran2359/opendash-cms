@@ -24,6 +24,7 @@ pub mod plugin_kv;
 pub mod plugin_projections;
 pub mod public_content;
 pub mod restore;
+pub mod search;
 pub mod seo;
 pub mod settings;
 pub mod sitemap;

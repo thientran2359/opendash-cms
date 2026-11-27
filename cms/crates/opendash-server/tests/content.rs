@@ -28,6 +28,8 @@ mod page_taxonomy_defaults;
 mod permalink_redirects_cas;
 #[path = "content/provider_taxonomy_and_routes.rs"]
 mod provider_taxonomy_and_routes;
+#[path = "content/public_site_search_fts/mod.rs"]
+mod public_site_search_fts;
 #[path = "content/publication_create.rs"]
 mod publication_create;
 #[path = "content/single_edit_draft_recovery.rs"]

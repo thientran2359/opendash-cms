@@ -195,6 +195,70 @@ pub fn parse_blocks_lenient_or_recover(raw_body: &str) -> ParsedBlockDocument {
     parse_blocks_internal(raw_body, false).expect("lenient block parser never returns Err")
 }
 
+/// Extracts human-readable plain text from an already parsed `BuilderDocument`
+/// (core heading/text/button blocks and active, declared `plugin/block` fields).
+pub fn extract_document_visible_text(
+    doc: &BuilderDocument,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> String {
+    let mut parts = Vec::new();
+    for section in &doc.sections {
+        for row in &section.children {
+            for col in &row.children {
+                for el in &col.children {
+                    let ElementContent::Known(known) = &el.content else {
+                        continue;
+                    };
+                    match known {
+                        KnownElement::Heading(props) => {
+                            let trimmed = props.text.trim();
+                            if !trimmed.is_empty() {
+                                parts.push(trimmed.to_owned());
+                            }
+                        }
+                        KnownElement::Text(props) => {
+                            if props.rich {
+                                let clean = crate::richtext::strip_richtext_to_plain(&props.text);
+                                if !clean.is_empty() {
+                                    parts.push(clean);
+                                }
+                            } else if !props.text.trim().is_empty() {
+                                parts.push(props.text.clone());
+                            }
+                        }
+                        KnownElement::Button(props) => {
+                            let trimmed = props.label.trim();
+                            if !trimmed.is_empty() {
+                                parts.push(trimmed.to_owned());
+                            }
+                        }
+                        KnownElement::PluginBlock(props) => {
+                            if let Some(entry) = schemas.get(&props.block_id)
+                                && entry.status == ProviderStatus::Active
+                                && entry.declaration_state == DeclarationState::Declared
+                            {
+                                let mut raw_parts = Vec::new();
+                                entry
+                                    .descriptor
+                                    .schema
+                                    .extract_visible_text(&props.values, &mut raw_parts);
+                                for raw_part in raw_parts {
+                                    let clean = crate::richtext::strip_richtext_to_plain(&raw_part);
+                                    if !clean.is_empty() {
+                                        parts.push(clean);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    parts.join("\n\n")
+}
+
 /// Extracts human-readable plain text from `od:text`, `od:heading`, and `od:button`
 /// blocks (used for search/bindings/reset flattening).
 pub fn extract_visible_text(raw_body: &str) -> String {
@@ -211,39 +275,5 @@ pub fn extract_visible_text_with_schemas(
         return raw_body.to_owned();
     }
     let parsed = parse_blocks_lenient_or_recover(raw_body);
-    let mut parts = Vec::new();
-    for section in parsed.document.sections {
-        for row in section.children {
-            for col in row.children {
-                for el in col.children {
-                    if let ElementContent::Known(known) = el.content {
-                        match known {
-                            KnownElement::Heading(props) if !props.text.trim().is_empty() => {
-                                parts.push(props.text);
-                            }
-                            KnownElement::Text(props) if !props.text.trim().is_empty() => {
-                                parts.push(props.text);
-                            }
-                            KnownElement::Button(props) if !props.label.trim().is_empty() => {
-                                parts.push(props.label);
-                            }
-                            KnownElement::PluginBlock(props) => {
-                                if let Some(entry) = schemas.get(&props.block_id)
-                                    && entry.status == ProviderStatus::Active
-                                    && entry.declaration_state == DeclarationState::Declared
-                                {
-                                    entry
-                                        .descriptor
-                                        .schema
-                                        .extract_visible_text(&props.values, &mut parts);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-        }
-    }
-    parts.join("\n\n")
+    extract_document_visible_text(&parsed.document, schemas)
 }

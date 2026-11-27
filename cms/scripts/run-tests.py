@@ -86,6 +86,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::entries",
             "storage::entry_table",
             "storage::fields",
+            "storage::search",
             "storage::taxonomy",
             "routes::entries",
             "routes::fields",
@@ -231,6 +232,12 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
     if path.startswith("cms/crates/opendash-plugin-sdk/") or path.startswith("cms/sdk/"):
         return {"plugin"}, set(), False, False
 
+    if path.startswith("cms/crates/opendash-core/src/search/"):
+        return {"content", "theme", "builder", "site-media-seo"}, set(), False, False
+
+    if path.startswith("cms/crates/opendash-core/src/richtext/"):
+        return {"builder", "content"}, set(), False, False
+
     if path.startswith("cms/crates/opendash-core/src/"):
         filename = path.rsplit("/", 1)[-1]
         core_routes: dict[str, set[str]] = {
@@ -282,10 +289,10 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         keyword_map = (
             (("theme", "override", "layout"), "theme"),
             (("plugin", "projection", "extension", "hook", "functions_runtime"), "plugin"),
-            (("entry", "content", "taxonomy", "field", "lifecycle", "trash"), "content"),
+            (("entry", "content", "taxonomy", "field", "lifecycle", "trash", "search", "fts5"), "content"),
             (("builder", "pattern", "section", "block"), "builder"),
             (("i18n", "multilingual", "locale"), "i18n"),
-            (("permalink", "seo", "menu", "media", "contact", "smtp", "option", "setting"), "site-media-seo"),
+            (("permalink", "seo", "menu", "media", "contact", "smtp", "option", "setting", "search", "fts5"), "site-media-seo"),
             (("backup", "operation", "maintenance", "restore", "job"), "ops"),
         )
         matched_any = False
@@ -395,6 +402,8 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "storage/operations.rs": {"ops"},
             "routes/operations.rs": {"ops"},
         }
+        if sub.startswith("storage/search/") or sub == "storage/search.rs":
+            return {"content", "site-media-seo", "theme", "ops"}, set(), False, False
         if sub in server_routes:
             return server_routes[sub], set(), False, False
         # Shared runtime entrypoints (main.rs, app.rs, auth.rs, error.rs, storage/mod.rs, etc.)

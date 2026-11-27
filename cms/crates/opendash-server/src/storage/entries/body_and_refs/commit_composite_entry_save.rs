@@ -278,6 +278,7 @@ pub async fn commit_composite_entry_save(
         .await?;
     }
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, saved_id).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
@@ -451,6 +452,7 @@ pub async fn commit_entry_translation(
     .fetch_one(&mut *tx)
     .await?;
     let mut record = decoded_with_terms(&mut tx, row).await?;
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, new_id).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));

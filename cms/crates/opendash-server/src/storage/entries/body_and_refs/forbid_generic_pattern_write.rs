@@ -253,6 +253,7 @@ pub async fn create_entry_with_fence(
     .await?;
     let record = decoded_with_terms(&mut tx, row).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, id).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(record)
@@ -343,6 +344,7 @@ pub async fn update_entry_with_fence(
             .await?;
             let record = decoded_with_terms(&mut tx, row).await?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+            crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, id).await?;
             tx.commit().await?;
             crate::cache::SiteCacheEpoch::global().bump();
             Ok(record)
@@ -418,6 +420,7 @@ pub async fn create_entry_with_schema_fence(
     .await?;
     let record = decoded_with_terms(&mut tx, row).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, id).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(record)
@@ -500,6 +503,7 @@ pub async fn update_entry_with_schema_fence(
             .await?;
             let record = decoded_with_terms(&mut tx, row).await?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+            crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, id).await?;
             tx.commit().await?;
             crate::cache::SiteCacheEpoch::global().bump();
             Ok(record)

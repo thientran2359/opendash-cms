@@ -327,6 +327,9 @@ async fn async_main(args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error
     storage::import::recover_orphaned_import_runs(&db, &paths.uploads_dir())
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
+    storage::search::ensure_search_index_bootstrapped(&db)
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
     storage::smtp::recover_inflight_notifications(&db)
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
