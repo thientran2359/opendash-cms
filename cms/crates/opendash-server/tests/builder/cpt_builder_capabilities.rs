@@ -116,7 +116,7 @@ fn document(heading: &str) -> Value {
         "blocks":[{"id":"section","block_id":"core/section","children":[
             {"id":"row","block_id":"core/row","children":[
                 {"id":"column","block_id":"core/column","children":[
-                    {"id":"heading","block_id":"core/heading","props":{"level":"h2","text":heading}}
+                    {"id":"heading","block_id":"core/heading","props":{"text":heading}}
                 ]}
             ]}
         ]}]

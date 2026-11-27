@@ -83,7 +83,7 @@ async fn login(client: &Client, site: &Site, username: &str, password: &str) -> 
 }
 
 fn ast(heading: &str) -> Value {
-    json!({"schema_version":1,"blocks":[{"id":"section","block_id":"core/section","children":[{"id":"row","block_id":"core/row","children":[{"id":"column","block_id":"core/column","children":[{"id":"heading","block_id":"core/heading","props":{"level":"h2","text":heading}}]}]}]}]})
+    json!({"schema_version":1,"blocks":[{"id":"section","block_id":"core/section","children":[{"id":"row","block_id":"core/row","children":[{"id":"column","block_id":"core/column","children":[{"id":"heading","block_id":"core/heading","props":{"text":heading}}]}]}]}]})
 }
 
 #[tokio::test]

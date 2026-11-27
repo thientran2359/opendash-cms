@@ -90,7 +90,7 @@ async fn login(http: &Client, site: &Site, username: &str, password: &str) -> (S
 }
 
 fn design(title: &str) -> Value {
-    json!({"schema_version":1,"blocks":[{"id":"section","block_id":"core/section","children":[{"id":"row","block_id":"core/row","children":[{"id":"column","block_id":"core/column","children":[{"id":"heading","block_id":"core/heading","props":{"level":"h2","text":title}}]}]}]}]})
+    json!({"schema_version":1,"blocks":[{"id":"section","block_id":"core/section","children":[{"id":"row","block_id":"core/row","children":[{"id":"column","block_id":"core/column","children":[{"id":"heading","block_id":"core/heading","props":{"text":title}}]}]}]}]})
 }
 
 // The Builder GET/PUT/Reset contract now includes content_entries.updated_at.

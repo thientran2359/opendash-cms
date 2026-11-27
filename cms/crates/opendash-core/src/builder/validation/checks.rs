@@ -51,10 +51,9 @@ fn validate_list_cross_fields(props: &BTreeMap<String, Value>) -> Result<(), Bui
         .and_then(Value::as_str)
         .is_some_and(|s| !s.trim().is_empty());
     let has_term = props.get("term_id").is_some_and(|v| !v.is_null());
-    if has_term {
-        if parse_positive_i64_prop(props.get("term_id")).is_none() || !has_tax {
-            return Err(BuilderError::Invalid("Invalid Builder list term_id filter"));
-        }
+    if has_tax != has_term || (has_term && parse_positive_i64_prop(props.get("term_id")).is_none())
+    {
+        return Err(BuilderError::Invalid("Invalid Builder list term_id filter"));
     }
     if props.get("include_descendants").and_then(Value::as_bool) == Some(true)
         && (!has_tax || parse_positive_i64_prop(props.get("term_id")).is_none())

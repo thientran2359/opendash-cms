@@ -196,6 +196,19 @@ impl AdminSession {
         res.json::<Value>().await.unwrap()["id"].as_i64().unwrap()
     }
 
+    pub(super) async fn create_pattern(&self, title: &str, slug: &str) -> i64 {
+        let res = self
+            .send_json(
+                Method::POST,
+                "/api/admin/patterns",
+                None,
+                Some(&json!({ "title": title, "slug": slug })),
+            )
+            .await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+        res.json::<Value>().await.unwrap()["id"].as_i64().unwrap()
+    }
+
     pub(super) async fn activate_theme(&self, revision_id: &str, ver: i64) {
         let etag = format!("\"v{ver}\"");
         assert_eq!(
@@ -250,7 +263,9 @@ fn core_catalog_tailwind_budget_and_ast_v1_invariants() {
         .unwrap();
         let schema: BlockSchema =
             serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{dir}: {e}"));
-        assert!(schema.validate("core/").is_ok(), "schema invalid for {dir}");
+        schema
+            .validate("core")
+            .unwrap_or_else(|e| panic!("schema invalid for {dir}: {e}"));
         if schema.render == "native" {
             native_count += 1;
         } else {
@@ -332,7 +347,7 @@ fn core_catalog_tailwind_budget_and_ast_v1_invariants() {
     );
 
     let acc_bad: BuilderDocument = serde_json::from_str(
-        r#"{"schema_version":1,"blocks":[{"id":"s","block_id":"core/section","children":[{"id":"r","block_id":"core/row","children":[{"id":"ai","block_id":"core/accordion-item","props":{"title":"Illegal"}}]}]}]}"#,
+        r#"{"schema_version":1,"blocks":[{"id":"sec-bad","block_id":"core/section","children":[{"id":"row-bad","block_id":"core/row","children":[{"id":"acc-bad","block_id":"core/accordion-item","props":{"title":"Illegal"}}]}]}]}"#,
     ).unwrap();
     assert!(
         acc_bad
@@ -342,7 +357,7 @@ fn core_catalog_tailwind_budget_and_ast_v1_invariants() {
 
     let col_root = BuilderDocument {
         schema_version: 1,
-        blocks: vec![node("c", "core/column", json!({}), vec![])],
+        blocks: vec![node("col-root", "core/column", json!({}), vec![])],
     };
     assert!(
         col_root
@@ -400,16 +415,16 @@ async fn studio_unified_ast_http_e2e_containers_accordion_card_and_pre_v1_reject
       {"id":"ban-1","block_id":"core/banner","props":{"bg_image":"__BG__"},"children":[
         {"id":"ban-h1","block_id":"core/heading","props":{"level":"h1","text":"Hero Banner"}},
         {"id":"ban-stk","block_id":"core/stack","children":[
-          {"id":"b1","block_id":"core/button","props":{"cta":{"label":"Bắt đầu","url":"/start","new_tab":false,"nofollow":false}}},
-          {"id":"b2","block_id":"core/button","props":{"cta":{"label":"Tài liệu","url":"/docs","new_tab":false,"nofollow":false}}}
+          {"id":"btn-1","block_id":"core/button","props":{"cta":{"label":"Bắt đầu","url":"/start","new_tab":false,"nofollow":false}}},
+          {"id":"btn-2","block_id":"core/button","props":{"cta":{"label":"Tài liệu","url":"/docs","new_tab":false,"nofollow":false}}}
         ]}
       ]},
       {"id":"sec-main","block_id":"core/section","children":[
         {"id":"row-main","block_id":"core/row","props":{"layout_mode":"grid_12","reverse_mobile":true},"children":[
           {"id":"col-l","block_id":"core/column","props":{"span":{"desktop":8}},"children":[
             {"id":"card-1","block_id":"core/card","props":{"card_link":{"url":"/promo","label":"Xem ưu đãi","new_tab":false,"nofollow":false}},"children":[
-              {"id":"ch","block_id":"core/heading","props":{"level":"h3","text":"Thẻ VIP"}},
-              {"id":"cb","block_id":"core/button","props":{"cta":{"label":"Đăng ký","url":"/vip","new_tab":false,"nofollow":false}}}
+              {"id":"card-h","block_id":"core/heading","props":{"level":"h3","text":"Thẻ VIP"}},
+              {"id":"card-b","block_id":"core/button","props":{"cta":{"label":"Đăng ký","url":"/vip","new_tab":false,"nofollow":false}}}
             ]}
           ]},
           {"id":"col-r","block_id":"core/column","props":{"span":{"desktop":4},"sticky":true},"children":[
@@ -421,12 +436,12 @@ async fn studio_unified_ast_http_e2e_containers_accordion_card_and_pre_v1_reject
         ]}
       ]}
     ]}"#.replace("__BG__", &banner_bg)).unwrap();
-    assert_eq!(
-        app.send_json(Method::PUT, &put_path, Some("\"v1\""), Some(&doc))
-            .await
-            .status(),
-        StatusCode::OK
-    );
+    let put_res = app
+        .send_json(Method::PUT, &put_path, Some("\"v1\""), Some(&doc))
+        .await;
+    let put_status = put_res.status();
+    let put_body = put_res.text().await.unwrap_or_default();
+    assert_eq!(put_status, StatusCode::OK, "PUT failed: {put_body}");
 
     let prev = app
         .send_json(

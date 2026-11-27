@@ -213,14 +213,18 @@ pub async fn validate_document_block_refs_in_conn(
             required_locale,
         )
         .await?;
-        validate_block_dynamic_options_in_tx(
-            conn,
-            &descriptor.schema.fields,
-            &node.props,
-            prev_vals,
-            allowed_context_fields,
-        )
-        .await?;
+        // Built-in core/template-part validates part_key syntax in opendash-core
+        // and degrades missing targets to non-fatal `template_part_unavailable` diagnostics.
+        if node.block_id != "core/template-part" {
+            validate_block_dynamic_options_in_tx(
+                conn,
+                &descriptor.schema.fields,
+                &node.props,
+                prev_vals,
+                allowed_context_fields,
+            )
+            .await?;
+        }
     }
     Ok(())
 }
