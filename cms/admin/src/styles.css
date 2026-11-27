@@ -366,7 +366,8 @@
     padding: 6px 10px; text-align: left; font-size: 13px; font-weight: 500;
     transition: background-color .12s ease, color .12s ease;
   }
-  .od-sidebar-profile, .od-topbar-profile { text-decoration: none; }
+  .od-sidebar-profile { text-decoration: none; }
+  .od-topbar-profile { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
   .od-nav-link:hover:not(:disabled) { background: #e4e4e780; color: var(--color-od-text); }
   .od-nav-link-active, .od-nav-link-active:hover:not(:disabled) {
     background: #eff6ff; color: var(--color-od-accent); border-color: #bfdbfe; font-weight: 600;

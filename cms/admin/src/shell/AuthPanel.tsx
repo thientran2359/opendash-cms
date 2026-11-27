@@ -113,7 +113,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
               }
             }}
             className={
-              'od-topbar-profile inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium no-underline transition-colors ' +
+              'od-topbar-profile rounded-md px-2 py-1 text-xs font-medium no-underline transition-colors ' +
               (isProfileActive ? 'bg-blue-50 font-semibold text-od-accent' : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950')
             }
           >
