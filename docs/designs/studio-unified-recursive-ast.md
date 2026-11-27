@@ -75,7 +75,7 @@ Kiểm toán mã nguồn thực tế sau Đợt 1 cho thấy 6 nút thắt cấu
    - Cài đặt **Single Root Wrapper Contract (`apply_single_root_wrapper`)** dùng HTML-aware attribute merger (tái sử dụng pattern tokenizer `document/normalize/`, 0 crate mới) + sửa `serialize_scoped_block_css` hỗ trợ cả self và descendant selector `[data-od-node-scope][data-od-spacing]`.
 4. **Comment-Block Codec V1 (`builder_blocks/`) & Public Media ACL Chặt chẽ:**
    - Giữ đủ 7 public API hiện hành (`contains_blocks`, `parse_blocks_lenient_or_recover`, `parse_blocks_to_builder_document`, `serialize_builder_document_to_blocks`, `extract_block_refs_lenient`, `extract_block_refs_lenient_with_schemas`, `extract_visible_text`) + thêm `parse_blocks_lenient_with_schemas`.
-   - Viết lại `extract_block_refs_lenient_with_schemas` theo stack `inactive_depth`, đồng bộ cả `entry_pattern_refs` trong `resync_plugin_block_acls_in_tx`, và chuẩn hóa `template_override_media_refs` qua migration `0057` (`+0` net schema objects) để đồng bộ hoàn toàn với Đợt 1 (`0055` & `0056`).
+   - Viết lại `extract_block_refs_lenient_with_schemas` theo stack `inactive_depth`, đồng bộ cả `entry_pattern_refs` trong `resync_plugin_block_acls_in_tx`, và chuẩn hóa `template_override_media_refs` qua migration `0058` *(đổi từ `0057` cũ do `PR #619` dùng `0057_manual_redirects_and_404_log.sql`, Owner chốt ngày 2026-11-27; `+0` net schema objects)* để đồng bộ hoàn toàn với Đợt 1 (`0055` & `0056`).
 5. **21 Core Blocks (`20 Core Baseline + core/content-slot`), Starter `1.0.0` V1 & Studio Recursive Frontend:**
    - Cắt chuyển toàn bộ 21 Core Blocks sang AST đệ quy V1 + `UNIFIED_FIELD_SCHEMA` V1, rút `core/showcase` sang test fixture, cập nhật `opendash-starter` `1.0.0` (blocks & patterns sang AST đệ quy V1, giữ duy nhất `STARTER_THEME_VERSION = "1.0.0"`), cập nhật `tailwind-public-safelist.txt` + rebuild `opendash-tailwind.css` (`< 120 KiB`).
    - Nâng cấp `StudioBlockTree` (kéo-thả đệ quy `before`/`after`/`inside`, Compatibility Mask với công thức `effectiveParentDepth + draggedSubtreeHeight <= 8`, Locked Compound Pairs suy diễn động từ schema), `StudioBlockCatalog` (`presets`), `BuilderInspector` (`<UnifiedFieldForm>` + `StudioBuilderClipboard`), và `BRIDGE_SCRIPT` (tự mở `<details>` tổ tiên trong `applyAttr` — 0 snap-back).
@@ -441,7 +441,7 @@ flowchart LR
 }
 ```
 
-### 6. Storage, Public Media ACL, Migration `0057`, Starter `1.0.0` V1 & Studio Frontend
+### 6. Storage, Public Media ACL, Migration `0058`, Starter `1.0.0` V1 & Studio Frontend
 
 - **Tối ưu & Dọn dẹp `storage/page/` (`read.rs`, `write.rs`, `mod.rs`):**
   - `load_declared_blocks_in_conn`: trả bản `Arc` bất biến của `embedded_core_block_defs()` từ `OnceLock`, chỉ query `SELECT ... FROM builder_block_definitions WHERE owner_kind != 'core' ORDER BY block_id`; bỏ qua kèm `tracing::warn!` nếu gặp dòng non-core không khớp `BlockSchema` V1.
@@ -452,7 +452,7 @@ flowchart LR
   - `resync_plugin_block_acls_in_tx`:
     - Cập nhật đồng bộ cả `entry_builder_media_refs` (`source_kind = 'builder'`), **`entry_pattern_refs`** (thu hồi quyền media của Pattern nằm trong Container vừa tắt!), và `template_override_media_refs`.
     - Khi gặp AST lỗi (tại cả `entry_builder_documents` lẫn `template_overrides`): **fail-closed bảo mật** — ghi `tracing::error!` chẩn đoán và **thu hồi Public ACL (`DELETE`)** (không trả `Err` gây deadlock tắt plugin, và `storage/media_refs.rs` vẫn giữ nguyên raw delete pin nên không mất media gốc).
-- **Migration `0057_template_override_media_ref_roles.sql` (`+0` net schema objects, `< 256` objects):**
+- **Migration `0058_template_override_media_ref_roles.sql` (`+0` net schema objects, `< 256` objects):**
   - Rebuild `template_override_media_refs` mở rộng `ref_role CHECK (ref_role IN ('image', 'video', 'poster', 'file', 'any'))` kèm index `idx_template_override_media_refs_media`, đồng bộ 100% với `entry_builder_media_refs` từ Đợt 1 (`0056`).
 - **`core/list` Zero-N+1, `storage/entries/`, Fail-Closed Đa ngôn ngữ & Toàn trang:**
   - `storage/entries/list_query.rs` & `mutations_and_status/`: thêm `list_published_page_with_offset_in_tx` (nâng trần `page_size` lên `1..=24`, thêm `extra_offset: 0..=200` → `OFFSET (page - 1) * page_size + extra_offset`) và cập nhật `collect_builder_list_term_ids` / `apply_builder_list_term_remap` sang đệ quy `BlockNode`.
@@ -516,7 +516,7 @@ flowchart LR
 - **Khả năng bảo trì, Tổ chức Module & Khôi phục (`Feature-First` `<= 600 LOC/file`):**
   - Xóa ~1.500+ dòng mã cũ (`KnownElement`, `synthetic`, `builder_binding.rs`, 3 form Inspector rời).
   - Mọi file `.rs`, `.ts`, `.tsx` mới hoặc tách thêm trong `cms/` **không vượt quá `600` dòng (LOC)**, tổ chức theo trách nhiệm tính năng thực tế (ví dụ `page/blocks_layout.rs`, `page/blocks_leaf.rs`, `page/blocks_runtime.rs`), **cấm đặt tên chung chung `part_*`**, pass `cms/scripts/check-standards.py` và `cms/scripts/loc-baseline.json`.
-  - Chỉ 1 migration rebuild nhỏ `+0` net schema objects (`0057`); giữ tổng `sqlite_schema < 256`; mọi Slice đều xanh độc lập trên `cms-ci`.
+  - Chỉ 1 migration rebuild nhỏ `+0` net schema objects (`0058`); giữ tổng `sqlite_schema < 256`; mọi Slice đều xanh độc lập trên `cms-ci`.
 
 ---
 
@@ -525,7 +525,7 @@ flowchart LR
 ### Target Files to Create/Modify
 
 #### 1. Migration & `cms/crates/opendash-core/` (Pure Rust · 0 I/O · 0 SQL · `<= 600 LOC/file`)
-- **Create `cms/migrations/0057_template_override_media_ref_roles.sql`:** Rebuild `template_override_media_refs` với `ref_role IN ('image', 'video', 'poster', 'file', 'any')` + `idx_template_override_media_refs_media` (`+0` net schema objects). Cập nhật `cms/migrations/README.md`.
+- **Create `cms/migrations/0058_template_override_media_ref_roles.sql`:** Rebuild `template_override_media_refs` với `ref_role IN ('image', 'video', 'poster', 'file', 'any')` + `idx_template_override_media_refs_media` (`+0` net schema objects). Cập nhật `cms/migrations/README.md`.
 - **Modify `cms/crates/opendash-core/src/block_schema.rs`:** Đổi tên `BlockSchemaV1` → `BlockSchema` (`schema_version: 1`, `DefaultChildSpec`, `BlockPresetSpec`, `supports_children`, `allowed_parents`, `allowed_children`, `allowed_contexts`, `RESERVED_BLOCK_FIELD_KEYS`, kiểm `render == "native"` chỉ cho `owner == "core"`, Pha 1 + Pha 2 `validate_block_catalog_templates`).
 - **Modify `cms/crates/opendash-core/src/builder/{mod.rs,types.rs,document.rs}`:** Chuyển `BuilderDocument` sang `schema_version: 1` (`#[serde(deny_unknown_fields)]`), `blocks: Vec<BlockNode>`, `MAX_BUILDER_DEPTH = 8`, `MAX_BUILDER_PATTERN_INSTANCES = 16`, `BuilderContextTarget` (gồm `ThemePattern`), xóa toàn bộ 4-tier structs + `KnownElement` + `ElementBinding` + `NodeMeta.synthetic`; cài `validate_for_save`, `strip_default_props`, `walk_blocks`, `matches_context`, `parse_positive_i64_prop`.
 - **Modify `cms/crates/opendash-core/src/builder_blocks/{mod.rs,parser.rs,parser_state.rs,refs.rs}`:** Codec đệ quy V1 `<!-- od:<block_id> ... -->...<!-- /od:<block_id> -->` & self-closing, paired `core/text`, `hoisted_freeform_html` (không xóa nội dung), stack-aware `extract_block_refs_lenient_with_schemas`, `parse_blocks_lenient_with_schemas`, giữ đủ 7 public API.
@@ -577,14 +577,14 @@ flowchart LR
 
 ---
 
-### Slice S01: Hạ tầng Additive — Container C-SEC (`HtmlScanState`), Compiled `BlockTemplateCache`, `HtmlSlotTable` `O(N)`, `core/list` Zero-N+1 & Migration `0057`
+### Slice S01: Hạ tầng Additive — Container C-SEC (`HtmlScanState`), Compiled `BlockTemplateCache`, `HtmlSlotTable` `O(N)`, `core/list` Zero-N+1 & Migration `0058`
 
 *(100% Additive trên nền AST hiện hành — không xóa type cũ, giữ mọi file `<= 600 LOC`, biên dịch sạch và pass 100% `cms-ci` độc lập.)*
 
-**Dependencies:** Đợt 1 ([`unified-field-engine.md`](unified-field-engine.md) — đã merge trên `main@9e17cca`, gồm `0055` & `0056`), Gettext L10n (PR `#615`), Feature-First Modularization (`c956496`), và phê duyệt Spec A1 của Owner.
+**Dependencies:** Đợt 1 ([`unified-field-engine.md`](unified-field-engine.md) — đã merge trên `main@3948066`, gồm `0055` & `0056`), Manual Redirects (`PR #619`, `0057`), Gettext L10n (PR `#615`/`#618`), Feature-First Modularization (`c956496`), và phê duyệt Spec A1 của Owner.
 
 **File Ownership:**
-- `cms/migrations/{0057_template_override_media_ref_roles.sql,README.md}`
+- `cms/migrations/{0058_template_override_media_ref_roles.sql,README.md}`
 - `cms/crates/opendash-server/src/template_sec/{nonces.rs,block_validator.rs,theme_validator.rs,composition/{mod.rs,html_scan_state.rs,ast_validation.rs,fragment_validation.rs,url_and_css.rs},policy/{block_render.rs,block_stmt_walker.rs,theme_html_walker.rs,nonces.rs,environment.rs}}`
 - `cms/crates/opendash-server/src/page/{mod.rs,render.rs,budget_render.rs,html_helpers.rs,scoped_css.rs,cache_types/{mod.rs,cache.rs,types.rs}}`
 - `cms/crates/opendash-server/src/dev_mode/{mod.rs,service.rs,types.rs}`
@@ -592,13 +592,13 @@ flowchart LR
 - `cms/crates/opendash-server/src/routes/themes/{mod.rs,packages_and_overrides/mod.rs}`
 
 **Acceptance Criteria:**
-1. Migration `0057` rebuild `template_override_media_refs` với `ref_role IN ('image', 'video', 'poster', 'file', 'any')` (`+0` net schema objects, `sqlite_schema < 256`).
+1. Migration `0058` rebuild `template_override_media_refs` với `ref_role IN ('image', 'video', 'poster', 'file', 'any')` (`+0` net schema objects, `sqlite_schema < 256`).
 2. `template_sec/`: nâng `HtmlScanState` (`prefix >= 20`, 6 bộ đếm `svg`/`math`/`foreign_object`/`a`/`button`/`summary`, cân bằng nhánh `{% if %}`), thêm `BLOCK_CHILDREN_NONCE_PREFIX` + `RESERVED_CONTEXT_VARS`, cài validator bare `{{ children_html }}` + `children_meta`/`parent_ctx` và `render_block_csec_compiled` (clone `base_env` per-node).
 3. `page/` + `routes/themes/` + `dev_mode/`: `BlockTemplateCache` cache `base_env: Arc<Environment>` theo `(block_id, revision_digest, cache_epoch)` + `clear()` trong `dev_sync`; cài `HtmlSlotTable` + streaming `assemble_slot_table` `O(N)` và `apply_single_root_wrapper`; sửa `serialize_scoped_block_css` phát cả self & descendant selector; đưa `MAX_BUILDER_LISTS_PER_REQUEST = 8` vào `RenderBudget`.
 4. `storage/page/` (`load_declared_blocks_in_conn` `WHERE owner_kind != 'core'` + cleanup core rows) và `storage/{builder,entries}/` (`list_published_page_with_offset_in_tx` `1..=24` & `offset <= 200`, batch URL + `ListItem` hydration, `translation_group_id` fail-closed trả `[]`).
 5. `python3 cms/scripts/check-standards.py` (`<= 600 LOC/file`) và `python3 cms/scripts/run-tests.py --changed` PASS 100% trên nền workspace xanh hoàn toàn.
 
-**Rollback:** `git revert` commit của S01 (với DB dev đã chạy `0057`, khôi phục từ backup hoặc tái tạo DB dev; không thay đổi định dạng AST).
+**Rollback:** `git revert` commit của S01 (với DB dev đã chạy `0058`, khôi phục từ backup hoặc tái tạo DB dev; không thay đổi định dạng AST).
 
 ---
 

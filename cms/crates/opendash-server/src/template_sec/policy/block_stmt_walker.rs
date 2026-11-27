@@ -5,16 +5,23 @@ pub(crate) fn walk_block_ast_stmt(
     states: BTreeSet<ThemeHtmlState>,
     mut scopes: UrlScopeStack,
     policy: &ThemeUrlPolicy,
+    walk_ctx: &mut BlockWalkContext,
 ) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
     match stmt {
-        Stmt::Template(t) => walk_block_ast_sequence(&t.children, states, scopes, policy),
+        Stmt::Template(t) => walk_block_ast_sequence(&t.children, states, scopes, policy, walk_ctx),
         Stmt::EmitRaw(raw) => {
             let mut next_states = BTreeSet::new();
             for initial in states {
                 let mut cur = initial;
                 for ch in raw.raw.chars() {
-                    let depth = cur.trusted_depth();
-                    cur = step_theme_raw_char(cur, ch, BLOCK_HTML_STEP_OPTIONS, depth)?;
+                    let depths = cur.nesting_depths();
+                    cur = ThemeHtmlState::with_trust_depths(cur.into_inner(), true, depths);
+                    cur = step_theme_raw_char(
+                        cur,
+                        ch,
+                        BLOCK_HTML_STEP_OPTIONS,
+                        usize::from(depths.svg),
+                    )?;
                 }
                 next_states.insert(cur);
             }
@@ -25,6 +32,29 @@ pub(crate) fn walk_block_ast_stmt(
         }
         Stmt::EmitExpr(e) => {
             reject_style_control_flow(&states)?;
+            if matches!(&e.expr, Expr::Var(v) if v.id == "children_html") {
+                if !walk_ctx.supports_children {
+                    return Err(
+                        "Template block không bật supports_children nên cấm dùng children_html.",
+                    );
+                }
+                if walk_ctx.forbid_children_html {
+                    return Err("children_html không được phép nằm trong for, set hoặc with.");
+                }
+                if states
+                    .iter()
+                    .any(|s| s.inner() != &ThemeHtmlState::Body || !s.nesting_depths().is_zero())
+                {
+                    return Err(
+                        "children_html chỉ được đặt trực tiếp ở thân HTML (ngoài svg/math/a/button/summary).",
+                    );
+                }
+                walk_ctx.children_html_count += 1;
+                if walk_ctx.children_html_count > 1 {
+                    return Err("Template block chỉ được xuất {{ children_html }} tối đa một lần.");
+                }
+                return Ok((states, scopes));
+            }
             if let Some((icon_arg, _)) = parse_od_icon_call_ext(&e.expr, true)? {
                 if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_icon() chỉ được xuất trong thân HTML của block.");
@@ -124,7 +154,7 @@ pub(crate) fn walk_block_ast_stmt(
             let mut expected_url_slot: Option<Option<UrlAttrSlot>> = None;
             let mut updated_states = BTreeSet::new();
             for state in states {
-                let svg_depth = state.trusted_depth();
+                let depths = state.nesting_depths();
                 let ThemeHtmlState::Tag {
                     tag_name,
                     is_close,
@@ -198,7 +228,7 @@ pub(crate) fn walk_block_ast_stmt(
                     }
                     attr_expr_count = attr_expr_count.saturating_add(1);
                 }
-                updated_states.insert(ThemeHtmlState::with_trust(
+                updated_states.insert(ThemeHtmlState::with_trust_depths(
                     ThemeHtmlState::Tag {
                         tag_name,
                         is_close,
@@ -214,7 +244,7 @@ pub(crate) fn walk_block_ast_stmt(
                         attr_static_buf,
                     },
                     true,
-                    svg_depth,
+                    depths,
                 ));
             }
             Ok((updated_states, scopes))
@@ -222,10 +252,26 @@ pub(crate) fn walk_block_ast_stmt(
         Stmt::IfCond(cond) => {
             reject_style_control_flow(&states)?;
             check_block_expr_restrictions(&cond.expr, &scopes, policy)?;
-            let (mut true_states, true_scopes) =
-                walk_block_ast_sequence(&cond.true_body, states.clone(), scopes.clone(), policy)?;
+            let entry_depths: BTreeSet<HtmlNestingDepths> =
+                states.iter().map(ThemeHtmlState::nesting_depths).collect();
+            let (mut true_states, true_scopes) = walk_block_ast_sequence(
+                &cond.true_body,
+                states.clone(),
+                scopes.clone(),
+                policy,
+                walk_ctx,
+            )?;
             let (false_states, false_scopes) =
-                walk_block_ast_sequence(&cond.false_body, states, scopes, policy)?;
+                walk_block_ast_sequence(&cond.false_body, states, scopes, policy, walk_ctx)?;
+            if true_states
+                .iter()
+                .chain(false_states.iter())
+                .any(|s| !entry_depths.contains(&s.nesting_depths()))
+            {
+                return Err(
+                    "Nhánh điều kiện {% if %} trong template block phải cân bằng thẻ đóng mở HTML.",
+                );
+            }
             true_states.extend(false_states);
             if true_states.len() > MAX_THEME_WALKER_STATES {
                 return Err("Quá nhiều trạng thái HTML tại nhánh điều kiện block.");
@@ -260,11 +306,14 @@ pub(crate) fn walk_block_ast_stmt(
                 }
             }
 
+            let prev_forbid = walk_ctx.forbid_children_html;
+            walk_ctx.forbid_children_html = true;
             let (else_states, else_scopes) = walk_block_ast_sequence(
                 &loop_stmt.else_body,
                 states.clone(),
                 scopes.clone(),
                 policy,
+                walk_ctx,
             )?;
 
             let loop_targets: BTreeMap<String, Option<UrlSourceKind>> =
@@ -288,6 +337,7 @@ pub(crate) fn walk_block_ast_stmt(
                     loop_states.clone(),
                     loop_scopes.clone(),
                     policy,
+                    walk_ctx,
                 )?;
                 let mut next_states = loop_states.clone();
                 next_states.extend(after_states);
@@ -308,6 +358,7 @@ pub(crate) fn walk_block_ast_stmt(
                 loop_states = next_states;
                 loop_scopes = next_header_scopes;
             }
+            walk_ctx.forbid_children_html = prev_forbid;
             if !settled {
                 return Err("Không thể xác định vị trí HTML sau vòng lặp trong template block.");
             }
@@ -357,15 +408,19 @@ pub(crate) fn walk_block_ast_stmt(
                     return Err("C-SEC cấm bọc biến richtext/url/media trong khối set.");
                 }
             }
+            let prev_forbid = walk_ctx.forbid_children_html;
+            walk_ctx.forbid_children_html = true;
             let (sb_states, sb_scopes) = walk_block_ast_sequence(
                 &sb.body,
                 BTreeSet::from([ThemeHtmlState::with_trust(ThemeHtmlState::Body, true, 0)]),
                 scopes.clone(),
                 policy,
+                walk_ctx,
             )?;
+            walk_ctx.forbid_children_html = prev_forbid;
             if sb_states
                 .iter()
-                .any(|s| s.inner() != &ThemeHtmlState::Body || s.trusted_depth() != 0)
+                .any(|s| s.inner() != &ThemeHtmlState::Body || !s.nesting_depths().is_zero())
             {
                 return Err("Khối set block phải đóng đủ thẻ/comment HTML bên trong.");
             }
@@ -394,8 +449,11 @@ pub(crate) fn walk_block_ast_stmt(
                 }
             }
             scopes.push_frame(frame);
+            let prev_forbid = walk_ctx.forbid_children_html;
+            walk_ctx.forbid_children_html = true;
             let (out_states, mut out_scopes) =
-                walk_block_ast_sequence(&w.body, states, scopes, policy)?;
+                walk_block_ast_sequence(&w.body, states, scopes, policy, walk_ctx)?;
+            walk_ctx.forbid_children_html = prev_forbid;
             out_scopes.pop_frame();
             Ok((out_states, out_scopes))
         }
@@ -464,6 +522,15 @@ pub fn validate_block_template_csec(
     source: &str,
     schema: &opendash_core::block_schema::BlockSchemaV1,
 ) -> Result<(), &'static str> {
+    validate_block_template_csec_with_children(block_id, source, schema, false)
+}
+
+pub fn validate_block_template_csec_with_children(
+    block_id: &str,
+    source: &str,
+    schema: &opendash_core::block_schema::BlockSchemaV1,
+    supports_children: bool,
+) -> Result<(), &'static str> {
     if source.trim().is_empty() {
         return Err("Template block không được để trống.");
     }
@@ -471,6 +538,7 @@ pub fn validate_block_template_csec(
         return Err("Template block vượt giới hạn 512 KiB.");
     }
     if source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
+        || source.contains(BLOCK_CHILDREN_NONCE_PREFIX)
         || source.contains(CONTENT_SLOT_TOKEN)
         || source.contains(PREVIEW_PART_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
@@ -479,20 +547,25 @@ pub fn validate_block_template_csec(
         return Err("Template block chứa chuỗi nonce nội bộ bị cấm.");
     }
 
-    let ctx = BlockSchemaTemplateContext::from_schema(schema);
+    let ctx = BlockSchemaTemplateContext::from_schema_with_children(schema, supports_children);
     let ast = parse(source, block_id, SyntaxConfig::default())
         .map_err(|_| "Cú pháp MiniJinja của template block không hợp lệ.")?;
     validate_stmt_with_icons_ext(&ast, true, true, false)?;
 
+    let mut walk_ctx = BlockWalkContext {
+        supports_children,
+        ..BlockWalkContext::default()
+    };
     let (final_states, _) = walk_block_ast_stmt(
         &ast,
         BTreeSet::from([ThemeHtmlState::with_trust(ThemeHtmlState::Body, true, 0)]),
         ctx.root_scopes,
         &ctx.policy,
+        &mut walk_ctx,
     )?;
     if final_states
         .iter()
-        .any(|s| s.inner() != &ThemeHtmlState::Body || s.trusted_depth() != 0)
+        .any(|s| s.inner() != &ThemeHtmlState::Body || !s.nesting_depths().is_zero())
     {
         return Err(
             "Template block phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment/svg).",

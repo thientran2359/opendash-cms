@@ -39,5 +39,7 @@ pub(super) use crate::{
 
 mod builderrendercontext;
 pub use builderrendercontext::*;
+mod list_hydration;
+pub use list_hydration::*;
 mod render_entry_builder_preview;
 pub use render_entry_builder_preview::*;

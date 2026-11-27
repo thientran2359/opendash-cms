@@ -161,11 +161,10 @@ pub(super) enum ThemeHtmlState {
         meta_ok: bool,
         attr_static_buf: String,
     },
-    // Only trusted Theme/Block templates track foreign-content nesting. The
-    // wrapper preserves SVG depth across tags, comments, and Jinja branches.
+    // Only trusted Theme/Block templates track foreign-content and block container nesting.
     Trusted {
         inner: Box<ThemeHtmlState>,
-        svg_depth: usize,
+        depths: HtmlNestingDepths,
     },
 }
 
@@ -179,8 +178,15 @@ impl ThemeHtmlState {
 
     pub(super) fn trusted_depth(&self) -> usize {
         match self {
-            Self::Trusted { svg_depth, .. } => *svg_depth,
+            Self::Trusted { depths, .. } => usize::from(depths.svg),
             _ => 0,
+        }
+    }
+
+    pub(super) fn nesting_depths(&self) -> HtmlNestingDepths {
+        match self {
+            Self::Trusted { depths, .. } => *depths,
+            _ => HtmlNestingDepths::default(),
         }
     }
 
@@ -192,15 +198,99 @@ impl ThemeHtmlState {
     }
 
     pub(super) fn with_trust(inner: Self, trusted: bool, svg_depth: usize) -> Self {
+        Self::with_trust_depths(
+            inner,
+            trusted,
+            HtmlNestingDepths {
+                svg: svg_depth.min(usize::from(u8::MAX)) as u8,
+                ..HtmlNestingDepths::default()
+            },
+        )
+    }
+
+    pub(super) fn with_trust_depths(inner: Self, trusted: bool, depths: HtmlNestingDepths) -> Self {
         if trusted {
             Self::Trusted {
                 inner: Box::new(inner),
-                svg_depth,
+                depths,
             }
         } else {
             inner
         }
     }
+}
+
+pub(super) fn advance_trusted_nesting_depths(
+    mut depths: HtmlNestingDepths,
+    tag_name: &str,
+    is_close: bool,
+    self_closing: bool,
+    strict_block: bool,
+) -> Result<HtmlNestingDepths, &'static str> {
+    let step_foreign =
+        |cur: u8, close_err: &'static str, deep_err: &'static str| -> Result<u8, &'static str> {
+            if is_close {
+                cur.checked_sub(1).ok_or(close_err)
+            } else if self_closing {
+                Ok(cur)
+            } else {
+                cur.checked_add(1).filter(|d| *d <= 64).ok_or(deep_err)
+            }
+        };
+    let step_interactive =
+        |cur: u8, close_err: &'static str, deep_err: &'static str| -> Result<u8, &'static str> {
+            if is_close {
+                cur.checked_sub(1).ok_or(close_err)
+            } else {
+                cur.checked_add(1).filter(|d| *d <= 64).ok_or(deep_err)
+            }
+        };
+    match tag_name {
+        "svg" => {
+            depths.svg = step_foreign(
+                depths.svg,
+                "Thẻ </svg> không có thẻ mở.",
+                "SVG lồng nhau quá sâu.",
+            )?;
+        }
+        "math" if strict_block => {
+            depths.math = step_foreign(
+                depths.math,
+                "Thẻ </math> không có thẻ mở.",
+                "MathML lồng nhau quá sâu.",
+            )?;
+        }
+        "foreignobject" if strict_block => {
+            depths.foreign_object = step_foreign(
+                depths.foreign_object,
+                "Thẻ </foreignObject> không có thẻ mở.",
+                "foreignObject lồng nhau quá sâu.",
+            )?;
+        }
+        "a" if strict_block => {
+            depths.a = step_interactive(
+                depths.a,
+                "Thẻ </a> không có thẻ mở.",
+                "Thẻ <a> lồng nhau quá sâu.",
+            )?;
+        }
+        "button" if strict_block => {
+            depths.button = step_interactive(
+                depths.button,
+                "Thẻ </button> không có thẻ mở.",
+                "Thẻ <button> lồng nhau quá sâu.",
+            )?;
+        }
+        "summary" if strict_block => {
+            depths.summary = step_interactive(
+                depths.summary,
+                "Thẻ </summary> không có thẻ mở.",
+                "Thẻ <summary> lồng nhau quá sâu.",
+            )?;
+        }
+        _ => {}
+    }
+    Ok(depths)
 }
 
 pub(super) fn new_theme_tag_state(first_char: char, is_close: bool) -> ThemeHtmlState {

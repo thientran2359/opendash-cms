@@ -299,6 +299,7 @@ pub async fn dev_sync(
             }),
         )
         .await;
+    crate::page::BlockTemplateCache::global().clear();
     crate::cache::SiteCacheEpoch::global().bump();
 
     Ok((

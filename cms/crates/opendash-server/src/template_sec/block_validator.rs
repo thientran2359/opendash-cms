@@ -45,3 +45,10 @@ pub(super) fn classify_trusted_link_tail(tail: &[&str]) -> Option<BlockSensitive
         _ => Some(BlockSensitiveKind::ObjectOrNonScalar),
     }
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct BlockWalkContext {
+    pub(super) supports_children: bool,
+    pub(super) forbid_children_html: bool,
+    pub(super) children_html_count: usize,
+}

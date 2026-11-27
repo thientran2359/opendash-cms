@@ -26,14 +26,18 @@ impl Default for BuilderRenderContext {
     }
 }
 
-/// Only public-safe display text and a canonical, storage-resolved href leave
-/// the list resolver. IDs remain stable when a slug or permalink changes.
-#[derive(Debug, Clone)]
+/// Only public-safe display text, canonical storage-resolved URLs, and opted-in
+/// hydrated card metadata leave the list resolver. IDs remain stable across slug edits.
+#[derive(Debug, Clone, Default)]
 pub struct ListItem {
     pub entry_id: i64,
     pub title: String,
     pub slug: String,
     pub href: Option<String>,
+    pub cover_url: Option<String>,
+    pub published_at: Option<String>,
+    pub excerpt: Option<String>,
+    pub terms: Vec<super::ListItemTerm>,
 }
 
 #[derive(Debug)]
@@ -80,6 +84,27 @@ pub async fn resolve_lists_in_tx_for_locale(
     pages: &BTreeMap<String, i64>,
     render_locale: Option<&str>,
 ) -> ApiResult<ListResults> {
+    resolve_lists_in_tx_for_locale_inner(tx, document, pages, render_locale, None).await
+}
+
+/// Request-scoped variant that charges each list resolution against `RenderBudget`.
+pub async fn resolve_lists_in_tx_for_locale_with_budget(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    pages: &BTreeMap<String, i64>,
+    render_locale: Option<&str>,
+    budget: &mut crate::template_sec::RenderBudget,
+) -> ApiResult<ListResults> {
+    resolve_lists_in_tx_for_locale_inner(tx, document, pages, render_locale, Some(budget)).await
+}
+
+async fn resolve_lists_in_tx_for_locale_inner(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    pages: &BTreeMap<String, i64>,
+    render_locale: Option<&str>,
+    mut budget: Option<&mut crate::template_sec::RenderBudget>,
+) -> ApiResult<ListResults> {
     let active_locale = match render_locale {
         Some(raw) => {
             crate::storage::settings::resolve_requested_locale_in_conn(&mut **tx, Some(raw)).await?
@@ -94,6 +119,9 @@ pub async fn resolve_lists_in_tx_for_locale(
                     let ElementContent::Known(KnownElement::List(props)) = &element.content else {
                         continue;
                     };
+                    if let Some(b) = budget.as_deref_mut() {
+                        b.charge_builder_list().map_err(ApiError::bad_request)?;
+                    }
                     // Defensive cap even for corrupt historical stored data.
                     if results.len() >= 8 {
                         return Err(ApiError::bad_request("Builder vượt giới hạn 8 list."));
@@ -103,7 +131,7 @@ pub async fn resolve_lists_in_tx_for_locale(
                         .copied()
                         .filter(|p| (1..=100).contains(p))
                         .unwrap_or(1);
-                    let filters = EntryFilters {
+                    let raw_filters = EntryFilters {
                         category_id: props.category_id,
                         tag_id: props.tag_id,
                         taxonomy_key: props.taxonomy_key.clone(),
@@ -115,41 +143,53 @@ pub async fn resolve_lists_in_tx_for_locale(
                         opendash_core::builder::ListSort::IdDesc => PublishedListSort::IdDesc,
                         opendash_core::builder::ListSort::IdAsc => PublishedListSort::IdAsc,
                     };
-                    let result = entries::list_published_page_in_tx(
+                    let filters = match super::resolve_list_filters_for_locale_in_tx(
+                        tx,
+                        &props.type_key,
+                        raw_filters,
+                        &active_locale,
+                    )
+                    .await?
+                    {
+                        super::LocalizedListFilterOutcome::Ready(resolved) => resolved,
+                        super::LocalizedListFilterOutcome::MissingConfig => {
+                            results.insert(element.id.clone(), ResolvedList::MissingConfig);
+                            continue;
+                        }
+                        super::LocalizedListFilterOutcome::EmptyDueToMissingTranslation => {
+                            results.insert(
+                                element.id.clone(),
+                                ResolvedList::Page {
+                                    page,
+                                    out_of_range: page > 1,
+                                    items: Vec::new(),
+                                    has_next: false,
+                                },
+                            );
+                            continue;
+                        }
+                    };
+                    let result = entries::list_published_page_with_offset_in_tx(
                         tx,
                         &props.type_key,
                         page,
                         i64::from(props.page_size),
+                        0,
                         sort,
                         filters,
                     )
                     .await?;
                     let rendered = match result {
                         PublishedListResult::Page(result) => {
-                            // Keep every URL lookup in the very same read
-                            // snapshot as the list page and published guards.
-                            let mut items = Vec::with_capacity(result.entries.len());
-                            for entry in result.entries {
-                                let href = if crate::storage::seo::resolve_public_entry_path_in_tx(
-                                    &mut **tx, entry.id,
-                                )
-                                .await?
-                                .is_some()
-                                {
-                                    crate::storage::permalinks::canonical_entry_path_in_tx(
-                                        &mut **tx, entry.id,
-                                    )
-                                    .await?
-                                } else {
-                                    None
-                                };
-                                items.push(ListItem {
-                                    entry_id: entry.id,
-                                    title: entry.title,
-                                    slug: entry.slug,
-                                    href,
-                                });
-                            }
+                            // Batch URL hydration runs in the very same read snapshot
+                            // as the list query and published visibility guards.
+                            let items = super::hydrate_list_items_in_tx(
+                                tx,
+                                &props.type_key,
+                                &result.entries,
+                                super::ListHydrationOptions::default(),
+                            )
+                            .await?;
                             ResolvedList::Page {
                                 page,
                                 out_of_range: page > 1 && items.is_empty(),

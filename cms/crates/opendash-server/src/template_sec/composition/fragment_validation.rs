@@ -243,6 +243,9 @@ pub(crate) fn is_forbidden_block_shadow_name(id: &str) -> bool {
             | "od_is_preview"
             | "od_icon"
             | "od_hook"
+            | "children_html"
+            | "children_meta"
+            | "parent_ctx"
     )
 }
 

@@ -1,5 +1,125 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct HtmlNestingDepths {
+    pub(crate) svg: u8,
+    pub(crate) math: u8,
+    pub(crate) foreign_object: u8,
+    pub(crate) a: u8,
+    pub(crate) button: u8,
+    pub(crate) summary: u8,
+}
+
+impl HtmlNestingDepths {
+    pub(crate) fn is_zero(self) -> bool {
+        self.svg == 0
+            && self.math == 0
+            && self.foreign_object == 0
+            && self.a == 0
+            && self.button == 0
+            && self.summary == 0
+    }
+}
+
+pub(crate) fn update_depths_from_tag_prefix(
+    prefix: &str,
+    trailing_slash: bool,
+    depths: &mut HtmlNestingDepths,
+) {
+    let Some(after_lt) = prefix.strip_prefix('<') else {
+        return;
+    };
+    let (is_close, name_src) = match after_lt.strip_prefix('/') {
+        Some(rest) => (true, rest),
+        None => (false, after_lt),
+    };
+    let name_len = name_src
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'-')
+        .count();
+    if name_len == 0 {
+        return;
+    }
+    let tag = name_src[..name_len].to_ascii_lowercase();
+    match tag.as_str() {
+        "svg" => {
+            if is_close {
+                depths.svg = depths.svg.saturating_sub(1);
+            } else if !trailing_slash {
+                depths.svg = depths.svg.saturating_add(1);
+            }
+        }
+        "math" => {
+            if is_close {
+                depths.math = depths.math.saturating_sub(1);
+            } else if !trailing_slash {
+                depths.math = depths.math.saturating_add(1);
+            }
+        }
+        "foreignobject" => {
+            if is_close {
+                depths.foreign_object = depths.foreign_object.saturating_sub(1);
+            } else if !trailing_slash {
+                depths.foreign_object = depths.foreign_object.saturating_add(1);
+            }
+        }
+        "a" => {
+            if is_close {
+                depths.a = depths.a.saturating_sub(1);
+            } else {
+                depths.a = depths.a.saturating_add(1);
+            }
+        }
+        "button" => {
+            if is_close {
+                depths.button = depths.button.saturating_sub(1);
+            } else {
+                depths.button = depths.button.saturating_add(1);
+            }
+        }
+        "summary" => {
+            if is_close {
+                depths.summary = depths.summary.saturating_sub(1);
+            } else {
+                depths.summary = depths.summary.saturating_add(1);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HtmlBodyScanner {
+    pub(crate) state: HtmlScanState,
+    pub(crate) depths: HtmlNestingDepths,
+}
+
+impl HtmlBodyScanner {
+    pub(crate) fn new() -> Self {
+        Self {
+            state: HtmlScanState::Body,
+            depths: HtmlNestingDepths::default(),
+        }
+    }
+
+    pub(crate) fn consume(&mut self, byte: u8) {
+        if byte == b'>'
+            && let HtmlScanState::Tag {
+                quote: None,
+                ref prefix,
+                trailing_slash,
+            } = self.state
+        {
+            update_depths_from_tag_prefix(prefix, trailing_slash, &mut self.depths);
+        }
+        self.state = self.state.clone().consume(byte);
+    }
+
+    pub(crate) fn is_safe_container_body(&self) -> bool {
+        self.state == HtmlScanState::Body && self.depths.is_zero()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum CommentScanSubState {
     /// Immediately after `<!--`: `>` closes (`<!-->`), `-` enters `StartDash`.
@@ -59,6 +179,7 @@ impl HtmlScanState {
             Self::Body if byte == b'<' => Self::Tag {
                 quote: None,
                 prefix: "<".to_owned(),
+                trailing_slash: false,
             },
             Self::Body => Self::Body,
             Self::Comment(sub) => match step_comment_substate(sub, byte) {
@@ -122,30 +243,34 @@ impl HtmlScanState {
             Self::Tag {
                 mut quote,
                 mut prefix,
+                mut trailing_slash,
             } => {
                 if prefix == "<" {
                     if byte == b'<' {
                         return Self::Tag {
                             quote: None,
                             prefix: "<".to_owned(),
+                            trailing_slash: false,
                         };
                     }
                     if !(byte.is_ascii_alphabetic() || matches!(byte, b'/' | b'!' | b'?')) {
                         return Self::Body;
                     }
                 }
-                if prefix.len() < 8 {
+                if prefix.len() < 24 {
                     prefix.push(char::from(byte));
                 }
                 if prefix == "<!--" {
                     return Self::Comment(CommentScanSubState::Start);
                 }
                 if let Some(q) = quote {
+                    trailing_slash = false;
                     if byte == q {
                         quote = None;
                     }
                 } else if byte == b'"' || byte == b'\'' {
                     quote = Some(byte);
+                    trailing_slash = false;
                 } else if byte == b'>' {
                     let lower = prefix.to_ascii_lowercase();
                     if lower.starts_with("<style")
@@ -173,8 +298,16 @@ impl HtmlScanState {
                         return Self::Title { closing_prefix: 0 };
                     }
                     return Self::Body;
+                } else if byte == b'/' {
+                    trailing_slash = true;
+                } else if !byte.is_ascii_whitespace() {
+                    trailing_slash = false;
                 }
-                Self::Tag { quote, prefix }
+                Self::Tag {
+                    quote,
+                    prefix,
+                    trailing_slash,
+                }
             }
         }
     }

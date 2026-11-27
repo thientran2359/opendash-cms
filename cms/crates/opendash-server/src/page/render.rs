@@ -11,17 +11,35 @@ impl BlockTemplateCache {
         GLOBAL.get_or_init(|| std::sync::Arc::new(BlockTemplateCache::new()))
     }
 
+    pub fn clear(&self) {
+        self.inner
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+
     pub fn get_or_validate(
         &self,
         block_id: &str,
         schema: &opendash_core::block_schema::BlockSchemaV1,
         template_source: &str,
     ) -> Result<std::sync::Arc<ValidatedBlockTemplate>, &'static str> {
+        self.get_or_validate_with_children(block_id, schema, template_source, false)
+    }
+
+    pub fn get_or_validate_with_children(
+        &self,
+        block_id: &str,
+        schema: &opendash_core::block_schema::BlockSchemaV1,
+        template_source: &str,
+        supports_children: bool,
+    ) -> Result<std::sync::Arc<ValidatedBlockTemplate>, &'static str> {
         let schema_json =
             serde_json::to_string(schema).map_err(|_| "Không thể tuần tự hóa block schema.")?;
         let digest =
             crate::storage::page::compute_block_definition_digest(&schema_json, template_source);
-        let key = (block_id.to_owned(), digest);
+        let cache_epoch = crate::cache::SiteCacheEpoch::global().current();
+        let key = (block_id.to_owned(), digest, cache_epoch, supports_children);
         if let Some(found) = self
             .inner
             .read()
@@ -31,7 +49,14 @@ impl BlockTemplateCache {
         {
             return Ok(found);
         }
-        crate::template_sec::validate_block_template_csec(block_id, template_source, schema)?;
+        crate::template_sec::validate_block_template_csec_with_children(
+            block_id,
+            template_source,
+            schema,
+            supports_children,
+        )?;
+        let base_env =
+            crate::template_sec::compile_block_template_base_env(block_id, template_source)?;
         let mut guard = self.inner.write().unwrap_or_else(|e| e.into_inner());
         if let Some(found) = guard.get(&key).cloned() {
             return Ok(found);
@@ -42,6 +67,7 @@ impl BlockTemplateCache {
         let validated = std::sync::Arc::new(ValidatedBlockTemplate {
             block_id: block_id.to_owned(),
             source: template_source.to_owned(),
+            base_env,
         });
         guard.insert(key, validated.clone());
         Ok(validated)

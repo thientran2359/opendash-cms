@@ -191,3 +191,152 @@ pub(in crate::storage) async fn list_host_entries_in_tx(
     .await?;
     Ok((rows, total))
 }
+
+/// Validates list query configuration, taxonomy visibility, and eligibility
+/// before executing the paginated query. Distinguishes request errors (`Err`)
+/// from missing/ineligible Builder configuration (`Ok(Err(missing))`).
+pub(in crate::storage) async fn preflight_published_list_filters_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    filters: &EntryFilters,
+) -> ApiResult<Result<(), PublishedListMissing>> {
+    if type_key == "pattern" {
+        return Ok(Err(PublishedListMissing::ContentType));
+    }
+    if filters.include_descendants
+        && filters.category_id.is_none()
+        && filters.taxonomy_key.is_none()
+    {
+        return Err(ApiError::bad_request(
+            "include_descendants yêu cầu category_id hoặc generic taxonomy.",
+        ));
+    }
+    // Invalid filter shapes remain a request error. A valid persisted pair
+    // that points at a withdrawn/private/deleted taxonomy is instead a
+    // missing Builder configuration, so the public homepage still renders.
+    if filters.taxonomy_key.is_some() != filters.term_id.is_some()
+        || (filters.taxonomy_key.is_some()
+            && (filters.category_id.is_some() || filters.tag_id.is_some()))
+        || filters.term_id.is_some_and(|id| id <= 0)
+    {
+        return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
+    }
+
+    let type_exists: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active'
+         AND key != 'pattern' AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if type_exists.is_none() {
+        return Ok(Err(PublishedListMissing::ContentType));
+    }
+
+    let effective_taxonomies =
+        crate::storage::content::load_effective_taxonomies_in_tx(&mut **tx, type_key).await?;
+
+    for (id, kind, missing) in [
+        (
+            filters.category_id,
+            "category",
+            PublishedListMissing::Category,
+        ),
+        (filters.tag_id, "tag", PublishedListMissing::Tag),
+    ] {
+        if let Some(id) = id {
+            if id <= 0 {
+                return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
+            }
+            let actual: Option<String> = sqlx::query_scalar(
+                "SELECT term.kind FROM taxonomy_terms term
+                   JOIN taxonomy_definitions d ON d.key=term.kind
+                   JOIN site_locales sl ON sl.code=term.locale AND sl.deleted_at IS NULL
+                  WHERE term.id=? AND d.public=1 AND d.provider_status='active'
+                    AND d.declaration_state='declared' AND sl.enabled=1
+                    AND (sl.is_default=1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id=1)=1)",
+            )
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?;
+            if actual.as_deref() != Some(kind)
+                || !effective_taxonomies.iter().any(|enabled| enabled == kind)
+            {
+                return Ok(Err(missing));
+            }
+        }
+    }
+
+    if let (Some(kind), Some(id)) = (&filters.taxonomy_key, filters.term_id) {
+        let usable: Option<i64> = sqlx::query_scalar(
+            "SELECT d.hierarchical FROM taxonomy_terms term
+              JOIN taxonomy_definitions d ON d.key = term.kind
+              JOIN site_locales sl ON sl.code=term.locale AND sl.deleted_at IS NULL
+             WHERE term.id = ? AND term.kind = ? AND d.public = 1
+               AND d.provider_status = 'active'
+               AND d.declaration_state = 'declared' AND sl.enabled=1
+               AND (sl.is_default=1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id=1)=1)",
+        )
+        .bind(id)
+        .bind(kind)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if usable.is_none()
+            || (filters.include_descendants && usable == Some(0))
+            || !effective_taxonomies.iter().any(|enabled| enabled == kind)
+        {
+            return Ok(Err(PublishedListMissing::Taxonomy));
+        }
+    }
+
+    validate_filter_in_tx(tx, type_key, filters, true).await?;
+    Ok(Ok(()))
+}
+
+/// Public list query accepting `page_size` 1..=24 and `extra_offset` 0..=200
+/// for Loop pagination and item-skip offsets while keeping legacy callers at 1..=20.
+pub async fn list_published_page_with_offset_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    page: i64,
+    page_size: i64,
+    extra_offset: i64,
+    sort: PublishedListSort,
+    filters: EntryFilters,
+) -> ApiResult<PublishedListResult> {
+    if !(1..=100).contains(&page) || !(1..=24).contains(&page_size) {
+        return Err(ApiError::bad_request(
+            "Trang danh sách phải từ 1–100 và page_size từ 1–24.",
+        ));
+    }
+    if !(0..=200).contains(&extra_offset) {
+        return Err(ApiError::bad_request(
+            "extra_offset danh sách phải từ 0–200.",
+        ));
+    }
+    if let Err(missing) = preflight_published_list_filters_in_tx(tx, type_key, &filters).await? {
+        return Ok(PublishedListResult::MissingConfig(missing));
+    }
+
+    // One extra row tells the renderer whether to expose a next-page link.
+    // Bounds above guarantee no integer overflow or unbounded fetch.
+    let offset = (page - 1) * page_size + extra_offset;
+    let mut entries = query_entries_filtered(
+        tx,
+        type_key,
+        page_size + 1,
+        offset,
+        filters,
+        true,
+        true,
+        sort,
+    )
+    .await?;
+    // ADR-0011 stops pagination at page 100 even if more records exist.
+    let has_next = page < 100 && entries.len() > page_size as usize;
+    entries.truncate(page_size as usize);
+    Ok(PublishedListResult::Page(PublishedListPage {
+        entries,
+        has_next,
+    }))
+}

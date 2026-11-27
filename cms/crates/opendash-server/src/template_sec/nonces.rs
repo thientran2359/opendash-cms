@@ -3,6 +3,25 @@ use super::*;
 // Reserved only by the block/theme RichText post-render nonce replacer.
 pub const BLOCK_RICHTEXT_NONCE_PREFIX: &str = "OD_RICHTEXT_";
 
+// Reserved only for Container `{{ children_html }}` reverse-order slot assembly.
+pub const BLOCK_CHILDREN_NONCE_PREFIX: &str = "__OD_CHILDREN_NONCE_";
+
+pub const MAX_BUILDER_LISTS_PER_REQUEST: usize = 8;
+
+pub fn generate_children_nonce() -> Result<String, &'static str> {
+    let mut random = [0_u8; 16];
+    OsRng
+        .try_fill_bytes(&mut random)
+        .map_err(|_| "Không tạo được nonce children.")?;
+    let mut nonce = String::with_capacity(BLOCK_CHILDREN_NONCE_PREFIX.len() + 32);
+    nonce.push_str(BLOCK_CHILDREN_NONCE_PREFIX);
+    for byte in random {
+        use std::fmt::Write;
+        write!(&mut nonce, "{byte:02x}").map_err(|_| "Không tạo được nonce children.")?;
+    }
+    Ok(nonce)
+}
+
 pub(super) fn advance_body_scan_state(
     before: &str,
     state: &mut HtmlScanState,
@@ -165,6 +184,7 @@ pub(super) fn install_hook_function(
 pub struct RenderBudget {
     pub fuel_remaining: u64,
     pub html_bytes_used: usize,
+    pub builder_lists_used: usize,
     pub locale: String,
     pub icon_nonces: IconNonceTable,
     pub richtext_nonces: RichTextNonceTable,
@@ -178,6 +198,7 @@ pub struct RenderBudget {
 pub(crate) struct PreviewCompositionBudget {
     pub fuel_remaining: u64,
     pub html_bytes_used: usize,
+    pub builder_lists_used: usize,
     pub expansions: usize,
     pub stack: Vec<String>,
     pub icon_nonces: IconNonceTable,
@@ -194,6 +215,7 @@ impl PreviewCompositionBudget {
         Self {
             fuel_remaining: rb.fuel_remaining,
             html_bytes_used: rb.html_bytes_used,
+            builder_lists_used: rb.builder_lists_used,
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: rb.icon_nonces,
@@ -206,6 +228,7 @@ impl PreviewCompositionBudget {
         RenderBudget {
             fuel_remaining: self.fuel_remaining,
             html_bytes_used: self.html_bytes_used,
+            builder_lists_used: self.builder_lists_used,
             locale: "vi".to_owned(),
             icon_nonces: self.icon_nonces.clone(),
             richtext_nonces: self.richtext_nonces.clone(),
@@ -216,6 +239,7 @@ impl PreviewCompositionBudget {
     pub(crate) fn sync_from_render_budget(&mut self, rb: &RenderBudget) {
         self.fuel_remaining = rb.fuel_remaining;
         self.html_bytes_used = rb.html_bytes_used;
+        self.builder_lists_used = rb.builder_lists_used;
         self.icon_nonces = rb.icon_nonces.clone();
         self.richtext_nonces = rb.richtext_nonces.clone();
         self.hook_nonces = rb.hook_nonces.clone();
@@ -260,11 +284,21 @@ pub(super) fn insert_preview_fragments(
 
 /// Bounded lexical HTML states for block templates and preview nonce replacement.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum HtmlScanState {
+pub(crate) enum HtmlScanState {
     Body,
-    Tag { quote: Option<u8>, prefix: String },
+    Tag {
+        quote: Option<u8>,
+        prefix: String,
+        trailing_slash: bool,
+    },
     Comment(CommentScanSubState),
-    Style { closing_prefix: usize },
-    Script { closing_prefix: usize },
-    Title { closing_prefix: usize },
+    Style {
+        closing_prefix: usize,
+    },
+    Script {
+        closing_prefix: usize,
+    },
+    Title {
+        closing_prefix: usize,
+    },
 }

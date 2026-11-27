@@ -5,6 +5,7 @@ impl Default for RenderBudget {
         Self {
             fuel_remaining: TEMPLATE_FUEL_LIMIT,
             html_bytes_used: 0,
+            builder_lists_used: 0,
             locale: "vi".to_owned(),
             icon_nonces: IconNonceTable::default(),
             richtext_nonces: RichTextNonceTable::default(),
@@ -25,6 +26,14 @@ impl RenderBudget {
         }
         Ok(())
     }
+
+    pub fn charge_builder_list(&mut self) -> Result<(), &'static str> {
+        if self.builder_lists_used >= MAX_BUILDER_LISTS_PER_REQUEST {
+            return Err("Builder vượt giới hạn 8 list trên mỗi request.");
+        }
+        self.builder_lists_used += 1;
+        Ok(())
+    }
 }
 
 impl Default for PreviewCompositionBudget {
@@ -32,6 +41,7 @@ impl Default for PreviewCompositionBudget {
         Self {
             fuel_remaining: TEMPLATE_FUEL_LIMIT,
             html_bytes_used: 0,
+            builder_lists_used: 0,
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: IconNonceTable::default(),
@@ -74,6 +84,7 @@ pub(crate) fn preview_composition_sites(
     }
     if source.contains(PREVIEW_PART_NONCE_PREFIX)
         || source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
+        || source.contains(BLOCK_CHILDREN_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {

@@ -22,19 +22,6 @@ pub(crate) use serde::Serialize;
 
 pub use crate::template_sec::RenderBudget;
 
-#[derive(Debug, Clone)]
-pub struct ValidatedBlockTemplate {
-    pub block_id: String,
-    pub source: String,
-}
-
-#[derive(Debug, Default)]
-pub struct BlockTemplateCache {
-    pub(crate) inner: std::sync::RwLock<
-        std::collections::BTreeMap<(String, String), std::sync::Arc<ValidatedBlockTemplate>>,
-    >,
-}
-
 #[derive(Debug, Serialize)]
 pub struct BuilderDiagnostic {
     pub node_id: String,
@@ -254,17 +241,17 @@ pub(crate) fn collect_scoped_css_for_fields(
                     };
                     if let Some(d_css) = d_sv.and_then(|sv| sv.format_css(css_unit)) {
                         desktop_rules.push_str(&format!(
-                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{d_css};}}"
+                            "[data-od-node-scope=\"{node_scope}\"][data-od-spacing=\"{field_path}\"],[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{d_css};}}"
                         ));
                     }
                     if let Some(t_css) = t_sv.and_then(|sv| sv.format_css(css_unit)) {
                         tablet_rules.push_str(&format!(
-                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{t_css};}}"
+                            "[data-od-node-scope=\"{node_scope}\"][data-od-spacing=\"{field_path}\"],[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{t_css};}}"
                         ));
                     }
                     if let Some(m_css) = m_sv.and_then(|sv| sv.format_css(css_unit)) {
                         mobile_rules.push_str(&format!(
-                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{m_css};}}"
+                            "[data-od-node-scope=\"{node_scope}\"][data-od-spacing=\"{field_path}\"],[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{m_css};}}"
                         ));
                     }
                 }
@@ -801,15 +788,18 @@ pub fn render_builder_with_budget_and_base_path(
                                                 };
                                             let menus_opt =
                                                 (!state.menus.is_empty()).then_some(&state.menus);
-                                            crate::template_sec::render_block_csec_with_inputs(
+                                            crate::template_sec::render_block_csec_compiled(
                                                 &compiled.block_id,
-                                                &compiled.source,
+                                                &compiled.base_env,
                                                 crate::template_sec::BlockRenderInputs {
                                                     hydrated_props: &hydrated,
                                                     local_richtext_nonces: Some(local_rt),
                                                     merged_options: Some(&state.options),
                                                     site_options: Some(&state.site_options),
                                                     menus: menus_opt,
+                                                    children_html: None,
+                                                    children_meta: None,
+                                                    parent_ctx: None,
                                                     is_preview,
                                                     fmt_cfg: &fmt_cfg,
                                                 },

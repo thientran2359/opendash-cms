@@ -285,3 +285,257 @@ async fn provider_toggle_resyncs_media_acl_without_erasing_saved_homepage() {
         .unwrap();
     assert_eq!(saved, original_json, "resync must not mutate saved AST");
 }
+
+#[tokio::test]
+async fn s01_core_sync_cleanup_list_offset_and_fail_closed_locale_filters() {
+    use opendash_core::builder::{
+        BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, ListProps, RowNode,
+        SectionNode,
+    };
+
+    let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    crate::storage::content::preflight_builtin_key_collisions(&db)
+        .await
+        .unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
+    ensure_embedded_core_blocks(&db).await.unwrap();
+
+    let mut conn = db.acquire().await.unwrap();
+    sqlx::query(
+        "INSERT INTO builder_block_definitions
+            (block_id, owner_kind, owner_id, provider_status, declaration_state, schema_json, template, revision_digest)
+         VALUES ('core/stale-obsolete', 'core', 'core', 'active', 'declared', '{}', '<div></div>', 'stale-rev')",
+    )
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+    ensure_embedded_core_blocks_in_conn(&mut conn)
+        .await
+        .unwrap();
+    let stale_cnt: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM builder_block_definitions WHERE block_id = 'core/stale-obsolete'",
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .unwrap();
+    assert_eq!(stale_cnt, 0);
+    let declared = load_declared_blocks_in_conn(&mut conn).await.unwrap();
+    assert!(declared.len() >= EMBEDDED_CORE_BLOCK_SOURCES.len());
+    assert!(!declared.contains_key("core/stale-obsolete"));
+
+    for idx in 1..=3 {
+        sqlx::query(
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
+             VALUES ('post', ?, ?, '{}', 'draft', 'vi', ?)",
+        )
+        .bind(format!("s01-vi-post-{idx}"))
+        .bind(format!("VI Post {idx}"))
+        .bind(format!("tg-s01-vi-{idx}"))
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "UPDATE content_entries SET publication_status = 'published' WHERE translation_group_id LIKE 'tg-s01-vi-%'",
+    )
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO site_locales (code,bcp47_tag,label,direction,is_default,enabled,position)
+         VALUES ('en','en','English','ltr',0,1,1)",
+    )
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE site_locales_state SET multilingual_enabled=1 WHERE id=1")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    let vi_cat_id: i64 = sqlx::query_scalar(
+        "INSERT INTO taxonomy_terms(kind, locale, translation_group_id, name, slug, version)
+         VALUES ('category', 'vi', 'tg-s01-cat', 'Tin tức', 'tin-tuc', 1)
+         RETURNING id",
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .unwrap();
+    assert_eq!(
+        crate::storage::builder::resolve_term_id_for_locale_in_conn(
+            &mut conn, vi_cat_id, "category", "en",
+        )
+        .await
+        .unwrap(),
+        None
+    );
+    drop(conn);
+
+    let list_doc = |cat_id: i64| -> BuilderDocument {
+        let props: ListProps = serde_json::from_value(
+            json!({ "type_key": "post", "page_size": 5, "category_id": cat_id }),
+        )
+        .unwrap();
+        BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "s1".into(),
+                meta: None,
+                responsive: None,
+                style: None,
+                children: vec![RowNode {
+                    id: "r1".into(),
+                    meta: None,
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "c1".into(),
+                        meta: None,
+                        responsive: None,
+                        children: vec![ElementNode {
+                            id: "list-1".into(),
+                            meta: None,
+                            content: ElementContent::Known(KnownElement::List(props)),
+                        }],
+                    }],
+                }],
+            }],
+        }
+    };
+
+    let mut tx = db.begin().await.unwrap();
+    let vi_filters = crate::storage::entries::EntryFilters {
+        category_id: None,
+        tag_id: None,
+        taxonomy_key: None,
+        term_id: None,
+        include_descendants: false,
+        locale: Some("vi".into()),
+    };
+    let crate::storage::entries::PublishedListResult::Page(offset_page) =
+        crate::storage::entries::list_published_page_with_offset_in_tx(
+            &mut tx,
+            "post",
+            1,
+            24,
+            1,
+            crate::storage::entries::PublishedListSort::IdDesc,
+            vi_filters.clone(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected published page");
+    };
+    assert_eq!(offset_page.entries.len(), 2);
+    assert_eq!(offset_page.entries[0].slug, "s01-vi-post-2");
+    assert_eq!(offset_page.entries[1].slug, "s01-vi-post-1");
+    assert!(
+        crate::storage::entries::list_published_page_with_offset_in_tx(
+            &mut tx,
+            "post",
+            1,
+            25,
+            0,
+            crate::storage::entries::PublishedListSort::IdDesc,
+            vi_filters.clone(),
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        crate::storage::entries::list_published_page_with_offset_in_tx(
+            &mut tx,
+            "post",
+            1,
+            24,
+            201,
+            crate::storage::entries::PublishedListSort::IdDesc,
+            vi_filters,
+        )
+        .await
+        .is_err()
+    );
+
+    let mut budget = crate::template_sec::RenderBudget::new();
+    let en_untranslated = crate::storage::builder::resolve_lists_in_tx_for_locale_with_budget(
+        &mut tx,
+        &list_doc(vi_cat_id),
+        &std::collections::BTreeMap::new(),
+        Some("en"),
+        &mut budget,
+    )
+    .await
+    .unwrap();
+    assert_eq!(budget.builder_lists_used, 1);
+    match en_untranslated.get("list-1").unwrap() {
+        crate::storage::builder::ResolvedList::Page { items, .. } => assert!(items.is_empty()),
+        other => panic!("expected empty fail-closed Page, got {other:?}"),
+    }
+
+    let missing = crate::storage::builder::resolve_lists_in_tx_for_locale_with_budget(
+        &mut tx,
+        &list_doc(999_999),
+        &std::collections::BTreeMap::new(),
+        Some("en"),
+        &mut budget,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        missing.get("list-1"),
+        Some(crate::storage::builder::ResolvedList::MissingConfig)
+    ));
+
+    let en_cat_id: i64 = sqlx::query_scalar(
+        "INSERT INTO taxonomy_terms(kind, locale, translation_group_id, name, slug, version)
+         VALUES ('category', 'en', 'tg-s01-cat', 'News', 'news', 1)
+         RETURNING id",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    let en_post_id: i64 = sqlx::query_scalar(
+        "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
+         VALUES ('post', 's01-en-post', 'EN Post', '{}', 'draft', 'en', 'tg-s01-en-1')
+         RETURNING id",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE content_entries SET publication_status = 'published' WHERE id = ?")
+        .bind(en_post_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO entry_terms(entry_id, term_id) VALUES (?, ?)")
+        .bind(en_post_id)
+        .bind(en_cat_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(
+        crate::storage::builder::resolve_term_id_for_locale_in_conn(
+            &mut *tx, vi_cat_id, "category", "en",
+        )
+        .await
+        .unwrap(),
+        Some(en_cat_id)
+    );
+    let en_resolved = crate::storage::builder::resolve_lists_in_tx_for_locale_with_budget(
+        &mut tx,
+        &list_doc(vi_cat_id),
+        &std::collections::BTreeMap::new(),
+        Some("en"),
+        &mut budget,
+    )
+    .await
+    .unwrap();
+    match en_resolved.get("list-1").unwrap() {
+        crate::storage::builder::ResolvedList::Page { items, .. } => {
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].slug, "s01-en-post");
+        }
+        other => panic!("expected translated en list items, got {other:?}"),
+    }
+    tx.commit().await.unwrap();
+}

@@ -1,5 +1,22 @@
 use super::*;
 
+#[derive(Debug, Clone)]
+pub struct ValidatedBlockTemplate {
+    pub block_id: String,
+    pub source: String,
+    pub base_env: std::sync::Arc<minijinja::Environment<'static>>,
+}
+
+#[derive(Debug, Default)]
+pub struct BlockTemplateCache {
+    pub(crate) inner: std::sync::RwLock<
+        std::collections::BTreeMap<
+            (String, String, u64, bool),
+            std::sync::Arc<ValidatedBlockTemplate>,
+        >,
+    >,
+}
+
 pub(crate) fn render_contact_form_html(
     node_id: &str,
     form: &crate::storage::contact::ContactFormRecord,

@@ -15,20 +15,26 @@ pub(crate) fn step_theme_raw_char(
     opts: HtmlStepOptions,
     svg_depth: usize,
 ) -> Result<ThemeHtmlState, &'static str> {
-    if let ThemeHtmlState::Trusted {
-        inner,
-        svg_depth: depth,
-    } = state
-    {
-        let completed_svg_tag = match inner.as_ref() {
+    if let ThemeHtmlState::Trusted { inner, depths } = state {
+        let completed_tag = match inner.as_ref() {
             ThemeHtmlState::Tag {
                 tag_name,
                 is_close,
                 phase,
                 quote,
                 ..
-            } if tag_name == "svg" && ch == '>' && quote.is_none() => {
-                Some((*is_close, *phase == TagPhase::SelfClosingSlash))
+            } if ch == '>'
+                && quote.is_none()
+                && matches!(
+                    tag_name.as_str(),
+                    "svg" | "math" | "foreignobject" | "a" | "button" | "summary"
+                ) =>
+            {
+                Some((
+                    tag_name.clone(),
+                    *is_close,
+                    *phase == TagPhase::SelfClosingSlash,
+                ))
             }
             _ => None,
         };
@@ -39,23 +45,20 @@ pub(crate) fn step_theme_raw_char(
                 allow_trusted_theme_markup: true,
                 ..opts
             },
-            depth,
+            usize::from(depths.svg),
         )?;
-        let depth = if let Some((is_close, self_closing)) = completed_svg_tag {
-            if is_close {
-                depth.checked_sub(1).ok_or("Thẻ </svg> không có thẻ mở.")?
-            } else if self_closing {
-                depth
-            } else {
-                depth
-                    .checked_add(1)
-                    .filter(|d| *d <= 64)
-                    .ok_or("SVG lồng nhau quá sâu.")?
-            }
+        let next_depths = if let Some((tag_name, is_close, self_closing)) = completed_tag {
+            advance_trusted_nesting_depths(
+                depths,
+                &tag_name,
+                is_close,
+                self_closing,
+                opts.forbid_style_tag,
+            )?
         } else {
-            depth
+            depths
         };
-        return Ok(ThemeHtmlState::with_trust(next, true, depth));
+        return Ok(ThemeHtmlState::with_trust_depths(next, true, next_depths));
     }
     let ascii = if ch.is_ascii() { Some(ch as u8) } else { None };
     match state {
@@ -247,6 +250,24 @@ pub(crate) fn step_theme_raw_char(
             mut meta_ok,
             mut attr_static_buf,
         } => {
+            macro_rules! finish_attr {
+                () => {
+                    finalize_theme_attr_with_mode(
+                        &tag_name,
+                        &mut attr_name,
+                        &mut quote,
+                        &mut attr_has_static_bytes,
+                        &mut attr_expr_count,
+                        &mut seen_attrs,
+                        &mut link_rel_stylesheet,
+                        &mut link_has_valid_href,
+                        &mut meta_ok,
+                        &mut attr_static_buf,
+                        opts.allow_trusted_theme_markup,
+                        opts.forbid_style_tag,
+                    )?
+                };
+            }
             if ascii == Some(0) {
                 return Err("Thẻ HTML chứa byte NUL bị cấm.");
             }
@@ -349,38 +370,14 @@ pub(crate) fn step_theme_raw_char(
                         phase = TagPhase::BeforeAttrValue;
                     }
                     Some(b'/') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
+                        finish_attr!();
                         if matches!(tag_name.as_str(), "style" | "title" | "script") {
                             return Err("Thẻ <style>/<title> không được tự đóng.");
                         }
                         phase = TagPhase::SelfClosingSlash;
                     }
                     Some(b'>') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
+                        finish_attr!();
                         return finalize_theme_tag(
                             &tag_name,
                             is_close,
@@ -399,38 +396,14 @@ pub(crate) fn step_theme_raw_char(
                         phase = TagPhase::BeforeAttrValue;
                     }
                     Some(b'/') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
+                        finish_attr!();
                         if matches!(tag_name.as_str(), "style" | "title" | "script") {
                             return Err("Thẻ <style>/<title> không được tự đóng.");
                         }
                         phase = TagPhase::SelfClosingSlash;
                     }
                     Some(b'>') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
+                        finish_attr!();
                         return finalize_theme_tag(
                             &tag_name,
                             is_close,
@@ -442,19 +415,7 @@ pub(crate) fn step_theme_raw_char(
                         );
                     }
                     Some(b'a'..=b'z' | b'A'..=b'Z') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
+                        finish_attr!();
                         attr_name.push(ch.to_ascii_lowercase());
                         phase = TagPhase::AttrName;
                     }
@@ -484,19 +445,7 @@ pub(crate) fn step_theme_raw_char(
                 TagPhase::AttrValue => {
                     if let Some(q) = quote {
                         if ascii == Some(q) {
-                            finalize_theme_attr(
-                                &tag_name,
-                                &mut attr_name,
-                                &mut quote,
-                                &mut attr_has_static_bytes,
-                                &mut attr_expr_count,
-                                &mut seen_attrs,
-                                &mut link_rel_stylesheet,
-                                &mut link_has_valid_href,
-                                &mut meta_ok,
-                                &mut attr_static_buf,
-                                opts.allow_trusted_theme_markup,
-                            )?;
+                            finish_attr!();
                             phase = TagPhase::BeforeAttr;
                         } else {
                             if matches!(attr_name.as_str(), "href" | "src" | "poster" | "cite")
@@ -515,34 +464,10 @@ pub(crate) fn step_theme_raw_char(
                             }
                         }
                     } else if ascii.is_some_and(is_ascii_html_whitespace) {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
+                        finish_attr!();
                         phase = TagPhase::BeforeAttr;
                     } else if ascii == Some(b'>') {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
+                        finish_attr!();
                         return finalize_theme_tag(
                             &tag_name,
                             is_close,

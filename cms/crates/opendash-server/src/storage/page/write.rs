@@ -37,6 +37,20 @@ pub async fn ensure_embedded_core_blocks_in_conn(conn: &mut SqliteConnection) ->
         .execute(&mut *conn)
         .await?;
     }
+    let active_ids: Vec<&str> = embedded_core_block_defs()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let ids_json = serde_json::to_string(&active_ids)?;
+    sqlx::query(
+        "DELETE FROM builder_block_definitions
+          WHERE owner_kind = 'core'
+            AND owner_id = 'core'
+            AND block_id NOT IN (SELECT value FROM json_each(?))",
+    )
+    .bind(&ids_json)
+    .execute(&mut *conn)
+    .await?;
     Ok(())
 }
 

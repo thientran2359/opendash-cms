@@ -163,12 +163,14 @@ fn builder_list_uses_snapshot_canonical_href_not_legacy_slug() {
                     title: "<unsafe>".into(),
                     slug: "old-slug".into(),
                     href: Some("/blog/new-slug".into()),
+                    ..Default::default()
                 },
                 crate::storage::builder::ListItem {
                     entry_id: 18,
                     title: "Unlinked".into(),
                     slug: "hidden".into(),
                     href: None,
+                    ..Default::default()
                 },
             ],
             has_next: false,

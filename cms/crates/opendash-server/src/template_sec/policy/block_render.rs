@@ -122,16 +122,30 @@ pub struct BlockRenderInputs<'a> {
     pub merged_options: Option<&'a BTreeMap<String, serde_json::Value>>,
     pub site_options: Option<&'a BTreeMap<String, serde_json::Value>>,
     pub menus: Option<&'a BTreeMap<String, serde_json::Value>>,
+    pub children_html: Option<&'a str>,
+    pub children_meta: Option<&'a [serde_json::Value]>,
+    pub parent_ctx: Option<&'a serde_json::Value>,
     pub is_preview: bool,
     pub fmt_cfg: &'a RenderFormattingConfig,
 }
 
-/// Renders a validated `block.json` v1 template from pre-hydrated field values under the
-/// shared request `RenderBudget` (`<= 2_000` fuel per node, `<= 10_000` total fuel,
-/// `<= 512 KiB` total HTML, `<= 128` RichText blocks per request).
-pub fn render_block_csec_with_inputs(
+/// Pre-compiles a block template once into a reusable `Environment<'static>`
+/// (`AutoEscape::Html`, `UndefinedBehavior::Strict`, static filters/tests).
+pub fn compile_block_template_base_env(
     block_id: &str,
     template_source: &str,
+) -> Result<std::sync::Arc<Environment<'static>>, &'static str> {
+    let mut env = restricted_environment_core();
+    env.add_template_owned(block_id.to_owned(), template_source.to_owned())
+        .map_err(|_| "Không thể biên dịch template block.")?;
+    Ok(std::sync::Arc::new(env))
+}
+
+/// Renders a pre-compiled `block.json` v1 template by cloning `base_env` per node
+/// and binding request-scoped `fuel`, `od_icon`, `od_hook`, `date_format` tz, and l10n.
+pub fn render_block_csec_compiled(
+    block_id: &str,
+    base_env: &std::sync::Arc<Environment<'static>>,
     inputs: BlockRenderInputs<'_>,
     budget: &mut RenderBudget,
 ) -> Result<String, &'static str> {
@@ -189,8 +203,21 @@ pub fn render_block_csec_with_inputs(
     ctx_map.insert("site_options".to_owned(), site_options_value);
     ctx_map.insert("menus".to_owned(), menus_value);
     ctx_map.insert("od_is_preview".to_owned(), Value::from(inputs.is_preview));
+    if let Some(ch) = inputs.children_html {
+        ctx_map.insert("children_html".to_owned(), Value::from(ch));
+    }
+    if let Some(cm) = inputs.children_meta {
+        ctx_map.insert(
+            "children_meta".to_owned(),
+            Value::from(cm.iter().map(json_to_safe_value).collect::<Vec<_>>()),
+        );
+    }
+    if let Some(pc) = inputs.parent_ctx {
+        ctx_map.insert("parent_ctx".to_owned(), json_to_safe_value(pc));
+    }
 
-    let mut env = restricted_environment_with_config(inputs.fmt_cfg);
+    let mut env = (**base_env).clone();
+    install_dynamic_formatting_handlers(&mut env, inputs.fmt_cfg);
     let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -203,8 +230,6 @@ pub fn render_block_csec_with_inputs(
     );
     install_hook_function(&mut env, &budget.hook_nonces, &local_hooks);
     env.set_fuel(Some(node_fuel));
-    env.add_template(block_id, template_source)
-        .map_err(|_| "Không thể biên dịch template block.")?;
     let captured = env
         .get_template(block_id)
         .map_err(|_| "Không tìm thấy template block.")?
@@ -233,7 +258,11 @@ pub fn render_block_csec_with_inputs(
         _ => shell.to_owned(),
     };
 
-    budget.charge_html_bytes(out.len())?;
+    let charge_bytes = match inputs.children_html {
+        Some(nonce) if out.contains(nonce) => out.len().saturating_sub(nonce.len()),
+        _ => out.len(),
+    };
+    budget.charge_html_bytes(charge_bytes)?;
     budget.richtext_nonces.reserve_count(local_rt_count)?;
     let additions = local_icons
         .lock()
@@ -251,4 +280,17 @@ pub fn render_block_csec_with_inputs(
         .clone();
     budget.hook_nonces.extend(hook_additions);
     Ok(out)
+}
+
+/// Renders a validated `block.json` v1 template from pre-hydrated field values under the
+/// shared request `RenderBudget` (`<= 2_000` fuel per node, `<= 10_000` total fuel,
+/// `<= 512 KiB` total HTML, `<= 128` RichText blocks per request).
+pub fn render_block_csec_with_inputs(
+    block_id: &str,
+    template_source: &str,
+    inputs: BlockRenderInputs<'_>,
+    budget: &mut RenderBudget,
+) -> Result<String, &'static str> {
+    let base_env = compile_block_template_base_env(block_id, template_source)?;
+    render_block_csec_compiled(block_id, &base_env, inputs, budget)
 }

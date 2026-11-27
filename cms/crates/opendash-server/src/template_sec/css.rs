@@ -38,6 +38,44 @@ pub fn validate_safe_css(css: &str) -> Result<(), &'static str> {
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(super) fn finalize_theme_attr_with_mode(
+    tag_name: &str,
+    attr_name: &mut String,
+    quote: &mut Option<u8>,
+    attr_has_static_bytes: &mut bool,
+    attr_expr_count: &mut u8,
+    seen_attrs: &mut BTreeSet<String>,
+    link_rel_stylesheet: &mut bool,
+    link_has_valid_href: &mut bool,
+    meta_ok: &mut bool,
+    attr_static_buf: &mut String,
+    allow_trusted_theme_markup: bool,
+    forbid_block_system_attrs: bool,
+) -> Result<(), &'static str> {
+    if forbid_block_system_attrs
+        && matches!(
+            attr_name.as_str(),
+            "data-node-id" | "data-od-node-scope" | "data-od-editable" | "data-od-kind"
+        )
+    {
+        return Err("Template block không được tự khai báo thuộc tính hệ thống của Studio.");
+    }
+    finalize_theme_attr(
+        tag_name,
+        attr_name,
+        quote,
+        attr_has_static_bytes,
+        attr_expr_count,
+        seen_attrs,
+        link_rel_stylesheet,
+        link_has_valid_href,
+        meta_ok,
+        attr_static_buf,
+        allow_trusted_theme_markup,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn finalize_theme_attr(
     tag_name: &str,
     attr_name: &mut String,

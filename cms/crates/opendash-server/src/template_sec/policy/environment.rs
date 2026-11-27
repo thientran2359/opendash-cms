@@ -5,6 +5,12 @@ pub fn restricted_environment() -> Environment<'static> {
 }
 
 pub fn restricted_environment_with_config(cfg: &RenderFormattingConfig) -> Environment<'static> {
+    let mut env = restricted_environment_core();
+    install_dynamic_formatting_handlers(&mut env, cfg);
+    env
+}
+
+pub(crate) fn restricted_environment_core() -> Environment<'static> {
     let mut env = Environment::empty();
     env.set_auto_escape_callback(|_| AutoEscape::Html);
     env.set_undefined_behavior(UndefinedBehavior::Strict);
@@ -38,14 +44,6 @@ pub fn restricted_environment_with_config(cfg: &RenderFormattingConfig) -> Envir
     env.add_filter("unique", minijinja::filters::unique);
     env.add_filter("title", minijinja::filters::title);
     env.add_filter("capitalize", minijinja::filters::capitalize);
-    let default_tz =
-        jiff::tz::TimeZone::get(cfg.timezone.as_str()).unwrap_or(jiff::tz::TimeZone::UTC);
-    env.add_filter(
-        "date_format",
-        move |value: Value, fmt: Option<&str>, tz: Option<&str>| {
-            filter_date_format(value, fmt, tz, &default_tz)
-        },
-    );
     env.add_filter("truncate", filter_truncate);
     env.add_filter("format_number", filter_format_number);
     env.add_filter("batch", filter_batch);
@@ -74,6 +72,21 @@ pub fn restricted_environment_with_config(cfg: &RenderFormattingConfig) -> Envir
     env.add_test("string", minijinja::tests::is_string);
     env.add_test("sequence", minijinja::tests::is_sequence);
     env.add_test("mapping", minijinja::tests::is_mapping);
+    env
+}
+
+pub(crate) fn install_dynamic_formatting_handlers(
+    env: &mut Environment<'_>,
+    cfg: &RenderFormattingConfig,
+) {
+    let default_tz =
+        jiff::tz::TimeZone::get(cfg.timezone.as_str()).unwrap_or(jiff::tz::TimeZone::UTC);
+    env.add_filter(
+        "date_format",
+        move |value: Value, fmt: Option<&str>, tz: Option<&str>| {
+            filter_date_format(value, fmt, tz, &default_tz)
+        },
+    );
 
     let catalogs_1 = cfg.l10n_catalogs.clone();
     let default_dom_1 = cfg.l10n_domain.clone().unwrap_or_default();
@@ -126,7 +139,6 @@ pub fn restricted_environment_with_config(cfg: &RenderFormattingConfig) -> Envir
             interpolate_l10n_params(translated, p.as_ref(), Some(count))
         },
     );
-    env
 }
 
 fn split_domain_and_params(
@@ -190,6 +202,7 @@ pub(crate) fn validate_template_csec_with_usage_flags(
         return Err("Template không được để trống.");
     }
     if source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
+        || source.contains(BLOCK_CHILDREN_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {
@@ -425,6 +438,7 @@ pub(crate) fn composition_sites(
     }
     if source.contains(CONTENT_SLOT_TOKEN)
         || source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
+        || source.contains(BLOCK_CHILDREN_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {

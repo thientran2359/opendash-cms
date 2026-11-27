@@ -41,6 +41,7 @@ pub async fn load_declared_blocks_in_conn(
         sqlx::query_as(
             "SELECT block_id, owner_kind, owner_id, provider_status, declaration_state, schema_json, template, revision_digest
              FROM builder_block_definitions
+             WHERE owner_kind != 'core'
              ORDER BY block_id",
         )
         .fetch_all(&mut *conn)
