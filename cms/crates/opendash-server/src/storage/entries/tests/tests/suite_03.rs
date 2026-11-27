@@ -7,7 +7,7 @@ async fn s02_auto_unique_slug_resolves_collisions_reserved_roots_and_64b_limit()
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     let actor = s02_admin_context(&db).await;
 
     let post_schema = crate::storage::content::load_effective_content_schema(&db, "post")
@@ -188,7 +188,7 @@ async fn s02_primary_category_validation_autoclear_and_redirect_history() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     let actor = s02_admin_context(&db).await;
 
     let perm = crate::storage::permalinks::get_settings(&db).await.unwrap();

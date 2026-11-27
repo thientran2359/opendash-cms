@@ -7,7 +7,7 @@ async fn builder_published_list_filters_before_paging_for_post_page_cpt() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     // Migration 0008 seeds Post/Page; only the custom CPT is new here.
     sqlx::query(
         "INSERT INTO content_types(key,definition_json,owner_kind)
@@ -159,7 +159,7 @@ async fn builder_list_rejects_bad_bounds_and_distinguishes_missing_config() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+    crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         "INSERT INTO content_types(key,definition_json,owner_kind)
          VALUES('news',json_object('key','news','fields',json_array()),'user')",

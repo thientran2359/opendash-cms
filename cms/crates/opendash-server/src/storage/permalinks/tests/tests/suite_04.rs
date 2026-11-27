@@ -7,7 +7,7 @@ async fn upgrade_0045_sets_wordpress_defaults_triggers_and_cleans_draft_redirect
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    let migrator = sqlx::migrate!("../../migrations");
+    let migrator = &crate::storage::MIGRATOR;
     migrator.run_to(44, &db).await.unwrap();
 
     sqlx::query(
