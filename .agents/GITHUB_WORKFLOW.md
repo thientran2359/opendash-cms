@@ -1,6 +1,12 @@
-# GitHub workflow cho 5 agent — đề xuất chuẩn vận hành
+# GitHub workflow OpenDash — Quy trình Feature Worktree
 
-> **Ủy quyền của chủ dự án:** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao các Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`) điều phối dự án, chốt quyết định kỹ thuật và merge mọi PR đủ gate, kể cả PR của chính mình. Tất cả agent (`Atlas`, `Aster`, `Nova`, `Orion`, `Harbor`, `Forge`) đều tự nhận task đủ Design Spec EGM (`Status: Approved`) / ownership và tự review/merge PR của mình. Required CI, acceptance, security/data và GitHub protection vẫn áp dụng.
+> **Cập nhật chuẩn vận hành (Owner Directive 2026-11-27):**
+> - **Ngừng giao Harbor/Forge & bỏ Issue lẻ theo Slice:** Không mở Issue lẻ từng Slice và không dispatch qua CoS cho `Harbor`/`Forge` nữa ([ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md)).
+> - **1 Feature = 1 Worktree = 1 Branch `feat/<slug>` = 1 PR vào `main`:** Thay thế quy định cũ về `agent/<name>` bắt buộc cho mọi task khi phát triển tính năng. Các Slice `S01..Sn` chỉ commit checkpoint trên `feat/<slug>`, giữa các Slice chỉ chạy Tầng 0 (`python3 cms/scripts/run-tests.py --check`), **chỉ build & chạy Tầng 1 (`python3 cms/scripts/run-tests.py --changed`) + drift-check 1 lần sau khi code xong toàn bộ tính năng**.
+> - **Owner chốt trước merge & Dọn dẹp ngay sau merge:** Agent báo cáo tự nhiên kèm Feature PR (Bước 6); chỉ merge sau khi Owner chốt ở Bước 7, rồi sync `main`, cập nhật [`docs/designs/SITEMAP.md`](../docs/designs/SITEMAP.md), xóa branch `feat/<slug>`, xóa worktree và dọn `cms/target`.
+> - Các quy định về `agent/<name>`, GitHub Project #3 và `prepare-github-issue.py` bên dưới được giữ làm **tài liệu tham chiếu lịch sử** (trước `2026-11-27`).
+
+> **Tham chiếu lịch sử (trước 2026-11-27):** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao các Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`) điều phối dự án, chốt quyết định kỹ thuật và merge mọi PR đủ gate, kể cả PR của chính mình. Tất cả agent (`Atlas`, `Aster`, `Nova`, `Orion`, `Harbor`, `Forge`) đều tự nhận task đủ Design Spec EGM (`Status: Approved`) / ownership và tự review/merge PR của mình. Required CI, acceptance, security/data và GitHub protection vẫn áp dụng.
 
 **Repository nguồn duy nhất:** `thientran2359/opendash-cms`.
 Code nằm trong 5 worktree/checkout **cục bộ** tách biệt trên Windows và macOS;

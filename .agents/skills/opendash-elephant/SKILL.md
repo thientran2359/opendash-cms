@@ -45,23 +45,32 @@ Khi khởi chạy `/egm-review` hoặc `/egm-review-loop` cho một Design Spec 
    - Model cân bằng/mặc định (tránh XHigh trừ khi kiến trúc lõi phức tạp): `egm-design`, `egm-codebase-details`, `egm-implementation-readiness`, `egm-zoom-out`.
 4. **Cắt ngữ cảnh hội thoại:** 1 Spec / 1 Feature = 1 conversation; chạy `/compact` hoặc mở conversation mới khi context vượt ~120K–150K hoặc khi chuyển pha lớn (Draft → Review → Closure).
 
-## 3. Kiểm chứng Bắt buộc khi Triển khai (Implementation & Verification)
+## 3. Kiểm chứng 3 Tầng khi Triển khai (`Owner Directive 2026-11-27`)
 
-Mọi mục `### Verification Plan` trong `docs/designs/<feature>.md` và mọi lượt triển khai code trong `cms/` đều phải chạy và vượt qua các kiểm tra sau từ gốc repository:
+Mọi mục `### Verification Plan` trong `docs/designs/<feature>.md` và mọi Feature Worktree (`feat/<slug>`) áp dụng đúng 3 tầng kiểm chứng:
 
-```powershell
-python cms/scripts/check-standards.py
-python cms/scripts/check-standards.py --self-test
-python cms/scripts/check-plans.py
-python cms/scripts/check-plans.py --self-test
+```bash
+# Tầng 0 (giữa các Slice trung gian S01..S(n-1) — chỉ kiểm biên dịch nhanh, KHÔNG chạy test):
+python3 cms/scripts/run-tests.py --check
+# (+ `npm --prefix cms/admin run typecheck` nếu sửa cms/admin/)
+
+# Tầng 1 (chạy 1 lần duy nhất khi code xong toàn bộ tính năng, trước Bước 6 báo cáo Owner):
+python3 cms/scripts/check-standards.py
+python3 cms/scripts/check-standards.py --self-test
+python3 cms/scripts/check-plans.py
+python3 cms/scripts/check-plans.py --self-test
 cargo fmt --manifest-path cms/Cargo.toml --all --check
-python cms/scripts/run-tests.py --changed
-# Trước release hoặc khi đổi lõi dùng chung:
-# python cms/scripts/run-tests.py --group all --release
+# (+ `npm --prefix cms/admin run build && node cms/scripts/check-i18n.mjs --strict` nếu sửa cms/admin/)
+python3 cms/scripts/run-tests.py --changed
+git diff --check
+
+# Tầng 2 (theo đợt gom 3–5 tính năng, trước release hoặc khi Owner yêu cầu):
+# python3 cms/scripts/run-tests.py --group all --release
 ```
 
-## 4. Vòng đời Spec, Provenance & Drift Report
+## 4. Vòng đời 7 Bước, Provenance & Drift Report
 
-- **3 trường provenance bắt buộc khi chuyển `Status: Approved`:** `**Approved By:**` (`Owner` hoặc `<Coordinator> (delegated)` theo [ADR-0010](../../../docs/decisions/ADR-0010-agent-project-and-merge-authority.md)), `**Approval Evidence:**` và `**Goldfish Review:**`; không còn `Open Questions` mở hay `TODO`/`TBD`.
-- **Chia Slice cho Design Spec lớn:** Mỗi `### Slice S01: ...` trong `## Detailed Implementation Plan` phải có `**Dependencies:**`, `**File Ownership:**`, `**Acceptance Criteria:**`, `**Rollback:**`, và tạo Issue bằng `python .agents/scripts/prepare-github-issue.py --source docs/designs/<feature>.md --slice S01`.
-- **Đóng Spec:** Sau khi triển khai & kiểm chứng, Coordinator chạy `/egm-drift-report` (lưu tại `.agents/research/` hoặc đính kèm PR closure) trước khi đánh dấu `Verified` trong [`docs/designs/SITEMAP.md`](../../../docs/designs/SITEMAP.md) và chạy `node cms/scripts/codegraph-index-docs.mjs`.
+- **Chọn cỡ Goldfish & Giải thích Tự nhiên (Bước 2–4):** Tính năng nhỏ/vừa/UI chạy 1 vòng Goldfish gọn (hoặc bỏ qua nếu Owner yêu cầu); tính năng lớn / đụng lõi / DB / C-SEC / Plugin ABI chạy 1–2 vòng. Tóm tắt ngắn gọn bằng ngôn ngữ tự nhiên cho Owner (làm gì, đổi gì, không làm gì, rủi ro/đánh đổi); khi được chốt mới đặt `Status: Approved` với đủ 3 trường provenance (`**Approved By:**`, `**Approval Evidence:**`, `**Goldfish Review:**`), không còn `Open Questions` mở hay `TODO`/`TBD`. Đặt trước số SQL migration ngay Bước 2 nếu chạy nhiều tính năng song song.
+- **Chia Slice nội bộ trong Spec (không tạo Issue lẻ theo Slice):** Mỗi `### Slice S01: ...` trong `## Detailed Implementation Plan` vẫn giữ đủ `**Dependencies:**`, `**File Ownership:**`, `**Acceptance Criteria:**`, `**Rollback:**` để dẫn hướng triển khai, nhưng agent tự code tuần tự tất cả Slice trên 1 worktree `feat/<slug>` và gom vào **1 Feature PR duy nhất**.
+- **Shift-Left Drift & Báo cáo Tự nhiên (Bước 5–6):** Sau khi code xong toàn bộ tính năng và chạy Tầng 1, thực hiện kiểm tra drift gọn (`/egm-drift-report` trên `feat/<slug>`), mở 1 Feature PR rồi báo cáo cho Owner bằng ngôn ngữ tự nhiên (đã làm gì, test đạt mức nào, còn giới hạn gì).
+- **Owner chốt, Merge & Dọn Worktree (Bước 7):** Khi Owner đồng ý, sync `origin/main` 1 lần cuối (nếu cần), merge PR vào `main`, cập nhật [`docs/designs/SITEMAP.md`](../../../docs/designs/SITEMAP.md) (`Implemented` / `**Verified**` kèm link [`docs/verification/`](../../../docs/verification/README.md)), chạy `node cms/scripts/codegraph-index-docs.mjs`, rồi xóa branch + xóa worktree + dọn `cms/target`.

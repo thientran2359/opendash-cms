@@ -5,6 +5,8 @@ description: "Dùng khi Atlas hoặc Aster được yêu cầu RUN, RESUME hoặ
 
 # Atlas / Aster → Forge / Harbor: RUN / RESUME / STATUS (Chuẩn EGM)
 
+> **Trạng thái (Owner Directive 2026-11-27): STANDBY / RETIRED.** Chủ dự án đã ngừng giao task/Slice cho **Harbor** và **Forge** qua CoS adapter và ngừng tạo Issue lẻ theo Slice. Không tự động kích hoạt skill này trừ khi chủ dự án yêu cầu trực tiếp; luồng triển khai hiện hành xem tại [`AGENTS.md`](../../../AGENTS.md) và [`opendash-elephant`](../opendash-elephant/SKILL.md).
+
 Skill này được **Atlas** (Windows) hoặc **Aster** (macOS) gọi trong một lượt theo yêu cầu của chủ dự án để giao việc triển khai từ một **Design Spec EGM đã duyệt** (`docs/designs/<feature>.md`, `Status: Approved`, đã merge lên `origin/main`) sang **Forge** (CoS Windows) và **Harbor** (CoS macOS) thông qua adapter [`.agents/scripts/cos_dispatch.py`](../../scripts/cos_dispatch.py). **Không chạy watcher, cron hay polling nền.**
 
 - **Nguồn trạng thái:** GitHub Issues + Project #3 + PR/CI; trạng thái giao vận: CoS local receipt.

@@ -10,7 +10,7 @@
 
 | Script | Purpose & CLI Interface |
 | --- | --- |
-| [`run-tests.py`](run-tests.py) | Grouped & change-aware Rust test runner (`--list`, `--changed [--base origin/main]`, `--group <theme\|builder\|content\|plugin\|i18n\|site-media-seo\|ops\|core\|all>`, `--release`, `--dry-run`, `--self-test`). Maps changed files to domain test groups, auto-resolves macOS `TMPDIR`, and uses the fast `dev` profile (`[profile.dev.package."*"] opt-level = 2`) by default. |
+| [`run-tests.py`](run-tests.py) | Grouped & change-aware Rust test runner (`--list`, `--check`, `--changed [--base origin/main]`, `--group <theme\|builder\|content\|plugin\|i18n\|site-media-seo\|ops\|core\|all>`, `--filter <pattern>`, `--release`, `--dry-run`, `--self-test`). Maps changed files (with smart wiring-only detection) to domain test groups, auto-resolves macOS `TMPDIR`, and uses the fast `dev` profile (`[profile.dev.package."*"] opt-level = 2`) by default. |
 | [`build.ps1`](build.ps1) | Windows build pipeline (`[-Release]`): runs `npm ci && npm run build` in `cms/admin` and `cms/examples/plugins/sample-plugin`, then `cargo build --locked -p opendash-server`. |
 | [`build-release-linux.sh`](build-release-linux.sh) | Builds reproducible-input `x86_64-unknown-linux-musl` release bundle (`[--out-dir <dir>] [--skip-npm-ci]`) with `opendash`, `deploy/`, `release-manifest.json`, and `checksums.txt`. |
 | [`verify-release-artifact.py`](verify-release-artifact.py) | Verifies release bundle manifest, SHA-256 checksums, secret/runtime file hygiene, static ELF linking on Linux, and `--check-config` (`verify_bundle`, `run_self_test`; accepts `<bundle_dir>` or `--self-test`). |
