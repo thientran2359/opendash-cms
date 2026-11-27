@@ -95,6 +95,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::entry_table",
             "storage::fields",
             "storage::revisions",
+            "storage::search",
             "storage::taxonomy",
             "routes::entries",
             "routes::fields",
@@ -146,6 +147,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::settings",
             "storage::builder::s03_media_acl_tests",
             "routes::media",
+            "routes::search",
             "routes::settings",
         ),
     ),
@@ -160,6 +162,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::operations",
             "storage::auth",
             "routes::operations",
+            "routes::search",
         ),
     ),
 )
@@ -246,6 +249,12 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
     if path.startswith("cms/crates/opendash-plugin-sdk/") or path.startswith("cms/sdk/"):
         return {"plugin"}, set(), False, False
 
+    if path.startswith("cms/crates/opendash-core/src/search/"):
+        return {"content", "theme", "builder", "site-media-seo"}, set(), False, False
+
+    if path.startswith("cms/crates/opendash-core/src/richtext/"):
+        return {"builder", "content"}, set(), False, False
+
     if path.startswith("cms/crates/opendash-core/src/"):
         sub_core = path[len("cms/crates/opendash-core/src/") :]
         core_prefixes: tuple[tuple[str, set[str]], ...] = (
@@ -312,7 +321,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         keyword_map = (
             (("theme", "override", "layout"), "theme"),
             (("plugin", "projection", "extension", "hook", "functions_runtime"), "plugin"),
-            (("entry", "content", "taxonomy", "field", "lifecycle", "trash", "search", "fts", "revision", "autosave"), "content"),
+            (("entry", "content", "taxonomy", "field", "lifecycle", "trash", "search", "fts", "fts5", "revision", "autosave"), "content"),
             (("builder", "pattern", "section", "block"), "builder"),
             (("i18n", "multilingual", "locale"), "i18n"),
             (("permalink", "redirect", "404", "seo", "menu", "media", "responsive", "variant", "contact", "smtp", "option", "setting"), "site-media-seo"),
@@ -344,7 +353,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "template_sec.rs": {"theme"},
             "content_render.rs": {"theme", "content"},
             "document.rs": {"theme"},
-            "public_context.rs": {"theme"},
+            "public_context.rs": {"theme", "site-media-seo"},
             "package.rs": {"theme", "plugin"},
             "cache.rs": {"theme", "plugin"},
             "storage/theme.rs": {"theme"},
@@ -417,6 +426,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "routes/media.rs": {"site-media-seo"},
             "routes/menu.rs": {"site-media-seo"},
             "routes/seo.rs": {"site-media-seo"},
+            "routes/search.rs": {"site-media-seo", "theme", "ops"},
             "routes/sitemap.rs": {"site-media-seo"},
             "routes/smtp.rs": {"site-media-seo"},
             "routes/settings.rs": {"site-media-seo", "i18n", "theme"},
@@ -437,6 +447,8 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "storage/operations_tests.rs": {"ops"},
             "routes/operations.rs": {"ops"},
         }
+        if sub.startswith("storage/search/") or sub == "storage/search.rs":
+            return {"content", "site-media-seo", "theme", "ops"}, set(), False, False
         if sub in server_routes:
             return server_routes[sub], set(), False, False
         server_prefixes: tuple[tuple[str, set[str]], ...] = (

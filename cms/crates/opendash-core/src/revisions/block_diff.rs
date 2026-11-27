@@ -100,6 +100,22 @@ fn element_type_and_label(content: &ElementContent) -> (String, String, BTreeMap
                         props,
                     )
                 }
+                KnownElement::SearchForm(p) => {
+                    insert_props_object(&mut props, p, &[]);
+                    (
+                        "core/search_form".to_owned(),
+                        "Search Form".to_owned(),
+                        props,
+                    )
+                }
+                KnownElement::SearchResults(p) => {
+                    insert_props_object(&mut props, p, &[]);
+                    (
+                        "core/search_results".to_owned(),
+                        "Search Results".to_owned(),
+                        props,
+                    )
+                }
                 KnownElement::ContentSlot(_) => (
                     "core/content_slot".to_owned(),
                     "Content Slot".to_owned(),

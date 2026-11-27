@@ -49,6 +49,7 @@ pub async fn set_multilingual_enabled(
             .execute(&mut *tx)
             .await?;
         crate::storage::permalinks::sync_claims_with_options(&mut tx, true).await?;
+        crate::storage::search::rebuild_search_index_in_conn(&mut tx).await?;
     }
     let snapshot = list_locales_in_conn(&mut tx).await?;
     tx.commit().await?;
@@ -143,6 +144,7 @@ pub async fn delete_locale(
             .execute(&mut *tx)
             .await?;
     }
+    crate::storage::search::delete_locale_search_index_in_conn(&mut tx, &code).await?;
     sqlx::query("UPDATE site_locales_state SET version = version + 1 WHERE id = 1")
         .execute(&mut *tx)
         .await?;
@@ -226,6 +228,9 @@ pub async fn create_locale(
             .execute(&mut *conn)
             .await?;
         crate::storage::permalinks::sync_claims_with_options(&mut conn, true).await?;
+        if existing.is_some() {
+            crate::storage::search::rebuild_search_index_in_conn(&mut conn).await?;
+        }
         Ok(list_locales_in_conn(&mut conn).await?)
     }
     .await;
@@ -288,6 +293,7 @@ pub async fn update_locale(
             .await?;
         if (was_enabled != 0) != input.enabled {
             crate::storage::permalinks::sync_claims_with_options(&mut conn, true).await?;
+            crate::storage::search::rebuild_search_index_in_conn(&mut conn).await?;
         }
         Ok(list_locales_in_conn(&mut conn).await?)
     }

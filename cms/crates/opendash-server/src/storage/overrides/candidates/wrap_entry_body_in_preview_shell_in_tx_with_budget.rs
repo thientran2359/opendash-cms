@@ -177,6 +177,7 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
                 cache,
                 url_policy: &url_policy,
                 fmt_cfg: &fmt_cfg,
+                search: None,
             };
             let mut tpl_rendered = render_preview_builder(
                 tx,

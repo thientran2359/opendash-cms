@@ -97,6 +97,7 @@ pub async fn put_site_taxonomy_eligibility(
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải schema CPT."))?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entries_for_type_in_conn(&mut tx, type_key).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(ContentTypeApiItem {

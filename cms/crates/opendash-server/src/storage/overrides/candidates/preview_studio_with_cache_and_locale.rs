@@ -180,6 +180,7 @@ pub async fn preview_studio_with_cache_and_locale(
             &site_options,
             &options,
             &menus,
+            &effective_locale,
         )?;
         (
             theme_context,
@@ -217,10 +218,24 @@ pub async fn preview_studio_with_cache_and_locale(
         crate::storage::seo::ThemeLocaleTarget::None,
     )
     .await?;
-    if let Some(obj) = theme_context.as_object_mut() {
-        obj.insert("locale".to_owned(), preview_locale_ctx.clone());
-    }
+    content_render::sync_preview_locale_and_search(&mut theme_context, &preview_locale_ctx);
     public_budget.set_locale_context(active.as_ref(), &effective_locale, preview_locale_ctx);
+    let preview_search_view = (target.kind == K::Search).then(|| {
+        content_render::SearchView::preview_sample(&state.locale_search_url, &effective_locale)
+    });
+    let preview_search_entries = if target.kind == K::Search {
+        content_render::SearchView::preview_sample_entries(&effective_locale)
+    } else {
+        Vec::new()
+    };
+    let preview_search_pagination = PaginationView::empty();
+    let preview_search = preview_search_view
+        .as_ref()
+        .map(|view| page::BuilderSearchData {
+            view,
+            entries: &preview_search_entries,
+            pagination: &preview_search_pagination,
+        });
     let mut canvas_layout = is_canvas_target(active.as_ref(), target);
     let main_scope = if target.kind == K::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
@@ -308,6 +323,7 @@ pub async fn preview_studio_with_cache_and_locale(
                 cache,
                 url_policy: &url_policy,
                 fmt_cfg: &fmt_cfg,
+                search: preview_search,
             };
             let mut rendered = render_preview_builder(
                 &mut tx,
@@ -342,6 +358,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     cache,
                     url_policy: &url_policy,
                     fmt_cfg: &fmt_cfg,
+                    search: preview_search,
                 };
                 let slot = if target.kind == K::Part {
                     None
@@ -469,4 +486,46 @@ pub async fn preview_studio_with_cache_and_locale(
         html: full_html,
         diagnostics,
     })
+}
+
+pub(in crate::storage) fn escape_preview_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn preview_studio_with_cache(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    target: &TemplateCandidate,
+    document: Option<&BuilderDocument>,
+    preview_entry: Option<&TemplatePreviewEntry>,
+    preview_annotations: bool,
+    transient: Option<&TransientStudioOverrides>,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
+    preview_studio_with_cache_and_locale(
+        db,
+        themes_root,
+        actor,
+        target,
+        document,
+        preview_entry,
+        preview_annotations,
+        transient,
+        None,
+        cache,
+    )
+    .await
 }

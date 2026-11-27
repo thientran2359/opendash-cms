@@ -203,6 +203,8 @@ pub fn canonical_route_key(
         RenderCachePolicy::ByRoute => {
             if is_not_found {
                 Some("not_found".to_owned())
+            } else if route_kind == "search" {
+                None
             } else if canonical_query.is_empty() {
                 Some(format!("{route_kind}:{route_path}"))
             } else {
@@ -343,6 +345,10 @@ mod tests {
         );
         assert_eq!(
             canonical_route_key(RenderCachePolicy::None, "single", "/post-1", "", false),
+            None
+        );
+        assert_eq!(
+            canonical_route_key(RenderCachePolicy::ByRoute, "search", "/", "s=arch", false),
             None
         );
     }

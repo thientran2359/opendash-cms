@@ -27,6 +27,8 @@ mod preview;
 pub use preview::*;
 mod environment;
 pub use environment::*;
+mod theme_form_checks;
+pub use theme_form_checks::*;
 mod theme_html_walker;
 pub use theme_html_walker::*;
 mod theme_url_scopes;

@@ -10,6 +10,8 @@ mod menus;
 mod public_routes;
 #[path = "site_media_seo/public_settings.rs"]
 mod public_settings;
+#[path = "site_media_seo/public_site_search_routes.rs"]
+mod public_site_search_routes;
 #[path = "site_media_seo/responsive_media_variants.rs"]
 mod responsive_media_variants;
 #[path = "site_media_seo/seo_metadata.rs"]

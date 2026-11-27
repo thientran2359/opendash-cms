@@ -159,6 +159,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [templateSavedDoc, setTemplateSavedDoc] = useState<BuilderDocument>(EMPTY_DOCUMENT);
   const [templateDoc, setTemplateDoc] = useState<BuilderDocument>(EMPTY_DOCUMENT);
   const [templateSelectedNodeId, setTemplateSelectedNodeId] = useState<string | null>(null);
+  const [templateDiagnostics, setTemplateDiagnostics] = useState<builderApi.BuilderDiagnostic[]>([]);
 
   // Mode 2 state
   const [entryTitle, setEntryTitle] = useState('');
@@ -715,6 +716,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         .then(res => {
           if (controller.signal.aborted || seq !== previewSeqRef.current) return;
           setPreviewHtml(res.html);
+          setTemplateDiagnostics(res.diagnostics ?? []);
         })
         .catch(cause => {
           if (controller.signal.aborted || seq !== previewSeqRef.current) return;
@@ -765,6 +767,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       }
     }
     setSelectedTargetKey(nextKey);
+    setTemplateDiagnostics([]);
     hydrateTemplateTarget(nextKey, targets, overrideDocs);
   };
 
@@ -1228,6 +1231,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                 allowList={!isPatternEntry}
                 allowContentSlot={false}
                 allowTemplatePart={false}
+                allowSearchResults={false}
                 requiresContentSlot={false}
                 diagnostics={entryDiagnostics}
                 hadFreeformWrap={entryHadFreeformWrap}
@@ -1304,6 +1308,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               patternsLoaded={patternsLoaded}
               onRefreshPatterns={refreshPatterns}
               availablePartKeys={availablePartKeys}
+              templateDiagnostics={templateDiagnostics}
               onBuilderMessage={(msg, failed) => setStatus(msg, Boolean(failed))}
               onApiError={onApiError}
               disabled={loading || saving || !csrfToken || localeDraftBlocked}

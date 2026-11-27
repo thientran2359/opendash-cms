@@ -87,6 +87,7 @@ pub async fn sync_provider_definitions_in_tx(
         ));
     }
     let mut declared = std::collections::BTreeSet::new();
+    let mut changed_keys = std::collections::BTreeSet::new();
     for taxonomy in declarations {
         let input = TaxonomyDefinitionInput {
             key: taxonomy.key.clone(),
@@ -146,6 +147,7 @@ pub async fn sync_provider_definitions_in_tx(
                 .bind(&taxonomy.key)
                 .execute(&mut *conn)
                 .await?;
+                changed_keys.insert(taxonomy.key.clone());
             }
         } else {
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM taxonomy_definitions")
@@ -182,10 +184,14 @@ pub async fn sync_provider_definitions_in_tx(
                 "UPDATE taxonomy_definitions SET declaration_state='withdrawn',
                  version=version+1 WHERE key=? AND declaration_state!='withdrawn'",
             )
-            .bind(key)
+            .bind(&key)
             .execute(&mut *conn)
             .await?;
+            changed_keys.insert(key);
         }
+    }
+    for tax_key in &changed_keys {
+        crate::storage::search::sync_entries_for_taxonomy_in_conn(conn, tax_key).await?;
     }
     Ok(())
 }
@@ -201,6 +207,17 @@ pub async fn set_provider_definitions_status_in_tx(
     } else {
         "provider_inactive"
     };
+    let affected_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT key FROM taxonomy_definitions
+          WHERE owner_kind=? AND owner_id=? AND provider_status!=?
+            AND (?=0 OR declaration_state='declared')",
+    )
+    .bind(owner_kind)
+    .bind(owner_id)
+    .bind(status)
+    .bind(i64::from(active))
+    .fetch_all(&mut *conn)
+    .await?;
     sqlx::query(
         "UPDATE taxonomy_definitions SET provider_status=?,version=version+1
          WHERE owner_kind=? AND owner_id=? AND provider_status!=?
@@ -213,6 +230,9 @@ pub async fn set_provider_definitions_status_in_tx(
     .bind(i64::from(active))
     .execute(&mut *conn)
     .await?;
+    for key in &affected_keys {
+        crate::storage::search::sync_entries_for_taxonomy_in_conn(conn, key).await?;
+    }
     Ok(())
 }
 
@@ -220,6 +240,13 @@ pub async fn deactivate_other_theme_definitions_in_tx(
     conn: &mut SqliteConnection,
     active_theme_id: &str,
 ) -> ApiResult<()> {
+    let affected_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT key FROM taxonomy_definitions
+          WHERE owner_kind='theme' AND owner_id!=? AND provider_status!='provider_inactive'",
+    )
+    .bind(active_theme_id)
+    .fetch_all(&mut *conn)
+    .await?;
     sqlx::query(
         "UPDATE taxonomy_definitions SET provider_status='provider_inactive',version=version+1
          WHERE owner_kind='theme' AND owner_id!=? AND provider_status!='provider_inactive'",
@@ -227,6 +254,9 @@ pub async fn deactivate_other_theme_definitions_in_tx(
     .bind(active_theme_id)
     .execute(&mut *conn)
     .await?;
+    for key in &affected_keys {
+        crate::storage::search::sync_entries_for_taxonomy_in_conn(conn, key).await?;
+    }
     Ok(())
 }
 
@@ -333,6 +363,7 @@ pub async fn patch_definition(
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải taxonomy vừa sửa."))?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entries_for_taxonomy_in_conn(&mut tx, key).await?;
     tx.commit().await.map_err(mutation_error)?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(updated)
@@ -380,6 +411,7 @@ pub async fn delete_definition(
         .await
         .map_err(mutation_error)?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entries_for_taxonomy_in_conn(&mut tx, key).await?;
     tx.commit().await.map_err(mutation_error)?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(())
@@ -479,6 +511,7 @@ pub async fn delete_term(
         ));
     }
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entries_for_term_in_conn(&mut tx, id).await?;
     tx.commit().await.map_err(mutation_error)?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(())

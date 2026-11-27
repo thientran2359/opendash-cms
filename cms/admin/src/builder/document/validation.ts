@@ -15,6 +15,8 @@ export const ELEMENT_PROP_KEYS: Record<string, readonly string[]> = {
   'core/list': ['type_key', 'category_id', 'tag_id', 'taxonomy_key', 'term_id',
     'include_descendants', 'sort', 'page_size'],
   'core/contact_form': ['form_id', 'submit_label'],
+  'core/search_form': ['placeholder', 'submit_label', 'show_type_filter', 'preserve_type_filter'],
+  'core/search_results': ['show_facets', 'show_excerpt', 'empty_message'],
   'core/pattern_ref': ['pattern_id'],
   'core/content_slot': [],
   'core/template_part': ['part_key'],
@@ -96,6 +98,13 @@ export function isLockedElement(
       || (props.new_tab !== undefined && typeof props.new_tab !== 'boolean')
       || (props.nofollow !== undefined && typeof props.nofollow !== 'boolean');
     case 'core/contact_form': return typeof props.form_id !== 'number' || props.form_id <= 0 || typeof props.submit_label !== 'string' || !props.submit_label.trim();
+    case 'core/search_form': return (props.placeholder !== undefined && typeof props.placeholder !== 'string')
+      || (props.submit_label !== undefined && typeof props.submit_label !== 'string')
+      || (props.show_type_filter !== undefined && typeof props.show_type_filter !== 'boolean')
+      || (props.preserve_type_filter !== undefined && typeof props.preserve_type_filter !== 'boolean');
+    case 'core/search_results': return (props.show_facets !== undefined && typeof props.show_facets !== 'boolean')
+      || (props.show_excerpt !== undefined && typeof props.show_excerpt !== 'boolean')
+      || (props.empty_message !== undefined && typeof props.empty_message !== 'string');
     case 'core/list': return typeof props.type_key !== 'string'
       || !/^[a-z][a-z0-9_]{0,63}$/.test(props.type_key)
       || !validListTaxonomyFilter(props)

@@ -184,7 +184,7 @@ async fn starter_bootstrap_import_repair_and_admin_theme_selection_are_durable()
             .unwrap()["type"],
         "url"
     );
-    assert_eq!(manifest["templates"].as_array().unwrap().len(), 9);
+    assert_eq!(manifest["templates"].as_array().unwrap().len(), 10);
     assert_eq!(manifest["patterns"].as_array().unwrap().len(), 6);
     assert_eq!(manifest["page_layouts"].as_array().unwrap().len(), 3);
     assert_eq!(manifest["sample"]["pages"].as_array().unwrap().len(), 5);

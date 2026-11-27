@@ -111,7 +111,9 @@ pub(in crate::storage) fn row_to_record(row: OverrideRow) -> ApiResult<TemplateO
         TemplateCandidateKind::Archive => "archive",
         TemplateCandidateKind::Taxonomy => "taxonomy_archive",
         TemplateCandidateKind::Part => target.part_key.as_deref().unwrap_or("part"),
-        TemplateCandidateKind::Index | TemplateCandidateKind::NotFound => "index",
+        TemplateCandidateKind::Index
+        | TemplateCandidateKind::NotFound
+        | TemplateCandidateKind::Search => "index",
     };
     Ok(TemplateOverrideRecord {
         id: row.0,
@@ -411,6 +413,7 @@ pub(in crate::storage) fn route_kind_for_candidate(kind: TemplateCandidateKind) 
         TemplateCandidateKind::Taxonomy => "taxonomy",
         TemplateCandidateKind::Index => "index",
         TemplateCandidateKind::NotFound => "not_found",
+        TemplateCandidateKind::Search => "search",
         TemplateCandidateKind::Part => "part",
     }
 }
@@ -440,6 +443,7 @@ pub(in crate::storage) fn preview_condition(kind: TemplateCandidateKind) -> Enqu
         TemplateCandidateKind::Archive => EnqueueCondition::Archive,
         TemplateCandidateKind::Taxonomy => EnqueueCondition::Taxonomy,
         TemplateCandidateKind::NotFound => EnqueueCondition::NotFound,
+        TemplateCandidateKind::Search => EnqueueCondition::Search,
         TemplateCandidateKind::Index | TemplateCandidateKind::Part => EnqueueCondition::All,
     }
 }
@@ -555,46 +559,4 @@ pub(in crate::storage) fn push_studio_target_item(
         has_theme_source,
     });
     Ok(())
-}
-
-pub(in crate::storage) fn escape_preview_text(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn preview_studio_with_cache(
-    db: &SqlitePool,
-    themes_root: &Path,
-    actor: &SessionContext,
-    target: &TemplateCandidate,
-    document: Option<&BuilderDocument>,
-    preview_entry: Option<&TemplatePreviewEntry>,
-    preview_annotations: bool,
-    transient: Option<&TransientStudioOverrides>,
-    cache: &page::BlockTemplateCache,
-) -> ApiResult<RenderedLayout> {
-    preview_studio_with_cache_and_locale(
-        db,
-        themes_root,
-        actor,
-        target,
-        document,
-        preview_entry,
-        preview_annotations,
-        transient,
-        None,
-        cache,
-    )
-    .await
 }

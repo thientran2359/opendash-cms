@@ -18948,6 +18948,9 @@ msgstr ""
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr ""
 
+msgid "No reindex jobs recorded yet."
+msgstr ""
+
 #: server:error:revision.pattern_admin_only
 msgid "Only Administrators may operate on Pattern revisions or autosaves."
 msgstr ""
@@ -19683,6 +19686,7 @@ msgid "This autosave was based on version v{{value1}}."
 msgstr ""
 
 msgid "This restored revision uses the standard Editor mode (editor)."
+msgstr ""
 
 #: admin:api.media.could_not_load_media_details
 msgid "Could not load media details."

@@ -154,6 +154,9 @@ pub async fn update_user_field_group(
     let updated = load_field_group_in_tx(&mut tx, &group_id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group sau cập nhật."))?;
+    for t in &all_affected_types {
+        crate::storage::search::sync_entries_for_type_in_conn(&mut tx, t).await?;
+    }
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(updated)
@@ -216,6 +219,9 @@ pub async fn withdraw_user_field_group(
     let withdrawn = load_field_group_in_tx(&mut tx, &group_id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group sau khi rút."))?;
+    for target in &existing.targets {
+        crate::storage::search::sync_entries_for_type_in_conn(&mut tx, &target.type_key).await?;
+    }
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(withdrawn)

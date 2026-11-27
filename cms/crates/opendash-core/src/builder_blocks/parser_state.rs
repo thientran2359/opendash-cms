@@ -440,6 +440,22 @@ pub(super) fn parse_leaf_content(tag: &str, json_str: &str) -> Result<ElementNod
                 content: ElementContent::Known(KnownElement::ContactForm(props)),
             })
         }
+        "search_form" => {
+            let (id, meta, props) = decode_props_with_id::<SearchFormProps>(json_str)?;
+            Ok(ElementNode {
+                id,
+                meta,
+                content: ElementContent::Known(KnownElement::SearchForm(props)),
+            })
+        }
+        "search_results" => {
+            let (id, meta, props) = decode_props_with_id::<SearchResultsProps>(json_str)?;
+            Ok(ElementNode {
+                id,
+                meta,
+                content: ElementContent::Known(KnownElement::SearchResults(props)),
+            })
+        }
         "content_slot" => {
             let (id, meta, props) = decode_props_with_id::<ContentSlotProps>(json_str)?;
             Ok(ElementNode {

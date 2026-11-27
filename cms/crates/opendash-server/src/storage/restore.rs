@@ -300,6 +300,8 @@ pub async fn validate_and_rebase_copy(db_path: &Path) -> ApiResult<i64> {
     .execute(&mut conn)
     .await?;
 
+    crate::storage::search::rebuild_search_index_in_conn(&mut conn).await?;
+
     let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
         .fetch_one(&mut conn)
         .await?;

@@ -6,6 +6,8 @@ mod content_declarations;
 mod package_install;
 #[path = "theme/public_context.rs"]
 mod public_context;
+#[path = "theme/public_site_search_theme.rs"]
+mod public_site_search_theme;
 #[path = "theme/reading_page_templates.rs"]
 mod reading_page_templates;
 #[path = "theme/responsive_media_render.rs"]

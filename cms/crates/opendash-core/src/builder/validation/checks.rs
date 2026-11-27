@@ -133,6 +133,24 @@ pub(crate) fn validate_known_with_schemas(
                 return Err("Invalid Builder contact form configuration");
             }
         }
+        KnownElement::SearchForm(props) => {
+            let label = props.submit_label.trim();
+            if !valid_text(&props.placeholder, 120, false)
+                || props.placeholder.chars().any(char::is_control)
+                || label.is_empty()
+                || props.submit_label.chars().count() > 64
+                || props.submit_label.chars().any(char::is_control)
+            {
+                return Err("Invalid Builder search form configuration");
+            }
+        }
+        KnownElement::SearchResults(props) => {
+            if !valid_text(&props.empty_message, 240, false)
+                || props.empty_message.chars().any(char::is_control)
+            {
+                return Err("Invalid Builder search results configuration");
+            }
+        }
         KnownElement::ContentSlot(_) => {}
         KnownElement::PatternRef(props) => {
             if props.pattern_id <= 0 {
