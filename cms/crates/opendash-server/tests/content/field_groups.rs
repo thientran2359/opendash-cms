@@ -156,6 +156,8 @@ fn assert_core_builtins(cts: &[Value]) {
         json!({
             "public": false,
             "has_archive": false,
+            "exclude_from_sitemap": true,
+            "show_in_menu": false,
             "publication": "immediate",
             "supports": ["builder"]
         })

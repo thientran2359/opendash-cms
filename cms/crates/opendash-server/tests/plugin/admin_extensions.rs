@@ -187,7 +187,7 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
         .execute(&db).await.unwrap();
     let group_id = "plugin:case-provider:internal_note";
     let fields_json = json!([
-        {"key":"secret","label":"Admin secret","type":"text","required":true,"acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}},
+        {"key":"secret","label":"Admin secret","type":"text","required":true,"default":"init","acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}},
         {"key":"shared","label":"Shared","type":"boolean","required":false,"acl":{"min_view_role":"editor","min_edit_role":"editor","public_exposure":"private"}}
     ]);
     let loc_json = json!([[{"param":"taxonomy_term","op":"eq","value":"category"}]]);

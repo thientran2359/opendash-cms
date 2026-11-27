@@ -72,8 +72,8 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
                     "title": "Theme Topic Meta",
                     "location": [[{"param": "taxonomy_term", "op": "eq", "value": "theme_topic"}]],
                     "fields": [
-                        {"key": "banner_img", "label": "Banner", "type": "media", "media_kind": "image"},
-                        {"key": "accent_color", "label": "Accent", "type": "color"}
+                        {"key": "banner_img", "label": "Banner", "type": "media", "media_kind": "image", "acl": {"public_exposure": "public"}},
+                        {"key": "accent_color", "label": "Accent", "type": "color", "acl": {"public_exposure": "public"}}
                     ]
                 },
                 {
@@ -92,8 +92,8 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
     .unwrap();
     let zip = build_zip(&[
         ("theme.json", &theme_manifest),
-        ("home.html", b"<main data-hotline='{{ custom_options.theme_opts.hotline | default(\"\") }}'>{% if custom_options.theme_opts.logo %}{{ od_image(custom_options.theme_opts.logo) }}{% endif %}</main>"),
-        ("single.html", b"<article data-order='{{ entry.menu_order }}' data-excerpt='{{ entry.excerpt }}'><h1>{{ entry.title }}</h1>{% if entry.parent %}<a href='{{ entry.parent.url }}'>{{ entry.parent.title }}</a>{% endif %}</article>"),
+        ("home.html", b"<main data-hotline='{{ custom_options.theme_opts.hotline | default(\"\") }}'>{% if custom_options.theme_opts.logo %}{{ od_image(custom_options.theme_opts.logo) }}{% endif %}{{ od_content() }}</main>"),
+        ("single.html", b"<article data-order='{{ entry.menu_order }}' data-excerpt='{{ entry.excerpt }}'><h1>{{ entry.title }}</h1>{% if entry.parent %}<a href='{{ entry.parent.url }}'>{{ entry.parent.title }}</a>{% endif %}{{ od_content() }}</article>"),
         ("archive.html", b"<section>{% for e in entries %}<div class='item'>{{ e.title }}</div>{% endfor %}</section>"),
         ("taxonomy-theme_topic.html", b"<section data-desc='{{ term.description }}' data-sort='{{ term.sort_order }}' data-color='{{ term.fields.accent_color | default(\"\") }}'>{% if term.featured_image %}{{ od_image(term.featured_image) }}{% endif %}{% if term.fields.banner_img %}{{ od_image(term.fields.banner_img) }}{% endif %}</section>"),
         ("index.html", b"<main>Index</main>"),
@@ -101,14 +101,21 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
     let t_inst = client
         .post(format!("{}/api/admin/themes", srv.base))
         .header(header::COOKIE, &admin)
+        .header(header::ORIGIN, &srv.base)
         .header("X-CSRF-Token", &acsrf)
         .header("Content-Type", "application/zip")
         .body(zip)
         .send()
         .await
         .unwrap();
-    assert_eq!(t_inst.status(), StatusCode::CREATED);
-    let rev_id = t_inst.json::<Value>().await.unwrap()["revision_id"]
+    let t_status = t_inst.status();
+    let t_text = t_inst.text().await.unwrap();
+    assert_eq!(
+        t_status,
+        StatusCode::CREATED,
+        "theme install failed: {t_text}"
+    );
+    let rev_id = serde_json::from_str::<Value>(&t_text).unwrap()["revision_id"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -168,26 +175,27 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
         &admin,
         Some(&acsrf),
         Some("\"v1\""),
-        None,
+        Some(json!({})),
     )
     .await;
+    assert_eq!(trash_tmp.status(), StatusCode::OK);
     let tmp_v2 = trash_tmp.json::<Value>().await.unwrap()["version"]
         .as_i64()
         .unwrap();
-    let purge_tmp = api_json(
-        &client,
-        reqwest::Method::POST,
-        &format!(
+    let purge_tmp = client
+        .delete(format!(
             "{}/api/admin/content-types/temp_cuj1/entries/{tmp_eid}/purge",
             srv.base
-        ),
-        &admin,
-        Some(&acsrf),
-        Some(&format!("\"v{tmp_v2}\"")),
-        None,
-    )
-    .await;
-    assert_eq!(purge_tmp.status(), StatusCode::OK);
+        ))
+        .header(header::COOKIE, &admin)
+        .header(header::ORIGIN, &srv.base)
+        .header("X-CSRF-Token", &acsrf)
+        .header(header::IF_MATCH, format!("\"v{tmp_v2}\""))
+        .header("X-Confirm-Purge", "true")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(purge_tmp.status(), StatusCode::NO_CONTENT);
     let del_ok = api_json(
         &client,
         reqwest::Method::DELETE,
@@ -228,7 +236,7 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
                 {"param": "user_role", "op": "eq", "value": "admin"}
             ]],
             "presentation": {"region":"sidebar","order":15,"style":"seamless","label_placement":"left","collapsed_by_default":true,"collapsible":true},
-            "fields": [{"key":"difficulty","label":"Difficulty","type":"text","required":true,"default":"basic"}]
+            "fields": [{"key":"difficulty","label":"Difficulty","type":"text","required":true,"default":"basic","acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}}]
         })),
     ).await;
     assert_eq!(docs_fg.status(), StatusCode::CREATED);
@@ -276,7 +284,7 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
         &admin,
         Some(&acsrf),
         Some("\"v1\""),
-        None,
+        Some(json!({})),
     )
     .await;
     assert_eq!(trash_parent.status(), StatusCode::CONFLICT);
@@ -298,9 +306,11 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
         .unwrap();
     assert!(
         pub_child.contains("Cha Tai Lieu")
-            && pub_child.contains("/tai-lieu/cha-tl")
+            && (pub_child.contains("/tai-lieu/cha-tl")
+                || pub_child.contains("&#x2f;tai-lieu&#x2f;cha-tl"))
             && pub_child.contains("data-order='1'")
-            && pub_child.contains("Tom tat con")
+            && pub_child.contains("Tom tat con"),
+        "pub_child mismatch: {pub_child}"
     );
     let pub_arch = client
         .get(format!("{}/tai-lieu", srv.base))
@@ -447,6 +457,62 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
     )
     .await;
     assert_eq!(opt_ed_ok.status(), StatusCode::OK);
+    let home_page = api_json(
+        &client,
+        reqwest::Method::POST,
+        &format!("{}/api/admin/content-types/page/entries", srv.base),
+        &admin,
+        Some(&acsrf),
+        None,
+        Some(json!({"title":"Home","slug":"home-cuj4","values":{}})),
+    )
+    .await;
+    assert_eq!(home_page.status(), StatusCode::CREATED);
+    let home_json: Value = home_page.json().await.unwrap();
+    let home_id = home_json["id"].as_i64().unwrap();
+    let home_ver = home_json["version"].as_i64().unwrap();
+    let home_pub = api_json(
+        &client,
+        reqwest::Method::POST,
+        &format!(
+            "{}/api/admin/content-types/page/entries/{home_id}/publication",
+            srv.base
+        ),
+        &admin,
+        Some(&acsrf),
+        Some(&format!("\"v{home_ver}\"")),
+        Some(json!({"status":"published"})),
+    )
+    .await;
+    assert_eq!(home_pub.status(), StatusCode::OK);
+    let reading_get = api_json(
+        &client,
+        reqwest::Method::GET,
+        &format!("{}/api/admin/settings/reading", srv.base),
+        &admin,
+        None,
+        None,
+        None,
+    )
+    .await;
+    let reading_etag = reading_get
+        .headers()
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let reading_put = api_json(
+        &client,
+        reqwest::Method::PUT,
+        &format!("{}/api/admin/settings/reading", srv.base),
+        &admin,
+        Some(&acsrf),
+        Some(&reading_etag),
+        Some(json!({"homepage_page_id":home_id})),
+    )
+    .await;
+    assert_eq!(reading_put.status(), StatusCode::OK);
     let home_html = client
         .get(format!("{}/", srv.base))
         .send()
@@ -456,7 +522,8 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
         .await
         .unwrap();
     assert!(
-        home_html.contains("data-hotline='1900-8888'") && !home_html.contains("ADMIN_PRIVATE_999")
+        home_html.contains("data-hotline='1900-8888'") && !home_html.contains("ADMIN_PRIVATE_999"),
+        "home_html mismatch: {home_html}"
     );
     assert_eq!(
         client

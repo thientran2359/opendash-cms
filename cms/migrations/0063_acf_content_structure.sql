@@ -254,11 +254,26 @@ SELECT ct.key AS cpt_key,
        je.value AS raw_spec,
        CASE
            WHEN json_extract(je.value, '$.key') = 'body'
-                AND json_extract(je.value, '$.type') IN ('richtext', 'rich_text') THEN 'promote_editor'
+                AND json_extract(je.value, '$.type') IN ('richtext', 'rich_text')
+                AND COALESCE(json_extract(je.value, '$.acl.public_exposure'), 'public') = 'public'
+                AND COALESCE(json_extract(je.value, '$.acl.min_view_role'), 'editor') = 'editor'
+                AND COALESCE(json_extract(je.value, '$.acl.min_edit_role'), 'editor') = 'editor' THEN 'promote_editor'
            WHEN json_extract(je.value, '$.key') = 'featured_image'
-                AND json_extract(je.value, '$.type') = 'image' THEN 'promote_featured_image'
+                AND (
+                    json_extract(je.value, '$.type') = 'image'
+                    OR (
+                        json_extract(je.value, '$.type') = 'media'
+                        AND COALESCE(json_extract(je.value, '$.media_kind'), 'image') = 'image'
+                    )
+                )
+                AND COALESCE(json_extract(je.value, '$.acl.public_exposure'), 'public') = 'public'
+                AND COALESCE(json_extract(je.value, '$.acl.min_view_role'), 'editor') = 'editor'
+                AND COALESCE(json_extract(je.value, '$.acl.min_edit_role'), 'editor') = 'editor' THEN 'promote_featured_image'
            WHEN json_extract(je.value, '$.key') = 'excerpt'
-                AND json_extract(je.value, '$.type') IN ('textarea', 'text') THEN 'promote_excerpt'
+                AND json_extract(je.value, '$.type') IN ('textarea', 'text')
+                AND COALESCE(json_extract(je.value, '$.acl.public_exposure'), 'public') = 'public'
+                AND COALESCE(json_extract(je.value, '$.acl.min_view_role'), 'editor') = 'editor'
+                AND COALESCE(json_extract(je.value, '$.acl.min_edit_role'), 'editor') = 'editor' THEN 'promote_excerpt'
            WHEN json_extract(je.value, '$.key') IN (
                 'body', 'featured_image', 'excerpt',
                 'parent_id', 'menu_order', 'custom_template',

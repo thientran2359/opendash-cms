@@ -244,7 +244,34 @@ fn b02_entry_view_with_url_pure_media_fallback_renders_default_single_and_archiv
         settings: ContentTypeSettings::default(),
     };
     let _ = featured;
-    let _ = gallery;
+    let group = opendash_core::content::AttachedFieldGroupSnapshot {
+        group_id: "user:article_media".into(),
+        owner: ResourceOwner::User,
+        local_key: "article_media".into(),
+        title: "Media".into(),
+        description: String::new(),
+        domain: opendash_core::content::FieldGroupDomain::Content,
+        location: vec![vec![opendash_core::content::LocationRule::content_type_eq(
+            "article",
+        )]],
+        presentation: opendash_core::content::FieldGroupPresentation::default(),
+        active: true,
+        fields: vec![gallery],
+        status: opendash_core::content::FieldGroupStatus::Active,
+        association_state: DeclarationState::Declared,
+        version: 1,
+    };
+    let effective = EffectiveContentSchema::assemble(
+        OwnedDescriptor {
+            owner: ResourceOwner::User,
+            status: ProviderStatus::Active,
+            declaration_state: DeclarationState::Declared,
+            descriptor: schema_def.clone(),
+        },
+        1,
+        vec![group],
+    )
+    .unwrap();
     let mut values = BTreeMap::new();
     values.insert("featured_image".into(), json!(media_hex));
     values.insert("photos".into(), json!([gallery_hex]));
@@ -272,7 +299,14 @@ fn b02_entry_view_with_url_pure_media_fallback_renders_default_single_and_archiv
         published_at: Some("2026-11-27T00:00:00Z".into()),
     };
 
-    let view = entry_view_with_url(record, &schema_def, Some("/pure-media-fallback".into()));
+    let view = entry_view_with_context(
+        &record,
+        &effective,
+        Some("/pure-media-fallback".into()),
+        &[],
+        &[],
+        FieldRole::Editor,
+    );
     let single_html = render_single_with_context_and_nonces_for_locale(
         &schema_def,
         &view,

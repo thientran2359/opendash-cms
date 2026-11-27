@@ -145,7 +145,7 @@ pub(in crate::storage) fn push_entry_table_scope(
 pub(in crate::storage) fn filter_entry_table_fields_for_role(
     values: &mut BTreeMap<String, Value>,
     effective: &opendash_core::content::EffectiveContentSchema,
-    admin_col_keys: &std::collections::BTreeSet<String>,
+    _admin_col_keys: &std::collections::BTreeSet<String>,
     caller_role: FieldRole,
 ) {
     let cpt_list_cols = &effective.base.descriptor.settings.list_columns;
@@ -160,7 +160,6 @@ pub(in crate::storage) fn filter_entry_table_fields_for_role(
             }
             field.definition.effective_acl().2 == PublicExposure::Public
                 || field.definition.show_in_list
-                || admin_col_keys.contains(key.as_str())
                 || cpt_list_cols.iter().any(|c| {
                     c.kind == opendash_core::content::ContentListColumnKind::Field && c.key == *key
                 })

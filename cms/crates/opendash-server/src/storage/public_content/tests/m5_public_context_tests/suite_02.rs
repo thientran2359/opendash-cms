@@ -251,7 +251,7 @@ async fn s01_generic_builder_body_and_media_follow_capability_and_publication_wi
     crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key, definition_json, owner_kind)
-            VALUES('project', '{"key":"project","label":"Project","fields":[],"settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
+            VALUES('project', '{"key":"project","label":"Project","settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
     )
     .execute(&db)
     .await
@@ -386,7 +386,7 @@ async fn s01_one_hop_pattern_acl_and_private_cpt_follow_unified_body_without_con
     crate::storage::MIGRATOR.run(&db).await.unwrap();
     sqlx::query(
         r#"INSERT INTO content_types(key, definition_json, owner_kind)
-            VALUES('service', '{"key":"service","label":"Service","fields":[],"settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
+            VALUES('service', '{"key":"service","label":"Service","settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
     )
     .execute(&db)
     .await

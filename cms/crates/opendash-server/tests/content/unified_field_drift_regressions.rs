@@ -235,7 +235,10 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
             "active": false,
             "location": [[{"param": "taxonomy_term", "op": "eq", "value": "category"}]],
             "presentation": {"region": "main_bottom", "order": 1, "collapsible": true},
-            "fields": [{"key": "info_msg", "label": "Ghi chú", "type": "message", "body": "Thông tin bổ sung"}]
+            "fields": [
+                {"key": "info_msg", "label": "Ghi chú", "type": "message", "body": "Thông tin bổ sung"},
+                {"key": "inactive_note", "label": "Ghi chú phụ", "type": "text"}
+            ]
         }))
         .send()
         .await

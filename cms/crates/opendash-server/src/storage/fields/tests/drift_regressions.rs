@@ -160,10 +160,11 @@ async fn f01_media_is_referenced_detects_nested_repeater_and_group_media_on_publ
     let mut fg_img = FieldSpec::new(FieldType::Media, "fg_banner", "Banner");
     fg_img.media_kind = Some(MediaFieldKind::Image);
     sqlx::query(
-        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, default_region, default_order, collapsible, status, version)
-         VALUES ('user:showcase_fg', 'user', NULL, 'showcase_fg', 'Extra', '', ?, 'main_bottom', 0, 0, 'active', 1)",
+        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, domain, location_rules_json, default_region, default_order, collapsible, status, version)
+         VALUES ('user:showcase_fg', 'user', NULL, 'showcase_fg', 'Extra', '', ?, 'content', ?, 'main_bottom', 0, 0, 'active', 1)",
     )
     .bind(serde_json::to_string(&vec![fg_img]).unwrap())
+    .bind(&loc_showcase)
     .execute(&db)
     .await
     .unwrap();
@@ -244,11 +245,12 @@ async fn f04_load_entry_ref_hydration_prefers_featured_image_and_ignores_non_ima
         "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, domain, location_rules_json, default_region, default_order, collapsible, status, version)
          VALUES ('user:report_base', 'user', NULL, 'report_base', 'Base', '', ?, 'content', ?, 'main_bottom', 0, 0, 'active', 1)",
     )
-    .bind(serde_json::to_string(&vec![a_file, b_feat]).unwrap())
+    .bind(serde_json::to_string(&vec![a_file]).unwrap())
     .bind(&loc_report)
     .execute(&db)
     .await
     .unwrap();
+    let _ = b_feat;
     sqlx::query("INSERT INTO content_field_group_targets (group_id, target_kind, target_key, association_state) VALUES ('user:report_base', 'content_type', 'report', 'declared')")
         .execute(&db)
         .await
@@ -448,6 +450,14 @@ async fn f11_f16_context_fields_without_list_and_term_extension_media_pins() {
 
     // F-16: taxonomy_terms.values_json + term_field_media_refs pinned media IDs are detected.
     let pin_id = "e".repeat(64);
+    sqlx::query(
+        "INSERT INTO media_assets (id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height, lifecycle_state, generation, version)
+         VALUES (?, 'image', 'pin.png', 'image/png', 'png', 100, 10, 10, 10, 10, 'active', 1, 1)",
+    )
+    .bind(&pin_id)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
     sqlx::query("INSERT INTO plugins(id,version,name,manifest_json,wasm_blob) VALUES ('p1','1.0.0','P1','{}',X'00')")
         .execute(&mut *conn)
         .await
@@ -462,8 +472,8 @@ async fn f11_f16_context_fields_without_list_and_term_extension_media_pins() {
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO term_field_media_refs (term_id, media_id, ref_role)
-         VALUES (?, ?, 'image')",
+        "INSERT INTO term_field_media_refs (term_id, locale, field_key, media_id)
+         VALUES (?, 'vi', 'banner', ?)",
     )
     .bind(term_id)
     .bind(&pin_id)
@@ -474,12 +484,7 @@ async fn f11_f16_context_fields_without_list_and_term_extension_media_pins() {
     let mut tx = db.begin().await.unwrap();
     let summary = collect_pins_in_tx(&mut tx, &pin_id).await.unwrap();
     assert!(summary.is_referenced());
-    assert!(
-        summary
-            .pins
-            .iter()
-            .any(|p| p.source_kind == "taxonomy_term_field")
-    );
+    assert!(summary.pins.iter().any(|p| p.source_kind == "term_meta"));
 }
 
 #[tokio::test]

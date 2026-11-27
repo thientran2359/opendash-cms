@@ -20,7 +20,7 @@ async fn cuj2_0063_migration_preserves_legacy_cpt_term_extensions_and_zero_delta
     migrator.run_to(62, &pool).await.unwrap();
 
     let pre_objects: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name != '_sqlx_migrations'",
+        "SELECT COUNT(*) FROM sqlite_schema WHERE name != '_sqlx_migrations' AND name != 'sqlite_sequence' AND name NOT LIKE 'sqlite_stat%'",
     )
     .fetch_one(&pool)
     .await
@@ -79,14 +79,14 @@ async fn cuj2_0063_migration_preserves_legacy_cpt_term_extensions_and_zero_delta
 
     migrator.run(&pool).await.unwrap();
     let post_objects: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name != '_sqlx_migrations'",
+        "SELECT COUNT(*) FROM sqlite_schema WHERE name != '_sqlx_migrations' AND name != 'sqlite_sequence' AND name NOT LIKE 'sqlite_stat%'",
     )
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(
         post_objects, pre_objects,
-        "0063 must maintain +0 net schema objects"
+        "0063 must maintain +0 net sqlite_schema objects"
     );
     assert!(post_objects < 256);
 

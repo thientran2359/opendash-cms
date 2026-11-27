@@ -225,6 +225,7 @@ pub async fn effective_list(
                 continue;
             };
             if field.effective_status != EffectiveFieldStatus::Active
+                || field.definition.effective_acl().2 != PublicExposure::Public
                 || role < field.definition.effective_acl().0
                 || (role < opendash_core::content::FieldRole::Admin
                     && effective.is_group_admin_only(&field.source_id))
