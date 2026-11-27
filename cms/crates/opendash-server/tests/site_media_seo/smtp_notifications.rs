@@ -307,16 +307,16 @@ async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
         "schema_version": 1,
         "blocks": [{
             "id": "sec-1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "el-form-1",
-                        "type": "core/contact-form",
+                        "block_id": "core/contact-form",
                         "props": { "form_id": form_id.to_string(), "submit_label": "Gui" }
                     }]
                 }]

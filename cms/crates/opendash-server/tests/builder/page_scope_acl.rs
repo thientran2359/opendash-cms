@@ -90,7 +90,7 @@ async fn login(http: &Client, site: &Site, username: &str, password: &str) -> (S
 }
 
 fn design(title: &str) -> Value {
-    json!({"schema_version":1,"blocks":[{"id":"section","type":"core/section","children":[{"id":"row","type":"core/row","children":[{"id":"column","type":"core/column","children":[{"id":"heading","type":"core/heading","props":{"level":"h2","text":title}}]}]}]}]})
+    json!({"schema_version":1,"blocks":[{"id":"section","block_id":"core/section","children":[{"id":"row","block_id":"core/row","children":[{"id":"column","block_id":"core/column","children":[{"id":"heading","block_id":"core/heading","props":{"level":"h2","text":title}}]}]}]}]})
 }
 
 // The Builder GET/PUT/Reset contract now includes content_entries.updated_at.
@@ -260,7 +260,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         .as_array_mut()
         .unwrap()
         .push(
-            json!({"id":"image","type":"core/image","props":{"image":image_id,"alt":"Page image"}}),
+            json!({"id":"image","block_id":"core/image","props":{"image":image_id,"alt":"Page image"}}),
         );
     let preview_path = format!("{a}/preview");
     let put = |version: i64| {
@@ -341,9 +341,9 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     );
 
     for element in [
-        json!({"id":"slot","type":"core/content-slot","props":{}}),
-        json!({"id":"part","type":"core/template-part","props":{"part_key":"header"}}),
-        json!({"id":"bad-media","type":"core/image","props":{"image":"missing-image","alt":"Missing"}}),
+        json!({"id":"slot","block_id":"core/content-slot","props":{}}),
+        json!({"id":"part","block_id":"core/template-part","props":{"part_key":"header"}}),
+        json!({"id":"bad-media","block_id":"core/image","props":{"image":"missing-image","alt":"Missing"}}),
     ] {
         let mut invalid = document.clone();
         invalid["blocks"][0]["children"][0]["children"][0]["children"]

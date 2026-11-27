@@ -246,11 +246,11 @@ async fn s01_generic_builder_body_and_media_follow_capability_and_publication_wi
     let media_id = "7".repeat(64);
     let document: opendash_core::builder::BuilderDocument = serde_json::from_value(serde_json::json!({
         "schema_version": 1,
-        "blocks": [{"id":"section", "type":"core/section", "children":[{"id":"row", "type":"core/row", "children":[
-            {"id":"column", "type":"core/column", "children":[
-                {"id":"heading", "type":"core/heading",
+        "blocks": [{"id":"section", "block_id":"core/section", "children":[{"id":"row", "block_id":"core/row", "children":[
+            {"id":"column", "block_id":"core/column", "children":[
+                {"id":"heading", "block_id":"core/heading",
                     "props":{"level":"h2","text":"S01 generic project body"}},
-                {"id":"picture", "type":"core/image",
+                {"id":"picture", "block_id":"core/image",
                     "props":{"image":media_id,"alt":"Project picture"}}
             ]}
         ]}]}]
@@ -395,8 +395,8 @@ async fn s01_one_hop_pattern_acl_and_private_cpt_follow_unified_body_without_con
     .last_insert_rowid();
     let pat_doc = serde_json::json!({
         "schema_version": 1,
-        "blocks": [{"id":"s1","type":"core/section","children":[{"id":"r1","type":"core/row","children":[{"id":"c1","type":"core/column","children":[
-            {"id":"img1","type":"core/image","props":{"image":media_id,"alt":"Pattern photo"}}
+        "blocks": [{"id":"s1","block_id":"core/section","children":[{"id":"r1","block_id":"core/row","children":[{"id":"c1","block_id":"core/column","children":[
+            {"id":"img1","block_id":"core/image","props":{"image":media_id,"alt":"Pattern photo"}}
         ]}]}]}]
     });
     sqlx::query(

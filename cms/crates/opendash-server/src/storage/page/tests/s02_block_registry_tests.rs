@@ -147,10 +147,10 @@ async fn provider_toggle_resyncs_media_acl_without_erasing_saved_homepage() {
     let document: BuilderDocument = serde_json::from_value(json!({
         "schema_version": opendash_core::builder::BUILDER_SCHEMA_VERSION,
         "blocks": [{
-            "id": "s1", "type": "core/section", "children": [{
-                "id": "r1", "type": "core/row", "children": [{
-                    "id": "c1", "type": "core/column", "children": [{
-                        "id": "e1", "type": "acme-blocks/banner",
+            "id": "s1", "block_id": "core/section", "children": [{
+                "id": "r1", "block_id": "core/row", "children": [{
+                    "id": "c1", "block_id": "core/column", "children": [{
+                        "id": "e1", "block_id": "acme-blocks/banner",
                         "props": { "photo": image_id }
                     }]
                 }]
@@ -372,10 +372,10 @@ async fn s01_core_sync_cleanup_list_offset_and_fail_closed_locale_filters() {
         serde_json::from_value(json!({
             "schema_version": 1,
             "blocks": [{
-                "id": "s1", "type": "core/section", "children": [{
-                    "id": "r1", "type": "core/row", "children": [{
-                        "id": "c1", "type": "core/column", "children": [{
-                            "id": "list-1", "type": "core/list",
+                "id": "s1", "block_id": "core/section", "children": [{
+                    "id": "r1", "block_id": "core/row", "children": [{
+                        "id": "c1", "block_id": "core/column", "children": [{
+                            "id": "list-1", "block_id": "core/list",
                             "props": {
                                 "type_key": "post",
                                 "page_size": 5,

@@ -136,16 +136,16 @@ fn doc_with_heading(node_id: &str, text: &str) -> Value {
         "schema_version": 1,
         "blocks": [{
             "id": format!("sec-{node_id}"),
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": format!("row-{node_id}"),
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": format!("col-{node_id}"),
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": node_id,
-                        "type": "core/heading",
+                        "block_id": "core/heading",
                         "props": { "level": "h2", "text": text }
                     }]
                 }]
@@ -476,7 +476,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .as_array_mut()
         .unwrap()
         .push(json!({
-            "id":"entry-slot","type":"core/content-slot","props":{}
+            "id":"entry-slot","block_id":"core/content-slot","props":{}
         }));
     let preview_single = preview_request()
         .json(&json!({
@@ -542,7 +542,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .as_array_mut()
         .unwrap()
         .push(
-            json!({"id":"nested-public-card","type":"core/template-part",
+            json!({"id":"nested-public-card","block_id":"core/template-part",
                      "props":{"part_key":"public-card"}}),
         );
     let save_single = client
@@ -916,7 +916,7 @@ fn preview_part_document(keys: &[&str]) -> Value {
         .unwrap();
     for (index, key) in keys.iter().enumerate() {
         children.push(
-            json!({"id":format!("part-{index}"),"type":"core/template-part",
+            json!({"id":format!("part-{index}"),"block_id":"core/template-part",
                              "props":{"part_key":key}}),
         );
     }

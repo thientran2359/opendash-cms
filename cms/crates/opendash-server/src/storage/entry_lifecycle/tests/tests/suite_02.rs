@@ -229,16 +229,16 @@ async fn startup_builder_migration_preserves_trashed_row_lifecycle_and_pins() {
         "schema_version": 1,
         "blocks": [{
             "id": "sec-1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "el-1",
-                        "type": "core/image",
+                        "block_id": "core/image",
                         "props": {
                             "image": pic_id,
                             "alt": "Pic"

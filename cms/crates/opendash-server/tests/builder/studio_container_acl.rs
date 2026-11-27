@@ -85,7 +85,7 @@ async fn theme_container_provider_toggle_revokes_nested_media_and_pattern_acl_pr
     let pat_id = app
         .create_entry("pattern", "Wrap Pattern", "wrap-pattern")
         .await;
-    let pat_doc: Value = serde_json::from_str(&r#"{"schema_version":1,"blocks":[{"id":"ps","type":"core/section","children":[{"id":"pr","type":"core/row","children":[{"id":"pc","type":"core/column","children":[{"id":"pi","type":"core/image","props":{"image":"__P__","alt":"Pattern Img"}}]}]}]}]}"#.replace("__P__", &pattern_img)).unwrap();
+    let pat_doc: Value = serde_json::from_str(&r#"{"schema_version":1,"blocks":[{"id":"ps","block_id":"core/section","children":[{"id":"pr","block_id":"core/row","children":[{"id":"pc","block_id":"core/column","children":[{"id":"pi","block_id":"core/image","props":{"image":"__P__","alt":"Pattern Img"}}]}]}]}]}"#.replace("__P__", &pattern_img)).unwrap();
     assert_eq!(
         app.send_json(
             Method::PUT,
@@ -99,7 +99,7 @@ async fn theme_container_provider_toggle_revokes_nested_media_and_pattern_acl_pr
     );
 
     let page_id = app.create_entry("page", "Wrap ACL", "wrap-acl-page").await;
-    let page_doc: Value = serde_json::from_str(&r#"{"schema_version":1,"blocks":[{"id":"ws","type":"core/section","children":[{"id":"wb","type":"csec-wrap/box","children":[{"id":"wi","type":"core/image","props":{"image":"__I__","alt":"Direct Img"}},{"id":"wp","type":"core/pattern-ref","props":{"pattern_id":"__PID__"}}]}]}]}"#.replace("__I__", &direct_img).replace("__PID__", &pat_id.to_string())).unwrap();
+    let page_doc: Value = serde_json::from_str(&r#"{"schema_version":1,"blocks":[{"id":"ws","block_id":"core/section","children":[{"id":"wb","block_id":"csec-wrap/box","children":[{"id":"wi","block_id":"core/image","props":{"image":"__I__","alt":"Direct Img"}},{"id":"wp","block_id":"core/pattern-ref","props":{"pattern_id":"__PID__"}}]}]}]}"#.replace("__I__", &direct_img).replace("__PID__", &pat_id.to_string())).unwrap();
     assert_eq!(
         app.send_json(
             Method::PUT,

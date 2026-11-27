@@ -632,10 +632,10 @@ async fn video_upload_validation_dedup_and_typed_image_guards() {
         .header("x-csrf-token", &csrf)
         .json(&json!({
             "schema_version": 1,
-            "blocks": [{"id": "sec1", "type": "core/section", "children": [
-                {"id": "row1", "type": "core/row", "children": [
-                    {"id": "col1", "type": "core/column", "children": [
-                        {"id": "img1", "type": "core/image",
+            "blocks": [{"id": "sec1", "block_id": "core/section", "children": [
+                {"id": "row1", "block_id": "core/row", "children": [
+                    {"id": "col1", "block_id": "core/column", "children": [
+                        {"id": "img1", "block_id": "core/image",
                          "props": {"image": mp4_sha, "alt": "Not an image"}}
                     ]}
                 ]}

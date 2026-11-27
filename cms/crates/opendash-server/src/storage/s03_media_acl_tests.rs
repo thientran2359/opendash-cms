@@ -59,10 +59,10 @@ async fn fixture() -> (SqlitePool, BuilderDocument, String, String) {
     let doc = serde_json::from_value(json!({
         "schema_version": 1,
         "blocks": [{
-            "id": "sec-1", "type": "core/section", "children": [{
-                "id": "row-1", "type": "core/row", "children": [{
-                    "id": "col-1", "type": "core/column", "children": [{
-                        "id": "gallery-1", "type": "reef/gallery",
+            "id": "sec-1", "block_id": "core/section", "children": [{
+                "id": "row-1", "block_id": "core/row", "children": [{
+                    "id": "col-1", "block_id": "core/column", "children": [{
+                        "id": "gallery-1", "block_id": "reef/gallery",
                         "props": {"hero": video, "slides": [{"thumb": img}]}
                     }]
                 }]

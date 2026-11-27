@@ -297,7 +297,7 @@ fn core_catalog_tailwind_budget_and_ast_v1_invariants() {
     }
 
     let doc: BuilderDocument = serde_json::from_str(
-        r#"{"schema_version":1,"blocks":[{"id":"sec-rt","type":"core/section","children":[{"id":"row-rt","type":"core/row","children":[{"id":"col-rt","type":"core/column","children":[{"id":"hd-rt","type":"core/heading","props":{"level":"h2","text":"Roundtrip"}}]}]}]}]}"#,
+        r#"{"schema_version":1,"blocks":[{"id":"sec-rt","block_id":"core/section","children":[{"id":"row-rt","block_id":"core/row","children":[{"id":"col-rt","block_id":"core/column","children":[{"id":"hd-rt","block_id":"core/heading","props":{"level":"h2","text":"Roundtrip"}}]}]}]}]}"#,
     ).unwrap();
     assert_eq!(
         parse_blocks_to_builder_document(&serialize_builder_document_to_blocks(&doc).unwrap())
@@ -332,7 +332,7 @@ fn core_catalog_tailwind_budget_and_ast_v1_invariants() {
     );
 
     let acc_bad: BuilderDocument = serde_json::from_str(
-        r#"{"schema_version":1,"blocks":[{"id":"s","type":"core/section","children":[{"id":"r","type":"core/row","children":[{"id":"ai","type":"core/accordion-item","props":{"title":"Illegal"}}]}]}]}"#,
+        r#"{"schema_version":1,"blocks":[{"id":"s","block_id":"core/section","children":[{"id":"r","block_id":"core/row","children":[{"id":"ai","block_id":"core/accordion-item","props":{"title":"Illegal"}}]}]}]}"#,
     ).unwrap();
     assert!(
         acc_bad
@@ -397,25 +397,25 @@ async fn studio_unified_ast_http_e2e_containers_accordion_card_and_pre_v1_reject
     );
 
     let doc: Value = serde_json::from_str(&r#"{"schema_version":1,"blocks":[
-      {"id":"ban-1","type":"core/banner","props":{"bg_image":"__BG__"},"children":[
-        {"id":"ban-h1","type":"core/heading","props":{"level":"h1","text":"Hero Banner"}},
-        {"id":"ban-stk","type":"core/stack","children":[
-          {"id":"b1","type":"core/button","props":{"cta":{"label":"Bắt đầu","url":"/start","new_tab":false,"nofollow":false}}},
-          {"id":"b2","type":"core/button","props":{"cta":{"label":"Tài liệu","url":"/docs","new_tab":false,"nofollow":false}}}
+      {"id":"ban-1","block_id":"core/banner","props":{"bg_image":"__BG__"},"children":[
+        {"id":"ban-h1","block_id":"core/heading","props":{"level":"h1","text":"Hero Banner"}},
+        {"id":"ban-stk","block_id":"core/stack","children":[
+          {"id":"b1","block_id":"core/button","props":{"cta":{"label":"Bắt đầu","url":"/start","new_tab":false,"nofollow":false}}},
+          {"id":"b2","block_id":"core/button","props":{"cta":{"label":"Tài liệu","url":"/docs","new_tab":false,"nofollow":false}}}
         ]}
       ]},
-      {"id":"sec-main","type":"core/section","children":[
-        {"id":"row-main","type":"core/row","props":{"layout_mode":"grid_12","reverse_mobile":true},"children":[
-          {"id":"col-l","type":"core/column","props":{"span":{"desktop":8}},"children":[
-            {"id":"card-1","type":"core/card","props":{"card_link":{"url":"/promo","label":"Xem ưu đãi","new_tab":false,"nofollow":false}},"children":[
-              {"id":"ch","type":"core/heading","props":{"level":"h3","text":"Thẻ VIP"}},
-              {"id":"cb","type":"core/button","props":{"cta":{"label":"Đăng ký","url":"/vip","new_tab":false,"nofollow":false}}}
+      {"id":"sec-main","block_id":"core/section","children":[
+        {"id":"row-main","block_id":"core/row","props":{"layout_mode":"grid_12","reverse_mobile":true},"children":[
+          {"id":"col-l","block_id":"core/column","props":{"span":{"desktop":8}},"children":[
+            {"id":"card-1","block_id":"core/card","props":{"card_link":{"url":"/promo","label":"Xem ưu đãi","new_tab":false,"nofollow":false}},"children":[
+              {"id":"ch","block_id":"core/heading","props":{"level":"h3","text":"Thẻ VIP"}},
+              {"id":"cb","block_id":"core/button","props":{"cta":{"label":"Đăng ký","url":"/vip","new_tab":false,"nofollow":false}}}
             ]}
           ]},
-          {"id":"col-r","type":"core/column","props":{"span":{"desktop":4},"sticky":true},"children":[
-            {"id":"acc-1","type":"core/accordion","props":{"open_first":true,"allow_multiple":false},"children":[
-              {"id":"ai1","type":"core/accordion-item","props":{"title":"Câu hỏi 1"},"children":[{"id":"at1","type":"core/text","props":{"content":"<p>Đáp án 1</p>"}}]},
-              {"id":"ai2","type":"core/accordion-item","props":{"title":"Câu hỏi 2"},"children":[{"id":"at2","type":"core/text","props":{"content":"<p>Đáp án 2</p>"}}]}
+          {"id":"col-r","block_id":"core/column","props":{"span":{"desktop":4},"sticky":true},"children":[
+            {"id":"acc-1","block_id":"core/accordion","props":{"open_first":true,"allow_multiple":false},"children":[
+              {"id":"ai1","block_id":"core/accordion-item","props":{"title":"Câu hỏi 1"},"children":[{"id":"at1","block_id":"core/text","props":{"content":"<p>Đáp án 1</p>"}}]},
+              {"id":"ai2","block_id":"core/accordion-item","props":{"title":"Câu hỏi 2"},"children":[{"id":"at2","block_id":"core/text","props":{"content":"<p>Đáp án 2</p>"}}]}
             ]}
           ]}
         ]}

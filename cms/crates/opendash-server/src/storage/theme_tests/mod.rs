@@ -73,16 +73,16 @@ fn one_part(part_key: &str) -> BuilderDocument {
         "schema_version":1,
         "blocks":[{
             "id":"section-main",
-            "type":"core/section",
+            "block_id":"core/section",
             "children":[{
                 "id":"row-main",
-                "type":"core/row",
+                "block_id":"core/row",
                 "children":[{
                     "id":"column-main",
-                    "type":"core/column",
+                    "block_id":"core/column",
                     "children":[{
                         "id":"part-node",
-                        "type":"core/template-part",
+                        "block_id":"core/template-part",
                         "props":{"part_key":part_key}
                     }]
                 }]

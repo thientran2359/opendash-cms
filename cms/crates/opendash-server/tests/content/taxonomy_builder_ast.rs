@@ -24,7 +24,7 @@ fn document(props: Value) -> BuilderDocument {
     let input = json!({
         "schema_version": 1,
         "blocks": [
-            {"id":"list-1", "type":"core/list", "props":props}
+            {"id":"list-1", "block_id":"core/list", "props":props}
         ]
     });
     BuilderDocument::from_json(input.to_string().as_bytes()).unwrap()

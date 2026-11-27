@@ -455,17 +455,17 @@ async fn m7_s08_t01_deterministic_e2e_and_adversarial_corpus() {
         "schema_version": 1,
         "blocks": [{
             "id": "sec1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [
                         {
                             "id": "vid1",
-                            "type": "core/video",
+                            "block_id": "core/video",
                             "props": {
                                 "video": expected_sha,
                                 "controls": true,
@@ -474,7 +474,7 @@ async fn m7_s08_t01_deterministic_e2e_and_adversarial_corpus() {
                         },
                         {
                             "id": "frm1",
-                            "type": "core/contact-form",
+                            "block_id": "core/contact-form",
                             "props": {
                                 "form_id": form_id.to_string(),
                                 "submit_label": "Gui"

@@ -113,10 +113,10 @@ fn type_input(builder: bool) -> Value {
 fn document(heading: &str) -> Value {
     json!({
         "schema_version":1,
-        "blocks":[{"id":"section","type":"core/section","children":[
-            {"id":"row","type":"core/row","children":[
-                {"id":"column","type":"core/column","children":[
-                    {"id":"heading","type":"core/heading","props":{"level":"h2","text":heading}}
+        "blocks":[{"id":"section","block_id":"core/section","children":[
+            {"id":"row","block_id":"core/row","children":[
+                {"id":"column","block_id":"core/column","children":[
+                    {"id":"heading","block_id":"core/heading","props":{"level":"h2","text":heading}}
                 ]}
             ]}
         ]}]
@@ -601,16 +601,16 @@ async fn auto_injected_cpt_body_without_declared_fields_syncs_media_refs_and_acl
         "schema_version": 1,
         "blocks": [{
             "id": "sec-1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "img-1",
-                        "type": "core/image",
+                        "block_id": "core/image",
                         "props": { "image": media_id, "alt": "Case visual" }
                     }]
                 }]
@@ -767,16 +767,16 @@ async fn plugin_content_save_syncs_entry_builder_media_refs_for_block_body() {
         "schema_version": 1,
         "blocks": [{
             "id": "s1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "r1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "c1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "i1",
-                        "type": "core/image",
+                        "block_id": "core/image",
                         "props": { "image": media_id, "alt": "Plugin image" }
                     }]
                 }]

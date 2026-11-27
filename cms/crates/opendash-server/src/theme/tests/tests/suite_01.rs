@@ -379,7 +379,7 @@ fn rejects_v3_untrusted_template_and_pattern_content() {
     }"#;
     let zip = build_zip(&[
         ("theme.json", manifest_with_pattern, CompressionMethod::Stored),
-        ("patterns/hero.json", br#"{"schema_version":1,"blocks":[{"id":"broken","type":"core/section","children":[{"id":"broken","type":"core/row","children":[]}]}]}"#, CompressionMethod::Stored),
+        ("patterns/hero.json", br#"{"schema_version":1,"blocks":[{"id":"broken","block_id":"core/section","children":[{"id":"broken","block_id":"core/row","children":[]}]}]}"#, CompressionMethod::Stored),
     ]);
     assert!(matches!(
         parse_theme_zip_v3(&zip),

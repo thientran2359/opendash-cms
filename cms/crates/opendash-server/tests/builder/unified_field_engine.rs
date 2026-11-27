@@ -171,16 +171,16 @@ fn block_doc(el_id: &str, block_id: &str, values: Value) -> Value {
         "schema_version": 1,
         "blocks": [{
             "id": "sec-1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": el_id,
-                        "type": block_id,
+                        "block_id": block_id,
                         "props": values
                     }]
                 }]

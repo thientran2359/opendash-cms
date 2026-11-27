@@ -445,16 +445,16 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
         "schema_version": 1,
         "blocks": [{
             "id": "pat-sec-1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "pat-row-1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "pat-col-1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "pat-h1",
-                        "type": "core/heading",
+                        "block_id": "core/heading",
                         "props": { "level": "h3", "text": "Inside Pattern Node" }
                     }]
                 }]
@@ -480,22 +480,22 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
         "schema_version": 1,
         "blocks": [{
             "id": "entry-sec-1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "entry-row-1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "entry-col-1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [
                         {
                             "id": "entry-h1",
-                            "type": "core/heading",
+                            "block_id": "core/heading",
                             "props": { "level": "h2", "text": "Editable Entry Heading" }
                         },
                         {
                             "id": "entry-pat-ref",
-                            "type": "core/pattern-ref",
+                            "block_id": "core/pattern-ref",
                             "props": { "pattern_id": pat_id.to_string() }
                         }
                     ]
@@ -573,16 +573,16 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
                 "schema_version": 1,
                 "blocks": [{
                     "id": "tpl-sec-1",
-                    "type": "core/section",
+                    "block_id": "core/section",
                     "children": [{
                         "id": "tpl-row-1",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [{
                             "id": "tpl-col-1",
-                            "type": "core/column",
+                            "block_id": "core/column",
                             "children": [{
                                 "id": "tpl-slot",
-                                "type": "core/content-slot",
+                                "block_id": "core/content-slot",
                                 "props": {}
                             }]
                         }]

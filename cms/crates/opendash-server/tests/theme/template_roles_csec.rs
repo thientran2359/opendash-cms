@@ -416,10 +416,10 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         .header("X-CSRF-Token", &csrf)
         .json(&serde_json::json!({
             "target":{"kind":"home"},
-            "document":{"schema_version":1,"blocks":[{"id":"shared-sec","type":"core/section","children":[
-                {"id":"shared-row","type":"core/row","children":[{"id":"shared-col","type":"core/column","children":[
-                    {"id":"shared-title","type":"core/heading","props":{"level":"h1","text":"Shared Home Template"}},
-                    {"id":"shared-slot","type":"core/content-slot","props":{}}
+            "document":{"schema_version":1,"blocks":[{"id":"shared-sec","block_id":"core/section","children":[
+                {"id":"shared-row","block_id":"core/row","children":[{"id":"shared-col","block_id":"core/column","children":[
+                    {"id":"shared-title","block_id":"core/heading","props":{"level":"h1","text":"Shared Home Template"}},
+                    {"id":"shared-slot","block_id":"core/content-slot","props":{}}
                 ]}]}
             ]}]}
         })).send().await.unwrap();
@@ -457,9 +457,9 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
     assert_eq!(current.status(), 200);
     let etag = current.headers()["etag"].to_str().unwrap().to_owned();
     let updated = serde_json::json!({
-        "schema_version":1,"blocks":[{"id":"home-sec","type":"core/section","children":[
-            {"id":"home-row","type":"core/row","children":[{"id":"home-col","type":"core/column","children":[
-                {"id":"home-title","type":"core/heading","props":{"level":"h1","text":"Saved Builder Home"}}
+        "schema_version":1,"blocks":[{"id":"home-sec","block_id":"core/section","children":[
+            {"id":"home-row","block_id":"core/row","children":[{"id":"home-col","block_id":"core/column","children":[
+                {"id":"home-title","block_id":"core/heading","props":{"level":"h1","text":"Saved Builder Home"}}
             ]}]}
         ]}]
     });

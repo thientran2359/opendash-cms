@@ -453,16 +453,16 @@ async fn s02_secondary_routing_home_chain_builder_list_pagination_and_archive_is
                 "schema_version": 1,
                 "blocks": [{
                     "id": "home-sec",
-                    "type": "core/section",
+                    "block_id": "core/section",
                     "children": [{
                         "id": "home-row",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [{
                             "id": "home-col",
-                            "type": "core/column",
+                            "block_id": "core/column",
                             "children": [
-                                { "id": "home-badge", "type": "core/heading", "props": { "level": "h1", "text": "Shared Home Candidate Chain" } },
-                                { "id": "home-slot", "type": "core/content-slot", "props": {} }
+                                { "id": "home-badge", "block_id": "core/heading", "props": { "level": "h1", "text": "Shared Home Candidate Chain" } },
+                                { "id": "home-slot", "block_id": "core/content-slot", "props": {} }
                             ]
                         }]
                     }]
@@ -534,16 +534,16 @@ async fn s02_secondary_routing_home_chain_builder_list_pagination_and_archive_is
         "schema_version": 1,
         "blocks": [{
             "id": "sec-1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "list-1",
-                        "type": "core/list",
+                        "block_id": "core/list",
                         "props": { "type_key": "post", "page_size": 1, "sort": "id_desc" }
                     }]
                 }]
@@ -1162,16 +1162,16 @@ async fn s02_disable_locale_hides_routes_redirects_and_media_acl_without_data_lo
             "schema_version": 1,
             "blocks": [{
                 "id": "b-sec",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "b-row",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "b-col",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "b-img",
-                            "type": "core/image",
+                            "block_id": "core/image",
                             "props": { "image": m_builder, "alt": "Builder" }
                         }]
                     }]
@@ -1281,16 +1281,16 @@ async fn s02_disable_locale_hides_routes_redirects_and_media_acl_without_data_lo
                 "schema_version": 1,
                 "blocks": [{
                     "id": "ov-sec",
-                    "type": "core/section",
+                    "block_id": "core/section",
                     "children": [{
                         "id": "ov-row",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [{
                             "id": "ov-col",
-                            "type": "core/column",
+                            "block_id": "core/column",
                             "children": [
-                                { "id": "ov-img", "type": "core/image", "props": { "image": m_override, "alt": "OV" } },
-                                { "id": "ov-slot", "type": "core/content-slot", "props": {} }
+                                { "id": "ov-img", "block_id": "core/image", "props": { "image": m_override, "alt": "OV" } },
+                                { "id": "ov-slot", "block_id": "core/content-slot", "props": {} }
                             ]
                         }]
                     }]

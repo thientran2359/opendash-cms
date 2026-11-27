@@ -21,9 +21,9 @@ async fn migrate_demo_entry_builder_docs_on_startup_cleans_non_pattern_and_keeps
 
     let doc: BuilderDocument = serde_json::from_value(json!({
         "schema_version": 1,
-        "blocks": [{"id":"sec-1","type":"core/section","children":[{"id":"row-1","type":"core/row","children":[{"id":"col-1","type":"core/column","children":[
-            {"id":"hd-1","type":"core/heading","props":{"level":"h2","text":"Demo migrated"}},
-            {"id":"im-1","type":"core/image","props":{"image":media_id,"alt":"Demo"}}
+        "blocks": [{"id":"sec-1","block_id":"core/section","children":[{"id":"row-1","block_id":"core/row","children":[{"id":"col-1","block_id":"core/column","children":[
+            {"id":"hd-1","block_id":"core/heading","props":{"level":"h2","text":"Demo migrated"}},
+            {"id":"im-1","block_id":"core/image","props":{"image":media_id,"alt":"Demo"}}
         ]}]}]}]
     }))
     .unwrap();
@@ -211,8 +211,8 @@ async fn entry_builder_enforces_body_min_edit_role_and_private_exposure_media_ac
 
     let doc: BuilderDocument = serde_json::from_value(json!({
         "schema_version": 1,
-        "blocks": [{"id":"sec-1","type":"core/section","children":[{"id":"row-1","type":"core/row","children":[{"id":"col-1","type":"core/column","children":[
-            {"id":"im-1","type":"core/image","props":{"image":media_id,"alt":"Secret"}}
+        "blocks": [{"id":"sec-1","block_id":"core/section","children":[{"id":"row-1","block_id":"core/row","children":[{"id":"col-1","block_id":"core/column","children":[
+            {"id":"im-1","block_id":"core/image","props":{"image":media_id,"alt":"Secret"}}
         ]}]}]}]
     }))
     .unwrap();

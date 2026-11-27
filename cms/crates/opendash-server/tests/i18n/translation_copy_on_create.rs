@@ -283,16 +283,16 @@ async fn s03_copy_on_create_entry_translations_seo_terms_builder_and_lifecycle()
         "schema_version": 1,
         "blocks": [{
             "id": "sec1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "list1",
-                        "type": "core/list",
+                        "block_id": "core/list",
                         "props": {
                             "type_key": "post",
                             "taxonomy_key": "category",
@@ -1144,16 +1144,16 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
         "schema_version": 1,
         "blocks": [{
             "id": "sec1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "slot1",
-                        "type": "core/content-slot",
+                        "block_id": "core/content-slot",
                         "props": {}
                     }]
                 }]
@@ -1195,17 +1195,17 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
         "schema_version": 1,
         "blocks": [{
             "id": "sec1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [
                         {
                             "id": "listen",
-                            "type": "core/list",
+                            "block_id": "core/list",
                             "props": {
                                 "type_key": "post",
                                 "page_size": 10
@@ -1213,7 +1213,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
                         },
                         {
                             "id": "slot1",
-                            "type": "core/content-slot",
+                            "block_id": "core/content-slot",
                             "props": {}
                         }
                     ]

@@ -730,26 +730,26 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
         "blocks": [
             {
                 "id": "sec-hero",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [
                     {
                         "id": "row-hero",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [
                             {
                                 "id": "col-hero-text",
-                                "type": "core/column",
+                                "block_id": "core/column",
                                 "children": [
-                                    {"id": "h-hero", "type": "core/heading", "props": {"level": "h1", "text": "Không gian sống mộc mạc, thoáng sáng và bền vững theo năm tháng"}},
-                                    {"id": "t-hero", "type": "core/text", "props": {"content": "<p>Mộc Studio thiết kế và thi công trọn gói nhà phố, căn hộ và biệt thự vườn với vật liệu tự nhiên bản địa.</p>"}},
-                                    {"id": "b-hero", "type": "core/button", "props": {"cta": {"label": "Khám phá hồ sơ dự án", "url": "/du_an", "new_tab": False, "nofollow": False}}},
+                                    {"id": "h-hero", "block_id": "core/heading", "props": {"level": "h1", "text": "Không gian sống mộc mạc, thoáng sáng và bền vững theo năm tháng"}},
+                                    {"id": "t-hero", "block_id": "core/text", "props": {"content": "<p>Mộc Studio thiết kế và thi công trọn gói nhà phố, căn hộ và biệt thự vườn với vật liệu tự nhiên bản địa.</p>"}},
+                                    {"id": "b-hero", "block_id": "core/button", "props": {"cta": {"label": "Khám phá hồ sơ dự án", "url": "/du_an", "new_tab": False, "nofollow": False}}},
                                 ],
                             },
                             {
                                 "id": "col-hero-img",
-                                "type": "core/column",
+                                "block_id": "core/column",
                                 "children": [
-                                    {"id": "img-hero", "type": "core/image", "props": {"image": media_ids[0], "alt": "Không gian phòng khách tràn ngập ánh sáng tự nhiên tại Mộc Studio"}},
+                                    {"id": "img-hero", "block_id": "core/image", "props": {"image": media_ids[0], "alt": "Không gian phòng khách tràn ngập ánh sáng tự nhiên tại Mộc Studio"}},
                                 ],
                             },
                         ],
@@ -758,18 +758,18 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-services",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [
                     {
                         "id": "row-services",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [
                             {
                                 "id": "col-services",
-                                "type": "core/column",
+                                "block_id": "core/column",
                                 "children": [
-                                    {"id": "h-services", "type": "core/heading", "props": {"level": "h2", "text": "Dịch vụ thiết kế & thi công"}},
-                                    {"id": "list-services", "type": "core/list", "props": {"type_key": "dich_vu", "sort": "id_desc", "page_size": 6}},
+                                    {"id": "h-services", "block_id": "core/heading", "props": {"level": "h2", "text": "Dịch vụ thiết kế & thi công"}},
+                                    {"id": "list-services", "block_id": "core/list", "props": {"type_key": "dich_vu", "sort": "id_desc", "page_size": 6}},
                                 ],
                             }
                         ],
@@ -778,18 +778,18 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-projects",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [
                     {
                         "id": "row-projects",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [
                             {
                                 "id": "col-projects",
-                                "type": "core/column",
+                                "block_id": "core/column",
                                 "children": [
-                                    {"id": "h-projects", "type": "core/heading", "props": {"level": "h2", "text": "Dự án tiêu biểu"}},
-                                    {"id": "list-projects", "type": "core/list", "props": {"type_key": "du_an", "sort": "id_desc", "page_size": 6}},
+                                    {"id": "h-projects", "block_id": "core/heading", "props": {"level": "h2", "text": "Dự án tiêu biểu"}},
+                                    {"id": "list-projects", "block_id": "core/list", "props": {"type_key": "du_an", "sort": "id_desc", "page_size": 6}},
                                 ],
                             }
                         ],
@@ -798,19 +798,19 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-video",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [
                     {
                         "id": "row-video",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [
                             {
                                 "id": "col-video",
-                                "type": "core/column",
+                                "block_id": "core/column",
                                 "children": [
-                                    {"id": "h-video", "type": "core/heading", "props": {"level": "h2", "text": "Nhịp xưởng mộc & quy trình hoàn thiện"}},
-                                    {"id": "t-video", "type": "core/text", "props": {"content": "<p>Thước phim ngắn ghi lại quy trình chọn gỗ, đánh mộng và kiểm tra ánh sáng tự nhiên trước khi bàn giao.</p>"}},
-                                    {"id": "vid-studio", "type": "core/video", "props": {"video": video_id, "poster": media_ids[3], "controls": True, "muted": False}},
+                                    {"id": "h-video", "block_id": "core/heading", "props": {"level": "h2", "text": "Nhịp xưởng mộc & quy trình hoàn thiện"}},
+                                    {"id": "t-video", "block_id": "core/text", "props": {"content": "<p>Thước phim ngắn ghi lại quy trình chọn gỗ, đánh mộng và kiểm tra ánh sáng tự nhiên trước khi bàn giao.</p>"}},
+                                    {"id": "vid-studio", "block_id": "core/video", "props": {"video": video_id, "poster": media_ids[3], "controls": True, "muted": False}},
                                 ],
                             }
                         ],
@@ -819,18 +819,18 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-posts",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [
                     {
                         "id": "row-posts",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [
                             {
                                 "id": "col-posts",
-                                "type": "core/column",
+                                "block_id": "core/column",
                                 "children": [
-                                    {"id": "h-posts", "type": "core/heading", "props": {"level": "h2", "text": "Bài viết mới từ nhật ký kiến trúc"}},
-                                    {"id": "list-posts", "type": "core/list", "props": {"type_key": "post", "sort": "id_desc", "page_size": 6}},
+                                    {"id": "h-posts", "block_id": "core/heading", "props": {"level": "h2", "text": "Bài viết mới từ nhật ký kiến trúc"}},
+                                    {"id": "list-posts", "block_id": "core/list", "props": {"type_key": "post", "sort": "id_desc", "page_size": 6}},
                                 ],
                             }
                         ],
@@ -839,19 +839,19 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             },
             {
                 "id": "sec-contact",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [
                     {
                         "id": "row-contact",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [
                             {
                                 "id": "col-contact",
-                                "type": "core/column",
+                                "block_id": "core/column",
                                 "children": [
-                                    {"id": "h-contact", "type": "core/heading", "props": {"level": "h2", "text": "Đặt lịch tư vấn thiết kế"}},
-                                    {"id": "t-contact", "type": "core/text", "props": {"content": "<p>Chia sẻ diện tích khu đất hoặc căn hộ của bạn, kiến trúc sư Mộc Studio sẽ phản hồi trong 24 giờ làm việc.</p>"}},
-                                    {"id": "form-contact", "type": "core/contact-form", "props": {"form_id": str(form_rec["id"]), "submit_label": "Gửi yêu cầu tư vấn"}},
+                                    {"id": "h-contact", "block_id": "core/heading", "props": {"level": "h2", "text": "Đặt lịch tư vấn thiết kế"}},
+                                    {"id": "t-contact", "block_id": "core/text", "props": {"content": "<p>Chia sẻ diện tích khu đất hoặc căn hộ của bạn, kiến trúc sư Mộc Studio sẽ phản hồi trong 24 giờ làm việc.</p>"}},
+                                    {"id": "form-contact", "block_id": "core/contact-form", "props": {"form_id": str(form_rec["id"]), "submit_label": "Gửi yêu cầu tư vấn"}},
                                 ],
                             }
                         ],

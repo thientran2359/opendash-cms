@@ -327,7 +327,7 @@ async fn studio_s04_unified_body_roundtrip_and_cpt_builder() {
         assert_eq!(open_json["had_recovery"], false);
         assert_eq!(open_json["publication_policy"], "draft_publish");
         assert_eq!(open_json["publication_status"], "draft");
-        assert_eq!(open_json["document"]["blocks"][0]["type"], "core/text");
+        assert_eq!(open_json["document"]["blocks"][0]["block_id"], "core/text");
         let version = open_json["version"].as_i64().unwrap();
 
         // 4. Save structured AST in UX Builder.
@@ -335,17 +335,17 @@ async fn studio_s04_unified_body_roundtrip_and_cpt_builder() {
             "schema_version": 1,
             "blocks": [{
                 "id": "sec-1",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "row-1",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "col-1",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": [
-                            { "id": "hd-1", "type": "core/heading", "props": { "level": "h2", "text": format!("{title} Heading") } },
-                            { "id": "tx-1", "type": "core/text", "props": { "content": format!("{title} Body A") } },
-                            { "id": "bt-1", "type": "core/button", "props": { "cta": { "label": "Liên hệ", "url": "/lien-he", "new_tab": false, "nofollow": false } } }
+                            { "id": "hd-1", "block_id": "core/heading", "props": { "level": "h2", "text": format!("{title} Heading") } },
+                            { "id": "tx-1", "block_id": "core/text", "props": { "content": format!("{title} Body A") } },
+                            { "id": "bt-1", "block_id": "core/button", "props": { "cta": { "label": "Liên hệ", "url": "/lien-he", "new_tab": false, "nofollow": false } } }
                         ]
                     }]
                 }]
@@ -481,16 +481,16 @@ async fn studio_s04_plugin_writer_ref_sync_and_one_hop_pattern_acl() {
         "schema_version": 1,
         "blocks": [{
             "id": "sec-plug",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-plug",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-plug",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "img-plug",
-                        "type": "core/image",
+                        "block_id": "core/image",
                         "props": { "image": plugin_img, "alt": "Plugin Image" }
                     }]
                 }]
@@ -601,16 +601,16 @@ async fn studio_s04_plugin_writer_ref_sync_and_one_hop_pattern_acl() {
             "schema_version": 1,
             "blocks": [{
                 "id": "psec-1",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "prow-1",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "pcol-1",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "pimg-1",
-                            "type": "core/image",
+                            "block_id": "core/image",
                             "props": { "image": pat_img, "alt": "Pattern Image" }
                         }]
                     }]
@@ -660,16 +660,16 @@ async fn studio_s04_plugin_writer_ref_sync_and_one_hop_pattern_acl() {
             "schema_version": 1,
             "blocks": [{
                 "id": "hsec-1",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "hrow-1",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "hcol-1",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "href-1",
-                            "type": "core/pattern-ref",
+                            "block_id": "core/pattern-ref",
                             "props": { "pattern_id": pat_id.to_string() }
                         }]
                     }]
@@ -875,16 +875,16 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
             "schema_version": 1,
             "blocks": [{
                 "id": "xsec-1",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "xrow-1",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "xcol-1",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "xbtn-1",
-                            "type": "core/button",
+                            "block_id": "core/button",
                             "props": { "cta": { "label": "Click", "url": "javascript:alert(1)", "new_tab": false, "nofollow": false } }
                         }]
                     }]
@@ -907,16 +907,16 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
             "schema_version": 1,
             "blocks": [{
                 "id": "xsec-2",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "xrow-2",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "xcol-2",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": [
-                            { "id": "xhd-1", "type": "core/heading", "props": { "level": "h2", "text": xss_script } },
-                            { "id": "xtx-1", "type": "core/text", "props": { "content": xss_img } }
+                            { "id": "xhd-1", "block_id": "core/heading", "props": { "level": "h2", "text": xss_script } },
+                            { "id": "xtx-1", "block_id": "core/text", "props": { "content": xss_img } }
                         ]
                     }]
                 }]
@@ -940,16 +940,16 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
             "schema_version": 1,
             "blocks": [{
                 "id": "xsec-2",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "xrow-2",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "xcol-2",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": [
-                            { "id": "xhd-1", "type": "core/heading", "props": { "level": "h2", "text": xss_script } },
-                            { "id": "xtx-1", "type": "core/text", "props": { "content": xss_svg } }
+                            { "id": "xhd-1", "block_id": "core/heading", "props": { "level": "h2", "text": xss_script } },
+                            { "id": "xtx-1", "block_id": "core/text", "props": { "content": xss_svg } }
                         ]
                     }]
                 }]

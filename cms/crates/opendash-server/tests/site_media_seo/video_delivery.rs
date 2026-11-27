@@ -411,16 +411,16 @@ async fn video_range_head_conditional_csp_and_public_acl() {
         "schema_version": 1,
         "blocks": [{
             "id": "sec1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "vid1",
-                        "type": "core/video",
+                        "block_id": "core/video",
                         "props": {
                             "video": video_id,
                             "poster": poster_id,
@@ -624,16 +624,16 @@ async fn video_range_head_conditional_csp_and_public_acl() {
         "schema_version": 1,
         "blocks": [{
             "id": "sec1",
-            "type": "core/section",
+            "block_id": "core/section",
             "children": [{
                 "id": "row1",
-                "type": "core/row",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col1",
-                    "type": "core/column",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "txt1",
-                        "type": "core/text",
+                        "block_id": "core/text",
                         "props": { "content": "No video" }
                     }]
                 }]

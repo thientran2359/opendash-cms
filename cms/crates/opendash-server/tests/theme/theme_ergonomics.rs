@@ -485,16 +485,16 @@ async fn theme_ergonomics_cuj_all_helpers_rich_context_zero_n_plus_1_and_withdra
             "schema_version": 1,
             "blocks": [{
                 "id": "tr-sec-1",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "tr-row-1",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "tr-col-1",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "tr-blk-1",
-                            "type": "core/heading",
+                            "block_id": "core/heading",
                             "props": { "level": "h2", "text": "Body Transient" }
                         }]
                     }]

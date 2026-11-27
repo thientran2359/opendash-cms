@@ -118,13 +118,13 @@ async fn put_builder(
 }
 
 fn document(element: Value) -> Value {
-    json!({"schema_version":1,"blocks":[{"id":"section","type":"core/section","children":[
-        {"id":"row","type":"core/row","children":[{"id":"column","type":"core/column","children":[element]}]}
+    json!({"schema_version":1,"blocks":[{"id":"section","block_id":"core/section","children":[
+        {"id":"row","block_id":"core/row","children":[{"id":"column","block_id":"core/column","children":[element]}]}
     ]}]})
 }
 
 fn heading(text: &str) -> Value {
-    json!({"id":"heading","type":"core/heading","props":{"level":"h2","text":text}})
+    json!({"id":"heading","block_id":"core/heading","props":{"level":"h2","text":text}})
 }
 
 async fn create_page(http: &Client, site: &Site, cookie: &str, csrf: &str, slug: &str) -> i64 {
@@ -247,7 +247,7 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
     .await;
     assert_eq!(editor_attempt.status(), StatusCode::FORBIDDEN);
     let nested = document(
-        json!({"id":"nested","type":"core/pattern-ref","props":{"pattern_id":pattern_id.to_string()}}),
+        json!({"id":"nested","block_id":"core/pattern-ref","props":{"pattern_id":pattern_id.to_string()}}),
     );
     assert_eq!(
         put_builder(
@@ -257,7 +257,7 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
         .status(),
         StatusCode::BAD_REQUEST
     );
-    let nested_list = document(json!({"id":"list","type":"core/list","props":{
+    let nested_list = document(json!({"id":"list","block_id":"core/list","props":{
         "type_key":"post","include_descendants":false,"sort":"id_desc","page_size":5
     }}));
     assert_eq!(
@@ -304,7 +304,7 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
         .as_array_mut()
         .unwrap()
         .push(json!({
-            "id":"media","type":"core/image","props":{"image":media_id,"alt":"private banner"}
+            "id":"media","block_id":"core/image","props":{"image":media_id,"alt":"private banner"}
         }));
     assert_eq!(
         put_builder(
@@ -335,7 +335,7 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
     );
 
     let ref_doc = document(json!({
-        "id":"shared","type":"core/pattern-ref","props":{"pattern_id":pattern_id.to_string()}
+        "id":"shared","block_id":"core/pattern-ref","props":{"pattern_id":pattern_id.to_string()}
     }));
     // The 1-hop reference projection belongs to entry Builder only. Shared
     // overrides must reject the block rather than save a silently missing CTA.
@@ -364,7 +364,7 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
         );
     }
     let bad_ref = document(json!({
-        "id":"other","type":"core/pattern-ref","props":{"pattern_id":first_id.to_string()}
+        "id":"other","block_id":"core/pattern-ref","props":{"pattern_id":first_id.to_string()}
     }));
     let fourth_id = create_page(&http, &site, &cookie, &csrf, "pattern-other").await;
     assert_eq!(

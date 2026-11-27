@@ -722,13 +722,13 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
             "schema_version": 1,
             "blocks": [{
                 "id": "sec-pat-1",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "row-pat-1",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "col-pat-1",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": []
                     }]
                 }]
@@ -1005,16 +1005,16 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
             "schema_version": 1,
             "blocks": [{
                 "id": "sec-1",
-                "type": "core/section",
+                "block_id": "core/section",
                 "children": [{
                     "id": "row-1",
-                    "type": "core/row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "col-1",
-                        "type": "core/column",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "el-1",
-                            "type": "dev-live-theme/promo",
+                            "block_id": "dev-live-theme/promo",
                             "props": { "heading": "HelloLive" }
                         }]
                     }]

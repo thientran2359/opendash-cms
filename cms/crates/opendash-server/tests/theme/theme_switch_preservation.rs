@@ -284,16 +284,16 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
                   "schema_version": 1,
                   "blocks": [{
                     "id": "sec-hdr-1",
-                    "type": "core/section",
+                    "block_id": "core/section",
                     "children": [{
                         "id": "row-hdr-1",
-                        "type": "core/row",
+                        "block_id": "core/row",
                         "children": [{
                             "id": "col-hdr-1",
-                            "type": "core/column",
+                            "block_id": "core/column",
                             "children": [{
                                 "id": "hdr-1",
-                                "type": "core/heading",
+                                "block_id": "core/heading",
                                 "props": { "level": "h2", "text": "Preserved Site Header" }
                             }]
                         }]
