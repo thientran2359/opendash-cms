@@ -93,11 +93,8 @@ pub async fn get_entry_autosave(
         materialize_autosave_payload_in_conn(&mut conn, &live, actor.user.id, caller_role).await?;
     let missing_refs =
         inspect_missing_refs_in_conn(&mut conn, &live, &materialized, caller_role, false).await?;
-    let mut has_hidden_admin_fields =
+    let has_hidden_admin_fields =
         has_hidden_fields_in_map(&live.effective, &live.payload.values, caller_role);
-    if !body_viewable && type_key != "pattern" {
-        has_hidden_admin_fields = true;
-    }
 
     Ok(AutosaveSnapshotResponse {
         current_version: live.version,

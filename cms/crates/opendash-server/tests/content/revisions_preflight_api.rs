@@ -583,4 +583,96 @@ async fn missing_refs_preflight_required_veto_acl_and_error_precedence() {
             "trashed {method} {path}"
         );
     }
+
+    // Regression (Goldfish Drift Major #1): custom CPT without `"body"` field must NOT flag
+    // `has_hidden_admin_fields = true` when no Admin-only fields exist.
+    assert_eq!(
+        api(
+            &http,
+            &site,
+            Some(&admin),
+            Method::POST,
+            "/api/admin/content-types",
+            None,
+            Some(json!({
+                "key": "headline_note",
+                "label": "Headline Notes",
+                "fields": [{ "key": "summary", "label": "Summary", "type": "text" }],
+                "settings": { "public": false, "has_archive": false, "publication": "draft_publish", "supports": [] }
+            }))
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    let note_tok = api(
+        &http,
+        &site,
+        Some(&admin),
+        Method::GET,
+        "/api/admin/content-types/headline_note/effective-editor-config",
+        None,
+        None,
+    )
+    .await
+    .json::<Value>()
+    .await
+    .unwrap()["schema_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let note_c = api(
+        &http,
+        &site,
+        Some(&admin),
+        Method::POST,
+        "/api/admin/content-types/headline_note/entries/composite",
+        None,
+        Some(json!({
+            "expected_schema_token": &note_tok,
+            "title": "Bodyless V1",
+            "slug": "bodyless-v1",
+            "values": { "summary": "Hello" }
+        })),
+    )
+    .await;
+    assert_eq!(note_c.status(), StatusCode::CREATED);
+    let note_id = note_c.json::<Value>().await.unwrap()["entry"]["id"]
+        .as_i64()
+        .unwrap();
+    for sess in [&admin, &editor] {
+        assert_eq!(
+            api(
+                &http,
+                &site,
+                Some(sess),
+                Method::PUT,
+                &format!("/api/admin/content-types/headline_note/entries/{note_id}/autosave"),
+                None,
+                Some(json!({
+                    "source_surface": "editor",
+                    "base_version": 1,
+                    "client_seq": 1,
+                    "title": "Bodyless Autosave"
+                }))
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let got: Value = api(
+            &http,
+            &site,
+            Some(sess),
+            Method::GET,
+            &format!("/api/admin/content-types/headline_note/entries/{note_id}/autosave"),
+            None,
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(got["autosave"]["has_hidden_admin_fields"], false, "{got}");
+    }
 }
