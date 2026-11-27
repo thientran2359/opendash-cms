@@ -2,14 +2,16 @@
 
 ## Overview
 
-Pure-Rust domain crate (`Cargo.toml` dependencies: `serde`, `serde_json`, `url` only; zero SQL, HTTP, filesystem I/O, or Wasm runtime code). Defines canonical identifiers, ownership-aware registry catalogs, lifecycle hook/filter envelopes, unified field schemas (`field_schema.rs`), content-type schemas, the 4-tier Builder AST (`Section -> Row -> Column -> Element`) and its `<!-- od:... -->` comment-block codec, declarative block schemas, RichText HTML sanitization, SVG icons, theme v3 manifests, plugin v1–v3 manifests, typed admin extensions, contact forms, CMS UI language catalog, and backup/restore manifest contracts across the 16 modules exported by [`src/lib.rs`](src/lib.rs).
+Pure-Rust domain crate (`Cargo.toml` dependencies: `serde`, `serde_json`, `url` only; zero SQL, HTTP, filesystem I/O, or Wasm runtime code). Defines canonical identifiers, ownership-aware registry catalogs, lifecycle hook/filter envelopes, unified field schemas (`field_schema.rs`), content-type schemas, the 4-tier Builder AST (`Section -> Row -> Column -> Element`) and its `<!-- od:... -->` comment-block codec, declarative block schemas, RichText HTML sanitization, SVG icons, theme v3 manifests, plugin v1–v3 manifests, typed admin extensions, contact forms, CMS UI language catalog, manual redirect/404 normalization & CSV codec (`redirects/`), and backup/restore manifest contracts across the 17 modules exported by [`src/lib.rs`](src/lib.rs).
 
 See [Core Foundation](../../../docs/contracts/CORE_FOUNDATION.md) and [CMS Architecture](../../../docs/architecture/CMS_ARCHITECTURE.md) for cross-crate boundaries.
 
 ## Interface
 
 - **Identifiers & Namespaces** ([`src/id.rs`](src/id.rs)):
-  - `[id.rs:valid_snake_key]`, `[id.rs:valid_snake_key_with_limit]`, `[id.rs:valid_kebab_segment_with_limit]`, `[id.rs:valid_bcp47_tag]`, `[id.rs:valid_lowercase_locale_code]`, `[id.rs:valid_namespaced_block_id]`, `[id.rs:valid_namespaced_snake_key]`, `[id.rs:validate_package_id]`, `[id.rs:valid_package_id]`, `[id.rs:validate_semver]`, `[id.rs:valid_layout_slice_panel_id]`, and `[id.rs:ScopedResourceId]` (`core:<key>`, `user:<key>`, `theme:<pkg>:<key>`, `plugin:<pkg>:<key>`).
+  - `[id.rs:RESERVED_SYSTEM_ROOTS]`, `[id.rs:is_reserved_system_root]`, `[id.rs:valid_snake_key]`, `[id.rs:valid_snake_key_with_limit]`, `[id.rs:valid_kebab_segment_with_limit]`, `[id.rs:valid_bcp47_tag]`, `[id.rs:valid_lowercase_locale_code]`, `[id.rs:valid_namespaced_block_id]`, `[id.rs:valid_namespaced_snake_key]`, `[id.rs:validate_package_id]`, `[id.rs:valid_package_id]`, `[id.rs:validate_semver]`, `[id.rs:valid_layout_slice_panel_id]`, and `[id.rs:ScopedResourceId]` (`core:<key>`, `user:<key>`, `theme:<pkg>:<key>`, `plugin:<pkg>:<key>`).
+- **Manual Redirects, Legacy %XX Path & CSV Codec** ([`src/redirects/`](src/redirects/mod.rs)):
+  - `[redirects/mod.rs:RedirectValidationError]`, `[redirects/mod.rs:CsvRowError]`, `[redirects/mod.rs:RedirectStatusCode]`, `[redirects/mod.rs:ConflictPolicy]`, `[redirects/mod.rs:CsvImportRequest]`, `[redirects/mod.rs:CsvImportResponse]`, `[redirects/path.rs:decode_safe_legacy_request_path]`, `[redirects/path.rs:normalize_redirect_source_path]`, `[redirects/path.rs:normalize_redirect_target_url]`, `[redirects/path.rs:build_redirect_location]`, `[redirects/csv.rs:parse_redirects_csv]`, and `[redirects/csv.rs:format_redirects_csv]`.
 - **Ownership Registry** ([`src/registry.rs`](src/registry.rs)):
   - `[registry.rs:ResourceOwner]`, `[registry.rs:ProviderStatus]`, `[registry.rs:DeclarationState]`, `[registry.rs:OwnedDescriptor]`, `[registry.rs:RegistryCatalog]`, and `[registry.rs:RegistryError]`.
 - **Hooks, Filters & Diagnostics** ([`src/hooks.rs`](src/hooks.rs)):

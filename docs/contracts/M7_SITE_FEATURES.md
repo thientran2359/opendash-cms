@@ -1,8 +1,8 @@
 # M7 Site Features — G2 selected contract
 
 > [!NOTE]
-> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0025`–`0031`; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `NOT_STARTED / NOT_RUN` bên dưới là snapshot lịch sử lúc chốt G2.
-> **Điểm cập nhật đối chiếu codebase:** Thẩm quyền phân giải URL (`D03`) đã chuyển sang `storage::permalinks` (`0040`–`0041`, [`CONTENT_FOUNDATION_2026_11.md`](CONTENT_FOUNDATION_2026_11.md)); lưu SEO/route gộp vào `CompositeEntrySaveInput` (`0034`); trong `0028_contact_forms.sql`, tên bảng/cột thực tế là `contact_site_state`, `contact_forms(slug, status)`, `contact_submissions(created_at)`, `contact_submission_dedup`, `contact_rate_buckets(expires_at)`.
+> **Trạng thái hiện hành (2026-11-27):** **Implemented** (migrations `0025`–`0031`; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `NOT_STARTED / NOT_RUN` bên dưới là snapshot lịch sử lúc chốt G2.
+> **Điểm cập nhật đối chiếu codebase:** Thẩm quyền phân giải URL (`D03`) đã chuyển sang `storage::permalinks` (`0040`–`0041`, [`CONTENT_FOUNDATION_2026_11.md`](CONTENT_FOUNDATION_2026_11.md)), bổ sung thêm Chuyển hướng thủ công 301/302 & 404 Log (`0057_manual_redirects_and_404_log.sql`, `routes::redirects`, `storage::redirects`, [`manual-redirects-and-404-log.md`](../designs/manual-redirects-and-404-log.md)); lưu SEO/route gộp vào `CompositeEntrySaveInput` (`0034`); trong `0028_contact_forms.sql`, tên bảng/cột thực tế là `contact_site_state`, `contact_forms(slug, status)`, `contact_submissions(created_at)`, `contact_submission_dedup`, `contact_rate_buckets(expires_at)`.
 
 **Owner:** Atlas · **Date:** 2026-11-14 · **G2:** AGREED on merge with [ADR-0014](../decisions/ADR-0014-m7-site-features.md). **Implementation:** NOT_STARTED. **Verification:** NOT_RUN.
 Baseline `main@4b60388683a01df8d6332c88449b4fa6821ef5fc`; `G1` (`2026-11-14-m7-site-features-g1.md`, Git history), [PRD](../product/PRODUCT_REQUIREMENTS.md), `G3` (`2026-11-14-m7-site-features-g3.md`, Git history). New interfaces below are specifications, not existing APIs.

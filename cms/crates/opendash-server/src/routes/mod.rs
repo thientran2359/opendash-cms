@@ -16,6 +16,7 @@ pub mod patterns;
 pub mod plugin;
 pub mod public;
 pub mod public_content;
+pub mod redirects;
 pub mod seo;
 pub mod settings;
 pub mod sitemap;

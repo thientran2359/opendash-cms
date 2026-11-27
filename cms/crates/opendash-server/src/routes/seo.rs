@@ -7,7 +7,13 @@ use axum::{
     http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use opendash_core::content::valid_content_type_key;
+use opendash_core::{
+    content::valid_content_type_key,
+    redirects::{
+        MAX_NOT_FOUND_PATH_BYTES, MAX_REDIRECT_SOURCE_PATH_BYTES, build_redirect_location,
+        decode_safe_legacy_request_path,
+    },
+};
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
@@ -22,6 +28,7 @@ use crate::{
         CanonicalUrlBuilder, QueryScope, parse_query, validate_public_request_path,
         validate_single_query,
     },
+    redirects::RedirectTelemetryBuffer,
     routes::{
         public_content::{
             PublicRenderServices, extract_origin_host, redirect_canonical_taxonomy,
@@ -34,6 +41,7 @@ use crate::{
     storage::{
         permalinks::{self, PublicRouteTarget},
         public_content,
+        redirects::find_active_manual_redirect,
         seo::{self, EntryRouteSnapshot, ReadingPageState},
     },
 };
@@ -105,6 +113,7 @@ pub async fn public_fallback(
     State(hooks): State<Arc<HookDispatcher>>,
     State(render_cache): State<Arc<ExtensionRenderCache>>,
     themes_root: Option<Extension<ThemeStoreRoot>>,
+    telemetry: Option<Extension<Arc<RedirectTelemetryBuffer>>>,
     headers: HeaderMap,
     method: Method,
     OriginalUri(uri): OriginalUri,
@@ -122,7 +131,8 @@ pub async fn public_fallback(
         return Err(ApiError::bad_request("Đường dẫn công khai không hợp lệ."));
     }
     let first_seg = path[1..].split('/').next().unwrap_or("");
-    if !first_seg.is_empty() && crate::seo::is_reserved_system_root(first_seg) {
+    if !first_seg.is_empty() && crate::seo::is_reserved_system_root(&first_seg.to_ascii_lowercase())
+    {
         return missing_public_page(&db, themes_root, None, Some(&services)).await;
     }
     let had_trailing_slash = path.len() > 1 && path.ends_with('/');
@@ -131,20 +141,104 @@ pub async fn public_fallback(
     } else {
         path
     };
-    validate_public_request_path(lookup_path).map_err(ApiError::bad_request)?;
-    let resolved = permalinks::resolve_public_path(&db, lookup_path).await?;
-    let Some(resolved) = resolved else {
+    let raw = uri.query();
+    let referer = headers.get(header::REFERER).and_then(|v| v.to_str().ok());
+    let user_agent = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok());
+
+    if lookup_path.contains('%') {
+        let decoded_path = decode_safe_legacy_request_path(lookup_path)
+            .map_err(|_| ApiError::bad_request("Đường dẫn công khai không hợp lệ."))?;
+        let decoded_first_seg = decoded_path[1..].split('/').next().unwrap_or("");
+        if !decoded_first_seg.is_empty()
+            && crate::seo::is_reserved_system_root(&decoded_first_seg.to_ascii_lowercase())
+        {
+            return missing_public_page(&db, themes_root, None, Some(&services)).await;
+        }
+        if decoded_path != "/" && decoded_path.len() <= MAX_REDIRECT_SOURCE_PATH_BYTES {
+            if let Some(hit) = find_active_manual_redirect(&db, &decoded_path)
+                .await
+                .map_err(|err| {
+                    eprintln!("manual redirect lookup failed: {err:?}");
+                    ApiError::internal("Không truy cập được dữ liệu.")
+                })?
+            {
+                if method == Method::GET
+                    && let Some(Extension(buf)) = &telemetry
+                {
+                    buf.record_redirect_hit(hit.id);
+                }
+                let location = build_redirect_location(&hit.target_url, raw);
+                return Ok(manual_public_redirect(hit.status_code, location));
+            }
+        }
         let inferred_locale =
-            crate::storage::settings::enabled_secondary_locale_for_segment(&db, first_seg).await?;
-        return missing_public_page(
+            crate::storage::settings::enabled_secondary_locale_for_segment(&db, decoded_first_seg)
+                .await?;
+        let response = missing_public_page(
             &db,
             themes_root,
             inferred_locale.as_deref(),
             Some(&services),
         )
-        .await;
+        .await?;
+        if method == Method::GET
+            && decoded_path != "/"
+            && decoded_path.len() <= MAX_NOT_FOUND_PATH_BYTES
+            && let Some(Extension(buf)) = &telemetry
+        {
+            buf.record_404(&decoded_path, referer, user_agent);
+        }
+        return Ok(response);
+    }
+
+    validate_public_request_path(lookup_path).map_err(ApiError::bad_request)?;
+    let resolved = permalinks::resolve_public_path(&db, lookup_path).await?;
+    if resolved.as_ref().is_none_or(|r| r.redirect)
+        && lookup_path != "/"
+        && lookup_path.len() <= MAX_REDIRECT_SOURCE_PATH_BYTES
+    {
+        if let Some(hit) = find_active_manual_redirect(&db, lookup_path)
+            .await
+            .map_err(|err| {
+                eprintln!("manual redirect lookup failed: {err:?}");
+                ApiError::internal("Không truy cập được dữ liệu.")
+            })?
+        {
+            if method == Method::GET
+                && let Some(Extension(buf)) = &telemetry
+            {
+                buf.record_redirect_hit(hit.id);
+            }
+            let location = build_redirect_location(&hit.target_url, raw);
+            return Ok(manual_public_redirect(hit.status_code, location));
+        }
+    }
+
+    let Some(resolved) = resolved else {
+        let inferred_locale =
+            crate::storage::settings::enabled_secondary_locale_for_segment(&db, first_seg).await?;
+        let response = missing_public_page(
+            &db,
+            themes_root,
+            inferred_locale.as_deref(),
+            Some(&services),
+        )
+        .await?;
+        let is_secondary_root = inferred_locale
+            .as_deref()
+            .is_some_and(|loc| lookup_path == format!("/{loc}"));
+        if method == Method::GET
+            && !is_secondary_root
+            && lookup_path != "/"
+            && lookup_path.len() <= MAX_NOT_FOUND_PATH_BYTES
+            && let Some(Extension(buf)) = &telemetry
+        {
+            buf.record_404(lookup_path, referer, user_agent);
+        }
+        return Ok(response);
     };
-    let raw = uri.query();
     match resolved.target {
         PublicRouteTarget::Entry {
             id,
@@ -153,7 +247,17 @@ pub async fn public_fallback(
         } => {
             validate_single_query(raw).map_err(ApiError::bad_request)?;
             let Some(record) = public_content::get_published_by_id(&db, id).await? else {
-                return missing_public_page(&db, themes_root, Some(&locale), Some(&services)).await;
+                let response =
+                    missing_public_page(&db, themes_root, Some(&locale), Some(&services)).await?;
+                if !is_home
+                    && method == Method::GET
+                    && lookup_path != "/"
+                    && lookup_path.len() <= MAX_NOT_FOUND_PATH_BYTES
+                    && let Some(Extension(buf)) = &telemetry
+                {
+                    buf.record_404(lookup_path, referer, user_agent);
+                }
+                return Ok(response);
             };
             if resolved.redirect || had_trailing_slash {
                 return Ok(permanent_public_redirect(resolved.canonical_path));
@@ -189,7 +293,16 @@ pub async fn public_fallback(
                     ReadingPageState::Missing
                 )
             {
-                return missing_public_page(&db, themes_root, Some(&locale), Some(&services)).await;
+                let response =
+                    missing_public_page(&db, themes_root, Some(&locale), Some(&services)).await?;
+                if method == Method::GET
+                    && lookup_path != "/"
+                    && lookup_path.len() <= MAX_NOT_FOUND_PATH_BYTES
+                    && let Some(Extension(buf)) = &telemetry
+                {
+                    buf.record_404(lookup_path, referer, user_agent);
+                }
+                return Ok(response);
             }
             public_content::require_public_archive(&db, &type_key).await?;
             if resolved.redirect || had_trailing_slash {
@@ -246,6 +359,23 @@ pub async fn public_fallback(
             .await
         }
     }
+}
+
+fn manual_public_redirect(status_code: u16, location: String) -> Response {
+    let status = if status_code == 302 {
+        StatusCode::FOUND
+    } else {
+        StatusCode::MOVED_PERMANENTLY
+    };
+    (
+        status,
+        [
+            (header::LOCATION, location),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+        ],
+        "",
+    )
+        .into_response()
 }
 
 fn permanent_public_redirect(location: String) -> Response {

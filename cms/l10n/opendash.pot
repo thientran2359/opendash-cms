@@ -18388,3 +18388,562 @@ msgstr ""
 #: server:error:package.zip_directory_entry_must_not_contain_data
 msgid "ZIP directory entry must not contain data."
 msgstr ""
+
+#: admin:app.redirects_error
+msgid "Redirects & 404 operation failed"
+msgstr ""
+
+#: admin:shell.redirects_and_404
+msgid "Redirects & 404"
+msgstr ""
+
+#: admin:shell.404-log
+msgid "Redirects & 404 Log"
+msgstr ""
+
+#: admin:redirects.page.description
+msgid "Manage manual 301/302 redirect rules, bulk CSV migration, and grouped 404 URLs."
+msgstr ""
+
+#: admin:redirects.tabs.aria
+msgid "Redirects and 404 views"
+msgstr ""
+
+#: admin:redirects.tabs.manual
+msgid "Redirects (301/302)"
+msgstr ""
+
+#: admin:redirects.tabs.not_found
+msgid "404 Log"
+msgstr ""
+
+#: admin:redirects.search_placeholder
+msgid "Search source path, target URL, or note…"
+msgstr ""
+
+#: admin:redirects.filter.all_codes
+msgid "All status codes"
+msgstr ""
+
+#: admin:redirects.filter.all_states
+msgid "All states"
+msgstr ""
+
+#: admin:redirects.filter.shadowed_only
+msgid "Shadowed by live page"
+msgstr ""
+
+#: admin:redirects.actions.add
+msgid "+ Add Redirect"
+msgstr ""
+
+#: admin:redirects.actions.import_csv
+msgid "Import CSV"
+msgstr ""
+
+#: admin:redirects.actions.export_csv
+msgid "Export CSV"
+msgstr ""
+
+#: admin:redirects.actions.edit
+msgctxt "redirects"
+msgid "Edit"
+msgstr ""
+
+#: admin:redirects.actions.enable
+msgctxt "redirects"
+msgid "Enable"
+msgstr ""
+
+#: admin:redirects.actions.save
+msgid "Save Redirect"
+msgstr ""
+
+#: admin:redirects.actions.cancel
+msgctxt "redirects"
+msgid "Cancel"
+msgstr ""
+
+#: admin:redirects.actions.rebase_latest
+msgid "Load latest (rebase)"
+msgstr ""
+
+#: admin:redirects.actions.keep_draft
+msgid "Keep draft"
+msgstr ""
+
+#: admin:redirects.shadowed_banner
+msgid "{{count}} active redirect(s) are currently shadowed by live published routes. Live content always takes priority."
+msgstr ""
+
+#: admin:redirects.shadowed_badge
+msgid "Shadowed by live route"
+msgstr ""
+
+#: admin:redirects.exact_match_hint
+msgid "Exact case-sensitive match"
+msgstr ""
+
+#: admin:redirects.empty
+msgid "No manual redirects found."
+msgstr ""
+
+#: admin:redirects.table.source
+msgid "Source Path"
+msgstr ""
+
+#: admin:redirects.table.target
+msgid "Target URL"
+msgstr ""
+
+#: admin:redirects.table.code
+msgid "Code"
+msgstr ""
+
+#: admin:redirects.table.hits
+msgid "Hits"
+msgstr ""
+
+#: admin:redirects.table.last_hit
+msgid "Last Hit"
+msgstr ""
+
+#: admin:redirects.status.active
+msgctxt "redirects"
+msgid "Active"
+msgstr ""
+
+#: admin:redirects.status.inactive
+msgctxt "redirects"
+msgid "Disabled"
+msgstr ""
+
+#: admin:redirects.modal.create_title
+msgid "Add Manual Redirect"
+msgstr ""
+
+#: admin:redirects.modal.edit_title
+msgid "Edit Manual Redirect"
+msgstr ""
+
+#: admin:redirects.modal.from_404_title
+msgid "Create Redirect from 404"
+msgstr ""
+
+#: admin:redirects.form.source_placeholder
+msgid "/old-page.html"
+msgstr ""
+
+#: admin:redirects.form.target_placeholder
+msgid "/new-page or https://example.com/path"
+msgstr ""
+
+#: admin:redirects.form.status_code
+msgid "HTTP Status Code"
+msgstr ""
+
+#: admin:redirects.form.status_301
+msgid "301 — Permanent Redirect"
+msgstr ""
+
+#: admin:redirects.form.status_302
+msgid "302 — Temporary Redirect"
+msgstr ""
+
+#: admin:redirects.form.enabled
+msgid "Rule enabled"
+msgstr ""
+
+#: admin:redirects.form.resolve_404
+msgid "Remove matching 404 log entry after saving"
+msgstr ""
+
+#: admin:redirects.confirm_delete
+msgid "Delete manual redirect '{{source}}'?"
+msgstr ""
+
+#: admin:redirects.notice.created
+msgid "Redirect '{{source}}' created."
+msgstr ""
+
+#: admin:redirects.notice.updated
+msgid "Redirect '{{source}}' updated."
+msgstr ""
+
+#: admin:redirects.notice.deleted
+msgid "Redirect deleted."
+msgstr ""
+
+#: admin:redirects.notice.created_from_404
+msgid "Redirect created from '{{source}}' and removed from 404 log."
+msgstr ""
+
+#: admin:redirects.notice.open_redirects_tab
+msgid "View Redirects"
+msgstr ""
+
+#: admin:redirects.notice.exported
+msgid "CSV exported."
+msgstr ""
+
+#: admin:redirects.conflict_412
+msgid "This rule was modified concurrently in another session. Reload the latest version to continue saving or keep editing your draft."
+msgstr ""
+
+#: admin:redirects.csv.modal_title
+msgid "Import Redirects from CSV"
+msgstr ""
+
+#: admin:redirects.csv.upload_label
+msgid "Choose .csv file (max 2 MiB / 5,000 rows)"
+msgstr ""
+
+#: admin:redirects.csv.paste_label
+msgid "Or paste CSV content"
+msgstr ""
+
+#: admin:redirects.csv.paste_placeholder
+msgid "source_path,target_url,status_code,enabled,note\n/old.html,/new-page,301,true,legacy"
+msgstr ""
+
+#: admin:redirects.csv.conflict_policy
+msgid "Duplicate source path policy"
+msgstr ""
+
+#: admin:redirects.csv.policy_skip
+msgid "Skip existing rules"
+msgstr ""
+
+#: admin:redirects.csv.policy_overwrite
+msgid "Overwrite existing rules (keep hits)"
+msgstr ""
+
+#: admin:redirects.csv.policy_error
+msgid "Fail if duplicate exists"
+msgstr ""
+
+#: admin:redirects.csv.dry_run
+msgid "Dry-Run Preview"
+msgstr ""
+
+#: admin:redirects.csv.running_preview
+msgid "Previewing…"
+msgstr ""
+
+#: admin:redirects.csv.commit
+msgid "Confirm Import"
+msgstr ""
+
+#: admin:redirects.csv.committing
+msgid "Importing…"
+msgstr ""
+
+#: admin:redirects.csv.summary
+msgid "Total: {{total}} · Create: {{create}} · Update: {{update}} · Skip: {{skip}} · Errors: {{errors}}"
+msgstr ""
+
+#: admin:redirects.csv.truncated
+msgid "Showing first {{shown}} of {{total}} rows (errors prioritized)."
+msgstr ""
+
+#: admin:redirects.csv.file_too_large
+msgid "Selected CSV file or payload exceeds the 2 MiB limit."
+msgstr ""
+
+#: admin:redirects.csv.imported_ok
+msgid "CSV import complete: {{create}} created, {{update}} updated, {{skip}} skipped."
+msgstr ""
+
+#: admin:redirects.csv.status_create
+msgid "Create"
+msgstr ""
+
+#: admin:redirects.csv.status_skip_existing
+msgid "Skip"
+msgstr ""
+
+#: admin:redirects.csv.status_error
+msgid "Error"
+msgstr ""
+
+#: admin:redirects.pagination
+msgid "Page {{page}} / {{pages}} ({{total}} items)"
+msgstr ""
+
+#: admin:redirects.prev_page
+msgctxt "redirects"
+msgid "Previous"
+msgstr ""
+
+#: admin:redirects.next_page
+msgctxt "redirects"
+msgid "Next"
+msgstr ""
+
+#: admin:redirects.error.load_failed
+msgid "Could not load manual redirects."
+msgstr ""
+
+#: admin:redirects.error.load_one_failed
+msgid "Could not load the latest redirect rule."
+msgstr ""
+
+#: admin:redirects.error.save_failed
+msgid "Could not save manual redirect."
+msgstr ""
+
+#: admin:redirects.error.delete_failed
+msgid "Could not delete manual redirect."
+msgstr ""
+
+#: admin:redirects.error.import_failed
+msgid "Could not import redirects CSV."
+msgstr ""
+
+#: admin:redirects.error.export_failed
+msgid "Could not export redirects CSV."
+msgstr ""
+
+#: admin:not_found_logs.search_placeholder
+msgid "Search 404 path or referrer…"
+msgstr ""
+
+#: admin:not_found_logs.sort.hits_desc
+msgid "Most hits"
+msgstr ""
+
+#: admin:not_found_logs.sort.recent_desc
+msgid "Most recent"
+msgstr ""
+
+#: admin:not_found_logs.sort.oldest_asc
+msgid "Oldest first"
+msgstr ""
+
+#: admin:not_found_logs.actions.bulk_delete
+msgid "Delete selected ({{count}})"
+msgstr ""
+
+#: admin:not_found_logs.actions.clear_menu
+msgid "Clear log"
+msgstr ""
+
+#: admin:not_found_logs.actions.clear_30d
+msgid "Clear older than 30 days"
+msgstr ""
+
+#: admin:not_found_logs.actions.clear_all
+msgid "Clear all 404 logs"
+msgstr ""
+
+#: admin:not_found_logs.actions.create_redirect
+msgid "Create Redirect"
+msgstr ""
+
+#: admin:not_found_logs.table.path
+msgid "Requested Path"
+msgstr ""
+
+#: admin:not_found_logs.table.last_seen
+msgid "Last Seen"
+msgstr ""
+
+#: admin:not_found_logs.table.first_seen
+msgid "First Seen"
+msgstr ""
+
+#: admin:not_found_logs.table.referrer
+msgid "Referrer / User-Agent"
+msgstr ""
+
+#: admin:not_found_logs.empty
+msgid "No 404 logs recorded yet."
+msgstr ""
+
+#: admin:not_found_logs.confirm_delete
+msgid "Delete 404 log entry '{{path}}'?"
+msgstr ""
+
+#: admin:not_found_logs.confirm_bulk_delete
+msgid "Delete {{count}} selected 404 log entry(s)?"
+msgstr ""
+
+#: admin:not_found_logs.confirm_clear_30d
+msgid "Flush pending telemetry and delete 404 logs older than 30 days?"
+msgstr ""
+
+#: admin:not_found_logs.confirm_clear_all
+msgid "Delete all recorded 404 log entries?"
+msgstr ""
+
+#: admin:not_found_logs.notice.deleted
+msgid "404 log entry deleted."
+msgstr ""
+
+#: admin:not_found_logs.notice.bulk_deleted
+msgid "Deleted {{count}} 404 log entry(s)."
+msgstr ""
+
+#: admin:not_found_logs.notice.cleared
+msgid "Cleared {{count}} 404 log entry(s)."
+msgstr ""
+
+#: admin:not_found_logs.error.load_failed
+msgid "Could not load 404 logs."
+msgstr ""
+
+#: admin:not_found_logs.error.delete_failed
+msgid "Could not delete 404 log entry."
+msgstr ""
+
+#: admin:not_found_logs.error.bulk_delete_failed
+msgid "Could not delete selected 404 logs."
+msgstr ""
+
+#: admin:not_found_logs.error.clear_failed
+msgid "Could not clear 404 logs."
+msgstr ""
+
+#: server:error:redirects.empty_source_path
+msgid "Source path must not be empty."
+msgstr ""
+
+#: server:error:redirects.source_path_too_long
+msgid "Source path exceeds the 512-byte limit."
+msgstr ""
+
+#: server:error:redirects.source_path_invalid_format
+msgid "Source path must start with '/', cannot be '/', and must not contain spaces, '?', '#', '\\', or empty/'.'/'..' segments."
+msgstr ""
+
+#: server:error:redirects.source_path_reserved_root
+msgid "Source path collides with a reserved system prefix."
+msgstr ""
+
+#: server:error:redirects.source_path_unsafe_encoding
+msgid "Source path contains invalid percent-encoding or disallowed ASCII escapes."
+msgstr ""
+
+#: server:error:redirects.empty_target_url
+msgid "Target URL must not be empty."
+msgstr ""
+
+#: server:error:redirects.target_url_too_long
+msgid "Target URL exceeds the 2048-byte limit."
+msgstr ""
+
+#: server:error:redirects.target_url_invalid
+msgid "Target URL must be an internal path starting with '/' or a valid http(s):// URL without credentials."
+msgstr ""
+
+#: server:error:redirects.target_url_unsafe_protocol_relative
+msgid "Target URL must not start with '//' or '/\\'."
+msgstr ""
+
+#: server:error:redirects.self_redirect
+msgid "Source path and target URL must not form a self-redirect."
+msgstr ""
+
+#: server:error:redirects.invalid_status_code
+msgid "Redirect status code must be 301 or 302."
+msgstr ""
+
+#: server:error:redirects.note_too_long
+msgid "Redirect note must not exceed 256 characters."
+msgstr ""
+
+#: server:error:redirects.note_control_chars
+msgid "Redirect note must not contain control characters."
+msgstr ""
+
+#: server:error:redirects.csv_empty
+msgid "CSV content contains no valid data rows."
+msgstr ""
+
+#: server:error:redirects.csv_too_large
+msgid "CSV content exceeds the maximum 2 MiB limit."
+msgstr ""
+
+#: server:error:redirects.csv_too_many_rows
+msgid "CSV content exceeds the maximum 5,000 data rows."
+msgstr ""
+
+#: server:error:redirects.csv_malformed_quote
+msgid "CSV content has malformed quotation marks."
+msgstr ""
+
+#: server:error:redirects.csv_missing_required_headers
+msgid "CSV header must include source_path and target_url columns."
+msgstr ""
+
+#: server:error:redirects.csv_duplicate_mapped_headers
+msgid "CSV header maps multiple columns to the same field."
+msgstr ""
+
+#: server:error:redirects.csv_invalid_status_value
+msgid "CSV status_code value must be 301 or 302."
+msgstr ""
+
+#: server:error:redirects.csv_invalid_enabled_value
+msgid "CSV enabled value must be true/false, 1/0, or yes/no."
+msgstr ""
+
+#: server:error:redirects.csv_invalid_column_count
+msgid "CSV row has an invalid column count."
+msgstr ""
+
+#: server:error:redirects.csv_duplicate_in_batch
+msgid "Duplicate source path within the same CSV batch."
+msgstr ""
+
+#: server:error:redirects.conflict_existing_source
+msgid "Source path already exists in manual redirects."
+msgstr ""
+
+#: server:error:redirects.cycle_or_chain_exceeded
+msgid "Rule creates a redirect loop or a chain longer than 3 hops."
+msgstr ""
+
+#: server:error:redirects.quota_exceeded
+msgid "Maximum quota of 20,000 manual redirects has been reached."
+msgstr ""
+
+#: server:error:redirects.csv_import_validation_failed
+msgid "CSV import failed: one or more rows are invalid or create a redirect loop."
+msgstr ""
+
+#: server:error:redirects.csv_import_conflicts
+msgid "CSV import failed: one or more source paths already exist."
+msgstr ""
+
+#: server:error:redirects.rule_not_found
+msgid "Manual redirect rule not found."
+msgstr ""
+
+#: server:error:redirects.precondition_failed
+msgid "Manual redirect rule was modified concurrently; please reload."
+msgstr ""
+
+#: server:error:redirects.not_found_log_not_found
+msgid "404 log entry not found."
+msgstr ""
+
+#: server:error:redirects.invalid_bulk_delete_ids
+msgid "Bulk delete IDs must contain 1 to 100 unique positive integers."
+msgstr ""
+
+#: server:error:redirects.invalid_clear_days
+msgid "older_than_days must be between 1 and 3650 days."
+msgstr ""
+
+#: server:error:redirects.invalid_query
+msgid "Invalid query parameters for redirects or 404 logs."
+msgstr ""
+
+#: server:error:redirects.invalid_json_or_too_large
+msgid "Invalid or oversized redirect JSON payload."
+msgstr ""
+
+#: server:error:redirects.csv_http_payload_too_large
+msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
+msgstr ""

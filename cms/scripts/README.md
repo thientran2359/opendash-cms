@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/scripts/` contains **36** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, canonical lifecycle benchmarks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
+`cms/scripts/` contains **37** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, API/SQLite smoke checks, canonical lifecycle benchmarks, and Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
 
 ## Interface
 
@@ -41,7 +41,7 @@ All smoke scripts launch isolated server instances (ephemeral loopback ports and
 - [`egm_pattern_s02_migration.py`](egm_pattern_s02_migration.py) — In-memory SQLite migration test applying `0001`–`0043` then `0044` (`apply_through`) to verify Section-to-Pattern upgrade integrity.
 - [`entry_lifecycle_benchmark.py`](entry_lifecycle_benchmark.py) — Canonical S04 baseline-vs-candidate performance benchmark (`--baseline-binary`, `--candidate-binary`, `--artifact-dir`, optional `--sizes`) verifying NFR gates P1–P3 across deterministic 1k/10k/50k fixtures.
 
-### Live Browser E2E Suites (16)
+### Live Browser E2E Suites (17)
 
 Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-specific `--artifact-dir` / `--browser` flags):
 
@@ -58,6 +58,7 @@ Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-sp
 - [`admin_extensions_e2e.py`](admin_extensions_e2e.py) — Plugin provider Admin columns, actions, and term panels E2E.
 - [`menu_picker_e2e.py`](menu_picker_e2e.py) — Admin menu picker E2E and shared launcher/theme helpers (`launch_server`, `stop_server`, `admin_login`, `api_json`, `set_cms_locale`, `theme_zip`).
 - [`admin_navigation_e2e.py`](admin_navigation_e2e.py) — Grouped Admin routes and one-screen-per-destination E2E.
+- [`manual_redirects_404_e2e.py`](manual_redirects_404_e2e.py) — Manual redirects (301/302), CSV dry-run/import/BOM export, aggregated 404 log, 1-click redirect, `401`/`412` draft recovery, RBAC, and `en`/`vi`/mobile Chrome E2E.
 - [`entry_table_e2e.py`](entry_table_e2e.py) — Entry tables, bulk CAS, URL redirect history, and mobile viewport E2E.
 - [`operations_backup_restore_e2e.py`](operations_backup_restore_e2e.py) — Backup → restore → re-auth → activate → re-edit → Save → public E2E.
 - [`windows_users_browser.py`](windows_users_browser.py) — Embedded Admin Users UI test at desktop and 390px viewports.
