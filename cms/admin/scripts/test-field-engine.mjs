@@ -13,11 +13,13 @@ const SRC_FIELDS_DIR = path.resolve(__dirname, '../src/fields');
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opendash-field-engine-'));
 fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ type: 'module' }));
 
-function transpileTsFile(name) {
-  const sourcePath = path.join(SRC_FIELDS_DIR, `${name}.ts`);
+function transpileTsFile(sourcePath, name) {
   const source = fs.readFileSync(sourcePath, 'utf8').replace(
     /(from\s+['"]\.\/[a-zA-Z0-9_]+)\.ts(['"])/g,
     '$1.mjs$2',
+  ).replace(
+    /(from\s+['"]\.\.\/[a-zA-Z0-9_/-]+)\.ts(['"])/g,
+    (m, p1, p2) => `${p1}.mjs${p2}`,
   );
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: {
@@ -28,19 +30,25 @@ function transpileTsFile(name) {
     fileName: sourcePath,
   });
   const outPath = path.join(tmpDir, `${name}.mjs`);
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, outputText, 'utf8');
   return pathToFileURL(outPath).href;
 }
 
-const typesUrl = transpileTsFile('types');
-const iconsUrl = transpileTsFile('icons');
-const helpersUrl = transpileTsFile('helpers');
-const conditionsUrl = transpileTsFile('conditions');
+const SRC_FIELD_GROUPS_DIR = path.resolve(__dirname, '../src/features/field-groups');
+const typesUrl = transpileTsFile(path.join(SRC_FIELDS_DIR, 'types.ts'), 'fields/types');
+const iconsUrl = transpileTsFile(path.join(SRC_FIELDS_DIR, 'icons.ts'), 'fields/icons');
+const helpersUrl = transpileTsFile(path.join(SRC_FIELDS_DIR, 'helpers.ts'), 'fields/helpers');
+const conditionsUrl = transpileTsFile(path.join(SRC_FIELDS_DIR, 'conditions.ts'), 'fields/conditions');
+const locEvalUrl = transpileTsFile(path.join(SRC_FIELD_GROUPS_DIR, 'locationRulesEvaluator.ts'), 'features/field-groups/locationRulesEvaluator');
+const builderHelpersUrl = transpileTsFile(path.join(SRC_FIELD_GROUPS_DIR, 'fieldBuilderHelpers.ts'), 'features/field-groups/fieldBuilderHelpers');
 
 await import(typesUrl);
 const icons = await import(iconsUrl);
 const helpers = await import(helpersUrl);
 const conditions = await import(conditionsUrl);
+const locEval = await import(locEvalUrl);
+const builderHelpers = await import(builderHelpersUrl);
 
 after(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -251,5 +259,68 @@ describe('conditions.ts DNF evaluation parity with Rust', () => {
       conditions.evaluateConditions([[{ field: 'show_b', op: 'eq', value: false }]], childSpecs, childValues, rootSpecs, rootValues),
       true,
     );
+  });
+});
+
+describe('locationRulesEvaluator.ts DNF parity with Rust', () => {
+  it('evaluates Content, Term, OptionsPage, EntryTaxonomy, SpecialPage, EntryId, and UserRole in OR-of-ANDs', () => {
+    const contentRules = [
+      [
+        { param: 'content_type', op: 'eq', value: 'page' },
+        { param: 'page_layout', op: 'eq', value: 'landing' },
+      ],
+      [
+        { param: 'content_type', op: 'eq', value: 'article' },
+        { param: 'entry_taxonomy', op: 'eq', value: 'category:12' },
+        { param: 'user_role', op: 'eq', value: 'admin' },
+      ],
+    ];
+    assert.equal(locEval.evaluateLocationRules(contentRules, {
+      content_type: 'page',
+      page_layout: 'landing',
+      user_role: 'editor',
+    }), true);
+    assert.equal(locEval.evaluateLocationRules(contentRules, {
+      content_type: 'page',
+      page_layout: 'default',
+      user_role: 'admin',
+    }), false);
+    assert.equal(locEval.evaluateLocationRules(contentRules, {
+      content_type: 'article',
+      entry_term_pairs: [['category', 12]],
+      user_role: 'admin',
+    }), true);
+    assert.equal(locEval.evaluateLocationRules(contentRules, {
+      content_type: 'article',
+      entry_term_pairs: [['category', 12]],
+      user_role: 'editor',
+    }), false);
+    assert.equal(locEval.evaluateLocationRules(
+      [[{ param: 'special_page', op: 'eq', value: 'homepage' }, { param: 'entry_id', op: 'neq', value: '99' }]],
+      { content_type: 'page', special_page: 'homepage', entry_id: 5, user_role: 'editor' },
+    ), true);
+    assert.equal(locEval.evaluateLocationRules(
+      [[{ param: 'taxonomy_term', op: 'eq', value: 'all' }]],
+      { taxonomy_term: 'genre', user_role: 'editor' },
+    ), true);
+    assert.equal(locEval.evaluateLocationRules(
+      [[{ param: 'options_page', op: 'eq', value: 'custom:company_info' }]],
+      { options_page: 'custom:company_info', user_role: 'editor' },
+    ), true);
+  });
+
+  it('infers domains, detects admin-only restriction, and serializes options safely', () => {
+    assert.equal(builderHelpers.inferDomainFromLocation([[{ param: 'taxonomy_term', op: 'eq', value: 'category' }]]), 'term');
+    assert.equal(builderHelpers.inferDomainFromLocation([[{ param: 'options_page', op: 'eq', value: 'site_global' }]]), 'options_page');
+    assert.equal(builderHelpers.isLocationRestrictedToAdminOnly([
+      [{ param: 'content_type', op: 'eq', value: 'post' }, { param: 'user_role', op: 'eq', value: 'admin' }],
+    ]), true);
+    assert.equal(builderHelpers.isLocationRestrictedToAdminOnly([
+      [{ param: 'content_type', op: 'eq', value: 'post' }, { param: 'user_role', op: 'eq', value: 'admin' }],
+      [{ param: 'content_type', op: 'eq', value: 'page' }],
+    ]), false);
+    const parsed = builderHelpers.parseSelectOptions('red|Red\nblue|Blue|star');
+    assert.deepEqual(parsed, [{ value: 'red', label: 'Red' }, { value: 'blue', label: 'Blue', icon: 'star' }]);
+    assert.equal(builderHelpers.serializeSelectOptions(parsed), 'red|Red\nblue|Blue|star');
   });
 });

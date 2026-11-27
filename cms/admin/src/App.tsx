@@ -19,6 +19,7 @@ import {
 } from './api/content.ts';
 import { listTaxonomyDefinitions } from './api/taxonomy.ts';
 import { ContentTypeSchemaSettings } from './features/content/ContentTypeSchemaSettings.tsx';
+import { FieldGroupsWorkspace } from './features/field-groups/FieldGroupsWorkspace.tsx';
 import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
@@ -702,10 +703,14 @@ const AppContent: React.FC = () => {
             onDirtyChange={markTermDirty}
           />
         ) : route.view === 'content-structure' && route.sub === 'field-groups' ? (
-          <section className="space-y-2" data-testid="field-groups-slot">
-            <h2 className="text-lg font-semibold text-zinc-950">{__("Field groups")}</h2>
-            <p className="text-sm text-zinc-600">{__("Field group management will be enabled in the next slice.")}</p>
-          </section>
+          <FieldGroupsWorkspace
+            key={`${siteInstanceId}:${user?.id ?? 'none'}`}
+            selectedGroupKey={route.typeKey}
+            csrfToken={csrfToken}
+            onNavigateHash={navigateHash}
+            onApiError={scopedTaxonomyApiError}
+            onDirtyChange={markSchemaDirty}
+          />
         ) : route.view === 'content-structure' && route.sub === 'options-pages' ? (
           <section className="space-y-2" data-testid="options-pages-slot">
             <h2 className="text-lg font-semibold text-zinc-950">{__("Options pages")}</h2>
