@@ -1,6 +1,8 @@
 # Tái cấu trúc Thanh điều hướng Sidebar Admin & Định tuyến IA
 
-* **Status:** Draft
+* **Status:** Approved
+* **Approved By:** Owner
+* **Approval Evidence:** Owner chat approval 2026-11-28 ("duyệt")
 * **Date:** 2026-11-28
 * **Baseline:** `main@b3fba26`
 * **Migrations:** Không có (0 SQL migration; giữ nguyên 100% backend Rust & DB schema)
