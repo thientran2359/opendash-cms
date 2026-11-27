@@ -198,7 +198,7 @@ Không còn câu hỏi mở (toàn bộ phạm vi kỹ thuật, quyền truy c�
 2. **Phân biệt Mục lá (`<a>`) vs Mục cha Accordion (`<button>`):**
    - Hàm dùng chung `isPlainLeftClick(event: React.MouseEvent): boolean` (`!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0`).
    - **Mục cha không có `visibleChildren` (Dashboard, Media library, Contact, Customize appearance, Menus):** render `<a href={item.hash} data-menu-id={item.id} aria-current={isActiveParent ? 'page' : undefined} className={'od-nav-link w-full justify-between no-underline ' + (isActiveParent ? 'od-nav-link-active' : '')}>`; chỉ gọi `e.preventDefault(); navigate(item.hash)` khi `isPlainLeftClick(e)` là `true`.
-   - **Mục cha có `visibleChildren`:** render `<button type="button" data-menu-id={item.id} aria-expanded={isExpanded} aria-controls={\`od-nav-sub-${item.id}\`}>` chỉ toggle `expandedMenus[item.id]`, **không bao giờ gọi `navigate()`**. Container danh sách con (`AdminShell.tsx#L282`) gắn đúng `id={\`od-nav-sub-${item.id}\`}`.
+   - **Mục cha có `visibleChildren`:** render `<button type="button" data-menu-id={item.id} aria-expanded={isExpanded} aria-controls={`od-nav-sub-${item.id}`}>` chỉ toggle `expandedMenus[item.id]`, **không bao giờ gọi `navigate()`**. Container danh sách con ([AdminShell.tsx](../../cms/admin/src/shell/AdminShell.tsx)) gắn đúng `id={`od-nav-sub-${item.id}`}`.
    - **Mục con `<a>`:** áp dụng cùng `isPlainLeftClick(e)` trước khi `e.preventDefault(); navigate(sub.hash)` để hỗ trợ mở tab mới bằng `Cmd/Ctrl + Click`. Lưu ý `navigate()` gọi `onNavigateHash(hash); setMobileOpen(false);` trực tiếp (hành vi đóng mobile drawer ngay khi người dùng chạm link là nhất quán với thiết kế mobile hiện hành).
 3. **Đồng bộ `activeParentId`, `selectedNavHash`, `breadcrumb` & Slots trong `AdminShell.tsx`:**
    - Thêm `contactContent: React.ReactNode` vào `AdminShellProps` và mount `{user?.role === 'admin' && route.view === 'contact' && <div className="od-admin-card min-w-0">{contactContent}</div>}` trong `#admin-main` (đồng thời bỏ nhánh `route.sub === 'contact'` khỏi `settingsContent` trong `App.tsx#L729-L730`).
@@ -216,7 +216,7 @@ Không còn câu hỏi mở (toàn bộ phạm vi kỹ thuật, quyền truy c�
      - `route.view === 'themes'` → `route.sub === 'install' ? '#/appearance/themes/install' : route.sub === 'library' ? '#/appearance/library' : '#/appearance/themes'`
      - `route.view === 'contact'` → `'#/contact'`
      - `route.view === 'studio'` → `route.studioPanel === 'menus' ? '#/studio?panel=menus' : '#/studio'`
-     - `route.view === 'settings'` → `route.sub === 'content-types' ? '#/content-structure/content-types' : \`#/settings/${route.sub}\``
+     - `route.view === 'settings'` → `route.sub === 'content-types' ? '#/content-structure/content-types' : `#/settings/${route.sub}``
      - `route.view === 'taxonomy'` → giữ đủ cả 2 nhánh `route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')` trả về `'#/content-structure/taxonomies'` (không làm mất highlight ở `#/taxonomy/<custom_key>/terms`).
    - `subLabels`: sửa `'install': __("Install")`, **giữ nguyên** `'library': __("Library")` (vì `#/media` có `sub: 'library'` và không có `activeChild`, trong khi `#/appearance/library` đã lấy nhãn `"Template library"` từ `activeChild.label`), và bổ sung `'seo': __("Homepage SEO")`, `'forms': __("Contact")`, `'inbox': __("Contact")`.
 4. **Topbar & Sidebar Footer Profile + CSS Layout (`AuthPanel.tsx`, `AdminShell.tsx`, `styles.css`):**
@@ -272,15 +272,15 @@ Không còn câu hỏi mở (toàn bộ phạm vi kỹ thuật, quyền truy c�
 
 | File | Action | LOC / Cap | Summary |
 | --- | --- | --- | --- |
-| `cms/admin/src/shell/router.ts` | Modify | `<= 450 / 600` | Thêm `view: 'contact'`, `themes` `sub: 'install'`, canonical `#/content-structure/{content-types,taxonomies}`, giữ toàn bộ alias cũ và RBAC guard. |
+| `cms/admin/src/shell/router.ts` | Modify | `<= 470 / 600` | Thêm `view: 'contact'`, `themes` `sub: 'install'`, canonical `#/content-structure/{content-types,taxonomies}`, `isPlainLeftClick`, giữ toàn bộ alias cũ và RBAC guard. |
 | `cms/admin/src/shell/AdminShellMenu.tsx` | Modify | `<= 260 / 600` | Sắp xếp lại cây menu 3 nhóm (`Themes` trước `Customize appearance`, thêm `Menus`, chuyển `Template library` sang `Patterns`, tách `Install theme`, sắp xếp `Tools`/`Settings`, thêm icon `menus` & `patterns`). |
 | `cms/admin/scripts/test-admin-navigation.mjs` | Create | `<= 300 / 600` | Unit tests (`node:test`) cho `parseAdminRoute`, `isRouteAllowed`, `isViewAllowed`, `buildMenuTree`, alias cũ và cấu trúc menu theo vai trò `admin`/`editor`. |
 | `cms/admin/package.json` | Modify | `<= 35` | Thêm script `"test:nav": "node ./scripts/test-admin-navigation.mjs"`. |
-| `cms/admin/src/shell/AdminShell.tsx` | Modify | `<= 520 / 600` | Pure accordion `expandedMenus` (guard leaf), `isPlainLeftClick`, leaf `<a>`, `id` cho submenu, `activeParentId`/`selectedNavHash`/`breadcrumb` mới, `contactContent` + `route.sub === 'install'`, `.od-sidebar-bottom` profile link (guard `user`), giữ `subLabels.library` và sửa `subLabels.install`. |
-| `cms/admin/src/shell/AuthPanel.tsx` | Modify | `<= 140 / 600` | Biến `#user-info` thành liên kết `#/users/profile` hỗ trợ modifier-click. |
+| `cms/admin/src/shell/AdminShell.tsx` | Modify | `<= 540 / 600` | Pure accordion `expandedMenus` (guard leaf), `isPlainLeftClick`, leaf `<a>`, `id` cho submenu, `activeParentId`/`selectedNavHash`/`breadcrumb` mới, `contactContent` + `route.sub === 'install'`, `.od-sidebar-bottom` profile link (guard `user`), giữ `subLabels.library` và sửa `subLabels.install`. |
+| `cms/admin/src/shell/AuthPanel.tsx` | Modify | `<= 150 / 600` | Biến `#user-info` thành liên kết `#/users/profile` hỗ trợ modifier-click. |
 | `cms/admin/src/styles.css` | Modify | `<= 500` | Thêm `min-height: 0` cho `.od-nav`, `text-decoration: none` + `:focus-visible` cho `.od-nav a`, `.od-sidebar-profile`, `#user-info`. |
 | `cms/admin/src/App.tsx` | Modify | `<= 835 / 879` | Nối `contactContent`, truyền `mode` cho `ThemesPanel`, plural `Categories`/`Tags` ở `cptTaxonomies`, `#/content-structure/content-types` tại `L303` & `L677`. |
-| `cms/admin/src/features/themes/ThemesPanel.tsx` | Modify | `<= 510 / 600` | Hỗ trợ `mode: 'list' \| 'install'`, reset `notice`/`error` khi đổi mode và `<a href>` chuyển qua lại giữa `Installed themes` và `Install theme`. |
+| `cms/admin/src/features/themes/ThemesPanel.tsx` | Modify | `<= 520 / 600` | Hỗ trợ `mode: 'list' \| 'install'`, reset `notice`/`error` khi đổi mode và `<a href>` chuyển qua lại giữa `Installed themes` và `Install theme`. |
 | `cms/admin/src/features/contact/ContactPanel.tsx` | Modify | `<= 495 / 600` | Hỗ trợ `initialTab` (`forms` \| `inbox`) đồng bộ theo `useEffect` và `<a href="#/settings/smtp">` sang SMTP. |
 | `cms/admin/src/features/contact/SmtpSettingsPanel.tsx` | Modify | `<= 235 / 600` | Bổ sung liên kết `<a href="#/contact">` quay lại `Contact forms & inbox`. |
 | `cms/admin/src/features/seo/SeoPanel.tsx` | Modify | `<= 205 / 600` | Bổ sung liên kết chéo `<a href="#/tools/redirects">` (`Redirects & 404`). |

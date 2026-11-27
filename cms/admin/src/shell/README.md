@@ -36,6 +36,7 @@ Application frame, authentication surface, RBAC enforcement, and hash URL router
 - TypeScript check & Vite build (`cms/admin/package.json`):
   ```powershell
   npm --prefix cms/admin run typecheck
+  npm --prefix cms/admin run test:nav
   npm --prefix cms/admin run build
   ```
 - Standards, i18n, and navigation E2E checks (`cms/scripts/`):

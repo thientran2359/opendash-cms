@@ -458,3 +458,13 @@ export function isViewAllowed(view: AdminView, role: Role): boolean {
   if (role === 'admin') return true;
   return !['contact', 'themes', 'plugins', 'users', 'tools', 'settings', 'patterns', 'studio'].includes(view);
 }
+
+export function isPlainLeftClick(event: {
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  button: number;
+}): boolean {
+  return !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0;
+}

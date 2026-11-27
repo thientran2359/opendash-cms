@@ -3,6 +3,7 @@ import { useI18n } from '../i18n/index.tsx';
 import { AdminButton } from '../components/AdminPrimitives.tsx';
 import { TextInput } from '../components/FormPrimitives.tsx';
 import { AuthUser } from '../types.ts';
+import { isPlainLeftClick } from './router.ts';
 
 interface AuthPanelProps {
   user: AuthUser | null;
@@ -104,10 +105,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             aria-current={isProfileActive ? 'page' : undefined}
             title={__("My profile")}
             onClick={event => {
-              if (
-                onNavigateProfile &&
-                !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0
-              ) {
+              if (onNavigateProfile && isPlainLeftClick(event)) {
                 event.preventDefault();
                 onNavigateProfile();
               }

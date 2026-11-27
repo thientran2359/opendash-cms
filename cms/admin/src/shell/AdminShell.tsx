@@ -4,6 +4,7 @@ import type { AuthUser } from '../types.ts';
 import type { OwnedContentType } from '../features/content/types.ts';
 import { AuthPanel } from './AuthPanel.tsx';
 import {
+  isPlainLeftClick,
   isRouteAllowed,
   isViewAllowed,
   parseAdminRoute,
@@ -63,10 +64,6 @@ interface AdminShellProps {
   themesContent: React.ReactNode;
   libraryContent: React.ReactNode;
   studioContent?: React.ReactNode;
-}
-
-function isPlainLeftClick(event: React.MouseEvent): boolean {
-  return !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0;
 }
 
 export const AdminShell: React.FC<AdminShellProps> = ({
