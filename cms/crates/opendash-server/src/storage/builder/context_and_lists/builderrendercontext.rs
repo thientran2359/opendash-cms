@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Clone)]
 pub struct BuilderRenderContext {
     pub declared_blocks: BTreeMap<String, crate::storage::page::RegisteredBlockDef>,
     pub site_options: BTreeMap<String, serde_json::Value>,
@@ -9,6 +10,7 @@ pub struct BuilderRenderContext {
     pub hydration_entries: BTreeMap<i64, crate::storage::fields::HydratedEntryRefRow>,
     pub hydration_terms: BTreeMap<i64, crate::storage::fields::HydratedTermRefRow>,
     pub timezone: String,
+    pub locale_search_url: String,
 }
 
 impl Default for BuilderRenderContext {
@@ -22,6 +24,7 @@ impl Default for BuilderRenderContext {
             hydration_entries: BTreeMap::new(),
             hydration_terms: BTreeMap::new(),
             timezone: "UTC".to_owned(),
+            locale_search_url: "/".to_owned(),
         }
     }
 }
@@ -265,12 +268,15 @@ pub(crate) async fn read_render_context_for_locale_tx(
     let timezone = crate::storage::settings::get_general_in_conn(&mut **tx)
         .await?
         .timezone;
+    let locale_search_url =
+        crate::storage::seo::resolve_locale_search_url_in_conn(&mut **tx, requested_locale).await?;
     Ok(BuilderRenderContext {
         declared_blocks,
         site_options,
         options,
         menus,
         timezone,
+        locale_search_url,
         ..Default::default()
     })
 }
@@ -279,40 +285,6 @@ pub(crate) async fn read_render_context_tx(
     tx: &mut Transaction<'_, Sqlite>,
 ) -> ApiResult<BuilderRenderContext> {
     read_render_context_for_locale_tx(tx, None, false, None).await
-}
-
-fn collect_doc_hydration_rec(
-    nodes: &[opendash_core::builder::BlockNode],
-    declared_blocks: &BTreeMap<String, crate::storage::page::RegisteredBlockDef>,
-    media_ids: &mut BTreeSet<String>,
-    entry_ids: &mut BTreeSet<i64>,
-    term_ids: &mut BTreeSet<i64>,
-) {
-    for node in nodes {
-        let Some(def) = declared_blocks.get(&node.block_id) else {
-            continue;
-        };
-        if def.status != ProviderStatus::Active
-            || def.declaration_state != DeclarationState::Declared
-        {
-            continue;
-        }
-        crate::field_hydrate::collect_hydration_ids(
-            &def.schema.schema.fields,
-            &node.props,
-            crate::field_hydrate::HydrationVisibility::All,
-            media_ids,
-            entry_ids,
-            term_ids,
-        );
-        collect_doc_hydration_rec(
-            &node.children,
-            declared_blocks,
-            media_ids,
-            entry_ids,
-            term_ids,
-        );
-    }
 }
 
 pub(crate) async fn hydrate_render_context_for_documents_in_conn(
@@ -325,8 +297,8 @@ pub(crate) async fn hydrate_render_context_for_documents_in_conn(
     let mut entry_ids = BTreeSet::new();
     let mut term_ids = BTreeSet::new();
     for doc in docs {
-        collect_doc_hydration_rec(
-            &doc.blocks,
+        collect_builder_document_media_ids(
+            doc,
             &state.declared_blocks,
             &mut media_ids,
             &mut entry_ids,

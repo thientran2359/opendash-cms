@@ -15,6 +15,7 @@ pub(in crate::storage) struct PreviewRenderContext<'a> {
     pub(in crate::storage) cache: &'a page::BlockTemplateCache,
     pub(in crate::storage) url_policy: &'a template_sec::ThemeUrlPolicy,
     pub(in crate::storage) fmt_cfg: &'a template_sec::RenderFormattingConfig,
+    pub(in crate::storage) search: Option<page::BuilderSearchData<'a>>,
 }
 
 pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> EntryView {
@@ -35,11 +36,14 @@ pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> Ent
         fields: BTreeMap::new(),
         field_list: Vec::new(),
         cover_url: None,
+        cover_media: None,
         terms,
         all_terms: Vec::new(),
         primary_category: None,
         ext: BTreeMap::new(),
         theme_ext: BTreeMap::new(),
+        snippet_segments: Vec::new(),
+        type_label: String::new(),
     }
 }
 
@@ -102,6 +106,10 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
     let empty_entries = Vec::new();
     let pagination = PaginationView::empty();
+    let search_url =
+        crate::storage::seo::resolve_locale_search_url_in_conn(&mut **tx, Some(&record.locale))
+            .await?;
+    let search_view = content_render::SearchView::inactive(&search_url);
     let theme_context = content_render::build_public_theme_context(PublicThemeContextInput {
         site,
         site_options,
@@ -121,6 +129,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
         taxonomy: None,
         content_type: Some(&ct_value),
         entry: Some(&view),
+        search: &search_view,
     })?;
     Ok(BuiltEntryPreviewContext {
         view,
@@ -225,7 +234,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
     };
     let mut body_diagnostics = Vec::new();
     let mut route = None;
-    let (theme_context, body) = if let Some((record, effective_schema)) = &entry {
+    let (mut theme_context, body) = if let Some((record, effective_schema)) = &entry {
         route = Some((record.content_type_key.as_str(), record.slug.as_str()));
         let built = build_entry_preview_context_in_tx(
             &mut tx,
@@ -286,9 +295,15 @@ pub async fn preview_typed_override_with_cache_and_locale(
                 &fmt_cfg,
                 &effective_locale,
             )?;
-            crate::document::normalize_public_document(&html)
-                .map(|doc| doc.body_fragment)
-                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+            crate::document::normalize_document_with_policy(
+                &html,
+                crate::document::DocumentNormalizeOptions {
+                    allow_trusted_theme_markup: false,
+                    allow_admin_media_preview: true,
+                },
+            )
+            .map(|doc| doc.body_fragment)
+            .map_err(|_| ApiError::bad_request("Invalid preview body."))
         })?;
         (built.theme_context, body)
     } else {
@@ -299,6 +314,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
             &site_options,
             &options,
             &menus,
+            &effective_locale,
         )?;
         (
             theme_context,
@@ -308,6 +324,29 @@ pub async fn preview_typed_override_with_cache_and_locale(
     if body.len() > template_sec::MAX_RENDERED_HTML_BYTES {
         return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
     }
+    let preview_locale_ctx = crate::storage::seo::build_theme_locale_context_in_conn(
+        &mut tx,
+        Some(&effective_locale),
+        crate::storage::seo::ThemeLocaleTarget::None,
+    )
+    .await?;
+    content_render::sync_preview_locale_and_search(&mut theme_context, &preview_locale_ctx);
+    let preview_search_view = (target.kind == TemplateCandidateKind::Search).then(|| {
+        content_render::SearchView::preview_sample(&state.locale_search_url, &effective_locale)
+    });
+    let preview_search_entries = if target.kind == TemplateCandidateKind::Search {
+        content_render::SearchView::preview_sample_entries(&effective_locale)
+    } else {
+        Vec::new()
+    };
+    let preview_search_pagination = PaginationView::empty();
+    let preview_search = preview_search_view
+        .as_ref()
+        .map(|view| page::BuilderSearchData {
+            view,
+            entries: &preview_search_entries,
+            pagination: &preview_search_pagination,
+        });
     collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[document], true).await?;
     let ctx = PreviewRenderContext {
         state: &state,
@@ -318,6 +357,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
         cache,
         url_policy: &url_policy,
         fmt_cfg: &fmt_cfg,
+        search: preview_search,
     };
     let root_scope = if target.kind == TemplateCandidateKind::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
@@ -352,6 +392,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
         )?;
     }
     rendered.html = content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
+    rendered.html = content_render::finalize_document_images(rendered.html, &budget.image_nonces)?;
     rendered.html =
         content_render::finalize_document_richtext(rendered.html, &budget.richtext_nonces)?;
     tx.rollback().await?;
@@ -490,6 +531,7 @@ pub(in crate::storage) async fn render_preview_named_part_in_tx(
             cache,
             url_policy: &url_policy,
             fmt_cfg: &fmt_cfg,
+            search: None,
         };
         let scope = part_scope_prefix(key, budget.expansions);
         let rendered = render_preview_builder(
@@ -519,6 +561,7 @@ pub(in crate::storage) async fn render_preview_named_part_in_tx(
             cache,
             url_policy: &url_policy,
             fmt_cfg: &fmt_cfg,
+            search: None,
         };
         return render_preview_part(tx, key, &ctx, budget).await;
     }

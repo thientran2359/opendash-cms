@@ -391,7 +391,7 @@ async fn studio_unified_ast_http_e2e_containers_accordion_card_and_pre_v1_reject
                 .is_some_and(|id| id.starts_with("core/"))
                 && i["status"] == "active")
             .count(),
-        21
+        23
     );
     assert!(!items.iter().any(|i| i["block_id"] == "core/showcase"));
 

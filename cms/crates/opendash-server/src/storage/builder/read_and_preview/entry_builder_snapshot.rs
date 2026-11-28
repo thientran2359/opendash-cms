@@ -351,6 +351,10 @@ pub async fn preview_entry_builder_with_cache(
             rendered.html,
             &render_budget.icon_nonces,
         )?;
+        rendered.html = crate::content_render::finalize_document_images(
+            rendered.html,
+            &render_budget.image_nonces,
+        )?;
         rendered.html = crate::content_render::finalize_document_richtext(
             rendered.html,
             &render_budget.richtext_nonces,

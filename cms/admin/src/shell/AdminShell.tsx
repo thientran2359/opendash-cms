@@ -163,6 +163,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     options: __("Theme options"), health: __("System health"),
     'media-reconcile': __("Media reconciliation"), backup: __("Backup & restore"),
     redirects: __("Redirects & 404"), '404-log': __("Redirects & 404 Log"),
+    search: __("Search index"),
     install: __("Settings"), profile: __("My profile"),
   };
   const pageTitle = routeForbidden

@@ -182,6 +182,7 @@ export function buildMenuTree(
         { label: __("Backup & restore"), hash: '#/tools/backup' },
         { label: __("Media reconciliation"), hash: '#/tools/media-reconcile' },
         { label: __("Redirects & 404"), hash: '#/tools/redirects' },
+        { label: __("Search index"), hash: '#/tools/search' },
         { label: __("System health"), hash: '#/tools/health' },
       ],
     },

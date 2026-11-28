@@ -34,6 +34,7 @@ pub struct RenderedLayout {
 pub struct BuilderTemplateContext<'a> {
     pub content_html: Option<&'a str>,
     pub parts: &'a std::collections::BTreeMap<String, String>,
+    pub search: Option<BuilderSearchData<'a>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

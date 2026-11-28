@@ -38,44 +38,6 @@ pub fn validate_safe_css(css: &str) -> Result<(), &'static str> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn finalize_theme_attr_with_mode(
-    tag_name: &str,
-    attr_name: &mut String,
-    quote: &mut Option<u8>,
-    attr_has_static_bytes: &mut bool,
-    attr_expr_count: &mut u8,
-    seen_attrs: &mut BTreeSet<String>,
-    link_rel_stylesheet: &mut bool,
-    link_has_valid_href: &mut bool,
-    meta_ok: &mut bool,
-    attr_static_buf: &mut String,
-    allow_trusted_theme_markup: bool,
-    forbid_block_system_attrs: bool,
-) -> Result<(), &'static str> {
-    if forbid_block_system_attrs
-        && matches!(
-            attr_name.as_str(),
-            "data-node-id" | "data-od-node-scope" | "data-od-editable" | "data-od-kind"
-        )
-    {
-        return Err("Template block không được tự khai báo thuộc tính hệ thống của Studio.");
-    }
-    finalize_theme_attr(
-        tag_name,
-        attr_name,
-        quote,
-        attr_has_static_bytes,
-        attr_expr_count,
-        seen_attrs,
-        link_rel_stylesheet,
-        link_has_valid_href,
-        meta_ok,
-        attr_static_buf,
-        allow_trusted_theme_markup,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
 pub(super) fn finalize_theme_attr(
     tag_name: &str,
     attr_name: &mut String,
@@ -86,8 +48,9 @@ pub(super) fn finalize_theme_attr(
     link_rel_stylesheet: &mut bool,
     link_has_valid_href: &mut bool,
     meta_ok: &mut bool,
+    form_has_action: &mut bool,
     attr_static_buf: &mut String,
-    allow_trusted_theme_markup: bool,
+    opts: HtmlStepOptions,
 ) -> Result<(), &'static str> {
     if attr_name.is_empty() {
         return Ok(());
@@ -95,10 +58,23 @@ pub(super) fn finalize_theme_attr(
     if !seen_attrs.insert(attr_name.clone()) {
         return Err("Thẻ HTML chứa thuộc tính bị trùng lặp.");
     }
-    if is_dangerous_attr_name(attr_name, allow_trusted_theme_markup) {
+    if opts.forbid_style_tag
+        && matches!(
+            attr_name.as_str(),
+            "data-node-id" | "data-od-node-scope" | "data-od-editable" | "data-od-kind"
+        )
+    {
+        return Err("Template block không được tự khai báo thuộc tính hệ thống của Studio.");
+    }
+    if is_dangerous_attr_name(
+        tag_name,
+        attr_name,
+        opts.allow_trusted_theme_markup,
+        opts.allow_search_form,
+    ) {
         return Err("Template chứa thuộc tính HTML bị C-SEC cấm.");
     }
-    if forbids_dynamic_interpolation(attr_name)
+    if forbids_dynamic_interpolation(tag_name, attr_name)
         && (*attr_expr_count != 0
             || attr_static_buf.contains("{{")
             || attr_static_buf.contains("{%"))
@@ -155,12 +131,21 @@ pub(super) fn finalize_theme_attr(
     }
     if matches!(
         attr_name.as_str(),
-        "href" | "src" | "poster" | "cite" | "xlink:href"
+        "href" | "src" | "poster" | "cite" | "xlink:href" | "action"
     ) {
         if *attr_expr_count > 1 || (*attr_expr_count > 0 && *attr_has_static_bytes) {
             return Err("URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.");
         }
-        if *attr_expr_count == 0 && !(tag_name == "link" && attr_name == "href") {
+        if attr_name == "action" {
+            if opts.allow_search_form && tag_name == "form" {
+                if *attr_expr_count == 0 {
+                    validate_safe_form_action(attr_static_buf)?;
+                }
+                *form_has_action = true;
+            } else {
+                return Err("Template chứa thuộc tính HTML bị C-SEC cấm.");
+            }
+        } else if *attr_expr_count == 0 && !(tag_name == "link" && attr_name == "href") {
             let decoded = decode_html_entities_for_url(attr_static_buf);
             if (tag_name == "a" && attr_name == "href") || attr_name == "xlink:href" {
                 validate_safe_href_url(&decoded)?;
@@ -168,6 +153,15 @@ pub(super) fn finalize_theme_attr(
                 validate_safe_url(&decoded)?;
             }
         }
+    }
+    if opts.allow_search_form && attr_name != "action" {
+        validate_search_form_attr_value(
+            tag_name,
+            attr_name,
+            attr_static_buf,
+            *attr_expr_count,
+            form_has_action,
+        )?;
     }
     attr_name.clear();
     *quote = None;
@@ -181,15 +175,15 @@ pub(super) fn validate_html_and_css_context(
     src: &str,
     post_render: bool,
     allow_trusted_theme_markup: bool,
+    allow_search_form: bool,
 ) -> Result<(), &'static str> {
     let lower = src.to_ascii_lowercase();
     let is_full_doctype_doc = lower.trim_start().starts_with("<!doctype");
 
-    // Scan HTML plus RAWTEXT style/script and RCDATA title. SVG depth limits
-    // the exceptional <title> permission to actual SVG foreign content.
+    // Scan HTML plus RAWTEXT style/script and RCDATA title. Track svg/math/form nesting depths.
     let bytes = src.as_bytes();
     let mut i = 0;
-    let mut svg_depth = 0_usize;
+    let mut depths = HtmlDepths::default();
     while i < bytes.len() {
         if bytes[i] != b'<' {
             i += 1;
@@ -252,20 +246,33 @@ pub(super) fn validate_html_and_css_context(
         if is_close
             && matches!(
                 tag_name.as_str(),
-                "style" | "title" | "script" | "link" | "meta"
+                "style" | "title" | "script" | "link" | "meta" | "input"
             )
         {
             return Err("Thẻ đóng HTML không hợp lệ ở vị trí này.");
         }
+        if tag_name == "form" {
+            if !is_close && depths.form > 0 {
+                return Err("C-SEC cấm lồng thẻ <form> bên trong <form>.");
+            }
+            if is_close && depths.form == 0 {
+                return Err("Thẻ </form> không có thẻ mở.");
+            }
+        }
+        let allowed_search_form = allow_search_form
+            && depths.svg == 0
+            && depths.math == 0
+            && is_search_form_tag(&tag_name);
         if FORBIDDEN_TAGS.contains(&tag_name.as_str())
             && !(allow_trusted_theme_markup
                 && matches!(
                     tag_name.as_str(),
                     "script" | "svg" | "foreignobject" | "math"
                 ))
+            && !allowed_search_form
             && !(tag_name == "title"
                 && !is_close
-                && (is_full_doctype_doc || (allow_trusted_theme_markup && svg_depth > 0)))
+                && (is_full_doctype_doc || (allow_trusted_theme_markup && depths.svg > 0)))
         {
             return Err("Template chứa thẻ HTML bị C-SEC cấm.");
         }
@@ -299,11 +306,7 @@ pub(super) fn validate_html_and_css_context(
             if !attr_slice.trim().is_empty() {
                 return Err("Thẻ đóng HTML không được chứa thuộc tính hoặc /.");
             }
-            if tag_name == "svg" {
-                svg_depth = svg_depth
-                    .checked_sub(1)
-                    .ok_or("Thẻ </svg> không có thẻ mở.")?;
-            }
+            depths = advance_depths(depths, &tag_name, true, false)?;
             i = k + 1;
             continue;
         }
@@ -313,17 +316,16 @@ pub(super) fn validate_html_and_css_context(
             attr_slice,
             post_render,
             allow_trusted_theme_markup,
+            allow_search_form,
         )?;
         let self_closing = attr_slice.trim_end().ends_with('/');
-        if matches!(tag_name.as_str(), "style" | "title" | "script") && self_closing {
-            return Err("Thẻ <style>/<title>/<script> không được tự đóng.");
+        if (matches!(tag_name.as_str(), "style" | "title" | "script")
+            || is_non_void_search_form_tag(&tag_name))
+            && self_closing
+        {
+            return Err("Thẻ HTML này không được tự đóng.");
         }
-        if tag_name == "svg" && !self_closing {
-            svg_depth = svg_depth
-                .checked_add(1)
-                .filter(|depth| *depth <= 64)
-                .ok_or("SVG lồng nhau quá sâu.")?;
-        }
+        depths = advance_depths(depths, &tag_name, false, self_closing)?;
 
         if tag_name == "style" {
             let (close_start, next_i) = find_rawtext_or_rcdata_end(src, k + 1, "style")?;
@@ -357,8 +359,14 @@ pub(super) fn validate_html_and_css_context(
         }
         i = k + 1;
     }
-    if svg_depth != 0 {
+    if depths.svg != 0 {
         return Err("SVG thiếu thẻ đóng.");
+    }
+    if depths.math != 0 {
+        return Err("MathML thiếu thẻ đóng.");
+    }
+    if depths.form != 0 {
+        return Err("C-SEC yêu cầu đóng đủ thẻ <form>.");
     }
     Ok(())
 }
@@ -368,6 +376,7 @@ pub(super) fn validate_tag_attributes(
     attr_slice: &str,
     post_render: bool,
     allow_trusted_theme_markup: bool,
+    allow_search_form: bool,
 ) -> Result<(), &'static str> {
     let attrs = parse_attributes(attr_slice, post_render)?;
 
@@ -398,12 +407,27 @@ pub(super) fn validate_tag_attributes(
         }
     }
 
+    if allow_search_form {
+        if !post_render
+            && let Some(action) = attrs.get("action")
+            && (action.contains("{{") || action.contains("{%"))
+        {
+            return Err("URL động trong thuộc tính không nằm trong whitelist typed URL.");
+        }
+        validate_post_render_form_attrs(tag_name, &attrs)?;
+    }
+
     for (name, val) in attrs {
-        if is_dangerous_attr_name(&name, allow_trusted_theme_markup) {
+        if is_dangerous_attr_name(
+            tag_name,
+            &name,
+            allow_trusted_theme_markup,
+            allow_search_form,
+        ) {
             return Err("Template chứa thuộc tính HTML bị C-SEC cấm.");
         }
         if !post_render
-            && forbids_dynamic_interpolation(&name)
+            && forbids_dynamic_interpolation(tag_name, &name)
             && (val.contains("{{") || val.contains("{%"))
         {
             return Err("C-SEC cấm nội suy bên trong thuộc tính sự kiện/namespace HTML.");

@@ -55,3 +55,19 @@ export function validateVideoUpload(file: File): void {
     throw new MediaUploadValidationError(_x("The video exceeds 100 MiB.", "feature.media"));
   }
 }
+
+/** Validates replacement upload against the existing asset's immutable media kind. */
+export async function validateReplaceMediaFile(file: File, expectedKind: 'image' | 'video'): Promise<void> {
+  const looksLikeVideo = file.type === 'video/mp4' || file.name.toLowerCase().endsWith('.mp4');
+  if (expectedKind === 'video') {
+    if (!looksLikeVideo) {
+      throw new MediaUploadValidationError(__("This asset is a video. Select an MP4 video file to replace it."));
+    }
+    validateVideoUpload(file);
+    return;
+  }
+  if (looksLikeVideo) {
+    throw new MediaUploadValidationError(__("This asset is an image. Select a JPEG, PNG or WebP image to replace it."));
+  }
+  await validateImageUpload(file);
+}

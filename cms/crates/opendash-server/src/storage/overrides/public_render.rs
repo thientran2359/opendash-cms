@@ -140,6 +140,7 @@ pub(in crate::storage) struct PublicBuilderContext<'a> {
     pub(in crate::storage) cache: &'a page::BlockTemplateCache,
     pub(in crate::storage) url_policy: &'a template_sec::ThemeUrlPolicy,
     pub(in crate::storage) fmt_cfg: &'a template_sec::RenderFormattingConfig,
+    pub(in crate::storage) search: Option<page::BuilderSearchData<'a>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -155,7 +156,7 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
     let empty_pages = BTreeMap::new();
-    render_resolved_public_builder_with_query_for_locale(
+    render_resolved_public_builder_with_query_and_search_for_locale(
         db,
         record,
         active,
@@ -165,13 +166,14 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
         slot,
         &empty_pages,
         "/",
+        None,
         budget,
         cache,
     )
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, dead_code)]
 pub async fn render_resolved_public_builder_with_query_for_locale(
     db: &SqlitePool,
     record: &TemplateOverrideRecord,
@@ -182,6 +184,38 @@ pub async fn render_resolved_public_builder_with_query_for_locale(
     slot: Option<&str>,
     list_pages: &BTreeMap<String, i64>,
     list_base_path: &str,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
+    render_resolved_public_builder_with_query_and_search_for_locale(
+        db,
+        record,
+        active,
+        theme_context,
+        route_entry,
+        locale,
+        slot,
+        list_pages,
+        list_base_path,
+        None,
+        budget,
+        cache,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn render_resolved_public_builder_with_query_and_search_for_locale(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    active: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    route_entry: Option<(&str, &str)>,
+    locale: Option<&str>,
+    slot: Option<&str>,
+    list_pages: &BTreeMap<String, i64>,
+    list_base_path: &str,
+    search: Option<page::BuilderSearchData<'_>>,
     budget: &mut PublicCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
@@ -229,6 +263,7 @@ pub async fn render_resolved_public_builder_with_query_for_locale(
         cache,
         url_policy: &url_policy,
         fmt_cfg: &fmt_cfg,
+        search,
     };
     let stack = vec![record.canonical_target_key.clone()];
     let rendered = render_public_builder(

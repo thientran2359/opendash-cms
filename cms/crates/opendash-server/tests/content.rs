@@ -28,8 +28,16 @@ mod page_taxonomy_defaults;
 mod permalink_redirects_cas;
 #[path = "content/provider_taxonomy_and_routes.rs"]
 mod provider_taxonomy_and_routes;
+#[path = "content/public_site_search_fts/mod.rs"]
+mod public_site_search_fts;
 #[path = "content/publication_create.rs"]
 mod publication_create;
+#[path = "content/revisions_crud_api.rs"]
+mod revisions_crud_api;
+#[path = "content/revisions_preflight_api.rs"]
+mod revisions_preflight_api;
+#[path = "content/revisions_storage.rs"]
+mod revisions_storage;
 #[path = "content/single_edit_draft_recovery.rs"]
 mod single_edit_draft_recovery;
 #[path = "content/taxonomy_builder_ast.rs"]

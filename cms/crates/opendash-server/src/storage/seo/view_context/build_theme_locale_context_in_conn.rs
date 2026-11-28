@@ -1,5 +1,30 @@
 use super::*;
 
+pub(crate) async fn resolve_locale_search_url_in_conn(
+    conn: &mut SqliteConnection,
+    current_locale: Option<&str>,
+) -> ApiResult<String> {
+    let enabled = settings::list_enabled_locales_in_conn(conn).await?;
+    if enabled.is_empty() {
+        return Ok("/".to_owned());
+    }
+    let default_code = enabled
+        .iter()
+        .find(|l| l.is_default)
+        .map(|l| l.code.as_str())
+        .unwrap_or_else(|| enabled[0].code.as_str())
+        .to_owned();
+    let current = current_locale
+        .and_then(|code| enabled.iter().find(|l| l.code == code))
+        .or_else(|| enabled.iter().find(|l| l.is_default))
+        .unwrap_or(&enabled[0]);
+    Ok(crate::storage::permalinks::prefix_for_locale(
+        &current.code,
+        &default_code,
+        "/",
+    ))
+}
+
 pub(crate) async fn build_theme_locale_context_in_conn(
     conn: &mut SqliteConnection,
     current_locale: Option<&str>,
@@ -13,6 +38,7 @@ pub(crate) async fn build_theme_locale_context_in_conn(
             "label": "Tiếng Việt",
             "direction": "ltr",
             "home_url": "/",
+            "search_url": "/",
             "alternates": [],
         }));
     }
@@ -119,6 +145,20 @@ pub(crate) async fn build_theme_locale_context_in_conn(
                 }
             }
         }
+        ThemeLocaleTarget::Search { raw_search_query } => {
+            let clean_query = raw_search_query.map(str::trim).filter(|q| !q.is_empty());
+            for loc in &enabled {
+                let base_url =
+                    crate::storage::permalinks::prefix_for_locale(&loc.code, &default_code, "/");
+                let url = crate::public_context::CanonicalUrlBuilder::search_url(
+                    &base_url,
+                    clean_query,
+                    None,
+                    1,
+                );
+                translated_paths.insert(loc.code.clone(), url);
+            }
+        }
         ThemeLocaleTarget::None => {}
     }
 
@@ -142,12 +182,15 @@ pub(crate) async fn build_theme_locale_context_in_conn(
         })
         .collect();
 
+    let base_locale_url =
+        crate::storage::permalinks::prefix_for_locale(&current.code, &default_code, "/");
     Ok(serde_json::json!({
         "code": current.code,
         "bcp47_tag": current.bcp47_tag,
         "label": current.label,
         "direction": current.direction,
-        "home_url": crate::storage::permalinks::prefix_for_locale(&current.code, &default_code, "/"),
+        "home_url": base_locale_url,
+        "search_url": base_locale_url,
         "alternates": alternates,
     }))
 }

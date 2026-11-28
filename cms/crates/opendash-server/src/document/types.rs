@@ -40,6 +40,12 @@ pub(super) enum TokenKind<'a> {
     ScriptBlock(&'a str),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DocumentNormalizeOptions {
+    pub allow_trusted_theme_markup: bool,
+    pub allow_admin_media_preview: bool,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum TagScanState {
     BeforeAttrName,
@@ -54,7 +60,21 @@ pub fn normalize_public_document_with_options(
     raw_html: &str,
     allow_trusted_theme_markup: bool,
 ) -> Result<SafeDocumentParts, DocumentNormalizationDiagnostic> {
-    let tokens = tokenize(raw_html, allow_trusted_theme_markup)?;
+    normalize_document_with_policy(
+        raw_html,
+        DocumentNormalizeOptions {
+            allow_trusted_theme_markup,
+            allow_admin_media_preview: false,
+        },
+    )
+}
+
+pub fn normalize_document_with_policy(
+    raw_html: &str,
+    opts: DocumentNormalizeOptions,
+) -> Result<SafeDocumentParts, DocumentNormalizationDiagnostic> {
+    let allow_trusted_theme_markup = opts.allow_trusted_theme_markup;
+    let tokens = tokenize_with_policy(raw_html, opts)?;
 
     // SVG foreignObject may embed HTML <body>/<html> as foreign content. It
     // must not turn a normal Theme fragment into a document envelope.

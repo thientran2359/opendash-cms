@@ -60,6 +60,7 @@ pub(crate) fn collect_scoped_css_for_fields(
     path_prefix: Option<&str>,
     node_scope: &str,
     is_preview: bool,
+    hydration_media: &std::collections::BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
     desktop_props: &mut String,
     tablet_props: &mut String,
     mobile_props: &mut String,
@@ -93,6 +94,7 @@ pub(crate) fn collect_scoped_css_for_fields(
                     Some(&field_path),
                     node_scope,
                     is_preview,
+                    hydration_media,
                     desktop_props,
                     tablet_props,
                     mobile_props,
@@ -280,11 +282,11 @@ pub(crate) fn collect_scoped_css_for_fields(
                     .or(default_str)
                     .filter(|s| !s.is_empty() && valid_sha256_media_id(s))
                 {
-                    let url_path = if is_preview {
-                        format!("/api/admin/media/{id}/file")
-                    } else {
-                        format!("/media/{id}/file")
-                    };
+                    let url_path = super::media_render::versioned_media_file_url(
+                        id,
+                        hydration_media,
+                        is_preview,
+                    );
                     desktop_props.push_str(&format!("{var_name}:url(\"{url_path}\");"));
                 }
             }
@@ -326,6 +328,7 @@ fn collect_block_css_rec(
                 None,
                 &node_scope,
                 is_preview,
+                &state.hydration_media,
                 &mut desktop_props,
                 &mut tablet_props,
                 &mut mobile_props,

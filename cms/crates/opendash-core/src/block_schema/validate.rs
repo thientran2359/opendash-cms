@@ -64,6 +64,7 @@ pub fn valid_allowed_context_token(token: &str) -> bool {
             | "archive"
             | "taxonomy"
             | "not_found"
+            | "search"
             | "loop_item"
     ) {
         return true;

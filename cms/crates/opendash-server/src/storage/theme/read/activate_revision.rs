@@ -183,6 +183,11 @@ pub async fn activate_revision(
                 let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
                 return Err(err);
             }
+            if let Err(err) = crate::storage::search::sync_builder_entries_in_conn(&mut conn).await
+            {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                return Err(err);
+            }
             sqlx::query("COMMIT").execute(&mut *conn).await?;
             crate::cache::SiteCacheEpoch::global().bump();
             Ok(RevisionActivationOutcome::Activated(

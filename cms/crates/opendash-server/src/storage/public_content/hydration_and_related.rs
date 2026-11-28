@@ -242,6 +242,7 @@ pub async fn hydrate_single_entry_view_in_conn(
         entries: &entries_map,
         terms: &terms_hydrate_map,
         is_preview,
+        tag_media_provenance: true,
     };
     let view = crate::content_render::build_hydrated_entry_view_with_context(
         record,
@@ -358,6 +359,7 @@ pub async fn hydrate_entry_views_with_options_in_conn(
         entries: &entries_map,
         terms: &ref_terms_map,
         is_preview,
+        tag_media_provenance: true,
     };
 
     let mut proj_map =

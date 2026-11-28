@@ -265,6 +265,32 @@ pub(crate) async fn resolve_requested_locale(
     resolve_requested_locale_in_conn(&mut conn, requested).await
 }
 
+/// Resolves a public-facing locale parameter (`None` / blank -> active default locale;
+/// invalid syntax -> `400`; disabled, deleted, or secondary while `multilingual_enabled = 0` -> `404`).
+pub(crate) async fn resolve_public_locale_in_conn(
+    conn: &mut SqliteConnection,
+    requested: Option<&str>,
+) -> ApiResult<String> {
+    let Some(raw) = requested.map(str::trim).filter(|v| !v.is_empty()) else {
+        return get_default_locale_code_in_conn(conn).await;
+    };
+    let normalized = raw.to_ascii_lowercase();
+    if !opendash_core::id::valid_lowercase_locale_code(&normalized) {
+        return Err(ApiError::bad_request("Mã ngôn ngữ tìm kiếm không hợp lệ."));
+    }
+    let found: Option<String> = sqlx::query_scalar(
+        "SELECT code FROM site_locales
+          WHERE code = ?
+            AND enabled = 1
+            AND deleted_at IS NULL
+            AND (is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)",
+    )
+    .bind(&normalized)
+    .fetch_optional(&mut *conn)
+    .await?;
+    found.ok_or_else(|| ApiError::not_found("Ngôn ngữ được yêu cầu không tồn tại hoặc đang tắt."))
+}
+
 pub(crate) async fn list_locales_in_conn(
     conn: &mut SqliteConnection,
 ) -> ApiResult<SiteLocalesSnapshot> {

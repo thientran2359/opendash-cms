@@ -10,8 +10,11 @@ fn renders_all_five_core_blocks_with_scoped_css_responsive_breakpoints_and_budge
             crate::storage::fields::HydratedMediaRow {
                 id: media_id.clone(),
                 kind: "image".into(),
+                mime_type: "image/jpeg".into(),
+                version: 1,
                 width: Some(800),
                 height: Some(600),
+                variants: Vec::new(),
             },
         )]),
         ..Default::default()
@@ -173,11 +176,9 @@ fn renders_all_five_core_blocks_with_scoped_css_responsive_breakpoints_and_budge
     assert!(public_rendered.html.contains(
         "@media (width < 768px){[data-od-node-scope=\"entry-sp-1\"]{--od-spacer-h:24px;}"
     ));
-    assert!(
-        public_rendered
-            .html
-            .contains(&format!("--od-banner-bg:url(\"/media/{media_id}/file\");"))
-    );
+    assert!(public_rendered.html.contains(&format!(
+        "--od-banner-bg:url(\"/media/{media_id}/file?v=1\");"
+    )));
     assert!(
         public_rendered
             .html
@@ -225,10 +226,15 @@ fn renders_all_five_core_blocks_with_scoped_css_responsive_breakpoints_and_budge
             .contains("[data-od-node-scope=\"pat_42-ban-1\"]")
     );
     assert!(preview_rendered.html.contains(&format!(
-        "--od-banner-bg:url(\"/api/admin/media/{media_id}/file\");"
+        "--od-banner-bg:url(\"/api/admin/media/{media_id}/file?v=1\");"
     )));
-    let decoded_preview = opendash_core::richtext::decode_html5_entities(&preview_rendered.html);
-    assert!(decoded_preview.contains(&format!("src=\"/api/admin/media/{media_id}/file\"")));
+    let finalized_preview = crate::content_render::finalize_document_images(
+        preview_rendered.html,
+        &preview_budget.image_nonces,
+    )
+    .unwrap();
+    let decoded_preview = opendash_core::richtext::decode_html5_entities(&finalized_preview);
+    assert!(decoded_preview.contains(&format!("src=\"/api/admin/media/{media_id}/file?v=1\"")));
 
     // Exhausted fuel isolates C-SEC blocks (banner, card, accordion) while NativeRust spacer/divider still render
     let mut zero_fuel_budget = RenderBudget {

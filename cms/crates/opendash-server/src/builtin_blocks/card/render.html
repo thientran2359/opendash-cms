@@ -6,8 +6,8 @@
 <article class="od-block-card od-card-{{ media_position }} relative flex overflow-hidden transition duration-200 {{ pos_cls }} {{ surface_cls }} {{ tone_cls }} {{ radius_cls }}"{% if tone == 'default' %} style="background-color:var(--od-card-bg,#ffffff);"{% endif %}>
   {% if card_link and card_link.url %}<a href="{{ card_link.url }}" target="{{ card_link.target }}" rel="{{ card_link.rel }}" aria-label="{{ card_link.label }}" class="od-card-stretched-link after:absolute after:inset-0 after:z-10"></a>{% endif %}
   {% if media_position != 'none' and image and image.url %}
-  <div class="od-card-media shrink-0 overflow-hidden{% if media_position == 'left' or media_position == 'right' %} md:w-2/5{% endif %}">
-    <img class="h-full w-full object-cover {{ ratio_cls }}" src="{{ image.url }}" alt="{{ image.alt }}" loading="lazy">
+  <div class="od-card-media {{ ratio_cls }} shrink-0 overflow-hidden{% if media_position == 'left' or media_position == 'right' %} md:w-2/5{% endif %}">
+    {{ od_image(image, "(min-width: 1024px) 33vw, 100vw", "h-full w-full object-cover") }}
   </div>
   {% endif %}
   <div class="od-card-body flex-1 {{ padding.classes }}" data-od-spacing="padding">

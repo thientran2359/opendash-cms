@@ -54,3 +54,24 @@ msgstr ""
 
 msgid "Language"
 msgstr ""
+
+msgid "Search"
+msgstr ""
+
+msgid "Search the site..."
+msgstr ""
+
+msgid "Search filters"
+msgstr ""
+
+msgid "All"
+msgstr ""
+
+msgid "Results:"
+msgstr ""
+
+msgid "Enter keywords to search published content."
+msgstr ""
+
+msgid "No matching results found."
+msgstr ""

@@ -6,9 +6,12 @@ use super::{
     cache_types::{BuilderDiagnostic, BuilderTemplateContext, ResolvedList},
     html_helpers::list_page_href,
     render::{ContactFormResults, PatternResults, escape_html},
-    render_contact_form_html,
+    render_contact_form_html, render_search_form_block, render_search_results_block,
 };
-use crate::{storage::builder::ListResults, template_sec::RenderBudget};
+use crate::{
+    storage::builder::{BuilderRenderContext, ListResults},
+    template_sec::RenderBudget,
+};
 
 pub(super) struct RuntimeBlockOutput {
     pub html: Option<String>,
@@ -225,6 +228,7 @@ fn render_list(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_native_runtime(
+    state: &BuilderRenderContext,
     node: &BlockNode,
     is_preview: bool,
     lists: &ListResults,
@@ -239,6 +243,26 @@ pub(super) fn render_native_runtime(
     match node.block_id.as_str() {
         "core/list" => Some(RuntimeBlockOutput {
             html: render_list(node, is_preview, lists, list_base_path, budget, diagnostics),
+            already_charged: 0,
+        }),
+        "core/search-form" => Some(RuntimeBlockOutput {
+            html: Some(render_search_form_block(
+                state,
+                node,
+                context,
+                is_preview,
+                &budget.locale,
+            )),
+            already_charged: 0,
+        }),
+        "core/search-results" => Some(RuntimeBlockOutput {
+            html: render_search_results_block(
+                node,
+                context,
+                is_preview,
+                &budget.locale,
+                diagnostics,
+            ),
             already_charged: 0,
         }),
         "core/contact-form" => {

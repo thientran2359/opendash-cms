@@ -33,7 +33,7 @@ pub struct RegisteredBlockDef {
     pub revision_digest: String,
 }
 
-/// 21 Core Blocks: 16 `NativeRust` (`None` template) + 5 `CompiledCsec` (`Some(render.html)`).
+/// 23 Core Blocks: 18 `NativeRust` (`None` template) + 5 `CompiledCsec` (`Some(render.html)`).
 pub(in crate::storage) const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, Option<&str>)] = &[
     // Layout (4 NativeRust)
     (
@@ -57,10 +57,18 @@ pub(in crate::storage) const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, Option<&str>)
         None,
     ),
     (include_str!("../../builtin_blocks/spacer/block.json"), None),
-    // Runtime & Template (5 NativeRust)
+    // Runtime & Template (7 NativeRust)
     (include_str!("../../builtin_blocks/list/block.json"), None),
     (
         include_str!("../../builtin_blocks/contact-form/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/search-form/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/search-results/block.json"),
         None,
     ),
     (

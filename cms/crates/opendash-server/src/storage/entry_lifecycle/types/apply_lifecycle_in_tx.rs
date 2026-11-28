@@ -173,6 +173,8 @@ pub(in crate::storage) async fn apply_lifecycle_in_tx(
             .execute(&mut **tx)
             .await?;
             crate::storage::plugin_projections::delete_entry_projections_in_tx(tx, row.id).await?;
+            crate::storage::search::delete_entry_search_index_in_conn(tx, row.id).await?;
+            crate::storage::revisions::clear_all_entry_autosaves_in_tx(&mut **tx, row.id).await?;
 
             let (version_after, trashed_at, published_at): (i64, Option<String>, Option<String>) =
                 sqlx::query_as(
@@ -293,6 +295,7 @@ pub(in crate::storage) async fn apply_lifecycle_in_tx(
             if needs_claim_rebuild {
                 crate::storage::permalinks::sync_claims_in_tx(tx).await?;
             }
+            crate::storage::search::sync_entry_search_index_in_conn(tx, row.id).await?;
 
             let (version_after, publication_after, trashed_at, published_at): (
                 i64,

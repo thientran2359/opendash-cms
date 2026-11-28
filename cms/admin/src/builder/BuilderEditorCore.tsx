@@ -386,7 +386,11 @@ export function BuilderEditorCore({
           <strong>{__("Block diagnostics:")}</strong>
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             {diagnostics.map((d, idx) => (
-              <li key={`${d.node_id}-${idx}`}>{d.node_id}: {d.message ?? d.code}</li>
+              <li key={`${d.node_id}-${idx}`} data-diagnostic-code={d.code}>
+                {d.node_id}: {d.code === 'search_results_outside_search_route'
+                  ? __("Search Results blocks only display items on the search route.")
+                  : (d.message ?? d.code)}
+              </li>
             ))}
           </ul>
         </div>

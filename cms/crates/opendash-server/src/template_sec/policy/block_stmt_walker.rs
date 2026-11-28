@@ -14,14 +14,8 @@ pub(crate) fn walk_block_ast_stmt(
             for initial in states {
                 let mut cur = initial;
                 for ch in raw.raw.chars() {
-                    let depths = cur.nesting_depths();
-                    cur = ThemeHtmlState::with_trust_depths(cur.into_inner(), true, depths);
-                    cur = step_theme_raw_char(
-                        cur,
-                        ch,
-                        BLOCK_HTML_STEP_OPTIONS,
-                        usize::from(depths.svg),
-                    )?;
+                    let depths = cur.depths();
+                    cur = step_theme_raw_char(cur, ch, BLOCK_HTML_STEP_OPTIONS, depths)?;
                 }
                 next_states.insert(cur);
             }
@@ -43,7 +37,7 @@ pub(crate) fn walk_block_ast_stmt(
                 }
                 if states
                     .iter()
-                    .any(|s| s.inner() != &ThemeHtmlState::Body || !s.nesting_depths().is_zero())
+                    .any(|s| s.inner() != &ThemeHtmlState::Body || s.has_open_depths())
                 {
                     return Err(
                         "children_html chỉ được đặt trực tiếp ở thân HTML (ngoài svg/math/a/button/summary).",
@@ -68,6 +62,28 @@ pub(crate) fn walk_block_ast_stmt(
                     );
                     if !matches!(resolved, Some((FieldTemplateNode::Icon, &[]))) {
                         return Err("od_icon() động phải tham chiếu trường kiểu icon.");
+                    }
+                }
+                return Ok((states, scopes));
+            }
+            if let Some(img_call) = parse_od_image_call(&e.expr)? {
+                if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
+                    return Err("od_image() chỉ được xuất trong thân HTML của block.");
+                }
+                if !is_valid_od_image_media_target(
+                    img_call.media_root,
+                    &img_call.media_attrs,
+                    &scopes,
+                    policy,
+                ) {
+                    return Err("od_image() động phải tham chiếu trường kiểu media.");
+                }
+                if let Some(alt_expr) = img_call.alt_expr {
+                    check_block_expr_restrictions(alt_expr, &scopes, policy)?;
+                    if block_expr_touches_sensitive(alt_expr, &scopes, policy) {
+                        return Err(
+                            "od_image() alt động chỉ được tham chiếu trường văn bản an toàn.",
+                        );
                     }
                 }
                 return Ok((states, scopes));
@@ -154,7 +170,7 @@ pub(crate) fn walk_block_ast_stmt(
             let mut expected_url_slot: Option<Option<UrlAttrSlot>> = None;
             let mut updated_states = BTreeSet::new();
             for state in states {
-                let depths = state.nesting_depths();
+                let depths = state.depths();
                 let ThemeHtmlState::Tag {
                     tag_name,
                     is_close,
@@ -167,6 +183,7 @@ pub(crate) fn walk_block_ast_stmt(
                     link_rel_stylesheet,
                     mut link_has_valid_href,
                     meta_ok,
+                    form_has_action,
                     attr_static_buf,
                 } = state.into_inner()
                 else {
@@ -177,7 +194,7 @@ pub(crate) fn walk_block_ast_stmt(
                         "C-SEC chỉ cho phép nội suy bên trong giá trị thuộc tính có dấu ngoặc kép.",
                     );
                 }
-                if forbids_dynamic_interpolation(&attr_name)
+                if forbids_dynamic_interpolation(&tag_name, &attr_name)
                     || matches!(attr_name.as_str(), "style" | "srcset" | "ping")
                     || (tag_name == "link" && attr_name == "rel")
                     || tag_name == "meta"
@@ -192,7 +209,7 @@ pub(crate) fn walk_block_ast_stmt(
                             "URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.",
                         );
                     }
-                    let Some(slot) = classify_theme_url_slot(&tag_name, &attr_name) else {
+                    let Some(slot) = classify_theme_url_slot(&tag_name, &attr_name, false) else {
                         return Err("C-SEC cấm nội suy URL động trên thuộc tính hoặc thẻ này.");
                     };
                     if let Some(prev_slot) = expected_url_slot {
@@ -228,7 +245,7 @@ pub(crate) fn walk_block_ast_stmt(
                     }
                     attr_expr_count = attr_expr_count.saturating_add(1);
                 }
-                updated_states.insert(ThemeHtmlState::with_trust_depths(
+                updated_states.insert(ThemeHtmlState::with_depths(
                     ThemeHtmlState::Tag {
                         tag_name,
                         is_close,
@@ -241,6 +258,7 @@ pub(crate) fn walk_block_ast_stmt(
                         link_rel_stylesheet,
                         link_has_valid_href,
                         meta_ok,
+                        form_has_action,
                         attr_static_buf,
                     },
                     true,
@@ -252,8 +270,8 @@ pub(crate) fn walk_block_ast_stmt(
         Stmt::IfCond(cond) => {
             reject_style_control_flow(&states)?;
             check_block_expr_restrictions(&cond.expr, &scopes, policy)?;
-            let entry_depths: BTreeSet<HtmlNestingDepths> =
-                states.iter().map(ThemeHtmlState::nesting_depths).collect();
+            let entry_depths: BTreeSet<HtmlDepths> =
+                states.iter().map(ThemeHtmlState::depths).collect();
             let (mut true_states, true_scopes) = walk_block_ast_sequence(
                 &cond.true_body,
                 states.clone(),
@@ -266,7 +284,7 @@ pub(crate) fn walk_block_ast_stmt(
             if true_states
                 .iter()
                 .chain(false_states.iter())
-                .any(|s| !entry_depths.contains(&s.nesting_depths()))
+                .any(|s| !entry_depths.contains(&s.depths()))
             {
                 return Err(
                     "Nhánh điều kiện {% if %} trong template block phải cân bằng thẻ đóng mở HTML.",
@@ -412,7 +430,11 @@ pub(crate) fn walk_block_ast_stmt(
             walk_ctx.forbid_children_html = true;
             let (sb_states, sb_scopes) = walk_block_ast_sequence(
                 &sb.body,
-                BTreeSet::from([ThemeHtmlState::with_trust(ThemeHtmlState::Body, true, 0)]),
+                BTreeSet::from([ThemeHtmlState::with_depths(
+                    ThemeHtmlState::Body,
+                    true,
+                    HtmlDepths::default(),
+                )]),
                 scopes.clone(),
                 policy,
                 walk_ctx,
@@ -420,7 +442,7 @@ pub(crate) fn walk_block_ast_stmt(
             walk_ctx.forbid_children_html = prev_forbid;
             if sb_states
                 .iter()
-                .any(|s| s.inner() != &ThemeHtmlState::Body || !s.nesting_depths().is_zero())
+                .any(|s| s.inner() != &ThemeHtmlState::Body || s.has_open_depths())
             {
                 return Err("Khối set block phải đóng đủ thẻ/comment HTML bên trong.");
             }
@@ -461,60 +483,6 @@ pub(crate) fn walk_block_ast_stmt(
     }
 }
 
-pub(crate) fn block_stmt_touches_sensitive(
-    stmt: &Stmt<'_>,
-    scopes: &UrlScopeStack,
-    policy: &ThemeUrlPolicy,
-) -> bool {
-    match stmt {
-        Stmt::Template(t) => t
-            .children
-            .iter()
-            .any(|c| block_stmt_touches_sensitive(c, scopes, policy)),
-        Stmt::EmitRaw(_) => false,
-        Stmt::EmitExpr(e) => block_expr_touches_sensitive(&e.expr, scopes, policy),
-        Stmt::IfCond(i) => {
-            block_expr_touches_sensitive(&i.expr, scopes, policy)
-                || i.true_body
-                    .iter()
-                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
-                || i.false_body
-                    .iter()
-                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
-        }
-        Stmt::ForLoop(f) => {
-            block_expr_touches_sensitive(&f.iter, scopes, policy)
-                || f.body
-                    .iter()
-                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
-                || f.else_body
-                    .iter()
-                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
-        }
-        Stmt::Set(s) => {
-            block_expr_touches_sensitive(&s.target, scopes, policy)
-                || block_expr_touches_sensitive(&s.expr, scopes, policy)
-        }
-        Stmt::SetBlock(sb) => {
-            block_expr_touches_sensitive(&sb.target, scopes, policy)
-                || sb
-                    .body
-                    .iter()
-                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
-        }
-        Stmt::WithBlock(w) => {
-            w.assignments.iter().any(|(k, v)| {
-                block_expr_touches_sensitive(k, scopes, policy)
-                    || block_expr_touches_sensitive(v, scopes, policy)
-            }) || w
-                .body
-                .iter()
-                .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
-        }
-        _ => true,
-    }
-}
-
 /// Validates a declarative `block.json` v1 `render.html` template using the unified
 /// `ThemeHtmlState` + MiniJinja AST + `UrlScopeStack` checker.
 pub fn validate_block_template_csec(
@@ -542,6 +510,7 @@ pub fn validate_block_template_csec_with_children(
         || source.contains(CONTENT_SLOT_TOKEN)
         || source.contains(PREVIEW_PART_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(IMAGE_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {
         return Err("Template block chứa chuỗi nonce nội bộ bị cấm.");
@@ -558,14 +527,18 @@ pub fn validate_block_template_csec_with_children(
     };
     let (final_states, _) = walk_block_ast_stmt(
         &ast,
-        BTreeSet::from([ThemeHtmlState::with_trust(ThemeHtmlState::Body, true, 0)]),
+        BTreeSet::from([ThemeHtmlState::with_depths(
+            ThemeHtmlState::Body,
+            true,
+            HtmlDepths::default(),
+        )]),
         ctx.root_scopes,
         &ctx.policy,
         &mut walk_ctx,
     )?;
     if final_states
         .iter()
-        .any(|s| s.inner() != &ThemeHtmlState::Body || !s.nesting_depths().is_zero())
+        .any(|s| s.inner() != &ThemeHtmlState::Body || s.has_open_depths())
     {
         return Err(
             "Template block phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment/svg).",

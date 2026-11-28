@@ -161,9 +161,15 @@ pub async fn preview_studio_with_cache_and_locale(
                 &fmt_cfg,
                 &effective_locale,
             )?;
-            crate::document::normalize_public_document(&html)
-                .map(|doc| doc.body_fragment)
-                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+            crate::document::normalize_document_with_policy(
+                &html,
+                crate::document::DocumentNormalizeOptions {
+                    allow_trusted_theme_markup: false,
+                    allow_admin_media_preview: true,
+                },
+            )
+            .map(|doc| doc.body_fragment)
+            .map_err(|_| ApiError::bad_request("Invalid preview body."))
         })?;
         (built.theme_context, body)
     } else {
@@ -174,6 +180,7 @@ pub async fn preview_studio_with_cache_and_locale(
             &site_options,
             &options,
             &menus,
+            &effective_locale,
         )?;
         (
             theme_context,
@@ -184,13 +191,19 @@ pub async fn preview_studio_with_cache_and_locale(
         return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
     }
 
-    let slot_fragment = crate::document::normalize_public_document_with_options(&body, true)
-        .map(|parts| {
-            let mut f = parts.authorized_styles.concat();
-            f.push_str(&parts.body_fragment);
-            f
-        })
-        .unwrap_or_else(|_| body.clone());
+    let slot_fragment = crate::document::normalize_document_with_policy(
+        &body,
+        crate::document::DocumentNormalizeOptions {
+            allow_trusted_theme_markup: true,
+            allow_admin_media_preview: true,
+        },
+    )
+    .map(|parts| {
+        let mut f = parts.authorized_styles.concat();
+        f.push_str(&parts.body_fragment);
+        f
+    })
+    .unwrap_or_else(|_| body.clone());
 
     let scope = if preview_annotations {
         RenderAnnotationScope::TemplateAll
@@ -205,10 +218,24 @@ pub async fn preview_studio_with_cache_and_locale(
         crate::storage::seo::ThemeLocaleTarget::None,
     )
     .await?;
-    if let Some(obj) = theme_context.as_object_mut() {
-        obj.insert("locale".to_owned(), preview_locale_ctx.clone());
-    }
+    content_render::sync_preview_locale_and_search(&mut theme_context, &preview_locale_ctx);
     public_budget.set_locale_context(active.as_ref(), &effective_locale, preview_locale_ctx);
+    let preview_search_view = (target.kind == K::Search).then(|| {
+        content_render::SearchView::preview_sample(&state.locale_search_url, &effective_locale)
+    });
+    let preview_search_entries = if target.kind == K::Search {
+        content_render::SearchView::preview_sample_entries(&effective_locale)
+    } else {
+        Vec::new()
+    };
+    let preview_search_pagination = PaginationView::empty();
+    let preview_search = preview_search_view
+        .as_ref()
+        .map(|view| page::BuilderSearchData {
+            view,
+            entries: &preview_search_entries,
+            pagination: &preview_search_pagination,
+        });
     let mut canvas_layout = is_canvas_target(active.as_ref(), target);
     let main_scope = if target.kind == K::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
@@ -296,6 +323,7 @@ pub async fn preview_studio_with_cache_and_locale(
                 cache,
                 url_policy: &url_policy,
                 fmt_cfg: &fmt_cfg,
+                search: preview_search,
             };
             let mut rendered = render_preview_builder(
                 &mut tx,
@@ -330,6 +358,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     cache,
                     url_policy: &url_policy,
                     fmt_cfg: &fmt_cfg,
+                    search: preview_search,
                 };
                 let slot = if target.kind == K::Part {
                     None
@@ -424,13 +453,14 @@ pub async fn preview_studio_with_cache_and_locale(
         settings::get_locale_bcp47_and_dir_in_conn(&mut *tx, Some(&effective_locale)).await?;
     let seo = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &general.site_title);
     let enqueued = preview_enqueued_styles(active.as_ref(), preview_condition(target.kind));
-    let full_html = content_render::compose_document_with_seo_with_assets(
+    let full_html = content_render::compose_document_with_seo_with_policy(
         header_html.as_deref(),
         &main_html,
         footer_html.as_deref(),
         &seo,
         &[],
         &enqueued,
+        true,
         true,
     )?;
     let full_html = if !preview_budget.hook_nonces.is_empty() {
@@ -447,6 +477,8 @@ pub async fn preview_studio_with_cache_and_locale(
     let full_html =
         content_render::finalize_document_icons(full_html, &preview_budget.icon_nonces)?;
     let full_html =
+        content_render::finalize_document_images(full_html, &preview_budget.image_nonces)?;
+    let full_html =
         content_render::finalize_document_richtext(full_html, &preview_budget.richtext_nonces)?;
     tx.rollback().await?;
     Ok(RenderedLayout {
@@ -454,4 +486,46 @@ pub async fn preview_studio_with_cache_and_locale(
         html: full_html,
         diagnostics,
     })
+}
+
+pub(in crate::storage) fn escape_preview_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn preview_studio_with_cache(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    target: &TemplateCandidate,
+    document: Option<&BuilderDocument>,
+    preview_entry: Option<&TemplatePreviewEntry>,
+    preview_annotations: bool,
+    transient: Option<&TransientStudioOverrides>,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
+    preview_studio_with_cache_and_locale(
+        db,
+        themes_root,
+        actor,
+        target,
+        document,
+        preview_entry,
+        preview_annotations,
+        transient,
+        None,
+        cache,
+    )
+    .await
 }

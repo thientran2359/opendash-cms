@@ -382,6 +382,7 @@ pub(in crate::storage) async fn render_preview_builder(
         Some(&page::BuilderTemplateContext {
             content_html: slot,
             parts: &parts,
+            search: ctx.search,
         }),
         &empty_patterns,
         false,

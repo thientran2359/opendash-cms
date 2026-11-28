@@ -156,6 +156,7 @@ pub(crate) enum UrlAttrSlot {
     Cite,
     SrcAndHref,
     LinkCss,
+    FormAction,
 }
 
 pub(crate) fn is_safe_theme_relative_path(raw: &str) -> bool {
@@ -195,18 +196,51 @@ pub(crate) fn is_valid_theme_stylesheet_href(raw_val: &str) -> bool {
         && rel_path.ends_with(".css")
 }
 
-pub(crate) fn is_dangerous_attr_name(attr_name: &str, allow_trusted_theme_markup: bool) -> bool {
-    matches!(attr_name, "srcdoc" | "formaction" | "action")
-        || (!allow_trusted_theme_markup
-            && (attr_name.starts_with("on")
-                || matches!(attr_name, "xmlns" | "xmlns:xlink" | "xlink:href")))
+pub(crate) fn is_dangerous_attr_name(
+    tag_name: &str,
+    attr_name: &str,
+    allow_trusted_theme_markup: bool,
+    allow_search_form: bool,
+) -> bool {
+    if matches!(
+        attr_name,
+        "srcdoc" | "formaction" | "formmethod" | "formenctype" | "formtarget" | "form"
+    ) {
+        return true;
+    }
+    if tag_name == "form" && matches!(attr_name, "enctype" | "target") {
+        return true;
+    }
+    if tag_name == "input" && attr_name == "src" {
+        return true;
+    }
+    if matches!(attr_name, "action" | "method") && !(tag_name == "form" && allow_search_form) {
+        return true;
+    }
+    !allow_trusted_theme_markup
+        && (attr_name.starts_with("on")
+            || matches!(attr_name, "xmlns" | "xmlns:xlink" | "xlink:href"))
 }
 
-pub(crate) fn forbids_dynamic_interpolation(attr_name: &str) -> bool {
+pub(crate) fn forbids_dynamic_interpolation(tag_name: &str, attr_name: &str) -> bool {
     attr_name.starts_with("on")
         || matches!(
             attr_name,
-            "srcdoc" | "formaction" | "action" | "xmlns" | "xmlns:xlink" | "xlink:href"
+            "srcdoc"
+                | "formaction"
+                | "formmethod"
+                | "formenctype"
+                | "formtarget"
+                | "form"
+                | "xmlns"
+                | "xmlns:xlink"
+                | "xlink:href"
+        )
+        || matches!(
+            (tag_name, attr_name),
+            ("form", "method" | "enctype" | "target")
+                | ("input", "type" | "src")
+                | ("button", "type")
         )
 }
 
@@ -225,6 +259,16 @@ pub(crate) fn is_security_checked_attr(attr_name: &str) -> bool {
                 | "http-equiv"
                 | "content"
                 | "name"
+                | "action"
+                | "method"
+                | "type"
+                | "enctype"
+                | "target"
+                | "form"
+                | "formaction"
+                | "formmethod"
+                | "formenctype"
+                | "formtarget"
                 | "xmlns"
                 | "xmlns:xlink"
                 | "xlink:href"
@@ -240,15 +284,21 @@ pub(crate) struct HtmlStepOptions {
     pub(crate) is_part: bool,
     pub(crate) is_full_doctype_doc: bool,
     pub(crate) allow_trusted_theme_markup: bool,
+    pub(crate) allow_search_form: bool,
     pub(crate) forbid_style_tag: bool,
 }
 
-pub(crate) fn classify_theme_url_slot(tag_name: &str, attr_name: &str) -> Option<UrlAttrSlot> {
+pub(crate) fn classify_theme_url_slot(
+    tag_name: &str,
+    attr_name: &str,
+    allow_search_form: bool,
+) -> Option<UrlAttrSlot> {
     match (tag_name, attr_name) {
         ("a", "href") => Some(UrlAttrSlot::AnchorHref),
         ("link", "href") => Some(UrlAttrSlot::LinkCss),
         ("blockquote" | "q", "cite") => Some(UrlAttrSlot::Cite),
-        (t, "src" | "poster") if !matches!(t, "link" | "meta" | "style" | "title") => {
+        ("form", "action") if allow_search_form => Some(UrlAttrSlot::FormAction),
+        (t, "src" | "poster") if !matches!(t, "link" | "meta" | "style" | "title" | "input") => {
             Some(UrlAttrSlot::SrcAndHref)
         }
         _ => None,

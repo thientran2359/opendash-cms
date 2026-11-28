@@ -2,6 +2,11 @@
 //! filesystem detail may enter a public context.
 use std::collections::{BTreeMap, HashSet};
 
+pub use opendash_core::search::{
+    MAX_SEARCH_PAGE, PublicSearchQuery, SEARCH_PAGE_SIZE, build_search_url, has_search_param,
+    parse_search_query, validate_percent_encoding,
+};
+
 use opendash_core::{
     content::valid_content_type_key,
     id::{valid_kebab_segment_with_limit, valid_package_id},
@@ -227,6 +232,10 @@ pub enum PublicRequestContext {
         query: PublicQuery,
         canonical_path: String,
     },
+    Search {
+        query: PublicSearchQuery,
+        canonical_path: String,
+    },
     NotFound,
 }
 
@@ -235,6 +244,15 @@ pub struct CanonicalUrlBuilder;
 impl CanonicalUrlBuilder {
     pub fn home() -> &'static str {
         "/"
+    }
+
+    pub fn search_url(
+        base_path: &str,
+        query: Option<&str>,
+        content_type: Option<&str>,
+        page: i64,
+    ) -> String {
+        build_search_url(base_path, query, content_type, page)
     }
 
     pub fn valid_type(type_key: &str) -> bool {

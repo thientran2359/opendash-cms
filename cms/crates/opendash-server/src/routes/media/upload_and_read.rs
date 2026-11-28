@@ -1,4 +1,4 @@
-//! Authenticated media upload, metadata listing and safe image/video serving.
+//! Authenticated media upload, metadata listing, responsive variant serving, and delete routing.
 
 use std::{path::PathBuf, pin::Pin, sync::Arc};
 
@@ -9,16 +9,21 @@ use axum::{
     http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use opendash_core::media::parse_variant_spec_ext;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use tokio::{io::AsyncWriteExt, sync::Semaphore};
+use tokio::io::AsyncWriteExt;
 
 use crate::{
-    auth::{require_admin, require_admin_with_csrf, require_session, require_session_with_csrf},
+    auth::{require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
-    media::{MAX_MEDIA_BYTES, MediaStore, decode_image},
+    media::{
+        DECODE_SLOTS, LeasedImageTarget, MAX_MEDIA_BYTES, MediaStore, VIDEO_INGEST_SLOTS,
+        decode_image, serve_leased_image,
+    },
     media_video::{MAX_VIDEO_BYTES, inspect_mp4},
+    operations::SiteCoordinator,
     storage::media::{self as media_storage, MediaAsset},
 };
 
@@ -53,7 +58,7 @@ pub async fn media_list(
     ))
 }
 
-fn display_filename(headers: &HeaderMap, extension: &str) -> String {
+pub(super) fn display_filename(headers: &HeaderMap, extension: &str) -> String {
     let fallback = format!("upload.{extension}");
     let Some(raw) = headers
         .get("x-file-name")
@@ -61,7 +66,6 @@ fn display_filename(headers: &HeaderMap, extension: &str) -> String {
     else {
         return fallback;
     };
-    // Client encodes original file name as encodeURIComponent(file.name).
     let encoded = format!("filename={raw}");
     let decoded = url::form_urlencoded::parse(encoded.as_bytes())
         .find(|(key, _)| key == "filename")
@@ -79,10 +83,24 @@ fn display_filename(headers: &HeaderMap, extension: &str) -> String {
     }
 }
 
+struct StagingCleanupGuard(Option<PathBuf>);
+
+impl Drop for StagingCleanupGuard {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            if path.is_dir() {
+                let _ = std::fs::remove_dir_all(path);
+            } else {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+}
+
 pub async fn media_upload(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
+    State(coordinator): State<Arc<SiteCoordinator>>,
     headers: HeaderMap,
     bytes: Bytes,
 ) -> ApiResult<Response> {
@@ -95,7 +113,6 @@ pub async fn media_upload(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    static DECODE_SLOTS: Semaphore = Semaphore::const_new(2);
     let _slot = DECODE_SLOTS
         .acquire()
         .await
@@ -104,30 +121,33 @@ pub async fn media_upload(
         .await
         .map_err(|_| ApiError::internal("Không thể xử lý ảnh."))??;
     let filename = display_filename(&headers, decoded.extension);
-    store.persist(&decoded).await?;
-    let metadata = media_storage::save(&db, &decoded.metadata(filename)).await?;
+    let stage_dir = store.create_upload_staging_dir().await?;
+    let mut guard = StagingCleanupGuard(Some(stage_dir.clone()));
+    store.stage_image_bundle(&stage_dir, &decoded).await?;
+    let _lease = coordinator.admit_mutation().map_err(|_| {
+        ApiError::service_unavailable("Hệ thống đang bảo trì; tạm dừng tải lên media.")
+    })?;
+    let metadata = media_storage::allocate_or_save_with_variants(
+        &db,
+        &store,
+        &decoded.metadata(filename),
+        &stage_dir,
+        Some(&decoded),
+        &decoded.variants,
+    )
+    .await?;
+    guard.0 = None;
     Ok((StatusCode::CREATED, Json(metadata)).into_response())
 }
 
-struct StagingCleanupGuard(Option<PathBuf>);
-
-impl Drop for StagingCleanupGuard {
-    fn drop(&mut self) {
-        if let Some(path) = self.0.take() {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-}
-
 pub async fn media_video_upload(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
+    State(coordinator): State<Arc<SiteCoordinator>>,
     headers: HeaderMap,
     mut body: Body,
 ) -> ApiResult<Response> {
     require_session_with_csrf(&headers, &db).await?;
-    static VIDEO_INGEST_SLOTS: Semaphore = Semaphore::const_new(2);
     let _slot = VIDEO_INGEST_SLOTS.try_acquire().map_err(|_| {
         ApiError::too_many_requests("Đang có quá nhiều lượt upload video đồng thời.")
     })?;
@@ -203,11 +223,19 @@ pub async fn media_video_upload(
             .map_err(|_| ApiError::internal("Không thể kiểm tra metadata video."))??;
 
     let filename = display_filename(&headers, "mp4");
-    store
-        .persist_video_from_staging(&staging_path, &validated.id)
-        .await?;
+    let _lease = coordinator.admit_mutation().map_err(|_| {
+        ApiError::service_unavailable("Hệ thống đang bảo trì; tạm dừng tải lên video.")
+    })?;
+    let metadata = media_storage::allocate_or_save_with_variants(
+        &db,
+        &store,
+        &validated.metadata(filename),
+        &staging_path,
+        None,
+        &[],
+    )
+    .await?;
     guard.0 = None;
-    let metadata = media_storage::save(&db, &validated.metadata(filename)).await?;
     Ok((StatusCode::CREATED, Json(metadata)).into_response())
 }
 
@@ -223,6 +251,8 @@ async fn image_response(
     if !media_storage::valid_media_id(id) {
         return Err(ApiError::bad_request("Mã media không hợp lệ."));
     }
+    // Acquire read lease BEFORE reading DB metadata to eliminate metadata/disk TOCTOU.
+    let read_lease = store.acquire_read_lease(id).await?;
     let asset = media_storage::find(db, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Media không tồn tại."))?;
@@ -231,28 +261,55 @@ async fn image_response(
     }
     if !thumb && asset.kind == "video" {
         let path = store.canonical_path(id, &asset.extension)?;
-        return crate::media::stream_authorized_video(method, headers, &asset, &path, store, true)
-            .await;
+        return crate::media::stream_authorized_video(
+            method, headers, &asset, &path, read_lease, true,
+        )
+        .await;
     }
-    let bytes = store.read(id, &asset.extension, thumb).await?;
-    let mime = if thumb {
-        "image/png"
+    let target = if thumb {
+        LeasedImageTarget::Thumbnail(&asset)
     } else {
-        asset.mime_type.as_str()
+        LeasedImageTarget::Original(&asset)
     };
-    Ok((
-        [
-            (header::CONTENT_TYPE, mime),
-            (header::CACHE_CONTROL, "private, no-store"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-            (
-                header::CONTENT_SECURITY_POLICY,
-                "default-src 'none'; sandbox",
-            ),
-        ],
-        bytes,
+    serve_leased_image(store, &read_lease, method, headers, target, false).await
+}
+
+pub async fn media_variant(
+    State(db): State<SqlitePool>,
+    State(store): State<Arc<MediaStore>>,
+    method: Method,
+    headers: HeaderMap,
+    Path((id, spec_ext)): Path<(String, String)>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    if !media_storage::valid_media_id(&id) {
+        return Err(ApiError::bad_request("Mã media không hợp lệ."));
+    }
+    let (spec, format) = parse_variant_spec_ext(&spec_ext)
+        .ok_or_else(|| ApiError::bad_request("Định dạng biến thể media không hợp lệ."))?;
+    let read_lease = store.acquire_read_lease(&id).await?;
+    let asset = media_storage::find(&db, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Media không tồn tại."))?;
+    if asset.kind != "image" {
+        return Err(ApiError::not_found("Media không hỗ trợ biến thể ảnh."));
+    }
+    media_storage::find_variant(&db, &id, asset.version, spec, format)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Biến thể media không tồn tại."))?;
+    serve_leased_image(
+        &store,
+        &read_lease,
+        &method,
+        &headers,
+        LeasedImageTarget::Variant {
+            asset: &asset,
+            spec,
+            format,
+        },
+        false,
     )
-        .into_response())
+    .await
 }
 
 pub async fn media_get(
@@ -260,18 +317,18 @@ pub async fn media_get(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
-    require_admin(&headers, &db).await?;
-    let asset = media_storage::find(&db, &id)
+    require_session(&headers, &db).await?;
+    let details = media_storage::find_details(&db, &id, true)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy media."))?;
-    let etag = format!("\"{}\"", asset.metadata_etag());
+    let etag = details.etag.clone();
     Ok((
         StatusCode::OK,
         [
             (header::ETAG, etag.as_str()),
             (header::CACHE_CONTROL, "private, no-store"),
         ],
-        Json(asset),
+        Json(details),
     )
         .into_response())
 }
@@ -286,7 +343,7 @@ pub async fn media_delete(
     require_admin_with_csrf(&headers, &db).await?;
     let (expected_gen, expected_ver) = crate::media_lifecycle::parse_media_if_match(&headers)?;
 
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let job = match crate::media_lifecycle::tombstone_media_in_tx(
         &mut tx,
         &id,

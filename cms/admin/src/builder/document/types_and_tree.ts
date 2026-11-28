@@ -72,6 +72,7 @@ export type BuilderContextTarget =
   | { kind: 'archive'; type_key?: string | null }
   | { kind: 'taxonomy'; taxonomy_key?: string | null }
   | { kind: 'not_found' }
+    | { kind: 'search' }
   | { kind: 'loop_item' };
 
 export interface DragCompatibilityMask {

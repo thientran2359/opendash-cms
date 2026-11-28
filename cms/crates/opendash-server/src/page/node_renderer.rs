@@ -187,6 +187,7 @@ fn render_csec_node(
         entries: &env.state.hydration_entries,
         terms: &env.state.hydration_terms,
         is_preview: env.is_preview,
+        tag_media_provenance: true,
     };
     let defaulted = def.schema.schema.apply_field_defaults(&node.props);
     let mut local_rt = crate::template_sec::RichTextNonceTable::default();
@@ -425,6 +426,7 @@ fn render_node(
     if is_native {
         let mut diag_buf = Vec::new();
         let (maybe_html, already_charged) = if let Some(rt) = render_native_runtime(
+            env.state,
             node,
             env.is_preview,
             env.lists,
@@ -437,9 +439,13 @@ fn render_node(
             &mut diag_buf,
         ) {
             (rt.html, rt.already_charged)
-        } else if let Some(leaf) =
-            render_native_leaf(node, &def.schema.schema.fields, env.is_preview, env.budget)?
-        {
+        } else if let Some(leaf) = render_native_leaf(
+            node,
+            &def.schema.schema.fields,
+            &env.state.hydration_media,
+            env.is_preview,
+            env.budget,
+        )? {
             (Some(leaf), 0)
         } else {
             diag_buf.push(BuilderDiagnostic {

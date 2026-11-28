@@ -199,7 +199,11 @@ fn render_text(node: &BlockNode) -> String {
     format!("<div class=\"{}\"{style_attr}>{clean}</div>", cls.join(" "))
 }
 
-fn render_image(node: &BlockNode, is_preview: bool) -> String {
+fn render_image(
+    node: &BlockNode,
+    hydration_media: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
+    is_preview: bool,
+) -> String {
     let Some(id) = node
         .props
         .get("image")
@@ -208,11 +212,6 @@ fn render_image(node: &BlockNode, is_preview: bool) -> String {
         .filter(|id| valid_sha256_media_id(id))
     else {
         return String::new();
-    };
-    let prefix = if is_preview {
-        "/api/admin/media"
-    } else {
-        "/media"
     };
     let alt = node.props.get("alt").and_then(Value::as_str).unwrap_or("");
     let caption = node
@@ -242,10 +241,13 @@ fn render_image(node: &BlockNode, is_preview: bool) -> String {
         r @ ("sm" | "md" | "lg" | "xl" | "2xl" | "full") => img_cls.push(format!("rounded-{r}")),
         _ => {}
     }
-    let img_html = format!(
-        "<img src=\"{prefix}/{id}/file\" alt=\"{}\" loading=\"lazy\" class=\"{}\">",
-        escape_html(alt),
-        img_cls.join(" "),
+    let img_html = super::media_render::render_responsive_image_html(
+        id,
+        alt,
+        &img_cls.join(" "),
+        "100vw",
+        hydration_media,
+        is_preview,
     );
     let media_html = match link_props(&node.props, "link") {
         Some((url, _, new_tab, nofollow)) => {
@@ -269,7 +271,11 @@ fn render_image(node: &BlockNode, is_preview: bool) -> String {
     format!("<figure class=\"od-image\">{media_html}{cap_html}</figure>")
 }
 
-fn render_video(node: &BlockNode, is_preview: bool) -> String {
+fn render_video(
+    node: &BlockNode,
+    hydration_media: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
+    is_preview: bool,
+) -> String {
     let Some(id) = node
         .props
         .get("video")
@@ -279,13 +285,10 @@ fn render_video(node: &BlockNode, is_preview: bool) -> String {
     else {
         return String::new();
     };
-    let prefix = if is_preview {
-        "/api/admin/media"
-    } else {
-        "/media"
-    };
+    let video_url = super::media_render::versioned_media_file_url(id, hydration_media, is_preview);
     let mut attrs = format!(
-        "src=\"{prefix}/{id}/file\" preload=\"metadata\" playsinline class=\"w-full rounded-lg\""
+        "src=\"{}\" preload=\"metadata\" playsinline class=\"w-full rounded-lg\"",
+        escape_html(&video_url),
     );
     if let Some(poster) = node
         .props
@@ -294,7 +297,9 @@ fn render_video(node: &BlockNode, is_preview: bool) -> String {
         .map(str::trim)
         .filter(|id| valid_sha256_media_id(id))
     {
-        attrs.push_str(&format!(" poster=\"{prefix}/{poster}/file\""));
+        let poster_url =
+            super::media_render::versioned_media_file_url(poster, hydration_media, is_preview);
+        attrs.push_str(&format!(" poster=\"{}\"", escape_html(&poster_url)));
     }
     if node
         .props
@@ -425,14 +430,15 @@ fn render_divider(node: &BlockNode, fields: &[FieldSpec]) -> String {
 pub(super) fn render_native_leaf(
     node: &BlockNode,
     fields: &[FieldSpec],
+    hydration_media: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
     is_preview: bool,
     budget: &mut RenderBudget,
 ) -> ApiResult<Option<String>> {
     match node.block_id.as_str() {
         "core/heading" => Ok(Some(render_heading(node))),
         "core/text" => Ok(Some(render_text(node))),
-        "core/image" => Ok(Some(render_image(node, is_preview))),
-        "core/video" => Ok(Some(render_video(node, is_preview))),
+        "core/image" => Ok(Some(render_image(node, hydration_media, is_preview))),
+        "core/video" => Ok(Some(render_video(node, hydration_media, is_preview))),
         "core/button" => Ok(Some(render_button(node, budget)?)),
         "core/divider" => Ok(Some(render_divider(node, fields))),
         "core/spacer" => Ok(Some(

@@ -170,7 +170,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
             ],
         ),
         ("import.rs", &["import_dry_run", "import_execute"]),
-        ("media.rs", &["media_upload", "media_video_upload"]),
+        ("media.rs", &["media_delete"]),
         (
             "menu.rs",
             &[
@@ -211,6 +211,10 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "bulk_delete_not_found_logs_handler",
                 "clear_not_found_logs_handler",
             ],
+        ),
+        (
+            "revisions.rs",
+            &["revision_restore", "autosave_put", "autosave_delete"],
         ),
         (
             "settings.rs",
@@ -312,6 +316,40 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
     assert!(
         pub_body.contains("coordinator.admit_mutation()"),
         "contact.rs::public_submit must run coordinator.admit_mutation() pre-check"
+    );
+
+    // Media upload, video upload, replace, and variants regenerate use short-lived
+    // SiteCoordinator::admit_mutation() leases around promote/commit DB sections after staging/decode.
+    let media_route_src = read_route_sources(&routes_dir, "media.rs");
+    for handler in [
+        "media_upload",
+        "media_video_upload",
+        "media_replace",
+        "media_variants_regenerate",
+    ] {
+        let pos = media_route_src
+            .find(&format!("pub async fn {handler}("))
+            .unwrap_or_else(|| panic!("missing media.rs::{handler}"));
+        let sig_end = media_route_src[pos..]
+            .find(") ->")
+            .map(|off| pos + off)
+            .unwrap_or(media_route_src.len());
+        assert!(
+            media_route_src[pos..sig_end].contains("State(coordinator)"),
+            "media.rs::{handler} must extract State(coordinator)"
+        );
+    }
+    let replace_engine_src = fs::read_to_string(manifest_dir.join("src/media/replace.rs"))
+        .expect("read media/replace.rs");
+    let upload_route_src =
+        fs::read_to_string(routes_dir.join("media/upload_and_read.rs")).expect("read upload");
+    let regen_route_src =
+        fs::read_to_string(routes_dir.join("media/regenerate.rs")).expect("read regenerate");
+    assert!(
+        replace_engine_src.contains("coordinator.admit_mutation()")
+            && upload_route_src.contains("coordinator.admit_mutation()")
+            && regen_route_src.contains("coordinator.admit_mutation()"),
+        "media upload, replace, and regenerate must gate DB writes via coordinator.admit_mutation()"
     );
     let contact_src =
         fs::read_to_string(manifest_dir.join("src").join("contact.rs")).expect("read contact.rs");

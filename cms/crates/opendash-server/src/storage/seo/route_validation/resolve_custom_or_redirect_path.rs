@@ -122,7 +122,8 @@ pub async fn build_home_seo_view_for_locale(
     });
     let mut description = home.description;
     let mut custom_canonical = home.canonical_url;
-    let mut og_image_url = project_og_image_url(&pub_settings, home.og_image_id);
+    let mut og_image_url =
+        project_og_image_url_versioned(db, &pub_settings, home.og_image_id).await?;
     let mut noindex = home.noindex;
     let mut home_json_ld = Vec::new();
     let page_state = reading_page_state_for_locale(db, locale, true).await?;
@@ -157,7 +158,7 @@ pub async fn build_home_seo_view_for_locale(
                 .bind(id)
                 .fetch_optional(db)
                 .await?;
-                og_image_url = project_og_image_url(&pub_settings, media_id);
+                og_image_url = project_og_image_url_versioned(db, &pub_settings, media_id).await?;
             }
             noindex |= entry_noindex != 0;
         }
@@ -176,7 +177,7 @@ pub async fn build_home_seo_view_for_locale(
                 && let Some(mid) = ov.og_image_id
                 && crate::storage::public_content::media_is_referenced(db, &mid).await?
             {
-                og_image_url = project_og_image_url(&pub_settings, Some(mid));
+                og_image_url = project_og_image_url_versioned(db, &pub_settings, Some(mid)).await?;
             }
             noindex |= ov.noindex;
         }

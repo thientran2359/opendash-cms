@@ -457,4 +457,16 @@
   @media (prefers-reduced-motion: reduce) {
     .od-sidebar, .od-nav-link { transition: none; }
   }
+  dialog.od-modal-dialog[open] {
+    display: flex;
+    flex-direction: column;
+  }
+  dialog.od-modal-dialog:modal {
+    overscroll-behavior: contain;
+  }
+  dialog.od-modal-dialog::backdrop {
+    overflow: hidden;
+    overscroll-behavior: contain;
+    background: rgba(9, 9, 11, 0.5);
+  }
 }

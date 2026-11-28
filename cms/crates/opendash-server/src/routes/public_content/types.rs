@@ -65,6 +65,7 @@ pub(super) struct PublicRouteContext<'a> {
     pub(super) content_type: Option<&'a serde_json::Value>,
     pub(super) entry: Option<&'a content_render::EntryView>,
     pub(super) list_pages: Option<&'a BTreeMap<String, i64>>,
+    pub(super) search: &'a content_render::SearchView,
 }
 
 pub struct ResolvedPublicHtml {
@@ -160,6 +161,7 @@ pub(super) async fn render_resolved_public_template_html(
         taxonomy: route_ctx.taxonomy,
         content_type: route_ctx.content_type,
         entry: route_ctx.entry,
+        search: route_ctx.search,
     })?;
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: site_ctx.timezone.to_owned(),
@@ -204,20 +206,31 @@ pub(super) async fn render_resolved_public_template_html(
                 == opendash_core::theme::TemplateCandidateKind::PageLayout
                 && overrides::is_canvas_page_layout(active, record.target.layout_key.as_deref());
             let empty_pages = BTreeMap::new();
-            let rendered = overrides::render_resolved_public_builder_with_query_for_locale(
-                db,
-                &record,
-                active,
-                &context,
-                route_entry,
-                locale,
-                Some(&slot_html),
-                route_ctx.list_pages.unwrap_or(&empty_pages),
-                route_ctx.route_path.unwrap_or("/"),
-                budget,
-                cache,
-            )
-            .await?;
+            let search_data =
+                route_ctx
+                    .search
+                    .is_search_route
+                    .then_some(crate::page::BuilderSearchData {
+                        view: route_ctx.search,
+                        entries: route_ctx.entries,
+                        pagination: route_ctx.pagination,
+                    });
+            let rendered =
+                overrides::render_resolved_public_builder_with_query_and_search_for_locale(
+                    db,
+                    &record,
+                    active,
+                    &context,
+                    route_entry,
+                    locale,
+                    Some(&slot_html),
+                    route_ctx.list_pages.unwrap_or(&empty_pages),
+                    route_ctx.route_path.unwrap_or("/"),
+                    search_data,
+                    budget,
+                    cache,
+                )
+                .await?;
             Ok(ResolvedPublicHtml {
                 html: rendered.html,
                 has_active_contact_form: rendered.has_active_contact_form,
@@ -468,6 +481,7 @@ pub(crate) async fn render_canonical_taxonomy(
         seo::ThemeLocaleTarget::Term { term_id },
     )
     .await?;
+    let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active_v3.as_ref(), &locale, locale_ctx);
     let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
     let cache = crate::page::BlockTemplateCache::global();
@@ -496,6 +510,7 @@ pub(crate) async fn render_canonical_taxonomy(
             content_type: Some(&ct_value),
             entry: None,
             list_pages: None,
+            search: &inactive_search,
         },
         &mut budget,
         cache,
@@ -552,7 +567,13 @@ pub(crate) async fn render_canonical_taxonomy(
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::finalize_document_richtext(
-            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            content_render::finalize_document_images(
+                content_render::finalize_document_icons(
+                    composed,
+                    &budget.render_budget.icon_nonces,
+                )?,
+                &budget.render_budget.image_nonces,
+            )?,
             &budget.render_budget.richtext_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,

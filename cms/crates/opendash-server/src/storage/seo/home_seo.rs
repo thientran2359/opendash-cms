@@ -48,13 +48,25 @@ pub async fn put_home_seo(
     put_home_seo_for_locale(db, None, expected_version, input).await
 }
 
-pub(in crate::storage) fn project_og_image_url(
+pub(in crate::storage) async fn project_og_image_url_versioned(
+    db: &SqlitePool,
     pub_settings: &settings::PublicSiteSettings,
     media_id: Option<String>,
-) -> Option<String> {
-    let mid = media_id?;
-    let rel = format!("/media/{mid}/file");
-    Some(absolute_public_url(pub_settings, &rel).unwrap_or(rel))
+) -> ApiResult<Option<String>> {
+    let Some(mid) = media_id else {
+        return Ok(None);
+    };
+    let version: Option<i64> = sqlx::query_scalar(
+        "SELECT version FROM media_assets WHERE id = ? AND lifecycle_state = 'active'",
+    )
+    .bind(&mid)
+    .fetch_optional(db)
+    .await?;
+    let rel = match version {
+        Some(v) => format!("/media/{mid}/file?v={}", v.max(1)),
+        None => format!("/media/{mid}/file"),
+    };
+    Ok(Some(absolute_public_url(pub_settings, &rel).unwrap_or(rel)))
 }
 
 pub async fn build_entry_seo_view_for_locale(
@@ -114,10 +126,10 @@ pub async fn build_entry_seo_view_for_locale(
         .bind(entry_id)
         .fetch_optional(db)
         .await?;
-        project_og_image_url(&pub_settings, public_mid)
+        project_og_image_url_versioned(db, &pub_settings, public_mid).await?
     } else if let Some(mid) = ov_og_image_id {
         if crate::storage::public_content::media_is_referenced(db, &mid).await? {
-            project_og_image_url(&pub_settings, Some(mid))
+            project_og_image_url_versioned(db, &pub_settings, Some(mid)).await?
         } else {
             None
         }

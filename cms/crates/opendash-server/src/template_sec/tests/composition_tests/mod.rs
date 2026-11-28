@@ -15,6 +15,7 @@ fn compile(
     validate_and_compile_csec_composition("root", source, parts, kind)
 }
 
+mod od_image_csec_tests;
 mod suite_01;
 mod suite_02;
 mod suite_03;

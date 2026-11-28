@@ -219,12 +219,20 @@ pub fn render_block_csec_compiled(
     let mut env = (**base_env).clone();
     install_dynamic_formatting_handlers(&mut env, inputs.fmt_cfg);
     let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let local_images = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     install_icon_function(
         &mut env,
         &budget.icon_nonces,
         &local_icons,
+        budget.html_bytes_used,
+        &overflowed,
+    );
+    install_image_function(
+        &mut env,
+        &budget.image_nonces,
+        &local_images,
         budget.html_bytes_used,
         &overflowed,
     );
@@ -251,7 +259,7 @@ pub fn render_block_csec_compiled(
     if shell.len() > MAX_RENDERED_HTML_BYTES {
         return Err("HTML render của block vượt quá giới hạn 512 KiB.");
     }
-    validate_html_and_css_context(shell, true, true)?;
+    validate_html_and_css_context(shell, true, true, false)?;
 
     let out = match inputs.local_richtext_nonces {
         Some(rt) if !rt.is_empty() => rt.substitute_into_document(shell.to_owned())?,
@@ -274,6 +282,16 @@ pub fn render_block_csec_compiled(
         .sum();
     budget.charge_html_bytes(icon_growth)?;
     budget.icon_nonces.extend(additions);
+    let image_additions = local_images
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let image_growth: usize = image_additions
+        .iter()
+        .map(|(n, s)| s.len().saturating_sub(n.len()))
+        .sum();
+    budget.charge_html_bytes(image_growth)?;
+    budget.image_nonces.extend(image_additions);
     let hook_additions = local_hooks
         .lock()
         .unwrap_or_else(|e| e.into_inner())

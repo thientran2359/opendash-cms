@@ -82,8 +82,8 @@ pub async fn pattern_create(
     headers: HeaderMap,
     Json(input): Json<PatternInput>,
 ) -> ApiResult<Response> {
-    require_admin_with_csrf(&headers, &db).await?;
-    let record = patterns::create(&db, &input).await?;
+    let actor = require_admin_with_csrf(&headers, &db).await?;
+    let record = patterns::create_for_actor(&db, &input, Some(&actor)).await?;
     Ok((
         StatusCode::CREATED,
         private_headers(Some(record.version)),
@@ -99,8 +99,15 @@ pub async fn pattern_update(
     Path(id): Path<i64>,
     Json(input): Json<PatternInput>,
 ) -> ApiResult<Response> {
-    require_admin_with_csrf(&headers, &db).await?;
-    let record = patterns::update(&db, id, version_from_if_match(&headers)?, &input).await?;
+    let actor = require_admin_with_csrf(&headers, &db).await?;
+    let record = patterns::update_for_actor(
+        &db,
+        id,
+        version_from_if_match(&headers)?,
+        &input,
+        Some(&actor),
+    )
+    .await?;
     Ok((private_headers(Some(record.version)), Json(record)).into_response())
 }
 

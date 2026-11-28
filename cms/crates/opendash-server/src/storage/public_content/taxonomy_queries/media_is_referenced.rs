@@ -32,7 +32,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            JOIN template_overrides AS ov ON ov.id = tom.override_id
            WHERE tom.media_id = ?
              AND (
-               ov.target_kind IN ('index', 'not_found', 'singular', 'part')
+               ov.target_kind IN ('index', 'not_found', 'search', 'singular', 'part')
                OR (ov.target_kind = 'home' AND EXISTS (
                  SELECT 1 FROM site_reading_settings AS reading
                  JOIN site_locales AS sl ON sl.code = reading.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)

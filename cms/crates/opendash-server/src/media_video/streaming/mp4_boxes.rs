@@ -4,6 +4,7 @@ impl ValidatedVideo {
     pub fn metadata(&self, filename: String) -> MediaAsset {
         MediaAsset {
             id: self.id.clone(),
+            content_sha256: self.id.clone(),
             kind: "video".to_string(),
             filename,
             mime_type: "video/mp4".to_string(),
@@ -19,7 +20,9 @@ impl ValidatedVideo {
             lifecycle_state: "active".to_string(),
             generation: 1,
             version: 1,
+            variants_ready_version: 0,
             created_at: String::new(),
+            updated_at: String::new(),
         }
     }
 }

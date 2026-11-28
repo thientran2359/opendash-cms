@@ -248,6 +248,7 @@ pub async fn purge_orphan_locale(
         &["DELETE FROM plugin_entry_projections WHERE locale = ?"],
     )
     .await?;
+    crate::storage::search::delete_locale_search_index_in_conn(&mut tx, &code).await?;
     let entries = delete_locale_rows(
         &mut tx,
         &code,

@@ -1959,10 +1959,13 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     // and Spec B S01 adds 0053 (owner_kind isolation for Theme Functions runtime),
     // and Entry Lifecycle S01 adds 0054 (`content_entries.trashed_at` + lifecycle indexes),
     // and Unified Field Engine adds 0055 (`theme_option_media_refs.locale`) and 0056 (`unified_field_content_cutover`),
-    // and Manual Redirects & 404 Log S01 adds 0057 (`manual_redirects` + `not_found_logs`),
-    // and Studio Unified Recursive AST adds 0058 (`template_override_media_ref_roles`);
+    // Manual Redirects & 404 Log S01 adds 0057 (`manual_redirects` + `not_found_logs`),
+    // Responsive Media & Replace S01 adds 0058 (`media_variants` + `media_replace_jobs` + `'media_regenerate'`),
+    // Revisions & Autosave adds 0059 (`entry_revisions` + `entry_autosaves`),
+    // Public Site Search S01 adds 0060 (`entry_search_fts` + `'search'`/`'search_reindex'`),
+    // and Studio Unified Recursive AST adds 0061 (`template_override_media_ref_roles`);
     // the 0040→0041 permalink preservation assertions above must still hold.
-    assert_eq!(migration_version, 58);
+    assert_eq!(migration_version, 61);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

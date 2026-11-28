@@ -230,7 +230,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
                     <div className="media-video-placeholder">MP4 · {formatNumber((asset.duration_ms ?? 0) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s</div>
                   ) : (
                     <img
-                      src={mediaThumbnailUrl(asset.id)}
+                      src={mediaThumbnailUrl(asset.id, asset.version)}
                       alt={asset.filename}
                       loading="lazy"
                       width={asset.thumb_width ?? undefined}

@@ -12,8 +12,9 @@ Custom React + TypeScript Unified Recursive AST visual page builder (`BlockNode[
   - Immutable mutations & clipboard: `[document.ts:newNodeId]`, `[document.ts:clone]`, `[document.ts:createStarterTemplateDocument]`, `[document.ts:insertBlock]`, `[document.ts:instantiateBlockNode]`, `[document.ts:initialBlockProps]`, `[document.ts:duplicateNode]`, `[document.ts:removeNode]`, `[document.ts:moveNode]`, `[document.ts:moveNodeSibling]`, `[document.ts:setNodeProps]`, `[document.ts:patchNodeProps]`, `[document.ts:setNodeMeta]`, `[document.ts:copyNodeOptions]`, `[document.ts:canPasteOptions]`, `[document.ts:pasteNodeOptions]`, `[document.ts:cloneWithFreshNodeIds]`.
 - **Core Editor (`BuilderEditorCore.tsx`):**
   - `[BuilderEditorCore.tsx:BuilderEditorCore]` (`StudioBuilderView` `'tree' | 'properties' | 'add'`): Shared editing core used by `StudioWorkspace` and `StudioCustomizerNav` (paired with `[../studio/StudioBlockTree.tsx:StudioBlockTree]`, `[../studio/StudioBlockCatalog.tsx:StudioBlockCatalog]`, and `[BuilderPreviewFrame.tsx:BuilderPreviewFrame]`).
-- **Sandboxed Live Preview (`BuilderPreviewFrame.tsx`):**
+- **Sandboxed Live Preview (`BuilderPreviewFrame.tsx`, `previewMediaRewrite.ts`):**
   - `[BuilderPreviewFrame.tsx:preparePreviewMarkup]`, `[BuilderPreviewFrame.tsx:PreparePreviewOptions]`, `[BuilderPreviewFrame.tsx:BuilderPreviewFrame]`, `[BuilderPreviewFrame.tsx:BuilderPreviewFrameProps]`: Prepares server-rendered preview HTML for `<iframe sandbox>`, mounts canvas gear controls (`data-od-kind` `section|container|block`), auto-opens enclosing `<details>` when selecting descendants, and bridges interactive pick/edit/menu/hover/scroll messages.
+  - `[previewMediaRewrite.ts:PRIVATE_MEDIA_PATH]`, `[previewMediaRewrite.ts:CSS_MEDIA_URL]`, `[previewMediaRewrite.ts:rewriteRootRelativeUrl]`, `[previewMediaRewrite.ts:rewritePreviewSrcset]`, `[previewMediaRewrite.ts:collectPrivateMediaPaths]`, `[previewMediaRewrite.ts:applyPreviewMediaRewrites]`: Handles versioned private/public media URLs, CSS `url(...)`, and responsive `img`/`source[srcset]` rewriting in preview markup.
 - **Inspector & Pattern Modal (`BuilderInspector.tsx`, `PatternLibraryModal.tsx`):**
   - `[BuilderInspector.tsx:BuilderInspector]`: Thin unified inspector wrapping `[../fields/UnifiedFieldForm.tsx:UnifiedFieldForm]` (`context="studio_block"`, `layoutMode="sidebar"`) plus `NodeMeta` attributes/visibility controls, with read-only lock presentation for unavailable providers.
   - `[PatternLibraryModal.tsx:PatternLibraryModal]`.
@@ -40,6 +41,7 @@ Custom React + TypeScript Unified Recursive AST visual page builder (`BlockNode[
   ```powershell
   npm --prefix cms/admin run typecheck
   npm --prefix cms/admin run build
+  npm --prefix cms/admin run test:media-preview
   ```
 - Standards, i18n, and Builder tests (`cms/scripts/`, `cms/admin/scripts/`):
   ```powershell

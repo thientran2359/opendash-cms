@@ -188,7 +188,7 @@ pub fn validate_template_csec_with_theme_urls(
     source: &str,
     policy: &ThemeUrlPolicy,
 ) -> Result<(), &'static str> {
-    validate_template_csec_with_usage_flags(name, source, policy, false, false).map(|_| ())
+    validate_template_csec_with_usage_flags(name, source, policy, false, false, false).map(|_| ())
 }
 
 pub(crate) fn validate_template_csec_with_usage_flags(
@@ -197,6 +197,7 @@ pub(crate) fn validate_template_csec_with_usage_flags(
     policy: &ThemeUrlPolicy,
     allow_od_icon: bool,
     allow_trusted_theme_markup: bool,
+    allow_search_form: bool,
 ) -> Result<ThemeTemplateUsageFlags, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
@@ -204,6 +205,7 @@ pub(crate) fn validate_template_csec_with_usage_flags(
     if source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
         || source.contains(BLOCK_CHILDREN_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(IMAGE_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {
         return Err("Theme HTML chứa marker icon nội bộ bị cấm.");
@@ -223,6 +225,7 @@ pub(crate) fn validate_template_csec_with_usage_flags(
         is_full_doctype_doc,
         policy,
         allow_trusted_theme_markup,
+        allow_search_form,
     )?;
 
     let mut env = restricted_environment();
@@ -256,8 +259,52 @@ pub fn render_csec_with_config(
     if rendered.len() > MAX_RENDERED_HTML_BYTES {
         return Err("HTML render vượt quá giới hạn 512 KiB.");
     }
-    validate_html_and_css_context(&rendered, true, false)?;
+    validate_html_and_css_context(&rendered, true, false, false)?;
     Ok(rendered)
+}
+
+/// Validates and renders a built-in default content template allowing `od_image()`.
+pub fn render_csec_with_images_and_config(
+    name: &str,
+    source: &str,
+    context: Value,
+    fmt_cfg: &RenderFormattingConfig,
+) -> Result<String, &'static str> {
+    validate_template_csec_with_usage_flags(
+        name,
+        source,
+        &ThemeUrlPolicy::default(),
+        true,
+        false,
+        false,
+    )?;
+    let mut env = restricted_environment_with_config(fmt_cfg);
+    let existing = ImageNonceTable::default();
+    let local_images = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    install_image_function(&mut env, &existing, &local_images, 0, &overflowed);
+    env.add_template(name, source)
+        .map_err(|_| "Không thể biên dịch template.")?;
+    let tpl = env
+        .get_template(name)
+        .map_err(|_| "Không tìm thấy template đã biên dịch.")?;
+    let rendered = tpl.render(context).map_err(|_| {
+        if overflowed.load(std::sync::atomic::Ordering::Relaxed) {
+            return "HTML render vượt quá giới hạn 512 KiB.";
+        }
+        "Lỗi thực thi template (fuel/recursion/strict undefined)."
+    })?;
+    if rendered.len() > MAX_RENDERED_HTML_BYTES {
+        return Err("HTML render vượt quá giới hạn 512 KiB.");
+    }
+    validate_html_and_css_context(&rendered, true, false, false)?;
+    let image_nonces = ImageNonceTable {
+        entries: local_images
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
+    };
+    image_nonces.substitute_into_document(rendered)
 }
 
 /// Checks theme v3 HTML and every declared part, then resolves the literal
@@ -298,7 +345,7 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
     {
         return Err("Template hoặc part vượt giới hạn 512 KiB.");
     }
-    let root_sites = composition_sites(root_name, root_source, false, policy)?;
+    let root_sites = composition_sites(root_name, root_source, false, policy, true)?;
     let part_policy = policy.without_cpt_entry_fields();
     let mut part_sites = BTreeMap::new();
     for (key, source) in parts {
@@ -307,7 +354,7 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
         }
         part_sites.insert(
             key.clone(),
-            composition_sites(key, source, true, &part_policy)?,
+            composition_sites(key, source, true, &part_policy, true)?,
         );
     }
 
@@ -350,8 +397,14 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
     }
     // This last check catches dangerous markup introduced across part boundaries,
     // in addition to the independent source checks before expansion.
-    let usage =
-        validate_template_csec_with_usage_flags(root_name, &compiled_source, policy, true, true)?;
+    let usage = validate_template_csec_with_usage_flags(
+        root_name,
+        &compiled_source,
+        policy,
+        true,
+        true,
+        true,
+    )?;
     Ok(CompiledCsecComposition {
         source: compiled_source,
         name: root_name.to_owned(),
@@ -432,6 +485,7 @@ pub(crate) fn composition_sites(
     source: &str,
     is_part: bool,
     policy: &ThemeUrlPolicy,
+    allow_search_form: bool,
 ) -> Result<Vec<CompositionSite>, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
@@ -440,6 +494,7 @@ pub(crate) fn composition_sites(
         || source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
         || source.contains(BLOCK_CHILDREN_NONCE_PREFIX)
         || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(IMAGE_NONCE_PREFIX)
         || source.contains(HOOK_NONCE_PREFIX)
     {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
@@ -452,7 +507,14 @@ pub(crate) fn composition_sites(
             .trim_start()
             .to_ascii_lowercase()
             .starts_with("<!doctype");
-    let _ = walk_theme_ast_with_url_scopes(&ast, is_part, is_full_doctype_doc, policy, true)?;
+    let _ = walk_theme_ast_with_url_scopes(
+        &ast,
+        is_part,
+        is_full_doctype_doc,
+        policy,
+        true,
+        allow_search_form,
+    )?;
     let mut sites = Vec::new();
     collect_composition_sites(&ast, source, false, &mut sites)?;
     sites.sort_by_key(|site| site.start);

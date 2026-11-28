@@ -88,7 +88,9 @@ pub(crate) fn classify_node_and_tail(
         (FieldTemplateNode::Media, &["url" | "thumbnail_url"]) => {
             Some(BlockSensitiveKind::MediaUrl)
         }
-        (FieldTemplateNode::Media, &["id" | "alt" | "width" | "height" | "kind"]) => None,
+        (FieldTemplateNode::Media, &["id" | "alt" | "width" | "height" | "kind" | "version"]) => {
+            None
+        }
         (FieldTemplateNode::Media, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
         (FieldTemplateNode::Gallery, _)
         | (FieldTemplateNode::Group(_), _)
@@ -113,7 +115,10 @@ pub(crate) fn classify_node_and_tail(
         ) => Some(BlockSensitiveKind::MediaUrl),
         (
             FieldTemplateNode::TermRef { multiple: false },
-            &["featured_image", "id" | "alt" | "width" | "height" | "kind"],
+            &[
+                "featured_image",
+                "id" | "alt" | "width" | "height" | "kind" | "version",
+            ],
         ) => None,
         (
             FieldTemplateNode::TermRef { multiple: false },
@@ -283,6 +288,60 @@ pub(crate) fn block_call_arg_touches_sensitive(
         | minijinja::machinery::ast::CallArg::KwargSplat(e) => {
             block_expr_touches_sensitive(e, scopes, policy)
         }
+    }
+}
+
+pub(crate) fn block_stmt_touches_sensitive(
+    stmt: &Stmt<'_>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> bool {
+    match stmt {
+        Stmt::Template(t) => t
+            .children
+            .iter()
+            .any(|c| block_stmt_touches_sensitive(c, scopes, policy)),
+        Stmt::EmitRaw(_) => false,
+        Stmt::EmitExpr(e) => block_expr_touches_sensitive(&e.expr, scopes, policy),
+        Stmt::IfCond(i) => {
+            block_expr_touches_sensitive(&i.expr, scopes, policy)
+                || i.true_body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+                || i.false_body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+        }
+        Stmt::ForLoop(f) => {
+            block_expr_touches_sensitive(&f.iter, scopes, policy)
+                || f.body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+                || f.else_body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+        }
+        Stmt::Set(s) => {
+            block_expr_touches_sensitive(&s.target, scopes, policy)
+                || block_expr_touches_sensitive(&s.expr, scopes, policy)
+        }
+        Stmt::SetBlock(sb) => {
+            block_expr_touches_sensitive(&sb.target, scopes, policy)
+                || sb
+                    .body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+        }
+        Stmt::WithBlock(w) => {
+            w.assignments.iter().any(|(k, v)| {
+                block_expr_touches_sensitive(k, scopes, policy)
+                    || block_expr_touches_sensitive(v, scopes, policy)
+            }) || w
+                .body
+                .iter()
+                .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+        }
+        _ => true,
     }
 }
 

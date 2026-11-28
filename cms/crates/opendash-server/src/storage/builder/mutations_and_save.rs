@@ -323,6 +323,7 @@ pub async fn migrate_demo_entry_builder_docs_on_startup(db: &SqlitePool) -> ApiR
             .bind(entry_id)
             .execute(&mut *tx)
             .await?;
+        crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, entry_id).await?;
         migrated += 1;
     }
     tx.commit().await?;

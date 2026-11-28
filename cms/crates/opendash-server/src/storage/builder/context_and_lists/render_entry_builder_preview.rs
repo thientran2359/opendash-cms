@@ -27,7 +27,7 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_scope(
     annotation_scope: RenderAnnotationScope,
 ) -> ApiResult<RenderedLayout> {
     let mut budget = page::RenderBudget::new();
-    render_entry_builder_preview_with_budget(
+    let mut rendered = render_entry_builder_preview_with_budget(
         tx,
         current,
         state,
@@ -37,7 +37,14 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_scope(
         &mut budget,
         page::BlockTemplateCache::global(),
     )
-    .await
+    .await?;
+    rendered.html =
+        crate::content_render::finalize_document_icons(rendered.html, &budget.icon_nonces)?;
+    rendered.html =
+        crate::content_render::finalize_document_images(rendered.html, &budget.image_nonces)?;
+    rendered.html =
+        crate::content_render::finalize_document_richtext(rendered.html, &budget.richtext_nonces)?;
+    Ok(rendered)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -67,6 +74,7 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_budget(
     let context = shared_preview.then_some(page::BuilderTemplateContext {
         content_html: None,
         parts: &parts,
+        search: None,
     });
     let scope = if current.opened.type_key == "pattern" {
         format!("pat_{}", current.opened.entry_id)

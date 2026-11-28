@@ -194,6 +194,9 @@ pub async fn install_plugin_revision(
     crate::storage::page::resync_plugin_block_acls_in_tx(&mut tx)
         .await
         .map_err(map_cnt_err)?;
+    crate::storage::search::sync_builder_entries_in_conn(&mut tx)
+        .await
+        .map_err(map_cnt_err)?;
     crate::storage::plugin_projections::delete_plugin_projections_in_tx(&mut tx, &manifest.id)
         .await
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi xóa plugin projections cũ: {e}")))?;
@@ -360,6 +363,9 @@ pub async fn set_plugin_enabled_cas(
     .await
     .map_err(map_cnt_err)?;
     crate::storage::page::resync_plugin_block_acls_in_tx(&mut tx)
+        .await
+        .map_err(map_cnt_err)?;
+    crate::storage::search::sync_builder_entries_in_conn(&mut tx)
         .await
         .map_err(map_cnt_err)?;
     if enabled {

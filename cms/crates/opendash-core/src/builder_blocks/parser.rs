@@ -165,16 +165,34 @@ fn collect_visible_text_nodes(
             {
                 continue;
             }
+            let mut raw_parts = Vec::new();
             entry
                 .descriptor
                 .schema
-                .extract_visible_text(&node.props, parts);
+                .extract_visible_text(&node.props, &mut raw_parts);
+            for raw_part in raw_parts {
+                let clean = crate::richtext::strip_richtext_to_plain(&raw_part);
+                if !clean.is_empty() {
+                    parts.push(clean);
+                }
+            }
             collect_visible_text_nodes(&node.children, schemas, parts);
-        } else if schemas.is_empty() {
+        } else if schemas.is_empty() || node.block_id.starts_with("core/") {
             collect_visible_text_fallback(node, parts);
             collect_visible_text_nodes(&node.children, schemas, parts);
         }
     }
+}
+
+/// Extracts human-readable plain text from an already parsed V1 `BuilderDocument`,
+/// skipping inactive/withdrawn plugin/theme subtrees when a `schemas` catalog is supplied.
+pub fn extract_document_visible_text(
+    doc: &BuilderDocument,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> String {
+    let mut parts = Vec::new();
+    collect_visible_text_nodes(&doc.blocks, schemas, &mut parts);
+    parts.join("\n\n")
 }
 
 /// Extracts human-readable plain text recursively across V1 `BlockNode`s, skipping
@@ -187,7 +205,5 @@ pub fn extract_visible_text_with_schemas(
         return raw_body.to_owned();
     }
     let parsed = parse_blocks_lenient_or_recover(raw_body);
-    let mut parts = Vec::new();
-    collect_visible_text_nodes(&parsed.document.blocks, schemas, &mut parts);
-    parts.join("\n\n")
+    extract_document_visible_text(&parsed.document, schemas)
 }

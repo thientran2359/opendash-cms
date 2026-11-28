@@ -369,6 +369,9 @@ pub async fn set_plugin_enabled(
     crate::storage::page::resync_plugin_block_acls_in_tx(&mut tx)
         .await
         .map_err(|e| e.1.into_owned())?;
+    crate::storage::search::sync_builder_entries_in_conn(&mut tx)
+        .await
+        .map_err(|e| e.1.into_owned())?;
     if enabled {
         crate::storage::admin_extensions::require_capacity_in_conn(&mut tx, "plugin", id, None)
             .await

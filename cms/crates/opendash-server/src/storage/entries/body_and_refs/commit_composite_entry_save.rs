@@ -185,6 +185,7 @@ pub async fn commit_composite_entry_save(
         Some(id) => {
             let expected_ver = input.expected_version.unwrap();
             current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
+            crate::storage::revisions::capture_baseline_if_missing_in_tx(&mut *tx, id).await?;
             let (old_values_json, was_ever_published_int): (String, i64) = sqlx::query_as(
                 "SELECT values_json, has_been_published FROM content_entries WHERE content_type_key = ? AND id = ?",
             )
@@ -290,6 +291,23 @@ pub async fn commit_composite_entry_save(
         .await?;
     }
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, saved_id).await?;
+    let (rev_source, clear_uid) = if entry_id.is_some() {
+        (
+            opendash_core::revisions::RevisionSource::Save,
+            Some(actor.user.id),
+        )
+    } else {
+        (opendash_core::revisions::RevisionSource::Create, None)
+    };
+    crate::storage::revisions::record_entry_revision_and_clear_autosave_in_tx(
+        &mut *tx,
+        saved_id,
+        rev_source,
+        crate::storage::revisions::RevisionActor::User(actor),
+        clear_uid,
+    )
+    .await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
@@ -453,6 +471,14 @@ pub async fn commit_entry_translation(
     )
     .await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::revisions::record_entry_revision_and_clear_autosave_in_tx(
+        &mut *tx,
+        new_id,
+        opendash_core::revisions::RevisionSource::Create,
+        crate::storage::revisions::RevisionActor::User(actor),
+        None,
+    )
+    .await?;
 
     let row: EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
@@ -463,6 +489,7 @@ pub async fn commit_entry_translation(
     .fetch_one(&mut *tx)
     .await?;
     let mut record = decoded_with_terms(&mut tx, row).await?;
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, new_id).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));

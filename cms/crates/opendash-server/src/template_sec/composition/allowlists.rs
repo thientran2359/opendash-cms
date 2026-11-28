@@ -13,6 +13,8 @@ pub(crate) const FORBIDDEN_TAGS: &[&str] = &[
     "input",
     "textarea",
     "select",
+    "option",
+    "optgroup",
     "fieldset",
     "svg",
     "math",

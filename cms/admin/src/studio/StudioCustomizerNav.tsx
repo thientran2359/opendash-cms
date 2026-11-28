@@ -65,6 +65,7 @@ interface Props {
   templateDirty: boolean;
   viewport: BuilderViewport;
   themeRevision: number;
+  templateDiagnostics?: Array<{ node_id: string; code: string }>;
   onBuilderMessage: (msg: string, failed?: boolean) => void;
   onApiError: (error: unknown, fallback: string) => void;
   disabled?: boolean;
@@ -93,6 +94,7 @@ function contextTargetForTemplate(target: TemplateTargetInput): BuilderContextTa
     case 'home': return { kind: 'home' };
     case 'index': return { kind: 'index' };
     case 'not_found': return { kind: 'not_found' };
+    case 'search': return { kind: 'search' };
   }
 }
 
@@ -167,6 +169,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   templateDirty,
   viewport,
   themeRevision,
+  templateDiagnostics = [],
   onBuilderMessage,
   onApiError,
   disabled = false,
@@ -537,6 +540,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               locale={previewLocale ?? localeState?.defaultLocale?.code ?? null}
               siteTimezone={generalDraft?.timezone}
               requiresContentSlot={selectedTarget.requires_content_slot}
+              diagnostics={templateDiagnostics}
               disabled={disabled}
               onMessage={onBuilderMessage}
               onApiError={onApiError}

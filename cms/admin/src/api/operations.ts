@@ -7,9 +7,12 @@ export interface MissingCanonicalDiagnostic {
   lifecycle_state: string;
 }
 
+export type ReconcileOrphanKind = 'canonical' | 'variant';
+
 export interface ReconcileOrphanCandidate {
   media_id: string;
   logical_key: string;
+  kind?: ReconcileOrphanKind;
   size_bytes: number;
   modified_unix_secs: number;
   sha256: string;
@@ -35,7 +38,14 @@ export interface ReconcilePlan {
 
 export interface OperationJob {
   id: string;
-  kind: 'backup' | 'restore' | 'reconcile' | 'purge' | 'media_delete';
+  kind:
+    | 'backup'
+    | 'restore'
+    | 'reconcile'
+    | 'purge'
+    | 'media_delete'
+    | 'media_regenerate'
+    | 'search_reindex';
   state: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
   version: number;
   actor_user_id: string | null;
@@ -275,5 +285,36 @@ export function activateRecovery(
     contentType: 'application/json',
     body: JSON.stringify(input),
     defaultErrorMessage: __("Could not activate the site after restore."),
+  });
+}
+
+export interface SearchIndexStatus {
+  indexed_documents: number;
+  eligible_published_entries: number;
+  in_sync: boolean;
+  maintenance_active: boolean;
+  last_job: OperationJob | null;
+}
+
+export interface SearchReindexResult {
+  job: OperationJob;
+  indexed_documents: number;
+  eligible_published_entries: number;
+  in_sync: boolean;
+  duration_ms: number;
+}
+
+export function getSearchIndexStatus(): Promise<SearchIndexStatus> {
+  return requestJson<SearchIndexStatus>('/api/admin/tools/search/status', {
+    method: 'GET',
+    defaultErrorMessage: __("Could not load search index status."),
+  });
+}
+
+export function reindexSearchIndex(csrfToken: string): Promise<SearchReindexResult> {
+  return requestJson<SearchReindexResult>('/api/admin/tools/search/reindex', {
+    method: 'POST',
+    csrfToken,
+    defaultErrorMessage: __("Could not rebuild search index."),
   });
 }

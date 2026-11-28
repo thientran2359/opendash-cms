@@ -56,6 +56,7 @@ pub(crate) async fn render_not_found_response_for_locale(
     let locale_ctx =
         seo::build_theme_locale_context(db, Some(&resolved_locale), seo::ThemeLocaleTarget::None)
             .await?;
+    let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active.as_ref(), &resolved_locale, locale_ctx);
     let l10n = content_render::core_l10n(&resolved_locale);
     let breadcrumbs = content_render::not_found_breadcrumbs(
@@ -91,6 +92,7 @@ pub(crate) async fn render_not_found_response_for_locale(
             content_type: None,
             entry: None,
             list_pages: None,
+            search: &inactive_search,
         },
         &mut budget,
         cache,
@@ -137,6 +139,7 @@ pub(crate) async fn render_not_found_response_for_locale(
     )
     .await?;
     let html = content_render::finalize_document_icons(html, &budget.render_budget.icon_nonces)?;
+    let html = content_render::finalize_document_images(html, &budget.render_budget.image_nonces)?;
     let html =
         content_render::finalize_document_richtext(html, &budget.render_budget.richtext_nonces)?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
@@ -321,6 +324,7 @@ pub(crate) async fn render_canonical_archive(
         },
     )
     .await?;
+    let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active_v3.as_ref(), &locale, locale_ctx);
     // Do not export ContentTypeDefinition fields/settings/defaults to a
     // public theme: field-level access is represented exclusively by
@@ -352,6 +356,7 @@ pub(crate) async fn render_canonical_archive(
             content_type: Some(&ct_value),
             entry: None,
             list_pages: None,
+            search: &inactive_search,
         },
         &mut budget,
         cache,
@@ -408,7 +413,13 @@ pub(crate) async fn render_canonical_archive(
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::finalize_document_richtext(
-            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            content_render::finalize_document_images(
+                content_render::finalize_document_icons(
+                    composed,
+                    &budget.render_budget.icon_nonces,
+                )?,
+                &budget.render_budget.image_nonces,
+            )?,
             &budget.render_budget.richtext_nonces,
         )?,
         body.has_active_contact_form || shell_has_form,

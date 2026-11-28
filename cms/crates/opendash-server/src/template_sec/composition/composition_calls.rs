@@ -135,6 +135,7 @@ pub(crate) fn reject_icons_in_set_block(children: &[Stmt<'_>]) -> Result<(), &'s
         match stmt {
             Stmt::EmitExpr(e) => {
                 parse_od_icon_call_ext(&e.expr, true).is_ok_and(|v| v.is_some())
+                    || parse_od_image_call(&e.expr).is_ok_and(|v| v.is_some())
                     || parse_od_hook_call(&e.expr).is_ok_and(|v| v.is_some())
             }
             Stmt::IfCond(c) => c.true_body.iter().chain(&c.false_body).any(contains_icon),

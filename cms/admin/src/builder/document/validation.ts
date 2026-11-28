@@ -33,6 +33,7 @@ const TEMPLATE_CONTEXT_KINDS = new Set<BuilderContextTarget['kind']>([
   'archive',
   'taxonomy',
   'not_found',
+  'search',
 ]);
 
 export function parsePositiveInt(value: unknown): number | null {

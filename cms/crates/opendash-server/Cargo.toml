@@ -26,6 +26,7 @@ sqlx = { workspace = true }
 subtle = { workspace = true }
 tokio = { workspace = true }
 url = { workspace = true }
+webp = { workspace = true }
 reqwest = { workspace = true }
 rust-embed = { workspace = true }
 wasmi = { workspace = true }

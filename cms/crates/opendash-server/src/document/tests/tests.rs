@@ -345,3 +345,51 @@ fn sanitize_render_head_fragment_strips_entity_encoded_seo_tags() {
         "expected sanitize_render_head_fragment to reject unquoted-attr SEO smuggling"
     );
 }
+
+#[test]
+fn document_normalizer_gates_picture_source_and_admin_media_preview_urls() {
+    let id = "a".repeat(64);
+    let public_picture = format!(
+        "<picture><source type=\"image/webp\" srcset=\"/media/{id}/variant/medium.webp?v=2 768w\"><img src=\"/media/{id}/file?v=2\" srcset=\"/media/{id}/variant/medium.jpg?v=2 768w\" sizes=\"100vw\" alt=\"OK\"></picture>"
+    );
+    let ok_pub = normalize_public_document(&public_picture).unwrap();
+    assert!(ok_pub.body_fragment.contains("<source "));
+    assert!(ok_pub.body_fragment.contains("</picture>"));
+
+    let admin_picture = format!(
+        "<picture><source type=\"image/webp\" srcset=\"/api/admin/media/{id}/variant/medium.webp?v=2 768w\"><img src=\"/api/admin/media/{id}/file?v=2\" alt=\"Preview\"></picture>"
+    );
+    assert_eq!(
+        normalize_public_document(&admin_picture).unwrap_err().code,
+        "invalid_media_srcset"
+    );
+    assert_eq!(
+        normalize_public_document(&format!("<img src=\"/api/admin/media/{id}/file?v=2\">"))
+            .unwrap_err()
+            .code,
+        "forbidden_admin_media_url"
+    );
+    let ok_prev = normalize_document_with_policy(
+        &admin_picture,
+        DocumentNormalizeOptions {
+            allow_trusted_theme_markup: false,
+            allow_admin_media_preview: true,
+        },
+    )
+    .unwrap();
+    assert!(ok_prev.body_fragment.contains("/api/admin/media/"));
+
+    assert_eq!(
+        normalize_document_with_policy(
+            "<source srcset=\"x 1x\"></source>",
+            DocumentNormalizeOptions::default(),
+        )
+        .unwrap_err()
+        .code,
+        "invalid_media_srcset"
+    );
+    assert_eq!(
+        normalize_public_document("</source>").unwrap_err().code,
+        "unexpected_void_close_tag"
+    );
+}

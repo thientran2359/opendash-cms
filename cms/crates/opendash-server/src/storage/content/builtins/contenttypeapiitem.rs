@@ -242,6 +242,7 @@ pub async fn insert_user_content_type(
             verify_effective_schema_transition(None, &effective, false)
                 .map_err(|e| map_transition_error(e, true))?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+            crate::storage::search::sync_entries_for_type_in_conn(&mut tx, &definition.key).await?;
             tx.commit().await?;
             crate::cache::SiteCacheEpoch::global().bump();
             Ok(ContentTypeApiItem {
@@ -351,6 +352,7 @@ pub async fn update_user_content_type(
         .map_err(|e| map_transition_error(e, true))?;
 
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entries_for_type_in_conn(&mut tx, type_key).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(ContentTypeApiItem {
@@ -456,6 +458,9 @@ pub async fn create_user_field_group(
     let created = load_field_group_in_tx(&mut tx, &group_id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group vừa tạo."))?;
+    for target in &input.target_types {
+        crate::storage::search::sync_entries_for_type_in_conn(&mut tx, target).await?;
+    }
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(created)

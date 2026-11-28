@@ -109,6 +109,14 @@ pub async fn get(db: &SqlitePool, id: i64) -> ApiResult<PatternRecord> {
 }
 
 pub async fn create(db: &SqlitePool, input: &PatternInput) -> ApiResult<PatternRecord> {
+    create_for_actor(db, input, None).await
+}
+
+pub async fn create_for_actor(
+    db: &SqlitePool,
+    input: &PatternInput,
+    actor: Option<&crate::auth::SessionContext>,
+) -> ApiResult<PatternRecord> {
     validate(input)?;
     let mut tx = db.begin().await?;
     reserve_writer(&mut tx).await?;
@@ -139,6 +147,17 @@ pub async fn create(db: &SqlitePool, input: &PatternInput) -> ApiResult<PatternR
     .bind(serde_json::to_string(&BuilderDocument::empty())?)
     .execute(&mut *tx)
     .await?;
+    let rev_actor = actor
+        .map(crate::storage::revisions::RevisionActor::User)
+        .unwrap_or(crate::storage::revisions::RevisionActor::System);
+    crate::storage::revisions::capture_entry_revision_in_tx(
+        &mut *tx,
+        id,
+        opendash_core::revisions::RevisionSource::PatternSave,
+        None,
+        rev_actor,
+    )
+    .await?;
     let created = get_in_tx(&mut tx, id).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
@@ -151,6 +170,16 @@ pub async fn update(
     version: i64,
     input: &PatternInput,
 ) -> ApiResult<PatternRecord> {
+    update_for_actor(db, id, version, input, None).await
+}
+
+pub async fn update_for_actor(
+    db: &SqlitePool,
+    id: i64,
+    version: i64,
+    input: &PatternInput,
+    actor: Option<&crate::auth::SessionContext>,
+) -> ApiResult<PatternRecord> {
     validate(input)?;
     let mut tx = db.begin().await?;
     reserve_writer(&mut tx).await?;
@@ -160,6 +189,7 @@ pub async fn update(
             "Pattern đã thay đổi; nháp chưa lưu.",
         ));
     }
+    crate::storage::revisions::capture_baseline_if_missing_in_tx(&mut *tx, id).await?;
     let result = sqlx::query(
         "UPDATE content_entries
             SET title=?,slug=?,version=version+1,updated_at=datetime('now')
@@ -181,6 +211,17 @@ pub async fn update(
     if updated.rows_affected() != 1 {
         return Err(ApiError::precondition_failed("Pattern đã thay đổi."));
     }
+    let rev_actor = actor
+        .map(crate::storage::revisions::RevisionActor::User)
+        .unwrap_or(crate::storage::revisions::RevisionActor::System);
+    crate::storage::revisions::capture_entry_revision_in_tx(
+        &mut *tx,
+        id,
+        opendash_core::revisions::RevisionSource::PatternSave,
+        None,
+        rev_actor,
+    )
+    .await?;
     let record = get_in_tx(&mut tx, id).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();

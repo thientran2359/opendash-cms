@@ -134,6 +134,13 @@ impl BuilderContextTarget {
                     ..
                 }
             ),
+            "search" => matches!(
+                self,
+                Self::Template {
+                    kind: K::Search,
+                    ..
+                }
+            ),
             "loop_item" => false,
             other => {
                 if let Some(cpt) = other.strip_prefix("entry_body:") {
