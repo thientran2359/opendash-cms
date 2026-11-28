@@ -62,6 +62,7 @@ export function TermEditPage({
   const [definition, setDefinition] = useState<TaxonomyDefinition | null>(null);
   const [allTerms, setAllTerms] = useState<TaxonomyTerm[]>([]);
   const [form, setForm] = useState<FormValues>(recovered?.form ?? blank);
+  const [sortOrderText, setSortOrderText] = useState<string>(() => String(form.sortOrder));
   const [baseline, setBaseline] = useState<FormValues>(recovered?.baseline ?? blank);
   const [version, setVersion] = useState<number | null>(recovered?.version ?? null);
   const [manualSlug, setManualSlug] = useState(recovered?.manualSlug ?? false);
@@ -360,7 +361,15 @@ export function TermEditPage({
           <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-sort-order">
             <span>{__("Sort order")}</span>
             <input id="term-sort-order" type="number" className={fieldClass} disabled={busy || !canEditCore}
-              value={form.sortOrder} onChange={e => setForm(prev => ({ ...prev, sortOrder: Number(e.target.value) || 0 }))} />
+              value={sortOrderText === '' ? '' : String(form.sortOrder) === sortOrderText ? sortOrderText : String(form.sortOrder)}
+              onChange={e => {
+                const raw = e.target.value;
+                setSortOrderText(raw);
+                if (raw.trim() !== '' && Number.isFinite(Number(raw))) {
+                  setForm(prev => ({ ...prev, sortOrder: Math.trunc(Number(raw)) }));
+                }
+              }}
+              onBlur={() => setSortOrderText(String(form.sortOrder))} />
           </label>
         </div>
 

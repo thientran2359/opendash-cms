@@ -61,10 +61,13 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
             setErrorMsg(job.error_message || __("Restore failed."));
           }
         })
-        .catch(() => {});
+        .catch((err) => {
+          setErrorMsg(err instanceof Error ? err.message : __("Lost connection while checking restore job status."));
+          onApiError(err);
+        });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [activeJob]);
+  }, [activeJob, onApiError]);
 
   const handleRestoreUploadAndRun = async (e: React.FormEvent) => {
     e.preventDefault();

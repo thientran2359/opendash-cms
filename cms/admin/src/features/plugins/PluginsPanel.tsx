@@ -297,9 +297,18 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
               : __("Review permissions, configure settings and enable or disable plugins running in the Wasmi sandbox.")}
           </p>
         </div>
-        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>
-          {loading ? __("Loading...") : __("Reload list")}
-        </AdminButton>
+        {mode === 'install' ? (
+          <a
+            href="#/plugins"
+            className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 no-underline transition-colors hover:bg-zinc-50"
+          >
+            {_x("Installed plugins", "plugins.tab_installed")}
+          </a>
+        ) : (
+          <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>
+            {loading ? __("Loading...") : __("Reload list")}
+          </AdminButton>
+        )}
       </div>
 
       {mode === 'install' && <section className="max-w-2xl rounded-xl border border-zinc-200 bg-zinc-50 p-4 sm:p-5" aria-labelledby="plugin-upload-heading">

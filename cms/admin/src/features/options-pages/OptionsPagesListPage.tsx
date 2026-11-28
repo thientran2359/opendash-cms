@@ -88,6 +88,7 @@ export const OptionsPagesListPage: React.FC<OptionsPagesListPageProps> = ({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [activeKey, setActiveKey] = useState<string>('');
+  const [menuPosText, setMenuPosText] = useState('50');
   const [form, setForm] = useState<PageFormState>(emptyForm);
   const [baseline, setBaseline] = useState<PageFormState>(emptyForm);
   const [manualKey, setManualKey] = useState(false);
@@ -477,8 +478,15 @@ export const OptionsPagesListPage: React.FC<OptionsPagesListPageProps> = ({
                     max={1000}
                     disabled={!canEditForm || busy}
                     className={INPUT_CLASS}
-                    value={form.menu_position}
-                    onChange={e => setForm(prev => ({ ...prev, menu_position: Number(e.target.value) || 0 }))}
+                    value={menuPosText === '' ? '' : String(form.menu_position) === menuPosText ? menuPosText : String(form.menu_position)}
+                    onChange={e => {
+                      const raw = e.target.value;
+                      setMenuPosText(raw);
+                      if (raw.trim() !== '' && Number.isFinite(Number(raw))) {
+                        setForm(prev => ({ ...prev, menu_position: Math.max(0, Math.min(1000, Math.trunc(Number(raw)))) }));
+                      }
+                    }}
+                    onBlur={() => setMenuPosText(String(form.menu_position))}
                   />
                 </label>
               </div>

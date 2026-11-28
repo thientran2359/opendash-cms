@@ -102,34 +102,22 @@ const AppContent: React.FC = () => {
   const [contentDirty, setContentDirty] = useState(false);
   const [schemaDirty, setSchemaDirty] = useState(false);
   const schemaDirtyRef = useRef(false);
-  const markSchemaDirty = useCallback((value: boolean) => {
-    schemaDirtyRef.current = value;
-    setSchemaDirty(value);
-  }, []);
+  const markSchemaDirty = useCallback((value: boolean) => { schemaDirtyRef.current = value; setSchemaDirty(value); }, []);
   const [permalinkDirty, setPermalinkDirty] = useState(false);
   const permalinkDirtyRef = useRef(false);
-  const markPermalinkDirty = useCallback((value: boolean) => {
-    permalinkDirtyRef.current = value;
-    setPermalinkDirty(value);
-  }, []);
+  const markPermalinkDirty = useCallback((value: boolean) => { permalinkDirtyRef.current = value; setPermalinkDirty(value); }, []);
   const [readingDirty, setReadingDirty] = useState(false);
   const readingDirtyRef = useRef(false);
-  const markReadingDirty = useCallback((value: boolean) => {
-    readingDirtyRef.current = value;
-    setReadingDirty(value);
-  }, []);
+  const markReadingDirty = useCallback((value: boolean) => { readingDirtyRef.current = value; setReadingDirty(value); }, []);
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const settingsDirtyRef = useRef(false);
+  const markSettingsDirty = useCallback((value: boolean) => { settingsDirtyRef.current = value; setSettingsDirty(value); }, []);
   const [toolsDirty, setToolsDirty] = useState(false);
   const toolsDirtyRef = useRef(false);
-  const markToolsDirty = useCallback((value: boolean) => {
-    toolsDirtyRef.current = value;
-    setToolsDirty(value);
-  }, []);
+  const markToolsDirty = useCallback((value: boolean) => { toolsDirtyRef.current = value; setToolsDirty(value); }, []);
   const [studioDirty, setStudioDirty] = useState(false);
   const studioDirtyRef = useRef(false);
-  const markStudioDirty = useCallback((value: boolean) => {
-    studioDirtyRef.current = value;
-    setStudioDirty(value);
-  }, []);
+  const markStudioDirty = useCallback((value: boolean) => { studioDirtyRef.current = value; setStudioDirty(value); }, []);
   const [postsDirty, setPostsDirty] = useState(false);
   const [pagesDirty, setPagesDirty] = useState(false);
   const [patternsDirty, setPatternsDirty] = useState(false);
@@ -137,10 +125,7 @@ const AppContent: React.FC = () => {
   const markPatternsDirty = (value: boolean) => { patternsDirtyRef.current = value; setPatternsDirty(value); };
   const [termDirty, setTermDirty] = useState(false);
   const termDirtyRef = useRef(false);
-  const markTermDirty = (next: boolean) => {
-    termDirtyRef.current = next;
-    setTermDirty(next);
-  };
+  const markTermDirty = (next: boolean) => { termDirtyRef.current = next; setTermDirty(next); };
   const [contentRevision, setContentRevision] = useState(0);
   const acceptedHashRef = useRef(window.location.hash || '#/dashboard');
   const historyIndexRef = useRef(0);
@@ -272,17 +257,19 @@ const AppContent: React.FC = () => {
       && acceptedHashRef.current !== destination && permalinkDirtyRef.current;
     const leavingReading = current.view === 'settings' && current.sub === 'reading'
       && acceptedHashRef.current !== destination && readingDirtyRef.current;
+    const leavingSettings = current.view === 'settings' && (current.sub === 'general' || current.sub === 'seo')
+      && acceptedHashRef.current !== destination && settingsDirtyRef.current;
     const leavingTools = current.view === 'tools' && (current.sub === 'redirects' || current.sub === '404-log')
       && acceptedHashRef.current !== destination && toolsDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    const hasDirty = leavingDirtyEditor || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading || leavingTools;
+    const hasDirty = leavingDirtyEditor || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading || leavingSettings || leavingTools;
     if (!hasDirty) return true;
     const approved = window.confirm(leavingStudio
           ? __("Studio customization has unsaved changes. Discard changes and exit?")
         : leavingTerm
           ? __("Taxonomy has unsaved changes. Leaving will discard your draft. Continue?")
-          : leavingSchema || leavingPattern || leavingPermalinks || leavingReading || leavingTools
+          : leavingSchema || leavingPattern || leavingPermalinks || leavingReading || leavingSettings || leavingTools
             ? __("There are unsaved changes. Leaving may discard your draft. Continue?")
             : __("There are unsaved changes. Leave this screen? The draft will be kept for this session."));
     if (approved && leavingStudio) {
@@ -366,13 +353,13 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(studioDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || toolsDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(studioDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || settingsDirtyRef.current || toolsDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, toolsDirty, postsDirty, pagesDirty, termDirty, patternsDirty]);
+  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, settingsDirty, toolsDirty, postsDirty, pagesDirty, termDirty, patternsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -660,7 +647,7 @@ const AppContent: React.FC = () => {
       ]))}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || toolsDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
+      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || settingsDirty || toolsDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
       devMode={devMode}
       devTheme={devTheme}
       devPlugins={devPlugins}
@@ -787,7 +774,7 @@ const AppContent: React.FC = () => {
         />
       }
       settingsContent={route.sub === 'general'
-        ? <GeneralSettingsPanel key={`general:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, __("Site settings failed."))} />
+        ? <GeneralSettingsPanel key={`general:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onDirtyChange={markSettingsDirty} onApiError={(error) => scopedTaxonomyApiError(error, __("Site settings failed."))} />
         : route.sub === 'multilingual'
           ? <MultilingualSettingsPage key={`multilingual:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, __("Site settings failed."))} />
         : route.sub === 'permalinks'
@@ -801,7 +788,7 @@ const AppContent: React.FC = () => {
               onApiError={(error) => scopedTaxonomyApiError(error, __("Reading settings failed."))}
               onDirtyChange={markReadingDirty} />
         : route.sub === 'seo'
-          ? <SeoPanel csrfToken={csrfToken} localeState={localeState} onApiError={(error) => handleApiError(error, __("Homepage SEO failed."))} />
+          ? <SeoPanel csrfToken={csrfToken} localeState={localeState} onDirtyChange={markSettingsDirty} onApiError={(error) => handleApiError(error, __("Homepage SEO failed."))} />
           : route.sub === 'smtp'
             ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("SMTP settings failed."))} />
             : null}

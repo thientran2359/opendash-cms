@@ -142,10 +142,10 @@ export function PatternsPage({ route, user, csrfToken, onApiError, onNavigateHas
     {!isEdit && !isNew && <>
       {canWrite && <button type="button" onClick={() => onNavigateHash('#/patterns/new')}>{__("Add pattern")}</button>}
       <div className="overflow-x-auto"><table className="min-w-full text-left text-sm">
-        <thead><tr><th className="p-2">ID</th><th className="p-2">{__("Title")}</th><th className="p-2">Slug</th><th className="p-2">{__("In use")}</th><th className="p-2">{__("Actions")}</th></tr></thead>
+        <thead><tr><th className="p-2">{__("ID")}</th><th className="p-2">{__("Title")}</th><th className="p-2">{__("Slug")}</th><th className="p-2">{__("In use")}</th><th className="p-2">{__("Actions")}</th></tr></thead>
         <tbody>{items.map(item => <tr key={item.id} className="border-t border-slate-200">
           <td className="p-2">#{item.id}</td><td className="p-2">{item.title}</td><td className="p-2">{item.slug}</td>
-          <td className="p-2">{item.referencing_count}{' '}{__("entries")}</td>
+          <td className="p-2">{__("{{count}} entries", { count: item.referencing_count })}</td>
           <td className="p-2"><button type="button" onClick={() => onNavigateHash(`#/patterns/${item.id}/edit`)}>{__("View pattern")}</button></td>
         </tr>)}</tbody>
       </table></div>
@@ -158,12 +158,12 @@ export function PatternsPage({ route, user, csrfToken, onApiError, onNavigateHas
       <label className="grid gap-1 text-sm font-medium">{__("Private slug")}<input aria-label={__("Pattern slug")} className="w-full" maxLength={64} value={slug}
           onChange={event => { setSlug(event.target.value); markDirty(true); }} required disabled={!canWrite} />
       </label>
-      {current && <p className="text-sm text-slate-600">{_x("Pattern #", "feature.patterns")}{current.id}{' '}{__("· version v")}{current.version} · {current.referencing_count}{' '}{__("entries using this pattern · no public URL")}</p>}
+      {current && <p className="text-sm text-slate-600">{__("Pattern #{{id}} · version v{{version}} · {{count}} entries using this pattern · no public URL", { id: current.id, version: current.version, count: current.referencing_count })}</p>}
       <div className="flex flex-wrap gap-2">
         {canWrite && <button type="submit" disabled={saving || (isEdit && !dirty)}>{saving ? __("Saving…") : __("Save pattern")}</button>}
         {current && canWrite && <button type="button" className="btn-secondary"
           onClick={() => onNavigateHash(`#/studio/entry/pattern/${current.id}`)}>{__("Open pattern builder")}</button>}
-        {current && canWrite && <button type="button" className="btn-secondary" disabled={saving || dirty}
+        {current && canWrite && <button type="button" className="btn-danger" disabled={saving || dirty}
           onClick={() => void remove()}>{__("Delete pattern")}</button>}
       </div>
       {dirty && current && <p className="text-xs text-amber-800">{__("Save or discard metadata changes before deleting the pattern.")}</p>}

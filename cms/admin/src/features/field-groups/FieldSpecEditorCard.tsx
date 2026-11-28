@@ -238,7 +238,9 @@ export const FieldSpecEditorCard: React.FC<FieldSpecEditorCardProps> = ({
                             update({ default: JSON.parse(raw) });
                             return;
                           }
-                        } catch {}
+                        } catch {
+                          // Keep raw string while user is typing partial JSON.
+                        }
                         update({ default: raw });
                       }} />
                   </label>
