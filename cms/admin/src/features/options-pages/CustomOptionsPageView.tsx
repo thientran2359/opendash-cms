@@ -269,6 +269,18 @@ export const CustomOptionsPageView: React.FC<CustomOptionsPageViewProps> = ({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {snapshot && <AdminBadge tone="neutral">v{snapshot.version}</AdminBadge>}
+          {user.role === 'admin' &&
+            snapshot?.page?.parent_menu === 'appearance' &&
+            snapshot.page.provider_status === 'active' &&
+            snapshot.page.declaration_state === 'declared' && (
+              <AdminButton
+                variant="secondary"
+                size="sm"
+                onClick={() => onNavigateHash(`#/studio/options/custom/${encodeURIComponent(pageKey)}`)}
+              >
+                {__("Open in Studio")}
+              </AdminButton>
+            )}
           {user.role === 'admin' && (
             <AdminButton
               variant="secondary"

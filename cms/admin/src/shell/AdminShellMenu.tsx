@@ -19,6 +19,13 @@ export interface OptionsPageMenuItem {
   menu_icon?: string | null;
   menu_position: number;
   min_edit_role: 'admin' | 'editor';
+  provider_status?: 'active' | 'inactive' | 'missing';
+  declaration_state?: 'declared' | 'withdrawn';
+}
+
+export function isActiveDeclaredOptionsPage(page: OptionsPageMenuItem): boolean {
+  return (page.provider_status ?? 'active') === 'active'
+    && (page.declaration_state ?? 'declared') === 'declared';
 }
 
 export {
@@ -121,7 +128,8 @@ export function buildMenuTree(
       };
     }),
     ...visibleOptionsPages
-      .filter(page => !(page.parent_menu === 'settings' && isAdmin))
+      .filter(page => !(page.parent_menu === 'settings' && isAdmin) && !(page.parent_menu === 'appearance' && isAdmin))
+      .filter(page => !(page.parent_menu === 'appearance' && !isAdmin && !isActiveDeclaredOptionsPage(page)))
       .map(page => ({
         id: `options:${page.page_key}`,
         label: page.menu_label,
@@ -130,7 +138,7 @@ export function buildMenuTree(
         group: (page.parent_menu === 'top_level'
           ? undefined
           : page.parent_menu === 'appearance'
-            ? 'appearance'
+            ? (isAdmin ? 'appearance' : 'content')
             : page.parent_menu === 'system' || page.parent_menu === 'settings'
               ? 'system'
               : 'content') as NavigationGroup | undefined,
@@ -165,19 +173,25 @@ export function buildMenuTree(
     },
     {
       id: 'studio',
-      label: __("Customize appearance"),
+      label: __("Customize Studio"),
       icon: 'builder',
       hash: '#/studio',
       group: 'appearance',
       adminOnly: true,
-    },
-    {
-      id: 'menus',
-      label: __("Menus"),
-      icon: 'menus',
-      hash: '#/studio?panel=menus',
-      group: 'appearance',
-      adminOnly: true,
+      children: [
+        { label: __("Site identity"), hash: '#/studio/identity' },
+        { label: __("Options"), hash: '#/studio/options' },
+        { label: __("Menus"), hash: '#/studio/menus' },
+        ...(isAdmin
+          ? visibleOptionsPages
+              .filter(page => page.parent_menu === 'appearance' && isActiveDeclaredOptionsPage(page))
+              .map(page => ({
+                label: page.menu_label,
+                hash: `#/studio/options/custom/${encodeURIComponent(page.page_key)}`,
+              }))
+          : []),
+        { label: __("Templates"), hash: '#/studio/templates' },
+      ],
     },
     {
       id: 'patterns',

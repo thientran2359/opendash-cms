@@ -41,6 +41,7 @@ export interface TransientStudioOverrides {
   global_options?: Record<string, unknown>;
   theme_options?: Record<string, unknown>;
   menu_slots?: Record<string, number | null>;
+  options_pages?: Record<string, Record<string, unknown>>;
 }
 
 export interface StudioPreviewInput {
@@ -86,6 +87,9 @@ export function postStudioPreview(
     }
     if (input.transient.menu_slots) {
       transient.menu_slots = input.transient.menu_slots;
+    }
+    if (input.transient.options_pages && Object.keys(input.transient.options_pages).length > 0) {
+      transient.options_pages = input.transient.options_pages;
     }
     if (Object.keys(transient).length > 0) {
       payload.transient = transient;

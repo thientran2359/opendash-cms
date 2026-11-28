@@ -1,4 +1,12 @@
 import type { Role } from '../types.ts';
+import {
+  parseLegacyBuilderRoute,
+  parseStudioRoute,
+  type StudioOptionsScope,
+  type StudioPanelId,
+} from './studioRouter.ts';
+
+export type { StudioOptionsScope, StudioPanelId };
 
 export type AdminView =
   | 'dashboard'
@@ -21,23 +29,6 @@ export type AdminView =
   | 'content-structure'
   | 'options-page';
 
-export type StudioPanelId =
-  | 'root'
-  | 'identity'
-  | 'theme-options'
-  | 'menus'
-  | 'reading'
-  | 'templates';
-
-const STUDIO_PANELS: StudioPanelId[] = [
-  'root',
-  'identity',
-  'theme-options',
-  'menus',
-  'reading',
-  'templates',
-];
-
 export interface ParsedRoute {
   view: AdminView;
   sub: string;
@@ -47,6 +38,7 @@ export interface ParsedRoute {
   taxonomyMode?: 'definitions' | 'list' | 'new' | 'edit' | 'invalid';
   templateRole?: string;
   studioPanel?: StudioPanelId;
+  studioOptionsRoute?: StudioOptionsScope;
   studioTemplateKey?: string;
   redirectHash?: string;
   rawHash: string;
@@ -256,10 +248,11 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     if (sub === 'options') {
       return {
         view: 'studio',
-        sub: 'theme-options',
-        studioPanel: 'theme-options',
+        sub: 'options',
+        studioPanel: 'options',
+        studioOptionsRoute: { kind: 'index' },
         rawHash: '#/appearance/options',
-        redirectHash: '#/studio?panel=theme-options',
+        redirectHash: '#/studio/options',
       };
     }
     if (sub === 'menus') {
@@ -268,138 +261,16 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
         sub: 'menus',
         studioPanel: 'menus',
         rawHash: '#/appearance/menus',
-        redirectHash: '#/studio?panel=menus',
+        redirectHash: '#/studio/menus',
       };
     }
     return { view: 'themes', sub: 'themes', rawHash: '#/appearance/themes' };
   }
   if (first === 'studio') {
-    if (segs[1] === 'entry') {
-      const rawTypeKey = segs[2] ? decodeURIComponent(segs[2]) : undefined;
-      const entryId = segs[3] && /^[1-9]\d*$/.test(segs[3]) && Number.isSafeInteger(Number(segs[3]))
-        ? Number(segs[3])
-        : undefined;
-      const valid =
-        segs.length === 4 &&
-        Boolean(rawTypeKey) &&
-        rawTypeKey !== 'section' &&
-        /^[a-z][a-z0-9_]{0,63}$/.test(rawTypeKey ?? '') &&
-        entryId !== undefined;
-      return {
-        view: 'studio-entry',
-        sub: valid ? 'entry' : 'invalid',
-        typeKey: rawTypeKey,
-        entryId,
-        rawHash: hash,
-      };
-    }
-    const rawPanel = params.get('panel');
-    const studioTemplateKey = params.get('template') ?? undefined;
-    const validPanel = rawPanel && STUDIO_PANELS.includes(rawPanel as StudioPanelId)
-      ? (rawPanel as StudioPanelId)
-      : studioTemplateKey
-        ? 'templates'
-        : 'root';
-    const valid = segs.length === 1 && (!rawPanel || STUDIO_PANELS.includes(rawPanel as StudioPanelId));
-    return {
-      view: 'studio',
-      sub: valid ? validPanel : 'invalid',
-      studioPanel: validPanel,
-      studioTemplateKey,
-      rawHash: hash,
-    };
+    return parseStudioRoute(segs, params, hash);
   }
   if (first === 'builder') {
-    const entryParam = params.get('entry');
-    const entryId = entryParam && /^[1-9]\d*$/.test(entryParam) && Number.isSafeInteger(Number(entryParam))
-      ? Number(entryParam) : undefined;
-    const templateRole = params.get('template') ?? undefined;
-    const typeKey = params.get('type') ?? undefined;
-    const validType = Boolean(typeKey && /^[a-z][a-z0-9_]{0,63}$/.test(typeKey));
-
-    // Redirect legacy Pattern builder URLs cleanly into Studio Mode 2 (Admin-only via isRouteAllowed).
-    if (templateRole === 'entry' && typeKey === 'pattern' && entryId !== undefined) {
-      return {
-        view: 'studio-entry',
-        sub: 'entry',
-        typeKey: 'pattern',
-        entryId,
-        rawHash: hash,
-        redirectHash: `#/studio/entry/pattern/${entryId}`,
-      };
-    }
-    if (templateRole === 'page' && typeKey === 'page' && entryId !== undefined) {
-      return {
-        view: 'studio-entry',
-        sub: 'entry',
-        typeKey: 'page',
-        entryId,
-        rawHash: hash,
-        redirectHash: `#/studio/entry/page/${entryId}`,
-      };
-    }
-    if (templateRole === 'entry' && validType && typeKey !== 'section' && entryId !== undefined) {
-      return {
-        view: 'studio-entry',
-        sub: 'entry',
-        typeKey,
-        entryId,
-        rawHash: hash,
-        redirectHash: `#/studio/entry/${encodeURIComponent(typeKey!)}/${entryId}`,
-      };
-    }
-    if (!entryParam && !templateRole && !typeKey && !queryPart) {
-      return {
-        view: 'studio',
-        sub: 'root',
-        studioPanel: 'root',
-        rawHash: hash,
-        redirectHash: '#/studio',
-      };
-    }
-    if (templateRole === 'single' && validType && entryId !== undefined) {
-      const studioTemplateKey = `single:type:${typeKey}:id:${entryId}`;
-      return {
-        view: 'studio',
-        sub: 'templates',
-        studioPanel: 'templates',
-        studioTemplateKey,
-        rawHash: hash,
-        redirectHash: `#/studio?panel=templates&template=${encodeURIComponent(studioTemplateKey)}`,
-      };
-    }
-    if (!entryParam && (!typeKey || validType) && (
-      templateRole === 'header' || templateRole === 'footer'
-      || templateRole === 'taxonomy_archive' || templateRole === 'archive' || templateRole === 'single'
-    )) {
-      const mappedKey =
-        templateRole === 'header'
-          ? 'part:header'
-          : templateRole === 'footer'
-            ? 'part:footer'
-            : templateRole === 'taxonomy_archive'
-              ? (typeKey ? `taxonomy:key:${typeKey}` : 'taxonomy')
-              : typeKey
-                ? `${templateRole}:type:${typeKey}`
-                : templateRole;
-      return {
-        view: 'studio',
-        sub: 'templates',
-        studioPanel: 'templates',
-        studioTemplateKey: mappedKey,
-        rawHash: hash,
-        redirectHash: `#/studio?panel=templates&template=${encodeURIComponent(mappedKey)}`,
-      };
-    }
-    return {
-      view: 'studio',
-      sub: 'invalid',
-      studioPanel: 'root',
-      templateRole,
-      typeKey,
-      entryId,
-      rawHash: hash,
-    };
+    return parseLegacyBuilderRoute(params, queryPart, hash);
   }
   if (first === 'contact') {
     const isInbox = segs[1] === 'inbox' || segs[1] === 'submissions';
