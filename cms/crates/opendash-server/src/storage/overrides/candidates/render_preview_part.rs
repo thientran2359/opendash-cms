@@ -81,6 +81,9 @@ pub(in crate::storage) async fn render_preview_part(
                 html,
                 diagnostics,
                 has_active_contact_form: false,
+                needs_blocks_js: budget.needs_blocks_js,
+                used_entry_content: false,
+                has_popup: false,
             }))
         }
         _ => Ok(None),

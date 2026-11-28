@@ -21910,3 +21910,103 @@ msgstr "{{count}} mục"
 #: admin:admin-ui-ux-polish
 msgid "· Selected version {{version}}"
 msgstr "· Phiên bản đang chọn {{version}}"
+
+#: core:studio-interactive-blocks
+msgid "Tabs"
+msgstr "Thẻ nội dung"
+
+#: core:studio-interactive-blocks
+msgid "Tabs: Add at least one Tab Panel."
+msgstr "Tabs: Hãy thêm ít nhất một Tab Panel."
+
+#: core:studio-interactive-blocks
+msgid "Image carousel"
+msgstr "Trình chiếu"
+
+#: core:studio-interactive-blocks
+msgid "Slider: Add at least one Slide."
+msgstr "Trình chiếu: Hãy thêm ít nhất một Slide."
+
+#: core:studio-interactive-blocks
+msgid "Slides"
+msgstr "Danh sách slide"
+
+#: core:studio-interactive-blocks
+msgid "Previous slide"
+msgstr "Slide trước"
+
+#: core:studio-interactive-blocks
+msgid "Next slide"
+msgstr "Slide tiếp theo"
+
+#: core:studio-interactive-blocks
+msgid "Choose a slide"
+msgstr "Chọn slide"
+
+#: core:studio-interactive-blocks
+msgid "Go to slide"
+msgstr "Tới slide"
+
+#: core:studio-interactive-blocks
+msgid "Slide {n} of {total}"
+msgstr "Slide {n} / {total}"
+
+#: core:studio-interactive-blocks
+msgid "Pause autoplay"
+msgstr "Tạm dừng tự động chạy"
+
+#: core:studio-interactive-blocks
+msgid "Play autoplay"
+msgstr "Tiếp tục tự động chạy"
+
+#: core:studio-interactive-blocks
+msgid "Image gallery"
+msgstr "Thư viện ảnh"
+
+#: core:studio-interactive-blocks
+msgid "Gallery: Select images in inspector."
+msgstr "Thư viện ảnh: Hãy chọn ảnh ở cột thiết lập."
+
+#: core:studio-interactive-blocks
+msgid "View image"
+msgstr "Xem ảnh"
+
+#: core:studio-interactive-blocks
+msgid "Image viewer"
+msgstr "Trình xem ảnh"
+
+#: core:studio-interactive-blocks
+msgid "Close viewer"
+msgstr "Đóng trình xem"
+
+#: core:studio-interactive-blocks
+msgid "Share this page"
+msgstr "Chia sẻ trang này"
+
+#: core:studio-interactive-blocks
+msgid "Copy link"
+msgstr "Sao chép liên kết"
+
+#: core:studio-interactive-blocks
+msgid "Copied"
+msgstr "Đã sao chép"
+
+#: core:studio-interactive-blocks
+msgid "Copy failed"
+msgstr "Không thể sao chép"
+
+#: core:studio-interactive-blocks
+msgid "Social Share: Turn on at least one channel."
+msgstr "Chia sẻ: Hãy bật ít nhất một kênh hoặc nút sao chép."
+
+#: core:studio-interactive-blocks
+msgid "Popup dialog"
+msgstr "Hộp thoại bật lên"
+
+#: core:studio-interactive-blocks
+msgid "Close popup"
+msgstr "Đóng hộp thoại"
+
+#: core:studio-interactive-blocks
+msgid "Popup: Set a valid ID (letters, digits, - or _)."
+msgstr "Popup: Hãy đặt ID hợp lệ (chữ, số, - hoặc _)."

@@ -45,6 +45,23 @@ pub async fn builder() -> Response {
 
 pub async fn serve_asset(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
     let clean_path = path.trim_start_matches('/');
+    if clean_path == "opendash-blocks.js" {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::OK)
+            .header(
+                axum::http::header::CONTENT_TYPE,
+                "text/javascript; charset=utf-8",
+            )
+            .header(axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+            .header(
+                axum::http::header::CACHE_CONTROL,
+                "public, max-age=3600",
+            )
+            .body(axum::body::Body::from(
+                crate::builtin_themes::PUBLIC_BLOCKS_JS,
+            ))
+            .unwrap_or_else(|_| axum::response::Response::new(axum::body::Body::empty()));
+    }
     if clean_path == "opendash-tailwind.css" {
         return (
             [

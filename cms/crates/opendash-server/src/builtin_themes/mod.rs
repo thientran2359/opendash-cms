@@ -1,6 +1,18 @@
 /// Public Tailwind v4 stylesheet is compiled at build time and embedded in the
 /// executable so public pages never depend on Node or a remote CDN.
 pub const PUBLIC_TAILWIND_CSS: &[u8] = include_bytes!("opendash-tailwind.css");
+pub const PUBLIC_BLOCKS_JS: &[u8] = include_bytes!("opendash-blocks.js");
+
+pub fn public_blocks_js_version_hash() -> &'static str {
+    use sha2::{Digest, Sha256};
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| {
+        let mut h = Sha256::new();
+        h.update(PUBLIC_BLOCKS_JS);
+        let full = format!("{:x}", h.finalize());
+        full[..12].to_owned()
+    })
+}
 
 use std::collections::BTreeMap;
 

@@ -20,6 +20,8 @@ use crate::{
 pub(super) struct RuntimeBlockOutput {
     pub html: Option<String>,
     pub already_charged: usize,
+    pub used_entry_content: bool,
+    pub has_popup: bool,
 }
 
 fn render_list(
@@ -251,6 +253,8 @@ pub(super) fn render_native_runtime(
         return Ok(Some(RuntimeBlockOutput {
             html,
             already_charged: 0,
+            used_entry_content: false,
+            has_popup: false,
         }));
     }
     if let Some((html, already_charged)) = render_entry_block_with_context(
@@ -266,6 +270,8 @@ pub(super) fn render_native_runtime(
         budget,
     )? {
         return Ok(Some(RuntimeBlockOutput {
+            used_entry_content: node.block_id == "core/entry-content" && html.is_some(),
+            has_popup: false,
             html,
             already_charged,
         }));
@@ -274,6 +280,8 @@ pub(super) fn render_native_runtime(
         return Ok(Some(RuntimeBlockOutput {
             html,
             already_charged: 0,
+            used_entry_content: false,
+            has_popup: false,
         }));
     }
 
@@ -281,6 +289,8 @@ pub(super) fn render_native_runtime(
         "core/list" => Ok(Some(RuntimeBlockOutput {
             html: render_list(node, is_preview, lists, list_base_path, budget, diagnostics),
             already_charged: 0,
+            used_entry_content: false,
+            has_popup: false,
         })),
         "core/search-form" => Ok(Some(RuntimeBlockOutput {
             html: Some(render_search_form_block(
@@ -291,6 +301,8 @@ pub(super) fn render_native_runtime(
                 &budget.locale,
             )),
             already_charged: 0,
+            used_entry_content: false,
+            has_popup: false,
         })),
         "core/search-results" => Ok(Some(RuntimeBlockOutput {
             html: render_search_results_block(
@@ -301,6 +313,8 @@ pub(super) fn render_native_runtime(
                 diagnostics,
             ),
             already_charged: 0,
+            used_entry_content: false,
+            has_popup: false,
         })),
         "core/contact-form" => {
             let l10n = crate::content_render::core_l10n(&budget.locale);
@@ -338,6 +352,8 @@ pub(super) fn render_native_runtime(
             Ok(Some(RuntimeBlockOutput {
                 html: Some(html),
                 already_charged: 0,
+                used_entry_content: false,
+                has_popup: false,
             }))
         }
         "core/pattern-ref" => {
@@ -345,12 +361,15 @@ pub(super) fn render_native_runtime(
             match patterns.get(&node.id) {
                 Some(pattern) => {
                     *has_active_contact_form |= pattern.has_active_contact_form;
+                    budget.needs_blocks_js |= pattern.needs_blocks_js;
                     Ok(Some(RuntimeBlockOutput {
                         html: Some(format!(
                             "<div class=\"od-pattern-ref\" data-pattern-id=\"{pid}\">{}</div>",
                             pattern.html
                         )),
                         already_charged: pattern.html.len(),
+                        used_entry_content: pattern.used_entry_content,
+                        has_popup: pattern.has_popup,
                     }))
                 }
                 None => {
@@ -368,6 +387,8 @@ pub(super) fn render_native_runtime(
                     Ok(Some(RuntimeBlockOutput {
                         html,
                         already_charged: 0,
+                        used_entry_content: false,
+                        has_popup: false,
                     }))
                 }
             }
@@ -387,6 +408,8 @@ pub(super) fn render_native_runtime(
                         part_html
                     )),
                     already_charged: part_html.len(),
+                    used_entry_content: false,
+                    has_popup: false,
                 })),
                 None => {
                     diagnostics.push(BuilderDiagnostic {
@@ -396,6 +419,8 @@ pub(super) fn render_native_runtime(
                     Ok(Some(RuntimeBlockOutput {
                         html: None,
                         already_charged: 0,
+                        used_entry_content: false,
+                        has_popup: false,
                     }))
                 }
             }

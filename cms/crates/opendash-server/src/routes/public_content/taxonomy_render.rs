@@ -219,6 +219,12 @@ pub(crate) async fn render_canonical_taxonomy(
     .await?;
     let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active_theme.as_ref(), &locale, locale_ctx);
+    budget.render_budget.locale = locale.clone();
+    budget.render_budget.page_canonical_url = Some(public_content::format_public_canonical_url(
+        pub_settings.public_origin.as_deref(),
+        &canonical_base,
+    ));
+    budget.render_budget.page_title = Some(schema.label.clone());
     let taxonomy_label = term_schema
         .as_ref()
         .map(|ts| ts.taxonomy.label.clone())
@@ -322,15 +328,18 @@ pub(crate) async fn render_canonical_taxonomy(
     )
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_richtext(
-            content_render::finalize_document_images(
-                content_render::finalize_document_icons(
-                    composed,
-                    &budget.render_budget.icon_nonces,
+        content_render::finalize_document_blocks_js(
+            content_render::finalize_document_richtext(
+                content_render::finalize_document_images(
+                    content_render::finalize_document_icons(
+                        composed,
+                        &budget.render_budget.icon_nonces,
+                    )?,
+                    &budget.render_budget.image_nonces,
                 )?,
-                &budget.render_budget.image_nonces,
+                &budget.render_budget.richtext_nonces,
             )?,
-            &budget.render_budget.richtext_nonces,
+            body.needs_blocks_js || budget.render_budget.needs_blocks_js,
         )?,
         body.has_active_contact_form || shell_has_form,
     ))

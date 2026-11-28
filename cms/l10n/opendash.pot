@@ -21891,3 +21891,103 @@ msgstr ""
 #: admin:admin-ui-ux-polish
 msgid "· Selected version {{version}}"
 msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Tabs"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Tabs: Add at least one Tab Panel."
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Image carousel"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Slider: Add at least one Slide."
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Slides"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Previous slide"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Next slide"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Choose a slide"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Go to slide"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Slide {n} of {total}"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Pause autoplay"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Play autoplay"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Image gallery"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Gallery: Select images in inspector."
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "View image"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Image viewer"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Close viewer"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Share this page"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Copy link"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Copied"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Copy failed"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Social Share: Turn on at least one channel."
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Popup dialog"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Close popup"
+msgstr ""
+
+#: core:studio-interactive-blocks
+msgid "Popup: Set a valid ID (letters, digits, - or _)."
+msgstr ""

@@ -76,6 +76,7 @@ pub async fn preview_studio_with_cache_and_locale(
     let mut has_active_contact_form = false;
     let mut route = None;
     let mut shared_rb = page::RenderBudget::new();
+    shared_rb.locale = effective_locale.clone();
     let resolved_term = resolve_preview_term_in_tx(
         &mut tx,
         target,
@@ -541,6 +542,9 @@ pub async fn preview_studio_with_cache_and_locale(
     tx.rollback().await?;
     Ok(RenderedLayout {
         has_active_contact_form,
+        needs_blocks_js: preview_budget.needs_blocks_js,
+        used_entry_content: false,
+        has_popup: false,
         html: full_html,
         diagnostics,
     })

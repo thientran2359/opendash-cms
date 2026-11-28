@@ -173,6 +173,17 @@ pub(crate) async fn render_index_home_response_for_locale(
         seo::build_theme_locale_context(db, Some(locale), seo::ThemeLocaleTarget::Home).await?;
     let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active.as_ref(), locale, locale_ctx);
+    let canonical_for_seo = CanonicalUrlBuilder::with_query(
+        canonical_path.clone(),
+        query.clone(),
+        QueryScope::ContentArchive,
+    );
+    budget.render_budget.locale = locale.to_owned();
+    budget.render_budget.page_canonical_url = Some(public_content::format_public_canonical_url(
+        pub_settings.public_origin.as_deref(),
+        &canonical_for_seo,
+    ));
+    budget.render_budget.page_title = Some(site.site_title.clone());
     let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
     let cache = crate::page::BlockTemplateCache::global();
     let body = render_resolved_public_template_html_with_surface(
@@ -240,11 +251,6 @@ pub(crate) async fn render_index_home_response_for_locale(
         )
         .await?
     };
-    let canonical_for_seo = CanonicalUrlBuilder::with_query(
-        canonical_path.clone(),
-        query.clone(),
-        QueryScope::ContentArchive,
-    );
     let allow_alternates =
         query.page == 1 && query.filters == crate::public_context::PublicFilters::default();
     let allow_custom_canonical = query.page == 1;
@@ -281,15 +287,18 @@ pub(crate) async fn render_index_home_response_for_locale(
     )
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_richtext(
-            content_render::finalize_document_images(
-                content_render::finalize_document_icons(
-                    composed,
-                    &budget.render_budget.icon_nonces,
+        content_render::finalize_document_blocks_js(
+            content_render::finalize_document_richtext(
+                content_render::finalize_document_images(
+                    content_render::finalize_document_icons(
+                        composed,
+                        &budget.render_budget.icon_nonces,
+                    )?,
+                    &budget.render_budget.image_nonces,
                 )?,
-                &budget.render_budget.image_nonces,
+                &budget.render_budget.richtext_nonces,
             )?,
-            &budget.render_budget.richtext_nonces,
+            body.needs_blocks_js || budget.render_budget.needs_blocks_js,
         )?,
         body.has_active_contact_form || shell_has_form,
     ))

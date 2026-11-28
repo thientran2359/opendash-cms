@@ -195,6 +195,9 @@ pub struct RenderBudget {
     pub image_nonces: ImageNonceTable,
     pub richtext_nonces: RichTextNonceTable,
     pub hook_nonces: HookNonceTable,
+    pub needs_blocks_js: bool,
+    pub page_canonical_url: Option<String>,
+    pub page_title: Option<String>,
 }
 
 /// One budget per private preview. Storage owns graph discovery and records
@@ -215,6 +218,9 @@ pub(crate) struct PreviewCompositionBudget {
     pub image_nonces: ImageNonceTable,
     pub richtext_nonces: RichTextNonceTable,
     pub hook_nonces: HookNonceTable,
+    pub needs_blocks_js: bool,
+    pub page_canonical_url: Option<String>,
+    pub page_title: Option<String>,
 }
 
 impl PreviewCompositionBudget {
@@ -237,6 +243,9 @@ impl PreviewCompositionBudget {
             image_nonces: rb.image_nonces,
             richtext_nonces: rb.richtext_nonces,
             hook_nonces: rb.hook_nonces,
+            needs_blocks_js: rb.needs_blocks_js,
+            page_canonical_url: rb.page_canonical_url,
+            page_title: rb.page_title,
         }
     }
 
@@ -253,6 +262,9 @@ impl PreviewCompositionBudget {
             image_nonces: self.image_nonces.clone(),
             richtext_nonces: self.richtext_nonces.clone(),
             hook_nonces: self.hook_nonces.clone(),
+            needs_blocks_js: self.needs_blocks_js,
+            page_canonical_url: self.page_canonical_url.clone(),
+            page_title: self.page_title.clone(),
         }
     }
 
@@ -268,6 +280,13 @@ impl PreviewCompositionBudget {
         self.image_nonces = rb.image_nonces.clone();
         self.richtext_nonces = rb.richtext_nonces.clone();
         self.hook_nonces = rb.hook_nonces.clone();
+        self.needs_blocks_js |= rb.needs_blocks_js;
+        if self.page_canonical_url.is_none() {
+            self.page_canonical_url = rb.page_canonical_url.clone();
+        }
+        if self.page_title.is_none() {
+            self.page_title = rb.page_title.clone();
+        }
     }
 }
 
@@ -324,6 +343,9 @@ pub(crate) enum HtmlScanState {
         closing_prefix: usize,
     },
     Title {
+        closing_prefix: usize,
+    },
+    Textarea {
         closing_prefix: usize,
     },
 }

@@ -27,6 +27,7 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_scope(
     annotation_scope: RenderAnnotationScope,
 ) -> ApiResult<RenderedLayout> {
     let mut budget = page::RenderBudget::new();
+    budget.locale = current.locale.clone();
     let mut rendered = render_entry_builder_preview_with_budget(
         tx,
         current,

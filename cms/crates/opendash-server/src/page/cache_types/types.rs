@@ -25,6 +25,12 @@ pub struct BuilderDiagnostic {
 pub struct RenderedLayout {
     #[serde(skip_serializing)]
     pub has_active_contact_form: bool,
+    #[serde(skip_serializing)]
+    pub needs_blocks_js: bool,
+    #[serde(skip_serializing)]
+    pub used_entry_content: bool,
+    #[serde(skip_serializing)]
+    pub has_popup: bool,
     pub html: String,
     pub diagnostics: Vec<BuilderDiagnostic>,
 }

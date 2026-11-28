@@ -152,6 +152,9 @@ pub(crate) async fn render_entry_response_with_cache(
     let entry_has_form = entry_body
         .as_ref()
         .is_some_and(|body| body.has_active_contact_form);
+    let entry_needs_blocks_js = entry_body
+        .as_ref()
+        .is_some_and(|body| body.needs_blocks_js);
     let builder_body_fragment =
         entry_body.as_ref().map(
             |body| match crate::document::normalize_public_document_with_options(&body.html, true) {
@@ -186,7 +189,13 @@ pub(crate) async fn render_entry_response_with_cache(
         )?,
     };
     entry_render_budget.locale = entry_locale.clone();
+    entry_render_budget.needs_blocks_js = false;
     let mut budget = overrides::PublicCompositionBudget::with_render_budget(entry_render_budget);
+    budget.render_budget.page_canonical_url = Some(public_content::format_public_canonical_url(
+        pub_settings.public_origin.as_deref(),
+        &canonical_path_for_seo,
+    ));
+    budget.render_budget.page_title = Some(entry_title_for_seo.clone());
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
     let custom_opts = crate::storage::options_pages::load_active_custom_options_public(
         &db,
@@ -328,15 +337,20 @@ pub(crate) async fn render_entry_response_with_cache(
     )
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_richtext(
-            content_render::finalize_document_images(
-                content_render::finalize_document_icons(
-                    composed,
-                    &budget.render_budget.icon_nonces,
+        content_render::finalize_document_blocks_js(
+            content_render::finalize_document_richtext(
+                content_render::finalize_document_images(
+                    content_render::finalize_document_icons(
+                        composed,
+                        &budget.render_budget.icon_nonces,
+                    )?,
+                    &budget.render_budget.image_nonces,
                 )?,
-                &budget.render_budget.image_nonces,
+                &budget.render_budget.richtext_nonces,
             )?,
-            &budget.render_budget.richtext_nonces,
+            (entry_needs_blocks_js && body.used_entry_content)
+                || body.needs_blocks_js
+                || budget.render_budget.needs_blocks_js,
         )?,
         body.has_active_contact_form || entry_has_form || shell_has_form,
     ))

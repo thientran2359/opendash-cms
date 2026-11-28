@@ -25,3 +25,9 @@ pub struct CompiledCsecComposition {
     pub uses_related_entries: bool,
     pub uses_recent_posts: bool,
 }
+
+impl CompiledCsecComposition {
+    pub fn has_entry_content(&self) -> bool {
+        self.content_count > 0
+    }
+}

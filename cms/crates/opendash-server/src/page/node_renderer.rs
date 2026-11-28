@@ -44,6 +44,8 @@ struct RenderEnv<'a> {
     slot_table: HtmlSlotTable,
     diagnostics: Vec<BuilderDiagnostic>,
     has_active_contact_form: bool,
+    used_entry_content: bool,
+    has_popup: bool,
 }
 
 fn node_preview_kind(
@@ -468,6 +470,8 @@ fn render_node(
             &mut env.has_active_contact_form,
             &mut diag_buf,
         )? {
+            env.used_entry_content |= rt.used_entry_content;
+            env.has_popup |= rt.has_popup;
             (rt.html, rt.already_charged)
         } else if let Some(leaf) = render_native_leaf(
             node,
@@ -570,6 +574,8 @@ pub(super) fn render_document(
         slot_table: HtmlSlotTable::new(),
         diagnostics: Vec::new(),
         has_active_contact_form: false,
+        used_entry_content: false,
+        has_popup: false,
     };
     for node in &document.blocks {
         render_node(
@@ -581,6 +587,8 @@ pub(super) fn render_document(
         )?;
     }
     let has_active_contact_form = env.has_active_contact_form;
+    let used_entry_content = env.used_entry_content;
+    let has_popup = env.has_popup;
     let diagnostics = env.diagnostics;
     let mut slot_table = env.slot_table;
 
@@ -588,6 +596,9 @@ pub(super) fn render_document(
     let html = assemble_slot_table(&root_html, &mut slot_table).map_err(ApiError::bad_request)?;
     Ok(RenderedLayout {
         has_active_contact_form,
+        needs_blocks_js: env.budget.needs_blocks_js,
+        used_entry_content,
+        has_popup,
         html,
         diagnostics,
     })

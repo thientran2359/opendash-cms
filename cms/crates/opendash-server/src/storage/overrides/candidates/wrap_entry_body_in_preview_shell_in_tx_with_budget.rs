@@ -113,7 +113,9 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
 
     let mut preview_budget =
         PreviewCompositionBudget::with_render_budget(entry_render_budget.clone());
+    preview_budget.locale = record.locale.clone();
     let mut public_budget = PublicCompositionBudget::with_render_budget(entry_render_budget);
+    public_budget.render_budget.locale = record.locale.clone();
     let preview_locale_ctx = crate::storage::seo::build_theme_locale_context_in_conn(
         &mut **tx,
         Some(&record.locale),
@@ -340,6 +342,9 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         content_render::finalize_document_richtext(full_html, &preview_budget.richtext_nonces)?;
     Ok(RenderedLayout {
         has_active_contact_form,
+        needs_blocks_js: entry_rendered.needs_blocks_js || preview_budget.needs_blocks_js,
+        used_entry_content: true,
+        has_popup: entry_rendered.has_popup,
         html: full_html,
         diagnostics,
     })
