@@ -462,7 +462,7 @@ async fn s02_secondary_routing_home_chain_builder_list_pagination_and_archive_is
                             "block_id": "core/column",
                             "children": [
                                 { "id": "home-badge", "block_id": "core/heading", "props": { "level": "h1", "text": "Shared Home Candidate Chain" } },
-                                { "id": "home-slot", "block_id": "core/content-slot", "props": {} }
+                                { "id": "home-slot", "block_id": "core/entry-content", "props": {} }
                             ]
                         }]
                     }]
@@ -1290,7 +1290,7 @@ async fn s02_disable_locale_hides_routes_redirects_and_media_acl_without_data_lo
                             "block_id": "core/column",
                             "children": [
                                 { "id": "ov-img", "block_id": "core/image", "props": { "image": m_override, "alt": "OV" } },
-                                { "id": "ov-slot", "block_id": "core/content-slot", "props": {} }
+                                { "id": "ov-slot", "block_id": "core/entry-content", "props": {} }
                             ]
                         }]
                     }]

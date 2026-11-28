@@ -470,13 +470,13 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .remove("effective_source");
     assert_eq!(saved_row, h1_json);
 
-    // 8. Typed Single(post) renders per published entry via core/content-slot.
+    // 8. Typed Single(post) renders per published entry via core/entry-content.
     let mut single_doc = doc_with_heading("sng-title", "Single Shell Header");
     single_doc["blocks"][0]["children"][0]["children"][0]["children"]
         .as_array_mut()
         .unwrap()
         .push(json!({
-            "id":"entry-slot","block_id":"core/content-slot","props":{}
+            "id":"entry-slot","block_id":"core/entry-content","props":{}
         }));
     let preview_single = preview_request()
         .json(&json!({

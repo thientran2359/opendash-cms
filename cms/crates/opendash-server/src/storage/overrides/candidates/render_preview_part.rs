@@ -456,17 +456,95 @@ pub async fn inspect_public_surfaces_and_precompile(
     Ok(acc.into_inspection(precompiled_body, precompiled_shell, has_shell_or_theme))
 }
 
-pub(in crate::storage) fn target_requires_and_forbids_slot(
+pub(in crate::storage) fn entry_content_rule_for_target(
     kind: TemplateCandidateKind,
-) -> (bool, bool) {
+) -> EntryContentRule {
     use TemplateCandidateKind as K;
-    let requires = matches!(
-        kind,
-        K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular
-    );
-    let forbids = matches!(
-        kind,
-        K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part
-    );
-    (requires, forbids)
+    match kind {
+        K::Single | K::SingleCustom | K::Singular => EntryContentRule::RequiredOrEntryBlock,
+        K::Page | K::PageLayout | K::Index => EntryContentRule::OptionalMaxOne,
+        K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part => EntryContentRule::Forbidden,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::storage) async fn render_preview_named_part_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    state: &BuilderRenderContext,
+    active: Option<&ActiveTheme>,
+    theme_context: &serde_json::Value,
+    route: Option<(&str, &str)>,
+    render_locale: &str,
+    template_data: Option<&content_render::TemplateRenderData<'_>>,
+    budget: &mut PreviewCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<Option<RenderedLayout>> {
+    let url_policy = active_theme_url_policy_in_conn(&mut **tx, active, None, None, None).await?;
+    let fmt_cfg = template_sec::RenderFormattingConfig {
+        timezone: state.timezone.clone(),
+        ..Default::default()
+    };
+    let part_target = TemplateCandidate {
+        part_key: Some(key.to_owned()),
+        ..candidate(TemplateCandidateKind::Part)
+    };
+    let canonical = part_target.canonical_key().map_err(ApiError::bad_request)?;
+    if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
+        validate_typed_document_with_context_in_tx(
+            tx,
+            &part_target,
+            &row.document,
+            Some(&row.document),
+            true,
+            Some(render_locale),
+        )
+        .await?;
+        let graph = preview_part_graph(tx, &part_target, &row.document, active, budget).await?;
+        let ctx = PreviewRenderContext {
+            state,
+            graph: &graph,
+            theme_context,
+            route,
+            render_locale,
+            cache,
+            url_policy: &url_policy,
+            fmt_cfg: &fmt_cfg,
+            search: None,
+            template_data,
+        };
+        let scope = part_scope_prefix(key, budget.expansions);
+        let rendered = render_preview_builder(
+            tx,
+            &row.document,
+            None,
+            &ctx,
+            budget,
+            RenderAnnotationScope::None,
+            &scope,
+        )
+        .await?;
+        return Ok(Some(rendered));
+    }
+    if let Some(source) = active.and_then(|a| a.parts.get(key)) {
+        let edges = template_sec::preview_csec_part_keys_with_theme_urls(key, source, &url_policy)
+            .map_err(ApiError::bad_request)?;
+        let mut graph =
+            preview_part_graph_from_edges(tx, &canonical, edges, active, budget).await?;
+        graph.insert(key.to_owned(), PreviewPartSource::Theme(source.clone()));
+        let ctx = PreviewRenderContext {
+            state,
+            graph: &graph,
+            theme_context,
+            route,
+            render_locale,
+            cache,
+            url_policy: &url_policy,
+            fmt_cfg: &fmt_cfg,
+            search: None,
+            template_data,
+        };
+        return render_preview_part(tx, key, &ctx, budget).await;
+    }
+    Ok(None)
 }

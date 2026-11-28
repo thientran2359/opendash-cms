@@ -3,6 +3,7 @@ mod index_home_render;
 mod pages_and_render;
 mod search_render;
 mod taxonomy_render;
+mod template_data;
 mod types;
 
 pub use assets_and_sitemap::*;

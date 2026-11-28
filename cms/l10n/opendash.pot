@@ -19057,15 +19057,24 @@ msgid "This pattern contains blocks incompatible with the current target."
 msgstr ""
 
 #: admin:studio.workspace.forbids_slot
-msgid "This template must not contain core/content-slot."
+msgid "This template must not contain Entry Content."
 msgstr ""
 
 #: admin:builder.editor_core.requires_slot
-msgid "This template must retain at least one core/content-slot."
+msgid "This template must retain at least one entry content or entry display block."
 msgstr ""
 
 #: admin:studio.workspace.requires_slot
-msgid "This template requires exactly one core/content-slot."
+msgid "Single templates require Entry Content (max 1) or at least one Entry block."
+msgstr ""
+
+msgid "This template allows at most one Entry Content block."
+msgstr ""
+
+msgid "Template context"
+msgstr ""
+
+msgid "Limit of one entry content block"
 msgstr ""
 
 msgid "No reindex jobs recorded yet."

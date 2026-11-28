@@ -141,6 +141,7 @@ pub(in crate::storage) struct PublicBuilderContext<'a> {
     pub(in crate::storage) url_policy: &'a template_sec::ThemeUrlPolicy,
     pub(in crate::storage) fmt_cfg: &'a template_sec::RenderFormattingConfig,
     pub(in crate::storage) search: Option<page::BuilderSearchData<'a>>,
+    pub(in crate::storage) template_data: Option<&'a content_render::TemplateRenderData<'a>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -219,6 +220,40 @@ pub async fn render_resolved_public_builder_with_query_and_search_for_locale(
     budget: &mut PublicCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
+    render_resolved_public_builder_with_template_data_for_locale(
+        db,
+        record,
+        active,
+        theme_context,
+        route_entry,
+        locale,
+        slot,
+        list_pages,
+        list_base_path,
+        search,
+        None,
+        budget,
+        cache,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn render_resolved_public_builder_with_template_data_for_locale(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    active: Option<&ActiveTheme>,
+    theme_context: &serde_json::Value,
+    route_entry: Option<(&str, &str)>,
+    locale: Option<&str>,
+    slot: Option<&str>,
+    list_pages: &BTreeMap<String, i64>,
+    list_base_path: &str,
+    search: Option<page::BuilderSearchData<'_>>,
+    template_data: Option<&content_render::TemplateRenderData<'_>>,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
     let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
     let mut state = builder::read_render_context_for_locale_tx(
@@ -230,6 +265,7 @@ pub async fn render_resolved_public_builder_with_query_and_search_for_locale(
     .await?;
     collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[&record.document], false)
         .await?;
+    populate_template_entry_schemas_in_conn(&mut tx, &mut state, template_data).await?;
     let url_policy = active_theme_url_policy_in_conn(
         &mut tx,
         active,
@@ -271,6 +307,7 @@ pub async fn render_resolved_public_builder_with_query_and_search_for_locale(
         url_policy: &url_policy,
         fmt_cfg: &fmt_cfg,
         search,
+        template_data,
     };
     let stack = vec![record.canonical_target_key.clone()];
     let rendered = render_public_builder(

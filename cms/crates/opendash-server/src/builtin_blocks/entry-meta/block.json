@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "id": "core/entry-meta",
+  "title": "Thông tin bài (Entry Meta)",
+  "category": "template",
+  "icon": "clock",
+  "render": "native",
+  "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "index", "loop_item"],
+  "fields": [
+    {
+      "type": "checkbox",
+      "key": "items",
+      "label": "Mục hiển thị",
+      "options": [
+        { "value": "published_date", "label": "Ngày xuất bản" },
+        { "value": "updated_date", "label": "Ngày cập nhật" },
+        { "value": "reading_time", "label": "Thời gian đọc" },
+        { "value": "primary_category", "label": "Chuyên mục chính" }
+      ],
+      "default": ["published_date", "reading_time"]
+    },
+    {
+      "type": "select",
+      "key": "date_format",
+      "label": "Định dạng ngày",
+      "options": [
+        { "value": "dmy_slash", "label": "DD/MM/YYYY" },
+        { "value": "mdy_long", "label": "Ngày tháng năm đầy đủ" },
+        { "value": "iso_date", "label": "YYYY-MM-DD" },
+        { "value": "short_month", "label": "Tháng viết tắt" }
+      ],
+      "default": "dmy_slash"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "separator",
+      "label": "Dấu ngăn cách",
+      "options": [
+        { "value": "dot", "label": "Chấm (·)" },
+        { "value": "slash", "label": "Gạch (/)" },
+        { "value": "pipe", "label": "Sọc (|)" }
+      ],
+      "default": "dot"
+    },
+    {
+      "type": "boolean",
+      "key": "show_icons",
+      "label": "Hiển thị Icon",
+      "default": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn lề",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" }
+      ],
+      "default": "left",
+      "responsive": true
+    }
+  ]
+}

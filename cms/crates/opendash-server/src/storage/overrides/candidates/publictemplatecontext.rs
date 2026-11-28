@@ -273,6 +273,17 @@ pub(in crate::storage) fn template_kind_str(kind: TemplateCandidateKind) -> &'st
     }
 }
 
+const ENTRY_CONTEXT_BLOCK_IDS: &[&str] = &[
+    "core/entry-title",
+    "core/entry-featured-image",
+    "core/entry-meta",
+    "core/entry-excerpt",
+    "core/entry-terms",
+    "core/entry-field",
+    "core/entry-related",
+    "core/entry-nav",
+];
+
 fn collect_parts_and_slots_rec(
     nodes: &[opendash_core::builder::BlockNode],
     schemas: &opendash_core::registry::RegistryCatalog<
@@ -280,6 +291,7 @@ fn collect_parts_and_slots_rec(
     >,
     parts: &mut Vec<String>,
     slots: &mut usize,
+    entry_blocks: &mut usize,
 ) {
     for node in nodes {
         let Some(entry) = schemas.get(&node.block_id) else {
@@ -291,7 +303,7 @@ fn collect_parts_and_slots_rec(
             continue;
         }
         match node.block_id.as_str() {
-            "core/content-slot" => *slots += 1,
+            "core/entry-content" => *slots += 1,
             "core/template-part" => {
                 if let Some(part_key) = node
                     .props
@@ -303,7 +315,10 @@ fn collect_parts_and_slots_rec(
                     parts.push(part_key.to_owned());
                 }
             }
-            _ => {
+            id => {
+                if ENTRY_CONTEXT_BLOCK_IDS.contains(&id) {
+                    *entry_blocks += 1;
+                }
                 parts.extend(
                     entry
                         .descriptor
@@ -312,8 +327,21 @@ fn collect_parts_and_slots_rec(
                 );
             }
         }
-        collect_parts_and_slots_rec(&node.children, schemas, parts, slots);
+        collect_parts_and_slots_rec(&node.children, schemas, parts, slots, entry_blocks);
     }
+}
+
+pub(in crate::storage) fn document_slot_scan_with_schemas(
+    document: &BuilderDocument,
+    schemas: &opendash_core::registry::RegistryCatalog<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >,
+) -> ApiResult<(Vec<String>, usize, usize)> {
+    let mut parts = Vec::new();
+    let mut slots = 0;
+    let mut entry_blocks = 0;
+    collect_parts_and_slots_rec(&document.blocks, schemas, &mut parts, &mut slots, &mut entry_blocks);
+    Ok((parts, slots, entry_blocks))
 }
 
 pub(in crate::storage) fn document_parts_and_slot_count_with_schemas(
@@ -322,21 +350,22 @@ pub(in crate::storage) fn document_parts_and_slot_count_with_schemas(
         opendash_core::block_schema::RegisteredBlockSchema,
     >,
 ) -> ApiResult<(Vec<String>, usize)> {
-    let mut parts = Vec::new();
-    let mut slots = 0;
-    collect_parts_and_slots_rec(&document.blocks, schemas, &mut parts, &mut slots);
+    let (parts, slots, _) = document_slot_scan_with_schemas(document, schemas)?;
     Ok((parts, slots))
 }
 
 pub(in crate::storage) fn validate_content_slots(
     target: &TemplateCandidate,
-    slots: usize,
+    entry_content_count: usize,
+    entry_context_block_count: usize,
 ) -> ApiResult<()> {
-    use TemplateCandidateKind as K;
-    let valid = match target.kind {
-        K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular => slots == 1,
-        K::Index => slots <= 1,
-        K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part => slots == 0,
+    let valid = match entry_content_rule_for_target(target.kind) {
+        EntryContentRule::RequiredOrEntryBlock => {
+            entry_content_count <= 1
+                && (entry_content_count == 1 || entry_context_block_count >= 1)
+        }
+        EntryContentRule::OptionalMaxOne => entry_content_count <= 1,
+        EntryContentRule::Forbidden => entry_content_count == 0,
     };
     if valid {
         Ok(())
@@ -385,15 +414,17 @@ pub(in crate::storage) fn normalize_template_ast_json(
     .map_err(|_| ApiError::bad_request("Invalid Builder UTF-8 document."))
 }
 
-/// The same AST and route-binding validation is used by Save and read-only Preview.
-pub(in crate::storage) async fn validate_typed_document_in_tx(
+pub(in crate::storage) async fn validate_typed_document_with_context_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     target: &TemplateCandidate,
     document: &BuilderDocument,
     prior: Option<&BuilderDocument>,
+    is_preview: bool,
+    requested_locale: Option<&str>,
 ) -> ApiResult<BuilderRenderContext> {
     validate_typed_target_in_tx(tx, target).await?;
-    let state = builder::read_render_context_tx(tx).await?;
+    let state =
+        builder::read_render_context_for_locale_tx(tx, requested_locale, is_preview, None).await?;
     let schemas = state.unified_block_schemas()?;
     let ctx = BuilderContextTarget::Template {
         kind: target.kind,
@@ -413,12 +444,22 @@ pub(in crate::storage) async fn validate_typed_document_in_tx(
             "Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.",
         ));
     }
-    let (_, slots) = document_parts_and_slot_count_with_schemas(document, &schemas)?;
-    validate_content_slots(target, slots)?;
+    let (_, slots, entry_blocks) = document_slot_scan_with_schemas(document, &schemas)?;
+    validate_content_slots(target, slots, entry_blocks)?;
     crate::storage::fields::validate_document_block_refs_in_conn(
         &mut **tx, document, prior, &schemas, None, None,
     )
     .await?;
     builder::validate_media_refs_in_tx(&mut **tx, document).await?;
     Ok(state)
+}
+
+/// The same AST and route-binding validation is used by Save and read-only Preview.
+pub(in crate::storage) async fn validate_typed_document_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    prior: Option<&BuilderDocument>,
+) -> ApiResult<BuilderRenderContext> {
+    validate_typed_document_with_context_in_tx(tx, target, document, prior, false, None).await
 }

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "id": "core/entry-field",
+  "title": "Trường dữ liệu bài (Entry Field)",
+  "category": "template",
+  "icon": "settings",
+  "render": "native",
+  "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "index", "loop_item"],
+  "fields": [
+    {
+      "type": "select",
+      "key": "field_key",
+      "label": "Khóa trường dữ liệu",
+      "options_source": "context_fields",
+      "allow_null": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "label_mode",
+      "label": "Hiển thị nhãn",
+      "options": [
+        { "value": "hide", "label": "Ẩn" },
+        { "value": "inline", "label": "Cùng dòng" },
+        { "value": "stacked", "label": "Xếp dọc" }
+      ],
+      "default": "inline"
+    },
+    {
+      "type": "text",
+      "key": "custom_label",
+      "label": "Nhãn tùy chỉnh",
+      "default": ""
+    },
+    {
+      "type": "select",
+      "key": "display_format",
+      "label": "Định dạng hiển thị",
+      "options": [
+        { "value": "auto", "label": "Tự động" },
+        { "value": "text", "label": "Văn bản" },
+        { "value": "badge", "label": "Nhãn (Badge)" },
+        { "value": "date", "label": "Ngày giờ" },
+        { "value": "number", "label": "Số" },
+        { "value": "link", "label": "Liên kết" },
+        { "value": "image", "label": "Ảnh" },
+        { "value": "gallery", "label": "Thư viện ảnh" }
+      ],
+      "default": "auto"
+    },
+    {
+      "type": "boolean",
+      "key": "hide_if_empty",
+      "label": "Ẩn khi rỗng",
+      "default": true
+    }
+  ]
+}

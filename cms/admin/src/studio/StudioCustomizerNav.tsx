@@ -105,6 +105,7 @@ const GROUP_ORDER: StudioTargetGroup[] = [
   'parts',
   'core',
   'content_types',
+  'taxonomies',
   'page_layouts',
   'custom_templates',
   'overrides',
@@ -188,6 +189,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
     parts: __("Shared components (Parts)"),
     core: __("Core templates"),
     content_types: __("Content types (CPT)"),
+    taxonomies: __("Taxonomies"),
     page_layouts: __("Page layouts"),
     custom_templates: __("Custom detail templates"),
     overrides: __("Other database overrides"),
@@ -538,7 +540,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               contextTypeKey={contextTypeKey}
               locale={previewLocale ?? localeState?.defaultLocale?.code ?? null}
               siteTimezone={generalDraft?.timezone}
-              requiresContentSlot={selectedTarget.requires_content_slot}
+              requiresContentSlot={selectedTarget.entry_content_rule === 'required_or_entry_block'}
               diagnostics={templateDiagnostics}
               disabled={disabled}
               onMessage={onBuilderMessage}

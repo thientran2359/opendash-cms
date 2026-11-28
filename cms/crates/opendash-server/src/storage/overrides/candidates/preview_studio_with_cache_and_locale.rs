@@ -72,14 +72,22 @@ pub async fn preview_studio_with_cache_and_locale(
         actor_role,
     )
     .await?;
-    let _resolved_term =
-        resolve_preview_term_in_tx(&mut tx, target, preview_term, &effective_locale, None).await?;
-
     let mut diagnostics = Vec::new();
     let mut has_active_contact_form = false;
     let mut route = None;
     let mut shared_rb = page::RenderBudget::new();
+    let resolved_term = resolve_preview_term_in_tx(
+        &mut tx,
+        target,
+        preview_term,
+        &effective_locale,
+        Some(&mut shared_rb.richtext_nonces),
+    )
+    .await?;
     shared_rb.richtext_nonces.extend(options_richtext_nonces);
+    let mut built_entry: Option<(content_render::EntryView, Vec<content_render::BreadcrumbItem>)> =
+        None;
+    let mut entry_has_builder_body = false;
     let (mut theme_context, body) = if let Some((record, effective_schema)) = &entry {
         route = Some((record.content_type_key.as_str(), record.slug.as_str()));
         let built = build_entry_preview_context_in_tx(
@@ -96,13 +104,15 @@ pub async fn preview_studio_with_cache_and_locale(
             Some(&mut shared_rb.richtext_nonces),
         )
         .await?;
+        let built_view = built.view;
+        let built_breadcrumbs = built.breadcrumbs;
         let definition = &effective_schema.base.descriptor;
         let raw_body_has_blocks = record
             .values
             .get("body")
             .and_then(serde_json::Value::as_str)
             .is_some_and(opendash_core::builder_blocks::contains_blocks);
-        let body = if raw_body_has_blocks
+        let builder_rendered = if raw_body_has_blocks
             && definition.settings.supports(ContentSupport::Builder)
             && record.content_type_key != "pattern"
         {
@@ -127,29 +137,32 @@ pub async fn preview_studio_with_cache_and_locale(
             }
         } else {
             None
-        }
-        .map(Ok)
-        .unwrap_or_else(|| {
-            let html = content_render::render_single_with_context_for_locale(
-                definition,
-                &built.view,
-                None,
-                &site,
-                built.archive_url.as_deref(),
-                &built.breadcrumbs,
-                &fmt_cfg,
-                &effective_locale,
-            )?;
-            crate::document::normalize_document_with_policy(
-                &html,
-                crate::document::DocumentNormalizeOptions {
-                    allow_trusted_theme_markup: false,
-                    allow_admin_media_preview: true,
-                },
-            )
-            .map(|doc| doc.body_fragment)
-            .map_err(|_| ApiError::bad_request("Invalid preview body."))
-        })?;
+        };
+        entry_has_builder_body = builder_rendered.is_some();
+        let body = builder_rendered
+            .map(Ok)
+            .unwrap_or_else(|| {
+                let html = content_render::render_single_with_context_for_locale(
+                    definition,
+                    &built_view,
+                    None,
+                    &site,
+                    built.archive_url.as_deref(),
+                    &built_breadcrumbs,
+                    &fmt_cfg,
+                    &effective_locale,
+                )?;
+                crate::document::normalize_document_with_policy(
+                    &html,
+                    crate::document::DocumentNormalizeOptions {
+                        allow_trusted_theme_markup: false,
+                        allow_admin_media_preview: true,
+                    },
+                )
+                .map(|doc| doc.body_fragment)
+                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+            })?;
+        built_entry = Some((built_view, built_breadcrumbs));
         (built.theme_context, body)
     } else {
         let custom_options =
@@ -237,8 +250,15 @@ pub async fn preview_studio_with_cache_and_locale(
     }
     let main_plan = if let Some(doc) = document {
         let existing = get_typed_override_on_connection(&mut tx, &key).await?;
-        validate_typed_document_in_tx(&mut tx, target, doc, existing.as_ref().map(|r| &r.document))
-            .await?;
+        validate_typed_document_with_context_in_tx(
+            &mut tx,
+            target,
+            doc,
+            existing.as_ref().map(|r| &r.document),
+            true,
+            Some(&effective_locale),
+        )
+        .await?;
         PreviewMainPlan::DraftDoc(doc)
     } else {
         let chain = build_reset_candidate_chain_for_locale_in_conn(
@@ -297,6 +317,44 @@ pub async fn preview_studio_with_cache_and_locale(
         }
     }
 
+    let (draft_ref, resolved_ref) = match &main_plan {
+        PreviewMainPlan::DraftDoc(d) => (Some(*d), None),
+        PreviewMainPlan::Resolved(r) => (None, Some(r)),
+    };
+    let surface = inspect_preview_surfaces_in_tx(
+        &mut tx,
+        target,
+        draft_ref,
+        resolved_ref,
+        active.as_ref(),
+        &url_policy,
+        canvas_layout,
+    )
+    .await?;
+    let real_entry_ref = entry
+        .as_ref()
+        .zip(built_entry.as_ref())
+        .map(|((rec, eff), (bv, bc))| (rec, eff, bv, bc.clone()));
+    let owned_td = build_preview_template_data_in_tx(
+        &mut tx,
+        BuildPreviewTemplateDataInput {
+            target,
+            site_options: &site_options,
+            menus_by_slot: menus.clone(),
+            locale: &effective_locale,
+            actor_role,
+            surface: &surface,
+            real_entry: real_entry_ref,
+            entry_body_html: entry_has_builder_body.then(|| slot_fragment.clone()),
+            entry_has_builder_body,
+            resolved_term: resolved_term.as_ref(),
+        },
+        Some(&mut preview_budget.richtext_nonces),
+    )
+    .await?;
+    let td = owned_td.as_render_data(&site);
+    populate_template_entry_schemas_in_conn(&mut tx, &mut state, Some(&td)).await?;
+
     let main_html = match main_plan {
         PreviewMainPlan::DraftDoc(doc) => {
             let graph =
@@ -312,6 +370,7 @@ pub async fn preview_studio_with_cache_and_locale(
                 url_policy: &url_policy,
                 fmt_cfg: &fmt_cfg,
                 search: preview_search,
+                template_data: Some(&td),
             };
             let mut rendered = render_preview_builder(
                 &mut tx,
@@ -347,6 +406,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     url_policy: &url_policy,
                     fmt_cfg: &fmt_cfg,
                     search: preview_search,
+                    template_data: Some(&td),
                 };
                 let slot = if target.kind == K::Part {
                     None
@@ -418,6 +478,7 @@ pub async fn preview_studio_with_cache_and_locale(
             &theme_context,
             route,
             &effective_locale,
+            Some(&td),
             &mut preview_budget,
             cache,
         )
@@ -430,6 +491,7 @@ pub async fn preview_studio_with_cache_and_locale(
             &theme_context,
             route,
             &effective_locale,
+            Some(&td),
             &mut preview_budget,
             cache,
         )

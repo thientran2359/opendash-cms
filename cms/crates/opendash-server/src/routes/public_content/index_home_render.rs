@@ -41,16 +41,38 @@ pub(crate) async fn render_index_home_response_for_locale(
         (Vec::new(), 0)
     };
     let has_more = offset.saturating_add(per_page) < total_items;
+    let active = match themes_root {
+        Some(Extension(root)) => theme_storage::load_active_theme(db, &root.0).await?,
+        None => None,
+    };
+    let candidates = overrides::build_candidates(&PublicTemplateContext::Index)?;
+    let resolution = overrides::resolve_template_2axis(
+        db,
+        &candidates,
+        active.as_ref().map(|v| &v.templates),
+        active.as_ref().map(|v| &v.parts),
+        active.as_ref().map(|v| &v.page_layouts),
+    )
+    .await?;
+    let pre_inspected = template_data::inspect_surface_for_resolution(
+        db,
+        &resolution,
+        active.as_ref(),
+        effective_schema.as_ref(),
+        None,
+    )
+    .await?;
     let mut home_richtext_nonces = crate::template_sec::RichTextNonceTable::default();
     let entries = {
         let mut conn = db.acquire().await?;
-        public_content::hydrate_entry_views_with_options_in_conn(
+        public_content::hydrate_entry_views_projected_in_conn(
             &mut conn,
             records,
             Some(locale),
             false,
             FieldRole::Editor,
             Some(&mut home_richtext_nonces),
+            &pre_inspected.inspection.loop_projection,
         )
         .await?
     };
@@ -99,10 +121,6 @@ pub(crate) async fn render_index_home_response_for_locale(
         &l10n.home_label,
         Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
     );
-    let active = match themes_root {
-        Some(Extension(root)) => theme_storage::load_active_theme(db, &root.0).await?,
-        None => None,
-    };
     let site = settings::get_general_for_locale(db, Some(locale)).await?;
     let pub_settings = settings::get_public(db).await?;
     let mut richtext_nonces = crate::template_sec::RichTextNonceTable::default();
@@ -136,7 +154,6 @@ pub(crate) async fn render_index_home_response_for_locale(
         &fmt_cfg,
         locale,
     )?;
-    let candidates = overrides::build_candidates(&PublicTemplateContext::Index)?;
     let mut budget = overrides::PublicCompositionBudget::default();
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
     budget
@@ -156,9 +173,9 @@ pub(crate) async fn render_index_home_response_for_locale(
     budget.set_locale_context(active.as_ref(), locale, locale_ctx);
     let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
     let cache = crate::page::BlockTemplateCache::global();
-    let body = resolve_public_template_html(
+    let body = render_resolved_public_template_html_with_surface(
         db,
-        &candidates,
+        resolution,
         active.as_ref(),
         &site_ctx,
         &site_opts,
@@ -169,8 +186,13 @@ pub(crate) async fn render_index_home_response_for_locale(
         PublicRouteContext {
             route_kind: "home",
             route_path: Some(&canonical_path),
+            resolved_locale: locale,
+            locale_target: seo::ThemeLocaleTarget::Home,
             entry_id: None,
             entry_type_key: None,
+            entry_schema: None,
+            entry_body_html: None,
+            entry_has_builder_body: false,
             custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
@@ -181,11 +203,18 @@ pub(crate) async fn render_index_home_response_for_locale(
             taxonomy: None,
             term: None,
             term_schema: None,
+            term_summary: None,
             content_type: Some(&ct_value),
+            archive_type: Some(content_render::ArchiveTypeSummary {
+                key: schema.key.clone(),
+                label: schema.label.clone(),
+                description: schema.description.clone(),
+            }),
             entry: None,
             list_pages: None,
             search: &inactive_search,
         },
+        Some(pre_inspected),
         &mut budget,
         cache,
     )
@@ -193,13 +222,17 @@ pub(crate) async fn render_index_home_response_for_locale(
     let (header, footer, shell_has_form) = if body.canvas_layout || body.theme_context.is_null() {
         (None, None, false)
     } else {
-        overrides::resolve_and_render_header_footer_with_context_for_locale(
+        overrides::resolve_and_render_header_footer_with_template_data_for_locale(
             db,
             active.as_ref(),
             &body.theme_context,
             &body.precompiled_shell,
             Some(locale),
             &fmt_cfg,
+            body.template_data
+                .as_ref()
+                .map(|d| d.as_render_data(&site_ctx))
+                .as_ref(),
             &mut budget,
             cache,
         )

@@ -234,7 +234,7 @@ export function BuilderEditorCore({
       return;
     }
     if (!canDeleteNode(draft, id, { requiresContentSlot, blockCatalog: blockSchemas })) {
-      onMessage?.(__("This template must retain at least one core/content-slot."), true);
+      onMessage?.(__("This template must retain at least one entry content or entry display block."), true);
       return;
     }
     const entry = locate(draft, id);

@@ -164,7 +164,7 @@ export function insertBlock(
 
   const ok = withinBuilderLimits(next)
     && countBlocksByType(next, 'core/list') <= MAX_BUILDER_LISTS
-    && countBlocksByType(next, 'core/content-slot') <= MAX_BUILDER_CONTENT_SLOTS
+    && countBlocksByType(next, 'core/entry-content') <= MAX_BUILDER_CONTENT_SLOTS
     && countBlocksByType(next, 'core/pattern-ref') <= MAX_BUILDER_PATTERN_INSTANCES
     && distinctPatternIdCount(next, blockCatalog) <= MAX_BUILDER_PATTERN_INSTANCES
     && preservesAnchors(document, next, undefined, blockCatalog);
@@ -181,7 +181,7 @@ export function duplicateNode(
     !source
     || hasLockedAncestor(document, id, blockCatalog)
     || isProtectedNode(document, id, blockCatalog)
-    || countDescendantBlocksByType(document, id, 'core/content-slot') > 0
+    || countDescendantBlocksByType(document, id, 'core/entry-content') > 0
   ) {
     return null;
   }
@@ -238,7 +238,7 @@ export function copyNodeOptions(
     !item
     || isLockedNode(item.node, blockCatalog)
     || hasLockedAncestor(document, id, blockCatalog)
-    || item.node.block_id === 'core/content-slot'
+    || item.node.block_id === 'core/entry-content'
   ) {
     return null;
   }
@@ -275,7 +275,7 @@ export function canPasteOptions(
   const locked = typeof lockedOrCatalog === 'boolean'
     ? lockedOrCatalog
     : isLockedNode(node, lockedOrCatalog);
-  if (locked || node.block_id === 'core/content-slot') return false;
+  if (locked || node.block_id === 'core/entry-content') return false;
   return node.block_id === clipboard.block_id;
 }
 

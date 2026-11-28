@@ -92,6 +92,11 @@ export interface TemplatePreviewEntry {
   entry_id: number;
 }
 
+export interface TemplatePreviewTerm {
+  taxonomy_key: string;
+  term_id: number;
+}
+
 export interface TypedTemplateResetResult {
   reset_id: number;
   canonical_target_key: string;

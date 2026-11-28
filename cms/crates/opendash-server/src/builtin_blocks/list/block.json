@@ -6,6 +6,8 @@
   "icon": "list",
   "render": "native",
   "allowed_contexts": ["*", "!pattern", "!theme_pattern"],
+  "supports_children": true,
+  "allowed_children": ["core/loop-item"],
   "fields": [
     {
       "type": "select",

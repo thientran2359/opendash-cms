@@ -238,25 +238,23 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
         .iter()
         .find(|i| i["canonical_target_key"] == "part:header")
         .unwrap();
-    assert_eq!(header_item["forbids_content_slot"], true);
-    assert_eq!(header_item["requires_content_slot"], false);
+    assert_eq!(header_item["entry_content_rule"], "forbidden");
     assert_eq!(header_item["effective_source"]["kind"], "active_theme");
     let page_item = items
         .iter()
         .find(|i| i["canonical_target_key"] == "page")
         .unwrap();
-    assert_eq!(page_item["requires_content_slot"], true);
-    assert_eq!(page_item["forbids_content_slot"], false);
-    assert!(
-        items
-            .iter()
-            .any(|i| i["canonical_target_key"] == "single:type:post")
-    );
-    assert!(
-        items
-            .iter()
-            .any(|i| i["canonical_target_key"] == "archive:type:post")
-    );
+    assert_eq!(page_item["entry_content_rule"], "optional_max_one");
+    let single_item = items
+        .iter()
+        .find(|i| i["canonical_target_key"] == "single:type:post")
+        .unwrap();
+    assert_eq!(single_item["entry_content_rule"], "required_or_entry_block");
+    let archive_item = items
+        .iter()
+        .find(|i| i["canonical_target_key"] == "archive:type:post")
+        .unwrap();
+    assert_eq!(archive_item["entry_content_rule"], "forbidden");
 
     // 4. Upload unpublished PNG media -> verify 404 publicly
     let mut png = Vec::new();
@@ -582,7 +580,7 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
                             "block_id": "core/column",
                             "children": [{
                                 "id": "tpl-slot",
-                                "block_id": "core/content-slot",
+                                "block_id": "core/entry-content",
                                 "props": {}
                             }]
                         }]
@@ -599,7 +597,7 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
         .unwrap()
         .to_owned();
     assert!(mode1_html.contains(
-        "data-node-id=\"tpl-slot\" data-block-id=\"core/content-slot\" data-od-node-scope=\"ov-tpl-slot\" data-od-editable=\"1\" data-od-kind=\"block\">"
+        "data-node-id=\"tpl-slot\" data-block-id=\"core/entry-content\" data-od-node-scope=\"ov-tpl-slot\" data-od-editable=\"1\" data-od-kind=\"block\">"
     ));
     // Inner entry nodes inside content_slot must NOT carry data-od-editable in Mode 1 template preview
     assert!(mode1_html.contains(

@@ -202,9 +202,16 @@ export function canDeleteNode(
     return false;
   }
   if (options?.requiresContentSlot) {
-    const totalSlots = countBlocksByType(document, 'core/content-slot');
-    const subtreeSlots = countDescendantBlocksByType(document, id, 'core/content-slot');
-    if (totalSlots > 0 && subtreeSlots >= totalSlots) return false;
+    const isEntryDisplay = (blockId: string) =>
+      blockId === 'core/entry-content' || blockId.startsWith('core/entry-');
+    const allEntryCount = allNodes(document).filter(item => isEntryDisplay(item.node.block_id)).length;
+    const subtreeEntryCount = allNodes(document).filter(
+      item =>
+        item.path.length >= target.path.length
+        && target.path.every((step, idx) => item.path[idx] === step)
+        && isEntryDisplay(item.node.block_id),
+    ).length;
+    if (allEntryCount > 0 && subtreeEntryCount >= allEntryCount) return false;
   }
   return true;
 }
@@ -309,7 +316,7 @@ function summarizeDefaultChildren(
     if (1 + child.height > maxH) maxH = 1 + child.height;
     nodes += 1 + child.nodes;
     lists += (spec.block_id === 'core/list' ? 1 : 0) + child.lists;
-    slots += (spec.block_id === 'core/content-slot' ? 1 : 0) + child.slots;
+    slots += (spec.block_id === 'core/entry-content' ? 1 : 0) + child.slots;
     patternRefs += (spec.block_id === 'core/pattern-ref' ? 1 : 0) + child.patternRefs;
   }
   return { height: maxH, nodes, lists, slots, patternRefs };
@@ -350,8 +357,8 @@ export function canInsertBlockAt(
   if (allNodes(document).length + nodesAdded > MAX_BUILDER_NODES) return false;
   const listsAdded = (schema.id === 'core/list' ? 1 : 0) + sub.lists;
   if (countBlocksByType(document, 'core/list') + listsAdded > MAX_BUILDER_LISTS) return false;
-  const slotsAdded = (schema.id === 'core/content-slot' ? 1 : 0) + sub.slots;
-  if (countBlocksByType(document, 'core/content-slot') + slotsAdded > MAX_BUILDER_CONTENT_SLOTS) return false;
+  const slotsAdded = (schema.id === 'core/entry-content' ? 1 : 0) + sub.slots;
+  if (countBlocksByType(document, 'core/entry-content') + slotsAdded > MAX_BUILDER_CONTENT_SLOTS) return false;
   const patternRefsAdded = (schema.id === 'core/pattern-ref' ? 1 : 0) + sub.patternRefs;
   if (countBlocksByType(document, 'core/pattern-ref') + patternRefsAdded > MAX_BUILDER_PATTERN_INSTANCES) {
     return false;

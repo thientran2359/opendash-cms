@@ -73,6 +73,8 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         Some(&mut entry_render_budget.richtext_nonces),
     )
     .await?;
+    let built_view = built.view;
+    let built_breadcrumbs = built.breadcrumbs;
     let mut theme_context = built.theme_context;
     let ctx_target = if schema.base.descriptor.key == "page" {
         PublicTemplateContext::Page {
@@ -159,6 +161,52 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         }
     }
 
+    let preview_is_canvas = match &resolution {
+        TemplateResolution::DbOverride(override_rec) => {
+            is_canvas_target(active.as_ref(), &override_rec.target)
+        }
+        TemplateResolution::ActiveTheme { target_key, .. } => {
+            is_canvas_resolved_key(active.as_ref(), target_key)
+        }
+        TemplateResolution::CoreFallback => false,
+    };
+    let effective_target = match &resolution {
+        TemplateResolution::DbOverride(override_rec) => override_rec.target.clone(),
+        _ => candidates
+            .first()
+            .cloned()
+            .unwrap_or_else(|| candidate(TemplateCandidateKind::Index)),
+    };
+    let surface = inspect_preview_surfaces_in_tx(
+        tx,
+        &effective_target,
+        None,
+        Some(&resolution),
+        active.as_ref(),
+        &url_policy,
+        preview_is_canvas,
+    )
+    .await?;
+    let owned_td = build_preview_template_data_in_tx(
+        tx,
+        BuildPreviewTemplateDataInput {
+            target: &effective_target,
+            site_options: &site_options,
+            menus_by_slot: menus.clone(),
+            locale: &record.locale,
+            actor_role,
+            surface: &surface,
+            real_entry: Some((&record, schema, &built_view, built_breadcrumbs)),
+            entry_body_html: Some(slot_fragment.clone()),
+            entry_has_builder_body: true,
+            resolved_term: None,
+        },
+        Some(&mut preview_budget.richtext_nonces),
+    )
+    .await?;
+    let td = owned_td.as_render_data(&site);
+    populate_template_entry_schemas_in_conn(&mut **tx, &mut state, Some(&td)).await?;
+
     let template_html = match resolution {
         TemplateResolution::DbOverride(override_rec) => {
             canvas_layout = is_canvas_target(active.as_ref(), &override_rec.target);
@@ -180,6 +228,7 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
                 url_policy: &url_policy,
                 fmt_cfg: &fmt_cfg,
                 search: None,
+                template_data: Some(&td),
             };
             let mut tpl_rendered = render_preview_builder(
                 tx,
@@ -230,6 +279,7 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
             &theme_context,
             route,
             &record.locale,
+            Some(&td),
             &mut preview_budget,
             cache,
         )
@@ -242,6 +292,7 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
             &theme_context,
             route,
             &record.locale,
+            Some(&td),
             &mut preview_budget,
             cache,
         )

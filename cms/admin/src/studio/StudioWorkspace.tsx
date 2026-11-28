@@ -358,7 +358,10 @@ export const StudioWorkspace: React.FC<Props> = ({
     } else {
       const targetInfo = items.find(t => t.canonical_target_key === targetKey);
       const starter = createStarterTemplateDocument({
-        includeContentSlot: Boolean(targetInfo?.requires_content_slot),
+        includeContentSlot:
+          targetInfo?.entry_content_rule === 'required_or_entry_block'
+          || targetInfo?.target.kind === 'page'
+          || targetInfo?.target.kind === 'page_layout',
       });
       setTemplateEditingEnabled(false);
       setTemplateSavedVersion(null);
@@ -793,12 +796,18 @@ export const StudioWorkspace: React.FC<Props> = ({
     }
 
     if (templateDirty && selectedTarget) {
-      if (selectedTarget.requires_content_slot && countBlocksByType(templateDoc, 'core/content-slot') !== 1) {
-        setStatus(__("This template requires exactly one core/content-slot."), true);
+      const slotCount = countBlocksByType(templateDoc, 'core/entry-content');
+      const hasEntryBlock = allNodes(templateDoc).some(n => n.node.block_id.startsWith('core/entry-'));
+      if (selectedTarget.entry_content_rule === 'required_or_entry_block') {
+        if (slotCount > 1 || (slotCount === 0 && !hasEntryBlock)) {
+          setStatus(__("Single templates require Entry Content (max 1) or at least one Entry block."), true);
+          return;
+        }
+      } else if (selectedTarget.entry_content_rule === 'optional_max_one' && slotCount > 1) {
+        setStatus(__("This template allows at most one Entry Content block."), true);
         return;
-      }
-      if (selectedTarget.forbids_content_slot && countBlocksByType(templateDoc, 'core/content-slot') > 0) {
-        setStatus(__("This template must not contain core/content-slot."), true);
+      } else if (selectedTarget.entry_content_rule === 'forbidden' && slotCount > 0) {
+        setStatus(__("This template must not contain Entry Content."), true);
         return;
       }
       const badPart = allNodes(templateDoc).some(

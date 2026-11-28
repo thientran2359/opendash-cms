@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "core/entry-nav",
+  "title": "Điều hướng Trước / Sau (Entry Navigation)",
+  "category": "template",
+  "icon": "arrow-left",
+  "render": "native",
+  "allowed_contexts": ["single", "single_custom", "singular"],
+  "fields": [
+    {
+      "type": "boolean",
+      "key": "same_taxonomy",
+      "label": "Cùng phân loại / chuyên mục",
+      "default": false
+    },
+    {
+      "type": "boolean",
+      "key": "show_thumbnail",
+      "label": "Hiển thị ảnh thu nhỏ",
+      "default": true
+    },
+    {
+      "type": "text",
+      "key": "prev_label",
+      "label": "Nhãn bài trước",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "key": "next_label",
+      "label": "Nhãn bài tiếp",
+      "default": ""
+    },
+    {
+      "type": "radio_buttons",
+      "key": "style",
+      "label": "Kiểu hiển thị",
+      "options": [
+        { "value": "cards", "label": "Thẻ (Cards)" },
+        { "value": "minimal", "label": "Tối giản" }
+      ],
+      "default": "cards"
+    }
+  ]
+}

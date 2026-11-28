@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "id": "core/entry-featured-image",
+  "title": "Ảnh đại diện bài (Featured Image)",
+  "category": "template",
+  "icon": "image",
+  "render": "native",
+  "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "index", "loop_item"],
+  "fields": [
+    {
+      "type": "select",
+      "key": "aspect_ratio",
+      "label": "Tỉ lệ khung ảnh",
+      "options": [
+        { "value": "auto", "label": "Tự nhiên" },
+        { "value": "16_9", "label": "16:9" },
+        { "value": "4_3", "label": "4:3" },
+        { "value": "3_2", "label": "3:2" },
+        { "value": "1_1", "label": "1:1" },
+        { "value": "4_5", "label": "4:5" }
+      ],
+      "default": "16_9"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "object_fit",
+      "label": "Kiểu phủ ảnh",
+      "options": [
+        { "value": "cover", "label": "Lấp đầy (Cover)" },
+        { "value": "contain", "label": "Vừa khung (Contain)" }
+      ],
+      "default": "cover"
+    },
+    {
+      "type": "select",
+      "key": "radius",
+      "label": "Bo góc",
+      "options": [
+        { "value": "none", "label": "Không" },
+        { "value": "sm", "label": "Nhỏ" },
+        { "value": "md", "label": "Vừa" },
+        { "value": "lg", "label": "Lớn" },
+        { "value": "xl", "label": "Rất lớn" },
+        { "value": "full", "label": "Tròn (Full)" }
+      ],
+      "default": "lg"
+    },
+    {
+      "type": "boolean",
+      "key": "link_to_entry",
+      "label": "Liên kết tới bài viết",
+      "default": false
+    },
+    {
+      "type": "boolean",
+      "key": "hide_if_empty",
+      "label": "Ẩn khi không có ảnh",
+      "default": true
+    }
+  ]
+}

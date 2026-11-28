@@ -107,6 +107,7 @@ fn block_template_allows_static_js_svg_but_rejects_dynamic_handlers_and_scripts(
             parent_ctx: None,
             is_preview: false,
             fmt_cfg: &fmt_cfg,
+            loop_context: None,
         },
         &mut budget,
     )

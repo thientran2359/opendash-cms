@@ -15,9 +15,10 @@ use super::{
         BlockTemplateCache, BuilderDiagnostic, BuilderTemplateContext, RenderAnnotationScope,
         RenderedLayout,
     },
+    loop_engine::render_loop_node_wrapper,
     render::{ContactFormResults, PatternResults, escape_html},
     root_wrapper::{RootAttrs, apply_single_root_wrapper},
-    scoped_css::{builder_visibility_css, serialize_scoped_block_css},
+    scoped_css::{builder_visibility_css, loop_node_scope, serialize_scoped_block_css},
     slot_table::{HtmlSlotTable, assemble_slot_table, scan_child_nonce_in_shell},
 };
 use crate::{
@@ -78,6 +79,7 @@ fn root_attrs_for<'a>(
         html_id: node.meta.as_ref().and_then(|m| m.html_id.as_deref()),
         extra_classes,
         kind,
+        is_loop_clone: false,
     }
 }
 
@@ -221,6 +223,7 @@ fn render_csec_node(
                     parent_ctx,
                     is_preview: env.is_preview,
                     fmt_cfg: &fmt_cfg,
+                    loop_context: None,
                 },
                 env.budget,
             )
@@ -275,7 +278,7 @@ fn render_node(
     native_parent: NativeParentInfo,
     out: &mut String,
 ) -> ApiResult<()> {
-    let node_scope = format!("{}-{}", env.scope, node.id);
+    let node_scope = loop_node_scope(env.scope, None, &node.id);
     let extra_classes = extra_classes_for(node);
     let Some(def) = env.state.declared_blocks.get(&node.block_id).cloned() else {
         return push_unavailable_placeholder(
@@ -301,6 +304,32 @@ fn render_node(
     let kind = node_preview_kind(env, &node.block_id, def.schema.schema.supports_children);
     let attrs = root_attrs_for(node, &node_scope, kind, &extra_classes);
     let is_native = def.schema.schema.render == "native";
+
+    if matches!(
+        node.block_id.as_str(),
+        "core/archive-loop" | "core/entry-related"
+    ) || (node.block_id == "core/list"
+        && node.children.iter().any(|c| c.block_id == "core/loop-item"))
+    {
+        let allow_editable = env.is_preview
+            && !env.pattern_document
+            && env.annotation_scope != RenderAnnotationScope::None;
+        return render_loop_node_wrapper(
+            node,
+            &attrs,
+            env.state,
+            env.scope,
+            env.lists,
+            env.list_base_path,
+            env.context,
+            env.is_preview,
+            allow_editable,
+            env.cache,
+            env.budget,
+            &mut env.diagnostics,
+            out,
+        );
+    }
 
     if def.schema.schema.supports_children {
         let active = active_child_nodes(&node.children, &env.state.declared_blocks);
@@ -428,6 +457,7 @@ fn render_node(
         let (maybe_html, already_charged) = if let Some(rt) = render_native_runtime(
             env.state,
             node,
+            env.scope,
             env.is_preview,
             env.lists,
             env.forms,
@@ -437,7 +467,7 @@ fn render_node(
             env.budget,
             &mut env.has_active_contact_form,
             &mut diag_buf,
-        ) {
+        )? {
             (rt.html, rt.already_charged)
         } else if let Some(leaf) = render_native_leaf(
             node,
@@ -506,7 +536,7 @@ pub(super) fn render_document(
     budget: &mut RenderBudget,
     cache: &BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
-    let vis_css = builder_visibility_css(document);
+    let vis_css = builder_visibility_css(document, scope);
     let block_css = serialize_scoped_block_css(state, document, scope, is_preview)?;
     let root_open = if pattern_document {
         "<div class=\"od-pattern-content\" data-builder-version=\"1\">"

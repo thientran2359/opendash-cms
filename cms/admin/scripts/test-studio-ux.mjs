@@ -76,8 +76,8 @@ const schemaPatternRef = {
   fields: [{ type: 'select', key: 'pattern_id', label: 'Pattern', options_source: 'patterns', required: true }],
 };
 const schemaSlot = {
-  schema_version: 1, id: 'core/content-slot', title: 'Slot', category: 'content', render: 'native',
-  allowed_contexts: ['single', 'page', 'home'], fields: [],
+  schema_version: 1, id: 'core/entry-content', title: 'Entry Content', category: 'template', render: 'native',
+  allowed_contexts: ['single', 'single_custom', 'singular', 'page', 'page_layout', 'index'], fields: [],
 };
 const schemaHero = {
   schema_version: 1, id: 'plugin/hero', title: 'Hero', category: 'content', render: 'index.html',
@@ -275,7 +275,7 @@ test('computeDragMask enforces depth 8, ACLs, compound helpers, and never blocks
       children: [{
         id: 'row-1', block_id: 'core/row',
         children: [
-          { id: 'col-1', block_id: 'core/column', children: [{ id: 'slot-1', block_id: 'core/content-slot', props: {} }, ...lists] },
+          { id: 'col-1', block_id: 'core/column', children: [{ id: 'slot-1', block_id: 'core/entry-content', props: {} }, ...lists] },
           { id: 'col-2', block_id: 'core/column', children: [] },
         ],
       }],
@@ -320,7 +320,7 @@ test('duplicateNode, copyNodeOptions, pasteNodeOptions enforce limits and schema
   const allIds = allNodes(dup.document).map(e => e.node.id);
   assert.equal(new Set(allIds).size, allIds.length);
 
-  assert.equal(duplicateNode(makeDoc([{ id: 's', block_id: 'core/content-slot', props: {} }]), 's', catalog), null);
+  assert.equal(duplicateNode(makeDoc([{ id: 's', block_id: 'core/entry-content', props: {} }]), 's', catalog), null);
   assert.equal(duplicateNode(makeDoc(Array.from({ length: 8 }, (_, i) => ({ id: `l${i}`, block_id: 'core/list', props: { type_key: 'post' } }))), 'l0', catalog), null);
   assert.equal(duplicateNode(makeDoc(Array.from({ length: 509 }, (_, i) => ({ id: `n${i}`, block_id: 'core/text', props: { content: 'x' } }))), 'n0', catalog), null);
   assert.equal(duplicateNode(makeDoc([{ id: 'big', block_id: 'core/text', props: { content: '界'.repeat(85_000) } }]), 'big', catalog), null);

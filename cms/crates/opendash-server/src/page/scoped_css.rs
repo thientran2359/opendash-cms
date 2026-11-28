@@ -15,25 +15,72 @@ pub(super) fn format_css_number(
     }
 }
 
+pub(super) fn loop_node_scope(scope: &str, loop_id: Option<&str>, node_id: &str) -> String {
+    match loop_id {
+        Some(lid) => format!("od-lt-{scope}-{lid}-{node_id}"),
+        None => format!("{scope}-{node_id}"),
+    }
+}
+
+fn collect_visibility_rec(
+    nodes: &[BlockNode],
+    scope: &str,
+    loop_id: Option<&str>,
+    vis_desktop: &mut String,
+    vis_tablet: &mut String,
+    vis_mobile: &mut String,
+) {
+    for node in nodes {
+        let active_loop_id = if node.block_id == "core/loop-item" {
+            Some(node.id.as_str())
+        } else {
+            loop_id
+        };
+        if let Some(vis) = node.meta.as_ref().and_then(|m| m.visibility.as_ref()) {
+            let push_vis = |target: &mut String| {
+                if let Some(lid) = active_loop_id {
+                    let node_scope = loop_node_scope(scope, Some(lid), &node.id);
+                    target.push_str(&format!(
+                        "[data-od-node-scope=\"{node_scope}\"]{{display:none !important;}}"
+                    ));
+                } else {
+                    push_visibility_rule(target, &node.id);
+                }
+            };
+            if vis.hide_desktop {
+                push_vis(vis_desktop);
+            }
+            if vis.hide_tablet {
+                push_vis(vis_tablet);
+            }
+            if vis.hide_mobile {
+                push_vis(vis_mobile);
+            }
+        }
+        collect_visibility_rec(
+            &node.children,
+            scope,
+            active_loop_id,
+            vis_desktop,
+            vis_tablet,
+            vis_mobile,
+        );
+    }
+}
+
 /// Emits `<style data-builder-responsive>` for per-node breakpoint visibility rules.
-pub(super) fn builder_visibility_css(document: &BuilderDocument) -> String {
+pub(super) fn builder_visibility_css(document: &BuilderDocument, scope: &str) -> String {
     let mut vis_desktop = String::new();
     let mut vis_tablet = String::new();
     let mut vis_mobile = String::new();
-    document.walk_blocks(|node, _| {
-        let Some(vis) = node.meta.as_ref().and_then(|m| m.visibility.as_ref()) else {
-            return;
-        };
-        if vis.hide_desktop {
-            push_visibility_rule(&mut vis_desktop, &node.id);
-        }
-        if vis.hide_tablet {
-            push_visibility_rule(&mut vis_tablet, &node.id);
-        }
-        if vis.hide_mobile {
-            push_visibility_rule(&mut vis_mobile, &node.id);
-        }
-    });
+    collect_visibility_rec(
+        &document.blocks,
+        scope,
+        None,
+        &mut vis_desktop,
+        &mut vis_tablet,
+        &mut vis_mobile,
+    );
     if vis_desktop.is_empty() && vis_tablet.is_empty() && vis_mobile.is_empty() {
         return String::new();
     }
@@ -300,6 +347,7 @@ fn collect_block_css_rec(
     nodes: &[BlockNode],
     state: &BuilderRenderContext,
     scope: &str,
+    loop_id: Option<&str>,
     is_preview: bool,
     desktop_rules: &mut String,
     tablet_rules: &mut String,
@@ -316,8 +364,13 @@ fn collect_block_css_rec(
         {
             continue;
         }
+        let active_loop_id = if node.block_id == "core/loop-item" {
+            Some(node.id.as_str())
+        } else {
+            loop_id
+        };
         if valid_package_id(&node.id) {
-            let node_scope = format!("{scope}-{}", node.id);
+            let node_scope = loop_node_scope(scope, active_loop_id, &node.id);
             let mut desktop_props = String::new();
             let mut tablet_props = String::new();
             let mut mobile_props = String::new();
@@ -357,6 +410,7 @@ fn collect_block_css_rec(
             &node.children,
             state,
             scope,
+            active_loop_id,
             is_preview,
             desktop_rules,
             tablet_rules,
@@ -389,6 +443,7 @@ pub fn serialize_scoped_block_css(
         &document.blocks,
         state,
         scope,
+        None,
         is_preview,
         &mut desktop_rules,
         &mut tablet_rules,

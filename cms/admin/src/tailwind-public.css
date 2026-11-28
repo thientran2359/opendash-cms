@@ -80,7 +80,24 @@ body {
 .od-block-card .od-card-body summary,
 .od-block-card .od-card-body input,
 .od-block-card .od-card-body select,
-.od-block-card .od-card-body textarea {
+.od-block-card .od-card-body textarea,
+.od-loop-card-linked :is(a,button,summary,input,select,textarea):not(.od-loop-stretched-link) {
   position: relative;
   z-index: 20;
+}
+
+.od-loop-item-horizontal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 768px) {
+  .od-loop-item-horizontal {
+    grid-template-columns: minmax(180px, 280px) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.od-brand-logo img {
+  height: var(--od-brand-h, 36px);
+  width: auto;
 }

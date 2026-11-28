@@ -134,7 +134,7 @@ fn rejects_legacy_sections_ast_wrong_version_leaf_children_and_constraints() {
             .is_err()
     );
 
-    // Duplicate IDs & > 1 content-slot & > 8 lists & > 16 pattern-refs rejected
+    // Duplicate IDs & > 1 entry-content & > 8 lists & > 16 pattern-refs rejected
     let dup = BuilderDocument {
         schema_version: 1,
         blocks: vec![
@@ -147,8 +147,8 @@ fn rejects_legacy_sections_ast_wrong_version_leaf_children_and_constraints() {
     let two_slots = BuilderDocument {
         schema_version: 1,
         blocks: vec![
-            node("slot-1", "core/content-slot", json!({}), vec![]),
-            node("slot-2", "core/content-slot", json!({}), vec![]),
+            node("slot-1", "core/entry-content", json!({}), vec![]),
+            node("slot-2", "core/entry-content", json!({}), vec![]),
         ],
     };
     let page_tpl_ctx = BuilderContextTarget::Template {

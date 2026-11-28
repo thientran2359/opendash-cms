@@ -32,10 +32,13 @@ impl RenderBudget {
     }
 
     pub fn charge_builder_list(&mut self) -> Result<(), &'static str> {
-        if self.builder_lists_used >= MAX_BUILDER_LISTS_PER_REQUEST {
+        if self.builder_lists_used >= MAX_BUILDER_LISTS_PER_REQUEST
+            || self.collection_queries_used >= MAX_BUILDER_LISTS_PER_REQUEST
+        {
             return Err("Builder vượt giới hạn 8 list trên mỗi request.");
         }
         self.builder_lists_used += 1;
+        self.collection_queries_used += 1;
         Ok(())
     }
 }

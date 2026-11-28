@@ -138,7 +138,7 @@ impl<'a> ValidationWalk<'a> {
             }
 
             match node.block_id.as_str() {
-                "core/content-slot" | "core/entry-content" => {
+                "core/entry-content" => {
                     self.content_slots += 1;
                     if self.content_slots > 1 {
                         return Err(BuilderError::Invalid(

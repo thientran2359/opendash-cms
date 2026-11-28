@@ -419,7 +419,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
             "document":{"schema_version":1,"blocks":[{"id":"shared-sec","block_id":"core/section","children":[
                 {"id":"shared-row","block_id":"core/row","children":[{"id":"shared-col","block_id":"core/column","children":[
                     {"id":"shared-title","block_id":"core/heading","props":{"level":"h1","text":"Shared Home Template"}},
-                    {"id":"shared-slot","block_id":"core/content-slot","props":{}}
+                    {"id":"shared-slot","block_id":"core/entry-content","props":{}}
                 ]}]}
             ]}]}
         })).send().await.unwrap();

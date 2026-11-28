@@ -41,6 +41,7 @@ const SYMBOL_BY_CATEGORY: Record<BlockCategory, string> = {
   media: '▣',
   interactive: '⚡',
   marketing: '★',
+  template: '◈',
   plugin: '❖',
 };
 
@@ -63,6 +64,7 @@ export function StudioBlockCatalog({
     { key: 'media', title: _x("Media", "studio.media") },
     { key: 'interactive', title: __("Interactive") },
     { key: 'marketing', title: __("Marketing") },
+    { key: 'template', title: __("Template context") },
     { key: 'plugin', title: __("Plugin") },
   ];
 
@@ -90,8 +92,8 @@ export function StudioBlockCatalog({
 
   const insertionReason = (schema: BlockSchema, presetKey?: string): string | null => {
     if (!canInsertBlockAt(document, schema, parentId, blockSchemas, contextTarget, presetKey)) {
-      if (schema.id === 'core/content-slot' && countBlocksByType(document, 'core/content-slot') >= MAX_BUILDER_CONTENT_SLOTS) {
-        return __("Limit of one content slot");
+      if (schema.id === 'core/entry-content' && countBlocksByType(document, 'core/entry-content') >= MAX_BUILDER_CONTENT_SLOTS) {
+        return __("Limit of one entry content block");
       }
       if (schema.id === 'core/list' && countBlocksByType(document, 'core/list') >= MAX_BUILDER_LISTS) {
         return __("Limit of eight lists");

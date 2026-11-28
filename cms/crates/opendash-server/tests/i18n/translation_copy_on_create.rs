@@ -1181,7 +1181,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
                     "block_id": "core/column",
                     "children": [{
                         "id": "slot1",
-                        "block_id": "core/content-slot",
+                        "block_id": "core/entry-content",
                         "props": {}
                     }]
                 }]
@@ -1241,7 +1241,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
                         },
                         {
                             "id": "slot1",
-                            "block_id": "core/content-slot",
+                            "block_id": "core/entry-content",
                             "props": {}
                         }
                     ]

@@ -41,7 +41,7 @@ pub(super) async fn inspect_builder_doc_refs(
     _live: &LiveEntryState,
     doc: &BuilderDocument,
     live_doc: Option<&BuilderDocument>,
-    _caller_role: FieldRole,
+    caller_role: FieldRole,
     allowed_context_fields: &[String],
     report: &mut MissingRefsReport,
 ) -> ApiResult<()> {
@@ -57,8 +57,9 @@ pub(super) async fn inspect_builder_doc_refs(
         collect_live_nodes(&live.blocks, &mut live_nodes);
     }
 
-    let mut stack: Vec<&BlockNode> = doc.blocks.iter().rev().collect();
-    while let Some(node) = stack.pop() {
+    let mut stack: Vec<(&BlockNode, Option<String>)> =
+        doc.blocks.iter().rev().map(|n| (n, None)).collect();
+    while let Some((node, enclosing_list_type)) = stack.pop() {
         let prev_node = live_nodes.get(node.id.as_str()).copied();
         let preserved = prev_node
             .is_some_and(|prev| prev.block_id == node.block_id && prev.props == node.props);
@@ -84,8 +85,18 @@ pub(super) async fn inspect_builder_doc_refs(
             }
             continue;
         }
+        let child_list_type = if node.block_id == "core/list" {
+            node.props
+                .get("type_key")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        } else {
+            enclosing_list_type.clone()
+        };
         for child in node.children.iter().rev() {
-            stack.push(child);
+            stack.push((child, child_list_type.clone()));
         }
 
         if node.block_id == "core/contact-form"
@@ -149,8 +160,16 @@ pub(super) async fn inspect_builder_doc_refs(
         if !preserved && node.block_id != "core/template-part" {
             let mut opts = Vec::new();
             collect_all_options_sources_with_paths(block_specs, &node.props, None, &mut opts);
-            inspect_dynamic_options(&mut *conn, cache, &opts, allowed_context_fields, report)
-                .await?;
+            let effective_fields_override = match enclosing_list_type.as_deref() {
+                Some(type_key) => cache
+                    .public_context_fields_for_cpt(&mut *conn, type_key, caller_role)
+                    .await?,
+                None => None,
+            };
+            let effective_fields = effective_fields_override
+                .as_deref()
+                .unwrap_or(allowed_context_fields);
+            inspect_dynamic_options(&mut *conn, cache, &opts, effective_fields, report).await?;
         }
     }
     Ok(())

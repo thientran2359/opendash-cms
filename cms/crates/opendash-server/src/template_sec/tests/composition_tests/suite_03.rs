@@ -232,6 +232,7 @@ fn block_csec_blocks_html5_comment_smuggling_duplicate_attrs_entity_urls_and_ric
             parent_ctx: None,
             is_preview: false,
             fmt_cfg: &fmt_cfg,
+            loop_context: None,
         },
         &mut budget,
     )
@@ -358,6 +359,7 @@ fn block_csec_supports_nested_group_icon_link_spacing_and_dynamic_menus() {
             parent_ctx: None,
             is_preview: false,
             fmt_cfg: &fmt_cfg,
+            loop_context: None,
         },
         &mut budget,
     )
@@ -483,6 +485,7 @@ fn container_block_csec_enforces_safe_body_nesting_balanced_if_and_budget() {
             parent_ctx: Some(&parent_ctx),
             is_preview: false,
             fmt_cfg: &fmt_cfg,
+            loop_context: None,
         },
         &mut budget,
     )

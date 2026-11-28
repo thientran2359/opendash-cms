@@ -87,8 +87,13 @@ pub(crate) async fn render_not_found_response_for_locale(
         PublicRouteContext {
             route_kind: "not_found",
             route_path: None,
+            resolved_locale: &resolved_locale,
+            locale_target: seo::ThemeLocaleTarget::None,
             entry_id: None,
             entry_type_key: None,
+            entry_schema: None,
+            entry_body_html: None,
+            entry_has_builder_body: false,
             custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
@@ -99,7 +104,9 @@ pub(crate) async fn render_not_found_response_for_locale(
             taxonomy: None,
             term: None,
             term_schema: None,
+            term_summary: None,
             content_type: None,
+            archive_type: None,
             entry: None,
             list_pages: None,
             search: &inactive_search,
@@ -112,13 +119,17 @@ pub(crate) async fn render_not_found_response_for_locale(
         if body.canvas_layout || body.theme_context.is_null() {
             (None, None, false)
         } else {
-            overrides::resolve_and_render_header_footer_with_context_for_locale(
+            overrides::resolve_and_render_header_footer_with_template_data_for_locale(
                 db,
                 active.as_ref(),
                 &body.theme_context,
                 &body.precompiled_shell,
                 locale,
                 &fmt_cfg,
+                body.template_data
+                    .as_ref()
+                    .map(|d| d.as_render_data(&site_ctx))
+                    .as_ref(),
                 &mut budget,
                 cache,
             )
@@ -229,16 +240,40 @@ pub(crate) async fn render_canonical_archive(
     )
     .await?;
     let has_more = offset.saturating_add(per_page) < total_items;
+    let active_v3 = match themes_root {
+        Some(Extension(root)) => theme_storage::load_active_theme(&db, &root.0).await?,
+        None => None,
+    };
+    let candidates = overrides::build_candidates(&PublicTemplateContext::Archive {
+        content_type: type_key.clone(),
+    })?;
+    let resolution = overrides::resolve_template_2axis(
+        &db,
+        &candidates,
+        active_v3.as_ref().map(|v| &v.templates),
+        active_v3.as_ref().map(|v| &v.parts),
+        active_v3.as_ref().map(|v| &v.page_layouts),
+    )
+    .await?;
+    let pre_inspected = template_data::inspect_surface_for_resolution(
+        &db,
+        &resolution,
+        active_v3.as_ref(),
+        Some(&effective_schema),
+        None,
+    )
+    .await?;
     let mut archive_richtext_nonces = crate::template_sec::RichTextNonceTable::default();
     let entries = {
         let mut conn = db.acquire().await?;
-        public_content::hydrate_entry_views_with_options_in_conn(
+        public_content::hydrate_entry_views_projected_in_conn(
             &mut conn,
             records,
             Some(&locale),
             false,
             FieldRole::Editor,
             Some(&mut archive_richtext_nonces),
+            &pre_inspected.inspection.loop_projection,
         )
         .await?
     };
@@ -289,10 +324,6 @@ pub(crate) async fn render_canonical_archive(
         &schema.label,
         Some(canonical_base.clone()),
     );
-    let active_v3 = match themes_root {
-        Some(Extension(root)) => theme_storage::load_active_theme(&db, &root.0).await?,
-        None => None,
-    };
     let site = settings::get_general_for_locale(&db, Some(&locale)).await?;
     let pub_settings = settings::get_public(&db).await?;
     let mut richtext_nonces = crate::template_sec::RichTextNonceTable::default();
@@ -326,9 +357,6 @@ pub(crate) async fn render_canonical_archive(
         &fmt_cfg,
         &locale,
     )?;
-    let candidates = overrides::build_candidates(&PublicTemplateContext::Archive {
-        content_type: type_key.clone(),
-    })?;
     let mut budget = overrides::PublicCompositionBudget::default();
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
     budget
@@ -357,9 +385,9 @@ pub(crate) async fn render_canonical_archive(
     // exposure-filtered EntryView values.
     let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
     let cache = crate::page::BlockTemplateCache::global();
-    let body = resolve_public_template_html(
+    let body = render_resolved_public_template_html_with_surface(
         &db,
-        &candidates,
+        resolution,
         active_v3.as_ref(),
         &site_ctx,
         &site_opts,
@@ -370,8 +398,15 @@ pub(crate) async fn render_canonical_archive(
         PublicRouteContext {
             route_kind: "archive",
             route_path: Some(&canonical_base),
+            resolved_locale: &locale,
+            locale_target: seo::ThemeLocaleTarget::Archive {
+                type_key: &type_key,
+            },
             entry_id: None,
             entry_type_key: None,
+            entry_schema: None,
+            entry_body_html: None,
+            entry_has_builder_body: false,
             custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
@@ -382,11 +417,18 @@ pub(crate) async fn render_canonical_archive(
             taxonomy: None,
             term: None,
             term_schema: None,
+            term_summary: None,
             content_type: Some(&ct_value),
+            archive_type: Some(content_render::ArchiveTypeSummary {
+                key: schema.key.clone(),
+                label: schema.label.clone(),
+                description: schema.description.clone(),
+            }),
             entry: None,
             list_pages: None,
             search: &inactive_search,
         },
+        Some(pre_inspected),
         &mut budget,
         cache,
     )
@@ -394,13 +436,17 @@ pub(crate) async fn render_canonical_archive(
     let (header, footer, shell_has_form) = if body.canvas_layout || body.theme_context.is_null() {
         (None, None, false)
     } else {
-        overrides::resolve_and_render_header_footer_with_context_for_locale(
+        overrides::resolve_and_render_header_footer_with_template_data_for_locale(
             &db,
             active_v3.as_ref(),
             &body.theme_context,
             &body.precompiled_shell,
             Some(&locale),
             &fmt_cfg,
+            body.template_data
+                .as_ref()
+                .map(|d| d.as_render_data(&site_ctx))
+                .as_ref(),
             &mut budget,
             cache,
         )

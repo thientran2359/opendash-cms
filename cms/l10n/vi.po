@@ -19054,16 +19054,25 @@ msgid "This pattern contains blocks incompatible with the current target."
 msgstr "Mẫu thiết kế chứa các block không tương thích với đích hiện tại."
 
 #: admin:studio.workspace.forbids_slot
-msgid "This template must not contain core/content-slot."
-msgstr "Mẫu giao diện này không được chứa core/content-slot."
+msgid "This template must not contain Entry Content."
+msgstr "Mẫu giao diện này không được chứa khối Nội dung bài viết."
 
 #: admin:builder.editor_core.requires_slot
-msgid "This template must retain at least one core/content-slot."
-msgstr "Mẫu giao diện này phải giữ lại ít nhất một core/content-slot."
+msgid "This template must retain at least one entry content or entry display block."
+msgstr "Mẫu giao diện này phải giữ lại ít nhất một khối nội dung hoặc khối hiển thị bài viết."
 
 #: admin:studio.workspace.requires_slot
-msgid "This template requires exactly one core/content-slot."
-msgstr "Mẫu giao diện này yêu cầu đúng một core/content-slot."
+msgid "Single templates require Entry Content (max 1) or at least one Entry block."
+msgstr "Mẫu bài viết chi tiết cần khối Nội dung bài viết (tối đa 1) hoặc ít nhất một khối Entry."
+
+msgid "This template allows at most one Entry Content block."
+msgstr "Mẫu giao diện này chỉ cho phép tối đa một khối Nội dung bài viết."
+
+msgid "Template context"
+msgstr "Khối ngữ cảnh Template"
+
+msgid "Limit of one entry content block"
+msgstr "Giới hạn tối đa 1 khối Nội dung bài viết"
 
 #: server:core_l10n.search_placeholder
 msgid "Search the site..."

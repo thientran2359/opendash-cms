@@ -51,8 +51,8 @@ export function createStarterTemplateDocument(options?: {
   }
   if (includeContentSlot) {
     colChildren.push({
-      id: newNodeId('core/content-slot', doc),
-      block_id: 'core/content-slot',
+      id: newNodeId('core/entry-content', doc),
+      block_id: 'core/entry-content',
       props: {},
     });
   }

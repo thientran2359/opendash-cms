@@ -138,6 +138,8 @@ fn builder_list_uses_snapshot_canonical_href_not_legacy_slug() {
             ],
             has_next: false,
             out_of_range: false,
+            hydrated_entries: None,
+            entry_schema: None,
         },
     );
     let rendered = render_builder_with_lists(&state, &doc, false, &lists).unwrap();
@@ -199,7 +201,7 @@ fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
                 json!({"pattern_id": "7"}),
                 vec![],
             ),
-            node("slot-1", "core/content-slot", json!({}), vec![]),
+            node("slot-1", "core/entry-content", json!({}), vec![]),
         ],
     );
     let mut patterns = PatternResults::new();
@@ -213,6 +215,7 @@ fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
         content_html: Some("<main><p data-node-id=\"entry-inner\">Entry</p></main>"),
         parts: &parts,
         search: None,
+        template_data: None,
     };
 
     // Public render (is_preview = false) and Scope::None emit zero data-od-editable attributes.

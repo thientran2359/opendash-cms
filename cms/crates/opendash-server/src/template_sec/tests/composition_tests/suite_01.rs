@@ -310,6 +310,7 @@ fn declarative_block_icon_renders_once_and_rejects_attribute_spoofing() {
             parent_ctx: None,
             is_preview: false,
             fmt_cfg: &fmt_cfg,
+            loop_context: None,
         },
         &mut budget,
     )

@@ -1,6 +1,13 @@
+mod blocks_archive;
+mod blocks_chrome;
+mod blocks_entry;
+mod blocks_entry_field;
+mod blocks_entry_field_complex;
+mod blocks_entry_nav;
 mod blocks_layout;
 mod blocks_leaf;
 mod blocks_runtime;
+mod loop_engine;
 mod budget_render;
 mod cache_types;
 mod html_helpers;
