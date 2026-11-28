@@ -19,7 +19,7 @@ export interface OptionsPageMenuItem {
   menu_icon?: string | null;
   menu_position: number;
   min_edit_role: 'admin' | 'editor';
-  provider_status?: 'active' | 'inactive' | 'missing';
+  provider_status?: string;
   declaration_state?: 'declared' | 'withdrawn';
 }
 

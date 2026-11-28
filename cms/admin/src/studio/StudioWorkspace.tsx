@@ -1,34 +1,35 @@
 import { useI18n } from '../i18n/index.tsx';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
 import * as builderApi from '../api/builder.ts';
 import { getContentEntry, queryContentEntryTable } from '../api/content.ts';
-import { getMenuSlots, listMenus, putMenuSlots, type MenuRecord, type MenuSlotsSnapshot } from '../api/menus.ts';
+import { getMenuSlots, listMenus, type MenuRecord, type MenuSlotsSnapshot } from '../api/menus.ts';
 import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../api/locales.ts';
 import { listPatterns, type PatternRecord } from '../api/patterns.ts';
 import {
   getGeneralSettings, getGlobalSiteOptions, getReadingSettings, getTimezoneCatalog,
-  saveGeneralSettings, saveGlobalSiteOptions, saveReadingSettings,
   type GeneralSettings, type GeneralSettingsDraft, type GlobalSiteOptionsSnapshot,
   type ReadingSettings, type ReadingSettingsDraft,
 } from '../api/settings.ts';
 import { getStudioTargets, postStudioPreview, type StudioTargetItem, type TransientStudioOverrides } from '../api/studio.ts';
-import { saveThemeOptions } from '../api/themes.ts';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
 import { BuilderPreviewFrame } from '../builder/BuilderPreviewFrame.tsx';
 import {
-  EMPTY_DOCUMENT, VALID_TEMPLATE_PART_KEY, allNodes, countBlocksByType,
-  createStarterTemplateDocument, locate, visibleNodesInTree,
+  EMPTY_DOCUMENT, createStarterTemplateDocument, locate, visibleNodesInTree,
   type BuilderDocument, type BuilderViewport, type StudioBuilderClipboard,
 } from '../builder/document.ts';
 import { StudioMode2RevisionsOverlay } from '../features/revisions/StudioMode2RevisionsOverlay.tsx';
 import { useStudioMode2Revisions } from '../features/revisions/useStudioMode2Revisions.ts';
-import type { ParsedRoute, StudioPanelId } from '../shell/router.ts';
+import { isActiveDeclaredOptionsPage, type OptionsPageMenuItem } from '../shell/AdminShellMenu.tsx';
+import type { ParsedRoute, StudioOptionsScope, StudioPanelId } from '../shell/router.ts';
 import type { AuthUser } from '../types.ts';
 import { StudioCustomizerNav } from './StudioCustomizerNav.tsx';
 import { StudioSidebarHeader } from './StudioSidebarHeader.tsx';
 import { StudioSidebarFooter } from './StudioSidebarFooter.tsx';
 import type { StudioMenuRequest } from './StudioBlockTree.tsx';
+import { buildStudioHash } from './studioOptionsSections.ts';
+import { useStudioMode1Controller } from './useStudioMode1Controller.ts';
+import { useStudioOptionsState } from './useStudioOptionsState.ts';
 
 interface Props {
   route: ParsedRoute;
@@ -40,8 +41,10 @@ interface Props {
   resetToken: number;
   themeRevision: number;
   localeState?: AdminLocaleState;
+  optionsPages?: OptionsPageMenuItem[];
   onNavigateHash: (hash: string) => void;
   onDirtyChange: (dirty: boolean) => void;
+  onTemplateDirtyChange?: (dirty: boolean) => void;
   onApiError: (error: unknown, fallback: string) => void;
   onSavedSettingsOrTheme?: () => void;
 }
@@ -82,12 +85,14 @@ export const StudioWorkspace: React.FC<Props> = ({
   resetToken,
   themeRevision,
   localeState = EMPTY_ADMIN_LOCALE_STATE,
+  optionsPages = [],
   onNavigateHash,
   onDirtyChange,
+  onTemplateDirtyChange,
   onApiError,
   onSavedSettingsOrTheme,
 }) => {
-  const { __, _x } = useI18n();
+  const { __ } = useI18n();
   const isMode2 = route.view === 'studio-entry';
   const entryTypeKey = isMode2 ? (route.typeKey ?? '') : '';
   const entryId = isMode2 ? (route.entryId ?? null) : null;
@@ -118,6 +123,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   // Mode 1 state
   const [panel, setPanel] = useState<StudioPanelId>(route.studioPanel ?? 'root');
+  const [optionsRoute, setOptionsRoute] = useState<StudioOptionsScope>(route.studioOptionsRoute ?? { kind: 'index' });
   const [previewLocale, setPreviewLocale] = useState<string>('');
   const previewLocaleInvalid = Boolean(previewLocale && localeState.allLocales.length > 0
     && previewLocale !== localeState.defaultLocale?.code
@@ -149,13 +155,32 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   const [globalOptionsSaved, setGlobalOptionsSaved] = useState<GlobalSiteOptionsSnapshot | null>(null);
   const [globalOptionsDraft, setGlobalOptionsDraft] = useState<Record<string, unknown> | null>(null);
-
-  const [themeOptionsVersion, setThemeOptionsVersion] = useState<number | null>(null);
-  const [themeOptionsDraft, setThemeOptionsDraft] = useState<Record<string, unknown> | null>(null);
-  const [themeOptionsDirty, setThemeOptionsDirty] = useState(false);
-  const [themeOptionsReloadToken, setThemeOptionsReloadToken] = useState(0);
   const [mode1ReloadSeq, setMode1ReloadSeq] = useState(0);
   const [menuPreviewSeq, setMenuPreviewSeq] = useState(0);
+
+  const appearanceOptionsPages = useMemo(
+    () =>
+      optionsPages
+        .filter(p => p.parent_menu === 'appearance' && isActiveDeclaredOptionsPage(p))
+        .slice()
+        .sort((a, b) => a.menu_position - b.menu_position || a.menu_label.localeCompare(b.menu_label)),
+    [optionsPages],
+  );
+
+  const optionsState = useStudioOptionsState({
+    active,
+    isMode2,
+    user,
+    csrfToken,
+    activeThemeId,
+    effectivePreviewLocale,
+    defaultLocaleCode: localeState.defaultLocale?.code ?? '',
+    hydratedPreviewLocale,
+    localeDraftBlocked,
+    mode1ReloadSeq,
+    themeRevision,
+    onApiError,
+  });
 
   const [overrideDocs, setOverrideDocs] = useState<Record<string, builderApi.TypedTemplateOverride>>({});
   const [templateEditingEnabled, setTemplateEditingEnabled] = useState(false);
@@ -249,9 +274,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     setMenuSlotsDraft(null);
     setGlobalOptionsSaved(null);
     setGlobalOptionsDraft(null);
-    setThemeOptionsDraft(null);
-    setThemeOptionsDirty(false);
-    setThemeOptionsVersion(null);
+    optionsState.resetAll();
     setTemplateEditingEnabled(false);
     setTemplateDoc(EMPTY_DOCUMENT);
     setTemplateSavedDoc(EMPTY_DOCUMENT);
@@ -297,13 +320,18 @@ export const StudioWorkspace: React.FC<Props> = ({
     globalOptionsSaved && globalOptionsDraft &&
     !sameJson(globalOptionsSaved.values, globalOptionsDraft),
   );
-  const mode1Dirty = generalDirty || readingDirty || menuSlotsDirty || globalOptionsDirty || themeOptionsDirty || templateDirty;
+  const mode1Dirty =
+    generalDirty || readingDirty || menuSlotsDirty || globalOptionsDirty
+    || optionsState.themeDirty || optionsState.anyOptionsPagesDirty || templateDirty;
   const entryDirty = Boolean(entryVersion !== null && !sameJson(entryDoc, entrySavedDoc));
   const totalDirty = isMode2 ? entryDirty : mode1Dirty;
 
   useEffect(() => {
     onDirtyChange(totalDirty);
   }, [totalDirty, onDirtyChange]);
+  useEffect(() => {
+    onTemplateDirtyChange?.(templateDirty);
+  }, [templateDirty, onTemplateDirtyChange]);
 
   // A disabled/deleted preview locale or a changed default invalidates its loaded CAS baseline.
   useEffect(() => {
@@ -327,13 +355,21 @@ export const StudioWorkspace: React.FC<Props> = ({
     }
   }, [isMode2, previewLocaleInvalid, localeBaselineMismatch, localeReloadPending, localeDraftConflict, hydratedPreviewLocale, previewLocale, saving, mode1Dirty]);
 
-  // Keep route-driven Mode 1 panel/target synchronized cleanly on navigation.
+  // Keep route-driven Mode 1 panel, options sub-route, and template target synchronized cleanly (including Back/Forward).
   useEffect(() => {
     if (!isMode2 && active) {
-      if (route.studioPanel) setPanel(route.studioPanel);
-      if (route.studioTemplateKey) setSelectedTargetKey(route.studioTemplateKey);
+      setPanel(route.studioPanel ?? 'root');
+      setOptionsRoute(route.studioOptionsRoute ?? { kind: 'index' });
+      const nextTarget = route.studioTemplateKey ?? null;
+      if (nextTarget !== selectedTargetKey) {
+        setSelectedTargetKey(nextTarget);
+        setTemplateDiagnostics([]);
+        if (mode1LoadedRef.current) {
+          hydrateTemplateTarget(nextTarget, targets, overrideDocs);
+        }
+      }
     }
-  }, [isMode2, active, route.studioPanel, route.studioTemplateKey]);
+  }, [isMode2, active, route.studioPanel, route.studioOptionsRoute, route.studioTemplateKey]);
 
   const hydrateTemplateTarget = (
     targetKey: string | null,
@@ -479,10 +515,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           setGlobalOptionsDraft(prev => (!forceReload && globalOptionsDirty && prev ? prev : globalOptsRes.values));
 
           if (forceReload) {
-            setThemeOptionsDraft(null);
-            setThemeOptionsDirty(false);
-            setThemeOptionsVersion(null);
-            setThemeOptionsReloadToken(v => v + 1);
+            optionsState.resetAll();
           }
 
           setPatterns(patRes.items);
@@ -712,8 +745,10 @@ export const StudioWorkspace: React.FC<Props> = ({
       const transient: TransientStudioOverrides = {};
       if (!localeDraftConflict && generalDirty && generalDraft) transient.general = generalDraft;
       if (!localeDraftConflict && globalOptionsDirty && globalOptionsDraft) transient.global_options = globalOptionsDraft;
-      if (!localeDraftConflict && themeOptionsDirty && themeOptionsDraft) transient.theme_options = themeOptionsDraft;
+      if (!localeDraftConflict && optionsState.themeDirty && optionsState.themeDraft) transient.theme_options = optionsState.themeDraft;
       if (!localeDraftConflict && menuSlotsDirty && menuSlotsDraft) transient.menu_slots = menuSlotsDraft;
+      const transientOptPages = !localeDraftConflict ? optionsState.buildTransientOptionsPages() : undefined;
+      if (transientOptPages) transient.options_pages = transientOptPages;
 
       const editingSelectedTemplate = Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled);
       void postStudioPreview(
@@ -734,7 +769,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         })
         .catch(cause => {
           if (controller.signal.aborted || seq !== previewSeqRef.current) return;
-          if (cause instanceof api.ApiClientError && cause.status === 412) {
+          if (cause instanceof api.ApiClientError && (cause.status === 412 || cause.status === 409)) {
             setConflict(true);
           } else {
             onApiError(cause, __("Cannot preview appearance customization."));
@@ -765,8 +800,10 @@ export const StudioWorkspace: React.FC<Props> = ({
     generalDraft,
     globalOptionsDirty,
     globalOptionsDraft,
-    themeOptionsDirty,
-    themeOptionsDraft,
+    optionsState.themeDirty,
+    optionsState.themeDraft,
+    optionsState.draftsByRef,
+    optionsState.snapshotsByRef,
     menuSlotsDirty,
     menuSlotsDraft,
     menuPreviewSeq,
@@ -778,130 +815,79 @@ export const StudioWorkspace: React.FC<Props> = ({
   ]);
 
   const handleSelectTarget = (nextKey: string | null) => {
-    if (templateDirty && nextKey !== selectedTargetKey) {
-      if (!window.confirm(__("The current template has unsaved changes. Discard them and switch targets?"))) {
-        return;
-      }
-    }
-    setSelectedTargetKey(nextKey);
-    setTemplateDiagnostics([]);
-    hydrateTemplateTarget(nextKey, targets, overrideDocs);
+    onNavigateHash(buildStudioHash('templates', undefined, nextKey));
   };
 
-  const handlePanelChange = (nextPanel: StudioPanelId) => {
-    setBuilderView('tree');
-    setAddTargetParentId(null);
-    setMenuRequest(null);
-    setPanel(nextPanel);
-    if (nextPanel !== 'templates' && templateDirty) {
-      setStatus(__("Unsaved template changes are retained in the current session."));
-    }
-  };
-
-  const handleSaveMode1 = async () => {
-    if (!active || !user || !csrfToken || loading || savingRef.current || !mode1Dirty || localeDraftBlocked || !hydratedPreviewLocale || hydratedPreviewLocale !== effectivePreviewLocale) return;
-
-    if (readingDirty && readingDraft && readingDraft.homepage_page_id !== null &&
-        readingDraft.homepage_page_id === readingDraft.posts_page_id) {
-      setStatus(__("The homepage and posts page cannot be the same page."), true);
-      return;
-    }
-
-    if (templateDirty && selectedTarget) {
-      if (selectedTarget.requires_content_slot && countBlocksByType(templateDoc, 'core/content-slot') !== 1) {
-        setStatus(__("This template requires exactly one core/content-slot."), true);
-        return;
-      }
-      if (selectedTarget.forbids_content_slot && countBlocksByType(templateDoc, 'core/content-slot') > 0) {
-        setStatus(__("This template must not contain core/content-slot."), true);
-        return;
-      }
-      const badPart = allNodes(templateDoc).some(
-        n =>
-          n.node.block_id === 'core/template-part'
-          && !VALID_TEMPLATE_PART_KEY.test(String(n.node.props?.part_key ?? '')),
-      );
-      if (badPart) {
-        setStatus(__("A template part has an invalid part_key."), true);
-        return;
-      }
-    }
-
-    savingRef.current = true;
-    setSaving(true);
-    setConflict(false);
-    const savedNames: string[] = [];
-    try {
-      if (generalDirty && generalSaved && generalDraft) {
-        const res = await saveGeneralSettings(generalDraft, generalSaved.version, csrfToken, effectivePreviewLocale || undefined);
-        setGeneralSaved(res);
-        setGeneralDraft({ site_title: res.site_title, tagline: res.tagline, timezone: res.timezone });
-        savedNames.push(__("Site identity"));
-      }
-      if (readingDirty && readingSaved && readingDraft) {
-        const res = await saveReadingSettings(readingDraft, readingSaved.version, csrfToken, effectivePreviewLocale || undefined);
-        setReadingSaved(res);
-        setReadingDraft({ homepage_page_id: res.homepage_page_id, posts_page_id: res.posts_page_id });
-        savedNames.push(__("Homepage and reading"));
-      }
-      if (menuSlotsDirty && menuSlotsSaved && menuSlotsDraft) {
-        const res = await putMenuSlots(menuSlotsSaved.theme_id, menuSlotsDraft, menuSlotsSaved.version, csrfToken, effectivePreviewLocale || undefined);
-        setMenuSlotsSaved(res);
-        setMenuSlotsDraft(buildSlotAssignmentsMap(res));
-        savedNames.push(__("Menu locations"));
-      }
-      if (globalOptionsDirty && globalOptionsSaved && globalOptionsDraft) {
-        const res = await saveGlobalSiteOptions(globalOptionsDraft, globalOptionsSaved.version, csrfToken);
-        setGlobalOptionsSaved(res);
-        setGlobalOptionsDraft(res.values);
-        savedNames.push(__("Global site options"));
-      }
-      if (themeOptionsDirty && activeThemeId && themeOptionsDraft && themeOptionsVersion !== null) {
-        const res = await saveThemeOptions(activeThemeId, themeOptionsDraft, themeOptionsVersion, csrfToken, effectivePreviewLocale || undefined);
-        setThemeOptionsVersion(res.version);
-        setThemeOptionsDraft(res.values);
-        setThemeOptionsDirty(false);
-        setThemeOptionsReloadToken(v => v + 1);
-        savedNames.push(__("Appearance options"));
-      }
-      if (templateDirty && selectedTarget) {
-        const res = await builderApi.putTemplateOverride(
-          selectedTarget.target,
-          templateDoc,
-          csrfToken,
-          templateSavedVersion !== null && templateSavedVersion > 0 ? templateSavedVersion : undefined,
-        );
-        setOverrideDocs(prev => ({ ...prev, [res.canonical_target_key]: res }));
-        setTemplateSavedVersion(res.version);
-        setTemplateSavedDoc(res.ast_json);
-        setTemplateDoc(res.ast_json);
-        const freshTargets = await getStudioTargets();
-        setTargets(freshTargets.items);
-        savedNames.push(`Template (${selectedTarget.canonical_target_key})`);
-      }
-
-      if (savedNames.length > 0) {
-        onSavedSettingsOrTheme?.();
-        setStatus(__("Saved: {{names}}.", { names: savedNames.join(", ") }));
-      }
-    } catch (cause) {
-      if (cause instanceof api.ApiClientError && cause.status === 412) {
-        setConflict(true);
-        setStatus(__("Data changed in another session (412). Your unsaved changes are retained."), true);
-      } else {
-        setStatus(
-          savedNames.length > 0
-            ? __("Saved {{names}}, but the next step failed; remaining changes are retained.", { names: savedNames.join(", ") })
-            : __("Saving failed; drafts are retained."),
-          true,
-        );
-        onApiError(cause, __("Cannot save appearance customization."));
-      }
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
+  const mode1Controller = useStudioMode1Controller({
+    active,
+    isMode2,
+    user,
+    csrfToken,
+    loading,
+    savingRef,
+    setSaving,
+    setConflict,
+    setStatus,
+    onApiError,
+    onNavigateHash,
+    onSavedSettingsOrTheme,
+    panel,
+    optionsRoute,
+    selectedTarget,
+    activeThemeId,
+    activeThemeName,
+    appearanceOptionsPages,
+    mode1Dirty,
+    localeDraftBlocked,
+    hydratedPreviewLocale,
+    effectivePreviewLocale,
+    generalDirty,
+    generalSaved,
+    generalDraft,
+    setGeneralSaved,
+    setGeneralDraft,
+    readingDirty,
+    readingSaved,
+    readingDraft,
+    setReadingSaved,
+    setReadingDraft,
+    menuSlotsDirty,
+    menuSlotsSaved,
+    menuSlotsDraft,
+    setMenuSlotsSaved,
+    setMenuSlotsDraft,
+    globalOptionsDirty,
+    globalOptionsSaved,
+    globalOptionsDraft,
+    setGlobalOptionsSaved,
+    setGlobalOptionsDraft,
+    optionsState,
+    templateDirty,
+    templateDoc,
+    templateSavedVersion,
+    setOverrideDocs,
+    setTemplateSavedVersion,
+    setTemplateSavedDoc,
+    setTemplateDoc,
+    setTargets,
+    entryTitle,
+    entryTypeKey,
+    entryId,
+    resetBuilderPaneUi: () => {
+      setBuilderView('tree');
+      setAddTargetParentId(null);
+      setMenuRequest(null);
+    },
+  });
+  const {
+    navigatePanel: handlePanelChange,
+    navigateOptionsRoute: handleOptionsRouteChange,
+    contextTitle,
+    contextBadge,
+    contextBack,
+    handleContextBack,
+    handleSaveMode1,
+  } = mode1Controller;
 
   const handleResetTemplate = async () => {
     if (!active || !csrfToken || savingRef.current || localeDraftBlocked || !selectedTarget?.override_id || !templateSavedVersion) return;
@@ -1027,31 +1013,6 @@ export const StudioWorkspace: React.FC<Props> = ({
     if (isMode2) setEntrySelectedNodeId(id);
     else if (panel === 'templates' && templateEditingEnabled) setTemplateSelectedNodeId(id);
   };
-  const contextTitle = isMode2
-    ? entryTitle || `${entryTypeKey} #${entryId}`
-    : selectedTarget && panel === 'templates'
-      ? selectedTarget.label
-      : ({ root: activeThemeName ?? activeThemeId ?? __("Default theme"),
-          identity: __("Site identity"), 'theme-options': __("Appearance options"),
-          menus: __("Menus and locations"), reading: __("Homepage and reading"), templates: __("Build templates") } as Record<string, string>)[panel];
-  const contextBadge = isMode2
-    ? (entryTypeKey === 'page'
-        ? __("Page")
-        : entryTypeKey === 'post'
-          ? __("Post")
-          : entryTypeKey === 'pattern'
-            ? _x("Reusable Pattern", "builder.document")
-            : entryTypeKey)
-    : selectedTarget && panel === 'templates' ? _x("Template", "studio.template") : panel === 'root' ? __("Theme") : undefined;
-  const contextBack = isMode2
-    ? undefined
-    : panel === 'root'
-      ? undefined
-      : panel === 'templates' && selectedTarget ? __("Template list") : __("Customize");
-  const handleContextBack = () => {
-    if (panel === 'templates' && selectedTarget) handleSelectTarget(null);
-    else handlePanelChange('root');
-  };
   const handleReloadConflict = () => {
     if (isMode2) {
       handleReloadMode2();
@@ -1064,6 +1025,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     setLocaleDraftConflict(null);
     setLocaleReloadPending(true);
     setLoading(true);
+    optionsState.resetAll();
     mode1ForceReloadRef.current = true;
     mode1LoadedRef.current = false;
     setConflict(false);
@@ -1172,8 +1134,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                     setReadingDraft(readingSaved ? { homepage_page_id: readingSaved.homepage_page_id, posts_page_id: readingSaved.posts_page_id } : null);
                     setMenuSlotsDraft(menuSlotsSaved ? buildSlotAssignmentsMap(menuSlotsSaved) : null);
                     setGlobalOptionsDraft(globalOptionsSaved ? globalOptionsSaved.values : null);
-                    setThemeOptionsDraft(null);
-                    setThemeOptionsDirty(false);
+                    optionsState.resetAll();
                   }
                   setPreviewLocale(next);
                   setLocaleReloadPending(true);
@@ -1270,6 +1231,9 @@ export const StudioWorkspace: React.FC<Props> = ({
               openPatternSeq={patternRequestSeq}
               panel={panel}
               onPanelChange={handlePanelChange}
+              optionsRoute={optionsRoute}
+              onOptionsRouteChange={handleOptionsRouteChange}
+              onNavigateHash={onNavigateHash}
               localeState={localeState}
               previewLocale={localeDraftConflict ?? (localeBaselineMismatch ? hydratedPreviewLocale! : previewLocaleInvalid ? previewLocale : effectivePreviewLocale)}
               activeThemeId={activeThemeId}
@@ -1281,16 +1245,11 @@ export const StudioWorkspace: React.FC<Props> = ({
               globalOptionsSnapshot={globalOptionsSaved}
               globalOptionsDraft={globalOptionsDraft}
               globalOptionsDirty={globalOptionsDirty}
-              onGlobalOptionsChange={next => setGlobalOptionsDraft(next)}
-              themeOptionsDraft={themeOptionsDraft}
-              themeOptionsDirty={themeOptionsDirty}
-              themeOptionsReloadToken={themeOptionsReloadToken}
-              onThemeOptionsChange={(vals, meta) => {
-                if (localeDraftBlocked || !hydratedPreviewLocale || hydratedPreviewLocale !== effectivePreviewLocale) return;
-                setThemeOptionsDraft(vals);
-                setThemeOptionsVersion(meta.version);
-                setThemeOptionsDirty(meta.dirty);
-              }}
+              onGlobalOptionsChange={partial =>
+                setGlobalOptionsDraft(prev => ({ ...(prev ?? globalOptionsSaved?.values ?? {}), ...partial }))
+              }
+              optionsState={optionsState}
+              appearanceOptionsPages={appearanceOptionsPages}
               menuSlots={menuSlotsSaved}
               menuSlotsDraft={menuSlotsDraft}
               menuSlotsDirty={menuSlotsDirty}

@@ -4,7 +4,6 @@ export type StudioPanelId =
   | 'root'
   | 'identity'
   | 'options'
-  | 'theme-options'
   | 'menus'
   | 'reading'
   | 'templates';
