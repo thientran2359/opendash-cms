@@ -413,23 +413,35 @@ async fn resolve_menus_by_keys_filters_locale_and_enforces_eight_menu_cap() {
         .execute(&db)
         .await
         .unwrap();
-    sqlx::query("UPDATE site_locales SET enabled = 1 WHERE code = 'en'")
-        .execute(&db)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO site_locales (code, bcp47_tag, label, direction, is_default, enabled, position)
+         VALUES ('en', 'en', 'English', 'ltr', 0, 1, 1)
+         ON CONFLICT(code) DO UPDATE SET enabled = 1, deleted_at = NULL",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
 
     let vi_entry_id: i64 = sqlx::query_scalar(
         "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
-         VALUES('page', 'gioi-thieu', 'Giới thiệu', '{}', 'published', 'vi', 'grp-m1') RETURNING id",
+         VALUES('page', 'gioi-thieu', 'Giới thiệu', '{}', 'draft', 'vi', 'grp-m1') RETURNING id",
     )
     .fetch_one(&db)
     .await
     .unwrap();
     let en_entry_id: i64 = sqlx::query_scalar(
         "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
-         VALUES('page', 'about', 'About', '{}', 'published', 'en', 'grp-m1') RETURNING id",
+         VALUES('page', 'about', 'About', '{}', 'draft', 'en', 'grp-m1') RETURNING id",
     )
     .fetch_one(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE content_entries SET publication_status = 'published', published_at = datetime('now') WHERE id IN (?, ?)",
+    )
+    .bind(vi_entry_id)
+    .bind(en_entry_id)
+    .execute(&db)
     .await
     .unwrap();
     sqlx::query(

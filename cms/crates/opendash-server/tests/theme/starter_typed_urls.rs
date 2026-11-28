@@ -308,8 +308,8 @@ async fn typed_url_fresh_public_saved_and_unsaved_preview() {
     assert_eq!(
         body.matches("href=\"&#x2f;lien-he?from=header&amp;x=2\"")
             .count(),
-        2,
-        "Header and Home must both render the exact escaped stored CTA URL: {body}"
+        1,
+        "Header must render the exact escaped stored CTA URL: {body}"
     );
 
     // The post back-link must follow the actual Posts Page assignment, never

@@ -281,12 +281,7 @@ fn loop_item_validation_enforces_limits_allowlist_html_id_and_projection() {
                 vec![
                     node("img-1", "core/entry-featured-image", json!({}), vec![]),
                     node("title-1", "core/entry-title", json!({}), vec![]),
-                    node(
-                        "meta-1",
-                        "core/entry-meta",
-                        json!({ "items": ["published_date", "primary_category", "reading_time"] }),
-                        vec![],
-                    ),
+                    node("meta-1", "core/entry-meta", json!({}), vec![]),
                     node("fld-1", "core/entry-field", json!({}), vec![]),
                 ],
             )],

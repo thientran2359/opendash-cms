@@ -89,19 +89,6 @@ impl OwnedPreviewTemplateData {
     }
 }
 
-fn csec_content_kind_for_candidate(kind: TemplateCandidateKind) -> template_sec::CsecContentKind {
-    use TemplateCandidateKind as K;
-    match kind {
-        K::Single | K::SingleCustom | K::Singular | K::Page | K::PageLayout => {
-            template_sec::CsecContentKind::Entry
-        }
-        K::Index => template_sec::CsecContentKind::Index,
-        K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part => {
-            template_sec::CsecContentKind::NonEntry
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(in crate::storage) async fn inspect_preview_surfaces_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
@@ -140,7 +127,7 @@ pub(in crate::storage) async fn inspect_preview_surfaces_in_tx(
             TemplateResolution::ActiveTheme { target_key, html } => {
                 let empty_parts = BTreeMap::new();
                 let parts = active.map(|v| &v.parts).unwrap_or(&empty_parts);
-                let kind = csec_content_kind_for_candidate(target.kind);
+                let kind = super::csec_content_kind_for_target_key(target_key);
                 let compiled = if let Some(act) = active {
                     template_sec::ThemeCompositionCache::global().get_or_compile(
                         &act.revision_digest,

@@ -1650,7 +1650,11 @@ async fn s02_seo_dir_hreflang_x_default_and_sitemap_xhtml() {
     assert!(vi_home_html.contains(
         "<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://cms.example.com/\">"
     ));
-    assert!(!vi_home_html.contains("hreflang=\"ar\""));
+    assert!(
+        vi_home_html.contains(
+            "<link rel=\"alternate\" hreflang=\"ar\" href=\"https://cms.example.com/ar\">"
+        )
+    );
 
     // 2. Archive hreflang on page 1 vs suppressed on page 2
     let arch_p1 = client
@@ -1769,7 +1773,7 @@ async fn s02_seo_dir_hreflang_x_default_and_sitemap_xhtml() {
         .await
         .unwrap();
 
-    // 5. Verify /sitemaps/1.xml emits xhtml namespace & alternates, omitting noindex en_about and unconfigured AR home
+    // 5. Verify /sitemaps/1.xml emits xhtml namespace & alternates, omitting noindex en_about while including unconfigured AR Index home
     let sm_resp = client
         .get(format!("{}/sitemaps/1.xml", srv.base_url))
         .send()
@@ -1780,7 +1784,7 @@ async fn s02_seo_dir_hreflang_x_default_and_sitemap_xhtml() {
     assert!(sm_xml.contains("xmlns:xhtml=\"http://www.w3.org/1999/xhtml\""));
     assert!(sm_xml.contains("<loc>https://cms.example.com/</loc>"));
     assert!(sm_xml.contains("<loc>https://cms.example.com/en</loc>"));
-    assert!(!sm_xml.contains("<loc>https://cms.example.com/ar</loc>"));
+    assert!(sm_xml.contains("<loc>https://cms.example.com/ar</loc>"));
     assert!(!sm_xml.contains("<loc>https://cms.example.com/en/about</loc>"));
     assert!(sm_xml.contains("<xhtml:link rel=\"alternate\" hreflang=\"ar\" href=\"https://cms.example.com/ar/about-ar\"/>"));
     assert!(!sm_xml.contains(

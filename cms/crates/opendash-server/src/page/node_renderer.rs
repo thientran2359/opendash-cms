@@ -331,7 +331,7 @@ fn render_node(
         );
     }
 
-    if def.schema.schema.supports_children {
+    if def.schema.schema.supports_children && node.block_id != "core/list" {
         let active = active_child_nodes(&node.children, &env.state.declared_blocks);
         let active_count = active.len();
         let children_meta = if is_native {

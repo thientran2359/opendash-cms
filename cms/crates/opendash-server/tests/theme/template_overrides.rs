@@ -231,7 +231,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
             .header("Cookie", &cookie)
             .header("Origin", &origin)
             .header("X-CSRF-Token", &csrf)
-            .json(&json!({ "title": title, "slug": slug, "values": {} }))
+            .json(&json!({ "title": title, "slug": slug, "values": { "body": format!("Body for {title}") } }))
             .send()
             .await
             .unwrap();
@@ -475,9 +475,10 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
     single_doc["blocks"][0]["children"][0]["children"][0]["children"]
         .as_array_mut()
         .unwrap()
-        .push(json!({
-            "id":"entry-slot","block_id":"core/entry-content","props":{}
-        }));
+        .extend([
+            json!({"id":"entry-title","block_id":"core/entry-title","props":{}}),
+            json!({"id":"entry-slot","block_id":"core/entry-content","props":{}}),
+        ]);
     let preview_single = preview_request()
         .json(&json!({
             "target":{"kind":"single","content_type":"post","selector_slug":"secret-draft"},

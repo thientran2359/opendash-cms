@@ -313,7 +313,7 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         .unwrap();
     assert_eq!(add_en.status(), StatusCode::CREATED);
 
-    // /en unconfigured home uses CoreL10n English
+    // /en unconfigured home renders Starter index.html in English
     let en_home = client
         .get(format!("{}/en", srv.origin))
         .send()
@@ -322,7 +322,7 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
     assert_eq!(en_home.status(), StatusCode::OK);
     let en_home_html = en_home.text().await.unwrap();
     assert!(en_home_html.contains("<html lang=\"en\" dir=\"ltr\">"));
-    assert!(en_home_html.contains("Latest posts"));
+    assert!(en_home_html.contains("No content yet."));
 
     // /en/no-such-page 404 uses Starter 1.1.0 English dictionary & language-switcher
     let en_404 = client

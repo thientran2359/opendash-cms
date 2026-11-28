@@ -517,8 +517,7 @@ fn icon_symbol_dedupe_and_unique_usage_caps() {
     assert!(!out.contains("id=\"od-sym-check\""));
     assert!(out.contains("<symbol id=\"od-sym-arrow-right\" viewBox=\"0 0 24 24\">"));
     assert_eq!(
-        out.matches("<use href=\"#od-sym-arrow-right\"></use>")
-            .count(),
+        out.matches("<use href=\"#od-sym-arrow-right\"/>").count(),
         2
     );
 

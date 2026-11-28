@@ -84,7 +84,7 @@ async fn migration_0060_fresh_and_baseline_upgrade_and_restore_validation() {
             .fetch_one(&up_pool)
             .await
             .unwrap();
-    assert_eq!(up_ver, 62);
+    assert_eq!(up_ver, 63);
     let up_objs: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
             .fetch_one(&up_pool)

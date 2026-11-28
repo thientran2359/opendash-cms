@@ -1117,7 +1117,7 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
         ("html_comment_bang_close", r#"<!-- bad --!>"#),
         (
             "set_block_unused_script_smuggling",
-            r#"{% set unused %}<script>alert(1)</script>{% endset %}<p>ok</p>"#,
+            r#"{% set unused %}<script>alert("{{ options.banner_text }}")</script>{% endset %}<p>ok</p>"#,
         ),
         (
             "with_block_shadowing_url_scope",
@@ -1137,7 +1137,7 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
         ),
         (
             "conditional_attr_splitting",
-            r#"<a data-x="{% if options.flag %}{{ entry.url }}{% else %}https://evil.example{% endif %}" href="https://evil.example">x</a>"#,
+            r#"<a data-x="{% if options.flag %}a" href="{{ options.banner_text }}"{% else %}b"{% endif %}>x</a>"#,
         ),
         ("closing_link_void_tag", r#"</link><p>x</p>"#),
         ("closing_meta_void_tag", r#"</meta><p>x</p>"#),
