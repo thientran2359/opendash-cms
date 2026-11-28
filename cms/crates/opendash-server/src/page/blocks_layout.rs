@@ -6,11 +6,7 @@ use opendash_core::{
 };
 use serde_json::Value;
 
-use crate::{
-    error::ApiResult,
-    storage::page::RegisteredBlockDef,
-    template_sec::RenderBudget,
-};
+use crate::{error::ApiResult, storage::page::RegisteredBlockDef, template_sec::RenderBudget};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct NativeParentInfo<'a> {

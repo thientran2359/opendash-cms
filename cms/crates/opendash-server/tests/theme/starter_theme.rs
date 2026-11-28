@@ -330,7 +330,10 @@ async fn starter_bootstrap_import_repair_and_admin_theme_selection_are_durable()
     assert!(!html.contains("/assets/opendash-blocks.js"));
 
     let mkt_created: Value = client
-        .post(format!("{}/api/admin/content-types/page/entries", srv.origin))
+        .post(format!(
+            "{}/api/admin/content-types/page/entries",
+            srv.origin
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::ORIGIN, &srv.origin)
@@ -358,7 +361,10 @@ async fn starter_bootstrap_import_repair_and_admin_theme_selection_are_durable()
     });
     assert_eq!(
         client
-            .put(format!("{}/api/admin/entries/page/{mkt_id}/builder", srv.origin))
+            .put(format!(
+                "{}/api/admin/entries/page/{mkt_id}/builder",
+                srv.origin
+            ))
             .header(header::COOKIE, &cookie)
             .header("X-CSRF-Token", &csrf)
             .header(header::ORIGIN, &srv.origin)
@@ -372,7 +378,10 @@ async fn starter_bootstrap_import_repair_and_admin_theme_selection_are_durable()
     );
     assert_eq!(
         client
-            .post(format!("{}/api/admin/content-types/page/entries/{mkt_id}/publication", srv.origin))
+            .post(format!(
+                "{}/api/admin/content-types/page/entries/{mkt_id}/publication",
+                srv.origin
+            ))
             .header(header::COOKIE, &cookie)
             .header("X-CSRF-Token", &csrf)
             .header(header::ORIGIN, &srv.origin)

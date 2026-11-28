@@ -165,7 +165,8 @@ fn render_loop_subtree_node(
             native_parent,
             is_preview,
             budget,
-        )? else {
+        )?
+        else {
             return Ok(String::new());
         };
         let active_cnt = node

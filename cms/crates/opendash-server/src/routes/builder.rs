@@ -53,10 +53,7 @@ pub async fn serve_asset(axum::extract::Path(path): axum::extract::Path<String>)
                 "text/javascript; charset=utf-8",
             )
             .header(axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-            .header(
-                axum::http::header::CACHE_CONTROL,
-                "public, max-age=3600",
-            )
+            .header(axum::http::header::CACHE_CONTROL, "public, max-age=3600")
             .body(axum::body::Body::from(
                 crate::builtin_themes::PUBLIC_BLOCKS_JS,
             ))

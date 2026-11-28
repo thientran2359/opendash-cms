@@ -152,9 +152,7 @@ pub(crate) async fn render_entry_response_with_cache(
     let entry_has_form = entry_body
         .as_ref()
         .is_some_and(|body| body.has_active_contact_form);
-    let entry_needs_blocks_js = entry_body
-        .as_ref()
-        .is_some_and(|body| body.needs_blocks_js);
+    let entry_needs_blocks_js = entry_body.as_ref().is_some_and(|body| body.needs_blocks_js);
     let builder_body_fragment =
         entry_body.as_ref().map(
             |body| match crate::document::normalize_public_document_with_options(&body.html, true) {

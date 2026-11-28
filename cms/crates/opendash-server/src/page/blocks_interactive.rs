@@ -10,9 +10,7 @@ use serde_json::{Value, json};
 
 use super::{
     blocks_chrome::bool_prop,
-    blocks_layout::{
-        NativeParentInfo, responsive_str_cascade, spacing_classes_or_attr, str_prop,
-    },
+    blocks_layout::{NativeParentInfo, responsive_str_cascade, spacing_classes_or_attr, str_prop},
     render::escape_html,
 };
 use crate::{
@@ -170,7 +168,10 @@ pub(super) fn wrap_margin_padding(
     } else {
         ""
     };
-    format!("<div class=\"{}\"{mar_attr}>{inner_html}</div>", cls.join(" "))
+    format!(
+        "<div class=\"{}\"{mar_attr}>{inner_html}</div>",
+        cls.join(" ")
+    )
 }
 
 pub(super) fn pad_attr(pad_fb: bool) -> &'static str {
@@ -382,7 +383,11 @@ pub(super) fn render_slider(
     let dots_html = if show_dots && active_count >= 2 {
         let mut dots = String::new();
         for idx in 0..active_count {
-            let cur = if idx == 0 { " aria-current=\"true\"" } else { "" };
+            let cur = if idx == 0 {
+                " aria-current=\"true\""
+            } else {
+                ""
+            };
             dots.push_str(&format!(
                 "<button type=\"button\" class=\"od-slider-dot\" data-od-slide-to=\"{idx}\" aria-label=\"{} {}\"{cur}></button>",
                 escape_html(&l10n.slider_dot_item),
@@ -439,7 +444,11 @@ pub(super) fn render_slide(
         .replace("{n}", &(idx + 1).to_string())
         .replace("{total}", &total.to_string());
     let (pad_tw, pad_fb) = spacing_classes_or_attr(fields, &node.props, "padding");
-    let mut cls = vec!["od-slide".to_owned(), "min-w-0".to_owned(), "shrink-0".to_owned()];
+    let mut cls = vec![
+        "od-slide".to_owned(),
+        "min-w-0".to_owned(),
+        "shrink-0".to_owned(),
+    ];
     cls.extend(pad_tw);
     format!(
         "<div class=\"{}\" data-od-slide-index=\"{idx}\"{} role=\"group\" aria-roledescription=\"slide\" aria-label=\"{}\">{child_nonce}</div>",

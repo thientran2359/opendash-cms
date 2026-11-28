@@ -174,7 +174,9 @@ fn s02_interactive_block_catalog_and_nesting_validation() {
             .validate_for_save(&catalog, &ctx, None)
             .unwrap_or_else(|e| panic!("popup allowed in part:{part_key}: {e}"));
     }
-    popup_doc.validate_for_save(&catalog, &page_ctx, None).unwrap();
+    popup_doc
+        .validate_for_save(&catalog, &page_ctx, None)
+        .unwrap();
 }
 
 async fn upload_png_rgb(app: &AdminSession, name: &str, rgba: [u8; 4]) -> String {
@@ -300,7 +302,11 @@ async fn s02_interactive_blocks_assets_conditional_js_csp_and_popup_http_e2e() {
         .await;
     let no_js_status = no_js_put.status();
     let no_js_body = no_js_put.text().await.unwrap_or_default();
-    assert_eq!(no_js_status, StatusCode::OK, "no_js PUT failed: {no_js_body}");
+    assert_eq!(
+        no_js_status,
+        StatusCode::OK,
+        "no_js PUT failed: {no_js_body}"
+    );
     let prev_nojs: Value = app
         .send_json(
             Method::POST,
@@ -460,7 +466,9 @@ async fn s02_interactive_blocks_assets_conditional_js_csp_and_popup_http_e2e() {
         .unwrap();
     let diags = full_prev["diagnostics"].as_array().unwrap();
     assert!(
-        diags.iter().any(|d| d["code"] == "nested_popup_not_allowed"),
+        diags
+            .iter()
+            .any(|d| d["code"] == "nested_popup_not_allowed"),
         "expected nested_popup_not_allowed in diagnostics: {diags:?}"
     );
     let full_prev_html = full_prev["html"].as_str().unwrap();
@@ -493,7 +501,10 @@ async fn s02_interactive_blocks_assets_conditional_js_csp_and_popup_http_e2e() {
         .to_owned();
     assert!(csp.contains("form-action 'none'"), "csp={csp}");
     let html = live.text().await.unwrap();
-    assert_eq!(html.match_indices("/assets/opendash-blocks.js?v=").count(), 1);
+    assert_eq!(
+        html.match_indices("/assets/opendash-blocks.js?v=").count(),
+        1
+    );
     assert!(!html.contains("<form"), "unexpected <form in HTML: {html}");
     assert_eq!(html.match_indices("<dialog").count(), 2);
     for needle in [

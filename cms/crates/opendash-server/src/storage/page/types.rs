@@ -177,22 +177,13 @@ pub(in crate::storage) const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, Option<&str>)
             "../../builtin_blocks/social-follow/render.html"
         )),
     ),
-    (
-        include_str!("../../builtin_blocks/tabs/block.json"),
-        None,
-    ),
+    (include_str!("../../builtin_blocks/tabs/block.json"), None),
     (
         include_str!("../../builtin_blocks/tab-panel/block.json"),
         None,
     ),
-    (
-        include_str!("../../builtin_blocks/slider/block.json"),
-        None,
-    ),
-    (
-        include_str!("../../builtin_blocks/slide/block.json"),
-        None,
-    ),
+    (include_str!("../../builtin_blocks/slider/block.json"), None),
+    (include_str!("../../builtin_blocks/slide/block.json"), None),
     (
         include_str!("../../builtin_blocks/gallery/block.json"),
         None,
@@ -201,8 +192,5 @@ pub(in crate::storage) const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, Option<&str>)
         include_str!("../../builtin_blocks/social-share/block.json"),
         None,
     ),
-    (
-        include_str!("../../builtin_blocks/popup/block.json"),
-        None,
-    ),
+    (include_str!("../../builtin_blocks/popup/block.json"), None),
 ];

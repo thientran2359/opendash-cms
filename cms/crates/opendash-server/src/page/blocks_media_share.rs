@@ -108,11 +108,19 @@ pub(super) fn render_gallery(
     };
 
     let (is_resp, d_raw, t_raw, m_raw) = responsive_str_cascade(&node.props, "columns", "3");
-    let (d, t, m) = (clamp_cols_1_6(d_raw), clamp_cols_1_6(t_raw), clamp_cols_1_6(m_raw));
+    let (d, t, m) = (
+        clamp_cols_1_6(d_raw),
+        clamp_cols_1_6(t_raw),
+        clamp_cols_1_6(m_raw),
+    );
     let mut grid_cls = if masonry {
         vec![format!("columns-{m}"), gap_cls.to_owned()]
     } else {
-        vec!["grid".to_owned(), format!("grid-cols-{m}"), gap_cls.to_owned()]
+        vec![
+            "grid".to_owned(),
+            format!("grid-cols-{m}"),
+            gap_cls.to_owned(),
+        ]
     };
     let prefix = if masonry { "columns" } else { "grid-cols" };
     if is_resp && t != m {
@@ -199,7 +207,9 @@ pub(super) fn render_gallery(
         } else {
             String::new()
         };
-        items_html.push_str(&format!("<figure{fig_cls}>{media_inner}{cap_html}</figure>"));
+        items_html.push_str(&format!(
+            "<figure{fig_cls}>{media_inner}{cap_html}</figure>"
+        ));
     }
 
     let lightbox_html = if use_lightbox {
@@ -242,7 +252,12 @@ pub(super) fn render_gallery(
         pad_attr(pad_fb),
         grid_cls.join(" "),
     );
-    Ok(wrap_margin_padding("od-gallery-wrap", mar_tw, mar_fb, inner))
+    Ok(wrap_margin_padding(
+        "od-gallery-wrap",
+        mar_tw,
+        mar_fb,
+        inner,
+    ))
 }
 
 pub(super) fn render_social_share(
@@ -388,13 +403,10 @@ pub(super) fn render_social_share(
         ));
     }
     if show_copy {
-        let ic_link = register_core_icon_in_budget(
-            budget,
-            "link",
-            Some("od-copy-icon w-3.5 h-3.5 shrink-0"),
-        )
-        .map_err(ApiError::bad_request)?
-        .unwrap_or_default();
+        let ic_link =
+            register_core_icon_in_budget(budget, "link", Some("od-copy-icon w-3.5 h-3.5 shrink-0"))
+                .map_err(ApiError::bad_request)?
+                .unwrap_or_default();
         let ic_check = register_core_icon_in_budget(
             budget,
             "check",
