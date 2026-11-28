@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "id": "core/entry-related",
+  "title": "Bài viết liên quan (Related Entries)",
+  "category": "template",
+  "icon": "bookmark",
+  "render": "native",
+  "allowed_contexts": ["single", "single_custom", "singular"],
+  "supports_children": true,
+  "allowed_children": ["core/loop-item"],
+  "default_children": [
+    {
+      "block_id": "core/loop-item",
+      "props": { "layout": "vertical", "surface_style": "bordered", "card_link_to_entry": true },
+      "children": [
+        { "block_id": "core/entry-featured-image", "props": { "aspect_ratio": "16_9" } },
+        { "block_id": "core/entry-title", "props": { "tag": "h2", "size": { "desktop": "lg" }, "link_to_entry": true, "max_lines": "2" } },
+        { "block_id": "core/entry-meta", "props": { "items": ["published_date", "reading_time"] } }
+      ]
+    }
+  ],
+  "fields": [
+    {
+      "type": "text",
+      "key": "heading",
+      "label": "Tiêu đề mục",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "key": "limit",
+      "label": "Số bài tối đa",
+      "min": 2,
+      "max": 8,
+      "step": 1,
+      "default": 4
+    },
+    {
+      "type": "range",
+      "key": "columns",
+      "label": "Số cột",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "default": 4,
+      "responsive": true
+    },
+    {
+      "type": "range",
+      "key": "gap",
+      "label": "Khoảng cách cột",
+      "min": 0,
+      "max": 48,
+      "step": 4,
+      "default": 24,
+      "unit": "px",
+      "responsive": true,
+      "css_var": "--od-rel-gap"
+    },
+    {
+      "type": "boolean",
+      "key": "hide_if_empty",
+      "label": "Ẩn khi rỗng",
+      "default": true
+    }
+  ]
+}

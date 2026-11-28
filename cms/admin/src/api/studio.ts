@@ -4,6 +4,7 @@ import type {
   HomepagePreview,
   TemplateEffectiveSource,
   TemplatePreviewEntry,
+  TemplatePreviewTerm,
   TemplateTargetInput,
 } from './builder.ts';
 import { requestJson } from './client.ts';
@@ -13,9 +14,12 @@ export type StudioTargetGroup =
   | 'parts'
   | 'core'
   | 'content_types'
+  | 'taxonomies'
   | 'page_layouts'
   | 'custom_templates'
   | 'overrides';
+
+export type EntryContentRule = 'required_or_entry_block' | 'optional_max_one' | 'forbidden';
 
 export interface StudioTargetItem {
   canonical_target_key: string;
@@ -25,8 +29,7 @@ export interface StudioTargetItem {
   override_id: number | null;
   version: number | null;
   effective_source: TemplateEffectiveSource;
-  requires_content_slot: boolean;
-  forbids_content_slot: boolean;
+  entry_content_rule: EntryContentRule;
   has_theme_source: boolean;
 }
 
@@ -48,6 +51,7 @@ export interface StudioPreviewInput {
   target: TemplateTargetInput;
   document?: BuilderDocument | null;
   preview_entry?: TemplatePreviewEntry | null;
+  preview_term?: TemplatePreviewTerm | null;
   preview_annotations?: boolean;
   preview_locale?: string | null;
   transient?: TransientStudioOverrides | null;
@@ -68,6 +72,7 @@ export function postStudioPreview(
   const payload: Record<string, unknown> = { target: input.target };
   if (input.document !== undefined) payload.document = input.document;
   if (input.preview_entry !== undefined) payload.preview_entry = input.preview_entry;
+  if (input.preview_term !== undefined) payload.preview_term = input.preview_term;
   if (input.preview_annotations !== undefined) payload.preview_annotations = input.preview_annotations;
   if (input.preview_locale) payload.preview_locale = input.preview_locale;
   if (input.transient !== undefined && input.transient !== null) {

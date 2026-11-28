@@ -108,6 +108,23 @@ pub async fn build_home_seo_view_for_locale(
     canonical_path: &str,
     allow_alternates: bool,
 ) -> ApiResult<SeoView> {
+    build_home_seo_view_for_locale_with_canonical(
+        db,
+        locale,
+        canonical_path,
+        allow_alternates,
+        true,
+    )
+    .await
+}
+
+pub async fn build_home_seo_view_for_locale_with_canonical(
+    db: &SqlitePool,
+    locale: Option<&str>,
+    canonical_path: &str,
+    allow_alternates: bool,
+    allow_custom_canonical: bool,
+) -> ApiResult<SeoView> {
     let general = settings::get_general_for_locale(db, locale).await?;
     let pub_settings = settings::get_public(db).await?;
     let (_resolved_locale, lang, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
@@ -183,9 +200,12 @@ pub async fn build_home_seo_view_for_locale(
         }
         home_json_ld = home_proj.json_ld;
     }
-    let canonical_url = custom_canonical
-        .clone()
-        .or_else(|| absolute_public_url(&pub_settings, canonical_path));
+    let canonical_url = if allow_custom_canonical {
+        custom_canonical.clone()
+    } else {
+        None
+    }
+    .or_else(|| absolute_public_url(&pub_settings, canonical_path));
     let robots = if !pub_settings.indexing_enabled || noindex {
         "noindex,nofollow".to_string()
     } else {
@@ -195,30 +215,58 @@ pub async fn build_home_seo_view_for_locale(
     let mut alternates = Vec::new();
     let mut tx = db.begin().await?;
     if allow_alternates
-        && matches!(page_state, ReadingPageState::Published(_))
+        && !matches!(page_state, ReadingPageState::Missing)
         && let Some(origin) =
             has_multilingual_alternates_prereq(&mut tx, &pub_settings, noindex).await?
-        && is_self_canonical_for_origin(custom_canonical.as_deref(), &origin, canonical_path)
+        && is_self_canonical_for_origin(
+            if allow_custom_canonical {
+                custom_canonical.as_deref()
+            } else {
+                None
+            },
+            &origin,
+            canonical_path,
+        )
     {
         let homes: Vec<(String, i64, String, Option<String>)> = sqlx::query_as(
-            "SELECT sl.bcp47_tag, sl.is_default, claims.path, COALESCE(s.canonical_url, h.canonical_url)
-               FROM site_reading_settings reading
-               JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-               JOIN content_entries e ON e.id = reading.homepage_page_id
-               JOIN content_types t ON t.key = e.content_type_key
-               JOIN permalink_route_claims claims
+            "SELECT sl.bcp47_tag,
+                    sl.is_default,
+                    CASE
+                      WHEN reading.homepage_page_id IS NULL THEN
+                        CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
+                      ELSE COALESCE(
+                        claims.path,
+                        CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
+                      )
+                    END,
+                    CASE WHEN reading.homepage_page_id IS NULL THEN h.canonical_url ELSE COALESCE(s.canonical_url, h.canonical_url) END
+               FROM site_locales sl
+               LEFT JOIN site_reading_settings reading ON reading.locale = sl.code
+               LEFT JOIN content_entries e ON e.id = reading.homepage_page_id
+               LEFT JOIN content_types t ON t.key = e.content_type_key
+               LEFT JOIN permalink_route_claims claims
                  ON claims.target_kind = 'entry'
                 AND claims.target_id = CAST(e.id AS TEXT)
-                AND claims.locale = reading.locale
+                AND claims.locale = sl.code
                LEFT JOIN entry_seo s ON s.entry_id = e.id
-               LEFT JOIN site_home_seo h ON h.locale = reading.locale
-              WHERE e.content_type_key = 'page'
-                AND e.locale = reading.locale
-                AND e.trashed_at IS NULL
-                AND e.publication_status = 'published'
-                AND t.provider_status = 'active'
-                AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
-                AND COALESCE(s.noindex, h.noindex, 0) = 0
+               LEFT JOIN site_home_seo h ON h.locale = sl.code
+              WHERE sl.enabled = 1
+                AND sl.deleted_at IS NULL
+                AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+                AND COALESCE(h.noindex, 0) = 0
+                AND (
+                  reading.homepage_page_id IS NULL
+                  OR (
+                    e.id IS NOT NULL
+                    AND e.content_type_key = 'page'
+                    AND e.locale = sl.code
+                    AND e.trashed_at IS NULL
+                    AND e.publication_status = 'published'
+                    AND t.provider_status = 'active'
+                    AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+                    AND COALESCE(s.noindex, 0) = 0
+                  )
+                )
               ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
         )
         .fetch_all(&mut *tx)

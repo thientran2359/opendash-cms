@@ -213,6 +213,24 @@ pub async fn validate_restored_db_read_only(db_path: &Path) -> ApiResult<i64> {
         ));
     }
 
+    // Spec A2 S01: Reject pre-V1 theme revisions before migration 0063 drops them.
+    let has_theme_source_format: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM pragma_table_info('theme_revisions') WHERE name = 'source_format' LIMIT 1",
+    )
+    .fetch_optional(&mut conn)
+    .await?;
+    if has_theme_source_format.is_some() {
+        let non_v1_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM theme_revisions WHERE source_format != 'v1'")
+                .fetch_one(&mut conn)
+                .await?;
+        if non_v1_count > 0 {
+            return Err(ApiError::bad_request(
+                "Bản sao khôi phục chứa theme revision tiền-V1 không được hỗ trợ.",
+            ));
+        }
+    }
+
     // Verify at least one viable Admin account exists (no bootstrap bypass).
     let admin_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM users WHERE role = 'admin' AND length(password_hash) > 0",
@@ -399,16 +417,19 @@ pub async fn verify_restored_db_references(db_path: &Path, site_root: &Path) -> 
     }
 
     for tr in &inventory.theme_revisions {
-        if tr.source_format == "v3" {
-            let rev_dir = site_root
-                .join("themes")
-                .join("revisions")
-                .join(&tr.revision_digest);
-            if !rev_dir.join(".complete").is_file() {
-                return Err(ApiError::bad_request(
-                    "Bản sao khôi phục thiếu .complete của theme revision.",
-                ));
-            }
+        if tr.source_format != "v1" {
+            return Err(ApiError::bad_request(
+                "Bản sao khôi phục chứa theme revision tiền-V1 không được hỗ trợ.",
+            ));
+        }
+        let rev_dir = site_root
+            .join("themes")
+            .join("revisions")
+            .join(&tr.revision_digest);
+        if !rev_dir.join(".complete").is_file() {
+            return Err(ApiError::bad_request(
+                "Bản sao khôi phục thiếu .complete của theme revision.",
+            ));
         }
     }
 

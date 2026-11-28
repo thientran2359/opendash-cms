@@ -1179,11 +1179,18 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
                 "children": [{
                     "id": "col1",
                     "block_id": "core/column",
-                    "children": [{
-                        "id": "slot1",
-                        "block_id": "core/content-slot",
-                        "props": {}
-                    }]
+                    "children": [
+                        {
+                            "id": "title1",
+                            "block_id": "core/entry-title",
+                            "props": {}
+                        },
+                        {
+                            "id": "slot1",
+                            "block_id": "core/entry-content",
+                            "props": {}
+                        }
+                    ]
                 }]
             }]
         }]
@@ -1216,6 +1223,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
     let single_html = single_json["html"].as_str().unwrap();
     assert!(single_html.contains("lang=\"en\""));
     assert!(single_html.contains("English Post Title"));
+    assert!(single_html.contains("English Body"));
     assert!(!single_html.contains("Bài viết tiếng Việt"));
 
     // Studio preview with custom BuilderDocument containing core/list -> filters by preview_locale="en"
@@ -1241,7 +1249,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
                         },
                         {
                             "id": "slot1",
-                            "block_id": "core/content-slot",
+                            "block_id": "core/entry-content",
                             "props": {}
                         }
                     ]
@@ -1255,7 +1263,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
         .header("Origin", &srv.base_url)
         .header("x-csrf-token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "index" },
             "document": list_doc,
             "preview_locale": "en"
         }))
@@ -1284,7 +1292,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
         .header("Origin", &srv.base_url)
         .header("x-csrf-token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "index" },
             "preview_locale": "xx"
         }))
         .send()

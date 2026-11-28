@@ -23,7 +23,7 @@ pub(in crate::storage) async fn resolve_template_2axis_on_connection(
 }
 
 /// The `templates`, `parts`, `layouts` maps MUST come from the verified active
-/// durable revision (storage::theme::load_active_theme_v3); raw untrusted theme
+/// durable revision (storage::theme::load_active_theme); raw untrusted theme
 /// paths, without verification, must never be passed into this resolver.
 pub async fn resolve_template_2axis(
     db: &SqlitePool,
@@ -146,9 +146,9 @@ pub(in crate::storage) async fn validate_part_graph_in_tx(
                     .map(|record| record.document)
             };
             if let Some(nested_doc) = nested_doc {
-                let (children, count) =
-                    document_parts_and_slot_count_with_schemas(&nested_doc, &schemas)?;
-                validate_content_slots(&part_candidate, count)?;
+                let (children, count, entry_blocks) =
+                    document_slot_scan_with_schemas(&nested_doc, &schemas)?;
+                validate_content_slots(&part_candidate, count, entry_blocks)?;
                 let mut next_path = path.clone();
                 next_path.push(key);
                 stack.push((children, depth + 1, next_path));
@@ -224,7 +224,7 @@ pub(in crate::storage) async fn preview_part_graph_from_edges(
     tx: &mut Transaction<'_, Sqlite>,
     root_key: &str,
     edges: Vec<String>,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
     let url_policy = active_theme_url_policy_in_conn(tx, active, None, None, None).await?;
@@ -250,8 +250,15 @@ pub(in crate::storage) async fn preview_part_graph_from_edges(
             }
             if !graph.contains_key(&part_key) {
                 let source = if let Some(row) = get_typed_override_on_connection(tx, &key).await? {
-                    validate_typed_document_in_tx(tx, &target, &row.document, Some(&row.document))
-                        .await?;
+                    validate_typed_document_with_context_in_tx(
+                        tx,
+                        &target,
+                        &row.document,
+                        Some(&row.document),
+                        true,
+                        None,
+                    )
+                    .await?;
                     PreviewPartSource::Builder(row.document)
                 } else if let Some(source) = active.and_then(|a| a.parts.get(&part_key)).cloned() {
                     PreviewPartSource::Theme(source)
@@ -287,7 +294,7 @@ pub(in crate::storage) async fn preview_part_graph(
     tx: &mut Transaction<'_, Sqlite>,
     target: &TemplateCandidate,
     document: &BuilderDocument,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
     let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut **tx).await?;
@@ -363,11 +370,12 @@ pub(in crate::storage) async fn render_preview_builder(
         }
     }
     let mut rb = budget.as_render_budget();
-    let lists = builder::resolve_lists_in_tx_for_locale_with_budget(
+    let lists = builder::resolve_lists_in_tx_for_locale_with_budget_and_preview(
         tx,
         document,
         &BTreeMap::new(),
         Some(ctx.render_locale),
+        true,
         &mut rb,
     )
     .await?;
@@ -383,6 +391,7 @@ pub(in crate::storage) async fn render_preview_builder(
             content_html: slot,
             parts: &parts,
             search: ctx.search,
+            template_data: ctx.template_data,
         }),
         &empty_patterns,
         false,
@@ -414,8 +423,8 @@ pub(in crate::storage) async fn render_public_part(
     }
     if let Some(row) = get_typed_override_on_connection(tx, &canonical).await? {
         let schemas = ctx.state.unified_block_schemas()?;
-        let (_, slots) = document_parts_and_slot_count_with_schemas(&row.document, &schemas)?;
-        validate_content_slots(&target, slots)?;
+        let (_, slots, entry_blocks) = document_slot_scan_with_schemas(&row.document, &schemas)?;
+        validate_content_slots(&target, slots, entry_blocks)?;
         let mut next_stack = stack.to_vec();
         next_stack.push(canonical);
         let scope = part_scope_prefix(key, budget.expansions);

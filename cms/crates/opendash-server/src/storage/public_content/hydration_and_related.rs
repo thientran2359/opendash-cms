@@ -35,7 +35,7 @@ pub struct PublicEntryRenderSnapshot {
     pub effective_schema: opendash_core::content::EffectiveContentSchema,
     pub eligible_public_taxonomies: Vec<String>,
     pub terms: Vec<crate::content_render::PublicTermView>,
-    pub active: Option<crate::storage::theme::ActiveThemeV3>,
+    pub active: Option<crate::storage::theme::ActiveTheme>,
     pub resolution: crate::storage::overrides::TemplateResolution,
     pub body: Option<crate::page::RenderedLayout>,
     pub budget: crate::page::RenderBudget,
@@ -117,6 +117,41 @@ pub async fn list_published_archive_with_total(
     require_public_archive_in_conn(&mut tx, type_key).await?;
     let res = entries::list_published_filtered_with_total_in_tx(
         &mut tx, type_key, limit, offset, filters, sort,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(res)
+}
+
+/// Loads published `"post"` entries for `/` / `/{locale}` (`Unconfigured`)
+/// using `Index`, bypassing `has_archive == false` while enforcing `active` & `public`.
+pub async fn list_published_for_index_home(
+    db: &SqlitePool,
+    limit: i64,
+    offset: i64,
+    locale: Option<&str>,
+    sort: entries::PublishedListSort,
+) -> ApiResult<(Vec<ContentEntryRecord>, i64)> {
+    let mut tx = db.begin().await?;
+    let visible: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM content_types
+            WHERE key = 'post' AND provider_status = 'active'
+              AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1
+        )",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if visible == 0 {
+        tx.commit().await?;
+        return Ok((Vec::new(), 0));
+    }
+    let filters = EntryFilters {
+        locale: locale.map(str::to_owned),
+        ..Default::default()
+    };
+    let res = entries::list_published_filtered_with_total_in_tx(
+        &mut tx, "post", limit, offset, filters, sort,
     )
     .await?;
     tx.commit().await?;
@@ -310,7 +345,28 @@ pub async fn hydrate_entry_views_with_options_in_conn(
     active_locale: Option<&str>,
     is_preview: bool,
     max_view_role: opendash_core::content::FieldRole,
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<Vec<crate::content_render::EntryView>> {
+    hydrate_entry_views_projected_in_conn(
+        conn,
+        records,
+        active_locale,
+        is_preview,
+        max_view_role,
+        richtext_nonces,
+        &opendash_core::builder::LoopProjection::all(),
+    )
+    .await
+}
+
+pub async fn hydrate_entry_views_projected_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    records: Vec<ContentEntryRecord>,
+    active_locale: Option<&str>,
+    is_preview: bool,
+    max_view_role: opendash_core::content::FieldRole,
     mut richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+    projection: &opendash_core::builder::LoopProjection,
 ) -> ApiResult<Vec<crate::content_render::EntryView>> {
     if records.is_empty() {
         return Ok(Vec::new());
@@ -326,7 +382,6 @@ pub async fn hydrate_entry_views_with_options_in_conn(
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    let parent_ids: Vec<i64> = records.iter().filter_map(|r| r.parent_id).collect();
     let eval_meta: Vec<(i64, String, Option<String>, Option<String>)> = records
         .iter()
         .map(|r| {
@@ -342,10 +397,25 @@ pub async fn hydrate_entry_views_with_options_in_conn(
     let urls =
         crate::storage::seo::resolve_public_entry_paths_by_entry_ids_in_conn(conn, &entry_ids)
             .await?;
-    let parent_map = batch_load_entry_parent_views_in_conn(conn, &parent_ids).await?;
+    let parent_map = if projection.needs_all_fields {
+        let parent_ids: Vec<i64> = records.iter().filter_map(|r| r.parent_id).collect();
+        batch_load_entry_parent_views_in_conn(conn, &parent_ids).await?
+    } else {
+        std::collections::BTreeMap::new()
+    };
     let eval_map = batch_load_entry_eval_contexts_in_conn(conn, &eval_meta, max_view_role).await?;
-    let mut terms_map = batch_load_public_entry_terms_in_conn(conn, &pairs).await?;
-    let tax_map = batch_load_eligible_public_taxonomies_in_conn(conn, &distinct_types).await?;
+    let load_terms =
+        projection.needs_all_fields || projection.needs_terms || projection.needs_primary_category;
+    let mut terms_map = if load_terms {
+        batch_load_public_entry_terms_in_conn(conn, &pairs).await?
+    } else {
+        std::collections::BTreeMap::new()
+    };
+    let tax_map = if load_terms {
+        batch_load_eligible_public_taxonomies_in_conn(conn, &distinct_types).await?
+    } else {
+        std::collections::BTreeMap::new()
+    };
     let mut schemas = std::collections::BTreeMap::new();
     for tk in &distinct_types {
         if let Some(eff) =
@@ -362,15 +432,16 @@ pub async fn hydrate_entry_views_with_options_in_conn(
         if let Some(eff) = schemas.get(&record.content_type_key)
             && let Some(eval_ctx) = eval_map.get(&record.id)
         {
+            let ordered = crate::content_render::ordered_public_field_defs_for_entry(
+                eff,
+                max_view_role,
+                eval_ctx,
+            );
             let specs: Vec<opendash_core::field_schema::FieldSpec> =
-                crate::content_render::ordered_public_field_defs_for_entry(
-                    eff,
-                    max_view_role,
-                    eval_ctx,
-                )
-                .into_iter()
-                .cloned()
-                .collect();
+                filter_specs_for_loop_projection(ordered, projection)
+                    .into_iter()
+                    .cloned()
+                    .collect();
             crate::field_hydrate::collect_hydration_ids(
                 &specs,
                 &record.values,
@@ -423,9 +494,12 @@ pub async fn hydrate_entry_views_with_options_in_conn(
         tag_media_provenance: true,
     };
 
-    let mut proj_map =
+    let mut proj_map = if projection.needs_all_fields {
         crate::storage::plugin_projections::batch_load_entry_projections_in_conn(conn, &entry_ids)
-            .await?;
+            .await?
+    } else {
+        std::collections::BTreeMap::new()
+    };
 
     let mut views = Vec::with_capacity(records.len());
     for record in records {

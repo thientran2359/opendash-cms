@@ -14,7 +14,7 @@ pub(super) use std::{
 
 pub(super) use opendash_core::registry::ProviderStatus;
 
-pub(super) use opendash_core::{id::validate_package_id, theme::ThemeV3Manifest};
+pub(super) use opendash_core::{id::validate_package_id, theme::ThemeManifest};
 
 pub(super) use serde::{Deserialize, Serialize};
 
@@ -29,9 +29,7 @@ pub(in crate::storage) const COMPLETE_MARKER: &str = ".complete";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemeSourceFormat {
-    V1Legacy,
-    V2,
-    V3,
+    V1,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,7 +37,6 @@ pub struct ThemePackageRecord {
     pub theme_id: String,
     pub display_name: String,
     pub source_format: ThemeSourceFormat,
-    pub is_legacy: bool,
     pub created_at: String,
 }
 
@@ -150,18 +147,18 @@ pub async fn ensure_default_starter_theme(
     };
 
     let files = builtin_starter_theme_files();
-    let pkg = crate::theme::validate_theme_v3_files(files.clone()).map_err(|error| {
+    let pkg = crate::theme::validate_theme_files(files.clone()).map_err(|error| {
         eprintln!("Built-in Starter Theme validation: {error:?}");
-        ApiError::internal("Built-in Starter Theme v3 không hợp lệ.")
+        ApiError::internal("Built-in Starter Theme v1 không hợp lệ.")
     })?;
     let (digest, file_digests) = compute_canonical_file_map_digest(&files);
     repair_builtin_starter_revision_dir_if_needed(themes_root, &digest, &file_digests)?;
 
-    // Cleanly replace any pre-V1 opendash-starter revisions with differing digests
+    // Cleanly replace any mismatched opendash-starter revisions with differing digests
     // without triggering 409 version conflicts or FK ON DELETE RESTRICT failures.
     let stale_rev_ids: Vec<String> = sqlx::query_scalar(
         "SELECT revision_id FROM theme_revisions
-          WHERE theme_id = ? AND source_format = 'v3' AND revision_digest != ?",
+          WHERE theme_id = ? AND source_format = 'v1' AND revision_digest != ?",
     )
     .bind(STARTER_THEME_ID)
     .bind(&digest)
@@ -186,7 +183,7 @@ pub async fn ensure_default_starter_theme(
             }
             sqlx::query(
                 "DELETE FROM theme_revisions
-                  WHERE theme_id = ? AND source_format = 'v3' AND revision_digest != ?",
+                  WHERE theme_id = ? AND source_format = 'v1' AND revision_digest != ?",
             )
             .bind(STARTER_THEME_ID)
             .bind(&digest)
@@ -207,10 +204,10 @@ pub async fn ensure_default_starter_theme(
         }
     }
 
-    let starter = match stage_and_commit_v3_revision(
+    let starter = match stage_and_commit_revision(
         db,
         themes_root,
-        "bootstrap-starter-v3",
+        "bootstrap-starter-v1",
         STARTER_THEME_ID,
         STARTER_THEME_NAME,
         STARTER_THEME_VERSION,
@@ -260,13 +257,13 @@ pub async fn ensure_default_starter_theme(
     Ok(starter)
 }
 
-/// Locally verified active theme v3 source. Each template is indexed by the
-/// canonical typed resolver key, never by the older coarse role names.
+/// Locally verified active Theme Format V1 source. Each template is indexed by the
+/// canonical typed resolver key, never by older coarse role names.
 #[derive(Clone, Debug)]
-pub struct ActiveThemeV3 {
+pub struct ActiveTheme {
     pub revision_id: String,
     pub revision_digest: String,
-    pub manifest: ThemeV3Manifest,
+    pub manifest: ThemeManifest,
     pub templates: BTreeMap<String, String>,
     pub parts: BTreeMap<String, String>,
     pub page_layouts: BTreeMap<String, String>,
@@ -318,17 +315,17 @@ pub struct ActiveThemeFunctionsSnapshot {
 
 /// Capture the active manifest and verified disk revision once. Preview loads
 /// only the requested part sources from this snapshot.
-pub(in crate::storage) struct CapturedThemeV3 {
-    pub manifest: ThemeV3Manifest,
+pub(in crate::storage) struct CapturedTheme {
+    pub manifest: ThemeManifest,
     pub(in crate::storage) revision: ThemeRevisionRecord,
     pub(in crate::storage) rev_dir: std::path::PathBuf,
     pub(in crate::storage) dev_overlay: Option<crate::dev_mode::DevThemeSnapshot>,
 }
 
-pub(in crate::storage) async fn capture_active_theme_v3_in_conn(
+pub(in crate::storage) async fn capture_active_theme_in_conn(
     conn: &mut sqlx::SqliteConnection,
     themes_root: &Path,
-) -> ApiResult<Option<CapturedThemeV3>> {
+) -> ApiResult<Option<CapturedTheme>> {
     if let Some(dev) = crate::dev_mode::DevOverlayConfig::global()
         && let Some(dev_root) = dev.dev_theme_root()
     {
@@ -339,13 +336,13 @@ pub(in crate::storage) async fn capture_active_theme_v3_in_conn(
                     theme_id: snap.manifest.theme_id.clone(),
                     version: snap.manifest.version.clone(),
                     revision_digest: snap.revision_digest.clone(),
-                    source_format: ThemeSourceFormat::V3,
+                    source_format: ThemeSourceFormat::V1,
                     manifest_json: snap.manifest_json.clone(),
                     file_digests: BTreeMap::new(),
                     provenance_json: "{}".to_owned(),
                     created_at: String::new(),
                 };
-                return Ok(Some(CapturedThemeV3 {
+                return Ok(Some(CapturedTheme {
                     manifest: snap.manifest.clone(),
                     revision: synthetic_rev,
                     rev_dir: dev_root.to_path_buf(),
@@ -374,13 +371,13 @@ pub(in crate::storage) async fn capture_active_theme_v3_in_conn(
         return Ok(None);
     };
     let revision = row_to_revision(row)?;
-    if revision.source_format != ThemeSourceFormat::V3 {
+    if revision.source_format != ThemeSourceFormat::V1 {
         return Ok(None);
     }
     if verify_revision_durability(themes_root, &revision) != RevisionDurabilityStatus::Valid {
         return Ok(None);
     }
-    let Ok(manifest) = serde_json::from_str::<ThemeV3Manifest>(&revision.manifest_json) else {
+    let Ok(manifest) = serde_json::from_str::<ThemeManifest>(&revision.manifest_json) else {
         return Ok(None);
     };
     if manifest.validate().is_err()
@@ -400,7 +397,7 @@ pub(in crate::storage) async fn capture_active_theme_v3_in_conn(
     {
         return Ok(None);
     }
-    Ok(Some(CapturedThemeV3 {
+    Ok(Some(CapturedTheme {
         manifest,
         revision,
         rev_dir,

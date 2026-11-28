@@ -44,7 +44,7 @@ pub struct CoreL10n {
     pub pattern_missing: Cow<'static, str>,
     pub select_placeholder: Cow<'static, str>,
     pub select_empty: Cow<'static, str>,
-    pub home_unconfigured: Cow<'static, str>,
+    pub latest_posts_heading: Cow<'static, str>,
     pub not_found_title: Cow<'static, str>,
     pub contact_error_title: Cow<'static, str>,
     pub contact_error_heading: Cow<'static, str>,
@@ -59,6 +59,16 @@ pub struct CoreL10n {
     pub search_results_summary: Cow<'static, str>,
     pub search_all_types: Cow<'static, str>,
     pub search_clear_type: Cow<'static, str>,
+    pub related_entries: Cow<'static, str>,
+    pub prev_entry: Cow<'static, str>,
+    pub next_entry: Cow<'static, str>,
+    pub breadcrumb_nav: Cow<'static, str>,
+    pub menu_toggle: Cow<'static, str>,
+    pub menu_label: Cow<'static, str>,
+    pub language_switcher: Cow<'static, str>,
+    pub reading_time_suffix: Cow<'static, str>,
+    pub preview_draft_date_suffix: Cow<'static, str>,
+    pub posts_count_suffix: Cow<'static, str>,
 }
 
 fn embedded_vi_catalog() -> &'static opendash_core::l10n::Catalog {
@@ -119,7 +129,7 @@ pub fn core_l10n_with_registry(
         pattern_missing: tr("Pattern no longer exists."),
         select_placeholder: tr("-- Select --"),
         select_empty: tr("Leave blank"),
-        home_unconfigured: tr("Homepage is not configured."),
+        latest_posts_heading: tr("Latest posts"),
         not_found_title: tr("404 — Page not found"),
         contact_error_title: tr("Form submission error"),
         contact_error_heading: tr("Unable to submit form"),
@@ -134,6 +144,16 @@ pub fn core_l10n_with_registry(
         search_results_summary: tr("Results:"),
         search_all_types: tr("All"),
         search_clear_type: tr("Show all types"),
+        related_entries: tr("Related posts"),
+        prev_entry: tr("Previous post"),
+        next_entry: tr("Next post"),
+        breadcrumb_nav: tr("Breadcrumb"),
+        menu_toggle: tr("Toggle menu"),
+        menu_label: tr("Menu"),
+        language_switcher: tr("Language"),
+        reading_time_suffix: tr("min read"),
+        preview_draft_date_suffix: tr("(Draft preview)"),
+        posts_count_suffix: tr("posts"),
     }
 }
 

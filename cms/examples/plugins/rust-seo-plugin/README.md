@@ -2,7 +2,7 @@
 
 ## Overview
 
-Standalone Rust WebAssembly plugin example (`id: "rust-seo-plugin"`, `version: "0.1.0"`, `api_version: 1`, `manifest_schema: 3`) built with [`opendash-plugin-sdk`](../../../crates/opendash-plugin-sdk/src/lib.rs) (ABI v1.1, `Envelope` v2, 15 host ops, and `MockHost`). It conforms to [Plugin ABI](../../../../docs/contracts/PLUGIN_ABI.md) and demonstrates write-time `entry.ext["rust-seo-plugin"]` view projection consumed by [sample-theme-v3](../../themes/sample-theme-v3/README.md).
+Standalone Rust WebAssembly plugin example (`id: "rust-seo-plugin"`, `version: "0.1.0"`, `api_version: 1`, `manifest_schema: 3`) built with [`opendash-plugin-sdk`](../../../crates/opendash-plugin-sdk/src/lib.rs) (ABI v1.1, `Envelope` v2, 15 host ops, and `MockHost`). It conforms to [Plugin ABI](../../../../docs/contracts/PLUGIN_ABI.md) and demonstrates write-time `entry.ext["rust-seo-plugin"]` view projection consumed by [sample-theme](../../themes/sample-theme/README.md).
 
 Directory layout:
 - [Cargo.toml](Cargo.toml): Standalone `[workspace]` crate (`crate-type = ["cdylib", "rlib"]`, `edition = "2024"`) targeting `wasm32-unknown-unknown` without modifying the root `cms/Cargo.toml` workspace.

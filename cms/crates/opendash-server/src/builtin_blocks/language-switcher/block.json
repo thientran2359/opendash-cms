@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "core/language-switcher",
+  "title": "Chuyển ngôn ngữ (Language Switcher)",
+  "category": "template",
+  "icon": "globe",
+  "render": "native",
+  "allowed_contexts": ["template", "part"],
+  "fields": [
+    {
+      "type": "radio_buttons",
+      "key": "style",
+      "label": "Kiểu hiển thị",
+      "options": [
+        { "value": "dropdown", "label": "Dropdown" },
+        { "value": "inline", "label": "Ngang hàng" },
+        { "value": "pills", "label": "Nút viên" }
+      ],
+      "default": "dropdown"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "label_mode",
+      "label": "Nhãn ngôn ngữ",
+      "options": [
+        { "value": "code", "label": "Mã (VI/EN)" },
+        { "value": "native_name", "label": "Tên bản ngữ" }
+      ],
+      "default": "native_name"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn lề",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" }
+      ],
+      "default": "right",
+      "responsive": true
+    }
+  ]
+}

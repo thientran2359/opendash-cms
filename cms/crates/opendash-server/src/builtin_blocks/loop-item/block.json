@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "id": "core/loop-item",
+  "title": "Mẫu thẻ vòng lặp (Loop Item)",
+  "category": "template",
+  "icon": "bookmark",
+  "render": "native",
+  "allowed_parents": ["core/archive-loop", "core/entry-related", "core/list"],
+  "allowed_contexts": ["*"],
+  "supports_children": true,
+  "allowed_children": ["*"],
+  "fields": [
+    {
+      "type": "radio_buttons",
+      "key": "layout",
+      "label": "Bố cục thẻ",
+      "options": [
+        { "value": "vertical", "label": "Dọc" },
+        { "value": "horizontal", "label": "Ngang (Ảnh trái)" }
+      ],
+      "default": "vertical"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "surface_style",
+      "label": "Kiểu bề mặt",
+      "options": [
+        { "value": "flat", "label": "Phẳng" },
+        { "value": "bordered", "label": "Có viền" },
+        { "value": "elevated", "label": "Đổ bóng" }
+      ],
+      "default": "bordered"
+    },
+    {
+      "type": "color",
+      "key": "bg_color",
+      "label": "Màu nền",
+      "css_var": "--od-li-bg"
+    },
+    {
+      "type": "select",
+      "key": "radius",
+      "label": "Bo góc",
+      "options": [
+        { "value": "none", "label": "Không" },
+        { "value": "sm", "label": "Nhỏ" },
+        { "value": "md", "label": "Vừa" },
+        { "value": "lg", "label": "Lớn" },
+        { "value": "xl", "label": "Rất lớn" }
+      ],
+      "default": "lg"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 16, "right": 16, "bottom": 16, "left": 16 }
+    },
+    {
+      "type": "boolean",
+      "key": "card_link_to_entry",
+      "label": "Nhấp cả thẻ để mở bài",
+      "default": false
+    }
+  ]
+}

@@ -194,12 +194,12 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     // 1. Install & activate Theme A with CPT, options, templates, and sample pack
     let png = tiny_png();
     let manifest_a = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "release-theme-a",
         "name": "Release Theme A",
         "version": "1.0.0",
         "assets": ["assets/hero.png"],
-        "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
         "declarations": {
             "content_types": [
                 {
@@ -247,7 +247,7 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
             b"<header><nav><a href=\"/\">{{ options.brand }}</a></nav></header>",
         ),
         (
-            "home.html",
+            "index.html",
             b"<main><h1>{{ options.brand }} Home</h1>{{ od_content() }}</main>",
         ),
         (
@@ -398,8 +398,8 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     let entry_id = entry_res["id"].as_i64().unwrap();
 
     let zip_b = build_zip(&[
-        ("theme.json", br#"{"manifest_version":3,"theme_id":"release-theme-b","name":"B","version":"1.0.0","templates": [{ "kind": "home", "file": "home.html" }]}"#),
-        ("home.html", b"<main>Beta{{ od_content() }}</main>"),
+        ("theme.json", br#"{"manifest_version":1,"theme_id":"release-theme-b","name":"B","version":"1.0.0","templates": [{ "kind": "index", "file": "index.html" }]}"#),
+        ("index.html", b"<main>Beta{{ od_content() }}</main>"),
     ]);
     let rev_b = client
         .post(format!("{}/api/admin/themes", srv.base_url))

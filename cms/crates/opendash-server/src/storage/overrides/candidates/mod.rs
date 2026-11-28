@@ -1,5 +1,5 @@
 //! Site-owned typed templates. Candidate specificity wins before source priority:
-//! for each candidate, site-owned Builder AST precedes active theme v3 HTML.
+//! for each candidate, site-owned Builder AST precedes active Theme Format V1 HTML.
 
 use super::*;
 
@@ -34,7 +34,7 @@ pub(super) use crate::{
     storage::{
         builder::{self, BuilderRenderContext, check_preview_images, resolve_contact_forms_in_tx},
         content, entries, menu, permalinks, public_content, settings, theme,
-        theme::ActiveThemeV3,
+        theme::ActiveTheme,
     },
     template_sec::{self, PreviewCompositionBudget},
 };

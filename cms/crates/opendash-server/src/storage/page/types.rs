@@ -33,7 +33,7 @@ pub struct RegisteredBlockDef {
     pub revision_digest: String,
 }
 
-/// 23 Core Blocks: 18 `NativeRust` (`None` template) + 5 `CompiledCsec` (`Some(render.html)`).
+/// 41 Core Blocks: 36 `NativeRust` (`None` template) + 5 `CompiledCsec` (`Some(render.html)`).
 pub(in crate::storage) const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, Option<&str>)] = &[
     // Layout (4 NativeRust)
     (
@@ -80,7 +80,76 @@ pub(in crate::storage) const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, Option<&str>)
         None,
     ),
     (
-        include_str!("../../builtin_blocks/content-slot/block.json"),
+        include_str!("../../builtin_blocks/site-brand/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/language-switcher/block.json"),
+        None,
+    ),
+    (include_str!("../../builtin_blocks/menu/block.json"), None),
+    (
+        include_str!("../../builtin_blocks/breadcrumbs/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/entry-title/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/entry-featured-image/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/entry-meta/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/entry-excerpt/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/entry-content/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/entry-terms/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/entry-field/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/entry-related/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/entry-nav/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/archive-title/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/archive-description/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/archive-featured-image/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/archive-loop/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/loop-item/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/archive-pagination/block.json"),
         None,
     ),
     // CompiledCsec (5 blocks)

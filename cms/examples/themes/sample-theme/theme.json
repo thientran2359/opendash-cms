@@ -1,7 +1,7 @@
 {
-  "manifest_version": 3,
-  "theme_id": "sample-theme-v3",
-  "name": "Sample Theme v3",
+  "manifest_version": 1,
+  "theme_id": "sample-theme",
+  "name": "Sample Theme",
   "version": "1.0.0",
   "templates": [
     {

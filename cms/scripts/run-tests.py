@@ -50,7 +50,7 @@ class GroupSpec:
 GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="theme",
-        description="Theme v3, Starter revisions, C-SEC templates, overrides, imports, public rendering",
+        description="Theme v1, Starter revisions, C-SEC templates, overrides, imports, public rendering",
         test_patterns=("theme",),
         unit_filters=(
             "theme::",
@@ -279,7 +279,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
         filename = path.rsplit("/", 1)[-1]
         core_routes: dict[str, set[str]] = {
             "theme.rs": {"theme"},
-            "icons.rs": {"theme"},
+            "icons.rs": {"theme", "builder"},
             "builder.rs": {"builder", "content"},
             "builder_blocks.rs": {"builder"},
             "block_schema.rs": {"builder", "theme"},
@@ -456,16 +456,17 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             return server_routes[sub], set(), False, False
         server_prefixes: tuple[tuple[str, set[str]], ...] = (
             ("theme/", {"theme"}),
-            ("template_sec/", {"theme"}),
+            ("template_sec/", {"theme", "builder"}),
             ("content_render/", {"theme", "content"}),
             ("document/", {"theme"}),
             ("dev_mode/", {"theme"}),
+            ("field_hydrate/", {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"}),
             ("storage/theme/", {"theme"}),
             ("storage/theme_tests/", {"theme"}),
-            ("storage/overrides/", {"theme"}),
+            ("storage/overrides/", {"theme", "builder"}),
             ("storage/import/", {"theme"}),
             ("storage/public_content/", {"theme", "content"}),
-            ("routes/themes/", {"theme"}),
+            ("routes/themes/", {"theme", "builder"}),
             ("routes/public_content/", {"theme", "content"}),
             ("page/", {"builder", "theme"}),
             ("storage/builder/", {"builder"}),
@@ -1018,7 +1019,7 @@ class RunTestsSelfTest(unittest.TestCase):
         cases = (
             ("cms/crates/opendash-core/src/theme/mod.rs", {"theme"}),
             ("cms/crates/opendash-core/src/content/types.rs", {"content"}),
-            ("cms/crates/opendash-server/src/template_sec/policy/mod.rs", {"theme"}),
+            ("cms/crates/opendash-server/src/template_sec/policy/mod.rs", {"theme", "builder"}),
             ("cms/crates/opendash-server/src/storage/entries/list.rs", {"content"}),
             ("cms/crates/opendash-server/src/storage/entry_lifecycle/trash.rs", {"content", "plugin"}),
             ("cms/crates/opendash-server/src/routes/revisions/revisions_handlers.rs", {"builder", "content", "ops"}),

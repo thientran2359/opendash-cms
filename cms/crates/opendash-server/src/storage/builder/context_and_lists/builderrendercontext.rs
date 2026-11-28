@@ -11,6 +11,7 @@ pub struct BuilderRenderContext {
     pub hydration_terms: BTreeMap<i64, crate::storage::fields::HydratedTermRefRow>,
     pub timezone: String,
     pub locale_search_url: String,
+    pub content_schemas: BTreeMap<String, opendash_core::content::EffectiveContentSchema>,
 }
 
 impl Default for BuilderRenderContext {
@@ -25,6 +26,7 @@ impl Default for BuilderRenderContext {
             hydration_terms: BTreeMap::new(),
             timezone: "UTC".to_owned(),
             locale_search_url: "/".to_owned(),
+            content_schemas: BTreeMap::new(),
         }
     }
 }
@@ -50,6 +52,8 @@ pub enum ResolvedList {
         items: Vec<ListItem>,
         has_next: bool,
         out_of_range: bool,
+        hydrated_entries: Option<Vec<crate::content_render::EntryView>>,
+        entry_schema: Option<opendash_core::content::EffectiveContentSchema>,
     },
     MissingConfig,
 }
@@ -91,7 +95,26 @@ pub async fn resolve_lists_in_tx_for_locale(
     pages: &BTreeMap<String, i64>,
     render_locale: Option<&str>,
 ) -> ApiResult<ListResults> {
-    resolve_lists_in_tx_for_locale_inner(tx, document, pages, render_locale, None).await
+    resolve_lists_in_tx_for_locale_inner(tx, document, pages, render_locale, false, None).await
+}
+
+pub async fn resolve_lists_in_tx_for_locale_with_budget_and_preview(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    pages: &BTreeMap<String, i64>,
+    render_locale: Option<&str>,
+    is_preview: bool,
+    budget: &mut crate::template_sec::RenderBudget,
+) -> ApiResult<ListResults> {
+    resolve_lists_in_tx_for_locale_inner(
+        tx,
+        document,
+        pages,
+        render_locale,
+        is_preview,
+        Some(budget),
+    )
+    .await
 }
 
 /// Request-scoped variant that charges each list resolution against `RenderBudget`.
@@ -102,7 +125,8 @@ pub async fn resolve_lists_in_tx_for_locale_with_budget(
     render_locale: Option<&str>,
     budget: &mut crate::template_sec::RenderBudget,
 ) -> ApiResult<ListResults> {
-    resolve_lists_in_tx_for_locale_inner(tx, document, pages, render_locale, Some(budget)).await
+    resolve_lists_in_tx_for_locale_inner(tx, document, pages, render_locale, false, Some(budget))
+        .await
 }
 
 fn collect_list_nodes_rec<'a>(
@@ -122,6 +146,7 @@ async fn resolve_lists_in_tx_for_locale_inner(
     document: &BuilderDocument,
     pages: &BTreeMap<String, i64>,
     render_locale: Option<&str>,
+    is_preview: bool,
     mut budget: Option<&mut crate::template_sec::RenderBudget>,
 ) -> ApiResult<ListResults> {
     let active_locale = match render_locale {
@@ -177,6 +202,10 @@ async fn resolve_lists_in_tx_for_locale_inner(
             show_excerpt: bool_prop(&node.props, "show_excerpt", true),
             show_taxonomy: bool_prop(&node.props, "show_taxonomy", true),
         };
+        let has_loop_item = node
+            .children
+            .iter()
+            .any(|child| child.block_id == "core/loop-item");
         let page = pages
             .get(&node.id)
             .copied()
@@ -211,6 +240,8 @@ async fn resolve_lists_in_tx_for_locale_inner(
                         out_of_range: page > 1,
                         items: Vec::new(),
                         has_next: false,
+                        hydrated_entries: has_loop_item.then(Vec::new),
+                        entry_schema: None,
                     },
                 );
                 continue;
@@ -231,11 +262,35 @@ async fn resolve_lists_in_tx_for_locale_inner(
                 let items =
                     super::hydrate_list_items_in_tx(tx, type_key, &result.entries, hydration_opts)
                         .await?;
+                let (hydrated_entries, entry_schema) = if has_loop_item {
+                    let projection =
+                        opendash_core::builder::inspect_loop_projection_nodes(&node.children);
+                    let hydrated =
+                        crate::storage::public_content::hydrate_entry_views_projected_in_conn(
+                            &mut **tx,
+                            result.entries,
+                            Some(&active_locale),
+                            is_preview,
+                            opendash_core::content::FieldRole::Editor,
+                            None,
+                            &projection,
+                        )
+                        .await?;
+                    let schema = crate::storage::content::load_effective_content_schema_in_tx(
+                        &mut **tx, type_key,
+                    )
+                    .await?;
+                    (Some(hydrated), schema)
+                } else {
+                    (None, None)
+                };
                 ResolvedList::Page {
                     page,
                     out_of_range: page > 1 && items.is_empty(),
                     items,
                     has_next: result.has_next,
+                    hydrated_entries,
+                    entry_schema,
                 }
             }
             PublishedListResult::MissingConfig(_) => ResolvedList::MissingConfig,

@@ -137,6 +137,14 @@ pub async fn batch_canonical_term_paths_in_tx(
     conn: &mut SqliteConnection,
     term_ids: &[i64],
 ) -> ApiResult<BTreeMap<i64, String>> {
+    batch_canonical_term_paths_for_locale_in_tx(conn, term_ids, None).await
+}
+
+pub async fn batch_canonical_term_paths_for_locale_in_tx(
+    conn: &mut SqliteConnection,
+    term_ids: &[i64],
+    locale_filter: Option<&str>,
+) -> ApiResult<BTreeMap<i64, String>> {
     let mut out = BTreeMap::new();
     if term_ids.is_empty() {
         return Ok(out);
@@ -153,11 +161,14 @@ pub async fn batch_canonical_term_paths_in_tx(
                JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                JOIN taxonomy_definitions d ON d.key = t.kind
               WHERE t.id IN (SELECT value FROM json_each(?))
+                AND (? IS NULL OR t.locale = ?)
                 AND d.public = 1
                 AND d.provider_status = 'active'
                 AND d.declaration_state = 'declared'",
         )
         .bind(ids_json)
+        .bind(locale_filter)
+        .bind(locale_filter)
         .fetch_all(&mut *conn)
         .await?;
         for (tid, path) in rows {

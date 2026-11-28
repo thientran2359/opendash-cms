@@ -179,7 +179,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "1.0.0",
@@ -259,7 +259,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-b",
             "name": "Theme B",
             "version": "1.0.0",
@@ -287,7 +287,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-b",
             "name": "Theme B",
             "version": "1.0.1",
@@ -308,7 +308,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "2.0.0",
@@ -353,7 +353,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "2.1.0",
@@ -399,7 +399,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "2.2.0",
@@ -446,7 +446,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "2.3.0",
@@ -491,7 +491,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "3.0.0",
@@ -539,7 +539,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-b",
             "name": "Theme B",
             "version": "2.0.0",

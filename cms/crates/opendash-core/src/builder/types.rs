@@ -1,4 +1,5 @@
-pub(super) use std::collections::{BTreeMap, HashMap, HashSet};
+pub(super) use super::{BlockNode, BuilderDocument};
+pub(super) use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub(super) use serde::{Deserialize, Serialize};
 pub(super) use serde_json::Value;
@@ -19,6 +20,147 @@ pub const MAX_BUILDER_LISTS_PER_REQUEST: usize = 8;
 pub const MAX_BUILDER_LISTS: usize = MAX_BUILDER_LISTS_PER_REQUEST;
 pub const MAX_BUILDER_PATTERN_INSTANCES: usize = 16;
 pub const MAX_EXPANDED_BUILDER_NODES: usize = 1024;
+pub const MAX_LOOP_ITEM_NODES: usize = 16;
+pub const MAX_LOOP_ITEM_REL_DEPTH: usize = 4;
+pub const MAX_LOOP_ITEMS_PER_REQUEST: usize = 96;
+pub const MAX_MENU_LOADS_PER_REQUEST: usize = 8;
+pub const MAX_THIRD_PARTY_BLOCKS_IN_LOOP: usize = 2;
+
+pub const LOOP_ITEM_CORE_ALLOWLIST: &[&str] = &[
+    "core/entry-title",
+    "core/entry-featured-image",
+    "core/entry-meta",
+    "core/entry-excerpt",
+    "core/entry-terms",
+    "core/entry-field",
+    "core/row",
+    "core/column",
+    "core/stack",
+    "core/card",
+    "core/banner",
+    "core/heading",
+    "core/text",
+    "core/image",
+    "core/button",
+    "core/divider",
+    "core/spacer",
+];
+
+pub const LOOP_PARENT_CARDINALITY: &[(&str, usize, usize)] = &[
+    ("core/archive-loop", 1, 1),
+    ("core/entry-related", 1, 1),
+    ("core/list", 0, 1),
+];
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LoopProjection {
+    pub needs_cover: bool,
+    pub needs_excerpt: bool,
+    pub needs_terms: bool,
+    pub needs_primary_category: bool,
+    pub needs_reading_time: bool,
+    pub needs_all_fields: bool,
+    pub custom_field_keys: BTreeSet<String>,
+}
+
+impl LoopProjection {
+    pub fn all() -> Self {
+        Self {
+            needs_cover: true,
+            needs_excerpt: true,
+            needs_terms: true,
+            needs_primary_category: true,
+            needs_reading_time: true,
+            needs_all_fields: true,
+            custom_field_keys: BTreeSet::new(),
+        }
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        self.needs_cover |= other.needs_cover;
+        self.needs_excerpt |= other.needs_excerpt;
+        self.needs_terms |= other.needs_terms;
+        self.needs_primary_category |= other.needs_primary_category;
+        self.needs_reading_time |= other.needs_reading_time;
+        self.needs_all_fields |= other.needs_all_fields;
+        if self.needs_all_fields {
+            self.custom_field_keys.clear();
+        } else {
+            self.custom_field_keys
+                .extend(other.custom_field_keys.iter().cloned());
+        }
+    }
+}
+
+fn inspect_loop_projection_inner(
+    nodes: &[BlockNode],
+    include_lists: bool,
+    in_loop: bool,
+    proj: &mut LoopProjection,
+) {
+    for node in nodes {
+        match node.block_id.as_str() {
+            "core/entry-featured-image" => proj.needs_cover = true,
+            "core/entry-excerpt" => proj.needs_excerpt = true,
+            "core/entry-terms" => proj.needs_terms = true,
+            "core/entry-meta" => {
+                if let Some(items) = node.props.get("items").and_then(Value::as_array) {
+                    for item in items.iter().filter_map(Value::as_str) {
+                        if item == "reading_time" {
+                            proj.needs_reading_time = true;
+                        } else if item == "primary_category" {
+                            proj.needs_primary_category = true;
+                        }
+                    }
+                } else {
+                    proj.needs_reading_time = true;
+                }
+            }
+            "core/entry-field" => {
+                if let Some(fk) = node.props.get("field_key").and_then(Value::as_str) {
+                    if fk == "cover_url" {
+                        proj.needs_cover = true;
+                    } else if !fk.is_empty()
+                        && !matches!(fk, "title" | "slug" | "url")
+                        && !proj.needs_all_fields
+                    {
+                        proj.custom_field_keys.insert(fk.to_owned());
+                    }
+                }
+            }
+            "core/entry-content" => {
+                if node
+                    .props
+                    .get("fallback_to_fields")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                {
+                    proj.needs_all_fields = true;
+                    proj.custom_field_keys.clear();
+                }
+            }
+            "core/list" if !include_lists => continue,
+            id if in_loop && !id.starts_with("core/") => {
+                proj.merge(&LoopProjection::all());
+            }
+            _ => {}
+        }
+        let child_in_loop = in_loop || node.block_id == "core/loop-item";
+        inspect_loop_projection_inner(&node.children, include_lists, child_in_loop, proj);
+    }
+}
+
+pub fn inspect_loop_projection_nodes(nodes: &[BlockNode]) -> LoopProjection {
+    let mut proj = LoopProjection::default();
+    inspect_loop_projection_inner(nodes, true, false, &mut proj);
+    proj
+}
+
+pub fn inspect_loop_projection(doc: &BuilderDocument) -> LoopProjection {
+    let mut proj = LoopProjection::default();
+    inspect_loop_projection_inner(&doc.blocks, false, false, &mut proj);
+    proj
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

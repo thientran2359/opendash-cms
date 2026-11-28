@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn parses_v3_theme_templates_parts_layouts_and_pattern_document() {
     let manifest = br#"{
-      "manifest_version": 3,
+      "manifest_version": 1,
       "theme_id": "sample-theme", "name": "Sample", "version": "1.0.0",
       "templates": [
         {"kind": "index", "file": "index.html"},
@@ -47,7 +47,7 @@ fn parses_v3_theme_templates_parts_layouts_and_pattern_document() {
             CompressionMethod::Stored,
         ),
     ]);
-    let package = parse_theme_zip_v3(&zip).unwrap();
+    let package = parse_theme_zip(&zip).unwrap();
     assert_eq!(package.manifest.theme_id, "sample-theme");
     assert_eq!(package.files.len(), 7);
     assert!(package.manifest_json.contains("manifest_version"));
@@ -55,7 +55,7 @@ fn parses_v3_theme_templates_parts_layouts_and_pattern_document() {
 
 #[test]
 fn v3_d01_accepts_exact_declared_assets_and_raster_preview() {
-    let mut manifest = minimal_v3_manifest();
+    let mut manifest = minimal_theme_manifest();
     manifest["assets"] = serde_json::json!([
         "assets/styles.css",
         "assets/images/hero.webp",
@@ -71,7 +71,7 @@ fn v3_d01_accepts_exact_declared_assets_and_raster_preview() {
         ("assets/images/hero.webp", b"RIFFdemoWEBP"),
         ("assets/fonts/body.woff2", b"woff2"),
     ];
-    let pkg = parse_theme_zip_v3(&build_v3_zip(manifest, entries)).unwrap();
+    let pkg = parse_theme_zip(&build_theme_zip(manifest, entries)).unwrap();
     assert_eq!(pkg.manifest.assets.len(), 3);
     assert_eq!(pkg.files.len(), 5);
 }
@@ -95,22 +95,22 @@ fn v3_s01_accepts_declared_utf8_js_modules_and_svg_only_within_text_cap() {
             "image/svg+xml",
         ),
     ] {
-        let mut manifest = minimal_v3_manifest();
+        let mut manifest = minimal_theme_manifest();
         manifest["assets"] = serde_json::json!([path]);
-        let pkg = parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, source)])).unwrap();
+        let pkg = parse_theme_zip(&build_theme_zip(manifest.clone(), &[(path, source)])).unwrap();
         assert_eq!(pkg.files[path], source);
         assert_eq!(theme_asset_mime(path), Some(mime));
 
         let invalid_utf8 = [0xff, 0xfe];
         assert!(matches!(
-            parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, &invalid_utf8)])),
+            parse_theme_zip(&build_theme_zip(manifest.clone(), &[(path, &invalid_utf8)])),
             Err(V2ZipError::BadRequest(message)) if message.contains("UTF-8")
         ));
-        let boundary = vec![b'a'; V3_MAX_ACTIVE_ASSET_BYTES];
-        assert!(parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, &boundary)])).is_ok());
-        let oversized = vec![b'a'; V3_MAX_ACTIVE_ASSET_BYTES + 1];
+        let boundary = vec![b'a'; MAX_ACTIVE_ASSET_BYTES];
+        assert!(parse_theme_zip(&build_theme_zip(manifest.clone(), &[(path, &boundary)])).is_ok());
+        let oversized = vec![b'a'; MAX_ACTIVE_ASSET_BYTES + 1];
         assert!(matches!(
-            parse_theme_zip_v3(&build_v3_zip(manifest, &[(path, &oversized)])),
+            parse_theme_zip(&build_theme_zip(manifest, &[(path, &oversized)])),
             Err(V2ZipError::PayloadTooLarge(_))
         ));
     }
@@ -118,7 +118,7 @@ fn v3_s01_accepts_declared_utf8_js_modules_and_svg_only_within_text_cap() {
 
 #[test]
 fn v3_s01_rejects_svg_pattern_preview_and_undeclared_active_assets() {
-    let mut manifest = minimal_v3_manifest();
+    let mut manifest = minimal_theme_manifest();
     let svg = br#"<svg xmlns="http://www.w3.org/2000/svg"/>"#;
     for (path, source) in [
         ("assets/icon.svg", svg.as_slice()),
@@ -126,7 +126,7 @@ fn v3_s01_rejects_svg_pattern_preview_and_undeclared_active_assets() {
         ("assets/module.mjs", b"export {};".as_slice()),
     ] {
         assert!(matches!(
-            parse_theme_zip_v3(&build_v3_zip(manifest.clone(), &[(path, source)])),
+            parse_theme_zip(&build_theme_zip(manifest.clone(), &[(path, source)])),
             Err(V2ZipError::BadRequest(_))
         ));
     }
@@ -136,7 +136,7 @@ fn v3_s01_rejects_svg_pattern_preview_and_undeclared_active_assets() {
         "file": "patterns/hero.json", "preview_asset": "assets/icon.svg"
     }]);
     assert!(matches!(
-        parse_theme_zip_v3(&build_v3_zip(
+        parse_theme_zip(&build_theme_zip(
             manifest,
             &[
                 ("patterns/hero.json", br#"{"schema_version":1,"blocks":[]}"#),
@@ -149,17 +149,17 @@ fn v3_s01_rejects_svg_pattern_preview_and_undeclared_active_assets() {
 
 #[test]
 fn v3_d01_rejects_missing_undeclared_and_duplicate_assets() {
-    let manifest = minimal_v3_manifest();
+    let manifest = minimal_theme_manifest();
     let assets = &[("assets/extra.png", b"image".as_slice())];
     assert!(matches!(
-        parse_theme_zip_v3(&build_v3_zip(manifest.clone(), assets)),
+        parse_theme_zip(&build_theme_zip(manifest.clone(), assets)),
         Err(V2ZipError::BadRequest(_))
     ));
 
     let mut missing = manifest.clone();
     missing["assets"] = serde_json::json!(["assets/missing.png"]);
     assert!(matches!(
-        parse_theme_zip_v3(&build_v3_zip(missing, &[])),
+        parse_theme_zip(&build_theme_zip(missing, &[])),
         Err(V2ZipError::BadRequest(_))
     ));
 
@@ -169,7 +169,7 @@ fn v3_d01_rejects_missing_undeclared_and_duplicate_assets() {
     // valid archive with two distinct equal-width names, then substitute
     // the second filename in its local and central directory headers.
     // CRC covers entry contents, not filename bytes.
-    let mut duplicate_zip = build_v3_zip(
+    let mut duplicate_zip = build_theme_zip(
         declared.clone(),
         &[("assets/extra.png", b"a"), ("assets/other.png", b"b")],
     );
@@ -210,21 +210,21 @@ fn v3_d01_rejects_missing_undeclared_and_duplicate_assets() {
         replaced, 2,
         "ZIP local and central names must both be rewritten"
     );
-    let duplicate_result = parse_theme_zip_v3(&duplicate_zip);
+    let duplicate_result = parse_theme_zip(&duplicate_zip);
     assert!(
         matches!(&duplicate_result, Err(V2ZipError::BadRequest(_))),
         "duplicate regular ZIP member must be rejected (any safe layer): {duplicate_result:?}"
     );
     declared["assets"] = serde_json::json!(["assets/extra.png", "assets/extra.png"]);
     assert!(matches!(
-        parse_theme_zip_v3(&build_v3_zip(declared, assets)),
+        parse_theme_zip(&build_theme_zip(declared, assets)),
         Err(V2ZipError::BadRequest(_))
     ));
 }
 
 #[test]
 fn v3_d01_rejects_hidden_traversal_unsafe_extension_and_long_paths() {
-    let manifest = minimal_v3_manifest();
+    let manifest = minimal_theme_manifest();
     let too_long = format!("assets/{}.png", "a".repeat(237));
     for path in [
         "assets/.private/hidden.png",
@@ -239,9 +239,9 @@ fn v3_d01_rejects_hidden_traversal_unsafe_extension_and_long_paths() {
         "assets/images/.secret.png",
         too_long.as_str(),
     ] {
-        let zip = build_v3_zip(manifest.clone(), &[(path, b"not safe")]);
+        let zip = build_theme_zip(manifest.clone(), &[(path, b"not safe")]);
         assert!(
-            matches!(parse_theme_zip_v3(&zip), Err(V2ZipError::BadRequest(_))),
+            matches!(parse_theme_zip(&zip), Err(V2ZipError::BadRequest(_))),
             "unexpected acceptance: {path}"
         );
     }
@@ -249,27 +249,27 @@ fn v3_d01_rejects_hidden_traversal_unsafe_extension_and_long_paths() {
 
 #[test]
 fn v3_d01_ignores_safe_empty_directories_but_rejects_hidden_children() {
-    let manifest = minimal_v3_manifest();
+    let manifest = minimal_theme_manifest();
     let empty_dirs = &[
         ("assets/", b"".as_slice()),
         ("assets/images/", b""),
         ("assets/.hidden/", b""),
     ];
-    let package = parse_theme_zip_v3(&build_v3_zip(manifest.clone(), empty_dirs)).unwrap();
+    let package = parse_theme_zip(&build_theme_zip(manifest.clone(), empty_dirs)).unwrap();
     assert_eq!(package.files.len(), 1);
     let hidden_file = &[
         ("assets/.hidden/", b"".as_slice()),
         ("assets/.hidden/secret.png", b"hidden"),
     ];
     assert!(matches!(
-        parse_theme_zip_v3(&build_v3_zip(manifest, hidden_file)),
+        parse_theme_zip(&build_theme_zip(manifest, hidden_file)),
         Err(V2ZipError::BadRequest(_))
     ));
 }
 
 #[test]
 fn v3_d01_rejects_invalid_preview_css_and_oversized_assets() {
-    let mut manifest = minimal_v3_manifest();
+    let mut manifest = minimal_theme_manifest();
     manifest["assets"] = serde_json::json!(["assets/styles.css"]);
     manifest["patterns"] = serde_json::json!([{
         "key": "hero", "title": "Hero", "category": "banner",
@@ -280,7 +280,7 @@ fn v3_d01_rejects_invalid_preview_css_and_oversized_assets() {
         ("assets/styles.css", b"body{}"),
     ];
     assert!(matches!(
-        parse_theme_zip_v3(&build_v3_zip(manifest.clone(), entries)),
+        parse_theme_zip(&build_theme_zip(manifest.clone(), entries)),
         Err(V2ZipError::BadRequest(_))
     ));
 
@@ -290,21 +290,21 @@ fn v3_d01_rejects_invalid_preview_css_and_oversized_assets() {
         b"@import url(https://evil.test/a.css);".as_slice(),
     )];
     assert!(matches!(
-        parse_theme_zip_v3(&build_v3_zip(manifest.clone(), unsafe_css)),
+        parse_theme_zip(&build_theme_zip(manifest.clone(), unsafe_css)),
         Err(V2ZipError::BadRequest(_))
     ));
 
     let giant_css = vec![b'a'; V2_MAX_TEXT_BYTES + 1];
-    let giant_zip = build_v3_zip(manifest, &[("assets/styles.css", &giant_css)]);
+    let giant_zip = build_theme_zip(manifest, &[("assets/styles.css", &giant_css)]);
     assert!(matches!(
-        parse_theme_zip_v3(&giant_zip),
+        parse_theme_zip(&giant_zip),
         Err(V2ZipError::PayloadTooLarge(_))
     ));
 }
 
 #[test]
 fn v3_d01_rejects_malformed_declarations_and_field_groups() {
-    let manifest = minimal_v3_manifest();
+    let manifest = minimal_theme_manifest();
     for bad in [
         serde_json::json!({"declarations":{"content_types":"not an array"}}),
         serde_json::json!({"field_groups":"not an array"}),
@@ -316,7 +316,7 @@ fn v3_d01_rejects_malformed_declarations_and_field_groups() {
             .unwrap()
             .extend(bad.as_object().unwrap().clone());
         assert!(matches!(
-            parse_theme_zip_v3(&build_v3_zip(variant, &[])),
+            parse_theme_zip(&build_theme_zip(variant, &[])),
             Err(V2ZipError::BadRequest(_))
         ));
     }
@@ -325,7 +325,7 @@ fn v3_d01_rejects_malformed_declarations_and_field_groups() {
 #[test]
 fn rejects_v3_undeclared_templates_and_unsafe_archive_paths() {
     let manifest = br#"{
-      "manifest_version":3, "theme_id":"sample-theme", "name":"Sample", "version":"1.0.0",
+      "manifest_version":1, "theme_id":"sample-theme", "name":"Sample", "version":"1.0.0",
       "templates":[{"kind":"index", "file":"index.html"}]
     }"#;
     for unwanted in [
@@ -345,7 +345,7 @@ fn rejects_v3_undeclared_templates_and_unsafe_archive_paths() {
             (unwanted, b"should be rejected", CompressionMethod::Stored),
         ]);
         assert!(
-            matches!(parse_theme_zip_v3(&zip), Err(V2ZipError::BadRequest(_))),
+            matches!(parse_theme_zip(&zip), Err(V2ZipError::BadRequest(_))),
             "{unwanted}"
         );
     }
@@ -354,7 +354,7 @@ fn rejects_v3_undeclared_templates_and_unsafe_archive_paths() {
 #[test]
 fn rejects_v3_untrusted_template_and_pattern_content() {
     let manifest = br#"{
-      "manifest_version":3, "theme_id":"sample-theme", "name":"Sample", "version":"1.0.0",
+      "manifest_version":1, "theme_id":"sample-theme", "name":"Sample", "version":"1.0.0",
       "templates":[{"kind":"page", "file":"page.html"}]
     }"#;
     for template in [
@@ -368,13 +368,13 @@ fn rejects_v3_untrusted_template_and_pattern_content() {
             ("page.html", template, CompressionMethod::Stored),
         ]);
         assert!(matches!(
-            parse_theme_zip_v3(&zip),
+            parse_theme_zip(&zip),
             Err(V2ZipError::BadRequest(_))
         ));
     }
 
     let manifest_with_pattern = br#"{
-      "manifest_version":3, "theme_id":"sample-theme", "name":"Sample", "version":"1.0.0",
+      "manifest_version":1, "theme_id":"sample-theme", "name":"Sample", "version":"1.0.0",
       "patterns":[{"key":"hero", "title":"Hero", "category":"banner", "file":"patterns/hero.json"}]
     }"#;
     let zip = build_zip(&[
@@ -382,7 +382,7 @@ fn rejects_v3_untrusted_template_and_pattern_content() {
         ("patterns/hero.json", br#"{"schema_version":1,"blocks":[{"id":"broken","block_id":"core/section","children":[{"id":"broken","block_id":"core/row","children":[]}]}]}"#, CompressionMethod::Stored),
     ]);
     assert!(matches!(
-        parse_theme_zip_v3(&zip),
+        parse_theme_zip(&zip),
         Err(V2ZipError::BadRequest(_))
     ));
 }

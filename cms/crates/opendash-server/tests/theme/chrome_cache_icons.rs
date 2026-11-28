@@ -26,7 +26,7 @@ fn temp_theme_dir() -> std::path::PathBuf {
 }
 
 fn write_theme(path: &Path, icon: &str) {
-    fs::write(path.join("theme.json"), r#"{"manifest_version":3,"theme_id":"safe-icons-test","name":"Safe Icons","version":"1.0.0","parts":{"header":"header.html"},"templates":[{"kind":"page","file":"page.html"}]}"#).unwrap();
+    fs::write(path.join("theme.json"), r#"{"manifest_version":1,"theme_id":"safe-icons-test","name":"Safe Icons","version":"1.0.0","parts":{"header":"header.html"},"templates":[{"kind":"page","file":"page.html"}]}"#).unwrap();
     fs::write(
         path.join("header.html"),
         "<header>{{ od_icon('arrow-right') }}</header>",
@@ -154,7 +154,7 @@ fn icons_theme_zip() -> Vec<u8> {
         let mut writer = ZipWriter::new(std::io::Cursor::new(&mut bytes));
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = br#"{
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "safe-icons-e2e",
             "name": "Safe Icons E2E",
             "version": "1.0.0",

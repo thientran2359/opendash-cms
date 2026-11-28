@@ -474,3 +474,105 @@ async fn s01_one_hop_pattern_acl_and_private_cpt_follow_unified_body_without_con
     .unwrap();
     assert!(!media_is_referenced(&db, &media_id).await.unwrap());
 }
+
+#[tokio::test]
+async fn adjacent_entries_use_idx_0063_without_temp_btree_and_respect_visibility() {
+    let dir = std::env::temp_dir().join(format!(
+        "opendash-s02-adjacent-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let db = crate::storage::init_db(&dir.join("cms.db")).await.unwrap();
+    super::synchronize_direct_sql_fixture(&db).await;
+
+    for (slug, status, published_at) in [
+        ("p-old", "published", "2026-11-20T09:00:00Z"),
+        ("p-mid-a", "published", "2026-11-22T09:00:00Z"),
+        ("p-mid-b", "published", "2026-11-22T09:00:00Z"),
+        ("p-draft", "draft", "2026-11-23T09:00:00Z"),
+        ("p-new", "published", "2026-11-25T09:00:00Z"),
+    ] {
+        let eid = super::add_entry(&db, "post", slug, status == "published", &[]).await;
+        sqlx::query("UPDATE content_entries SET published_at = ? WHERE id = ?")
+            .bind(published_at)
+            .bind(eid)
+            .execute(&db)
+            .await
+            .unwrap();
+    }
+
+    let mid_b_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM content_entries WHERE content_type_key = 'post' AND slug = 'p-mid-b'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    let mid_a_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM content_entries WHERE content_type_key = 'post' AND slug = 'p-mid-a'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    let new_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM content_entries WHERE content_type_key = 'post' AND slug = 'p-new'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+
+    for (newer, tax_filter) in [
+        (
+            false,
+            crate::storage::public_content::AdjacentTaxFilter::None,
+        ),
+        (
+            true,
+            crate::storage::public_content::AdjacentTaxFilter::None,
+        ),
+        (
+            false,
+            crate::storage::public_content::AdjacentTaxFilter::PrimaryCategory,
+        ),
+        (
+            true,
+            crate::storage::public_content::AdjacentTaxFilter::PrimaryCategory,
+        ),
+    ] {
+        let plan_sql = format!(
+            "EXPLAIN QUERY PLAN {}",
+            crate::storage::public_content::build_adjacent_sql(newer, tax_filter)
+        );
+        let plan_rows: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(plan_sql))
+            .fetch_all(&db)
+            .await
+            .unwrap();
+        let detail = plan_rows
+            .iter()
+            .map(|r| r.3.as_str())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(
+            detail.contains("idx_content_entries_pub_order"),
+            "expected idx_content_entries_pub_order in plan: {detail}"
+        );
+        assert!(
+            !detail.contains("USE TEMP B-TREE FOR ORDER BY"),
+            "unexpected temp B-tree sort in plan: {detail}"
+        );
+    }
+
+    let mut tx = db.begin().await.unwrap();
+    let adj = crate::storage::public_content::query_adjacent_entries_in_tx(
+        &mut tx, mid_b_id, "post", "vi", false, false,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    assert_eq!(adj.prev.as_ref().map(|p| p.id), Some(mid_a_id));
+    assert_eq!(adj.next.as_ref().map(|n| n.id), Some(new_id));
+    drop(db);
+    let _ = std::fs::remove_dir_all(&dir);
+}

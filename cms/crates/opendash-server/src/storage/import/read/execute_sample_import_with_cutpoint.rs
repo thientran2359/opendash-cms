@@ -68,12 +68,12 @@ pub async fn execute_sample_import_with_cutpoint(
     let rev = find_revision_by_id(db, &plan.revision_id)
         .await?
         .ok_or_else(|| ApiError::not_found("Revision theme chưa được cài đặt."))?;
-    if rev.source_format != ThemeSourceFormat::V3 {
-        return Err(ApiError::not_found("Revision theme v3 không tồn tại."));
+    if rev.source_format != ThemeSourceFormat::V1 {
+        return Err(ApiError::not_found("Revision theme v1 không tồn tại."));
     }
     let option_schema = settings::parse_theme_options_schema(&rev.manifest_json)
         .map_err(ApiError::unprocessable)?;
-    let manifest: ThemeV3Manifest = serde_json::from_str(&rev.manifest_json)?;
+    let manifest: ThemeManifest = serde_json::from_str(&rev.manifest_json)?;
     manifest.validate().map_err(ApiError::bad_request)?;
     let sample: ThemeSampleManifest = serde_json::from_value(
         manifest

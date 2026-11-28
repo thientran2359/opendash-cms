@@ -50,6 +50,7 @@ fn od_image_enforces_csec_provenance_nonce_boundaries_and_attributes() {
             parent_ctx: None,
             is_preview: false,
             fmt_cfg: &fmt_cfg,
+            loop_context: None,
         },
         &mut budget,
     )
@@ -99,6 +100,7 @@ fn od_image_enforces_csec_provenance_nonce_boundaries_and_attributes() {
                 parent_ctx: None,
                 is_preview: false,
                 fmt_cfg: &fmt_cfg,
+                loop_context: None,
             },
             &mut forged_budget,
         )

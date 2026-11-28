@@ -32,7 +32,7 @@ pub(crate) async fn render_entry_response_with_cache(
         effective_schema,
         eligible_public_taxonomies,
         terms,
-        active: active_v3,
+        active: active,
         mut resolution,
         body: entry_body,
         budget: mut entry_render_budget,
@@ -43,7 +43,7 @@ pub(crate) async fn render_entry_response_with_cache(
             .page_layout_key
             .as_ref()
             .filter(|key| {
-                active_v3.as_ref().is_some_and(|theme| {
+                active.as_ref().is_some_and(|theme| {
                     theme
                         .manifest
                         .page_layouts
@@ -53,15 +53,15 @@ pub(crate) async fn render_entry_response_with_cache(
             })
             .cloned();
         // Preserve the Page's own Builder body. Only the shared template
-        // candidate chain changes: Home -> PageLayout -> Page -> Index.
+        // candidate chain changes: PageLayout -> Page -> Index.
         let candidates =
-            overrides::build_candidates(&PublicTemplateContext::Home { page_layout_key })?;
+            overrides::build_candidates(&PublicTemplateContext::Page { page_layout_key })?;
         resolution = overrides::resolve_template_2axis(
             &db,
             &candidates,
-            active_v3.as_ref().map(|v| &v.templates),
-            active_v3.as_ref().map(|v| &v.parts),
-            active_v3.as_ref().map(|v| &v.page_layouts),
+            active.as_ref().map(|v| &v.templates),
+            active.as_ref().map(|v| &v.parts),
+            active.as_ref().map(|v| &v.page_layouts),
         )
         .await?;
     }
@@ -152,6 +152,26 @@ pub(crate) async fn render_entry_response_with_cache(
     let entry_has_form = entry_body
         .as_ref()
         .is_some_and(|body| body.has_active_contact_form);
+    let builder_body_fragment =
+        entry_body.as_ref().map(
+            |body| match crate::document::normalize_public_document_with_options(&body.html, true) {
+                Ok(parts) => {
+                    let mut fragment = parts.authorized_styles.concat();
+                    fragment.push_str(&parts.body_fragment);
+                    fragment
+                }
+                Err(_) => body.html.clone(),
+            },
+        );
+    let classic_body_fragment = if entry_body.is_none() {
+        content_render::render_entry_body_fragment(&entry.values, &effective_schema)
+    } else {
+        None
+    };
+    let entry_has_builder_body = builder_body_fragment.is_some();
+    let entry_body_html = builder_body_fragment
+        .as_deref()
+        .or(classic_body_fragment.as_deref());
     let fallback_html = match entry_body {
         Some(body) => body.html,
         None => content_render::render_single_with_context_for_locale(
@@ -186,14 +206,14 @@ pub(crate) async fn render_entry_response_with_cache(
     )
     .await?;
     let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
-    budget.set_locale_context(active_v3.as_ref(), &entry_locale, locale_ctx);
+    budget.set_locale_context(active.as_ref(), &entry_locale, locale_ctx);
     let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
     let pagination = PaginationView::empty();
     let empty_entries = Vec::new();
     let body = render_resolved_public_template_html(
         &db,
         resolution,
-        active_v3.as_ref(),
+        active.as_ref(),
         &site_ctx,
         &site_opts,
         &theme_opts,
@@ -203,8 +223,17 @@ pub(crate) async fn render_entry_response_with_cache(
         PublicRouteContext {
             route_kind: if is_home { "home" } else { "single" },
             route_path: Some(&canonical_path_for_seo),
+            resolved_locale: &entry_locale,
+            locale_target: if is_home {
+                seo::ThemeLocaleTarget::Home
+            } else {
+                seo::ThemeLocaleTarget::Entry { entry_id: entry.id }
+            },
             entry_id: Some(entry.id),
             entry_type_key: Some(&type_key),
+            entry_schema: Some(&effective_schema),
+            entry_body_html,
+            entry_has_builder_body,
             custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
@@ -215,7 +244,13 @@ pub(crate) async fn render_entry_response_with_cache(
             taxonomy: None,
             term: None,
             term_schema: None,
+            term_summary: None,
             content_type: Some(&ct_value),
+            archive_type: Some(content_render::ArchiveTypeSummary {
+                key: schema.key.clone(),
+                label: schema.label.clone(),
+                description: schema.description.clone(),
+            }),
             entry: Some(&view),
             list_pages: Some(&list_pages),
             search: &inactive_search,
@@ -227,13 +262,17 @@ pub(crate) async fn render_entry_response_with_cache(
     let (header, footer, shell_has_form) = if body.canvas_layout || body.theme_context.is_null() {
         (None, None, false)
     } else {
-        overrides::resolve_and_render_header_footer_with_context_for_locale(
+        overrides::resolve_and_render_header_footer_with_template_data_for_locale(
             &db,
-            active_v3.as_ref(),
+            active.as_ref(),
             &body.theme_context,
             &body.precompiled_shell,
             Some(&entry_locale),
             &fmt_cfg,
+            body.template_data
+                .as_ref()
+                .map(|d| d.as_render_data(&site_ctx))
+                .as_ref(),
             &mut budget,
             cache,
         )
@@ -265,7 +304,7 @@ pub(crate) async fn render_entry_response_with_cache(
     } else {
         EnqueueCondition::Single
     };
-    let enqueued = enqueued_for_route(active_v3.as_ref(), route_condition);
+    let enqueued = enqueued_for_route(active.as_ref(), route_condition);
     let canonical_query = crate::cache::canonicalize_public_query(raw_query, QueryScope::Single);
     let composed = content_render::compose_document_with_seo_with_assets(
         header.as_deref(),
@@ -274,7 +313,7 @@ pub(crate) async fn render_entry_response_with_cache(
         &seo_view,
         body_classes,
         &enqueued,
-        active_v3.is_some(),
+        active.is_some(),
     )?;
     let composed = apply_public_render_hooks(
         composed,

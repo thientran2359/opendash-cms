@@ -48,7 +48,7 @@ pub(crate) async fn render_search_response_for_locale(
     }
 
     let active = match themes_root {
-        Some(Extension(root)) => theme_storage::load_active_theme_v3(db, &root.0).await?,
+        Some(Extension(root)) => theme_storage::load_active_theme(db, &root.0).await?,
         None => None,
     };
     let site = settings::get_general_for_locale(db, Some(locale)).await?;
@@ -186,8 +186,15 @@ pub(crate) async fn render_search_response_for_locale(
         PublicRouteContext {
             route_kind: "search",
             route_path: Some(&search_url),
+            resolved_locale: &resolved_locale,
+            locale_target: seo::ThemeLocaleTarget::Search {
+                raw_search_query: raw_for_alt,
+            },
             entry_id: None,
             entry_type_key: None,
+            entry_schema: None,
+            entry_body_html: None,
+            entry_has_builder_body: false,
             custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
@@ -198,7 +205,9 @@ pub(crate) async fn render_search_response_for_locale(
             taxonomy: None,
             term: None,
             term_schema: None,
+            term_summary: None,
             content_type: None,
+            archive_type: None,
             entry: None,
             list_pages: None,
             search: &search_view,
@@ -212,13 +221,17 @@ pub(crate) async fn render_search_response_for_locale(
         if body.canvas_layout || body.theme_context.is_null() {
             (None, None, false)
         } else {
-            overrides::resolve_and_render_header_footer_with_context_for_locale(
+            overrides::resolve_and_render_header_footer_with_template_data_for_locale(
                 db,
                 active.as_ref(),
                 &body.theme_context,
                 &body.precompiled_shell,
                 Some(&resolved_locale),
                 &fmt_cfg,
+                body.template_data
+                    .as_ref()
+                    .map(|d| d.as_render_data(&site_ctx))
+                    .as_ref(),
                 &mut budget,
                 cache,
             )
@@ -256,7 +269,10 @@ pub(crate) async fn render_search_response_for_locale(
     )
     .await?;
     let html = content_render::finalize_document_richtext(
-        content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+        content_render::finalize_document_images(
+            content_render::finalize_document_icons(composed, &budget.render_budget.icon_nonces)?,
+            &budget.render_budget.image_nonces,
+        )?,
         &budget.render_budget.richtext_nonces,
     )?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(

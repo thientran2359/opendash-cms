@@ -23,6 +23,7 @@ import {
   preservesAnchors,
   withinBuilderLimits,
 } from './validation.ts';
+import { isInsideLoopItem, validateLoopInvariants } from './loop_validation.ts';
 import { findActiveCatalogItem } from './types_and_tree.ts';
 
 function nodeArrayForParent(document: BuilderDocument, parentId: string | null): BlockNode[] | null {
@@ -51,8 +52,8 @@ export function createStarterTemplateDocument(options?: {
   }
   if (includeContentSlot) {
     colChildren.push({
-      id: newNodeId('core/content-slot', doc),
-      block_id: 'core/content-slot',
+      id: newNodeId('core/entry-content', doc),
+      block_id: 'core/entry-content',
       props: {},
     });
   }
@@ -141,7 +142,7 @@ export function setNodeMeta(
     const val = (patch.html_id ?? '').trim();
     if (!val) {
       delete merged.html_id;
-    } else if (!/^[a-zA-Z0-9_-]{1,64}$/.test(val)) {
+    } else if (isInsideLoopItem(next, id) || !/^[a-zA-Z0-9_-]{1,64}$/.test(val)) {
       return null;
     } else {
       merged.html_id = val;
@@ -230,9 +231,12 @@ export function moveNode(
     ? findActiveCatalogItem(blockCatalog, targetParent.node.block_id)?.schema
     : null;
 
+  const effectiveCtx = targetParentId !== null && isInsideLoopItem(document, targetParentId)
+    ? ({ kind: 'loop_item' } as const)
+    : contextTarget;
   if (!sourceLocked && sourceSchema) {
     if (
-      !matchesContextTarget(contextTarget, sourceSchema.allowed_contexts)
+      !matchesContextTarget(effectiveCtx, sourceSchema.allowed_contexts)
       || !canParentAcceptChild(targetParentSchema, sourceSchema, targetParentId)
     ) {
       return null;
@@ -263,7 +267,9 @@ export function moveNode(
   if (source.parentId === targetParentId && insertIndex === sourceIndex) return null;
 
   targetSiblings.splice(insertIndex, 0, moving);
-  return withinBuilderLimits(next) && preservesAnchors(document, next, undefined, blockCatalog)
+  return withinBuilderLimits(next)
+    && preservesAnchors(document, next, undefined, blockCatalog)
+    && validateLoopInvariants(next, blockCatalog)
     ? next
     : null;
 }

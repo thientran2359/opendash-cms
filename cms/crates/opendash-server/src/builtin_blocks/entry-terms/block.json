@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "id": "core/entry-terms",
+  "title": "Phân loại bài (Entry Terms)",
+  "category": "template",
+  "icon": "tag",
+  "render": "native",
+  "allowed_contexts": ["single", "single_custom", "singular", "loop_item"],
+  "fields": [
+    {
+      "type": "select",
+      "key": "taxonomy_key",
+      "label": "Phân loại",
+      "options_source": "taxonomies",
+      "allow_null": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "style",
+      "label": "Kiểu nhãn",
+      "options": [
+        { "value": "pill", "label": "Viên (Pill)" },
+        { "value": "text", "label": "Chữ thường" },
+        { "value": "outline", "label": "Viền (Outline)" }
+      ],
+      "default": "pill"
+    },
+    {
+      "type": "text",
+      "key": "prefix_label",
+      "label": "Nhãn tiền tố",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "key": "max_items",
+      "label": "Số mục tối đa",
+      "min": 1,
+      "max": 12,
+      "step": 1,
+      "default": 6
+    },
+    {
+      "type": "boolean",
+      "key": "link_to_term",
+      "label": "Liên kết tới trang phân loại",
+      "default": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn lề",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" }
+      ],
+      "default": "left",
+      "responsive": true
+    },
+    {
+      "type": "boolean",
+      "key": "hide_if_empty",
+      "label": "Ẩn khi rỗng",
+      "default": true
+    }
+  ]
+}

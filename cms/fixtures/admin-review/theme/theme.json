@@ -1,5 +1,5 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 1,
   "theme_id": "review-theme",
   "name": "Admin Review Theme",
   "version": "1.0.0",

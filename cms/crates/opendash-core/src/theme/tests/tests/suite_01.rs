@@ -1,15 +1,17 @@
 use super::*;
 
 #[test]
-fn v3_manifest_accepts_valid_resources_and_rejects_wrong_version_or_unknown_fields() {
-    let manifest = v3_manifest();
+fn theme_manifest_accepts_valid_resources_and_rejects_wrong_version_or_unknown_fields() {
+    let manifest = theme_manifest();
     manifest.validate().unwrap();
-    let decoded: ThemeV3Manifest =
+    let decoded: ThemeManifest =
         serde_json::from_value(serde_json::to_value(&manifest).unwrap()).unwrap();
     decoded.validate().unwrap();
 
     let mut wrong = manifest.clone();
     wrong.manifest_version = 2;
+    assert!(wrong.validate().is_err());
+    wrong.manifest_version = 3;
     assert!(wrong.validate().is_err());
     wrong = manifest.clone();
     wrong.theme_id = "../evil".into();
@@ -19,43 +21,43 @@ fn v3_manifest_accepts_valid_resources_and_rejects_wrong_version_or_unknown_fiel
     assert!(wrong.validate().is_err());
     let mut unknown = serde_json::to_value(manifest).unwrap();
     unknown["unexpected"] = json!("value");
-    assert!(serde_json::from_value::<ThemeV3Manifest>(unknown).is_err());
+    assert!(serde_json::from_value::<ThemeManifest>(unknown).is_err());
 }
 
 #[test]
 fn page_layout_chrome_is_backward_compatible_and_explicit() {
-    let mut old = serde_json::to_value(v3_manifest()).unwrap();
+    let mut old = serde_json::to_value(theme_manifest()).unwrap();
     old["page_layouts"][0]
         .as_object_mut()
         .unwrap()
         .remove("chrome");
-    let parsed: ThemeV3Manifest = serde_json::from_value(old).unwrap();
+    let parsed: ThemeManifest = serde_json::from_value(old).unwrap();
     assert_eq!(parsed.page_layouts[0].chrome, PageLayoutChrome::Default);
     let mut declared = serde_json::to_value(parsed).unwrap();
     declared["page_layouts"][0]["chrome"] = json!("none");
-    let parsed: ThemeV3Manifest = serde_json::from_value(declared.clone()).unwrap();
+    let parsed: ThemeManifest = serde_json::from_value(declared.clone()).unwrap();
     assert_eq!(parsed.page_layouts[0].chrome, PageLayoutChrome::None);
     parsed.validate().unwrap();
     declared["page_layouts"][0]["chrome"] = json!("unknown");
-    assert!(serde_json::from_value::<ThemeV3Manifest>(declared).is_err());
+    assert!(serde_json::from_value::<ThemeManifest>(declared).is_err());
 }
 
 #[test]
-fn v3_assets_missing_field_defaults_to_empty_and_explicit_empty_is_valid() {
-    let mut without_assets = serde_json::to_value(v3_manifest()).unwrap();
+fn theme_assets_missing_field_defaults_to_empty_and_explicit_empty_is_valid() {
+    let mut without_assets = serde_json::to_value(theme_manifest()).unwrap();
     without_assets.as_object_mut().unwrap().remove("assets");
-    let omitted: ThemeV3Manifest = serde_json::from_value(without_assets).unwrap();
+    let omitted: ThemeManifest = serde_json::from_value(without_assets).unwrap();
     assert!(omitted.assets.is_empty());
     omitted.validate().unwrap();
 
-    let mut explicit_empty = v3_manifest();
+    let mut explicit_empty = theme_manifest();
     explicit_empty.assets.clear();
     explicit_empty.validate().unwrap();
-    let roundtrip: ThemeV3Manifest =
+    let roundtrip: ThemeManifest =
         serde_json::from_value(serde_json::to_value(&explicit_empty).unwrap()).unwrap();
     assert_eq!(roundtrip.assets, Vec::<String>::new());
 
-    let mut declared = v3_manifest();
+    let mut declared = theme_manifest();
     declared.assets = vec![
         "assets/styles.css".into(),
         "assets/images/logo.v2.png".into(),
@@ -63,13 +65,13 @@ fn v3_assets_missing_field_defaults_to_empty_and_explicit_empty_is_valid() {
         "assets/README.txt".to_ascii_lowercase(),
     ];
     declared.validate().unwrap();
-    let decoded: ThemeV3Manifest =
+    let decoded: ThemeManifest =
         serde_json::from_value(serde_json::to_value(&declared).unwrap()).unwrap();
     assert_eq!(decoded.assets, declared.assets);
 }
 
 #[test]
-fn v3_asset_path_grammar_accepts_only_safe_canonical_files() {
+fn theme_asset_path_grammar_accepts_only_safe_canonical_files() {
     for path in [
         "assets/x.css",
         "assets/note.txt",
@@ -86,14 +88,14 @@ fn v3_asset_path_grammar_accepts_only_safe_canonical_files() {
         "assets/_.png",
         "assets/_hidden-style.css",
     ] {
-        assert!(valid_v3_asset_path(path), "should accept: {path}");
-        assert_eq!(valid_asset_path(path), valid_v3_asset_path(path));
+        assert!(valid_theme_asset_path(path), "should accept: {path}");
+        assert_eq!(valid_asset_path(path), valid_theme_asset_path(path));
     }
     let exactly_240 = format!("assets/{}.png", "a".repeat(236));
     assert_eq!(exactly_240.len() - "assets/".len(), 240);
-    assert!(valid_v3_asset_path(&exactly_240));
+    assert!(valid_theme_asset_path(&exactly_240));
     let too_long = format!("assets/{}.png", "a".repeat(237));
-    assert!(!valid_v3_asset_path(&too_long));
+    assert!(!valid_theme_asset_path(&too_long));
 
     for path in [
         "",
@@ -127,14 +129,14 @@ fn v3_asset_path_grammar_accepts_only_safe_canonical_files() {
         "assets/test\n.png",
         "assets/img.png.",
     ] {
-        assert!(!valid_v3_asset_path(path), "should reject: {path:?}");
-        assert_eq!(valid_asset_path(path), valid_v3_asset_path(path));
+        assert!(!valid_theme_asset_path(path), "should reject: {path:?}");
+        assert_eq!(valid_asset_path(path), valid_theme_asset_path(path));
     }
 }
 
 #[test]
-fn v3_manifest_rejects_duplicate_and_noncanonical_asset_declarations() {
-    let baseline = v3_manifest();
+fn theme_manifest_rejects_duplicate_and_noncanonical_asset_declarations() {
+    let baseline = theme_manifest();
     baseline.validate().unwrap();
     for bad in [
         "assets/.hidden/logo.png",
@@ -160,25 +162,25 @@ fn v3_manifest_rejects_duplicate_and_noncanonical_asset_declarations() {
 
 #[test]
 fn enqueue_defaults_and_strict_fields_are_backward_compatible() {
-    let mut value = serde_json::to_value(v3_manifest()).unwrap();
+    let mut value = serde_json::to_value(theme_manifest()).unwrap();
     assert!(value.get("styles").is_none());
     assert!(value.get("scripts").is_none());
-    let legacy: ThemeV3Manifest = serde_json::from_value(value.clone()).unwrap();
+    let legacy: ThemeManifest = serde_json::from_value(value.clone()).unwrap();
     assert!(legacy.styles.is_empty() && legacy.scripts.is_empty());
     legacy.validate().unwrap();
     value["styles"] = json!([{"handle":"main", "src":"assets/styles.css"}]);
     value["scripts"] = json!([{"handle":"main", "src":"assets/main.js"}]);
-    let parsed: ThemeV3Manifest = serde_json::from_value(value.clone()).unwrap();
+    let parsed: ThemeManifest = serde_json::from_value(value.clone()).unwrap();
     assert!(parsed.styles[0].conditions.is_empty());
     assert!(parsed.styles[0].media.is_none());
     assert_eq!(parsed.scripts[0].location, ScriptLocation::Footer);
     assert_eq!(parsed.scripts[0].strategy, ScriptStrategy::Defer);
     assert!(!parsed.scripts[0].module);
     value["scripts"][0]["strategy"] = json!("unknown");
-    assert!(serde_json::from_value::<ThemeV3Manifest>(value.clone()).is_err());
+    assert!(serde_json::from_value::<ThemeManifest>(value.clone()).is_err());
     value["scripts"][0]["strategy"] = json!("defer");
     value["styles"][0]["unknown"] = json!(true);
-    assert!(serde_json::from_value::<ThemeV3Manifest>(value).is_err());
+    assert!(serde_json::from_value::<ThemeManifest>(value).is_err());
 }
 
 #[test]
@@ -420,7 +422,7 @@ fn pattern_preview_remains_raster_only() {
     for ext in [
         "png", "jpg", "jpeg", "webp", "gif", "js", "mjs", "svg", "css", "txt", "woff2",
     ] {
-        let mut manifest = v3_manifest();
+        let mut manifest = theme_manifest();
         let path = format!("assets/preview.{ext}");
         manifest.assets.push(path.clone());
         manifest.patterns[0].preview_asset = Some(path);
@@ -433,8 +435,8 @@ fn pattern_preview_remains_raster_only() {
 }
 
 #[test]
-fn v3_manifest_enforces_unique_canonical_template_targets() {
-    let mut manifest = v3_manifest();
+fn theme_manifest_enforces_unique_canonical_template_targets() {
+    let mut manifest = theme_manifest();
     let mut typed = template(TemplateCandidateKind::Single, "single-post.html");
     typed.content_type = Some("post".into());
     manifest.templates.push(typed.clone());

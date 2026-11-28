@@ -107,6 +107,7 @@ fn block_template_allows_static_js_svg_but_rejects_dynamic_handlers_and_scripts(
             parent_ctx: None,
             is_preview: false,
             fmt_cfg: &fmt_cfg,
+            loop_context: None,
         },
         &mut budget,
     )
@@ -135,9 +136,7 @@ fn block_template_allows_static_js_svg_but_rejects_dynamic_handlers_and_scripts(
 #[test]
 fn icon_nonce_replacement_never_inserts_svg_in_script_rawtext() {
     let nonce = "OD_ICON_0123456789abcdef0123456789abcdef";
-    let table = IconNonceTable {
-        entries: vec![(nonce.to_owned(), "<svg/>".to_owned())],
-    };
+    let table = IconNonceTable::from_test_entries(vec![(nonce.to_owned(), "<svg/>".to_owned())]);
     let source = format!("<script>if (1 < 2 && 3 > 1) {{ console.log('{nonce}'); }}</script>");
     assert!(table.substitute_into_document(source).is_err());
 }

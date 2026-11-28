@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "id": "core/archive-loop",
+  "title": "Vòng lặp Lưu trữ (Archive Loop)",
+  "category": "template",
+  "icon": "book-open",
+  "render": "native",
+  "allowed_contexts": ["archive", "taxonomy", "index"],
+  "supports_children": true,
+  "allowed_children": ["core/loop-item"],
+  "default_children": [
+    {
+      "block_id": "core/loop-item",
+      "props": { "layout": "vertical", "surface_style": "bordered", "card_link_to_entry": true },
+      "children": [
+        { "block_id": "core/entry-featured-image", "props": { "aspect_ratio": "16_9" } },
+        { "block_id": "core/entry-terms", "props": { "max_items": 2, "style": "pill" } },
+        { "block_id": "core/entry-title", "props": { "tag": "h2", "size": { "desktop": "lg" }, "link_to_entry": true, "max_lines": "2" } },
+        { "block_id": "core/entry-meta", "props": { "items": ["published_date", "reading_time"] } },
+        { "block_id": "core/entry-excerpt", "props": { "max_lines": "2" } }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "key": "card_grid_3",
+      "title": "Lưới 3 cột tiêu chuẩn",
+      "icon": "book-open",
+      "props": { "columns": { "desktop": 3, "tablet": 2, "mobile": 1 }, "gap": { "desktop": 24 } },
+      "children": [
+        {
+          "block_id": "core/loop-item",
+          "props": { "layout": "vertical", "surface_style": "bordered", "card_link_to_entry": true },
+          "children": [
+            { "block_id": "core/entry-featured-image", "props": { "aspect_ratio": "16_9" } },
+            { "block_id": "core/entry-terms", "props": { "max_items": 2, "style": "pill" } },
+            { "block_id": "core/entry-title", "props": { "tag": "h2", "size": { "desktop": "lg" }, "link_to_entry": true, "max_lines": "2" } },
+            { "block_id": "core/entry-meta", "props": { "items": ["published_date", "reading_time"] } },
+            { "block_id": "core/entry-excerpt", "props": { "max_lines": "2" } }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "card_grid_2",
+      "title": "Lưới 2 cột rộng",
+      "icon": "bookmark",
+      "props": { "columns": { "desktop": 2, "tablet": 2, "mobile": 1 }, "gap": { "desktop": 28 } },
+      "children": [
+        {
+          "block_id": "core/loop-item",
+          "props": { "layout": "vertical", "surface_style": "elevated", "card_link_to_entry": true },
+          "children": [
+            { "block_id": "core/entry-featured-image", "props": { "aspect_ratio": "16_9" } },
+            { "block_id": "core/entry-title", "props": { "tag": "h2", "size": { "desktop": "xl" }, "link_to_entry": true } },
+            { "block_id": "core/entry-meta", "props": { "items": ["published_date", "primary_category", "reading_time"] } },
+            { "block_id": "core/entry-excerpt", "props": { "max_lines": "3" } }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "horizontal_list",
+      "title": "Danh sách ngang (Ảnh trái)",
+      "icon": "menu",
+      "props": { "columns": { "desktop": 1, "tablet": 1, "mobile": 1 }, "gap": { "desktop": 20 } },
+      "children": [
+        {
+          "block_id": "core/loop-item",
+          "props": { "layout": "horizontal", "surface_style": "bordered", "card_link_to_entry": true },
+          "children": [
+            { "block_id": "core/entry-featured-image", "props": { "aspect_ratio": "4_3" } },
+            { "block_id": "core/entry-title", "props": { "tag": "h2", "size": { "desktop": "xl" }, "link_to_entry": true } },
+            { "block_id": "core/entry-meta", "props": { "items": ["published_date", "reading_time"] } },
+            { "block_id": "core/entry-excerpt", "props": { "max_lines": "3" } }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "minimal_blog",
+      "title": "Blog tối giản (Không ảnh)",
+      "icon": "file-text",
+      "props": { "columns": { "desktop": 1, "tablet": 1, "mobile": 1 }, "gap": { "desktop": 16 } },
+      "children": [
+        {
+          "block_id": "core/loop-item",
+          "props": { "layout": "vertical", "surface_style": "flat" },
+          "children": [
+            { "block_id": "core/entry-meta", "props": { "items": ["published_date", "primary_category"] } },
+            { "block_id": "core/entry-title", "props": { "tag": "h2", "size": { "desktop": "2xl" }, "link_to_entry": true } },
+            { "block_id": "core/entry-excerpt", "props": { "max_lines": "2" } }
+          ]
+        }
+      ]
+    }
+  ],
+  "fields": [
+    {
+      "type": "range",
+      "key": "columns",
+      "label": "Số cột",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "default": 3,
+      "responsive": true
+    },
+    {
+      "type": "range",
+      "key": "gap",
+      "label": "Khoảng cách cột",
+      "min": 0,
+      "max": 48,
+      "step": 4,
+      "default": 24,
+      "unit": "px",
+      "responsive": true,
+      "css_var": "--od-loop-gap"
+    },
+    {
+      "type": "text",
+      "key": "empty_message",
+      "label": "Thông báo khi trống",
+      "default": ""
+    }
+  ]
+}

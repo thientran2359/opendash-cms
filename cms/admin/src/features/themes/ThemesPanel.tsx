@@ -9,7 +9,7 @@ import {
   getActiveThemeFunctionsSettings,
   getThemes,
   installTheme,
-  isV3ThemeInstall,
+  isV1ThemeInstall,
   runActiveThemeAction,
   saveActiveThemeFunctionsSettings,
   type ImportExecutionOutcome,
@@ -171,7 +171,7 @@ export const ThemesPanel: React.FC<Props> = ({
     setNotice('');
     try {
       const item = await installTheme(file, csrfToken);
-      if (isV3ThemeInstall(item)) {
+      if (isV1ThemeInstall(item)) {
         setSelectedRevisionId(item.revision_id);
         setNotice(__("Installed {{value1}} v{{value2}} (revision {{value3}}…). Not activated.", { value1: item.theme_id, value2: item.version, value3: item.revision_id.slice(0, 16) }));
       }
@@ -188,7 +188,7 @@ export const ThemesPanel: React.FC<Props> = ({
   const activateRevision = async () => {
     if (!csrfToken || !data || busy || !selectedRevisionId) return;
     const revisionId = selectedRevisionId;
-    if (!data.revisions.some(rev => rev.source_format === 'v3' && rev.revision_id === revisionId)) return;
+    if (!data.revisions.some(rev => rev.source_format === 'v1' && rev.revision_id === revisionId)) return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -215,8 +215,8 @@ export const ThemesPanel: React.FC<Props> = ({
     }
   };
 
-  const v3Revisions = data?.revisions.filter(revision => revision.source_format === 'v3') ?? [];
-  const activeThemeKey = data?.selection.source_format === 'v3'
+  const v1Revisions = data?.revisions.filter(revision => revision.source_format === 'v1') ?? [];
+  const activeThemeKey = data?.selection.source_format === 'v1'
     ? data.selection.theme_id
     : null;
 
@@ -230,7 +230,7 @@ export const ThemesPanel: React.FC<Props> = ({
           </h2>
           <p className="mt-1 text-sm text-zinc-600">
             {mode === 'install'
-              ? __("Upload a Theme v3 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder.")
+              ? __("Upload a Theme v1 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder.")
               : __("Activating a theme does not change blocks, fields or data saved in the builder.")}
           </p>
         </div>
@@ -261,7 +261,7 @@ export const ThemesPanel: React.FC<Props> = ({
         <div className="max-w-2xl space-y-3 rounded-xl border border-dashed border-zinc-300 bg-zinc-50/70 p-4 transition-colors hover:border-od-accent/60 hover:bg-od-accent-soft/25">
           <div>
             <span className="block text-sm font-semibold text-zinc-900">{__("Install theme from ZIP")}</span>
-            <span className="mt-0.5 block text-xs text-zinc-600">{__("Theme v3 (manifest_version=3, theme.json, templates, parts and declared assets).")}</span>
+            <span className="mt-0.5 block text-xs text-zinc-600">{__("Theme v1 (manifest_version=1, theme.json, templates, parts and declared assets).")}</span>
           </div>
           <UploadFileButton
             testId="themes-upload"
@@ -278,11 +278,11 @@ export const ThemesPanel: React.FC<Props> = ({
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {mode === 'list' && <>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-2.5">
-        <h3 className="text-base font-semibold text-zinc-900">{__("Installed ({{count}} v3 revisions)", { count: v3Revisions.length })}</h3>
+        <h3 className="text-base font-semibold text-zinc-900">{__("Installed ({{count}} v1 revisions)", { count: v1Revisions.length })}</h3>
         {!loading && data && (
           <p className="text-xs text-zinc-600" data-testid="active-theme">
             {__("Active theme:")}{' '}
-            <strong className="font-semibold text-zinc-900">{data.selection.source_format === 'v3' ? `${data.selection.theme_id} (v3)` : __("No theme")}</strong>{' '}
+            <strong className="font-semibold text-zinc-900">{data.selection.source_format === 'v1' ? data.selection.theme_id : __("No theme")}</strong>{' '}
             {__("· Selected version {{version}}", { version: data.selection.version })}
           </p>
         )}
@@ -290,12 +290,12 @@ export const ThemesPanel: React.FC<Props> = ({
       {loading && <p role="status" className="text-sm text-zinc-600">{__("Loading themes…")}</p>}
       {!loading && data && (
         <>
-          {v3Revisions.length === 0 && <p className="text-sm text-zinc-500">{__("No themes yet. Install a ZIP to get started.")}</p>}
-          {v3Revisions.length > 0 && (
-            <section className="space-y-3" aria-label={__("Theme v3 revisions")} data-testid="theme-v3-revisions">
-              <h4 className="text-sm font-semibold text-zinc-700">{__("Installed v3 revisions ({{count}})", { count: v3Revisions.length })}</h4>
+          {v1Revisions.length === 0 && <p className="text-sm text-zinc-500">{__("No themes yet. Install a ZIP to get started.")}</p>}
+          {v1Revisions.length > 0 && (
+            <section className="space-y-3" aria-label={__("Theme v1 revisions")} data-testid="theme-v1-revisions">
+              <h4 className="text-sm font-semibold text-zinc-700">{__("Installed v1 revisions ({{count}})", { count: v1Revisions.length })}</h4>
               <ul className="grid min-w-0 list-none grid-cols-1 gap-3 pl-0 sm:grid-cols-2">
-                {v3Revisions.map(revision => {
+                {v1Revisions.map(revision => {
                   const isActive = data.selection.revision_id === revision.revision_id;
                   const isSelected = selectedRevisionId === revision.revision_id;
                   return (
@@ -326,12 +326,12 @@ export const ThemesPanel: React.FC<Props> = ({
               </ul>
               <div className="flex flex-wrap items-center gap-3">
                 <AdminButton variant="primary" size="md" onClick={() => void activateRevision()}
-                  disabled={!csrfToken || busy || loading || !selectedRevisionId || !v3Revisions.some(rev => rev.revision_id === selectedRevisionId && data.selection.revision_id !== rev.revision_id)}>{__("Activate selected revision")}</AdminButton>
+                  disabled={!csrfToken || busy || loading || !selectedRevisionId || !v1Revisions.some(rev => rev.revision_id === selectedRevisionId && data.selection.revision_id !== rev.revision_id)}>{__("Activate selected revision")}</AdminButton>
                 <p className="text-xs text-zinc-500">{__("Installing a ZIP does not activate it automatically. The active revision comes from the version selected on the server.")}</p>
               </div>
             </section>
           )}
-          {data.selection.source_format === 'v3' && (
+          {data.selection.source_format === 'v1' && (
             <nav aria-label={__("Edit theme templates")} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-4 text-sm">
               <p className="text-zinc-700">{__("To edit header, footer, single or archive, open the visual builder and select the appropriate role.")}</p>
               <a href="#/studio" className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50">{__("Open visual builder")}</a>

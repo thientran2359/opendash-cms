@@ -47,6 +47,7 @@ pub(in crate::storage) async fn render_public_builder(
             content_html: slot,
             parts: &parts,
             search: ctx.search,
+            template_data: ctx.template_data,
         }),
         &empty_patterns,
         false,
@@ -67,13 +68,12 @@ pub(in crate::storage) async fn inspect_part_slot_in_tx(
     key: &str,
     depth: usize,
     stack: &[String],
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     url_policy: &template_sec::ThemeUrlPolicy,
     schemas: &opendash_core::registry::RegistryCatalog<
         opendash_core::block_schema::RegisteredBlockSchema,
     >,
-    uses_related_entries: &mut bool,
-    uses_recent_posts: &mut bool,
+    acc: &mut SurfaceScanAcc,
 ) -> ApiResult<(bool, Option<Arc<template_sec::CompiledCsecComposition>>)> {
     let target = TemplateCandidate {
         part_key: Some(key.to_owned()),
@@ -83,11 +83,18 @@ pub(in crate::storage) async fn inspect_part_slot_in_tx(
     if stack.contains(&canonical) || depth > 3 {
         return Err(ApiError::internal("Template part cycle or depth limit."));
     }
+    acc.part_expansions += 1;
+    if acc.part_expansions > 32 {
+        return Err(ApiError::internal("Template parts exceed 32 expansions."));
+    }
+    if let Some(cached) = acc.inspected_parts.get(&canonical) {
+        return Ok((true, cached.clone()));
+    }
     if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
-        let (_, slots) = document_parts_and_slot_count_with_schemas(&row.document, schemas)?;
-        validate_content_slots(&target, slots)?;
+        let (_, slots, entry_blocks) = document_slot_scan_with_schemas(&row.document, schemas)?;
+        validate_content_slots(&target, slots, entry_blocks)?;
         let mut next_stack = stack.to_vec();
-        next_stack.push(canonical);
+        next_stack.push(canonical.clone());
         Box::pin(inspect_db_document_surfaces_in_tx(
             tx,
             &row.document,
@@ -96,10 +103,10 @@ pub(in crate::storage) async fn inspect_part_slot_in_tx(
             active,
             url_policy,
             schemas,
-            uses_related_entries,
-            uses_recent_posts,
+            acc,
         ))
         .await?;
+        acc.inspected_parts.insert(canonical, None);
         return Ok((true, None));
     }
     let Some(active) = active else {
@@ -121,8 +128,9 @@ pub(in crate::storage) async fn inspect_part_slot_in_tx(
     if depth + compiled.max_part_depth > 3 {
         return Err(ApiError::internal("Template part depth exceeds 3."));
     }
-    *uses_related_entries |= compiled.uses_related_entries;
-    *uses_recent_posts |= compiled.uses_recent_posts;
+    acc.merge_theme_compiled(&compiled);
+    acc.inspected_parts
+        .insert(canonical, Some(compiled.clone()));
     Ok((true, Some(compiled)))
 }
 
@@ -132,14 +140,14 @@ pub(in crate::storage) async fn inspect_db_document_surfaces_in_tx(
     document: &BuilderDocument,
     depth: usize,
     stack: &[String],
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     url_policy: &template_sec::ThemeUrlPolicy,
     schemas: &opendash_core::registry::RegistryCatalog<
         opendash_core::block_schema::RegisteredBlockSchema,
     >,
-    uses_related_entries: &mut bool,
-    uses_recent_posts: &mut bool,
+    acc: &mut SurfaceScanAcc,
 ) -> ApiResult<()> {
+    inspect_document_template_requirements(document, acc);
     for key in document_parts_and_slot_count_with_schemas(document, schemas)?.0 {
         Box::pin(inspect_part_slot_in_tx(
             tx,
@@ -149,8 +157,7 @@ pub(in crate::storage) async fn inspect_db_document_surfaces_in_tx(
             active,
             url_policy,
             schemas,
-            uses_related_entries,
-            uses_recent_posts,
+            acc,
         ))
         .await?;
     }
@@ -160,11 +167,37 @@ pub(in crate::storage) async fn inspect_db_document_surfaces_in_tx(
 #[allow(clippy::too_many_arguments)]
 pub async fn resolve_and_render_header_footer_with_context_for_locale(
     db: &SqlitePool,
-    active_v3: Option<&ActiveThemeV3>,
+    active_v3: Option<&ActiveTheme>,
     theme_context: &serde_json::Value,
     precompiled_shell: &PrecompiledPublicShell,
     locale: Option<&str>,
     fmt_cfg: &template_sec::RenderFormattingConfig,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<(Option<String>, Option<String>, bool)> {
+    resolve_and_render_header_footer_with_template_data_for_locale(
+        db,
+        active_v3,
+        theme_context,
+        precompiled_shell,
+        locale,
+        fmt_cfg,
+        None,
+        budget,
+        cache,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn resolve_and_render_header_footer_with_template_data_for_locale(
+    db: &SqlitePool,
+    active_v3: Option<&ActiveTheme>,
+    theme_context: &serde_json::Value,
+    precompiled_shell: &PrecompiledPublicShell,
+    locale: Option<&str>,
+    fmt_cfg: &template_sec::RenderFormattingConfig,
+    template_data: Option<&content_render::TemplateRenderData<'_>>,
     budget: &mut PublicCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<(Option<String>, Option<String>, bool)> {
@@ -188,6 +221,7 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         let part_refs: Vec<&BuilderDocument> = part_docs.iter().collect();
         collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &part_refs, false).await?;
     }
+    populate_template_entry_schemas_in_conn(&mut tx, &mut state, template_data).await?;
     let url_policy = active_theme_url_policy_in_conn(&mut tx, active_v3, None, None, None).await?;
     let empty_pages = BTreeMap::new();
     let header_search_view: Option<content_render::SearchView> = theme_context
@@ -218,6 +252,7 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         url_policy: &url_policy,
         fmt_cfg,
         search: header_search,
+        template_data,
     };
 
     async fn render_shell_slot(
@@ -234,8 +269,9 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         let canonical = target.canonical_key().map_err(ApiError::internal)?;
         if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
             let schemas = context.state.unified_block_schemas()?;
-            let (_, slots) = document_parts_and_slot_count_with_schemas(&row.document, &schemas)?;
-            validate_content_slots(&target, slots)?;
+            let (_, slots, entry_blocks) =
+                document_slot_scan_with_schemas(&row.document, &schemas)?;
+            validate_content_slots(&target, slots, entry_blocks)?;
             let scope = part_scope_prefix(slot_key, budget.expansions);
             return Ok(Some(
                 Box::pin(render_public_builder(

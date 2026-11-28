@@ -673,7 +673,7 @@ fn cuj3_dual_projection_wasm() -> Vec<u8> {
 
 fn build_shop_theme_zip() -> Vec<u8> {
     let manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "s04-shop-theme",
         "name": "S04 Shop Theme",
         "version": "1.0.0",

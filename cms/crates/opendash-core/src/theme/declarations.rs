@@ -19,7 +19,6 @@ pub fn valid_block_key(value: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TemplateCandidateKind {
-    Home,
     Page,
     PageLayout,
     Single,
@@ -116,7 +115,6 @@ impl TemplateCandidate {
         let no_other =
             self.custom_key.is_none() && self.layout_key.is_none() && self.part_key.is_none();
         match self.kind {
-            TemplateCandidateKind::Home if only_plain => Ok("home".into()),
             TemplateCandidateKind::Page if only_plain => Ok("page".into()),
             TemplateCandidateKind::Singular if only_plain => Ok("singular".into()),
             TemplateCandidateKind::Index if only_plain => Ok("index".into()),
@@ -292,10 +290,12 @@ pub struct PageLayoutDecl {
     pub chrome: PageLayoutChrome,
 }
 
-/// v3 is additive in S01: v2 manifests are still readable by existing callers.
+pub const THEME_MANIFEST_VERSION: u8 = 1;
+
+/// Clean-slate Theme Format V1 manifest (`theme.json`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ThemeV3Manifest {
+pub struct ThemeManifest {
     pub manifest_version: u8,
     pub theme_id: String,
     pub name: String,
@@ -339,12 +339,12 @@ pub struct ThemeV3Manifest {
     pub functions: Option<ThemeFunctionsSpec>,
 }
 
-/// Validate a canonical theme v3 static-file path without accessing the ZIP.
+/// Validate a canonical Theme Format V1 static-file path without accessing the ZIP.
 ///
 /// The byte limit applies after "assets/"; directories use [a-z0-9_-]+,
 /// filenames use [a-z0-9_.-] with a non-dot first byte, no ".." and only
-/// the file extensions supported by the v3 archive reader.
-pub fn valid_v3_asset_path(value: &str) -> bool {
+/// the file extensions supported by the V1 archive reader.
+pub fn valid_theme_asset_path(value: &str) -> bool {
     let Some(path) = value.strip_prefix("assets/") else {
         return false;
     };
@@ -394,7 +394,7 @@ pub fn valid_v3_asset_path(value: &str) -> bool {
     false
 }
 
-/// Backwards-compatible alias: both server callers use identical D01 grammar.
+/// Backwards-compatible alias: callers use identical D01 grammar.
 pub fn valid_asset_path(value: &str) -> bool {
-    valid_v3_asset_path(value)
+    valid_theme_asset_path(value)
 }

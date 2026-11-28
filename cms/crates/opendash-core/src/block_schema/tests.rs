@@ -346,3 +346,50 @@ fn enforces_render_native_reserved_keys_sparse_props_and_catalog_graph() {
         .unwrap();
     assert!(validate_block_catalog_templates(&bad_cat).is_err());
 }
+
+#[test]
+fn loop_schema_compatibility_enforces_explicit_leaf_and_recursive_field_bans() {
+    use crate::field_schema::{FieldType, SelectOptionsSource};
+
+    let cat: BlockCategory = serde_json::from_str("\"template\"").unwrap();
+    assert_eq!(cat, BlockCategory::Template);
+
+    let mut blk = minimal_block("acme/card", "render.html");
+    blk.allowed_contexts = Some(vec!["*".into()]);
+    assert!(!blk.is_loop_schema_compatible());
+
+    blk.allowed_contexts = Some(vec!["loop_item".into()]);
+    assert!(blk.is_loop_schema_compatible());
+
+    blk.supports_children = true;
+    assert!(!blk.is_loop_schema_compatible());
+    blk.supports_children = false;
+
+    for forbidden in [
+        FieldType::Repeater,
+        FieldType::Richtext,
+        FieldType::Gallery,
+        FieldType::EntryRef,
+        FieldType::TermRef,
+    ] {
+        let mut bad = blk.clone();
+        bad.fields
+            .push(FieldSpec::new(forbidden, "bad_field", "Bad"));
+        assert!(!bad.is_loop_schema_compatible());
+
+        let mut grp = FieldSpec::new(FieldType::Group, "grp", "Group");
+        grp.fields
+            .push(FieldSpec::new(forbidden, "nested_bad", "Nested Bad"));
+        let mut bad_nested = blk.clone();
+        bad_nested.fields.push(grp);
+        assert!(!bad_nested.is_loop_schema_compatible());
+    }
+
+    let mut sel = FieldSpec::new(FieldType::Select, "menu", "Menu");
+    sel.options_source = Some(SelectOptionsSource::Menus);
+    let mut grp = FieldSpec::new(FieldType::Group, "grp", "Group");
+    grp.fields.push(sel);
+    let mut bad_opts = blk;
+    bad_opts.fields.push(grp);
+    assert!(!bad_opts.is_loop_schema_compatible());
+}

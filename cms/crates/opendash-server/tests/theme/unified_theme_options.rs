@@ -217,11 +217,11 @@ async fn m5_s04_t02_unified_options_richtext_icon_recursive_urls_studio_and_l10n
 
     // 1. Negative C-SEC checks on install (site_options shadowing, non-URL subfield href/src, unknown literal icon)
     let hero_group_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "bad-s02-csec",
         "name": "Bad CSEC",
         "version": "1.0.0",
-        "templates": [{ "kind": "home", "file": "home.html" }],
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "options": [
             {
                 "key": "hero",
@@ -264,7 +264,7 @@ async fn m5_s04_t02_unified_options_richtext_icon_recursive_urls_studio_and_l10n
             .header(header::CONTENT_TYPE, "application/zip")
             .body(build_zip(&[
                 ("theme.json", hero_group_manifest.as_bytes()),
-                ("home.html", bad_home.as_bytes()),
+                ("index.html", bad_home.as_bytes()),
             ]))
             .send()
             .await
@@ -337,11 +337,11 @@ async fn m5_s04_t02_unified_options_richtext_icon_recursive_urls_studio_and_l10n
 
     // 4. Install & activate S02 Unified Options theme
     let theme_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "unified-s02-theme",
         "name": "Unified S02 Theme",
         "version": "1.0.0",
-        "templates": [{ "kind": "home", "file": "home.html" }],
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "options": [
             { "key": "tab_main", "label": "Main", "type": "tab" },
             { "key": "acc_hero", "label": "Hero Section", "type": "accordion", "open_by_default": true },
@@ -414,7 +414,7 @@ async fn m5_s04_t02_unified_options_richtext_icon_recursive_urls_studio_and_l10n
         .header(header::CONTENT_TYPE, "application/zip")
         .body(build_zip(&[
             ("theme.json", theme_manifest.as_bytes()),
-            ("home.html", home_html),
+            ("index.html", home_html),
         ]))
         .send()
         .await
@@ -678,7 +678,7 @@ async fn m5_s04_t02_unified_options_richtext_icon_recursive_urls_studio_and_l10n
         .header(header::ORIGIN, &srv.base_url)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "index" },
             "preview_annotations": false,
             "preview_locale": "en",
             "transient": {
@@ -720,9 +720,9 @@ async fn m5_s04_t02_unified_options_richtext_icon_recursive_urls_studio_and_l10n
         .body(build_zip(&[
             (
                 "theme.json",
-                br#"{"manifest_version":3,"theme_id":"blank-s02-theme","name":"Blank","version":"1.0.0","templates":[{"kind":"home","file":"home.html"}]}"#,
+                br#"{"manifest_version":1,"theme_id":"blank-s02-theme","name":"Blank","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}]}"#,
             ),
-            ("home.html", b"<main>Blank{{ od_content() }}</main>"),
+            ("index.html", b"<main>Blank{{ od_content() }}</main>"),
         ]))
         .send()
         .await

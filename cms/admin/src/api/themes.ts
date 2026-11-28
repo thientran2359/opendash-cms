@@ -8,14 +8,14 @@ export interface ThemeRevisionSummary {
   theme_id: string;
   version: string;
   revision_digest: string;
-  source_format: 'v1_legacy' | 'v2' | 'v3';
+  source_format: 'v1';
 }
 
 export interface ThemeSelection {
   revision_id: string | null;
   theme_id: string | null;
   version: number;
-  source_format: 'v1_legacy' | 'v2' | 'v3' | null;
+  source_format: 'v1' | null;
 }
 
 export interface ThemesSummary {
@@ -24,18 +24,16 @@ export interface ThemesSummary {
   selection: ThemeSelection;
 }
 
-export interface ThemeV3InstallResponse {
+export interface ThemeInstallResponse {
   revision_id: string;
   theme_id: string;
   version: string;
   revision_digest: string;
-  source_format: 'v3';
+  source_format: 'v1';
   activated: false;
 }
 
-export type ThemeInstallResponse = ThemeV3InstallResponse;
-
-export function isV3ThemeInstall(response: ThemeInstallResponse): response is ThemeV3InstallResponse {
+export function isV1ThemeInstall(response: ThemeInstallResponse): response is ThemeInstallResponse {
   return 'revision_id' in response;
 }
 

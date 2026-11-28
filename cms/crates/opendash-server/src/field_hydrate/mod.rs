@@ -1,9 +1,18 @@
 //! Pure zero-SQL template hydrator transforming raw `FieldSpec` values into
 //! unified V1 MiniJinja objects per `docs/contracts/UNIFIED_FIELD_SCHEMA.md` §6.
 
-use std::collections::{BTreeMap, BTreeSet};
+mod media_and_links;
 
-use opendash_core::{
+pub(crate) use media_and_links::build_media_urls_and_srcsets;
+use media_and_links::{
+    hydrate_entry_row, hydrate_link_value, hydrate_media_for_ctx, hydrate_spacing_value,
+    hydrate_term_row, parse_i64_id, unwrap_responsive_desktop,
+};
+pub use media_and_links::{hydrate_media_row, hydrate_media_row_for_template};
+
+pub(super) use std::collections::{BTreeMap, BTreeSet};
+
+pub(super) use opendash_core::{
     field_schema::{
         FieldSpec, FieldType, LinkValue, MAX_REPEATER_ITEMS, SpacingProperty, SpacingValue,
         canonicalize_f64, collect_media_ids, collect_relational_refs, default_value_for_field_spec,
@@ -13,9 +22,9 @@ use opendash_core::{
     richtext::sanitize_richtext,
 };
 
-use serde_json::{Map, Value, json};
+pub(super) use serde_json::{Map, Value, json};
 
-use crate::{
+pub(super) use crate::{
     storage::fields::{HydratedEntryRefRow, HydratedMediaRow, HydratedTermRefRow},
     template_sec::RichTextNonceTable,
 };
@@ -70,237 +79,6 @@ pub fn collect_hydration_ids(
     term_ids.extend(collected_rels.term_ids);
 }
 
-pub(crate) fn build_media_urls_and_srcsets(
-    row: &HydratedMediaRow,
-    is_preview: bool,
-) -> (
-    String,
-    String,
-    Vec<opendash_core::media::MediaVariantView>,
-    Option<String>,
-    Option<String>,
-) {
-    let prefix = if is_preview {
-        "/api/admin/media"
-    } else {
-        "/media"
-    };
-    let version = row.version.max(1);
-    let file_url = format!("{prefix}/{}/file?v={version}", row.id);
-    let thumbnail_url = if row.kind == "image" {
-        format!("{prefix}/{}/thumbnail?v={version}", row.id)
-    } else {
-        String::new()
-    };
-    let variants: Vec<opendash_core::media::MediaVariantView> = row
-        .variants
-        .iter()
-        .map(|v| opendash_core::media::MediaVariantView {
-            spec: v.spec,
-            format: v.format,
-            width: v.width,
-            height: v.height,
-            byte_size: v.byte_size,
-            url: format!(
-                "{prefix}/{}/variant/{}.{}?v={version}",
-                row.id,
-                v.spec.as_str(),
-                v.format.extension()
-            ),
-        })
-        .collect();
-    let (webp_srcset, fallback_srcset) = if row.kind == "image" {
-        let orig_w = row.width.and_then(|w| u32::try_from(w).ok()).unwrap_or(0);
-        if orig_w > 0 {
-            opendash_core::media::build_responsive_srcsets(
-                &row.mime_type,
-                orig_w,
-                &file_url,
-                &variants,
-            )
-        } else {
-            (None, None)
-        }
-    } else {
-        (None, None)
-    };
-    (
-        file_url,
-        thumbnail_url,
-        variants,
-        webp_srcset,
-        fallback_srcset,
-    )
-}
-
-pub fn hydrate_media_row(row: &HydratedMediaRow, is_preview: bool) -> Value {
-    let version = row.version.max(1);
-    let (file_url, thumbnail_url, variants, webp_srcset, fallback_srcset) =
-        build_media_urls_and_srcsets(row, is_preview);
-    json!({
-        "id": row.id,
-        "version": version,
-        "url": file_url,
-        "thumbnail_url": thumbnail_url,
-        "alt": "",
-        "width": row.width,
-        "height": row.height,
-        "kind": row.kind,
-        "variants": variants,
-        "webp_srcset": webp_srcset,
-        "fallback_srcset": fallback_srcset,
-    })
-}
-
-pub fn hydrate_media_row_for_template(row: &HydratedMediaRow, is_preview: bool) -> Value {
-    let mut val = hydrate_media_row(row, is_preview);
-    if let Value::Object(ref mut map) = val {
-        map.insert(
-            crate::template_sec::MEDIA_PROVENANCE_KEY.to_owned(),
-            Value::String(crate::template_sec::media_provenance_token().to_owned()),
-        );
-    }
-    val
-}
-
-fn hydrate_media_for_ctx(row: &HydratedMediaRow, ctx: &HydrationContext<'_>) -> Value {
-    if ctx.tag_media_provenance {
-        hydrate_media_row_for_template(row, ctx.is_preview)
-    } else {
-        hydrate_media_row(row, ctx.is_preview)
-    }
-}
-
-fn hydrate_entry_row(row: &HydratedEntryRefRow) -> Value {
-    json!({
-        "id": row.id,
-        "type_key": row.type_key,
-        "title": row.title,
-        "slug": row.slug,
-        "url": row.url,
-        "cover_url": row.cover_url,
-        "excerpt": row.excerpt,
-    })
-}
-
-fn hydrate_term_row(row: &HydratedTermRefRow, ctx: &HydrationContext<'_>) -> Value {
-    let featured_image = row
-        .featured_image_media_id
-        .as_deref()
-        .and_then(|id| ctx.media.get(id))
-        .map(|m| hydrate_media_for_ctx(m, ctx))
-        .unwrap_or(Value::Null);
-    json!({
-        "id": row.id,
-        "kind": row.taxonomy_key,
-        "name": row.name,
-        "slug": row.slug,
-        "url": row.url,
-        "featured_image": featured_image,
-    })
-}
-
-fn extract_raw_spacing(val: &Value) -> Option<SpacingValue> {
-    if let Ok(mut s) = serde_json::from_value::<SpacingValue>(val.clone()) {
-        s.canonicalize();
-        return Some(s);
-    }
-    None
-}
-
-fn hydrate_spacing_value(spec: &FieldSpec, raw_val: Option<&Value>) -> Value {
-    let effective = raw_val.or(spec.default.as_ref());
-    let prop = spec.effective_spacing_property();
-    let unit = spec.effective_unit();
-
-    if let Some(obj) = effective.and_then(Value::as_object)
-        && (obj.contains_key("desktop") || obj.contains_key("tablet") || obj.contains_key("mobile"))
-    {
-        let desktop = obj.get("desktop").and_then(extract_raw_spacing);
-        let tablet = obj.get("tablet").and_then(extract_raw_spacing);
-        let mobile = obj.get("mobile").and_then(extract_raw_spacing);
-        let classes =
-            SpacingValue::format_responsive_classes(desktop.clone(), tablet, mobile, prop, unit);
-        let base = desktop.unwrap_or_default();
-        let css = base.format_css(unit).unwrap_or_default();
-        return json!({
-            "top": base.top,
-            "right": base.right,
-            "bottom": base.bottom,
-            "left": base.left,
-            "css": css,
-            "classes": classes,
-        });
-    }
-
-    let mut base = effective.and_then(extract_raw_spacing).unwrap_or_default();
-    base.canonicalize();
-    let css = base.format_css(unit).unwrap_or_default();
-    let prefix = match prop {
-        SpacingProperty::Padding => SpacingProperty::Padding,
-        SpacingProperty::Margin => SpacingProperty::Margin,
-    };
-    let classes = base.format_classes(prefix, unit);
-    json!({
-        "top": base.top,
-        "right": base.right,
-        "bottom": base.bottom,
-        "left": base.left,
-        "css": css,
-        "classes": classes,
-    })
-}
-
-fn hydrate_link_value(spec: &FieldSpec, raw_val: Option<&Value>) -> Value {
-    let candidate = match raw_val {
-        Some(v) if !v.is_null() => Some(v),
-        _ => spec.default.as_ref(),
-    };
-    let Some(val) = candidate else {
-        return Value::Null;
-    };
-    let Ok(link) = serde_json::from_value::<LinkValue>(val.clone()) else {
-        return Value::Null;
-    };
-    let trimmed_url = link.url.trim();
-    if trimmed_url.is_empty() || !valid_safe_url(trimmed_url) {
-        return Value::Null;
-    }
-    let target = if link.new_tab { "_blank" } else { "" };
-    let rel = match (link.new_tab, link.nofollow) {
-        (true, true) => "noopener noreferrer nofollow",
-        (true, false) => "noopener noreferrer",
-        (false, true) => "nofollow",
-        (false, false) => "",
-    };
-    json!({
-        "url": trimmed_url,
-        "label": link.label,
-        "target": target,
-        "rel": rel,
-        "new_tab": link.new_tab,
-        "nofollow": link.nofollow,
-    })
-}
-
-fn parse_i64_id(val: &Value) -> Option<i64> {
-    val.as_i64().filter(|id| *id > 0)
-}
-
-fn unwrap_responsive_desktop<'a>(
-    spec: &FieldSpec,
-    raw_val: Option<&'a Value>,
-) -> Option<&'a Value> {
-    let val = raw_val?;
-    if spec.responsive
-        && let Some(obj) = val.as_object()
-        && (obj.contains_key("desktop") || obj.contains_key("tablet") || obj.contains_key("mobile"))
-    {
-        return obj.get("desktop");
-    }
-    Some(val)
-}
-
 pub fn hydrate_field_value_stateless(
     spec: &FieldSpec,
     raw_val: Option<&Value>,
@@ -323,8 +101,20 @@ pub fn hydrate_field_value(
     spec: &FieldSpec,
     raw_val: Option<&Value>,
     ctx: &HydrationContext<'_>,
+    richtext_nonces: Option<&mut RichTextNonceTable>,
+    visibility: HydrationVisibility,
+) -> Result<Value, &'static str> {
+    hydrate_field_value_with_richtext(spec, raw_val, ctx, richtext_nonces, visibility, None, None)
+}
+
+pub fn hydrate_field_value_with_richtext(
+    spec: &FieldSpec,
+    raw_val: Option<&Value>,
+    ctx: &HydrationContext<'_>,
     mut richtext_nonces: Option<&mut RichTextNonceTable>,
     visibility: HydrationVisibility,
+    mut richtext_html: Option<&mut BTreeMap<String, String>>,
+    key_prefix: Option<&str>,
 ) -> Result<Value, &'static str> {
     if !visibility.allows(spec) {
         return Ok(Value::Null);
@@ -414,6 +204,13 @@ pub fn hydrate_field_value(
             let clean = sanitize_richtext(text)?;
             if clean.is_empty() {
                 return Ok(Value::String(String::new()));
+            }
+            if let Some(rt_map) = richtext_html.as_deref_mut() {
+                let full_key = match key_prefix {
+                    Some(prefix) if !prefix.is_empty() => format!("{prefix}.{}", spec.key),
+                    _ => spec.key.clone(),
+                };
+                rt_map.insert(full_key, clean.clone());
             }
             if let Some(table) = richtext_nonces.as_deref_mut() {
                 let nonce = table.register_sanitized(clean)?;
@@ -507,12 +304,18 @@ pub fn hydrate_field_value(
                 .and_then(Value::as_object)
                 .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 .unwrap_or_default();
-            let hydrated = hydrate_field_values(
+            let next_prefix = match key_prefix {
+                Some(prefix) if !prefix.is_empty() => format!("{prefix}.{}", spec.key),
+                _ => spec.key.clone(),
+            };
+            let hydrated = hydrate_field_values_with_richtext(
                 &spec.fields,
                 &child_raw,
                 ctx,
                 richtext_nonces,
                 visibility.child_visibility(),
+                richtext_html,
+                Some(&next_prefix),
             )?;
             let mut obj = Map::with_capacity(hydrated.len());
             for (k, v) in hydrated {
@@ -556,20 +359,42 @@ pub fn hydrate_field_values(
     specs: &[FieldSpec],
     raw_values: &BTreeMap<String, Value>,
     ctx: &HydrationContext<'_>,
+    richtext_nonces: Option<&mut RichTextNonceTable>,
+    visibility: HydrationVisibility,
+) -> Result<BTreeMap<String, Value>, &'static str> {
+    hydrate_field_values_with_richtext(
+        specs,
+        raw_values,
+        ctx,
+        richtext_nonces,
+        visibility,
+        None,
+        None,
+    )
+}
+
+pub fn hydrate_field_values_with_richtext(
+    specs: &[FieldSpec],
+    raw_values: &BTreeMap<String, Value>,
+    ctx: &HydrationContext<'_>,
     mut richtext_nonces: Option<&mut RichTextNonceTable>,
     visibility: HydrationVisibility,
+    mut richtext_html: Option<&mut BTreeMap<String, String>>,
+    key_prefix: Option<&str>,
 ) -> Result<BTreeMap<String, Value>, &'static str> {
     let mut out = BTreeMap::new();
     for spec in specs {
         if !visibility.allows(spec) {
             continue;
         }
-        let val = hydrate_field_value(
+        let val = hydrate_field_value_with_richtext(
             spec,
             raw_values.get(&spec.key),
             ctx,
             richtext_nonces.as_deref_mut(),
             visibility,
+            richtext_html.as_deref_mut(),
+            key_prefix,
         )?;
         out.insert(spec.key.clone(), val);
     }
@@ -577,5 +402,5 @@ pub fn hydrate_field_values(
 }
 
 #[cfg(test)]
-#[path = "field_hydrate_tests.rs"]
+#[path = "../field_hydrate_tests.rs"]
 mod tests;

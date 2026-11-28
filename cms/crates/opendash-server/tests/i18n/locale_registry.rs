@@ -155,13 +155,13 @@ fn build_theme_zip(id: &str, version: &str, options: Value) -> Vec<u8> {
         let mut zip = ZipWriter::new(Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": id,
             "name": id,
             "version": version,
             "templates": [
                 { "kind": "index", "file": "index.html" },
-                { "kind": "home", "file": "home.html" }
+                { "kind": "page", "file": "page.html" }
             ],
             "parts": { "header": "header.html" },
             "menus": { "slots": ["header"] },
@@ -171,7 +171,7 @@ fn build_theme_zip(id: &str, version: &str, options: Value) -> Vec<u8> {
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
         zip.start_file("header.html", opts).unwrap();
         zip.write_all(b"<header><nav>{% if menus.header is defined %}{% for item in menus.header.items %}<a href=\"{{ item.url }}\">{{ item.label }}</a>{% endfor %}{% endif %}</nav></header>").unwrap();
-        zip.start_file("home.html", opts).unwrap();
+        zip.start_file("page.html", opts).unwrap();
         zip.write_all(b"<main>{{ options.hero_title }}{{ od_content() }}</main>")
             .unwrap();
         zip.start_file("index.html", opts).unwrap();
@@ -213,7 +213,7 @@ fn core_reserved_entry_keys_and_theme_default_locale_validation() {
         (Some("invalid_locale"), false),
     ] {
         let mut manifest_val = json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "core-locale-theme",
             "name": "Core Locale Theme",
             "version": "1.0.0",
@@ -222,7 +222,7 @@ fn core_reserved_entry_keys_and_theme_default_locale_validation() {
         if let Some(loc) = raw_locale {
             manifest_val["default_locale"] = json!(loc);
         }
-        let parsed: opendash_core::theme::ThemeV3Manifest =
+        let parsed: opendash_core::theme::ThemeManifest =
             serde_json::from_value(manifest_val).unwrap();
         assert_eq!(
             parsed.validate().is_ok(),

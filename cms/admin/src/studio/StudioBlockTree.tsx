@@ -330,7 +330,7 @@ export function StudioBlockTree({
         const label = nodeTitle(item, blockSchemas);
         const htmlId = item.node.meta?.html_id?.trim() || '';
         const canEdit = !disabled && !locked && !lockedAncestor;
-        const canCopy = canEdit && item.node.block_id !== 'core/content-slot';
+        const canCopy = canEdit && item.node.block_id !== 'core/entry-content';
         const toggleCollapse = () => {
           const next = new Set(expandedIds);
           if (next.has(id)) next.delete(id); else next.add(id);

@@ -227,12 +227,18 @@ export function useStudioMode1Controller(p: StudioMode1ControllerParams) {
     }
 
     if (p.templateDirty && selectedTarget) {
-      if (selectedTarget.requires_content_slot && countBlocksByType(p.templateDoc, 'core/content-slot') !== 1) {
-        p.setStatus(__("This template requires exactly one core/content-slot."), true);
+      const slotCount = countBlocksByType(p.templateDoc, 'core/entry-content');
+      const hasEntryBlock = allNodes(p.templateDoc).some(n => n.node.block_id.startsWith('core/entry-'));
+      if (selectedTarget.entry_content_rule === 'required_or_entry_block') {
+        if (slotCount > 1 || (slotCount === 0 && !hasEntryBlock)) {
+          p.setStatus(__("Single templates require Entry Content (max 1) or at least one Entry block."), true);
+          return;
+        }
+      } else if (selectedTarget.entry_content_rule === 'optional_max_one' && slotCount > 1) {
+        p.setStatus(__("This template allows at most one Entry Content block."), true);
         return;
-      }
-      if (selectedTarget.forbids_content_slot && countBlocksByType(p.templateDoc, 'core/content-slot') > 0) {
-        p.setStatus(__("This template must not contain core/content-slot."), true);
+      } else if (selectedTarget.entry_content_rule === 'forbidden' && slotCount > 0) {
+        p.setStatus(__("This template must not contain Entry Content."), true);
         return;
       }
       const badPart = allNodes(p.templateDoc).some(

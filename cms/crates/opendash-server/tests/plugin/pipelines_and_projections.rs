@@ -132,7 +132,7 @@ fn build_plugin_zip(manifest_json: &str, wasm_bytes: &[u8]) -> Vec<u8> {
 
 fn build_s03_theme_zip() -> Vec<u8> {
     let manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "s03-proj-theme",
         "name": "S03 Projection Theme",
         "version": "1.0.0",

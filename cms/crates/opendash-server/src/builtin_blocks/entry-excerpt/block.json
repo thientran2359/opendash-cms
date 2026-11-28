@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "id": "core/entry-excerpt",
+  "title": "Tóm tắt bài (Entry Excerpt)",
+  "category": "template",
+  "icon": "file-text",
+  "render": "native",
+  "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "index", "loop_item"],
+  "fields": [
+    {
+      "type": "select",
+      "key": "font_size",
+      "label": "Cỡ chữ",
+      "options": [
+        { "value": "sm", "label": "Nhỏ" },
+        { "value": "base", "label": "Chuẩn" },
+        { "value": "lg", "label": "Lớn" }
+      ],
+      "default": "base",
+      "responsive": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn lề",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" }
+      ],
+      "default": "left",
+      "responsive": true
+    },
+    {
+      "type": "color",
+      "key": "color",
+      "label": "Màu chữ",
+      "css_var": "--od-ex-color"
+    },
+    {
+      "type": "number",
+      "key": "max_chars",
+      "label": "Số ký tự tối đa",
+      "min": 40,
+      "max": 500,
+      "step": 10,
+      "default": 180
+    },
+    {
+      "type": "select",
+      "key": "max_lines",
+      "label": "Giới hạn số dòng",
+      "options": [
+        { "value": "none", "label": "Không giới hạn" },
+        { "value": "2", "label": "2 dòng" },
+        { "value": "3", "label": "3 dòng" },
+        { "value": "4", "label": "4 dòng" }
+      ],
+      "default": "3"
+    },
+    {
+      "type": "boolean",
+      "key": "hide_if_empty",
+      "label": "Ẩn khi rỗng",
+      "default": true
+    }
+  ]
+}

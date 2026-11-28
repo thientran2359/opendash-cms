@@ -180,7 +180,7 @@ fn s02_csec_od_hook_validation_in_cli_check_theme() {
     let theme_dir = temp.path.join("theme-hook-check");
     fs::create_dir_all(&theme_dir).unwrap();
     let manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "hook-check-theme",
         "name": "Hook Check Theme",
         "version": "1.0.0",
@@ -381,7 +381,7 @@ async fn s02_render_hooks_trust_seo_protection_cache_invalidation_and_safe_mode(
 
     // 4. Install & Activate Theme with functions.js subscribing to all 3 render filters
     let theme_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "render-hooks-theme",
         "name": "Render Hooks Theme",
         "version": "1.0.0",

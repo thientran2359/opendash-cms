@@ -51,4 +51,6 @@ pub(super) struct BlockWalkContext {
     pub(super) supports_children: bool,
     pub(super) forbid_children_html: bool,
     pub(super) children_html_count: usize,
+    pub(super) forbid_od_hook: bool,
+    pub(super) forbid_trusted_markup: bool,
 }

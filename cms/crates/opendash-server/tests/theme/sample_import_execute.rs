@@ -134,12 +134,12 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
 
     // Install & activate A1
     let manifest_a1 = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "exec-theme",
         "name": "Exec Theme",
         "version": "1.0.0",
         "assets": ["assets/hero.png"],
-        "templates": [{ "kind": "home", "file": "home.html" }],
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "options": [
             { "key": "brand_title", "label": "Brand", "type": "text", "default": "Default", "public": true }
         ],
@@ -178,7 +178,7 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
 
     let zip_a1 = build_zip(&[
         ("theme.json", &manifest_a1),
-        ("home.html", b"<main>Home{{ od_content() }}</main>"),
+        ("index.html", b"<main>Home{{ od_content() }}</main>"),
         ("assets/hero.png", &png),
     ]);
     let inst1 = client
@@ -341,12 +341,12 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
 
     // 3. Upgrade A1 -> A2: logical provenance skips duplicates (0 created, 4 skipped)
     let manifest_a2 = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "exec-theme",
         "name": "Exec Theme",
         "version": "2.0.0",
         "assets": ["assets/hero.png"],
-        "templates": [{ "kind": "home", "file": "home.html" }],
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "options": [
             { "key": "brand_title", "label": "Brand", "type": "text", "default": "Default", "public": true }
         ],
@@ -384,7 +384,7 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
     .unwrap();
     let zip_a2 = build_zip(&[
         ("theme.json", &manifest_a2),
-        ("home.html", b"<main>Home v2{{ od_content() }}</main>"),
+        ("index.html", b"<main>Home v2{{ od_content() }}</main>"),
         ("assets/hero.png", &png),
     ]);
     let inst2 = client

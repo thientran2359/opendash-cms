@@ -336,7 +336,7 @@ pub fn render_csec_with_images_and_config(
     image_nonces.substitute_into_document(rendered)
 }
 
-/// Checks theme v3 HTML and every declared part, then resolves the literal
+/// Checks Theme V1 HTML and every declared part, then resolves the literal
 /// `od_part("key")` DAG into one ordinary, C-SEC-approved MiniJinja source.
 ///
 /// `parts` maps the literal part key to its HTML fragment, not a filesystem

@@ -3,17 +3,13 @@ use super::*;
 impl ThemeSourceFormat {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::V1Legacy => "v1_legacy",
-            Self::V2 => "v2",
-            Self::V3 => "v3",
+            Self::V1 => "v1",
         }
     }
 
     pub(in crate::storage) fn from_db(raw: &str) -> ApiResult<Self> {
         match raw {
-            "v1_legacy" => Ok(Self::V1Legacy),
-            "v2" => Ok(Self::V2),
-            "v3" => Ok(Self::V3),
+            "v1" => Ok(Self::V1),
             _ => Err(ApiError::internal("Định dạng theme không hợp lệ trong DB.")),
         }
     }
@@ -81,9 +77,6 @@ pub fn verify_revision_durability(
     themes_root: &Path,
     revision: &ThemeRevisionRecord,
 ) -> RevisionDurabilityStatus {
-    if revision.source_format == ThemeSourceFormat::V1Legacy {
-        return RevisionDurabilityStatus::Valid;
-    }
     let rev_dir = themes_root
         .join("revisions")
         .join(&revision.revision_digest);
@@ -144,7 +137,7 @@ fn sync_staged_file(file: &File) -> std::io::Result<()> {
         use std::os::fd::AsRawFd;
         // On macOS, std::fs::File::sync_data() calls F_FULLFSYNC per file.
         // Flush each staged file with fsync(2); the revision's `.complete`
-        // marker in `stage_and_commit_v3_revision` still calls `sync_all()`
+        // marker in `stage_and_commit_revision` still calls `sync_all()`
         // (`F_FULLFSYNC`) as the single durable barrier after rename.
         let rc = unsafe { libc::fsync(file.as_raw_fd()) };
         if rc == 0 {
@@ -272,7 +265,7 @@ pub(in crate::storage) fn validate_owner_template_selection_key(
     validate_package_id(owner_id).map_err(ApiError::bad_request)
 }
 
-impl CapturedThemeV3 {
+impl CapturedTheme {
     pub(super) fn part(&self, key: &str) -> ApiResult<Option<String>> {
         if let Some(ref snap) = self.dev_overlay {
             return Ok(snap.parts.get(key).cloned());

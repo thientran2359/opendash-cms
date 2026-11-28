@@ -14,9 +14,9 @@ fn build_csec_wrap_theme_zip() -> Vec<u8> {
         let files = [
             (
                 "theme.json",
-                r#"{"manifest_version":3,"theme_id":"csec-wrap","name":"CSEC Wrap Theme","version":"1.0.0","templates":[{"kind":"home","file":"home.html"},{"kind":"page","file":"page.html"}]}"#,
+                r#"{"manifest_version":1,"theme_id":"csec-wrap","name":"CSEC Wrap Theme","version":"1.0.0","templates":[{"kind":"index","file":"index.html"},{"kind":"page","file":"page.html"}]}"#,
             ),
-            ("home.html", "<main>{{ od_content() }}</main>"),
+            ("index.html", "<main>{{ od_content() }}</main>"),
             ("page.html", "<main>{{ od_content() }}</main>"),
             (
                 "blocks/box/block.json",

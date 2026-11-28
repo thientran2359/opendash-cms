@@ -161,7 +161,7 @@ pub(crate) async fn execute_snapshot_worker(req: &SnapshotWorkerRequest) -> ApiR
     }
 
     for rev in &inventory.theme_revisions {
-        if matches!(rev.source_format.as_str(), "v2" | "v3") {
+        if rev.source_format == "v1" {
             let rev_dir = paths
                 .themes_dir()
                 .join("revisions")

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "core/archive-pagination",
+  "title": "Phân trang Lưu trữ (Pagination)",
+  "category": "template",
+  "icon": "chevron-left",
+  "render": "native",
+  "allowed_contexts": ["archive", "taxonomy", "index"],
+  "fields": [
+    {
+      "type": "radio_buttons",
+      "key": "style",
+      "label": "Kiểu phân trang",
+      "options": [
+        { "value": "numbers", "label": "Số trang" },
+        { "value": "prev_next", "label": "Trước / Sau" },
+        { "value": "compact", "label": "Rút gọn" }
+      ],
+      "default": "numbers"
+    },
+    {
+      "type": "text",
+      "key": "prev_label",
+      "label": "Nhãn trang trước",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "key": "next_label",
+      "label": "Nhãn trang sau",
+      "default": ""
+    },
+    {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn lề",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" }
+      ],
+      "default": "center",
+      "responsive": true
+    }
+  ]
+}

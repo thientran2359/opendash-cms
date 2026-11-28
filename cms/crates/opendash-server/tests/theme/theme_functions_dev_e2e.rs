@@ -224,7 +224,7 @@ async fn s04_theme_functions_secrets_actions_logs_and_extension_secret_backup_re
 
     // Install & activate Theme v3 with functions.js, secret setting, and admin/editor actions
     let theme_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "s04-secret-theme",
         "name": "S04 Secret Theme",
         "version": "1.0.0",
@@ -739,7 +739,7 @@ async fn s04_dev_mode_live_edit_guards_sync_backup_and_examples_cli() {
     .unwrap();
 
     let dev_theme_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "dev-live-theme",
         "name": "Dev Live Theme",
         "version": "0.1.0",

@@ -27,7 +27,7 @@ fn check_theme_path_validates_dir_zip_and_security_boundaries() {
     // Build minimal valid theme dir + test binary zip with non-.zip extension.
     let valid_dir = tmp_root.join("valid-theme");
     std::fs::create_dir_all(valid_dir.join("assets")).unwrap();
-    let manifest_bytes = br#"{"manifest_version":3,"theme_id":"cli-sample","name":"CLI Sample","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}],"assets":["assets/main.css"],"options":[{"key":"cta","label":"CTA","type":"text","default":"Hi"}]}"#;
+    let manifest_bytes = br#"{"manifest_version":1,"theme_id":"cli-sample","name":"CLI Sample","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}],"assets":["assets/main.css"],"options":[{"key":"cta","label":"CTA","type":"text","default":"Hi"}]}"#;
     let index_bytes = b"<main><h1>{{ site.title }}</h1>{% for e in entries %}<a href=\"{{ e.url }}\">{{ e.title }}</a>{% endfor %}</main>";
     let css_bytes = b"body { color: #111; }";
     std::fs::write(valid_dir.join("theme.json"), manifest_bytes).unwrap();
@@ -115,7 +115,7 @@ fn check_theme_path_validates_dir_zip_and_security_boundaries() {
     std::fs::create_dir_all(&bad_csec).unwrap();
     std::fs::write(
         bad_csec.join("theme.json"),
-        br#"{"manifest_version":3,"theme_id":"bad-csec","name":"Bad","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}]}"#,
+        br#"{"manifest_version":1,"theme_id":"bad-csec","name":"Bad","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}]}"#,
     )
     .unwrap();
     std::fs::write(bad_csec.join("index.html"), b"<iframe>unsafe</iframe>").unwrap();

@@ -59,7 +59,7 @@ async fn active_in_conn(conn: &mut SqliteConnection) -> ApiResult<Vec<Registered
          LEFT JOIN theme_revisions r ON r.revision_id=s.revision_id
          WHERE a.provider_status='active'
            AND ((a.owner_kind='plugin' AND p.enabled=1 AND p.last_error IS NULL)
-             OR (a.owner_kind='theme' AND r.theme_id=a.owner_id AND r.source_format='v3'))
+             OR (a.owner_kind='theme' AND r.theme_id=a.owner_id AND r.source_format='v1'))
          ORDER BY a.owner_kind,a.owner_id,a.local_key",
     )
     .fetch_all(&mut *conn)
@@ -245,7 +245,7 @@ pub async fn effective_list(
                     .fetch_optional(&mut *tx)
                     .await?;
                     raw.and_then(|raw| {
-                        serde_json::from_str::<opendash_core::theme::ThemeV3Manifest>(&raw)
+                        serde_json::from_str::<opendash_core::theme::ThemeManifest>(&raw)
                             .ok()
                             .and_then(|m| m.to_runtime_manifest())
                     })

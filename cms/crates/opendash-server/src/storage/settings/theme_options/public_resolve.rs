@@ -206,7 +206,7 @@ async fn resolve_merged_public_options_with_overrides_in_conn_with_options(
         }
     } else if transient_theme.is_some_and(|m| !m.is_empty()) {
         return Err(ApiError::unprocessable(
-            "Không có theme v3 đang kích hoạt để xem trước theme_options.",
+            "Không có theme v1 đang kích hoạt để xem trước theme_options.",
         ));
     }
 
@@ -360,7 +360,7 @@ pub async fn get_active_merged_public_options_in_conn_for_locale_with_nonces(
             "SELECT r.theme_id, r.manifest_json
              FROM theme_active_selection AS a
              JOIN theme_revisions AS r ON r.revision_id = a.revision_id
-             WHERE a.id = 1 AND r.source_format = 'v3'",
+             WHERE a.id = 1 AND r.source_format = 'v1'",
         )
         .fetch_optional(&mut *conn)
         .await?
@@ -442,7 +442,7 @@ pub async fn get_active_public_theme_options_for_locale(
             "SELECT r.theme_id, r.manifest_json
              FROM theme_active_selection AS a
              JOIN theme_revisions AS r ON r.revision_id = a.revision_id
-             WHERE a.id = 1 AND r.source_format = 'v3'",
+             WHERE a.id = 1 AND r.source_format = 'v1'",
         )
         .fetch_optional(&mut *conn)
         .await?

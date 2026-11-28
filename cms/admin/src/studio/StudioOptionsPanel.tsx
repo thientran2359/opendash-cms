@@ -205,7 +205,7 @@ export const StudioOptionsPanel: React.FC<Props> = ({
               {themeSnap && <AdminBadge tone="neutral">v{themeSnap.version}</AdminBadge>}
             </div>
             {!activeThemeId ? (
-              <AdminAlert tone="info">{__("No active v3 theme with configurable options.")}</AdminAlert>
+              <AdminAlert tone="info">{__("No active v1 theme with configurable options.")}</AdminAlert>
             ) : optionsState.themeLoading ? (
               <p className="px-1 text-xs text-zinc-500">{__("Loading theme options…")}</p>
             ) : optionsState.themeError ? (
@@ -302,7 +302,7 @@ export const StudioOptionsPanel: React.FC<Props> = ({
 
   if (optionsRoute.kind === 'theme') {
     if (!activeThemeId) {
-      return <div className="p-4"><AdminAlert tone="info">{__("No active v3 theme with configurable options.")}</AdminAlert></div>;
+      return <div className="p-4"><AdminAlert tone="info">{__("No active v1 theme with configurable options.")}</AdminAlert></div>;
     }
     if (optionsState.themeLoading) {
       return <div className="p-4 text-xs text-zinc-500">{__("Loading theme options…")}</div>;

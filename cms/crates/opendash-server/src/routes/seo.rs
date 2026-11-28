@@ -425,8 +425,27 @@ pub async fn public_fallback(
                 )
                 .await;
             }
-            validate_single_query(raw).map_err(ApiError::bad_request)?;
             if resolved.redirect || had_trailing_slash {
+                if matches!(
+                    crate::storage::seo::reading_page_state_for_locale(&db, Some(&locale), true)
+                        .await?,
+                    crate::storage::seo::ReadingPageState::Unconfigured
+                ) {
+                    let query = parse_query(raw, QueryScope::ContentArchive)
+                        .map_err(ApiError::bad_request)?;
+                    if query.filters != crate::public_context::PublicFilters::default() {
+                        return Err(ApiError::bad_request(
+                            "Trang chủ không hỗ trợ bộ lọc taxonomy.",
+                        ));
+                    }
+                    let target = CanonicalUrlBuilder::with_query(
+                        resolved.canonical_path,
+                        query,
+                        QueryScope::ContentArchive,
+                    );
+                    return Ok(permanent_public_redirect(target));
+                }
+                validate_single_query(raw).map_err(ApiError::bad_request)?;
                 return Ok(permanent_public_redirect(resolved.canonical_path));
             }
             crate::routes::public::render_home_for_locale(

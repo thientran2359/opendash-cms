@@ -1,5 +1,5 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 1,
   "theme_id": "theme-js-starter",
   "name": "Theme JS Starter",
   "version": "1.0.0",

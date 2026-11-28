@@ -34,12 +34,11 @@ async fn studio_preview_transient_options_pages_live_updates_and_fail_closes() {
     .unwrap();
 
     let manifest = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "studio-opt-theme",
         "name": "Studio Options Preview Theme",
         "version": "1.0.0",
         "templates": [
-            {"kind": "home", "file": "home.html"},
             {"kind": "index", "file": "index.html"}
         ],
         "declarations": {
@@ -94,13 +93,8 @@ async fn studio_preview_transient_options_pages_live_updates_and_fail_closes() {
         }
     }))
     .unwrap();
-    let home_html = b"<main><h1>{{ custom_options.brand_banner.headline | default('NONE') }}</h1><p>{{ custom_options.brand_banner.cta_group.label | default('') }}</p><aside>{{ options.promo_bar | default('NO-PROMO') }}</aside>{{ od_content() }}</main>";
-    let index_html = b"<main>Index</main>";
-    let zip = build_zip(&[
-        ("theme.json", &manifest),
-        ("home.html", home_html),
-        ("index.html", index_html),
-    ]);
+    let index_html = b"<main><h1>{{ custom_options.brand_banner.headline | default('NONE') }}</h1><p>{{ custom_options.brand_banner.cta_group.label | default('') }}</p><aside>{{ options.promo_bar | default('NO-PROMO') }}</aside></main>";
+    let zip = build_zip(&[("theme.json", &manifest), ("index.html", index_html)]);
     let up = client
         .post(format!("{}/api/admin/themes", srv.base))
         .header("Cookie", &admin)
@@ -173,7 +167,7 @@ async fn studio_preview_transient_options_pages_live_updates_and_fail_closes() {
 
     // 2. Live preview renders unsaved transient custom_options & site_global extra group without persisting.
     let ok_res = preview(json!({
-        "target": {"kind": "home"},
+        "target": {"kind": "index"},
         "transient": {
             "options_pages": {
                 "custom:brand_banner": {
@@ -226,31 +220,31 @@ async fn studio_preview_transient_options_pages_live_updates_and_fail_closes() {
     let invalid_cases = vec![
         (
             "unknown page",
-            json!({"target": {"kind": "home"}, "transient": {"options_pages": {"custom:does_not_exist": {"headline": "X"}}}}),
+            json!({"target": {"kind": "index"}, "transient": {"options_pages": {"custom:does_not_exist": {"headline": "X"}}}}),
         ),
         (
             "inactive theme",
-            json!({"target": {"kind": "home"}, "transient": {"options_pages": {"theme:other-theme": {"x": "1"}}}}),
+            json!({"target": {"kind": "index"}, "transient": {"options_pages": {"theme:other-theme": {"x": "1"}}}}),
         ),
         (
             "private field",
-            json!({"target": {"kind": "home"}, "transient": {"options_pages": {"custom:brand_banner": {"internal_note": "leak"}}}}),
+            json!({"target": {"kind": "index"}, "transient": {"options_pages": {"custom:brand_banner": {"internal_note": "leak"}}}}),
         ),
         (
             "admin-only group field",
-            json!({"target": {"kind": "home"}, "transient": {"options_pages": {"custom:brand_banner": {"admin_flag": "leak"}}}}),
+            json!({"target": {"kind": "index"}, "transient": {"options_pages": {"custom:brand_banner": {"admin_flag": "leak"}}}}),
         ),
         (
             "nested private child",
-            json!({"target": {"kind": "home"}, "transient": {"options_pages": {"custom:brand_banner": {"cta_group": {"label": "ok", "admin_token": "secret"}}}}}),
+            json!({"target": {"kind": "index"}, "transient": {"options_pages": {"custom:brand_banner": {"cta_group": {"label": "ok", "admin_token": "secret"}}}}}),
         ),
         (
             "non-translatable on secondary locale",
-            json!({"target": {"kind": "home"}, "preview_locale": "en", "transient": {"options_pages": {"custom:brand_banner": {"fixed_code": "EN-CODE"}}}}),
+            json!({"target": {"kind": "index"}, "preview_locale": "en", "transient": {"options_pages": {"custom:brand_banner": {"fixed_code": "EN-CODE"}}}}),
         ),
         (
             "colliding built-in site_global key",
-            json!({"target": {"kind": "home"}, "transient": {"options_pages": {"site_global": {"contact_phone": "123"}}}}),
+            json!({"target": {"kind": "index"}, "transient": {"options_pages": {"site_global": {"contact_phone": "123"}}}}),
         ),
     ];
     for (label, payload) in invalid_cases {

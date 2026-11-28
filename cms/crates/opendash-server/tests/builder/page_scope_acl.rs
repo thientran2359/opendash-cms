@@ -341,7 +341,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     );
 
     for element in [
-        json!({"id":"slot","block_id":"core/content-slot","props":{}}),
+        json!({"id":"slot","block_id":"core/entry-content","props":{}}),
         json!({"id":"part","block_id":"core/template-part","props":{"part_key":"header"}}),
         json!({"id":"bad-media","block_id":"core/image","props":{"image":"missing-image","alt":"Missing"}}),
     ] {

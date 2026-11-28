@@ -2,6 +2,9 @@ use opendash_core::builder::{BlockNode, parse_positive_i64_prop};
 use serde_json::Value;
 
 use super::{
+    blocks_archive::render_archive_block,
+    blocks_chrome::render_chrome_block,
+    blocks_entry::render_entry_block_with_context,
     blocks_layout::responsive_i64_cascade,
     cache_types::{BuilderDiagnostic, BuilderTemplateContext, ResolvedList},
     html_helpers::list_page_href,
@@ -9,6 +12,7 @@ use super::{
     render_contact_form_html, render_search_form_block, render_search_results_block,
 };
 use crate::{
+    error::ApiResult,
     storage::builder::{BuilderRenderContext, ListResults},
     template_sec::RenderBudget,
 };
@@ -48,6 +52,7 @@ fn render_list(
             page,
             has_next,
             out_of_range,
+            ..
         }) => {
             let mut out = format!(
                 "<div class=\"builder-list\" data-list-type=\"{}\">",
@@ -230,22 +235,54 @@ fn render_list(
 pub(super) fn render_native_runtime(
     state: &BuilderRenderContext,
     node: &BlockNode,
+    scope: &str,
     is_preview: bool,
     lists: &ListResults,
     forms: &ContactFormResults,
     context: Option<&BuilderTemplateContext<'_>>,
     patterns: &PatternResults,
     list_base_path: &str,
-    budget: &RenderBudget,
+    budget: &mut RenderBudget,
     has_active_contact_form: &mut bool,
     diagnostics: &mut Vec<BuilderDiagnostic>,
-) -> Option<RuntimeBlockOutput> {
+) -> ApiResult<Option<RuntimeBlockOutput>> {
+    let td = context.and_then(|c| c.template_data);
+    if let Some(html) = render_chrome_block(node, scope, td, is_preview, budget)? {
+        return Ok(Some(RuntimeBlockOutput {
+            html,
+            already_charged: 0,
+        }));
+    }
+    if let Some((html, already_charged)) = render_entry_block_with_context(
+        node,
+        None,
+        None,
+        &state.content_schemas,
+        false,
+        td,
+        context.and_then(|c| c.content_html),
+        is_preview,
+        &state.timezone,
+        budget,
+    )? {
+        return Ok(Some(RuntimeBlockOutput {
+            html,
+            already_charged,
+        }));
+    }
+    if let Some(html) = render_archive_block(node, td, is_preview, budget) {
+        return Ok(Some(RuntimeBlockOutput {
+            html,
+            already_charged: 0,
+        }));
+    }
+
     match node.block_id.as_str() {
-        "core/list" => Some(RuntimeBlockOutput {
+        "core/list" => Ok(Some(RuntimeBlockOutput {
             html: render_list(node, is_preview, lists, list_base_path, budget, diagnostics),
             already_charged: 0,
-        }),
-        "core/search-form" => Some(RuntimeBlockOutput {
+        })),
+        "core/search-form" => Ok(Some(RuntimeBlockOutput {
             html: Some(render_search_form_block(
                 state,
                 node,
@@ -254,8 +291,8 @@ pub(super) fn render_native_runtime(
                 &budget.locale,
             )),
             already_charged: 0,
-        }),
-        "core/search-results" => Some(RuntimeBlockOutput {
+        })),
+        "core/search-results" => Ok(Some(RuntimeBlockOutput {
             html: render_search_results_block(
                 node,
                 context,
@@ -264,7 +301,7 @@ pub(super) fn render_native_runtime(
                 diagnostics,
             ),
             already_charged: 0,
-        }),
+        })),
         "core/contact-form" => {
             let l10n = crate::content_render::core_l10n(&budget.locale);
             let submit_label = node
@@ -298,23 +335,23 @@ pub(super) fn render_native_runtime(
                     )
                 }
             };
-            Some(RuntimeBlockOutput {
+            Ok(Some(RuntimeBlockOutput {
                 html: Some(html),
                 already_charged: 0,
-            })
+            }))
         }
         "core/pattern-ref" => {
             let pid = parse_positive_i64_prop(node.props.get("pattern_id")).unwrap_or(0);
             match patterns.get(&node.id) {
                 Some(pattern) => {
                     *has_active_contact_form |= pattern.has_active_contact_form;
-                    Some(RuntimeBlockOutput {
+                    Ok(Some(RuntimeBlockOutput {
                         html: Some(format!(
                             "<div class=\"od-pattern-ref\" data-pattern-id=\"{pid}\">{}</div>",
                             pattern.html
                         )),
                         already_charged: pattern.html.len(),
-                    })
+                    }))
                 }
                 None => {
                     diagnostics.push(BuilderDiagnostic {
@@ -328,10 +365,10 @@ pub(super) fn render_native_runtime(
                             l10n.pattern_missing
                         )
                     });
-                    Some(RuntimeBlockOutput {
+                    Ok(Some(RuntimeBlockOutput {
                         html,
                         already_charged: 0,
-                    })
+                    }))
                 }
             }
         }
@@ -343,42 +380,26 @@ pub(super) fn render_native_runtime(
                 .map(str::trim)
                 .unwrap_or("");
             match context.and_then(|ctx| ctx.parts.get(key)) {
-                Some(part_html) => Some(RuntimeBlockOutput {
+                Some(part_html) => Ok(Some(RuntimeBlockOutput {
                     html: Some(format!(
                         "<div class=\"od-template-part\" data-part-key=\"{}\">{}</div>",
                         escape_html(key),
                         part_html
                     )),
                     already_charged: part_html.len(),
-                }),
+                })),
                 None => {
                     diagnostics.push(BuilderDiagnostic {
                         node_id: node.id.clone(),
                         code: "template_part_unavailable",
                     });
-                    Some(RuntimeBlockOutput {
+                    Ok(Some(RuntimeBlockOutput {
                         html: None,
                         already_charged: 0,
-                    })
+                    }))
                 }
             }
         }
-        "core/content-slot" => match context.and_then(|ctx| ctx.content_html) {
-            Some(slot_html) => Some(RuntimeBlockOutput {
-                html: Some(slot_html.to_owned()),
-                already_charged: slot_html.len(),
-            }),
-            None => {
-                diagnostics.push(BuilderDiagnostic {
-                    node_id: node.id.clone(),
-                    code: "template_context_unavailable",
-                });
-                Some(RuntimeBlockOutput {
-                    html: None,
-                    already_charged: 0,
-                })
-            }
-        },
-        _ => None,
+        _ => Ok(None),
     }
 }

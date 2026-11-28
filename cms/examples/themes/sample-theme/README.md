@@ -1,18 +1,18 @@
-# Sample Theme v3 (`sample-theme-v3`)
+# Sample Theme (`sample-theme`)
 
 ## Overview
 
-Minimal Theme Format v3 reference package (`theme_id: "sample-theme-v3"`, `manifest_version: 3`, `version: "1.0.0"`) illustrating [Theme Format and Template Resolver](../../../../docs/designs/theme-format-and-template-resolver.md), C-SEC helpers from [Theme Ergonomics](../../../../docs/designs/theme-ergonomics-and-csec-helpers.md), and two-step guarded consumption of write-time plugin projections (`entry.ext["rust-seo-plugin"]`) produced by [rust-seo-plugin](../../plugins/rust-seo-plugin/README.md).
+Minimal Theme Format V1 reference package (`theme_id: "sample-theme"`, `manifest_version: 1`, `version: "1.0.0"`) illustrating [Theme Format and Template Resolver](../../../../docs/designs/theme-format-and-template-resolver.md), C-SEC helpers from [Theme Ergonomics](../../../../docs/designs/theme-ergonomics-and-csec-helpers.md), and two-step guarded consumption of write-time plugin projections (`entry.ext["rust-seo-plugin"]`) produced by [rust-seo-plugin](../../plugins/rust-seo-plugin/README.md).
 
 Package layout:
-- [theme.json](theme.json): Theme Format v3 manifest declaring templates and explicit static assets.
+- [theme.json](theme.json): Theme Format V1 manifest declaring templates and explicit static assets.
 - [single.html](single.html): Single-entry MiniJinja template compliant with `UndefinedBehavior::Strict` and C-SEC rules.
 - `assets/`: Static stylesheet in [assets/app.css](assets/app.css).
 
 ## Interface
 
 - **Manifest Contract ([theme.json](theme.json)):**
-  - `manifest_version: 3`, `theme_id: "sample-theme-v3"`, `templates: [{ "kind": "single", "file": "single.html" }]`, `assets: ["assets/app.css"]`.
+  - `manifest_version: 1`, `theme_id: "sample-theme"`, `templates: [{ "kind": "single", "file": "single.html" }]`, `assets: ["assets/app.css"]`.
 - **Template Context & Helpers ([single.html](single.html)):**
   - Consumes `site.title`, `locale` (defaulted via `locale | default({})`), `theme_assets['assets/app.css']`, `breadcrumbs`, `entry.title`, `entry.published_at | date_format("%d/%m/%Y")`, `entry.reading_time_minutes | format_number`, `related_entries`, and `{{ od_content() }}`.
   - Reads optional plugin badge data safely under strict undefined checking:
@@ -39,12 +39,12 @@ Package layout:
 Validate the theme directory offline (`[cms/crates/opendash-server/src/theme.rs:check_theme_path]`, also covered by `cms/crates/opendash-server/tests/theme_ergonomics_test.rs`):
 
 ```bash
-./cms/target/release/opendash --check-theme cms/examples/themes/sample-theme-v3
+./cms/target/release/opendash --check-theme cms/examples/themes/sample-theme
 ```
 
 To test an uploadable runtime archive (excluding `README.md`):
 
 ```bash
-zip -r /tmp/sample-theme-v3.zip theme.json single.html assets/app.css
-./cms/target/release/opendash --check-theme /tmp/sample-theme-v3.zip
+zip -r /tmp/sample-theme.zip theme.json single.html assets/app.css
+./cms/target/release/opendash --check-theme /tmp/sample-theme.zip
 ```

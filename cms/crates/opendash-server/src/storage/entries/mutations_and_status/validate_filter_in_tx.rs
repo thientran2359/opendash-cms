@@ -244,16 +244,16 @@ pub(in crate::storage) async fn resolve_entry_template_patches_in_tx(
     let manifest_json: Option<String> = sqlx::query_scalar(
         "SELECT r.manifest_json FROM theme_active_selection s
            JOIN theme_revisions r ON r.revision_id = s.revision_id
-          WHERE s.id = 1 AND r.source_format = 'v3'",
+          WHERE s.id = 1 AND r.source_format = 'v1'",
     )
     .fetch_optional(&mut **tx)
     .await?;
     let Some(manifest_json) = manifest_json else {
         return Err(ApiError::unprocessable(
-            "Chưa có theme v3 hoạt động để chọn layout/template.",
+            "Chưa có theme v1 hoạt động để chọn layout/template.",
         ));
     };
-    let manifest: opendash_core::theme::ThemeV3Manifest = serde_json::from_str(&manifest_json)
+    let manifest: opendash_core::theme::ThemeManifest = serde_json::from_str(&manifest_json)
         .map_err(|_| ApiError::internal("Manifest theme hoạt động không hợp lệ."))?;
     manifest.validate().map_err(ApiError::internal)?;
     if needs_layout_validation

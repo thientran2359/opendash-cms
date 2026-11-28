@@ -8,7 +8,7 @@ use opendash_core::content::{
 /// Only the manifest captured for this request and active DB declarations can
 /// authorize theme URL expressions; no caller-provided preview values contribute permissions.
 pub(crate) fn active_theme_url_policy(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
 ) -> ApiResult<template_sec::ThemeUrlPolicy> {
     match active {
         Some(active) => settings::theme_url_policy(&serde_json::to_string(&active.manifest)?)
@@ -18,7 +18,7 @@ pub(crate) fn active_theme_url_policy(
 }
 
 pub(crate) fn active_theme_url_policy_for_target(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     target_key: Option<&str>,
     db_schema: Option<&EffectiveContentSchema>,
 ) -> ApiResult<template_sec::ThemeUrlPolicy> {
@@ -65,7 +65,7 @@ pub(crate) fn active_theme_url_policy_for_target(
 
 pub(crate) async fn active_theme_url_policy_in_conn(
     conn: &mut SqliteConnection,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     target_key: Option<&str>,
     db_cpt_schema: Option<&EffectiveContentSchema>,
     db_term_schema: Option<&EffectiveTermSchema>,
@@ -243,7 +243,7 @@ async fn load_active_options_ref_specs_in_conn(
 
 pub(crate) async fn active_theme_url_policy_for_route(
     db: &SqlitePool,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     target_key: Option<&str>,
     db_cpt_schema: Option<&EffectiveContentSchema>,
     db_term_schema: Option<&EffectiveTermSchema>,

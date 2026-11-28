@@ -294,7 +294,7 @@ async fn public_theme_options_merge_locale_overlays_over_global_defaults() {
     .await
     .unwrap();
     let manifest = serde_json::json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "t-l10n",
         "name": "T",
         "version": "1.0.0",
@@ -308,14 +308,14 @@ async fn public_theme_options_merge_locale_overlays_over_global_defaults() {
     .to_string();
     sqlx::query(
         "INSERT INTO theme_packages (theme_id, display_name, source_format)
-         VALUES ('t-l10n', 'T', 'v3')",
+         VALUES ('t-l10n', 'T', 'v1')",
     )
     .execute(&db)
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO theme_revisions (revision_id, theme_id, version, revision_digest, source_format, manifest_json, file_digests_json, provenance_json)
-         VALUES ('rev-1', 't-l10n', '1.0.0', 'dig-1', 'v3', ?, '{}', '{}')",
+         VALUES ('rev-1', 't-l10n', '1.0.0', 'dig-1', 'v1', ?, '{}', '{}')",
     )
     .bind(&manifest)
     .execute(&db)
@@ -403,7 +403,7 @@ async fn translatable_media_gallery_group_repeater_and_orphan_locale_cleanup_wor
     }
 
     let manifest = serde_json::json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "t-media-l10n",
         "name": "TM",
         "version": "1.0.0",
@@ -437,14 +437,14 @@ async fn translatable_media_gallery_group_repeater_and_orphan_locale_cleanup_wor
     .to_string();
     sqlx::query(
         "INSERT INTO theme_packages (theme_id, display_name, source_format)
-         VALUES ('t-media-l10n', 'TM', 'v3')",
+         VALUES ('t-media-l10n', 'TM', 'v1')",
     )
     .execute(&db)
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO theme_revisions (revision_id, theme_id, version, revision_digest, source_format, manifest_json, file_digests_json, provenance_json)
-         VALUES ('rev-tm', 't-media-l10n', '1.0.0', 'dig-tm', 'v3', ?, '{}', '{}')",
+         VALUES ('rev-tm', 't-media-l10n', '1.0.0', 'dig-tm', 'v1', ?, '{}', '{}')",
     )
     .bind(&manifest)
     .execute(&db)

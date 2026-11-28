@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "id": "core/menu",
+  "title": "Menu Điều hướng (Navigation Menu)",
+  "category": "template",
+  "icon": "menu",
+  "render": "native",
+  "allowed_contexts": ["template", "part"],
+  "fields": [
+    {
+      "type": "radio_buttons",
+      "key": "source_mode",
+      "label": "Nguồn Menu",
+      "options": [
+        { "value": "slot", "label": "Theo vị trí (Slot)" },
+        { "value": "menu", "label": "Chọn Menu cụ thể" }
+      ],
+      "default": "slot"
+    },
+    {
+      "type": "select",
+      "key": "slot_key",
+      "label": "Vị trí Menu (Slot)",
+      "options_source": "menu_slots",
+      "allow_null": true,
+      "conditions": [[{ "field": "source_mode", "op": "eq", "value": "slot" }]]
+    },
+    {
+      "type": "select",
+      "key": "menu_key",
+      "label": "Menu",
+      "options_source": "menus",
+      "allow_null": true,
+      "conditions": [[{ "field": "source_mode", "op": "eq", "value": "menu" }]]
+    },
+    {
+      "type": "radio_buttons",
+      "key": "layout",
+      "label": "Bố cục",
+      "options": [
+        { "value": "horizontal", "label": "Ngang" },
+        { "value": "vertical", "label": "Dọc" }
+      ],
+      "default": "horizontal"
+    },
+    {
+      "type": "range",
+      "key": "max_depth",
+      "label": "Độ sâu menu con",
+      "min": 1,
+      "max": 3,
+      "step": 1,
+      "default": 2
+    },
+    {
+      "type": "boolean",
+      "key": "mobile_drawer",
+      "label": "Ngăn kéo trên Mobile",
+      "default": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn lề",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" }
+      ],
+      "default": "left",
+      "responsive": true
+    },
+    {
+      "type": "range",
+      "key": "gap",
+      "label": "Khoảng cách mục",
+      "min": 0,
+      "max": 48,
+      "step": 4,
+      "default": 16,
+      "unit": "px",
+      "responsive": true,
+      "css_var": "--od-menu-gap"
+    }
+  ]
+}

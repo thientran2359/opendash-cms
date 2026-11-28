@@ -26,6 +26,14 @@ pub async fn resolve_public_entry_paths_by_entry_ids_in_conn(
     conn: &mut SqliteConnection,
     ids: &[i64],
 ) -> ApiResult<BTreeMap<i64, String>> {
+    resolve_public_entry_paths_by_entry_ids_for_locale_in_conn(conn, ids, None).await
+}
+
+pub async fn resolve_public_entry_paths_by_entry_ids_for_locale_in_conn(
+    conn: &mut SqliteConnection,
+    ids: &[i64],
+    locale_filter: Option<&str>,
+) -> ApiResult<BTreeMap<i64, String>> {
     let mut out = BTreeMap::new();
     if ids.is_empty() {
         return Ok(out);
@@ -42,6 +50,7 @@ pub async fn resolve_public_entry_paths_by_entry_ids_in_conn(
                 AND c.target_id = CAST(e.id AS TEXT)
                 AND c.locale = e.locale
               WHERE e.id IN (SELECT value FROM json_each(?))
+                AND (? IS NULL OR e.locale = ?)
                 AND e.trashed_at IS NULL
                 AND e.publication_status = 'published'
                 AND e.content_type_key NOT IN ('pattern', 'section')
@@ -49,6 +58,8 @@ pub async fn resolve_public_entry_paths_by_entry_ids_in_conn(
                 AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
         )
         .bind(ids_json)
+        .bind(locale_filter)
+        .bind(locale_filter)
         .fetch_all(&mut *conn)
         .await?;
         for (eid, path) in rows {
@@ -544,4 +555,13 @@ pub async fn build_theme_locale_context(
 ) -> ApiResult<serde_json::Value> {
     let mut conn = db.acquire().await?;
     build_theme_locale_context_in_conn(&mut conn, current_locale, target).await
+}
+
+pub async fn build_locale_render_context(
+    db: &SqlitePool,
+    current_locale: Option<&str>,
+    target: ThemeLocaleTarget<'_>,
+) -> ApiResult<crate::content_render::LocaleRenderContext> {
+    let mut conn = db.acquire().await?;
+    build_locale_render_context_in_conn(&mut conn, current_locale, target).await
 }

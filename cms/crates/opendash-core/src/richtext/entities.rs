@@ -148,15 +148,27 @@ pub(super) fn decode_entity_at(input: &str, start: usize) -> Option<(&'static st
 /// `em`, `i`, `u`, `ul`, `ol`, `li`, `blockquote`, `a`) with balanced tags, depth cap,
 /// RAWTEXT/RCDATA/foreign element stripping, and HTML5-decoded URL checking on `<a href>`.
 pub fn sanitize_richtext(raw: &str) -> Result<String, &'static str> {
-    if raw.len() > MAX_RICHTEXT_INPUT_BYTES {
-        return Err("Nội dung RichText vượt quá giới hạn 64 KiB đầu vào.");
+    sanitize_richtext_with_limits(raw, MAX_RICHTEXT_INPUT_BYTES, MAX_RICHTEXT_OUTPUT_BYTES)
+}
+
+pub fn sanitize_richtext_with_limits(
+    raw: &str,
+    max_input_bytes: usize,
+    max_output_bytes: usize,
+) -> Result<String, &'static str> {
+    if raw.len() > max_input_bytes {
+        return Err(if max_input_bytes <= MAX_RICHTEXT_INPUT_BYTES {
+            "Nội dung RichText vượt quá giới hạn 64 KiB đầu vào."
+        } else {
+            "Nội dung RichText vượt quá giới hạn dung lượng đầu vào cho phép."
+        });
     }
     if raw.contains('\0') {
         return Err("Nội dung RichText không được chứa ký tự NUL.");
     }
 
     let bytes = raw.as_bytes();
-    let mut out = String::with_capacity(raw.len().min(MAX_RICHTEXT_OUTPUT_BYTES));
+    let mut out = String::with_capacity(raw.len().min(max_output_bytes));
     let mut open_stack: Vec<&'static str> = Vec::new();
     let mut cursor = 0usize;
 
@@ -293,8 +305,12 @@ pub fn sanitize_richtext(raw: &str) -> Result<String, &'static str> {
         out.push('>');
     }
 
-    if out.len() > MAX_RICHTEXT_OUTPUT_BYTES {
-        return Err("Nội dung RichText vượt quá giới hạn 32 KiB sau làm sạch.");
+    if out.len() > max_output_bytes {
+        return Err(if max_output_bytes <= MAX_RICHTEXT_OUTPUT_BYTES {
+            "Nội dung RichText vượt quá giới hạn 32 KiB sau làm sạch."
+        } else {
+            "Nội dung RichText vượt quá giới hạn dung lượng đầu ra sau làm sạch."
+        });
     }
 
     Ok(out)

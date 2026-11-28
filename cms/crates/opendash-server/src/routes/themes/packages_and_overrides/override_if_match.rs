@@ -82,7 +82,7 @@ pub async fn template_overrides_reset(
         .find(|row| row.id == id)
         .ok_or_else(|| ApiError::not_found("Không có template override để reset."))?;
     let candidates = overrides::build_reset_candidate_chain(&db, &target.target).await?;
-    let active = theme::load_active_theme_v3(&db, &themes_root.0).await?;
+    let active = theme::load_active_theme(&db, &themes_root.0).await?;
     let reset = overrides::reset_typed_override(
         &db,
         id,
@@ -141,6 +141,7 @@ pub async fn studio_preview(
         &input.target,
         input.document.as_ref(),
         input.preview_entry.as_ref(),
+        input.preview_term.as_ref(),
         input.preview_annotations,
         input.transient.as_ref(),
         input.preview_locale.as_deref(),
@@ -196,6 +197,7 @@ pub async fn template_overrides_preview(
         &input.target,
         &input.document,
         input.preview_entry.as_ref(),
+        input.preview_term.as_ref(),
         expected,
         input.preview_locale.as_deref(),
         &block_template_cache,
@@ -331,7 +333,7 @@ pub async fn active_layouts(
     request_headers: HeaderMap,
 ) -> ApiResult<Response> {
     require_session(&request_headers, &db).await?;
-    let active = theme::load_active_theme_v3(&db, &themes_root.0).await?;
+    let active = theme::load_active_theme(&db, &themes_root.0).await?;
     let (active_theme_id, page_layouts, custom_templates) = match active {
         Some(active) => {
             let layouts: Vec<_> = active
@@ -430,10 +432,10 @@ pub async fn theme_asset(
     let Ok(Some(rev)) = find_revision_by_digest(&db, &revision_digest).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    // New active asset formats are supported only by validated v3 packages.
+    // Active asset formats follow the validated Theme Format V1 package allowlist.
     if matches!(mime, "text/javascript; charset=utf-8" | "image/svg+xml")
-        && (rev.source_format != theme::ThemeSourceFormat::V3
-            || !opendash_core::theme::valid_v3_asset_path(&safe_rel))
+        && (rev.source_format != theme::ThemeSourceFormat::V1
+            || !opendash_core::theme::valid_theme_asset_path(&safe_rel))
     {
         return StatusCode::NOT_FOUND.into_response();
     }

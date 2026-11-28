@@ -33,7 +33,6 @@ const CORE_DIRS: &[&str] = &[
     "contact-form",
     "pattern-ref",
     "template-part",
-    "content-slot",
     "spacer",
     "divider",
     "banner",
@@ -43,6 +42,25 @@ const CORE_DIRS: &[&str] = &[
     "social-follow",
     "search-form",
     "search-results",
+    "site-brand",
+    "language-switcher",
+    "menu",
+    "breadcrumbs",
+    "entry-title",
+    "entry-featured-image",
+    "entry-meta",
+    "entry-excerpt",
+    "entry-content",
+    "entry-terms",
+    "entry-field",
+    "entry-related",
+    "entry-nav",
+    "archive-title",
+    "archive-description",
+    "archive-featured-image",
+    "archive-loop",
+    "loop-item",
+    "archive-pagination",
 ];
 
 pub(super) struct Site(Child, PathBuf, pub(super) String);
@@ -284,7 +302,7 @@ fn core_catalog_tailwind_budget_and_ast_v1_invariants() {
     }
     assert_eq!(
         (native_count, csec_count, catalog.iter().count()),
-        (18, 5, 23)
+        (36, 5, 41)
     );
     validate_block_catalog_templates(&catalog).unwrap();
 
@@ -393,7 +411,7 @@ async fn studio_unified_ast_http_e2e_containers_accordion_card_and_pre_v1_reject
                 .is_some_and(|id| id.starts_with("core/"))
                 && i["status"] == "active")
             .count(),
-        23
+        41
     );
     assert!(!items.iter().any(|i| i["block_id"] == "core/showcase"));
 

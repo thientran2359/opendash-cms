@@ -3,16 +3,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use opendash_core::block_schema::RegisteredBlockSchema;
 use opendash_core::content::EffectiveContentSchema;
 use opendash_core::registry::RegistryCatalog;
-use opendash_core::theme::ThemeV3Manifest;
+use opendash_core::theme::ThemeManifest;
 use sqlx::SqliteConnection;
 
 use crate::error::ApiResult;
-use crate::storage::fields::load_active_v3_manifest_in_conn;
+use crate::storage::fields::load_active_theme_manifest_in_conn;
 use crate::storage::media::valid_media_id;
 
 pub(super) struct InspectionCaches {
     pub(super) schemas: RegistryCatalog<RegisteredBlockSchema>,
-    manifest: Option<ThemeV3Manifest>,
+    manifest: Option<ThemeManifest>,
     manifest_loaded: bool,
     active_media: BTreeMap<(String, Option<String>), bool>,
     active_cpts: BTreeMap<String, bool>,
@@ -58,9 +58,9 @@ impl InspectionCaches {
     pub(super) async fn ensure_manifest(
         &mut self,
         conn: &mut SqliteConnection,
-    ) -> ApiResult<Option<&ThemeV3Manifest>> {
+    ) -> ApiResult<Option<&ThemeManifest>> {
         if !self.manifest_loaded {
-            self.manifest = load_active_v3_manifest_in_conn(conn).await?;
+            self.manifest = load_active_theme_manifest_in_conn(conn).await?;
             self.manifest_loaded = true;
         }
         Ok(self.manifest.as_ref())
@@ -317,5 +317,29 @@ impl InspectionCaches {
             self.exact_schemas.insert(type_key.to_owned(), schema);
         }
         Ok(self.exact_schemas.get(type_key).and_then(|s| s.as_ref()))
+    }
+
+    pub(super) async fn public_context_fields_for_cpt(
+        &mut self,
+        conn: &mut SqliteConnection,
+        type_key: &str,
+        caller_role: opendash_core::field_schema::FieldRole,
+    ) -> ApiResult<Option<Vec<String>>> {
+        use opendash_core::content::EffectiveFieldStatus;
+        use opendash_core::field_schema::PublicExposure;
+        let Some(schema) = self.schema_for(conn, type_key).await? else {
+            return Ok(None);
+        };
+        let keys = schema
+            .effective_fields
+            .iter()
+            .filter(|(_, fe)| {
+                fe.effective_status == EffectiveFieldStatus::Active
+                    && fe.definition.effective_acl().0 <= caller_role
+                    && fe.definition.effective_acl().2 == PublicExposure::Public
+            })
+            .map(|(k, _)| k.clone())
+            .collect();
+        Ok(Some(keys))
     }
 }

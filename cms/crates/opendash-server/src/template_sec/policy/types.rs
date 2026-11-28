@@ -6,7 +6,11 @@ pub const MAX_RENDERED_HTML_BYTES: usize = 512 * 1024;
 /// to `crate::document` (some integration tests include `template_sec.rs` standalone).
 pub const MAX_ICON_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 
-pub const MAX_ICONS_PER_REQUEST: usize = 128;
+pub const MAX_UNIQUE_ICONS_PER_REQUEST: usize = 64;
+
+pub const MAX_ICON_USAGES_PER_REQUEST: usize = 256;
+
+pub const MAX_ICONS_PER_REQUEST: usize = MAX_ICON_USAGES_PER_REQUEST;
 
 pub const TEMPLATE_FUEL_LIMIT: u64 = 10_000;
 

@@ -326,7 +326,7 @@ pub struct ThemePatternDocument {
     pub document: BuilderDocument,
 }
 
-/// Read the verified active v3 manifest; inactive/legacy themes yield an empty
+/// Read the verified active V1 manifest; uninstalled/unavailable themes yield an empty
 /// catalog. Preview URLs use the actual revision-digest asset route.
 pub async fn list_theme_patterns(
     db: &SqlitePool,
@@ -336,7 +336,7 @@ pub async fn list_theme_patterns(
 ) -> ApiResult<ThemePatternCatalog> {
     let mut categories = BTreeSet::new();
     let mut items = Vec::new();
-    if let Some(active) = theme::load_active_theme_v3(db, themes_root).await? {
+    if let Some(active) = theme::load_active_theme(db, themes_root).await? {
         let query = q.unwrap_or("").trim().to_lowercase();
         let filter = category.unwrap_or("").trim();
         for pattern in active.manifest.patterns {
@@ -385,9 +385,9 @@ pub async fn get_theme_pattern(
     if !valid_snake_key(key) {
         return Err(ApiError::bad_request("Khóa Pattern không hợp lệ."));
     }
-    let active = theme::load_active_theme_v3(db, themes_root)
+    let active = theme::load_active_theme(db, themes_root)
         .await?
-        .ok_or_else(|| ApiError::not_found("Không có active theme v3."))?;
+        .ok_or_else(|| ApiError::not_found("Không có active theme v1."))?;
     let pattern = active
         .manifest
         .patterns

@@ -448,7 +448,7 @@ async fn s02_secondary_routing_home_chain_builder_list_pagination_and_archive_is
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "page" },
             "document": {
                 "schema_version": 1,
                 "blocks": [{
@@ -462,7 +462,7 @@ async fn s02_secondary_routing_home_chain_builder_list_pagination_and_archive_is
                             "block_id": "core/column",
                             "children": [
                                 { "id": "home-badge", "block_id": "core/heading", "props": { "level": "h1", "text": "Shared Home Candidate Chain" } },
-                                { "id": "home-slot", "block_id": "core/content-slot", "props": {} }
+                                { "id": "home-slot", "block_id": "core/entry-content", "props": {} }
                             ]
                         }]
                     }]
@@ -1290,7 +1290,7 @@ async fn s02_disable_locale_hides_routes_redirects_and_media_acl_without_data_lo
                             "block_id": "core/column",
                             "children": [
                                 { "id": "ov-img", "block_id": "core/image", "props": { "image": m_override, "alt": "OV" } },
-                                { "id": "ov-slot", "block_id": "core/content-slot", "props": {} }
+                                { "id": "ov-slot", "block_id": "core/entry-content", "props": {} }
                             ]
                         }]
                     }]
@@ -1650,7 +1650,11 @@ async fn s02_seo_dir_hreflang_x_default_and_sitemap_xhtml() {
     assert!(vi_home_html.contains(
         "<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://cms.example.com/\">"
     ));
-    assert!(!vi_home_html.contains("hreflang=\"ar\""));
+    assert!(
+        vi_home_html.contains(
+            "<link rel=\"alternate\" hreflang=\"ar\" href=\"https://cms.example.com/ar\">"
+        )
+    );
 
     // 2. Archive hreflang on page 1 vs suppressed on page 2
     let arch_p1 = client
@@ -1769,7 +1773,7 @@ async fn s02_seo_dir_hreflang_x_default_and_sitemap_xhtml() {
         .await
         .unwrap();
 
-    // 5. Verify /sitemaps/1.xml emits xhtml namespace & alternates, omitting noindex en_about and unconfigured AR home
+    // 5. Verify /sitemaps/1.xml emits xhtml namespace & alternates, omitting noindex en_about while including unconfigured AR Index home
     let sm_resp = client
         .get(format!("{}/sitemaps/1.xml", srv.base_url))
         .send()
@@ -1780,7 +1784,7 @@ async fn s02_seo_dir_hreflang_x_default_and_sitemap_xhtml() {
     assert!(sm_xml.contains("xmlns:xhtml=\"http://www.w3.org/1999/xhtml\""));
     assert!(sm_xml.contains("<loc>https://cms.example.com/</loc>"));
     assert!(sm_xml.contains("<loc>https://cms.example.com/en</loc>"));
-    assert!(!sm_xml.contains("<loc>https://cms.example.com/ar</loc>"));
+    assert!(sm_xml.contains("<loc>https://cms.example.com/ar</loc>"));
     assert!(!sm_xml.contains("<loc>https://cms.example.com/en/about</loc>"));
     assert!(sm_xml.contains("<xhtml:link rel=\"alternate\" hreflang=\"ar\" href=\"https://cms.example.com/ar/about-ar\"/>"));
     assert!(!sm_xml.contains(

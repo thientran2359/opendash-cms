@@ -184,7 +184,7 @@ fn builtin_starter_v1_validates_with_canvas_chrome_and_v1_options() {
     assert_eq!(STARTER_THEME_VERSION, "1.0.0");
     assert_eq!(digest.len(), 64);
 
-    let validated = crate::theme::validate_theme_v3_files(files)
+    let validated = crate::theme::validate_theme_files(files)
         .expect("Starter V1 1.0.0 must pass v3 validation");
     assert_eq!(validated.manifest.version, "1.0.0");
     let canvas = validated
@@ -208,7 +208,7 @@ async fn starter_v1_cleanly_replaces_pre_v1_starter_without_conflict_or_fk_error
     use crate::storage::theme::{
         RevisionActivationOutcome, RevisionInstallOutcome, activate_revision,
         compute_canonical_file_map_digest, ensure_default_starter_theme, get_active_selection,
-        list_revisions, stage_and_commit_v3_revision,
+        list_revisions, stage_and_commit_revision,
     };
 
     // Part A: pre-V1 active starter with same version "1.0.0" (different digest) -> clean replace & activate V1
@@ -227,8 +227,8 @@ async fn starter_v1_cleanly_replaces_pre_v1_starter_without_conflict_or_fk_error
         serde_json::to_vec_pretty(&manifest_val).unwrap(),
     );
     let (pre_digest, _) = compute_canonical_file_map_digest(&pre_v1_files);
-    let pre_pkg = crate::theme::validate_theme_v3_files(pre_v1_files.clone()).unwrap();
-    let pre_rev = match stage_and_commit_v3_revision(
+    let pre_pkg = crate::theme::validate_theme_files(pre_v1_files.clone()).unwrap();
+    let pre_rev = match stage_and_commit_revision(
         &db,
         &themes_root,
         "seed-pre-v1",
@@ -283,8 +283,8 @@ async fn starter_v1_cleanly_replaces_pre_v1_starter_without_conflict_or_fk_error
         "theme.json".to_owned(),
         serde_json::to_vec_pretty(&manifest_val).unwrap(),
     );
-    let pre_111_pkg = crate::theme::validate_theme_v3_files(pre_v1_files.clone()).unwrap();
-    stage_and_commit_v3_revision(
+    let pre_111_pkg = crate::theme::validate_theme_files(pre_v1_files.clone()).unwrap();
+    stage_and_commit_revision(
         &db_c,
         &themes_root_c,
         "seed-pre-111",
@@ -301,12 +301,12 @@ async fn starter_v1_cleanly_replaces_pre_v1_starter_without_conflict_or_fk_error
     let custom_files = BTreeMap::from([
         (
             "theme.json".to_owned(),
-            br#"{"manifest_version":3,"theme_id":"custom-active","name":"Custom","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}]}"#.to_vec(),
+            br#"{"manifest_version":1,"theme_id":"custom-active","name":"Custom","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}]}"#.to_vec(),
         ),
         ("index.html".to_owned(), b"<main>Custom</main>".to_vec()),
     ]);
-    let custom_pkg = crate::theme::validate_theme_v3_files(custom_files.clone()).unwrap();
-    let RevisionInstallOutcome::Installed(custom_rev) = stage_and_commit_v3_revision(
+    let custom_pkg = crate::theme::validate_theme_files(custom_files.clone()).unwrap();
+    let RevisionInstallOutcome::Installed(custom_rev) = stage_and_commit_revision(
         &db_c,
         &themes_root_c,
         "seed-custom",
@@ -342,4 +342,101 @@ async fn starter_v1_cleanly_replaces_pre_v1_starter_without_conflict_or_fk_error
         .collect();
     assert_eq!(versions_c, vec!["1.0.0"]);
     db_c.close().await;
+}
+
+#[tokio::test]
+async fn migration_0063_clean_slate_and_restore_pre_v1_rejection() {
+    let tmp = TempDirGuard::new("mig-0063-clean-slate");
+    let db_path = tmp.path().join("upgrade_0063.sqlite");
+    {
+        let db = connect_file_pool(&db_path).await;
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        let migrator = sqlx::migrate::Migrator::new(migrations).await.unwrap();
+        migrator.run_to(62, &db).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO theme_packages (theme_id,display_name,source_format,is_legacy)
+             VALUES ('pre-v1-pkg','PreV1','v3',0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO theme_revisions (
+                revision_id,theme_id,version,revision_digest,source_format,
+                manifest_json,file_digests_json,provenance_json
+             ) VALUES (
+                'pre-v1-rev','pre-v1-pkg','1.0.0','digest-pre-v1','v3',
+                '{\"manifest_version\":3,\"theme_id\":\"pre-v1-pkg\",\"name\":\"PreV1\",\"version\":\"1.0.0\"}',
+                '{}','{}'
+             )",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO theme_active_selection (id,revision_id,version)
+             VALUES (1,'pre-v1-rev',11)
+             ON CONFLICT(id) DO UPDATE SET revision_id=excluded.revision_id,version=11",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let doc_json = serde_json::to_string(&BuilderDocument::empty()).unwrap();
+        sqlx::query(
+            "INSERT INTO template_overrides (target_kind,canonical_target_key,target_json,ast_json)
+             VALUES ('home','home','{\"kind\":\"home\"}',?),('search','search','{\"kind\":\"search\"}',?)",
+        )
+        .bind(&doc_json)
+        .bind(&doc_json)
+        .execute(&db)
+        .await
+        .unwrap();
+        db.close().await;
+    }
+
+    // 1. Pre-migration backup validation must reject pre-V1 DB with 400 Bad Request before running 0063.
+    let err = crate::storage::restore::validate_restored_db_read_only(&db_path)
+        .await
+        .expect_err("restore validation must reject pre-V1 theme revisions with 400");
+    assert_eq!(err.0, axum::http::StatusCode::BAD_REQUEST);
+
+    // 2. Running 0063 via init_db drops pre-V1 themes + 'home' override, keeps 'search' & CAS version, adds idx_content_entries_pub_order.
+    let db = init_db(&db_path).await.unwrap();
+    let pkg_cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM theme_packages")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(pkg_cnt, 0);
+    let sel: (Option<String>, i64) =
+        sqlx::query_as("SELECT revision_id,version FROM theme_active_selection WHERE id=1")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(sel, (None, 11));
+    let remaining_overrides: Vec<String> = sqlx::query_scalar(
+        "SELECT canonical_target_key FROM template_overrides ORDER BY canonical_target_key",
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(remaining_overrides, vec!["search"]);
+    let has_adj_idx: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND name='idx_content_entries_pub_order'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(has_adj_idx, 1);
+    let schema_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_schema WHERE name != '_sqlx_migrations' AND name != 'sqlite_sequence' AND name NOT LIKE 'sqlite_stat%'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert!(
+        schema_rows <= 256,
+        "sqlite_schema count {schema_rows} > 256"
+    );
+    db.close().await;
 }
