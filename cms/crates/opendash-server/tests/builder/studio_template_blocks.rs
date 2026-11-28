@@ -31,7 +31,7 @@ fn s03_core_block_catalog_and_loop_validation() {
         }
     }
     dirs.sort();
-    assert_eq!(dirs.len(), 41, "expected 41 core blocks, found {dirs:?}");
+    assert_eq!(dirs.len(), 48, "expected 48 core blocks, found {dirs:?}");
 
     for dir in &dirs {
         let raw = fs::read_to_string(blocks_dir.join(dir).join("block.json")).unwrap();

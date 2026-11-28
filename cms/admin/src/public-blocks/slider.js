@@ -27,11 +27,20 @@ function setupSlider(root, reduced) {
   let autoT = null;
   let paused = reduced;
 
+  const hasCssOrder = supportsCss("order", "mod(calc(sibling-index() - 1), 3)");
+  const applyOrder = (idx) => {
+    if (!hasCssOrder) {
+      slides.forEach((sl, i) => {
+        sl.style.order = String(((i - idx) % slides.length + slides.length) % slides.length);
+      });
+    }
+  };
   if (isLoop) {
     if (!supportsCss("order", "sibling-count()")) {
       root.style.setProperty("--children-count", String(slides.length));
     }
     root.style.setProperty("--current", "0");
+    applyOrder(0);
   }
 
   const syncUi = (idx) => {
@@ -58,6 +67,7 @@ function setupSlider(root, reduced) {
   const park = (idx) => {
     root.classList.add("od-slider-parking");
     root.style.setProperty("--current", String(idx));
+    applyOrder(idx);
     track.scrollLeft = 0;
     const clear = () => root.classList.remove("od-slider-parking");
     const raf = window.requestAnimationFrame;

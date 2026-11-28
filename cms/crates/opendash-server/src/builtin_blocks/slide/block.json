@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "core/slide",
+  "title": "Slide",
+  "category": "interactive",
+  "icon": "bookmark",
+  "render": "native",
+  "supports_children": true,
+  "allowed_parents": ["core/slider"],
+  "allowed_children": ["*", "!core/section", "!core/slide", "!core/slider"],
+  "allowed_contexts": ["*", "!loop_item"],
+  "default_children": [
+    {
+      "block_id": "core/heading",
+      "props": { "level": "h3", "text": "Slide mới", "size": "xl" }
+    }
+  ],
+  "fields": [
+    {
+      "type": "range",
+      "key": "min_height",
+      "label": "Chiều cao tối thiểu",
+      "min": 0,
+      "max": 720,
+      "step": 16,
+      "default": 0,
+      "unit": "px",
+      "css_var": "--od-slide-min-h"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true
+    }
+  ]
+}

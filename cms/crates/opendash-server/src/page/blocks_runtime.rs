@@ -244,6 +244,7 @@ pub(super) fn render_native_runtime(
     context: Option<&BuilderTemplateContext<'_>>,
     patterns: &PatternResults,
     list_base_path: &str,
+    in_popup: bool,
     budget: &mut RenderBudget,
     has_active_contact_form: &mut bool,
     diagnostics: &mut Vec<BuilderDiagnostic>,
@@ -360,6 +361,18 @@ pub(super) fn render_native_runtime(
             let pid = parse_positive_i64_prop(node.props.get("pattern_id")).unwrap_or(0);
             match patterns.get(&node.id) {
                 Some(pattern) => {
+                    if in_popup && pattern.has_popup {
+                        diagnostics.push(BuilderDiagnostic {
+                            node_id: node.id.clone(),
+                            code: "nested_popup_not_allowed",
+                        });
+                        return Ok(Some(RuntimeBlockOutput {
+                            html: None,
+                            already_charged: 0,
+                            used_entry_content: false,
+                            has_popup: false,
+                        }));
+                    }
                     *has_active_contact_form |= pattern.has_active_contact_form;
                     budget.needs_blocks_js |= pattern.needs_blocks_js;
                     Ok(Some(RuntimeBlockOutput {

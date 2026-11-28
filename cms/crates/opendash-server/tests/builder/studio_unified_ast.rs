@@ -39,6 +39,13 @@ const CORE_DIRS: &[&str] = &[
     "card",
     "accordion",
     "accordion-item",
+    "tabs",
+    "tab-panel",
+    "slider",
+    "slide",
+    "gallery",
+    "social-share",
+    "popup",
     "social-follow",
     "search-form",
     "search-results",
@@ -302,7 +309,7 @@ fn core_catalog_tailwind_budget_and_ast_v1_invariants() {
     }
     assert_eq!(
         (native_count, csec_count, catalog.iter().count()),
-        (36, 5, 41)
+        (43, 5, 48)
     );
     validate_block_catalog_templates(&catalog).unwrap();
 
@@ -411,7 +418,7 @@ async fn studio_unified_ast_http_e2e_containers_accordion_card_and_pre_v1_reject
                 .is_some_and(|id| id.starts_with("core/"))
                 && i["status"] == "active")
             .count(),
-        41
+        48
     );
     assert!(!items.iter().any(|i| i["block_id"] == "core/showcase"));
 

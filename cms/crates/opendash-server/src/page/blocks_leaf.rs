@@ -7,7 +7,7 @@ use opendash_core::{
 use serde_json::Value;
 
 use super::{
-    blocks_layout::{responsive_str_cascade, spacing_classes_or_attr},
+    blocks_layout::{NativeParentInfo, responsive_str_cascade, spacing_classes_or_attr},
     render::escape_html,
 };
 use crate::{error::ApiError, error::ApiResult, template_sec::RenderBudget};
@@ -203,6 +203,7 @@ fn render_image(
     node: &BlockNode,
     hydration_media: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
     is_preview: bool,
+    native_parent: NativeParentInfo<'_>,
 ) -> String {
     let Some(id) = node
         .props
@@ -241,13 +242,20 @@ fn render_image(
         r @ ("sm" | "md" | "lg" | "xl" | "2xl" | "full") => img_cls.push(format!("rounded-{r}")),
         _ => {}
     }
-    let img_html = super::media_render::render_responsive_image_html(
+    let fetchpriority = if native_parent.in_deferred_media {
+        "low"
+    } else {
+        ""
+    };
+    let img_html = super::media_render::render_responsive_image_html_with_priority(
         id,
         alt,
         &img_cls.join(" "),
         "100vw",
         hydration_media,
         is_preview,
+        "lazy",
+        fetchpriority,
     );
     let media_html = match link_props(&node.props, "link") {
         Some((url, _, new_tab, nofollow)) => {
@@ -432,12 +440,18 @@ pub(super) fn render_native_leaf(
     fields: &[FieldSpec],
     hydration_media: &BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
     is_preview: bool,
+    native_parent: NativeParentInfo<'_>,
     budget: &mut RenderBudget,
 ) -> ApiResult<Option<String>> {
     match node.block_id.as_str() {
         "core/heading" => Ok(Some(render_heading(node))),
         "core/text" => Ok(Some(render_text(node))),
-        "core/image" => Ok(Some(render_image(node, hydration_media, is_preview))),
+        "core/image" => Ok(Some(render_image(
+            node,
+            hydration_media,
+            is_preview,
+            native_parent,
+        ))),
         "core/video" => Ok(Some(render_video(node, hydration_media, is_preview))),
         "core/button" => Ok(Some(render_button(node, budget)?)),
         "core/divider" => Ok(Some(render_divider(node, fields))),
@@ -445,6 +459,19 @@ pub(super) fn render_native_leaf(
             "<div class=\"od-spacer w-full\" aria-hidden=\"true\" style=\"height:var(--od-spacer-h,32px);\"></div>"
                 .to_owned(),
         )),
+        "core/gallery" => super::blocks_media_share::render_gallery(
+            node,
+            fields,
+            hydration_media,
+            is_preview,
+            native_parent,
+            budget,
+        )
+        .map(Some),
+        "core/social-share" => {
+            super::blocks_media_share::render_social_share(node, fields, is_preview, budget)
+                .map(Some)
+        }
         _ => Ok(None),
     }
 }

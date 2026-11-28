@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "id": "core/tabs",
+  "title": "Thẻ nội dung (Tabs)",
+  "category": "interactive",
+  "icon": "folder",
+  "render": "native",
+  "supports_children": true,
+  "allowed_children": ["core/tab-panel"],
+  "allowed_contexts": ["*", "!loop_item"],
+  "default_children": [
+    {
+      "block_id": "core/tab-panel",
+      "props": { "title": "Tab 1" },
+      "children": [
+        {
+          "block_id": "core/text",
+          "props": { "content": "<p>Nội dung cho Tab 1.</p>" }
+        }
+      ]
+    },
+    {
+      "block_id": "core/tab-panel",
+      "props": { "title": "Tab 2" },
+      "children": [
+        {
+          "block_id": "core/text",
+          "props": { "content": "<p>Nội dung cho Tab 2.</p>" }
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "key": "underline_horizontal",
+      "title": "Gạch chân ngang",
+      "icon": "minus",
+      "props": { "style": "underline" }
+    },
+    {
+      "key": "boxed_pills",
+      "title": "Nút bo tròn (Pills)",
+      "icon": "folder",
+      "props": { "style": "pills" }
+    }
+  ],
+  "fields": [
+    {
+      "type": "select",
+      "key": "style",
+      "label": "Kiểu thanh Tab",
+      "options": [
+        { "value": "underline", "label": "Gạch chân (Underline)" },
+        { "value": "pills", "label": "Viên thuốc (Pills)" },
+        { "value": "boxed", "label": "Đóng khung (Boxed)" }
+      ],
+      "default": "underline"
+    },
+    {
+      "type": "number",
+      "key": "default_tab",
+      "label": "Tab mở sẵn (từ 1)",
+      "min": 1,
+      "max": 20,
+      "step": 1,
+      "default": 1
+    },
+    {
+      "type": "text",
+      "key": "aria_label",
+      "label": "Nhãn trợ năng (ARIA label)",
+      "max_chars": 120,
+      "default": ""
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true
+    },
+    {
+      "type": "spacing",
+      "key": "margin",
+      "label": "Lề ngoài (Margin)",
+      "property": "margin",
+      "unit": "px",
+      "min": -128,
+      "max": 128,
+      "responsive": true
+    }
+  ]
+}

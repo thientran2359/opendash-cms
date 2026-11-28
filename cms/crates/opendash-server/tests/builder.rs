@@ -1,5 +1,7 @@
 #[path = "builder/cpt_builder_capabilities.rs"]
 mod cpt_builder_capabilities;
+#[path = "builder/interactive_blocks_test.rs"]
+mod interactive_blocks_test;
 #[path = "builder/page_scope_acl.rs"]
 mod page_scope_acl;
 #[path = "builder/pattern_library.rs"]
