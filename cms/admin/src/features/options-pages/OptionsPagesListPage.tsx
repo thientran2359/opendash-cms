@@ -317,9 +317,15 @@ export const OptionsPagesListPage: React.FC<OptionsPagesListPageProps> = ({
                       variant="secondary"
                       size="sm"
                       disabled={busy}
-                      onClick={() => onNavigateHash(`#/options/${encodeURIComponent(item.page_key)}`)}
+                      onClick={() => onNavigateHash(
+                        user.role === 'admin' && item.parent_menu === 'appearance' && item.provider_status === 'active' && item.declaration_state === 'declared'
+                          ? `#/studio/options/custom/${encodeURIComponent(item.page_key)}`
+                          : `#/options/${encodeURIComponent(item.page_key)}`,
+                      )}
                     >
-                      {__("Open screen")}
+                      {user.role === 'admin' && item.parent_menu === 'appearance' && item.provider_status === 'active' && item.declaration_state === 'declared'
+                        ? __("Open in Studio")
+                        : __("Open screen")}
                     </AdminButton>
                     <AdminButton
                       variant="secondary"
@@ -431,10 +437,15 @@ export const OptionsPagesListPage: React.FC<OptionsPagesListPageProps> = ({
                   >
                     <option value="settings">{__("System -> Settings")}</option>
                     <option value="content">{__("Content")}</option>
-                    <option value="appearance">{__("Appearance")}</option>
+                    <option value="appearance">{__("Appearance -> Customize Studio")}</option>
                     <option value="system">{__("System")}</option>
                     <option value="top_level">{__("Top-level sidebar section")}</option>
                   </select>
+                  {form.parent_menu === 'appearance' && (
+                    <span className="mt-1 block text-[11px] font-normal text-zinc-500">
+                      {__("Opens inside Customize Studio with live preview for Admins; Editors use the standalone form.")}
+                    </span>
+                  )}
                 </label>
               </div>
 

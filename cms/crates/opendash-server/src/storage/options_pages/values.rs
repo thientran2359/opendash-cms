@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use opendash_core::{
     content::{
         AttachedFieldGroupSnapshot, FieldGroupDomain, FieldGroupPresentation, FieldGroupStatus,
-        FieldRole, LocationEvalContext, evaluate_location_rules, valid_custom_options_page_key,
+        FieldRole, LocationEvalContext, evaluate_location_rules, is_restricted_to_admin_only,
+        valid_custom_options_page_key,
     },
     field_schema::{
         FieldContext, FieldSpec, FieldType, HydrationVisibility, collect_media_ids,
@@ -36,6 +37,7 @@ pub struct OptionsPageFieldGroupView {
     pub presentation: FieldGroupPresentation,
     pub fields: Vec<FieldSpec>,
     pub read_only_keys: BTreeSet<String>,
+    pub public_previewable: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -375,6 +377,7 @@ pub(in crate::storage) async fn get_options_page_values_in_conn(
                 presentation: grp.presentation,
                 fields: visible_fields,
                 read_only_keys: read_only,
+                public_previewable: !is_restricted_to_admin_only(&grp.location),
             });
         }
     }

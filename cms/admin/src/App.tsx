@@ -118,6 +118,8 @@ const AppContent: React.FC = () => {
   const [studioDirty, setStudioDirty] = useState(false);
   const studioDirtyRef = useRef(false);
   const markStudioDirty = useCallback((value: boolean) => { studioDirtyRef.current = value; setStudioDirty(value); }, []);
+  const studioTemplateDirtyRef = useRef(false);
+  const markStudioTemplateDirty = useCallback((value: boolean) => { studioTemplateDirtyRef.current = value; }, []);
   const [postsDirty, setPostsDirty] = useState(false);
   const [pagesDirty, setPagesDirty] = useState(false);
   const [patternsDirty, setPatternsDirty] = useState(false);
@@ -204,6 +206,8 @@ const AppContent: React.FC = () => {
         menu_icon: p.menu_icon,
         menu_position: p.menu_position,
         min_edit_role: p.min_edit_role,
+        provider_status: p.provider_status,
+        declaration_state: p.declaration_state,
       })));
       const defMap = new Map(definitions.map(def => [def.key, def]));
       const customTypes = list.filter(
@@ -249,6 +253,9 @@ const AppContent: React.FC = () => {
       editorDraftStore.hasDirtyKey(currentEditor);
     const switchingStudioTarget = (current.view === 'studio' || current.view === 'studio-entry')
       && studioIdentity(current) !== studioIdentity(next);
+    const switchingStudioTemplate = current.view === 'studio' && next.view === 'studio'
+      && Boolean(current.studioTemplateKey) && current.studioTemplateKey !== next.studioTemplateKey
+      && studioTemplateDirtyRef.current;
     const leavingStudio = switchingStudioTarget && studioDirtyRef.current;
     const leavingPattern = current.view === 'patterns' && current.rawHash !== destination && patternsDirtyRef.current;
     const leavingSchema = current.view === 'content-structure' && current.sub === 'content-types'
@@ -263,9 +270,11 @@ const AppContent: React.FC = () => {
       && acceptedHashRef.current !== destination && toolsDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    const hasDirty = leavingDirtyEditor || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading || leavingSettings || leavingTools;
+    const hasDirty = leavingDirtyEditor || leavingStudio || switchingStudioTemplate || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading || leavingSettings || leavingTools;
     if (!hasDirty) return true;
-    const approved = window.confirm(leavingStudio
+    const approved = window.confirm(switchingStudioTemplate
+        ? __("The current template has unsaved changes. Discard them and switch targets?")
+      : leavingStudio
           ? __("Studio customization has unsaved changes. Discard changes and exit?")
         : leavingTerm
           ? __("Taxonomy has unsaved changes. Leaving will discard your draft. Continue?")
@@ -664,8 +673,10 @@ const AppContent: React.FC = () => {
         resetToken={builderReset + studioResetEpoch}
         themeRevision={themeRevision}
         localeState={localeState}
+        optionsPages={optionsPages}
         onNavigateHash={navigateHash}
         onDirtyChange={markStudioDirty}
+        onTemplateDirtyChange={markStudioTemplateDirty}
         onApiError={handleApiError}
         onSavedSettingsOrTheme={() => setThemeRevision(v => v + 1)}
       /> : null}

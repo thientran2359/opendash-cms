@@ -440,6 +440,8 @@ pub struct TransientStudioOverrides {
     pub theme_options: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub menu_slots: Option<BTreeMap<String, Option<i64>>>,
+    #[serde(default)]
+    pub options_pages: Option<BTreeMap<String, BTreeMap<String, serde_json::Value>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

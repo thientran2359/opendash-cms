@@ -48,6 +48,7 @@ export interface OptionsPageFieldGroupView {
   presentation: FieldGroupPresentation;
   fields: FieldSpec[];
   read_only_keys: string[];
+  public_previewable?: boolean;
 }
 
 export interface OptionsPageValuesSnapshot {

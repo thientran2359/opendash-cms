@@ -156,7 +156,7 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => onNavigateHash(`#/studio?panel=templates&template=${encodeURIComponent(item.role)}`)}
+                onClick={() => onNavigateHash(`#/studio/templates/${encodeURIComponent(item.role)}`)}
               >
                 {__("Customize in Studio")}
               </button>
