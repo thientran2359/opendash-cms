@@ -30,6 +30,7 @@ interface Params {
   user: AuthUser | null;
   csrfToken: string | null;
   activeThemeId: string | null;
+  activeCustomPageRef: string | null;
   effectivePreviewLocale: string;
   defaultLocaleCode: string;
   hydratedPreviewLocale: string | null;
@@ -84,6 +85,7 @@ export function useStudioOptionsState({
   user,
   csrfToken,
   activeThemeId,
+  activeCustomPageRef,
   effectivePreviewLocale,
   defaultLocaleCode,
   hydratedPreviewLocale,
@@ -105,6 +107,8 @@ export function useStudioOptionsState({
 
   const seqRef = useRef(0);
   const fetchedRefsRef = useRef<Set<string>>(new Set());
+  const activeCustomPageRefLatest = useRef<string | null>(activeCustomPageRef);
+  activeCustomPageRefLatest.current = activeCustomPageRef;
   const onApiErrorRef = useRef(onApiError);
   onApiErrorRef.current = onApiError;
 
@@ -214,7 +218,39 @@ export function useStudioOptionsState({
           if (seqRef.current === reqSeq) setLoadingRefs(prev => ({ ...prev, [ref]: false }));
         });
     }
+
+    const initialCustomRef = activeCustomPageRefLatest.current;
+    if (initialCustomRef && initialCustomRef.startsWith('custom:')) {
+      fetchedRefsRef.current.add(initialCustomRef);
+      setLoadingRefs(prev => ({ ...prev, [initialCustomRef]: true }));
+      void getOptionsPageValues(initialCustomRef, effectivePreviewLocale || undefined)
+        .then(snap => {
+          if (seqRef.current !== reqSeq) return;
+          setSnapshotsByRef(prev => ({ ...prev, [initialCustomRef]: snap }));
+          setDraftsByRef(prev => ({ ...prev, [initialCustomRef]: { ...snap.values } }));
+        })
+        .catch(cause => {
+          if (seqRef.current !== reqSeq) return;
+          if (cause instanceof ApiClientError && cause.status === 404) {
+            setNotFoundRefs(prev => ({ ...prev, [initialCustomRef]: true }));
+            return;
+          }
+          fetchedRefsRef.current.delete(initialCustomRef);
+          const msg = cause instanceof Error ? cause.message : __("Could not load options page values.");
+          setErrorsByRef(prev => ({ ...prev, [initialCustomRef]: msg }));
+          onApiErrorRef.current(cause, __("Could not load options page values."));
+        })
+        .finally(() => {
+          if (seqRef.current === reqSeq) setLoadingRefs(prev => ({ ...prev, [initialCustomRef]: false }));
+        });
+    }
   }, [canLoad, activeThemeId, effectivePreviewLocale, mode1ReloadSeq, themeRevision]);
+
+  // Lazy-load any custom options page opened via in-Studio navigation after initial hydration.
+  useEffect(() => {
+    if (!canLoad || !activeCustomPageRef || !activeCustomPageRef.startsWith('custom:')) return;
+    loadPageRef(activeCustomPageRef);
+  }, [canLoad, activeCustomPageRef, loadPageRef]);
 
   const updateThemeDraft = useCallback((partial: Record<string, unknown>) => {
     if (localeDraftBlocked || !hydratedPreviewLocale || hydratedPreviewLocale !== effectivePreviewLocale) return;

@@ -173,6 +173,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     user,
     csrfToken,
     activeThemeId,
+    activeCustomPageRef: optionsRoute.kind === 'custom' ? `custom:${optionsRoute.pageKey}` : null,
     effectivePreviewLocale,
     defaultLocaleCode: localeState.defaultLocale?.code ?? '',
     hydratedPreviewLocale,
@@ -1317,7 +1318,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           const PreviewTag: 'main' | 'div' = active ? 'main' : 'div';
           return (
         <PreviewTag className={`min-w-0 flex-1 flex-col overflow-hidden md:flex ${mobilePane === 'preview' ? 'flex' : 'hidden'} ${viewport === 'desktop' ? 'bg-white' : 'bg-zinc-200/70'}`}>
-          <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-4')}>
+          <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-0 sm:p-4')}>
             {previewHtml ? (
               <BuilderPreviewFrame
                 html={previewHtml}

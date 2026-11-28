@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import type { AdminLocaleState } from '../api/locales.ts';
 import type { GlobalSiteOptionsSnapshot } from '../api/settings.ts';
 import type { BuilderViewport } from '../builder/document.ts';
@@ -69,12 +69,6 @@ export const StudioOptionsPanel: React.FC<Props> = ({
   const { __ } = useI18n();
   const defaultLocaleCode = localeState?.defaultLocale?.code ?? '';
   const isSecondaryLocale = Boolean(previewLocale && defaultLocaleCode && previewLocale !== defaultLocaleCode);
-
-  useEffect(() => {
-    if (optionsRoute.kind === 'custom') {
-      optionsState.ensurePageLoaded(`custom:${optionsRoute.pageKey}`);
-    }
-  }, [optionsRoute, optionsState.ensurePageLoaded]);
 
   const globalSections = useMemo(
     () => (globalOptionsSnapshot ? partitionFieldSections(globalOptionsSnapshot.fields, __("Global site options")) : []),
