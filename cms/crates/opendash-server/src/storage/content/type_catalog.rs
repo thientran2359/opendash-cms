@@ -27,81 +27,13 @@ pub async fn load_effective_content_schema_in_tx(
         descriptor,
     };
 
-    let attached_groups = if table_exists_in_tx(conn, "content_field_groups").await?
-        && table_exists_in_tx(conn, "content_field_group_targets").await?
-    {
-        let group_rows: Vec<(
-            String,
-            String,
-            Option<String>,
-            String,
-            String,
-            String,
-            String,
-            String,
-            i32,
-            i64,
-            String,
-            i64,
-            String,
-        )> = sqlx::query_as(
-            "SELECT g.group_id, g.owner_kind, g.owner_id, g.local_key, g.title, g.description,
-                    g.fields_json, g.default_region, g.default_order, g.collapsible, g.status,
-                    g.version, t.association_state
-             FROM content_field_group_targets t
-             JOIN content_field_groups g ON g.group_id = t.group_id
-             WHERE t.type_key = ?
-             ORDER BY g.group_id ASC",
-        )
-        .bind(type_key)
-        .fetch_all(&mut *conn)
-        .await?;
-
-        let mut snapshots = Vec::with_capacity(group_rows.len());
-        for (
-            group_id,
-            g_owner_kind,
-            g_owner_id,
-            local_key,
-            title,
-            description,
-            fields_json,
-            default_region_str,
-            default_order,
-            collapsible_int,
-            g_status_str,
-            version,
-            assoc_str,
-        ) in group_rows
-        {
-            let fields: Vec<opendash_core::field_schema::FieldSpec> =
-                serde_json::from_str(&fields_json).map_err(|_| {
-                    ApiError::internal("Dữ liệu fields_json của field group không hợp lệ.")
-                })?;
-            let default_region = EditorRegion::from_db(&default_region_str).ok_or_else(|| {
-                ApiError::internal("default_region của field group không hợp lệ.")
-            })?;
-            let status = FieldGroupStatus::from_db(&g_status_str)
-                .ok_or_else(|| ApiError::internal("Trạng thái field group không hợp lệ."))?;
-            snapshots.push(AttachedFieldGroupSnapshot {
-                group_id,
-                owner: parse_owner(&g_owner_kind, g_owner_id)?,
-                local_key,
-                title,
-                description,
-                fields,
-                default_region,
-                default_order,
-                collapsible: collapsible_int != 0,
-                status,
-                association_state: parse_declaration_state(&assoc_str)?,
-                version,
-            });
-        }
-        snapshots
-    } else {
-        Vec::new()
-    };
+    let attached_groups = load_attached_groups_in_tx(
+        conn,
+        "content_type",
+        type_key,
+        opendash_core::content::FieldGroupDomain::Content,
+    )
+    .await?;
 
     let mut effective = EffectiveContentSchema::assemble(base, base_version, attached_groups)
         .map_err(|e| map_transition_error(e, true))?;
@@ -182,24 +114,85 @@ pub(in crate::storage) async fn has_persisted_group_values_for_type_in_tx(
     type_key: &str,
     fields: &[opendash_core::field_schema::FieldSpec],
 ) -> ApiResult<bool> {
-    if fields.is_empty() {
+    has_persisted_group_values_for_target_in_tx(conn, "content_type", type_key, fields).await
+}
+
+pub(in crate::storage) async fn has_persisted_group_values_for_target_in_tx(
+    conn: &mut SqliteConnection,
+    target_kind: &str,
+    target_key: &str,
+    fields: &[opendash_core::field_schema::FieldSpec],
+) -> ApiResult<bool> {
+    let field_keys: HashSet<&str> = fields
+        .iter()
+        .filter(|f| !f.is_ui_only())
+        .map(|f| f.key.as_str())
+        .collect();
+    if field_keys.is_empty() {
         return Ok(false);
     }
-    let values_list: Vec<String> =
-        sqlx::query_scalar("SELECT values_json FROM content_entries WHERE content_type_key = ?")
-            .bind(type_key)
+    let values_list: Vec<String> = match target_kind {
+        "content_type" => {
+            if target_key == "*" {
+                sqlx::query_scalar(
+                    "SELECT values_json FROM content_entries WHERE content_type_key NOT IN ('pattern', 'section')",
+                )
+                .fetch_all(&mut *conn)
+                .await?
+            } else {
+                sqlx::query_scalar(
+                    "SELECT values_json FROM content_entries WHERE content_type_key = ?",
+                )
+                .bind(target_key)
+                .fetch_all(&mut *conn)
+                .await?
+            }
+        }
+        "taxonomy_term" => {
+            if target_key == "*" {
+                sqlx::query_scalar(
+                    "SELECT values_json FROM taxonomy_terms WHERE values_json != '{}'",
+                )
+                .fetch_all(&mut *conn)
+                .await?
+            } else {
+                sqlx::query_scalar(
+                    "SELECT values_json FROM taxonomy_terms WHERE kind = ? AND values_json != '{}'",
+                )
+                .bind(target_key)
+                .fetch_all(&mut *conn)
+                .await?
+            }
+        }
+        "options_page" => {
+            let mut out: Vec<String> = sqlx::query_scalar(
+                "SELECT json_object(option_key, json(value_json))
+                   FROM theme_option_values
+                  WHERE owner_kind = 'options_page' AND owner_id = ?",
+            )
+            .bind(target_key)
             .fetch_all(&mut *conn)
             .await?;
-    let field_keys: HashSet<&str> = fields.iter().map(|f| f.key.as_str()).collect();
+            let loc: Vec<String> = sqlx::query_scalar(
+                "SELECT json_object(option_key, json(value_json))
+                   FROM theme_option_locale_values
+                  WHERE owner_kind = 'options_page' AND owner_id = ?",
+            )
+            .bind(target_key)
+            .fetch_all(&mut *conn)
+            .await?;
+            out.extend(loc);
+            out
+        }
+        _ => Vec::new(),
+    };
     for raw in values_list {
         if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&raw)
-        {
-            if map
+            && map
                 .iter()
                 .any(|(k, v)| field_keys.contains(k.as_str()) && !v.is_null())
-            {
-                return Ok(true);
-            }
+        {
+            return Ok(true);
         }
     }
     Ok(false)

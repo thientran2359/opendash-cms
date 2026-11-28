@@ -16,14 +16,3 @@ impl PermalinkPutError {
         }
     }
 }
-
-#[cfg(test)]
-impl PermalinkSettings {
-    pub(in crate::storage::permalinks) fn input(&self) -> PermalinkSettingsInput {
-        PermalinkSettingsInput {
-            post_structure: self.post_structure.clone(),
-            content_type_bases: self.content_type_bases.clone(),
-            taxonomy_bases: self.taxonomy_bases.clone(),
-        }
-    }
-}

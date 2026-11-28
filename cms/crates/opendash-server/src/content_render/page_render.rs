@@ -167,6 +167,10 @@ pub struct EntryView {
     pub title: String,
     pub slug: String,
     pub url: Option<String>,
+    #[serde(default)]
+    pub parent: Option<EntryParentView>,
+    #[serde(default)]
+    pub menu_order: i32,
     pub created_at: String,
     pub updated_at: String,
     pub published_at: Option<String>,
@@ -209,53 +213,21 @@ pub(super) fn media_url(value: &Value) -> Option<String> {
     valid_media_id(id).then(|| format!("/media/{id}/file"))
 }
 
-fn rewrite_media_urls_in_value(val: &mut Value) {
-    match val {
-        Value::Object(obj) => {
-            for k in ["url", "thumbnail_url", "cover_url"] {
-                if let Some(Value::String(s)) = obj.get_mut(k)
-                    && s.starts_with("/media/")
-                {
-                    *s = s.replacen("/media/", "/api/admin/media/", 1);
-                }
-            }
-            for k in ["webp_srcset", "fallback_srcset"] {
-                if let Some(Value::String(s)) = obj.get_mut(k)
-                    && (s.starts_with("/media/") || s.contains(", /media/"))
-                {
-                    *s = s.replace("/media/", "/api/admin/media/");
-                }
-            }
-            for child in obj.values_mut() {
-                if child.is_object() || child.is_array() {
-                    rewrite_media_urls_in_value(child);
-                }
-            }
-        }
-        Value::Array(arr) => {
-            for item in arr {
-                rewrite_media_urls_in_value(item);
-            }
-        }
-        _ => {}
-    }
-}
-
 pub(crate) fn rewrite_preview_media_urls(mut view: EntryView, type_key: &str) -> EntryView {
     let admin_media = |url: &str| url.replacen("/media/", "/api/admin/media/", 1);
     view.cover_url = view.cover_url.as_deref().map(admin_media);
     if let Some(ref mut cm) = view.cover_media {
-        rewrite_media_urls_in_value(cm);
+        super::rewrite_media_urls_in_value(cm);
     }
     for val in view.fields.values_mut() {
-        rewrite_media_urls_in_value(val);
+        super::rewrite_media_urls_in_value(val);
     }
     for field in &mut view.field_list {
         if let Some(ref mut media) = field.media {
-            rewrite_media_urls_in_value(media);
+            super::rewrite_media_urls_in_value(media);
         }
         for item in &mut field.gallery {
-            rewrite_media_urls_in_value(item);
+            super::rewrite_media_urls_in_value(item);
         }
     }
     if view.url.is_none() {
@@ -265,57 +237,6 @@ pub(crate) fn rewrite_preview_media_urls(mut view: EntryView, type_key: &str) ->
         ));
     }
     view
-}
-
-pub struct PublicThemeContextInput<'a> {
-    pub site: &'a SiteContext<'a>,
-    pub site_options: &'a BTreeMap<String, Value>,
-    pub options: &'a BTreeMap<String, Value>,
-    pub theme_assets: &'a BTreeMap<String, String>,
-    pub menus: &'a BTreeMap<String, crate::storage::menu::MenuViewModel>,
-    pub route_kind: &'a str,
-    pub route_path: Option<&'a str>,
-    pub breadcrumbs: &'a [BreadcrumbItem],
-    pub pagination: &'a PaginationView,
-    pub archive_url: Option<&'a str>,
-    pub previous_url: Option<&'a str>,
-    pub next_url: Option<&'a str>,
-    pub entries: &'a [EntryView],
-    pub related_entries: &'a [EntryView],
-    pub recent_posts: &'a [EntryView],
-    pub taxonomy: Option<&'a Value>,
-    pub content_type: Option<&'a Value>,
-    pub entry: Option<&'a EntryView>,
-    pub search: &'a SearchView,
-}
-
-#[derive(Serialize)]
-pub(super) struct SerializedRouteContext<'a> {
-    pub(super) kind: &'a str,
-    pub(super) path: Option<&'a str>,
-}
-
-#[derive(Serialize)]
-pub(super) struct SerializedThemeContext<'a> {
-    pub(super) site: &'a SiteContext<'a>,
-    pub(super) site_options: &'a BTreeMap<String, Value>,
-    pub(super) options: &'a BTreeMap<String, Value>,
-    pub(super) theme_options: &'a BTreeMap<String, Value>,
-    pub(super) theme_assets: &'a BTreeMap<String, String>,
-    pub(super) menus: &'a BTreeMap<String, crate::storage::menu::MenuViewModel>,
-    pub(super) route: SerializedRouteContext<'a>,
-    pub(super) breadcrumbs: &'a [BreadcrumbItem],
-    pub(super) pagination: &'a PaginationView,
-    pub(super) archive_url: Option<&'a str>,
-    pub(super) previous_url: Option<&'a str>,
-    pub(super) next_url: Option<&'a str>,
-    pub(super) entries: &'a [EntryView],
-    pub(super) related_entries: &'a [EntryView],
-    pub(super) recent_posts: &'a [EntryView],
-    pub(super) taxonomy: Option<&'a Value>,
-    pub(super) content_type: Option<&'a Value>,
-    pub(super) entry: Option<&'a EntryView>,
-    pub(super) search: &'a SearchView,
 }
 
 pub const MAX_RENDER_HOOK_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;

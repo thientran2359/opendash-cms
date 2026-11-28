@@ -106,7 +106,8 @@ pub async fn prepare_entry_translation(
     for (k, v) in &source.values {
         if let Some(fe) = effective.effective_fields.get(k)
             && (caller_role < fe.definition.effective_acl().0
-                || caller_role < fe.definition.effective_acl().1)
+                || caller_role < fe.definition.effective_acl().1
+                || (caller_role < FieldRole::Admin && effective.is_group_admin_only(&fe.source_id)))
         {
             continue;
         }
@@ -183,8 +184,22 @@ pub async fn prepare_entry_translation(
         values: copied_values.clone(),
         term_ids: Some(remapped_term_ids.clone()),
     };
+    let translated_parent =
+        map_parent_translation_in_conn(&mut conn, type_key, source.parent_id, &target_locale)
+            .await?;
+    let loc_ctx = build_entry_location_ctx_in_conn(
+        &mut conn,
+        type_key,
+        None,
+        &target_locale,
+        caller_role,
+        source.page_layout_key.clone(),
+        source.custom_template_key.clone(),
+        &remapped_term_ids,
+    )
+    .await?;
     check_input
-        .validate_against_effective(&effective)
+        .validate_against_effective(&effective, &loc_ctx)
         .map_err(ApiError::unprocessable)?;
 
     Ok(EntryTranslationPlan {
@@ -198,5 +213,7 @@ pub async fn prepare_entry_translation(
         page_layout_key: source.page_layout_key,
         custom_template_key: source.custom_template_key,
         content_mode: source.content_mode,
+        parent_id: translated_parent,
+        menu_order: source.menu_order,
     })
 }

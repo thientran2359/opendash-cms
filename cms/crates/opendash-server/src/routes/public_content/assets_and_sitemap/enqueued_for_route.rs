@@ -53,6 +53,13 @@ pub(crate) async fn render_not_found_response_for_locale(
     };
     let mut budget = overrides::PublicCompositionBudget::default();
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
+    let custom_opts = crate::storage::options_pages::load_active_custom_options_public(
+        db,
+        Some(&resolved_locale),
+        false,
+        Some(&mut budget.render_budget.richtext_nonces),
+    )
+    .await?;
     let locale_ctx =
         seo::build_theme_locale_context(db, Some(&resolved_locale), seo::ThemeLocaleTarget::None)
             .await?;
@@ -82,6 +89,7 @@ pub(crate) async fn render_not_found_response_for_locale(
             route_path: None,
             entry_id: None,
             entry_type_key: None,
+            custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
             archive_url: None,
@@ -89,6 +97,8 @@ pub(crate) async fn render_not_found_response_for_locale(
             next_url: None,
             entries: &empty_entries,
             taxonomy: None,
+            term: None,
+            term_schema: None,
             content_type: None,
             entry: None,
             search: &inactive_search,
@@ -204,11 +214,20 @@ pub(crate) async fn render_canonical_archive(
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
     let schema = &effective_schema.base.descriptor;
-    let offset = (page - 1) * ARCHIVE_SIZE;
-    let (records, total_items) =
-        public_content::list_published_with_total(&db, &type_key, ARCHIVE_SIZE, offset, filters)
-            .await?;
-    let has_more = offset.saturating_add(ARCHIVE_SIZE) < total_items;
+    let per_page = i64::from(schema.settings.archive_per_page).max(1);
+    let offset = (page - 1) * per_page;
+    let (records, total_items) = public_content::list_published_archive_with_total(
+        &db,
+        &type_key,
+        per_page,
+        offset,
+        filters,
+        crate::storage::entries::PublishedListSort::from_content_default_sort(
+            schema.settings.default_sort,
+        ),
+    )
+    .await?;
+    let has_more = offset.saturating_add(per_page) < total_items;
     let mut archive_richtext_nonces = crate::template_sec::RichTextNonceTable::default();
     let entries = {
         let mut conn = db.acquire().await?;
@@ -248,7 +267,7 @@ pub(crate) async fn render_canonical_archive(
         .flatten();
     let pagination = PaginationView::compute(
         page,
-        ARCHIVE_SIZE,
+        per_page,
         total_items,
         previous.clone(),
         next.clone(),
@@ -315,6 +334,13 @@ pub(crate) async fn render_canonical_archive(
         .render_budget
         .richtext_nonces
         .extend(archive_richtext_nonces);
+    let custom_opts = crate::storage::options_pages::load_active_custom_options_public(
+        &db,
+        Some(&locale),
+        false,
+        Some(&mut budget.render_budget.richtext_nonces),
+    )
+    .await?;
     let locale_ctx = seo::build_theme_locale_context(
         &db,
         Some(&locale),
@@ -345,6 +371,7 @@ pub(crate) async fn render_canonical_archive(
             route_path: Some(&canonical_base),
             entry_id: None,
             entry_type_key: None,
+            custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
             archive_url: Some(&canonical_base),
@@ -352,6 +379,8 @@ pub(crate) async fn render_canonical_archive(
             next_url: next.as_deref(),
             entries: &entries,
             taxonomy: None,
+            term: None,
+            term_schema: None,
             content_type: Some(&ct_value),
             entry: None,
             search: &inactive_search,

@@ -13,10 +13,17 @@ import * as api from './api/index.ts';
 import { getHealth } from './api/client.ts';
 import { syncDevManifest } from './api/themes.ts';
 import { AdminShell, isRouteAllowed, parseAdminRoute, type ParsedRoute } from './shell/AdminShell.tsx';
-import { getEffectiveContentTypeTaxonomies, listContentTypes } from './api/content.ts';
+import {
+  getEffectiveContentTypeTaxonomies,
+  listContentTypes,
+} from './api/content.ts';
 import { listTaxonomyDefinitions } from './api/taxonomy.ts';
-import type { OwnedContentType } from './features/content/types.ts';
+import { listOptionsPages } from './api/optionsPages.ts';
 import { ContentTypeSchemaSettings } from './features/content/ContentTypeSchemaSettings.tsx';
+import { FieldGroupsWorkspace } from './features/field-groups/FieldGroupsWorkspace.tsx';
+import { CustomOptionsPageView } from './features/options-pages/CustomOptionsPageView.tsx';
+import { OptionsPagesListPage } from './features/options-pages/OptionsPagesListPage.tsx';
+import type { OptionsPageMenuItem } from './shell/AdminShellMenu.tsx';
 import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
 import { clearPermalinkDrafts, discardPermalinkDraft, PermalinkSettingsPage } from './features/settings/PermalinkSettingsPage.tsx';
@@ -82,8 +89,9 @@ const AppContent: React.FC = () => {
   const [isError, setIsError] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [route, setRoute] = useState<ParsedRoute>(() => parseAdminRoute(window.location.hash, window.location.pathname));
-  const [cptTypes, setCptTypes] = useState<OwnedContentType[]>([]);
+  const [cptTypes, setCptTypes] = useState<api.OwnedContentTypeWithSettings[]>([]);
   const [cptTaxonomies, setCptTaxonomies] = useState<Record<string, Array<{ key: string; label: string }>>>({});
+  const [optionsPages, setOptionsPages] = useState<OptionsPageMenuItem[]>([]);
   const [localeState, setLocaleState] = useState<AdminLocaleState>(EMPTY_ADMIN_LOCALE_STATE);
   const [selectedSchemaTypeKey, setSelectedSchemaTypeKey] = useState<string | null>(null);
   const [siteInstanceId, setSiteInstanceId] = useState<string>('default-site');
@@ -197,11 +205,20 @@ const AppContent: React.FC = () => {
 
   const loadCptTypes = useCallback(async () => {
     try {
-      const [list, definitions] = await Promise.all([
+      const [list, definitions, pagesList] = await Promise.all([
         listContentTypes(),
         listTaxonomyDefinitions().catch(() => []),
+        listOptionsPages().catch(() => []),
       ]);
       setCptTypes(list);
+      setOptionsPages(pagesList.map(p => ({
+        page_key: p.page_key,
+        menu_label: p.menu_label,
+        parent_menu: p.parent_menu,
+        menu_icon: p.menu_icon,
+        menu_position: p.menu_position,
+        min_edit_role: p.min_edit_role,
+      })));
       const defMap = new Map(definitions.map(def => [def.key, def]));
       const customTypes = list.filter(
         ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section' && ct.descriptor.key !== 'pattern',
@@ -209,10 +226,12 @@ const AppContent: React.FC = () => {
       const entries = await Promise.all(
         customTypes.map(async ct => {
           const keys = await getEffectiveContentTypeTaxonomies(ct.descriptor.key).catch(() => []);
-          const items = keys.map(key => ({
-            key,
-            label: defMap.get(key)?.label ?? key,
-          }));
+          const items = keys
+            .filter(key => defMap.get(key)?.settings?.show_in_menu !== false)
+            .map(key => ({
+              key,
+              label: defMap.get(key)?.label ?? key,
+            }));
           return [ct.descriptor.key, items] as const;
         }),
       );
@@ -228,7 +247,7 @@ const AppContent: React.FC = () => {
     acceptedHashRef.current = hash;
     routeRef.current = next;
     setRoute(next);
-    if (requested.view === 'settings' && requested.sub === 'content-types' && requested.typeKey) {
+    if (requested.view === 'content-structure' && requested.sub === 'content-types' && requested.typeKey) {
       setSelectedSchemaTypeKey(requested.typeKey);
     }
   };
@@ -245,7 +264,7 @@ const AppContent: React.FC = () => {
       && studioIdentity(current) !== studioIdentity(next);
     const leavingStudio = switchingStudioTarget && studioDirtyRef.current;
     const leavingPattern = current.view === 'patterns' && current.rawHash !== destination && patternsDirtyRef.current;
-    const leavingSchema = current.view === 'settings' && current.sub === 'content-types'
+    const leavingSchema = current.view === 'content-structure' && current.sub === 'content-types'
       && schemaDirtyRef.current && acceptedHashRef.current !== destination;
     const leavingPermalinks = current.view === 'settings' && current.sub === 'permalinks'
       && acceptedHashRef.current !== destination && permalinkDirtyRef.current;
@@ -558,6 +577,8 @@ const AppContent: React.FC = () => {
       lastAuthenticatedUserId.current = null;
       setRoute(parseAdminRoute('#/dashboard', window.location.pathname));
       setCptTypes([]);
+      setCptTaxonomies({});
+      setOptionsPages([]);
       window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/dashboard');
       acceptedHashRef.current = '#/dashboard';
       setStatus(() => __("Signed out."), false);
@@ -624,6 +645,7 @@ const AppContent: React.FC = () => {
       route={route}
       routeForbidden={Boolean(user && !isRouteAllowed(route, user.role))}
       cptTypes={cptTypes}
+      optionsPages={optionsPages}
       cptTaxonomies={Object.fromEntries(Object.entries(cptTaxonomies).map(([type, terms]) => [
         type, terms.map(term => ({
           ...term, label: term.key === 'category' ? __("Categories") : term.key === 'tag' ? __("Tags") : term.label,
@@ -673,7 +695,7 @@ const AppContent: React.FC = () => {
           selectedTypeKey={selectedSchemaTypeKey}
           onSelectTypeKey={key => {
             if (key) {
-              if (routeRef.current.view === 'settings' && routeRef.current.sub === 'content-types') {
+              if (routeRef.current.view === 'content-structure' && routeRef.current.sub === 'content-types') {
                 navigateHash(`#/content-structure/content-types/${encodeURIComponent(key)}`);
               }
             } else {
@@ -687,6 +709,54 @@ const AppContent: React.FC = () => {
           }}
           onDirtyChange={markSchemaDirty}
         />
+      }
+      contentStructureContent={
+        route.view === 'content-structure' && route.sub === 'taxonomies' ? (
+          <TaxonomyDefinitionsPage
+            key={`${siteInstanceId}:${user?.id ?? 'none'}`}
+            user={user}
+            siteInstanceId={siteInstanceId}
+            csrfToken={csrfToken}
+            onApiError={scopedTaxonomyApiError}
+            onNavigateHash={navigateHash}
+            onDirtyChange={markTermDirty}
+            onDefinitionsChanged={() => { void loadCptTypes(); }}
+          />
+        ) : route.view === 'content-structure' && route.sub === 'field-groups' ? (
+          <FieldGroupsWorkspace
+            key={`${siteInstanceId}:${user?.id ?? 'none'}`}
+            selectedGroupKey={route.typeKey}
+            csrfToken={csrfToken}
+            onNavigateHash={navigateHash}
+            onApiError={scopedTaxonomyApiError}
+            onDirtyChange={markSchemaDirty}
+          />
+        ) : route.view === 'content-structure' && route.sub === 'options-pages' ? (
+          <OptionsPagesListPage
+            key={`${siteInstanceId}:${user?.id ?? 'none'}`}
+            user={user}
+            csrfToken={csrfToken}
+            onApiError={scopedTaxonomyApiError}
+            onDirtyChange={markSchemaDirty}
+            onNavigateHash={navigateHash}
+            onChanged={() => { void loadCptTypes(); }}
+          />
+        ) : undefined
+      }
+      optionsPageContent={
+        route.view === 'options-page' && route.typeKey ? (
+          <CustomOptionsPageView
+            key={`${siteInstanceId}:${user?.id ?? 'none'}:${route.typeKey}`}
+            pageKey={route.typeKey}
+            user={user}
+            siteInstanceId={siteInstanceId}
+            csrfToken={csrfToken}
+            localeState={localeState}
+            onApiError={scopedTaxonomyApiError}
+            onDirtyChange={markSchemaDirty}
+            onNavigateHash={navigateHash}
+          />
+        ) : null
       }
       profileContent={
         <UserProfilePanel
@@ -788,7 +858,7 @@ const AppContent: React.FC = () => {
       taxonomyContent={route.taxonomyMode === 'definitions'
         ? <TaxonomyDefinitionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}`}
             user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={scopedTaxonomyApiError}
-            onNavigateHash={navigateHash} onDirtyChange={markTermDirty} />
+            onNavigateHash={navigateHash} onDirtyChange={markTermDirty} onDefinitionsChanged={() => { void loadCptTypes(); }} />
         : <TaxonomyPage key={`terms-${route.typeKey ?? 'taxonomy'}-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
             kind={route.taxonomyKind ?? 'category'} cptTypeKey={route.typeKey}
             routeMode={route.taxonomyMode === 'edit' ? 'edit' : 'new'}

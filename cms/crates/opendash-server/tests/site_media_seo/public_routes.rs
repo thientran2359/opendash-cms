@@ -447,10 +447,7 @@ async fn custom_entry_routes_redirects_cas_and_privacy() {
         .header("x-csrf-token", &csrf)
         .json(&json!({
             "key": "landing",
-            "label": "Landing",
-            "fields": [
-                { "key": "summary", "label": "Summary", "type": "text" }
-            ]
+            "label": "Landing"
         }))
         .send()
         .await

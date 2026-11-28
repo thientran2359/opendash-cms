@@ -176,6 +176,7 @@ pub(super) fn build_entry_view_with_defs(
     let mut public_values = BTreeMap::new();
     let mut fields = Vec::with_capacity(ordered_defs.len());
 
+    let mut excerpt_plain: Option<String> = None;
     let mut summary_plain: Option<String> = None;
     let mut body_plain: Option<String> = None;
     let mut fallback_plain_parts: Vec<String> = Vec::new();
@@ -231,7 +232,9 @@ pub(super) fn build_entry_view_with_defs(
         public_values.insert(definition.key.clone(), hydrated.clone());
         if let Some(plain) = plain_text_from_field(definition, value) {
             all_plain_parts.push(plain.clone());
-            if definition.key == "summary" && summary_plain.is_none() {
+            if definition.key == "excerpt" && excerpt_plain.is_none() {
+                excerpt_plain = Some(plain);
+            } else if definition.key == "summary" && summary_plain.is_none() {
                 summary_plain = Some(plain);
             } else if definition.key == "body" && body_plain.is_none() {
                 body_plain = Some(plain);
@@ -284,7 +287,9 @@ pub(super) fn build_entry_view_with_defs(
     let cover_url = featured_cover_url.or(first_image_cover_url);
     let cover_media = featured_cover_media.or(first_image_cover_media);
 
-    let excerpt_source = if let Some(ref summary) = summary_plain {
+    let excerpt_source = if let Some(ref explicit) = excerpt_plain {
+        explicit.as_str().to_owned()
+    } else if let Some(ref summary) = summary_plain {
         summary.as_str().to_owned()
     } else if let Some(ref body) = body_plain {
         body.as_str().to_owned()
@@ -343,6 +348,8 @@ pub(super) fn build_entry_view_with_defs(
         title: record.title.clone(),
         slug: record.slug.clone(),
         url,
+        parent: None,
+        menu_order: record.menu_order,
         created_at: record.created_at.clone(),
         updated_at: record.updated_at.clone(),
         published_at: record.published_at.clone(),
@@ -372,11 +379,6 @@ pub fn ordered_public_field_defs<'a>(
 ) -> Vec<&'a opendash_core::field_schema::FieldSpec> {
     let mut seen = BTreeSet::new();
     let mut ordered_keys: Vec<&str> = Vec::with_capacity(effective_schema.effective_fields.len());
-    for field in &effective_schema.base.descriptor.fields {
-        if seen.insert(field.key.as_str()) {
-            ordered_keys.push(field.key.as_str());
-        }
-    }
     for group in &effective_schema.attached_groups {
         for field in &group.fields {
             if seen.insert(field.key.as_str()) {
@@ -403,16 +405,60 @@ pub fn ordered_public_field_defs<'a>(
         .collect()
 }
 
+pub fn ordered_public_field_defs_for_entry<'a>(
+    effective_schema: &'a EffectiveContentSchema,
+    max_view_role: FieldRole,
+    eval_ctx: &opendash_core::content::LocationEvalContext,
+) -> Vec<&'a opendash_core::field_schema::FieldSpec> {
+    let active_groups: BTreeSet<&str> = effective_schema
+        .attached_groups
+        .iter()
+        .filter(|grp| {
+            grp.is_runtime_active()
+                && !opendash_core::content::is_restricted_to_admin_only(&grp.location)
+                && opendash_core::content::evaluate_location_rules(&grp.location, eval_ctx)
+        })
+        .map(|grp| grp.group_id.as_str())
+        .collect();
+    let mut seen = BTreeSet::new();
+    let mut ordered_keys: Vec<&str> = Vec::with_capacity(effective_schema.effective_fields.len());
+    for group in &effective_schema.attached_groups {
+        if !active_groups.contains(group.group_id.as_str()) {
+            continue;
+        }
+        for field in &group.fields {
+            if seen.insert(field.key.as_str()) {
+                ordered_keys.push(field.key.as_str());
+            }
+        }
+    }
+    for (key, fe) in &effective_schema.effective_fields {
+        if fe.source_id.starts_with("base:") && seen.insert(key.as_str()) {
+            ordered_keys.push(key.as_str());
+        }
+    }
+
+    ordered_keys
+        .into_iter()
+        .filter_map(|key| effective_schema.effective_fields.get(key))
+        .filter(|fe| {
+            (fe.source_id.starts_with("base:") || active_groups.contains(fe.source_id.as_str()))
+                && !fe.definition.is_ui_only()
+                && fe.effective_status == EffectiveFieldStatus::Active
+                && fe.definition.effective_acl().2 == PublicExposure::Public
+                && fe.definition.effective_acl().0 <= max_view_role
+        })
+        .map(|fe| &fe.definition)
+        .collect()
+}
+
 pub fn entry_view_with_url(
     record: ContentEntryRecord,
     schema: &ContentTypeDefinition,
     url: Option<String>,
 ) -> EntryView {
-    let vis = opendash_core::field_schema::HydrationVisibility::ContentPublic {
-        max_view_role: FieldRole::Editor,
-    };
-    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> =
-        schema.fields.iter().filter(|d| vis.allows(d)).collect();
+    let core_specs = core_specs_for_settings(&schema.key, &schema.settings);
+    let ordered_defs: Vec<&opendash_core::field_schema::FieldSpec> = core_specs.iter().collect();
     build_entry_view_with_defs(
         &record,
         &schema.key,
@@ -424,6 +470,30 @@ pub fn entry_view_with_url(
         None,
         None,
     )
+}
+
+fn core_specs_for_settings(
+    type_key: &str,
+    settings: &opendash_core::content::ContentTypeSettings,
+) -> Vec<opendash_core::field_schema::FieldSpec> {
+    use opendash_core::content::ContentSupport;
+    use opendash_core::field_schema::{FieldSpec, FieldType, MediaFieldKind};
+    if matches!(type_key, "pattern" | "section") {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if settings.supports(ContentSupport::Editor) || settings.supports(ContentSupport::Builder) {
+        out.push(FieldSpec::new(FieldType::Richtext, "body", "Nội dung"));
+    }
+    if settings.supports(ContentSupport::FeaturedImage) {
+        let mut fi = FieldSpec::new(FieldType::Media, "featured_image", "Ảnh đại diện");
+        fi.media_kind = Some(MediaFieldKind::Image);
+        out.push(fi);
+    }
+    if settings.supports(ContentSupport::Excerpt) {
+        out.push(FieldSpec::new(FieldType::Textarea, "excerpt", "Tóm tắt"));
+    }
+    out
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -438,6 +508,33 @@ pub fn build_hydrated_entry_view_with_context(
     richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
 ) -> EntryView {
     let ordered_defs = ordered_public_field_defs(effective_schema, max_view_role);
+    build_entry_view_with_defs(
+        record,
+        &effective_schema.base.descriptor.key,
+        &ordered_defs,
+        url,
+        terms,
+        eligible_public_taxonomies,
+        max_view_role,
+        hydration_ctx,
+        richtext_nonces,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_hydrated_entry_view_with_eval_context(
+    record: &ContentEntryRecord,
+    effective_schema: &EffectiveContentSchema,
+    url: Option<String>,
+    terms: &[PublicTermView],
+    eligible_public_taxonomies: &[String],
+    max_view_role: FieldRole,
+    eval_ctx: &opendash_core::content::LocationEvalContext,
+    hydration_ctx: Option<&crate::field_hydrate::HydrationContext<'_>>,
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> EntryView {
+    let ordered_defs =
+        ordered_public_field_defs_for_entry(effective_schema, max_view_role, eval_ctx);
     build_entry_view_with_defs(
         record,
         &effective_schema.base.descriptor.key,

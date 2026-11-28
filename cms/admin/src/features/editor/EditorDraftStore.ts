@@ -78,6 +78,8 @@ export interface EditorDraftPayload {
   cleared_fields: string[];
   term_ids: number[];
   primary_category_term_id: number | null;
+  parent_id?: number | null;
+  menu_order?: number;
   page_layout_key?: string | null;
   custom_template_key?: string | null;
   custom_path?: string | null;
@@ -119,6 +121,8 @@ export function diffEditorPayload(
     'content_mode',
     'term_ids',
     'primary_category_term_id',
+    'parent_id',
+    'menu_order',
     'page_layout_key',
     'custom_template_key',
     'custom_path',
@@ -358,6 +362,12 @@ export class EditorDraftStore {
       primary_category_term_id: savedDirty.has('primary_category_term_id')
         && freshConfig.taxonomies.includes('category')
         ? (saved.payload.primary_category_term_id ?? null) : fresh.primary_category_term_id,
+      parent_id: savedDirty.has('parent_id')
+        ? (saved.payload.parent_id ?? null)
+        : (fresh.parent_id ?? null),
+      menu_order: savedDirty.has('menu_order')
+        ? (saved.payload.menu_order ?? 0)
+        : (fresh.menu_order ?? 0),
       page_layout_key: savedDirty.has('page_layout_key')
         ? (saved.payload.page_layout_key ?? null)
         : (fresh.page_layout_key ?? null),

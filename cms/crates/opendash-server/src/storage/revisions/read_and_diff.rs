@@ -169,6 +169,8 @@ pub async fn get_entry_revision_filtered(
         page_layout_key: rec.payload.page_layout_key,
         custom_template_key: rec.payload.custom_template_key,
         seo: rec.payload.seo,
+        parent_id: rec.payload.parent_id,
+        menu_order: rec.payload.menu_order,
         has_hidden_admin_fields,
         missing_refs,
     })
@@ -261,7 +263,9 @@ pub(super) async fn materialize_autosave_payload_in_conn(
                 primary_category_touched, primary_category_term_id,
                 page_layout_touched, page_layout_key,
                 custom_template_touched, custom_template_key,
-                seo_touched, seo_json, updated_at
+                seo_touched, seo_json,
+                parent_id_touched, parent_id, menu_order_touched, menu_order,
+                updated_at
            FROM entry_autosaves
           WHERE entry_id = ? AND user_id = ? AND content_type_key = ?",
     )
@@ -302,6 +306,8 @@ pub(super) async fn materialize_autosave_payload_in_conn(
                 page_layout_key: None,
                 custom_template_key: None,
                 seo: None,
+                parent_id: None,
+                menu_order: 0,
             },
         ));
     }
@@ -384,6 +390,16 @@ pub(super) async fn materialize_autosave_payload_in_conn(
     } else {
         live.payload.seo.clone()
     };
+    let parent_id = if row.try_get::<i64, _>("parent_id_touched")? != 0 {
+        row.try_get("parent_id")?
+    } else {
+        live.payload.parent_id
+    };
+    let menu_order = if row.try_get::<i64, _>("menu_order_touched")? != 0 {
+        row.try_get::<Option<i32>, _>("menu_order")?.unwrap_or(0)
+    } else {
+        live.payload.menu_order
+    };
 
     Ok((
         meta,
@@ -397,6 +413,8 @@ pub(super) async fn materialize_autosave_payload_in_conn(
             page_layout_key,
             custom_template_key,
             seo,
+            parent_id,
+            menu_order,
         },
     ))
 }

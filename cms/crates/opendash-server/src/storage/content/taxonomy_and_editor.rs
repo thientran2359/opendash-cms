@@ -43,6 +43,147 @@ pub(in crate::storage) fn parse_declaration_state(raw: &str) -> ApiResult<Declar
     }
 }
 
+pub(in crate::storage) fn parse_domain(
+    raw: &str,
+) -> ApiResult<opendash_core::content::FieldGroupDomain> {
+    match raw {
+        "content" => Ok(opendash_core::content::FieldGroupDomain::Content),
+        "term" => Ok(opendash_core::content::FieldGroupDomain::Term),
+        "options_page" => Ok(opendash_core::content::FieldGroupDomain::OptionsPage),
+        _ => Err(ApiError::internal("domain của field group không hợp lệ.")),
+    }
+}
+
+pub(in crate::storage) fn domain_to_db(
+    domain: opendash_core::content::FieldGroupDomain,
+) -> &'static str {
+    match domain {
+        opendash_core::content::FieldGroupDomain::Content => "content",
+        opendash_core::content::FieldGroupDomain::Term => "term",
+        opendash_core::content::FieldGroupDomain::OptionsPage => "options_page",
+    }
+}
+
+pub(in crate::storage) fn parse_location_rules(
+    raw: &str,
+) -> ApiResult<opendash_core::content::LocationRuleGroups> {
+    serde_json::from_str(raw)
+        .map_err(|_| ApiError::internal("location_rules_json của field group không hợp lệ."))
+}
+
+pub(in crate::storage) fn parse_presentation(
+    raw: &str,
+    legacy_region: &str,
+    legacy_order: i32,
+    legacy_collapsible: bool,
+) -> ApiResult<opendash_core::content::FieldGroupPresentation> {
+    if raw == "{}" || raw.trim().is_empty() {
+        let region = EditorRegion::from_db(legacy_region)
+            .ok_or_else(|| ApiError::internal("default_region của field group không hợp lệ."))?;
+        return Ok(opendash_core::content::FieldGroupPresentation {
+            region,
+            order: legacy_order,
+            collapsible: legacy_collapsible,
+            ..Default::default()
+        });
+    }
+    serde_json::from_str(raw)
+        .map_err(|_| ApiError::internal("presentation_json của field group không hợp lệ."))
+}
+
+pub(in crate::storage) async fn load_attached_groups_in_tx(
+    conn: &mut SqliteConnection,
+    target_kind: &str,
+    target_key: &str,
+    domain: opendash_core::content::FieldGroupDomain,
+) -> ApiResult<Vec<AttachedFieldGroupSnapshot>> {
+    if !table_exists_in_tx(conn, "content_field_groups").await?
+        || !table_exists_in_tx(conn, "content_field_group_targets").await?
+    {
+        return Ok(Vec::new());
+    }
+    let domain_str = domain_to_db(domain);
+    let group_rows: Vec<(
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        i32,
+        i64,
+        String,
+        i64,
+        String,
+    )> = sqlx::query_as(
+        "SELECT g.group_id, g.owner_kind, g.owner_id, g.local_key, g.title, g.description,
+                g.fields_json, g.location_rules_json, g.presentation_json, g.active,
+                g.default_region, g.default_order, g.collapsible, g.status, g.version,
+                t.association_state
+           FROM content_field_group_targets t
+           JOIN content_field_groups g ON g.group_id = t.group_id
+          WHERE t.target_kind = ? AND t.target_key IN (?, '*') AND g.domain = ?
+          ORDER BY g.group_id ASC",
+    )
+    .bind(target_kind)
+    .bind(target_key)
+    .bind(domain_str)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    let mut snapshots = Vec::with_capacity(group_rows.len());
+    for (
+        group_id,
+        g_owner_kind,
+        g_owner_id,
+        local_key,
+        title,
+        description,
+        fields_json,
+        loc_json,
+        pres_json,
+        active_int,
+        def_region_str,
+        def_order,
+        collapsible_int,
+        g_status_str,
+        version,
+        assoc_str,
+    ) in group_rows
+    {
+        let fields: Vec<opendash_core::field_schema::FieldSpec> =
+            serde_json::from_str(&fields_json).map_err(|_| {
+                ApiError::internal("Dữ liệu fields_json của field group không hợp lệ.")
+            })?;
+        let location = parse_location_rules(&loc_json)?;
+        let presentation =
+            parse_presentation(&pres_json, &def_region_str, def_order, collapsible_int != 0)?;
+        let status = FieldGroupStatus::from_db(&g_status_str)
+            .ok_or_else(|| ApiError::internal("Trạng thái field group không hợp lệ."))?;
+        snapshots.push(AttachedFieldGroupSnapshot {
+            group_id,
+            owner: parse_owner(&g_owner_kind, g_owner_id)?,
+            local_key,
+            title,
+            description,
+            domain,
+            location,
+            presentation,
+            active: active_int != 0,
+            fields,
+            status,
+            association_state: parse_declaration_state(&assoc_str)?,
+            version,
+        });
+    }
+    Ok(snapshots)
+}
+
 pub fn map_input_validation_error(msg: &'static str) -> ApiError {
     if msg.starts_with("field_key_collision:") {
         ApiError::conflict(msg)
@@ -52,6 +193,9 @@ pub fn map_input_validation_error(msg: &'static str) -> ApiError {
         || msg.starts_with("reserved_panel_namespace:")
         || msg.starts_with("invalid_panel_region:")
         || msg.starts_with("duplicate_panel_id:")
+        || msg.starts_with("sync_entry_terms_location_cycle:")
+        || msg.starts_with("duplicate_sync_entry_terms_taxonomy:")
+        || msg.starts_with("invalid_location_rules_domain:")
     {
         ApiError::unprocessable(msg)
     } else {
@@ -73,7 +217,10 @@ pub fn map_transition_error(err: SchemaTransitionError, incompat_as_conflict: bo
         SchemaTransitionError::InvalidFieldAcl(_)
         | SchemaTransitionError::InvalidFieldDefault(_)
         | SchemaTransitionError::AdminRequiredFieldMissingDefault(_)
-        | SchemaTransitionError::RequiredFieldHiddenOrInaccessible(_) => {
+        | SchemaTransitionError::RequiredFieldHiddenOrInaccessible(_)
+        | SchemaTransitionError::InvalidLocationRulesDomain(_)
+        | SchemaTransitionError::SyncEntryTermsLocationCycle(_)
+        | SchemaTransitionError::DuplicateSyncEntryTermsTaxonomy(_) => {
             ApiError::unprocessable(err.message())
         }
     }
@@ -344,6 +491,7 @@ pub(in crate::storage) async fn load_plugin_action_panels_for_type_in_tx(
                 min_view_role,
                 min_edit_role,
                 collapsible: ep.collapsible,
+                presentation: Default::default(),
                 required_core: false,
                 effective_status: EffectiveFieldStatus::Active,
             });

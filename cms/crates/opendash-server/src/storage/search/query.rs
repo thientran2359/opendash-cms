@@ -77,6 +77,8 @@ struct SearchEntryDbRow {
     custom_template_key: Option<String>,
     content_mode: String,
     primary_category_term_id: Option<i64>,
+    parent_id: Option<i64>,
+    menu_order: i32,
     rank_score: f64,
 }
 
@@ -213,7 +215,7 @@ pub async fn query_public_search_in_conn(
                 e.locale, e.translation_group_id, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
                 e.page_layout_key, e.custom_template_key, e.content_mode,
-                e.primary_category_term_id,
+                e.primary_category_term_id, e.parent_id, e.menu_order,
                 bm25(entry_search_fts, 10.0, 5.0, 1.0, 3.0) AS rank_score
            FROM entry_search_fts
            JOIN content_entries e ON e.id = entry_search_fts.rowid
@@ -358,6 +360,8 @@ async fn hydrate_search_hits_in_conn(
             custom_template_key: row.custom_template_key,
             content_mode,
             publication_status: row.publication_status,
+            parent_id: row.parent_id,
+            menu_order: row.menu_order,
             version: row.version,
             created_at: row.created_at,
             updated_at: row.updated_at,

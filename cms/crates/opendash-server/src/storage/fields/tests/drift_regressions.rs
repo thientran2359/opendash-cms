@@ -78,7 +78,8 @@ async fn f01_media_is_referenced_detects_nested_repeater_and_group_media_on_publ
     let def = ContentTypeDefinition {
         key: "showcase".into(),
         label: "Showcase".into(),
-        fields: vec![rep, grp],
+        singular_label: None,
+        description: None,
         settings: ContentTypeSettings::default(),
     };
     sqlx::query(
@@ -89,6 +90,23 @@ async fn f01_media_is_referenced_detects_nested_repeater_and_group_media_on_publ
     .execute(&db)
     .await
     .unwrap();
+    let loc_showcase = serde_json::to_string(&vec![vec![
+        opendash_core::content::LocationRule::content_type_eq("showcase"),
+    ]])
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, domain, location_rules_json, default_region, default_order, collapsible, status, version)
+         VALUES ('user:showcase_base', 'user', NULL, 'showcase_base', 'Base', '', ?, 'content', ?, 'main_bottom', 0, 0, 'active', 1)",
+    )
+    .bind(serde_json::to_string(&vec![rep, grp]).unwrap())
+    .bind(&loc_showcase)
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO content_field_group_targets (group_id, target_kind, target_key, association_state) VALUES ('user:showcase_base', 'content_type', 'showcase', 'declared')")
+        .execute(&db)
+        .await
+        .unwrap();
 
     let vals = json!({
         "slides": [{"slide_img": card_media}],
@@ -142,14 +160,15 @@ async fn f01_media_is_referenced_detects_nested_repeater_and_group_media_on_publ
     let mut fg_img = FieldSpec::new(FieldType::Media, "fg_banner", "Banner");
     fg_img.media_kind = Some(MediaFieldKind::Image);
     sqlx::query(
-        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, default_region, default_order, collapsible, status, version)
-         VALUES ('user:showcase_fg', 'user', NULL, 'showcase_fg', 'Extra', '', ?, 'main_bottom', 0, 0, 'active', 1)",
+        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, domain, location_rules_json, default_region, default_order, collapsible, status, version)
+         VALUES ('user:showcase_fg', 'user', NULL, 'showcase_fg', 'Extra', '', ?, 'content', ?, 'main_bottom', 0, 0, 'active', 1)",
     )
     .bind(serde_json::to_string(&vec![fg_img]).unwrap())
+    .bind(&loc_showcase)
     .execute(&db)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO content_field_group_targets (group_id, type_key, association_state) VALUES ('user:showcase_fg', 'showcase', 'declared')")
+    sqlx::query("INSERT INTO content_field_group_targets (group_id, target_kind, target_key, association_state) VALUES ('user:showcase_fg', 'content_type', 'showcase', 'declared')")
         .execute(&db)
         .await
         .unwrap();
@@ -206,7 +225,8 @@ async fn f04_load_entry_ref_hydration_prefers_featured_image_and_ignores_non_ima
     let def = ContentTypeDefinition {
         key: "report".into(),
         label: "Báo cáo".into(),
-        fields: vec![a_file, b_feat],
+        singular_label: None,
+        description: None,
         settings: ContentTypeSettings::default(),
     };
     sqlx::query(
@@ -217,6 +237,24 @@ async fn f04_load_entry_ref_hydration_prefers_featured_image_and_ignores_non_ima
     .execute(&db)
     .await
     .unwrap();
+    let loc_report = serde_json::to_string(&vec![vec![
+        opendash_core::content::LocationRule::content_type_eq("report"),
+    ]])
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, domain, location_rules_json, default_region, default_order, collapsible, status, version)
+         VALUES ('user:report_base', 'user', NULL, 'report_base', 'Base', '', ?, 'content', ?, 'main_bottom', 0, 0, 'active', 1)",
+    )
+    .bind(serde_json::to_string(&vec![a_file]).unwrap())
+    .bind(&loc_report)
+    .execute(&db)
+    .await
+    .unwrap();
+    let _ = b_feat;
+    sqlx::query("INSERT INTO content_field_group_targets (group_id, target_kind, target_key, association_state) VALUES ('user:report_base', 'content_type', 'report', 'declared')")
+        .execute(&db)
+        .await
+        .unwrap();
 
     // Even when featured_image is not set on the entry, a_attachment points to a non-image ('file')
     // asset -> cover_url must stay None (m.kind == "image" strictly enforced).
@@ -290,12 +328,29 @@ async fn f05_media_validation_rejects_wrong_kind_and_preserves_409_for_quarantin
             descriptor: ContentTypeDefinition {
                 key: "gallery_item".into(),
                 label: "Ảnh".into(),
-                fields: vec![photo],
+                singular_label: None,
+                description: None,
                 settings: ContentTypeSettings::default(),
             },
         },
         1,
-        vec![],
+        vec![opendash_core::content::AttachedFieldGroupSnapshot {
+            group_id: "user:gallery_fg".into(),
+            owner: ResourceOwner::User,
+            local_key: "gallery_fg".into(),
+            title: "Gallery FG".into(),
+            description: String::new(),
+            domain: opendash_core::content::FieldGroupDomain::Content,
+            location: vec![vec![opendash_core::content::LocationRule::content_type_eq(
+                "gallery_item",
+            )]],
+            presentation: opendash_core::content::FieldGroupPresentation::default(),
+            active: true,
+            fields: vec![photo],
+            status: opendash_core::content::FieldGroupStatus::Active,
+            association_state: DeclarationState::Declared,
+            version: 1,
+        }],
     )
     .unwrap();
 
@@ -355,7 +410,8 @@ async fn f11_f16_context_fields_without_list_and_term_extension_media_pins() {
         serde_json::to_string(&ContentTypeDefinition {
             key: "priv_ctx".into(),
             label: "Private".into(),
-            fields: vec![priv_f],
+            singular_label: None,
+            description: None,
             settings: ContentTypeSettings::default(),
         })
         .unwrap(),
@@ -363,6 +419,23 @@ async fn f11_f16_context_fields_without_list_and_term_extension_media_pins() {
     .execute(&mut *conn)
     .await
     .unwrap();
+    let loc_priv = serde_json::to_string(&vec![vec![
+        opendash_core::content::LocationRule::content_type_eq("priv_ctx"),
+    ]])
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, domain, location_rules_json, default_region, default_order, collapsible, status, version)
+         VALUES ('user:priv_fg', 'user', NULL, 'priv_fg', 'Priv', '', ?, 'content', ?, 'main_bottom', 0, 0, 'active', 1)",
+    )
+    .bind(serde_json::to_string(&vec![priv_f]).unwrap())
+    .bind(&loc_priv)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO content_field_group_targets (group_id, target_kind, target_key, association_state) VALUES ('user:priv_fg', 'content_type', 'priv_ctx', 'declared')")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
     let opts = list_dynamic_options(
         &db,
         &tmp.0,
@@ -375,13 +448,22 @@ async fn f11_f16_context_fields_without_list_and_term_extension_media_pins() {
     .unwrap();
     assert!(!opts.iter().any(|o| o.value == "secret_key"));
 
-    // F-16: term_extension_values JSON is parsed and pinned media IDs are detected.
+    // F-16: taxonomy_terms.values_json + term_field_media_refs pinned media IDs are detected.
     let pin_id = "e".repeat(64);
+    sqlx::query(
+        "INSERT INTO media_assets (id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height, lifecycle_state, generation, version)
+         VALUES (?, 'image', 'pin.png', 'image/png', 'png', 100, 10, 10, 10, 10, 'active', 1, 1)",
+    )
+    .bind(&pin_id)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
     sqlx::query("INSERT INTO plugins(id,version,name,manifest_json,wasm_blob) VALUES ('p1','1.0.0','P1','{}',X'00')")
         .execute(&mut *conn)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO taxonomy_terms(kind,slug,name,locale,translation_group_id) VALUES ('category','news','News','vi','tg-news')")
+    sqlx::query("INSERT INTO taxonomy_terms(kind,slug,name,locale,translation_group_id,values_json) VALUES ('category','news','News','vi','tg-news',?)")
+        .bind(json!({"banner": pin_id}).to_string())
         .execute(&mut *conn)
         .await
         .unwrap();
@@ -390,11 +472,11 @@ async fn f11_f16_context_fields_without_list_and_term_extension_media_pins() {
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO term_extension_values (term_id, owner_kind, owner_id, local_key, values_json)
-         VALUES (?, 'plugin', 'p1', 'ext_panel', ?)",
+        "INSERT INTO term_field_media_refs (term_id, locale, field_key, media_id)
+         VALUES (?, 'vi', 'banner', ?)",
     )
     .bind(term_id)
-    .bind(json!({"banner": pin_id}).to_string())
+    .bind(&pin_id)
     .execute(&mut *conn)
     .await
     .unwrap();
@@ -402,12 +484,7 @@ async fn f11_f16_context_fields_without_list_and_term_extension_media_pins() {
     let mut tx = db.begin().await.unwrap();
     let summary = collect_pins_in_tx(&mut tx, &pin_id).await.unwrap();
     assert!(summary.is_referenced());
-    assert!(
-        summary
-            .pins
-            .iter()
-            .any(|p| p.source_kind == "term_extension")
-    );
+    assert!(summary.pins.iter().any(|p| p.source_kind == "term_meta"));
 }
 
 #[tokio::test]
@@ -434,7 +511,8 @@ async fn f11_cpt_target_fields_excludes_private_and_includes_public_field_groups
     let def = ContentTypeDefinition {
         key: "guide".into(),
         label: "Guide".into(),
-        fields: vec![ui_tab, pub_base, priv_base, admin_base],
+        singular_label: None,
+        description: None,
         settings: ContentTypeSettings::default(),
     };
     sqlx::query(
@@ -458,15 +536,20 @@ async fn f11_cpt_target_fields_excludes_private_and_includes_public_field_groups
         min_edit_role: Some(FieldRole::Editor),
         public_exposure: Some(PublicExposure::Private),
     });
+    let loc_guide = serde_json::to_string(&vec![vec![
+        opendash_core::content::LocationRule::content_type_eq("guide"),
+    ]])
+    .unwrap();
     sqlx::query(
-        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, default_region, default_order, collapsible, status, version)
-         VALUES ('user:guide_fg', 'user', NULL, 'guide_fg', 'Guide FG', '', ?, 'main_bottom', 0, 0, 'active', 1)",
+        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, domain, location_rules_json, default_region, default_order, collapsible, status, version)
+         VALUES ('user:guide_fg', 'user', NULL, 'guide_fg', 'Guide FG', '', ?, 'content', ?, 'main_bottom', 0, 0, 'active', 1)",
     )
-    .bind(serde_json::to_string(&vec![fg_pub, fg_priv]).unwrap())
+    .bind(serde_json::to_string(&vec![ui_tab, pub_base, priv_base, admin_base, fg_pub, fg_priv]).unwrap())
+    .bind(&loc_guide)
     .execute(&db)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO content_field_group_targets (group_id, type_key, association_state) VALUES ('user:guide_fg', 'guide', 'declared')")
+    sqlx::query("INSERT INTO content_field_group_targets (group_id, target_kind, target_key, association_state) VALUES ('user:guide_fg', 'content_type', 'guide', 'declared')")
         .execute(&db)
         .await
         .unwrap();

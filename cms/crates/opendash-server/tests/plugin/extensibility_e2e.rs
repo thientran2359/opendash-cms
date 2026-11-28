@@ -1288,7 +1288,7 @@ async fn cuj2_prepare_save_editor_acl_and_contact_before_submit_pre_db_gate() {
     let client = Client::builder().redirect(Policy::none()).build().unwrap();
     let (cookie, csrf) = setup_and_login(&client, &base_url).await;
 
-    // 1. Custom CPT with editor-writable public field and admin-only private field
+    // 1. Custom CPT + FieldGroup with editor-writable public field and admin-only private field
     let ct_resp = client
         .post(format!("{base_url}/api/admin/content-types"))
         .header("Cookie", &cookie)
@@ -1297,6 +1297,26 @@ async fn cuj2_prepare_save_editor_acl_and_contact_before_submit_pre_db_gate() {
         .json(&json!({
             "key": "product_s04",
             "label": "Product S04",
+            "settings": {
+                "public": true,
+                "has_archive": true,
+                "publication": "immediate",
+                "supports": ["editor"]
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ct_resp.status().as_u16(), 201);
+    let fg_resp = client
+        .post(format!("{base_url}/api/admin/content-field-groups"))
+        .header("Cookie", &cookie)
+        .header("Origin", &base_url)
+        .header("X-CSRF-Token", &csrf)
+        .json(&json!({
+            "local_key": "product_s04_fields",
+            "title": "Product S04 Fields",
+            "target_types": ["product_s04"],
             "fields": [
                 {
                     "key": "sku_normalized",
@@ -1318,18 +1338,12 @@ async fn cuj2_prepare_save_editor_acl_and_contact_before_submit_pre_db_gate() {
                         "public_exposure": "private"
                     }
                 }
-            ],
-            "settings": {
-                "public": true,
-                "has_archive": true,
-                "publication": "immediate",
-                "supports": ["editor"]
-            }
+            ]
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(ct_resp.status(), StatusCode::CREATED);
+    assert_eq!(fg_resp.status().as_u16(), 201);
 
     // Create editor account
     let user_resp = client

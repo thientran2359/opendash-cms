@@ -81,13 +81,7 @@ pub fn filter_entry_values_for_role(
     effective: &EffectiveContentSchema,
     caller_role: FieldRole,
 ) {
-    record.values.retain(|key, _| {
-        effective
-            .effective_fields
-            .get(key)
-            .map(|fe| caller_role >= fe.definition.effective_acl().0)
-            .unwrap_or(true)
-    });
+    filter_values_map_for_role(&mut record.values, effective, caller_role);
 }
 
 pub(in crate::storage) async fn verify_schema_token_in_tx(
@@ -197,9 +191,11 @@ pub struct CompositePreflightPlan {
     pub locale: String,
     pub translation_group_id: Option<String>,
     pub effective: EffectiveContentSchema,
-    pub effective_ct_def: ContentTypeDefinition,
     pub merged_input: ContentEntryInput,
     pub publication_status: Option<String>,
+    pub parent_id: Option<i64>,
+    pub menu_order: i32,
+    pub loc_ctx: opendash_core::content::LocationEvalContext,
 }
 
 /// Check a selection under the same SQLite writer as the entry mutation. A
@@ -288,21 +284,6 @@ pub(in crate::storage) fn actor_field_role(role: auth::Role) -> FieldRole {
     match role {
         auth::Role::Admin => FieldRole::Admin,
         auth::Role::Editor => FieldRole::Editor,
-    }
-}
-
-pub(in crate::storage) fn effective_as_ct_def(
-    effective: &EffectiveContentSchema,
-) -> ContentTypeDefinition {
-    ContentTypeDefinition {
-        key: effective.base.descriptor.key.clone(),
-        label: effective.base.descriptor.label.clone(),
-        settings: effective.base.descriptor.settings.clone(),
-        fields: effective
-            .effective_fields
-            .values()
-            .map(|fe| fe.definition.clone())
-            .collect(),
     }
 }
 

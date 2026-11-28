@@ -33,25 +33,33 @@ pub(super) struct ExistingAutosaveRow {
     pub(super) custom_template_key: Option<String>,
     pub(super) seo_touched: bool,
     pub(super) seo: Option<CanonicalRevisionSeo>,
+    pub(super) parent_id_touched: bool,
+    pub(super) parent_id: Option<i64>,
+    pub(super) menu_order_touched: bool,
+    pub(super) menu_order: Option<i32>,
     pub(super) updated_at: String,
 }
 
-pub(super) type MergedAutosaveFields = (
-    String,
-    ContentMode,
-    BTreeMap<String, Value>,
-    Vec<String>,
-    Option<String>,
-    Vec<i64>,
-    bool,
-    Option<i64>,
-    bool,
-    Option<String>,
-    bool,
-    Option<String>,
-    bool,
-    Option<CanonicalRevisionSeo>,
-);
+pub(super) struct MergedAutosaveFields {
+    pub(super) title: String,
+    pub(super) content_mode: ContentMode,
+    pub(super) values: BTreeMap<String, Value>,
+    pub(super) cleared_fields: Vec<String>,
+    pub(super) builder_document_json: Option<String>,
+    pub(super) term_ids: Vec<i64>,
+    pub(super) primary_category_touched: bool,
+    pub(super) primary_category_term_id: Option<i64>,
+    pub(super) page_layout_touched: bool,
+    pub(super) page_layout_key: Option<String>,
+    pub(super) custom_template_touched: bool,
+    pub(super) custom_template_key: Option<String>,
+    pub(super) seo_touched: bool,
+    pub(super) seo: Option<CanonicalRevisionSeo>,
+    pub(super) parent_id_touched: bool,
+    pub(super) parent_id: Option<i64>,
+    pub(super) menu_order_touched: bool,
+    pub(super) menu_order: Option<i32>,
+}
 
 fn parse_surface(raw: &str) -> ApiResult<AutosaveSurface> {
     match raw {
@@ -73,7 +81,10 @@ pub(super) async fn load_existing_autosave_in_conn(
                 primary_category_touched, primary_category_term_id,
                 page_layout_touched, page_layout_key,
                 custom_template_touched, custom_template_key,
-                seo_touched, seo_json, updated_at
+                seo_touched, seo_json,
+                parent_id_touched, parent_id,
+                menu_order_touched, menu_order,
+                updated_at
            FROM entry_autosaves
           WHERE entry_id = ? AND user_id = ? AND content_type_key = ?",
     )
@@ -114,6 +125,10 @@ pub(super) async fn load_existing_autosave_in_conn(
         custom_template_key: row.try_get("custom_template_key")?,
         seo_touched: row.try_get::<i64, _>("seo_touched")? != 0,
         seo,
+        parent_id_touched: row.try_get::<i64, _>("parent_id_touched")? != 0,
+        parent_id: row.try_get("parent_id")?,
+        menu_order_touched: row.try_get::<i64, _>("menu_order_touched")? != 0,
+        menu_order: row.try_get("menu_order")?,
         updated_at: row.try_get("updated_at")?,
     }))
 }
@@ -127,6 +142,8 @@ pub(super) fn validate_pattern_autosave_input(input: &AutosaveUpsertInput) -> Ap
         || !matches!(input.page_layout_key, PatchField::Omitted)
         || !matches!(input.custom_template_key, PatchField::Omitted)
         || !matches!(input.seo, PatchField::Omitted)
+        || !matches!(input.parent_id, PatchField::Omitted)
+        || !matches!(input.menu_order, PatchField::Omitted)
     {
         return Err(ApiError::bad_request(
             "Pattern autosave chỉ hỗ trợ source_surface = 'studio' và builder_document.",
@@ -162,22 +179,26 @@ pub(super) fn build_pattern_autosave_row(
             .unwrap_or_else(|| live.payload.title.clone()),
         PatchField::Clear => unreachable!("validated at route layer"),
     };
-    Ok((
+    Ok(MergedAutosaveFields {
         title,
-        ContentMode::Builder,
-        BTreeMap::new(),
-        Vec::new(),
-        Some(doc_raw),
-        Vec::new(),
-        false,
-        None,
-        false,
-        None,
-        false,
-        None,
-        false,
-        None,
-    ))
+        content_mode: ContentMode::Builder,
+        values: BTreeMap::new(),
+        cleared_fields: Vec::new(),
+        builder_document_json: Some(doc_raw),
+        term_ids: Vec::new(),
+        primary_category_touched: false,
+        primary_category_term_id: None,
+        page_layout_touched: false,
+        page_layout_key: None,
+        custom_template_touched: false,
+        custom_template_key: None,
+        seo_touched: false,
+        seo: None,
+        parent_id_touched: false,
+        parent_id: None,
+        menu_order_touched: false,
+        menu_order: None,
+    })
 }
 
 fn filter_editable_values_map(
@@ -257,22 +278,26 @@ pub(super) fn build_studio_autosave_row(
     term_ids.sort_unstable();
     term_ids.dedup();
 
-    Ok((
+    Ok(MergedAutosaveFields {
         title,
-        ContentMode::Builder,
+        content_mode: ContentMode::Builder,
         values,
-        cleared,
-        None,
+        cleared_fields: cleared,
+        builder_document_json: None,
         term_ids,
-        existing.is_some_and(|e| e.primary_category_touched),
-        existing.and_then(|e| e.primary_category_term_id),
-        existing.is_some_and(|e| e.page_layout_touched),
-        existing.and_then(|e| e.page_layout_key.clone()),
-        existing.is_some_and(|e| e.custom_template_touched),
-        existing.and_then(|e| e.custom_template_key.clone()),
-        existing.is_some_and(|e| e.seo_touched),
-        existing.and_then(|e| e.seo.clone()),
-    ))
+        primary_category_touched: existing.is_some_and(|e| e.primary_category_touched),
+        primary_category_term_id: existing.and_then(|e| e.primary_category_term_id),
+        page_layout_touched: existing.is_some_and(|e| e.page_layout_touched),
+        page_layout_key: existing.and_then(|e| e.page_layout_key.clone()),
+        custom_template_touched: existing.is_some_and(|e| e.custom_template_touched),
+        custom_template_key: existing.and_then(|e| e.custom_template_key.clone()),
+        seo_touched: existing.is_some_and(|e| e.seo_touched),
+        seo: existing.and_then(|e| e.seo.clone()),
+        parent_id_touched: existing.is_some_and(|e| e.parent_id_touched),
+        parent_id: existing.and_then(|e| e.parent_id),
+        menu_order_touched: existing.is_some_and(|e| e.menu_order_touched),
+        menu_order: existing.and_then(|e| e.menu_order),
+    })
 }
 
 pub(super) fn build_editor_autosave_row(
@@ -349,22 +374,37 @@ pub(super) fn build_editor_autosave_row(
         ),
     };
 
-    Ok((
+    let (parent_id_touched, parent_id_val) = match input.parent_id {
+        PatchField::Omitted => (false, None),
+        PatchField::Clear => (true, None),
+        PatchField::Set(v) => (true, Some(v)),
+    };
+    let (menu_order_touched, menu_order_val) = match input.menu_order {
+        PatchField::Omitted => (false, None),
+        PatchField::Clear => (true, Some(0)),
+        PatchField::Set(v) => (true, Some(v)),
+    };
+
+    Ok(MergedAutosaveFields {
         title,
         content_mode,
         values,
-        cleared,
-        None,
+        cleared_fields: cleared,
+        builder_document_json: None,
         term_ids,
-        primary_touched,
-        primary_val,
-        layout_touched,
-        layout_val,
-        template_touched,
-        template_val,
+        primary_category_touched: primary_touched,
+        primary_category_term_id: primary_val,
+        page_layout_touched: layout_touched,
+        page_layout_key: layout_val,
+        custom_template_touched: template_touched,
+        custom_template_key: template_val,
         seo_touched,
-        seo_val,
-    ))
+        seo: seo_val,
+        parent_id_touched,
+        parent_id: parent_id_val,
+        menu_order_touched,
+        menu_order: menu_order_val,
+    })
 }
 
 fn resolve_opt_str_patch(patch: &PatchField<String>) -> (bool, Option<String>) {

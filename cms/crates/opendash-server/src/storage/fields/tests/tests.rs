@@ -50,41 +50,60 @@ async fn lists_all_8_options_sources_and_enforces_visibility_filters() {
         .await
         .unwrap();
 
-    // Seed active CPT with active/public, admin-only, private, and withdrawn fields, plus inactive CPT
+    // Seed active CPT with field group (active/public, admin-only, private fields), plus inactive CPT
     let active_def = serde_json::json!({
         "key": "product",
         "label": "Sản phẩm",
-        "fields": [
-            {
-                "key": "price",
-                "label": "Giá bán",
-                "type": "text",
-                "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public"},
-                "declaration_state": "declared"
-            },
-            {
-                "key": "cost",
-                "label": "Giá vốn",
-                "type": "text",
-                "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"},
-                "declaration_state": "declared"
-            },
-            {
-                "key": "internal_note",
-                "label": "Ghi chú nội bộ",
-                "type": "text",
-                "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "private"},
-                "declaration_state": "declared"
-            }
-        ],
         "settings": { "public": true, "has_archive": true, "publication": "draft_publish", "supports": ["editor"] }
     });
+    let product_fields = serde_json::json!([
+        {
+            "key": "price",
+            "label": "Giá bán",
+            "type": "text",
+            "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public"},
+            "declaration_state": "declared"
+        },
+        {
+            "key": "cost",
+            "label": "Giá vốn",
+            "type": "text",
+            "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"},
+            "declaration_state": "declared"
+        },
+        {
+            "key": "internal_note",
+            "label": "Ghi chú nội bộ",
+            "type": "text",
+            "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "private"},
+            "declaration_state": "declared"
+        }
+    ]);
     sqlx::query(
         "INSERT INTO content_types (key, definition_json, owner_kind, provider_status)
          VALUES ('product', ?, 'user', 'active'),
-                ('hidden_cpt', '{\"key\":\"hidden_cpt\",\"label\":\"Hidden\",\"fields\":[]}', 'user', 'provider_inactive')",
+                ('hidden_cpt', '{\"key\":\"hidden_cpt\",\"label\":\"Hidden\"}', 'user', 'provider_inactive')",
     )
     .bind(active_def.to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+    let loc_product =
+        serde_json::json!([[{"param": "content_type", "op": "eq", "value": "product"}]])
+            .to_string();
+    sqlx::query(
+        "INSERT INTO content_field_groups (group_id, owner_kind, owner_id, local_key, title, description, fields_json, domain, location_rules_json, default_region, default_order, collapsible, status, version)
+         VALUES ('user:product_fields', 'user', NULL, 'product_fields', 'Product Fields', '', ?, 'content', ?, 'main_bottom', 0, 0, 'active', 1)",
+    )
+    .bind(product_fields.to_string())
+    .bind(&loc_product)
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO content_field_group_targets (group_id, target_kind, target_key, association_state)
+         VALUES ('user:product_fields', 'content_type', 'product', 'declared')",
+    )
     .execute(&db)
     .await
     .unwrap();

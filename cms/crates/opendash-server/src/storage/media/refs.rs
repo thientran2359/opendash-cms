@@ -1,24 +1,11 @@
 use std::collections::BTreeMap;
 
-use opendash_core::content::{ContentEntryInput, ContentTypeDefinition, EffectiveContentSchema};
+use opendash_core::content::EffectiveContentSchema;
 use serde_json::Value;
 use sqlx::SqlitePool;
 
 use super::queries::{find, valid_media_id};
 use crate::error::{ApiError, ApiResult};
-
-fn collect_schema_media_ids(
-    schema: &ContentTypeDefinition,
-    input: &ContentEntryInput,
-) -> opendash_core::field_schema::CollectedMediaIds {
-    let specs: Vec<opendash_core::field_schema::FieldSpec> = schema
-        .fields
-        .iter()
-        .filter(|field| !field.is_ui_only())
-        .cloned()
-        .collect();
-    opendash_core::field_schema::collect_media_ids(&specs, &input.values)
-}
 
 pub fn collect_effective_media_ids(
     effective: &EffectiveContentSchema,
@@ -32,19 +19,6 @@ pub fn collect_effective_media_ids(
     opendash_core::field_schema::collect_media_ids(&specs, values)
 }
 
-/// Existing legacy entry values are readable; new/updated entries must only
-/// reference active registered media matching each field's `media_kind`.
-/// No path or URL is accepted from a form.
-pub async fn require_existing_references(
-    db: &SqlitePool,
-    schema: &ContentTypeDefinition,
-    input: &ContentEntryInput,
-) -> ApiResult<()> {
-    let collected = collect_schema_media_ids(schema, input);
-    let mut conn = db.acquire().await?;
-    verify_collected_media_with_quarantine_in_conn(&mut conn, &collected).await
-}
-
 pub async fn require_existing_effective_references(
     db: &SqlitePool,
     effective: &EffectiveContentSchema,
@@ -53,15 +27,6 @@ pub async fn require_existing_effective_references(
     let collected = collect_effective_media_ids(effective, values);
     let mut conn = db.acquire().await?;
     verify_collected_media_with_quarantine_in_conn(&mut conn, &collected).await
-}
-
-pub async fn require_existing_references_in_tx(
-    conn: &mut sqlx::SqliteConnection,
-    schema: &ContentTypeDefinition,
-    input: &ContentEntryInput,
-) -> ApiResult<()> {
-    let collected = collect_schema_media_ids(schema, input);
-    verify_collected_media_with_quarantine_in_conn(conn, &collected).await
 }
 
 pub async fn require_existing_effective_references_in_tx(

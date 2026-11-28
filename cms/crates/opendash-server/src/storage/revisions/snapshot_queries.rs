@@ -122,7 +122,8 @@ pub(super) async fn load_live_entry_state_in_conn(
     let row = sqlx::query(
         "SELECT id, content_type_key, locale, translation_group_id, slug, title,
                 values_json, publication_status, content_mode, page_layout_key,
-                custom_template_key, primary_category_term_id, version, updated_at, trashed_at
+                custom_template_key, primary_category_term_id, parent_id, menu_order,
+                version, updated_at, trashed_at
            FROM content_entries
           WHERE content_type_key = ? AND id = ?",
     )
@@ -151,6 +152,8 @@ pub(super) async fn load_live_entry_state_in_conn(
         .try_get::<Option<String>, _>("custom_template_key")?
         .filter(|s| !s.is_empty());
     let primary_category_term_id: Option<i64> = row.try_get("primary_category_term_id")?;
+    let parent_id: Option<i64> = row.try_get("parent_id")?;
+    let menu_order: i32 = row.try_get("menu_order")?;
     let version: i64 = row.try_get("version")?;
     let updated_at: String = row.try_get("updated_at")?;
     let trashed_at: Option<String> = row.try_get("trashed_at")?;
@@ -232,6 +235,8 @@ pub(super) async fn load_live_entry_state_in_conn(
             page_layout_key,
             custom_template_key,
             seo,
+            parent_id,
+            menu_order,
         },
     })
 }
@@ -246,7 +251,8 @@ pub(super) async fn load_revision_record_in_conn(
         "SELECT id, revision_number, content_hash, source, restored_from_revision_number,
                 author_user_id, author_username, title, slug, content_mode, values_json,
                 builder_document_json, term_ids_json, primary_category_term_id,
-                page_layout_key, custom_template_key, seo_json, entry_version, created_at
+                page_layout_key, custom_template_key, seo_json, parent_id, menu_order,
+                entry_version, created_at
            FROM entry_revisions
           WHERE id = ? AND entry_id = ? AND content_type_key = ?",
     )
@@ -282,6 +288,8 @@ pub(super) async fn load_revision_record_in_conn(
         .try_get::<Option<String>, _>("custom_template_key")?
         .filter(|s| !s.is_empty());
     let seo_raw: Option<String> = row.try_get("seo_json")?;
+    let parent_id: Option<i64> = row.try_get("parent_id")?;
+    let menu_order: i32 = row.try_get("menu_order")?;
     let entry_version: i64 = row.try_get("entry_version")?;
     let created_at: String = row.try_get("created_at")?;
 
@@ -327,6 +335,8 @@ pub(super) async fn load_revision_record_in_conn(
             page_layout_key,
             custom_template_key,
             seo,
+            parent_id,
+            menu_order,
         },
     })
 }

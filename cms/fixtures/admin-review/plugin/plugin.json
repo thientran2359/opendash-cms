@@ -29,13 +29,19 @@
         "order": 20,
         "action_id": "inspect"
       }
-    ],
-    "term_panels": [
+    ]
+  },
+  "declarations": {
+    "field_groups": [
       {
         "local_key": "review_details",
-        "label": "Plugin Review",
-        "kind": "category",
-        "order": 20,
+        "title": "Plugin Review",
+        "location": [
+          [
+            { "param": "taxonomy_term", "op": "eq", "value": "category" }
+          ]
+        ],
+        "presentation": { "region": "main_bottom", "order": 20 },
         "fields": [
           {
             "key": "private_note",

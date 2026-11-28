@@ -727,25 +727,11 @@ async fn s03_copy_on_create_rbac_and_immediate_cpt() {
     let (editor_cookie, editor_csrf) =
         login(&c, &srv.base_url, "editor1", "EditorPassword123!").await;
 
-    // Create immediate CPT with an optional admin-only field
+    // Create immediate CPT with an optional admin-only field via Field Group
     let def_opt = json!({
         "key": "faq",
         "label": "FAQ",
-        "settings": { "public": true, "has_archive": false, "publication": "immediate", "supports": ["editor"] },
-        "fields": [
-            { "key": "answer", "label": "Answer", "type": "text", "required": true },
-            {
-                "key": "admin_note",
-                "label": "Admin Note",
-                "type": "text",
-                "required": false,
-                "acl": {
-                    "min_view_role": "admin",
-                    "min_edit_role": "admin",
-                    "public_exposure": "private"
-                }
-            }
-        ]
+        "settings": { "public": true, "has_archive": false, "publication": "immediate", "supports": ["editor"] }
     });
     let ct_resp = c
         .post(format!("{}/api/admin/content-types", srv.base_url))
@@ -763,6 +749,34 @@ async fn s03_copy_on_create_rbac_and_immediate_cpt() {
             ct_resp.text().await.unwrap()
         );
     }
+    let fg_resp = c
+        .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+        .header(header::COOKIE, &admin_cookie)
+        .header("Origin", &srv.base_url)
+        .header("x-csrf-token", &admin_csrf)
+        .json(&json!({
+            "local_key": "faq_fields",
+            "title": "FAQ Fields",
+            "location": [[{"param": "content_type", "op": "eq", "value": "faq"}]],
+            "fields": [
+                { "key": "answer", "label": "Answer", "type": "text", "required": true },
+                {
+                    "key": "admin_note",
+                    "label": "Admin Note",
+                    "type": "text",
+                    "required": false,
+                    "acl": {
+                        "min_view_role": "admin",
+                        "min_edit_role": "admin",
+                        "public_exposure": "private"
+                    }
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fg_resp.status(), StatusCode::CREATED);
 
     let faq_vi: Value = c
         .post(format!(
@@ -815,7 +829,21 @@ async fn s03_copy_on_create_rbac_and_immediate_cpt() {
         .json(&json!({
             "key": "faq_req",
             "label": "FAQ Req",
-            "settings": { "public": true, "has_archive": false, "publication": "immediate", "supports": ["editor"] },
+            "settings": { "public": true, "has_archive": false, "publication": "immediate", "supports": ["editor"] }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ct_req.status(), StatusCode::CREATED);
+    let fg_req = c
+        .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+        .header(header::COOKIE, &admin_cookie)
+        .header("Origin", &srv.base_url)
+        .header("x-csrf-token", &admin_csrf)
+        .json(&json!({
+            "local_key": "faq_req_fields",
+            "title": "FAQ Req Fields",
+            "target_types": ["faq_req"],
             "fields": [
                 { "key": "answer", "label": "Answer", "type": "text", "required": true },
                 {
@@ -835,7 +863,7 @@ async fn s03_copy_on_create_rbac_and_immediate_cpt() {
         .send()
         .await
         .unwrap();
-    assert_eq!(ct_req.status(), StatusCode::CREATED);
+    assert_eq!(fg_req.status(), StatusCode::CREATED);
 
     let faq_req_vi: Value = c
         .post(format!(

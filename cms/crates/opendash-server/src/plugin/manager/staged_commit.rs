@@ -78,22 +78,7 @@ impl PluginManager {
             }
         }
 
-        let schema = opendash_core::content::ContentTypeDefinition {
-            key: effective_schema.base.descriptor.key.clone(),
-            label: effective_schema.base.descriptor.label.clone(),
-            settings: effective_schema.base.descriptor.settings.clone(),
-            fields: effective_schema
-                .effective_fields
-                .values()
-                .map(|e| {
-                    let mut def = e.definition.clone();
-                    if !e.effective_required() {
-                        def.required = false;
-                    }
-                    def
-                })
-                .collect(),
-        };
+        let schema = effective_schema.base.descriptor.clone();
 
         let entry_input = opendash_core::content::ContentEntryInput {
             slug: cmd.slug,
@@ -102,7 +87,13 @@ impl PluginManager {
             values: cmd.values,
             term_ids: cmd.term_ids,
         };
-        if let Err(msg) = entry_input.validate_against_effective(&effective_schema) {
+        let loc_ctx = opendash_core::content::LocationEvalContext {
+            content_type: Some(cmd.type_key.clone()),
+            entry_id: cmd.entry_id,
+            user_role: actor_role,
+            ..Default::default()
+        };
+        if let Err(msg) = entry_input.validate_against_effective(&effective_schema, &loc_ctx) {
             return Err(mk_err(
                 StatusCode::BAD_REQUEST,
                 "invalid_entry_input",

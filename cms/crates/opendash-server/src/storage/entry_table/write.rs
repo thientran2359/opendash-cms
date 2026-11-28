@@ -142,6 +142,31 @@ pub(in crate::storage) fn push_entry_table_scope(
     }
 }
 
+pub(in crate::storage) fn filter_entry_table_fields_for_role(
+    values: &mut BTreeMap<String, Value>,
+    effective: &opendash_core::content::EffectiveContentSchema,
+    _admin_col_keys: &std::collections::BTreeSet<String>,
+    caller_role: FieldRole,
+) {
+    let cpt_list_cols = &effective.base.descriptor.settings.list_columns;
+    values.retain(|key, _| {
+        effective.effective_fields.get(key).is_some_and(|field| {
+            let role_ok = field.effective_status == EffectiveFieldStatus::Active
+                && caller_role >= field.definition.effective_acl().0
+                && !(caller_role < FieldRole::Admin
+                    && effective.is_group_admin_only(&field.source_id));
+            if !role_ok {
+                return false;
+            }
+            field.definition.effective_acl().2 == PublicExposure::Public
+                || field.definition.show_in_list
+                || cpt_list_cols.iter().any(|c| {
+                    c.kind == opendash_core::content::ContentListColumnKind::Field && c.key == *key
+                })
+        })
+    });
+}
+
 pub(in crate::storage) async fn validate_terms(
     tx: &mut Transaction<'_, Sqlite>,
     type_key: &str,

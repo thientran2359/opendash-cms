@@ -39,14 +39,14 @@ async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtri
 
     // Insert plugin-owned settings without separate plugin registry table
     sqlx::query(
-        "INSERT INTO theme_option_versions (theme_id, owner_kind, owner_id, version) VALUES ('acme-plugin', 'plugin', 'acme-plugin', 1)",
+        "INSERT INTO theme_option_versions (owner_kind, owner_id, version) VALUES ('plugin', 'acme-plugin', 1)",
     )
     .execute(&pool)
     .await
     .expect("insert plugin option version");
 
     sqlx::query(
-        "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json) VALUES ('acme-plugin', 'plugin', 'acme-plugin', 'accent_color', '\"#112233\"')",
+        "INSERT INTO theme_option_values (owner_kind, owner_id, option_key, value_json) VALUES ('plugin', 'acme-plugin', 'accent_color', '\"#112233\"')",
     )
     .execute(&pool)
     .await

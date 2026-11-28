@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/scripts/` contains **20** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, shared E2E/benchmark helpers, canonical lifecycle benchmarks, and current Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
+`cms/scripts/` contains **21** operational scripts covering workspace builds, grouped fast Rust testing, release packaging, architecture/documentation/i18n gates, CodeGraph indexing/querying, shared E2E/benchmark helpers, canonical lifecycle benchmarks, and current Playwright live-browser E2E suites. See also the root [workspace verification commands](../../README.md#kiểm-chứng-tại-workspace).
 
 ## Interface
 
@@ -36,9 +36,11 @@ Shared stdlib test utilities (`e2e_helpers.py`), baseline DB fixture generator, 
 - [`make_baseline_fixture.py`](make_baseline_fixture.py) — Generates or verifies `cms/fixtures/baseline_0001.sqlite` (`create_baseline_fixture`).
 - [`entry_lifecycle_benchmark.py`](entry_lifecycle_benchmark.py) — Canonical S04 baseline-vs-candidate performance benchmark (`--baseline-binary`, `--candidate-binary`, `--artifact-dir`, optional `--sizes`) verifying NFR gates P1–P3 across deterministic 1k/10k/50k fixtures.
 
-### Live Browser E2E Suites (5)
+### Live Browser E2E Suites (6)
 
 Require Python Playwright and Chromium/Chrome (`--binary <path>`, plus script-specific `--artifact-dir` / `--browser` flags):
+
+- [`acf_content_structure_e2e.py`](acf_content_structure_e2e.py) — ACF Content Structure (`0063`) end-to-end CUJ suite covering CPT creation & native `<dialog>` delete, 4-tab Field Groups & entry meta persistence, Taxonomy Term meta/SEO & Editor inline term creation, and Custom Options Pages with multilingual `<LocaleTabs>` & RBAC.
 
 - [`admin_i18n_multilingual_e2e.py`](admin_i18n_multilingual_e2e.py) — Admin i18n and multilingual settings (`0051`) browser journeys.
 - [`entry_lifecycle_trash_e2e.py`](entry_lifecycle_trash_e2e.py) — Entry Trash/Restore/Purge, Reading guard, dormant retained-Trash maintenance, Editor vs Admin RBAC, Studio/Editor trashed guards, and plugin host confirmation Chrome E2E suite.

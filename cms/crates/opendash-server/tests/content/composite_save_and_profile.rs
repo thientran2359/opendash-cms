@@ -150,7 +150,7 @@ async fn composite_entry_save_patch_semantics_acl_fence_and_profile_api() {
     assert_eq!(ed_create.status(), StatusCode::CREATED);
     let (ed_cookie, ed_csrf) = login(&client, &srv.base_url, "editor1", "EditorPassword123!").await;
 
-    // Create CPT `project` with default_value, admin-edit, and admin-view fields
+    // Create CPT `project` + FieldGroup with default_value, admin-edit, and admin-view fields
     let cpt_resp = client
         .post(format!("{}/api/admin/content-types", srv.base_url))
         .header("Cookie", &admin_cookie)
@@ -158,7 +158,21 @@ async fn composite_entry_save_patch_semantics_acl_fence_and_profile_api() {
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
             "key": "project",
-            "label": "Dự án",
+            "label": "Dự án"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cpt_resp.status(), StatusCode::CREATED);
+    let fg_resp = client
+        .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+        .header("Cookie", &admin_cookie)
+        .header("Origin", &srv.base_url)
+        .header("X-CSRF-Token", &admin_csrf)
+        .json(&json!({
+            "local_key": "project_fields",
+            "title": "Project Fields",
+            "target_types": ["project"],
             "fields": [
                 {
                     "key": "summary",
@@ -194,9 +208,20 @@ async fn composite_entry_save_patch_semantics_acl_fence_and_profile_api() {
         .send()
         .await
         .unwrap();
-    assert_eq!(cpt_resp.status(), StatusCode::CREATED);
-    let cpt_json: Value = cpt_resp.json().await.unwrap();
-    let schema_token = cpt_json["schema_token"].as_str().unwrap().to_string();
+    assert_eq!(fg_resp.status(), StatusCode::CREATED);
+    let cfg_json: Value = client
+        .get(format!(
+            "{}/api/admin/content-types/project/effective-editor-config",
+            srv.base_url
+        ))
+        .header("Cookie", &admin_cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let schema_token = cfg_json["schema_token"].as_str().unwrap().to_string();
 
     // 1. Missing expected_schema_token -> 428; stale expected_schema_token -> 409
     let missing_tok = client

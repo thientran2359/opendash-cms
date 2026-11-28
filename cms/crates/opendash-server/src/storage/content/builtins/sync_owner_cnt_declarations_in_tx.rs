@@ -22,16 +22,11 @@ pub(in crate::storage) async fn sync_owner_cnt_declarations_in_tx(
     let has_fg_tables = table_exists_in_tx(conn, "content_field_groups").await?
         && table_exists_in_tx(conn, "content_field_group_targets").await?;
 
-    // Snapshot potentially affected types before mutating so verify_effective_schema_transition
+    // Snapshot declared/owned CPTs before mutating so verify_effective_schema_transition
     // can compare old_effective vs new_effective symmetrically.
     let mut candidate_types: BTreeSet<String> = BTreeSet::new();
     for ct in &declarations.content_types {
         candidate_types.insert(ct.key.clone());
-    }
-    for fg in &declarations.field_groups {
-        for t in &fg.target_types {
-            candidate_types.insert(t.clone());
-        }
     }
     let existing_owned_ct_keys: Vec<String> =
         sqlx::query_scalar("SELECT key FROM content_types WHERE owner_kind = ? AND owner_id = ?")
@@ -39,27 +34,9 @@ pub(in crate::storage) async fn sync_owner_cnt_declarations_in_tx(
             .bind(owner_id_str)
             .fetch_all(&mut *conn)
             .await?;
-    // A new provider CPT has no earlier Admin CAS token. For an existing CPT,
-    // provider eligibility changes must advance its CAS version just like a
-    // site-owned override, even when the provider's schema JSON is unchanged.
     let existing_owned_ct_set: HashSet<String> = existing_owned_ct_keys.iter().cloned().collect();
     for k in &existing_owned_ct_keys {
         candidate_types.insert(k.clone());
-    }
-    if has_fg_tables {
-        let existing_target_types: Vec<String> = sqlx::query_scalar(
-            "SELECT DISTINCT t.type_key
-             FROM content_field_group_targets t
-             JOIN content_field_groups g ON g.group_id = t.group_id
-             WHERE g.owner_kind = ? AND g.owner_id = ?",
-        )
-        .bind(owner_kind_str)
-        .bind(owner_id_str)
-        .fetch_all(&mut *conn)
-        .await?;
-        for k in existing_target_types {
-            candidate_types.insert(k);
-        }
     }
 
     let mut old_snapshots: HashMap<String, (EffectiveContentSchema, bool)> = HashMap::new();
@@ -101,9 +78,6 @@ pub(in crate::storage) async fn sync_owner_cnt_declarations_in_tx(
                 }
                 let existing_def: ContentTypeDefinition = serde_json::from_str(&raw_def)
                     .map_err(|_| ApiError::internal("Dữ liệu loại nội dung không hợp lệ."))?;
-                // Preserve omitted fields as withdrawn when package re-declares CPT (270-R1)
-                let merged_fields =
-                    merge_package_redeclared_fields(&existing_def.fields, &ct.fields);
                 let mut incoming_settings = ct
                     .settings
                     .clone()
@@ -111,6 +85,19 @@ pub(in crate::storage) async fn sync_owner_cnt_declarations_in_tx(
                 incoming_settings
                     .validate_and_normalize()
                     .map_err(map_input_validation_error)?;
+                if existing_def.settings.hierarchical && !incoming_settings.hierarchical {
+                    let has_children: bool = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND parent_id IS NOT NULL)",
+                    )
+                    .bind(&ct.key)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if has_children {
+                        return Err(ApiError::conflict(
+                            "incompatible_schema_change: Không thể tắt phân cấp khi đã có bài viết con (parent_id).",
+                        ));
+                    }
+                }
                 if existing_def.settings.publication == ContentPublication::DraftPublish
                     && incoming_settings.publication == ContentPublication::Immediate
                 {
@@ -129,7 +116,8 @@ pub(in crate::storage) async fn sync_owner_cnt_declarations_in_tx(
                 let incoming = ContentTypeDefinition {
                     key: ct.key.clone(),
                     label: ct.label.clone(),
-                    fields: merged_fields,
+                    singular_label: ct.singular_label.clone(),
+                    description: ct.description.clone(),
                     settings: incoming_settings,
                 };
                 incoming.validate().map_err(map_input_validation_error)?;
@@ -159,7 +147,8 @@ pub(in crate::storage) async fn sync_owner_cnt_declarations_in_tx(
                 let incoming = ContentTypeDefinition {
                     key: ct.key.clone(),
                     label: ct.label.clone(),
-                    fields: ct.fields.clone(),
+                    singular_label: ct.singular_label.clone(),
+                    description: ct.description.clone(),
                     settings,
                 };
                 incoming.validate().map_err(map_input_validation_error)?;
@@ -354,150 +343,7 @@ pub(in crate::storage) async fn sync_owner_cnt_declarations_in_tx(
         }
     }
 
-    // Sync package field_groups (3-level tombstone preservation — 270-R1)
-    if has_fg_tables {
-        let mut declared_group_ids: HashSet<String> = HashSet::new();
-        for fg in &declarations.field_groups {
-            let group_id = format!("{owner_kind_str}:{owner_id_str}:{}", fg.local_key);
-            let incoming_fields = fg
-                .validate_and_normalize()
-                .map_err(map_input_validation_error)?;
-
-            for target in &fg.target_types {
-                let exists: bool =
-                    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM content_types WHERE key = ?)")
-                        .bind(target)
-                        .fetch_one(&mut *conn)
-                        .await?;
-                if !exists {
-                    return Err(ApiError::unprocessable(format!(
-                        "Loại nội dung mục tiêu '{target}' trong field_group '{}' chưa tồn tại.",
-                        fg.local_key
-                    )));
-                }
-            }
-
-            if let Some(existing_group) = load_field_group_in_tx(conn, &group_id).await? {
-                let merged_fields =
-                    merge_package_redeclared_fields(&existing_group.fields, &incoming_fields);
-                let fields_json = serde_json::to_string(&merged_fields)?;
-
-                sqlx::query(
-                    "UPDATE content_field_groups
-                     SET title = ?, description = ?, fields_json = ?, default_region = ?,
-                         default_order = ?, collapsible = ?, status = 'active',
-                         version = version + 1,
-                         updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                     WHERE group_id = ?",
-                )
-                .bind(&fg.title)
-                .bind(&fg.description)
-                .bind(&fields_json)
-                .bind(fg.default_region.as_str())
-                .bind(fg.default_order)
-                .bind(if fg.collapsible { 1_i64 } else { 0_i64 })
-                .bind(&group_id)
-                .execute(&mut *conn)
-                .await?;
-
-                let incoming_target_set: HashSet<&str> =
-                    fg.target_types.iter().map(|s| s.as_str()).collect();
-                for target in &fg.target_types {
-                    sqlx::query(
-                        "INSERT INTO content_field_group_targets (group_id, type_key, association_state)
-                         VALUES (?, ?, 'declared')
-                         ON CONFLICT(group_id, type_key) DO UPDATE SET
-                             association_state = 'declared',
-                             updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-                    )
-                    .bind(&group_id)
-                    .bind(target)
-                    .execute(&mut *conn)
-                    .await?;
-                }
-                for old_t in &existing_group.targets {
-                    if !incoming_target_set.contains(old_t.type_key.as_str()) {
-                        sqlx::query(
-                            "UPDATE content_field_group_targets
-                             SET association_state = 'withdrawn',
-                                 updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                             WHERE group_id = ? AND type_key = ?",
-                        )
-                        .bind(&group_id)
-                        .bind(&old_t.type_key)
-                        .execute(&mut *conn)
-                        .await?;
-                    }
-                }
-            } else {
-                let fields_json = serde_json::to_string(&incoming_fields)?;
-                sqlx::query(
-                    "INSERT INTO content_field_groups
-                     (group_id, owner_kind, owner_id, local_key, title, description, fields_json,
-                      default_region, default_order, collapsible, status, version)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1)",
-                )
-                .bind(&group_id)
-                .bind(owner_kind_str)
-                .bind(owner_id_str)
-                .bind(&fg.local_key)
-                .bind(&fg.title)
-                .bind(&fg.description)
-                .bind(&fields_json)
-                .bind(fg.default_region.as_str())
-                .bind(fg.default_order)
-                .bind(if fg.collapsible { 1_i64 } else { 0_i64 })
-                .execute(&mut *conn)
-                .await?;
-
-                for target in &fg.target_types {
-                    sqlx::query(
-                        "INSERT INTO content_field_group_targets (group_id, type_key, association_state)
-                         VALUES (?, ?, 'declared')",
-                    )
-                    .bind(&group_id)
-                    .bind(target)
-                    .execute(&mut *conn)
-                    .await?;
-                }
-            }
-            declared_group_ids.insert(group_id);
-        }
-
-        // Withdraw omitted field_groups owned by this package (retaining targets & fields)
-        let owned_group_ids: Vec<String> = sqlx::query_scalar(
-            "SELECT group_id FROM content_field_groups WHERE owner_kind = ? AND owner_id = ?",
-        )
-        .bind(owner_kind_str)
-        .bind(owner_id_str)
-        .fetch_all(&mut *conn)
-        .await?;
-
-        for gid in owned_group_ids {
-            if !declared_group_ids.contains(&gid) {
-                sqlx::query(
-                    "UPDATE content_field_groups
-                     SET status = 'withdrawn', version = version + 1,
-                         updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                     WHERE group_id = ?",
-                )
-                .bind(&gid)
-                .execute(&mut *conn)
-                .await?;
-                sqlx::query(
-                    "UPDATE content_field_group_targets
-                     SET association_state = 'withdrawn',
-                         updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                     WHERE group_id = ?",
-                )
-                .bind(&gid)
-                .execute(&mut *conn)
-                .await?;
-            }
-        }
-    }
-
-    // Enforce Rule COMPAT-1..COMPAT-4 across every affected type_key
+    // Enforce Rule COMPAT-1..COMPAT-4 across every declared/owned CPT before syncing field groups
     for t in &candidate_types {
         if let Some(new_eff) = load_effective_content_schema_in_tx(conn, t).await? {
             let (old_eff_opt, has_entries) = match old_snapshots.get(t) {
@@ -507,6 +353,27 @@ pub(in crate::storage) async fn sync_owner_cnt_declarations_in_tx(
             verify_effective_schema_transition(old_eff_opt, &new_eff, has_entries)
                 .map_err(|e| map_transition_error(e, incompat_as_conflict))?;
         }
+    }
+
+    // Sync Custom Options Pages before field groups so `options_page == custom:<key>` targets exist
+    crate::storage::options_pages::sync_provider_options_pages_in_tx(
+        conn,
+        owner_kind_str,
+        owner_id_str,
+        &declarations.options_pages,
+    )
+    .await?;
+
+    // Sync multi-domain package field_groups (Content, Term, OptionsPage) + COMPAT-1..4
+    if has_fg_tables {
+        sync_field_groups::sync_owner_field_groups_in_tx(
+            conn,
+            owner_kind_str,
+            owner_id_str,
+            &declarations.field_groups,
+            incompat_as_conflict,
+        )
+        .await?;
     }
 
     let rewrites: Vec<crate::storage::permalinks::ProviderRewriteDeclaration> = declarations

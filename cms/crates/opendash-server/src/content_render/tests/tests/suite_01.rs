@@ -76,12 +76,9 @@ fn escapes_untrusted_title_rich_text_and_template_tokens() {
     let schema = ContentTypeDefinition {
         key: "post".into(),
         label: "Bài viết".into(),
+        singular_label: None,
+        description: None,
         settings: opendash_core::content::ContentTypeSettings::builtin_publication(),
-        fields: vec![opendash_core::field_schema::FieldSpec::new(
-            opendash_core::field_schema::FieldType::Richtext,
-            "body",
-            "Nội dung",
-        )],
     };
     let record = ContentEntryRecord {
         id: 1,
@@ -99,6 +96,8 @@ fn escapes_untrusted_title_rich_text_and_template_tokens() {
         term_ids: vec![],
         primary_category_term_id: None,
         publication_status: "draft".into(),
+        parent_id: None,
+        menu_order: 0,
         page_layout_key: None,
         custom_template_key: None,
         content_mode: opendash_core::content::ContentMode::Editor,
@@ -119,7 +118,8 @@ fn site_context_is_html_escaped_in_default_and_custom_templates() {
     let schema = ContentTypeDefinition {
         key: "news".into(),
         label: "Tin tức".into(),
-        fields: vec![],
+        singular_label: None,
+        description: None,
         settings: Default::default(),
     };
     let site = SiteContext {
@@ -151,7 +151,8 @@ fn public_entry_without_resolved_href_never_forges_a_legacy_url() {
     let schema = ContentTypeDefinition {
         key: "post".into(),
         label: "Posts".into(),
-        fields: vec![],
+        singular_label: None,
+        description: None,
         settings: Default::default(),
     };
     let entry = ContentEntryRecord {
@@ -166,6 +167,8 @@ fn public_entry_without_resolved_href_never_forges_a_legacy_url() {
         term_ids: vec![],
         primary_category_term_id: None,
         publication_status: "published".into(),
+        parent_id: None,
+        menu_order: 0,
         page_layout_key: None,
         custom_template_key: None,
         content_mode: opendash_core::content::ContentMode::Editor,
@@ -285,29 +288,62 @@ fn entry_view_with_context_enforces_acl_declaration_order_nulls_and_excerpt() {
             descriptor: ContentTypeDefinition {
                 key: "product".into(),
                 label: "Sản phẩm".into(),
-                fields: vec![base_price.clone(), missing_public.clone()],
+                singular_label: None,
+                description: None,
                 settings: ContentTypeSettings::default(),
             },
         },
         base_version: 1,
-        attached_groups: vec![AttachedFieldGroupSnapshot {
-            group_id: "g1".into(),
-            owner: ResourceOwner::Core,
-            local_key: "g1".into(),
-            title: "Group".into(),
-            description: String::new(),
-            fields: vec![
-                group_summary.clone(),
-                admin_note.clone(),
-                private_field.clone(),
-            ],
-            default_region: EditorRegion::MainPrimary,
-            default_order: 0,
-            collapsible: false,
-            status: FieldGroupStatus::Active,
-            association_state: DeclarationState::Declared,
-            version: 1,
-        }],
+        attached_groups: vec![
+            AttachedFieldGroupSnapshot {
+                group_id: "core:g0".into(),
+                owner: ResourceOwner::Core,
+                local_key: "g0".into(),
+                title: "Base".into(),
+                description: String::new(),
+                domain: opendash_core::content::FieldGroupDomain::Content,
+                location: vec![vec![opendash_core::content::LocationRule::content_type_eq(
+                    "product",
+                )]],
+                presentation: opendash_core::content::FieldGroupPresentation {
+                    region: EditorRegion::MainPrimary,
+                    order: -1,
+                    collapsible: false,
+                    ..Default::default()
+                },
+                active: true,
+                fields: vec![base_price.clone(), missing_public.clone()],
+                status: FieldGroupStatus::Active,
+                association_state: DeclarationState::Declared,
+                version: 1,
+            },
+            AttachedFieldGroupSnapshot {
+                group_id: "g1".into(),
+                owner: ResourceOwner::Core,
+                local_key: "g1".into(),
+                title: "Group".into(),
+                description: String::new(),
+                domain: opendash_core::content::FieldGroupDomain::Content,
+                location: vec![vec![opendash_core::content::LocationRule::content_type_eq(
+                    "product",
+                )]],
+                presentation: opendash_core::content::FieldGroupPresentation {
+                    region: EditorRegion::MainPrimary,
+                    order: 0,
+                    collapsible: false,
+                    ..Default::default()
+                },
+                active: true,
+                fields: vec![
+                    group_summary.clone(),
+                    admin_note.clone(),
+                    private_field.clone(),
+                ],
+                status: FieldGroupStatus::Active,
+                association_state: DeclarationState::Declared,
+                version: 1,
+            },
+        ],
         effective_fields: [
             base_price,
             missing_public,
@@ -352,6 +388,8 @@ fn entry_view_with_context_enforces_acl_declaration_order_nulls_and_excerpt() {
         term_ids: vec![12, 5],
         primary_category_term_id: Some(12),
         publication_status: "published".into(),
+        parent_id: None,
+        menu_order: 0,
         page_layout_key: None,
         custom_template_key: None,
         content_mode: opendash_core::content::ContentMode::Editor,

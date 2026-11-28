@@ -19976,6 +19976,1350 @@ msgstr "Tệp gốc"
 msgid "Showing first 50 of {{value1}} orphaned candidates."
 msgstr "Hiển thị 50 mục đầu tiên trong tổng số {{value1}} tệp mồ côi."
 
+#: admin:api.content
+msgid "Could not delete the content type."
+msgstr "Không thể xóa loại nội dung."
+
+#: admin:api.content
+msgid "Could not update field group active state."
+msgstr "Không thể cập nhật trạng thái kích hoạt của nhóm trường."
+
+#: admin:api.content
+msgid "Could not permanently delete the field group."
+msgstr "Không thể xóa vĩnh viễn nhóm trường."
+
+#: admin:api.locales
+msgid "Could not load language packs."
+msgstr "Không thể tải danh sách gói ngôn ngữ."
+
+#: admin:api.locales
+msgid "Could not upload language pack."
+msgstr "Không thể tải lên gói ngôn ngữ."
+
+#: admin:api.locales
+msgid "Could not delete language pack."
+msgstr "Không thể xóa gói ngôn ngữ."
+
+#: admin:api.optionsPages
+msgid "Could not load custom options pages."
+msgstr "Không thể tải danh sách trang tùy chọn."
+
+#: admin:api.optionsPages
+msgid "Options page not found."
+msgstr "Không tìm thấy trang tùy chọn."
+
+#: admin:api.optionsPages
+msgid "Could not create options page."
+msgstr "Không thể tạo trang tùy chọn."
+
+#: admin:api.optionsPages
+msgid "Could not update options page."
+msgstr "Không thể cập nhật trang tùy chọn."
+
+#: admin:api.optionsPages
+msgid "Could not delete options page."
+msgstr "Không thể xóa trang tùy chọn."
+
+#: admin:api.optionsPages
+msgid "Could not load options page values."
+msgstr "Không thể tải giá trị của trang tùy chọn."
+
+#: admin:api.optionsPages
+msgid "Could not save options page values."
+msgstr "Không thể lưu giá trị của trang tùy chọn."
+
+#: admin:builder.BuilderBindingFields
+msgid "Could not load fields for the content type; saved binding is preserved."
+msgstr "Không thể tải các trường cho loại nội dung; liên kết đã lưu vẫn được giữ nguyên."
+
+#: admin:builder.BuilderBindingFields
+msgid "Your session expired while looking up fields."
+msgstr "Phiên đăng nhập đã hết hạn khi tra cứu các trường."
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Added list column slot."
+msgstr "Đã thêm cột danh sách."
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Removed column {{value1}}."
+msgstr "Đã xóa cột {{value1}}."
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Moved column to position {{value1}}."
+msgstr "Đã di chuyển cột tới vị trí {{value1}}."
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Admin table columns (list_columns)"
+msgstr "Các cột bảng quản trị (list_columns)"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Configure extra columns shown in the Entry List table (Private field columns are filtered by role)."
+msgstr "Cấu hình các cột bổ sung hiển thị trong bảng danh sách bài (cột trường riêng tư được lọc theo vai trò)."
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "+ Add column"
+msgstr "+ Thêm cột"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "No extra list columns configured yet."
+msgstr "Chưa có cột bổ sung nào được cấu hình."
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Column {{value1}} type"
+msgstr "Loại cột {{value1}}"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Custom field"
+msgstr "Trường tùy chỉnh"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Menu order"
+msgstr "Thứ tự menu"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Parent entry"
+msgstr "Mục cha"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Column {{value1}} taxonomy key"
+msgstr "Khóa phân loại của cột {{value1}}"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Column {{value1}} field key"
+msgstr "Khóa trường của cột {{value1}}"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "field_key"
+msgstr "field_key"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "System column key"
+msgstr "Khóa cột hệ thống"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Column {{value1}} display label"
+msgstr "Nhãn hiển thị cột {{value1}}"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Optional heading override"
+msgstr "Tiêu đề thay thế (tùy chọn)"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Move column {{value1}} up"
+msgstr "Di chuyển cột {{value1}} lên"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Move column {{value1}} down"
+msgstr "Di chuyển cột {{value1}} xuống"
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Remove column {{value1}}"
+msgstr "Xóa cột {{value1}}"
+
+#: admin:features.content.ContentTypeDeleteModal
+msgid "Delete content type {{value1}}?"
+msgstr "Xóa loại nội dung {{value1}}?"
+
+#: admin:features.content.ContentTypeDeleteModal
+msgid "You are deleting CPT"
+msgstr "Bạn đang xóa CPT"
+
+#: admin:features.content.ContentTypeDeleteModal
+msgid "Content types that still have active or trashed entries cannot be deleted until all entries are purged."
+msgstr "Không thể xóa loại nội dung khi vẫn còn bản ghi đang hoạt động hoặc trong thùng rác cho đến khi xóa sạch."
+
+#: admin:features.content.ContentTypeDeleteModal
+msgid "Cancel"
+msgstr "Hủy"
+
+#: admin:features.content.ContentTypeForm
+msgid "Items per archive page must be between 1 and 100."
+msgstr "Số mục mỗi trang lưu trữ phải nằm trong khoảng 1 đến 100."
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu position must be between 0 and 1000."
+msgstr "Vị trí menu phải nằm trong khoảng 0 đến 1000."
+
+#: admin:features.content.ContentTypeForm
+msgid "Rewrite base must use lowercase letters, numbers, and hyphens only (no slashes or placeholders)."
+msgstr "Đường dẫn gốc chỉ được dùng chữ thường, số và dấu gạch ngang (không dấu gạch chéo hoặc placeholder)."
+
+#: admin:features.content.ContentTypeForm
+msgid "Excerpt (excerpt)"
+msgstr "Tóm tắt (excerpt)"
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu order (menu_order)"
+msgstr "Thứ tự menu (menu_order)"
+
+#: admin:features.content.ContentTypeForm
+msgid "Custom template selector"
+msgstr "Bộ chọn mẫu giao diện riêng"
+
+#: admin:features.content.ContentTypeForm
+msgid "Define CPT identity, hierarchy, capabilities and menu visibility. Custom fields are attached separately via Field Groups."
+msgstr "Định nghĩa danh tính, phân cấp, quyền hỗ trợ và hiển thị menu cho CPT. Các trường tùy chỉnh được gắn riêng qua Nhóm trường."
+
+#: admin:features.content.ContentTypeForm
+msgid "Plural display name *"
+msgstr "Tên hiển thị số nhiều *"
+
+#: admin:features.content.ContentTypeForm
+msgid "Projects"
+msgstr "Dự án"
+
+#: admin:features.content.ContentTypeForm
+msgid "Singular label"
+msgstr "Nhãn số ít"
+
+#: admin:features.content.ContentTypeForm
+msgid "Description"
+msgstr "Mô tả"
+
+#: admin:features.content.ContentTypeForm
+msgid "Short description for editors and admin tools"
+msgstr "Mô tả ngắn cho biên tập viên và công cụ quản trị"
+
+#: admin:features.content.ContentTypeForm
+msgid "Hierarchical parent-child tree (hierarchical)"
+msgstr "Cây phân cấp cha-con (hierarchical)"
+
+#: admin:features.content.ContentTypeForm
+msgid "Exclude from sitemap.xml"
+msgstr "Loại trừ khỏi sitemap.xml"
+
+#: admin:features.content.ContentTypeForm
+msgid "Publish immediately (immediate)"
+msgstr "Xuất bản ngay lập tức (immediate)"
+
+#: admin:features.content.ContentTypeForm
+msgid "Save draft / Publish"
+msgstr "Lưu nháp / Xuất bản"
+
+#: admin:features.content.ContentTypeForm
+msgid "URL rewrite base"
+msgstr "Đường dẫn gốc URL"
+
+#: admin:features.content.ContentTypeForm
+msgid "Archive posts per page"
+msgstr "Số bài mỗi trang lưu trữ"
+
+#: admin:features.content.ContentTypeForm
+msgid "Default archive sort"
+msgstr "Sắp xếp lưu trữ mặc định"
+
+#: admin:features.content.ContentTypeForm
+msgid "Newest published"
+msgstr "Mới xuất bản nhất"
+
+#: admin:features.content.ContentTypeForm
+msgid "Newest created"
+msgstr "Mới tạo nhất"
+
+#: admin:features.content.ContentTypeForm
+msgid "Recently updated"
+msgstr "Cập nhật gần đây"
+
+#: admin:features.content.ContentTypeForm
+msgid "Title (A-Z)"
+msgstr "Tiêu đề (A-Z)"
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu order ascending"
+msgstr "Thứ tự menu tăng dần"
+
+#: admin:features.content.ContentTypeForm
+msgid "Sidebar menu visibility"
+msgstr "Hiển thị trên thanh bên"
+
+#: admin:features.content.ContentTypeForm
+msgid "Show in admin sidebar"
+msgstr "Hiện trong thanh bên quản trị"
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu label override"
+msgstr "Nhãn menu tùy chỉnh"
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu icon"
+msgstr "Biểu tượng menu"
+
+#: admin:features.content.ContentTypeForm
+msgid "Position (0-1000)"
+msgstr "Vị trí (0-1000)"
+
+#: admin:features.content.ContentTypeForm
+msgid "Attach taxonomies"
+msgstr "Gắn phân loại (Taxonomies)"
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Pattern is a private content type and its configuration cannot be changed."
+msgstr "Mẫu thiết kế là loại nội dung riêng tư và không thể thay đổi cấu hình."
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Configuration:"
+msgstr "Cấu hình:"
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Delete content type"
+msgstr "Xóa loại nội dung"
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "This CPT is declared by a theme or plugin. Only route rewrite base can be overridden here; see the Taxonomies tab for taxonomy eligibility."
+msgstr "CPT này do giao diện hoặc plugin khai báo. Tại đây chỉ ghi đè được đường dẫn gốc; xem tab Phân loại để chọn taxonomy áp dụng."
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Visibility, archive & routing"
+msgstr "Hiển thị, lưu trữ & định tuyến"
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Items per archive page"
+msgstr "Số mục mỗi trang lưu trữ"
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Leave empty to use default CPT key; %taxonomy% placeholders are not used on custom CPT rewrite bases."
+msgstr "Để trống để dùng khóa CPT mặc định; CPT tùy chỉnh không dùng placeholder %taxonomy%."
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Toggling features off hides their UI while preserving existing saved data."
+msgstr "Tắt tính năng chỉ ẩn giao diện và vẫn bảo toàn dữ liệu đã lưu."
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Sidebar menu"
+msgstr "Menu thanh bên"
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Menu label"
+msgstr "Nhãn menu"
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Menu position"
+msgstr "Vị trí menu"
+
+#: admin:features.content.ContentTypeSchemaSettings
+msgid "Deleted CPT {{value1}}."
+msgstr "Đã xóa CPT {{value1}}."
+
+#: admin:features.content.ContentTypeSchemaSettings
+msgid "Overview & settings"
+msgstr "Tổng quan & cài đặt"
+
+#: admin:features.content.ContentTypeSchemaSettings
+msgid "Supports"
+msgstr "Tính năng hỗ trợ"
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Moved panel {{value1}} to {{value2}}."
+msgstr "Đã chuyển khung {{value1}} sang {{value2}}."
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Added subgroup {{value1}}."
+msgstr "Đã thêm nhóm con {{value1}}."
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Move panel {{value1}} up"
+msgstr "Di chuyển khung {{value1}} lên"
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Move panel {{value1}} down"
+msgstr "Di chuyển khung {{value1}} xuống"
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Collapsed"
+msgstr "Thu gọn"
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Subgroups ({{value1}})"
+msgstr "Nhóm con ({{value1}})"
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "New subgroup title…"
+msgstr "Tiêu đề nhóm con mới…"
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "+ Add subgroup"
+msgstr "+ Thêm nhóm con"
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Remove subgroup"
+msgstr "Xóa nhóm con"
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "No active fields available to assign."
+msgstr "Không có trường hoạt động nào để gán."
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Drag or reorder core and field-group panels across the four editor regions, toggle default collapse state, and organize subgroups."
+msgstr "Kéo thả hoặc sắp xếp thứ tự khung lõi và nhóm trường qua 4 vùng trình soạn thảo, đặt mặc định thu gọn và chia nhóm con."
+
+#: admin:features.content.EntryListColumns
+msgid "Parent"
+msgstr "Mục cha"
+
+#: admin:features.content.QuickEditForm
+msgid "Parent #{{value1}}"
+msgstr "Cha #{{value1}}"
+
+#: admin:features.content.QuickEditForm
+msgid "Top level"
+msgstr "Cấp cao nhất"
+
+#: admin:features.content.QuickEditForm
+msgid "Order {{value1}}"
+msgstr "Thứ tự {{value1}}"
+
+#: admin:features.editor.PanelRegionRenderer
+msgid "Excerpt field is not enabled."
+msgstr "Trường tóm tắt chưa được bật."
+
+#: admin:features.editor.PanelRegionRenderer
+msgid "(No parent — top level)"
+msgstr "(Không có mục cha — cấp cao nhất)"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Add at least one sibling data field to configure conditional logic."
+msgstr "Hãy thêm ít nhất một trường dữ liệu cùng cấp để cấu hình điều kiện hiển thị."
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Enable conditional logic (DNF: OR of AND groups)"
+msgstr "Bật điều kiện hiển thị (DNF: HOẶC của các nhóm VÀ)"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Show if"
+msgstr "Hiển thị nếu"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "OR if"
+msgstr "HOẶC nếu"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Remove group"
+msgstr "Xóa nhóm"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Condition target field"
+msgstr "Trường đích điều kiện"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Condition operator"
+msgstr "Toán tử điều kiện"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Condition value"
+msgstr "Giá trị điều kiện"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Yes / True"
+msgstr "Có / Đúng"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "No / False"
+msgstr "Không / Sai"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "a, b, c"
+msgstr "a, b, c"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Value"
+msgstr "Giá trị"
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "+ Add OR condition group"
+msgstr "+ Thêm nhóm điều kiện HOẶC"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Added field {{value1}}."
+msgstr "Đã thêm trường {{value1}}."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Group title is required."
+msgstr "Tiêu đề nhóm trường là bắt buộc."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Local key must be lowercase snake_case starting with a letter."
+msgstr "Khóa cục bộ phải là snake_case chữ thường và bắt đầu bằng chữ cái."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Field group must define between 1 and 64 data fields."
+msgstr "Nhóm trường phải khai báo từ 1 đến 64 trường dữ liệu."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Admin-only location rules cannot include public fields; set exposure to Private."
+msgstr "Quy tắc chỉ dành cho Admin không được chứa trường công khai; hãy chuyển phạm vi sang Riêng tư."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "sync_entry_terms cannot be used alongside an entry_taxonomy location rule."
+msgstr "Không thể dùng sync_entry_terms cùng với quy tắc vị trí entry_taxonomy."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Could not save field group."
+msgstr "Không thể lưu nhóm trường."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Edit field group"
+msgstr "Chỉnh sửa nhóm trường"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Active"
+msgstr "Đang bật"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Inactive"
+msgstr "Đang tắt"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "This field group is owned by a theme or plugin and is read-only here."
+msgstr "Nhóm trường này thuộc quyền sở hữu của giao diện hoặc plugin nên chỉ xem tại đây."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Configure fields, location display targets, presentation style and conditional rules."
+msgstr "Cấu hình danh sách trường, quy tắc vị trí hiển thị, kiểu trình bày và logic điều kiện."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Save field group"
+msgstr "Lưu nhóm trường"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Location rules restrict this group to Admin only. Change public fields to Private in Presentation & Access."
+msgstr "Quy tắc vị trí giới hạn nhóm này chỉ cho Admin. Hãy chuyển các trường công khai sang Riêng tư ở mục Trình bày & Quyền."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "A term_ref field with sync_entry_terms enabled cannot be combined with an entry_taxonomy location rule."
+msgstr "Trường term_ref đang bật sync_entry_terms không thể kết hợp cùng quy tắc vị trí entry_taxonomy."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Group title *"
+msgstr "Tiêu đề nhóm *"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Local key *"
+msgstr "Khóa cục bộ *"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Active group"
+msgstr "Kích hoạt nhóm"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Drag cards or use ↑/↓ buttons to set editor display order."
+msgstr "Kéo thẻ hoặc nhấn ↑/↓ để chỉnh thứ tự hiển thị."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "+ Add field"
+msgstr "+ Thêm trường"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Reordered field {{value1}}."
+msgstr "Đã sắp xếp lại trường {{value1}}."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Moved field to position {{value1}}."
+msgstr "Đã chuyển trường tới vị trí {{value1}}."
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Group presentation settings"
+msgstr "Cấu hình trình bày nhóm trường"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Editor region"
+msgstr "Vùng trình soạn thảo"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Order (-1000..1000)"
+msgstr "Thứ tự (-1000..1000)"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Box style"
+msgstr "Kiểu khung"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Card (Standard)"
+msgstr "Thẻ chuẩn (Card)"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Seamless (No box)"
+msgstr "Liền mạch (Không viền)"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Label placement"
+msgstr "Vị trí nhãn"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Top aligned"
+msgstr "Căn trên"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Left aligned"
+msgstr "Căn trái"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Collapsible panel"
+msgstr "Cho phép thu gọn khung"
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Collapsed by default"
+msgstr "Thu gọn mặc định"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Updated active state for {{value1}}."
+msgstr "Đã cập nhật trạng thái kích hoạt cho {{value1}}."
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Permanently deleted field group {{value1}}."
+msgstr "Đã xóa vĩnh viễn nhóm trường {{value1}}."
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Withdrew field group {{value1}}."
+msgstr "Đã rút nhóm trường {{value1}}."
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Could not remove field group."
+msgstr "Không thể xóa nhóm trường."
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Your session expired while deleting the field group."
+msgstr "Phiên đăng nhập đã hết hạn khi xóa nhóm trường."
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Structure / Field groups"
+msgstr "Cấu trúc / Nhóm trường"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Create reusable field groups targeting content types, taxonomy terms, or custom options pages."
+msgstr "Tạo các nhóm trường dùng lại cho loại nội dung, term phân loại hoặc trang tùy chọn."
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Filter by domain"
+msgstr "Lọc theo phạm vi"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Options Page"
+msgstr "Trang tùy chọn"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Search field groups"
+msgstr "Tìm kiếm nhóm trường"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Search title or key…"
+msgstr "Tìm tiêu đề hoặc khóa…"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Loading field groups…"
+msgstr "Đang tải nhóm trường…"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "No matching field groups found."
+msgstr "Không tìm thấy nhóm trường phù hợp."
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Field groups table"
+msgstr "Bảng nhóm trường"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Title & key"
+msgstr "Tiêu đề & khóa"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Domain"
+msgstr "Phạm vi"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Withdrawn"
+msgstr "Đã rút"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Edit"
+msgstr "Chỉnh sửa"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Withdraw"
+msgstr "Rút cấu hình"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Purge"
+msgstr "Xóa sạch"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Permanently delete {{value1}}?"
+msgstr "Xóa vĩnh viễn {{value1}}?"
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Purging removes the field group definition permanently (?purge=true) once all stored references are safe or empty."
+msgstr "Xóa sạch sẽ gỡ bỏ vĩnh viễn định nghĩa nhóm trường (?purge=true) khi không còn tham chiếu lưu trữ."
+
+#: admin:features.field-groups.FieldGroupsWorkspace
+msgid "Loading field group…"
+msgstr "Đang tải nhóm trường…"
+
+#: admin:features.field-groups.FieldGroupsWorkspace
+msgid "Field group \"{{value1}}\" was not found."
+msgstr "Không tìm thấy nhóm trường \"{{value1}}\"."
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Untitled field"
+msgstr "Trường chưa đặt tên"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Move field {{value1}} up"
+msgstr "Di chuyển trường {{value1}} lên"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Move field {{value1}} down"
+msgstr "Di chuyển trường {{value1}} xuống"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Field setting sections"
+msgstr "Các mục cấu hình trường"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Validation"
+msgstr "Ràng buộc"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Presentation & Access"
+msgstr "Trình bày & Quyền"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Conditional Logic"
+msgstr "Logic điều kiện"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Field label *"
+msgstr "Nhãn trường *"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Field type"
+msgstr "Kiểu trường"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Instructions"
+msgstr "Hướng dẫn nhập"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Default value (string or JSON)"
+msgstr "Giá trị mặc định (chuỗi hoặc JSON)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Choices (value|Label or value|Label|icon per line)"
+msgstr "Lựa chọn (giá_trị|Nhãn hoặc giá_trị|Nhãn|icon mỗi dòng)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Dynamic options source"
+msgstr "Nguồn tùy chọn động"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Static choices above"
+msgstr "Danh sách tĩnh ở trên"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Multiple select"
+msgstr "Chọn nhiều giá trị"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Allow empty option"
+msgstr "Cho phép giá trị rỗng"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Rich text toolbar"
+msgstr "Thanh công cụ văn bản giàu định dạng"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Standard"
+msgstr "Tiêu chuẩn"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Minimal"
+msgstr "Tối giản"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Target content types (comma-separated)"
+msgstr "Loại nội dung đích (cách nhau dấu phẩy)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Allow multiple entries"
+msgstr "Cho phép chọn nhiều bản ghi"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Taxonomy key"
+msgstr "Khóa phân loại"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Picker UI style"
+msgstr "Kiểu giao diện chọn"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Auto (follows taxonomy)"
+msgstr "Tự động (theo phân loại)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Checklist"
+msgstr "Danh sách kiểm"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Tag input"
+msgstr "Thẻ từ khóa (Tags)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Dropdown select"
+msgstr "Danh sách thả xuống"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Radio buttons"
+msgstr "Nút chọn đơn (Radio)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Multiple terms"
+msgstr "Chọn nhiều term"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Sync to entry taxonomy"
+msgstr "Đồng bộ với phân loại của bài viết"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "True label"
+msgstr "Nhãn Đúng"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "False label"
+msgstr "Nhãn Sai"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Tone"
+msgstr "Sắc thái"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Message text"
+msgstr "Nội dung thông báo"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Nested sub-fields"
+msgstr "Các trường con lồng nhau"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Added sub-field."
+msgstr "Đã thêm trường con."
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "+ Add sub-field"
+msgstr "+ Thêm trường con"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Min chars"
+msgstr "Số ký tự tối thiểu"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Max chars"
+msgstr "Số ký tự tối đa"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Min value"
+msgstr "Giá trị tối thiểu"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Max value"
+msgstr "Giá trị tối đa"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "UI layout elements do not store data or run validation."
+msgstr "Thành phần giao diện bố cục không lưu dữ liệu hay kiểm tra ràng buộc."
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Grid width (%)"
+msgstr "Độ rộng lưới (%)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "CSS custom var"
+msgstr "Biến CSS tùy chỉnh"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Role access (View / Edit)"
+msgstr "Quyền theo vai trò (Xem / Sửa)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Editor views & edits"
+msgstr "Biên tập viên được xem & sửa"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Editor views, Admin edits"
+msgstr "Biên tập viên chỉ xem, Admin sửa"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Admin only"
+msgstr "Chỉ Admin"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Public hydration exposure"
+msgstr "Phạm vi công khai dữ liệu"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Public (rendered in themes)"
+msgstr "Công khai (hiển thị ngoài giao diện)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Private (Admin/Editor only)"
+msgstr "Riêng tư (chỉ Admin/Editor)"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Show in list column"
+msgstr "Hiện trong cột bảng danh sách"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Responsive"
+msgstr "Đa màn hình (Responsive)"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Rule value"
+msgstr "Giá trị quy tắc"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "All content types (all)"
+msgstr "Tất cả loại nội dung (all)"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "All taxonomies (all)"
+msgstr "Tất cả phân loại (all)"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Homepage (homepage)"
+msgstr "Trang chủ (homepage)"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Posts Page (posts_page)"
+msgstr "Trang bài viết (posts_page)"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Administrator (admin)"
+msgstr "Quản trị viên (admin)"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Options page target"
+msgstr "Trang tùy chọn mục tiêu"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Location rules"
+msgstr "Quy tắc vị trí"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Taxonomy Term"
+msgstr "Term phân loại"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Every rule within a group uses AND; multiple groups use OR. Rules inside a group cannot mix Content, Term, and Options Page targets."
+msgstr "Các quy tắc cùng nhóm kết hợp bằng VÀ; giữa các nhóm kết hợp bằng HOẶC. Một nhóm không thể trộn lẫn Nội dung, Term và Trang tùy chọn."
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Show this field group if"
+msgstr "Hiển thị nhóm trường này nếu"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "OR"
+msgstr "HOẶC"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Remove OR group"
+msgstr "Xóa nhóm HOẶC"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Location parameter"
+msgstr "Tham số vị trí"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Location operator"
+msgstr "Toán tử vị trí"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "is equal to"
+msgstr "bằng"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "is not equal to"
+msgstr "khác"
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "+ Add rule group (OR)"
+msgstr "+ Thêm nhóm quy tắc (HOẶC)"
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Saved options for {{value1}} (v{{value2}})."
+msgstr "Đã lưu tùy chọn cho {{value1}} (v{{value2}})."
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Options changed concurrently (412/409). Your edits are kept; reload before saving."
+msgstr "Tùy chọn đã thay đổi đồng thời (412/409). Nội dung của bạn vẫn được giữ; hãy tải lại trước khi lưu."
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "You do not have permission to edit this options page."
+msgstr "Bạn không có quyền chỉnh sửa trang tùy chọn này."
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Options page {{value1}} was not found."
+msgstr "Không tìm thấy trang tùy chọn {{value1}}."
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Back to options pages"
+msgstr "Quay lại danh sách trang tùy chọn"
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Manage options pages"
+msgstr "Quản lý trang tùy chọn"
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Switch language and discard unsaved changes in this tab?"
+msgstr "Chuyển ngôn ngữ và hủy các thay đổi chưa lưu trong tab này?"
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Loading options…"
+msgstr "Đang tải tùy chọn…"
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "No active field groups are attached to options_page = custom:{{value1}} yet."
+msgstr "Chưa có nhóm trường nào đang bật gắn với options_page = custom:{{value1}}."
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Fallback ({{value1}})"
+msgstr "Dùng bản dự phòng ({{value1}})"
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "All changes saved"
+msgstr "Mọi thay đổi đã được lưu"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Discard unsaved changes to this options page?"
+msgstr "Hủy các thay đổi chưa lưu của trang tùy chọn này?"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Options page key must be snake_case (1 to 64 characters)."
+msgstr "Khóa trang tùy chọn phải là snake_case (1 đến 64 ký tự)."
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Options page title is required."
+msgstr "Tiêu đề trang tùy chọn là bắt buộc."
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Saved options page {{value1}} (v{{value2}})."
+msgstr "Đã lưu trang tùy chọn {{value1}} (v{{value2}})."
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Options page changed concurrently (412). Reload and try again."
+msgstr "Trang tùy chọn đã thay đổi đồng thời (412). Hãy tải lại và thử lại."
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Could not save options page."
+msgstr "Không thể lưu trang tùy chọn."
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Deleted options page {{value1}}."
+msgstr "Đã xóa trang tùy chọn {{value1}}."
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Content Structure / Options Pages"
+msgstr "Cấu trúc nội dung / Trang tùy chọn"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Options pages"
+msgstr "Trang tùy chọn"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Create custom settings screens attached to Admin navigation and bind field groups via location rules."
+msgstr "Tạo màn hình cài đặt tùy chỉnh gắn vào thanh điều hướng Quản trị và liên kết nhóm trường qua quy tắc vị trí."
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "+ Add options page"
+msgstr "+ Thêm trang tùy chọn"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "No custom options pages defined yet."
+msgstr "Chưa có trang tùy chọn nào được tạo."
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Menu"
+msgstr "Menu"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Open screen"
+msgstr "Mở màn hình"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Configure"
+msgstr "Cấu hình"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Create options page"
+msgstr "Tạo trang tùy chọn"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Configure {{value1}}"
+msgstr "Cấu hình {{value1}}"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Page title *"
+msgstr "Tiêu đề trang *"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Page key *"
+msgstr "Khóa trang *"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Sidebar menu label *"
+msgstr "Nhãn menu thanh bên *"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Parent menu group"
+msgstr "Nhóm menu cha"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "System -> Settings"
+msgstr "Hệ thống -> Cài đặt"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Top-level sidebar section"
+msgstr "Mục cấp cao trên thanh bên"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Minimum edit role"
+msgstr "Vai trò sửa tối thiểu"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Editor & Admin"
+msgstr "Editor & Admin"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "This options page is provider-managed. Only its assigned field group values can be edited."
+msgstr "Trang tùy chọn này do gói mở rộng quản lý. Chỉ chỉnh được giá trị nhóm trường đã gắn."
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Save options page"
+msgstr "Lưu trang tùy chọn"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Delete options page {{value1}}?"
+msgstr "Xóa trang tùy chọn {{value1}}?"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Also permanently purge all saved option values for this page"
+msgstr "Xóa sạch vĩnh viễn toàn bộ giá trị đã lưu của trang này"
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Confirm delete"
+msgstr "Xác nhận xóa"
+#: admin:features.settings.LanguagePacksPanel
+msgid "Uploaded language pack for {{domain}} ({{locale}})."
+msgstr "Đã tải lên gói ngôn ngữ cho {{domain}} ({{locale}})."
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Removed custom language pack for {{domain}} ({{locale}})."
+msgstr "Đã gỡ gói ngôn ngữ tùy chỉnh của {{domain}} ({{locale}})."
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Gettext language packs (.po / .mo)"
+msgstr "Gói ngôn ngữ Gettext (.po / .mo)"
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Upload custom .po or .mo translation files for OpenDash Core, the active theme, or installed plugins. Uploaded .po files are compiled to .mo automatically."
+msgstr "Tải lên tệp dịch .po hoặc .mo cho OpenDash Core, giao diện hoặc plugin. Tệp .po sẽ được tự động biên dịch sang .mo."
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Text domain"
+msgstr "Tên miền văn bản (Text domain)"
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Translation file (.po / .mo)"
+msgstr "Tệp dịch (.po / .mo)"
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Upload pack"
+msgstr "Tải lên gói"
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Loading language packs..."
+msgstr "Đang tải gói ngôn ngữ..."
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "{{count}} reference strings"
+msgstr "{{count}} chuỗi gốc"
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "No custom or bundled language packs installed."
+msgstr "Chưa có gói ngôn ngữ tích hợp hoặc tùy chỉnh nào."
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Locale"
+msgstr "Ngôn ngữ"
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Coverage"
+msgstr "Độ phủ"
+
+#: admin:features.settings.LanguagePacksPanel
+msgctxt "l10n.pack.delete"
+msgid "Delete override"
+msgstr "Xóa bản ghi đè"
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Built-in"
+msgstr "Tích hợp sẵn"
+
+#: admin:features.settings.MultilingualSettingsPage
+msgid "Language packs"
+msgstr "Gói ngôn ngữ"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Optional singular name"
+msgstr "Tên số ít (tùy chọn)"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Lowercase kebab-case archive prefix. Leave empty to use the taxonomy key."
+msgstr "Tiền tố đường dẫn lưu trữ dạng kebab-case chữ thường. Để trống để dùng khóa taxonomy."
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Editor & picker behavior"
+msgstr "Hành vi trong trình soạn thảo & bộ chọn"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Selection mode"
+msgstr "Chế độ chọn"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Single term only"
+msgstr "Chỉ chọn 1 term"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Picker style"
+msgstr "Kiểu hiển thị bộ chọn"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Auto (by hierarchy)"
+msgstr "Tự động (theo phân cấp)"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Tags chips"
+msgstr "Thẻ tag (Chips)"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Default fallback term on publish"
+msgstr "Term mặc định khi xuất bản"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "None (no automatic default)"
+msgstr "Không (không tự động gán)"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Term #{{value1}} (not loaded)"
+msgstr "Term #{{value1}} (chưa tải)"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Require at least one term when publishing"
+msgstr "Bắt buộc chọn ít nhất 1 term khi xuất bản"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Allow Editors to create new terms"
+msgstr "Cho phép Editor tạo term mới"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Show taxonomy submenu in Admin sidebar"
+msgstr "Hiện mục phân loại trong menu thanh bên"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Show column by default in entry list table"
+msgstr "Mặc định hiện cột trong bảng danh sách bài"
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Attach to content types"
+msgstr "Gắn vào các loại nội dung"
+
+#: admin:features.taxonomy.TermEditPage
+msgid "Server version changed {{value1}}. Keep edited input and continue with v{{value2}}?"
+msgstr "Phiên bản máy chủ đã đổi {{value1}}. Giữ dữ liệu đã sửa và tiếp tục với v{{value2}}?"
+
+#: admin:features.taxonomy.TermEditPage
+msgid "Updated baseline version v{{value1}}; edited input is retained."
+msgstr "Đã cập nhật phiên bản gốc v{{value1}}; dữ liệu đã sửa vẫn được giữ nguyên."
+
+#: admin:features.taxonomy.TermEditPage
+msgid "Sort order"
+msgstr "Thứ tự sắp xếp"
+
+#: admin:features.taxonomy.TermEditPage
+msgid "Server data changed (412/409). Your edits are retained."
+msgstr "Dữ liệu máy chủ đã thay đổi (412/409). Bản sửa của bạn vẫn được giữ."
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Name cannot be empty."
+msgstr "Tên không được để trống."
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Slug must start with a-z and contain only lowercase letters, numbers, and hyphens."
+msgstr "Slug phải bắt đầu bằng chữ a-z và chỉ chứa chữ thường, số và dấu gạch ngang."
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Could not create term."
+msgstr "Không thể tạo term."
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Add new {{value1}}"
+msgstr "Thêm {{value1}} mới"
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Create term"
+msgstr "Tạo term"
+
+#: admin:features.taxonomy.TermMetaFieldGroups
+msgid "Term custom fields"
+msgstr "Trường tùy chỉnh của term"
+
+#: admin:features.taxonomy.TermPicker
+msgid "Required before publish"
+msgstr "Bắt buộc trước khi xuất bản"
+
+#: admin:features.taxonomy.TermPickerGroupBody
+msgid "— None —"
+msgstr "— Không chọn —"
+
+#: admin:features.taxonomy.TermPickerGroupBody
+msgid "+ Choose term to add…"
+msgstr "+ Chọn term để thêm…"
+
+#: admin:features.taxonomy.TermPickerGroupBody
+msgid "Clear selection"
+msgstr "Xóa lựa chọn"
+
+#: admin:features.taxonomy.TermPickerGroupBody
+msgid "+ Add {{value1}}"
+msgstr "+ Thêm {{value1}}"
+
+#: admin:features.taxonomy.TermSeoFields
+msgid "Only admins can modify archive SEO metadata for terms."
+msgstr "Chỉ Quản trị viên mới được chỉnh siêu dữ liệu SEO lưu trữ của term."
+
+#: admin:features.taxonomy.TermSeoFields
+msgid "Change OG image"
+msgstr "Đổi ảnh OG"
+
+#: admin:features.taxonomy.TermSeoFields
+msgid "Choose OG image"
+msgstr "Chọn ảnh OG"
+
+#: admin:features.taxonomy.TermSeoFields
+msgid "SHA-256 media ID"
+msgstr "ID media SHA-256"
+
+#: admin:shell.AdminShell
+msgid "Content types"
+msgstr "Loại nội dung"
+
+#: admin:shell.AdminShell
+msgid "Taxonomies"
+msgstr "Phân loại"
+
+#: admin:shell.AdminShell
+msgid "Options page"
+msgstr "Trang tùy chọn"
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Translatable (multilingual)"
+msgstr "Đa ngôn ngữ (Translatable)"
+
 #: admin:shell.install
 msgid "Install"
 msgstr "Cài đặt"

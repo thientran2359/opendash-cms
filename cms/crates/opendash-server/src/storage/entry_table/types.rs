@@ -66,6 +66,10 @@ pub struct EntryTableRow {
     pub updated_at: String,
     pub published_at: Option<String>,
     pub trashed_at: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<i64>,
+    #[serde(default)]
+    pub menu_order: i32,
     pub term_ids: Vec<i64>,
     pub public_url: Option<String>,
     pub fields: BTreeMap<String, Value>,
@@ -189,6 +193,8 @@ pub async fn query(
     let column = match filter.sort.as_str() {
         "title" => "e.title COLLATE NOCASE",
         "created_at" => "e.created_at",
+        "published_at" => "COALESCE(e.published_at, e.created_at)",
+        "menu_order" => "e.menu_order",
         "id" => "e.id",
         "trashed_at" => "e.trashed_at",
         _ if is_trash_view => "e.trashed_at",
@@ -205,7 +211,7 @@ pub async fn query(
     rows_qb.push(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json, \
                 e.publication_status, e.version, e.created_at, e.updated_at, e.published_at, \
-                e.locale, e.translation_group_id, e.trashed_at",
+                e.locale, e.translation_group_id, e.trashed_at, e.parent_id, e.menu_order",
     );
     push_entry_table_scope(
         &mut rows_qb,
@@ -233,6 +239,8 @@ pub async fn query(
         String,
         String,
         Option<String>,
+        Option<i64>,
+        i32,
     );
     let selected: Vec<SelectedRow> = rows_qb.build_query_as().fetch_all(&mut *tx).await?;
 
@@ -261,8 +269,14 @@ pub async fn query(
         std::collections::HashSet::new()
     };
 
-    let (translations_by_group, mut terms_by_entry, public_urls) = if is_trash_view {
-        (BTreeMap::new(), BTreeMap::new(), BTreeMap::new())
+    let (translations_by_group, mut terms_by_entry, public_urls, admin_col_keys) = if is_trash_view
+    {
+        (
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            std::collections::BTreeSet::new(),
+        )
     } else {
         let group_ids: Vec<String> = selected
             .iter()
@@ -280,7 +294,10 @@ pub async fn query(
             .collect();
         let urls =
             seo::resolve_public_entry_paths_by_entry_ids_in_conn(&mut tx, &published_ids).await?;
-        (tr, terms, urls)
+        let col_keys =
+            crate::storage::admin_extensions::active_column_field_keys_in_conn(&mut tx, type_key)
+                .await?;
+        (tr, terms, urls, col_keys)
     };
 
     let mut items = Vec::with_capacity(selected.len());
@@ -298,6 +315,8 @@ pub async fn query(
         locale,
         translation_group_id,
         trashed_at,
+        parent_id,
+        menu_order,
     ) in selected
     {
         if is_trash_view {
@@ -323,6 +342,8 @@ pub async fn query(
                 updated_at,
                 published_at,
                 trashed_at,
+                parent_id: None,
+                menu_order: 0,
                 term_ids: Vec::new(),
                 public_url: None,
                 fields: BTreeMap::new(),
@@ -355,13 +376,12 @@ pub async fn query(
             published_at.clone(),
         ))?;
         let term_ids = terms_by_entry.remove(&record.id).unwrap_or_default();
-        record.values.retain(|key, _| {
-            effective.effective_fields.get(key).is_some_and(|field| {
-                field.effective_status == EffectiveFieldStatus::Active
-                    && caller_role >= field.definition.effective_acl().0
-                    && field.definition.effective_acl().2 == PublicExposure::Public
-            })
-        });
+        filter_entry_table_fields_for_role(
+            &mut record.values,
+            &effective,
+            &admin_col_keys,
+            caller_role,
+        );
         let public_url = if record.publication_status == "published" {
             public_urls.get(&record.id).cloned()
         } else {
@@ -390,6 +410,8 @@ pub async fn query(
             updated_at: record.updated_at,
             published_at,
             trashed_at: None,
+            parent_id,
+            menu_order,
             term_ids,
             public_url,
             fields: record.values,

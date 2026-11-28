@@ -205,10 +205,17 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
                 {
                     "key": "portfolio",
                     "label": "Portfolio",
+                    "taxonomies": ["category", "tag"]
+                }
+            ],
+            "field_groups": [
+                {
+                    "local_key": "portfolio_fields",
+                    "title": "Portfolio Fields",
+                    "target_types": ["portfolio"],
                     "fields": [
                         { "key": "client", "label": "Client", "type": "text", "required": true }
-                    ],
-                    "taxonomies": ["category", "tag"]
+                    ]
                 }
             ]
         },

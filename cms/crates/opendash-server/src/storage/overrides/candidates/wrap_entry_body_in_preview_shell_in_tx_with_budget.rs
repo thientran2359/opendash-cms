@@ -18,7 +18,9 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         .ok_or_else(|| ApiError::not_found("Content entry not found."))?;
     entries::filter_entry_values_for_role(&mut record, schema, actor_role);
     let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
-    let url_policy = active_theme_url_policy(active.as_ref())?;
+    let url_policy =
+        active_theme_url_policy_in_conn(&mut **tx, active.as_ref(), None, Some(schema), None)
+            .await?;
     let mut state =
         builder::read_render_context_for_locale_tx(tx, Some(&record.locale), true, None).await?;
     let mut options_richtext_nonces = template_sec::RichTextNonceTable::default();
@@ -195,11 +197,19 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         }
         TemplateResolution::ActiveTheme { target_key, html } => {
             canvas_layout = is_canvas_resolved_key(active.as_ref(), &target_key);
-            let out = render_csec_template_for_preview(
+            let tpl_url_policy = active_theme_url_policy_in_conn(
+                &mut **tx,
+                active.as_ref(),
+                Some(&target_key),
+                Some(schema),
+                None,
+            )
+            .await?;
+            let out = render_csec_template_for_preview_with_policy(
                 &target_key,
                 &html,
                 active.as_ref(),
-                Some(schema),
+                &tpl_url_policy,
                 &theme_context,
                 Some(&slot_fragment),
                 &mut public_budget,

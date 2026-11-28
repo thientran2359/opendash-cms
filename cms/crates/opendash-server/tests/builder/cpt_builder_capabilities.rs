@@ -103,7 +103,6 @@ fn type_input(builder: bool) -> Value {
     json!({
         "key": "project",
         "label": "Projects",
-        "fields": [{"key":"body","label":"Project text","type":"richtext"}],
         "settings": {
             "public":true,"has_archive":true,"publication":"draft_publish","supports":supports
         }
@@ -562,7 +561,6 @@ async fn auto_injected_cpt_body_without_declared_fields_syncs_media_refs_and_acl
         .json(&json!({
             "key": "case_study",
             "label": "Case Studies",
-            "fields": [],
             "settings": {
                 "public": true,
                 "has_archive": true,

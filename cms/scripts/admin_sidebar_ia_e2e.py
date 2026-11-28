@@ -63,7 +63,6 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         {
                             "key": "project",
                             "label": "Projects",
-                            "fields": [{"key": "summary", "label": "Summary", "type": "text"}],
                         },
                         csrf,
                         expected=201,

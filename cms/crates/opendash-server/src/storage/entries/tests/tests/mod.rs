@@ -106,6 +106,8 @@ fn base_composite_input(
         custom_template_key: PatchField::Omitted,
         content_mode: PatchField::Omitted,
         seo: PatchField::Omitted,
+        parent_id: PatchField::Omitted,
+        menu_order: None,
         created_at: None,
         updated_at: None,
     }

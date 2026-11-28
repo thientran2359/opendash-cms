@@ -21,6 +21,7 @@ use crate::error::{ApiError, ApiResult};
 
 use super::super::locales::{get_default_locale_code_in_conn, resolve_requested_locale_in_conn};
 use super::schema::*;
+use super::storage_helpers::*;
 
 pub async fn get_global_site_options_in_conn(
     conn: &mut SqliteConnection,
@@ -172,75 +173,7 @@ pub(in crate::storage::settings) async fn load_theme_option_maps_in_conn(
     BTreeMap<String, serde_json::Value>,
     BTreeMap<String, serde_json::Value>,
 )> {
-    let global_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = 'theme' AND owner_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_all(&mut *conn)
-    .await?;
-    let mut global_map = BTreeMap::new();
-    for (k, v_json) in global_rows {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
-            global_map.insert(k, v);
-        }
-    }
-
-    let mut locale_map = BTreeMap::new();
-    if target_locale != default_locale {
-        let loc_rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT option_key, value_json
-               FROM theme_option_locale_values
-              WHERE theme_id = ? AND locale = ?",
-        )
-        .bind(theme_id)
-        .bind(target_locale)
-        .fetch_all(&mut *conn)
-        .await?;
-        for (k, v_json) in loc_rows {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
-                locale_map.insert(k, v);
-            }
-        }
-    }
-
-    Ok((global_map, locale_map))
-}
-
-pub(in crate::storage::settings) async fn sync_theme_option_media_refs_in_conn(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-    owner_kind: &str,
-    owner_id: &str,
-    locale: &str,
-    option_key: &str,
-    media_ids: &BTreeSet<String>,
-) -> ApiResult<()> {
-    sqlx::query(
-        "DELETE FROM theme_option_media_refs
-          WHERE owner_kind = ? AND owner_id = ? AND locale = ? AND option_key = ?",
-    )
-    .bind(owner_kind)
-    .bind(owner_id)
-    .bind(locale)
-    .bind(option_key)
-    .execute(&mut *conn)
-    .await?;
-    for media_id in media_ids {
-        sqlx::query(
-            "INSERT OR IGNORE INTO theme_option_media_refs
-                (theme_id, owner_kind, owner_id, locale, option_key, media_id)
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(theme_id)
-        .bind(owner_kind)
-        .bind(owner_id)
-        .bind(locale)
-        .bind(option_key)
-        .bind(media_id)
-        .execute(&mut *conn)
-        .await?;
-    }
-    Ok(())
+    load_owner_option_maps_in_conn(conn, "theme", theme_id, default_locale, target_locale).await
 }
 
 pub async fn get_theme_options_in_conn_for_locale(
@@ -257,24 +190,9 @@ pub async fn get_theme_options_in_conn_for_locale(
     let (global_map, locale_map) =
         load_theme_option_maps_in_conn(conn, theme_id, &default_locale, &target_locale).await?;
 
-    let version: i64 = if target_locale == default_locale {
-        sqlx::query_scalar(
-            "SELECT version FROM theme_option_versions WHERE owner_kind = 'theme' AND owner_id = ?",
-        )
-        .bind(theme_id)
-        .fetch_optional(&mut *conn)
-        .await?
-        .unwrap_or(1)
-    } else {
-        sqlx::query_scalar(
-            "SELECT version FROM theme_option_locale_versions WHERE theme_id = ? AND locale = ?",
-        )
-        .bind(theme_id)
-        .bind(&target_locale)
-        .fetch_optional(&mut *conn)
-        .await?
-        .unwrap_or(1)
-    };
+    let version: i64 =
+        load_owner_option_version_in_conn(conn, "theme", theme_id, &default_locale, &target_locale)
+            .await?;
 
     let mut values = BTreeMap::new();
     for spec in &fields {
@@ -401,155 +319,45 @@ pub async fn put_theme_options_in_conn_for_locale(
     )
     .await?;
 
-    if is_secondary {
-        let current_ver: Option<i64> = sqlx::query_scalar(
-            "SELECT version FROM theme_option_locale_versions WHERE theme_id = ? AND locale = ?",
-        )
-        .bind(theme_id)
-        .bind(&target_locale)
-        .fetch_optional(&mut *conn)
-        .await?;
-        match current_ver {
-            None => {
-                if expected_version != 1 {
-                    return Ok(ThemeOptionsOutcome::Stale);
-                }
-                sqlx::query(
-                    "INSERT INTO theme_option_locale_versions (theme_id, locale, version)
-                     VALUES (?, ?, 2)",
-                )
-                .bind(theme_id)
-                .bind(&target_locale)
-                .execute(&mut *conn)
-                .await?;
-            }
-            Some(ver) => {
-                if ver != expected_version {
-                    return Ok(ThemeOptionsOutcome::Stale);
-                }
-                let res = sqlx::query(
-                    "UPDATE theme_option_locale_versions
-                        SET version = version + 1,
-                            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                      WHERE theme_id = ? AND locale = ? AND version = ?",
-                )
-                .bind(theme_id)
-                .bind(&target_locale)
-                .bind(expected_version)
-                .execute(&mut *conn)
-                .await?;
-                if res.rows_affected() != 1 {
-                    return Ok(ThemeOptionsOutcome::Stale);
-                }
-            }
-        }
-        for (k, v) in &submitted {
-            let v_json = serde_json::to_string(v)?;
-            sqlx::query(
-                "INSERT INTO theme_option_locale_values (theme_id, locale, option_key, value_json, updated_at)
-                 VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                 ON CONFLICT(theme_id, locale, option_key) DO UPDATE SET
-                     value_json = excluded.value_json,
-                     updated_at = excluded.updated_at",
-            )
-            .bind(theme_id)
-            .bind(&target_locale)
-            .bind(k)
-            .bind(v_json)
-            .execute(&mut *conn)
-            .await?;
+    let secondary_loc = is_secondary.then_some(target_locale.as_str());
+    if !bump_owner_option_version_in_conn(
+        conn,
+        "theme",
+        theme_id,
+        theme_id,
+        secondary_loc,
+        expected_version,
+    )
+    .await?
+    {
+        return Ok(ThemeOptionsOutcome::Stale);
+    }
 
-            let spec = spec_map[k.as_str()];
-            if matches!(
-                spec.field_type,
-                FieldType::Media | FieldType::Gallery | FieldType::Group | FieldType::Repeater
-            ) {
-                let single_map = BTreeMap::from([(k.clone(), v.clone())]);
-                let media_ids =
-                    collect_media_ids(std::slice::from_ref(spec), &single_map).all_ids();
-                sync_theme_option_media_refs_in_conn(
-                    conn,
-                    theme_id,
-                    "theme",
-                    theme_id,
-                    &target_locale,
-                    k,
-                    &media_ids,
-                )
-                .await?;
-            }
-        }
-    } else {
-        let current_ver: Option<i64> = sqlx::query_scalar(
-            "SELECT version FROM theme_option_versions WHERE owner_kind = 'theme' AND owner_id = ?",
+    let ref_locale = secondary_loc.unwrap_or("");
+    for (k, v) in &submitted {
+        let v_json = serde_json::to_string(v)?;
+        upsert_owner_option_value_in_conn(
+            conn,
+            "theme",
+            theme_id,
+            theme_id,
+            secondary_loc,
+            k,
+            &v_json,
         )
-        .bind(theme_id)
-        .fetch_optional(&mut *conn)
         .await?;
 
-        match current_ver {
-            None => {
-                if expected_version != 1 {
-                    return Ok(ThemeOptionsOutcome::Stale);
-                }
-                sqlx::query(
-                    "INSERT INTO theme_option_versions (theme_id, owner_kind, owner_id, version)
-                     VALUES (?, 'theme', ?, 2)",
-                )
-                .bind(theme_id)
-                .bind(theme_id)
-                .execute(&mut *conn)
-                .await?;
-            }
-            Some(ver) => {
-                if ver != expected_version {
-                    return Ok(ThemeOptionsOutcome::Stale);
-                }
-                let res = sqlx::query(
-                    "UPDATE theme_option_versions
-                     SET version = version + 1,
-                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                     WHERE owner_kind = 'theme' AND owner_id = ? AND version = ?",
-                )
-                .bind(theme_id)
-                .bind(expected_version)
-                .execute(&mut *conn)
-                .await?;
-                if res.rows_affected() != 1 {
-                    return Ok(ThemeOptionsOutcome::Stale);
-                }
-            }
-        }
-
-        for (k, v) in &submitted {
-            let v_json = serde_json::to_string(v)?;
-            sqlx::query(
-                "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json, updated_at)
-                 VALUES (?, 'theme', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                 ON CONFLICT(owner_kind, owner_id, option_key) DO UPDATE SET
-                     value_json = excluded.value_json,
-                     updated_at = excluded.updated_at",
+        let spec = spec_map[k.as_str()];
+        if matches!(
+            spec.field_type,
+            FieldType::Media | FieldType::Gallery | FieldType::Group | FieldType::Repeater
+        ) {
+            let single_map = BTreeMap::from([(k.clone(), v.clone())]);
+            let media_ids = collect_media_ids(std::slice::from_ref(spec), &single_map).all_ids();
+            sync_theme_option_media_refs_in_conn(
+                conn, theme_id, "theme", theme_id, ref_locale, k, &media_ids,
             )
-            .bind(theme_id)
-            .bind(theme_id)
-            .bind(k)
-            .bind(v_json)
-            .execute(&mut *conn)
             .await?;
-
-            let spec = spec_map[k.as_str()];
-            if matches!(
-                spec.field_type,
-                FieldType::Media | FieldType::Gallery | FieldType::Group | FieldType::Repeater
-            ) {
-                let single_map = BTreeMap::from([(k.clone(), v.clone())]);
-                let media_ids =
-                    collect_media_ids(std::slice::from_ref(spec), &single_map).all_ids();
-                sync_theme_option_media_refs_in_conn(
-                    conn, theme_id, "theme", theme_id, "", k, &media_ids,
-                )
-                .await?;
-            }
         }
     }
 

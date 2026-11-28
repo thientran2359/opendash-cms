@@ -129,28 +129,45 @@ test('themes install route separates from Template Library (#/appearance/library
 
 test('content-structure canonical routes and legacy aliases parse cleanly', () => {
   assert.deepEqual(parseAdminRoute('#/content-structure/content-types'), {
-    view: 'settings',
+    view: 'content-structure',
     sub: 'content-types',
     typeKey: undefined,
     rawHash: '#/content-structure/content-types',
   });
   assert.deepEqual(parseAdminRoute('#/content-structure/content-types/project'), {
-    view: 'settings',
+    view: 'content-structure',
     sub: 'content-types',
     typeKey: 'project',
     rawHash: '#/content-structure/content-types/project',
   });
   assert.deepEqual(parseAdminRoute('#/content-structure/taxonomies'), {
-    view: 'taxonomy',
-    sub: 'definitions',
-    taxonomyMode: 'definitions',
+    view: 'content-structure',
+    sub: 'taxonomies',
     rawHash: '#/content-structure/taxonomies',
   });
+  assert.deepEqual(parseAdminRoute('#/content-structure/field-groups'), {
+    view: 'content-structure',
+    sub: 'field-groups',
+    typeKey: undefined,
+    rawHash: '#/content-structure/field-groups',
+  });
+  assert.deepEqual(parseAdminRoute('#/content-structure/options-pages'), {
+    view: 'content-structure',
+    sub: 'options-pages',
+    typeKey: undefined,
+    rawHash: '#/content-structure/options-pages',
+  });
+  assert.deepEqual(parseAdminRoute('#/options/brand_config'), {
+    view: 'options-page',
+    sub: 'view',
+    typeKey: 'brand_config',
+    rawHash: '#/options/brand_config',
+  });
   assert.deepEqual(parseAdminRoute('#/content-structure'), {
-    view: 'settings',
+    view: 'content-structure',
     sub: 'content-types',
+    typeKey: undefined,
     rawHash: '#/content-structure/content-types',
-    redirectHash: '#/content-structure/content-types',
   });
   // Legacy deep links continue parsing without forced URL rewriting.
   assert.equal(parseAdminRoute('#/appearance/content-types/page').rawHash, '#/appearance/content-types/page');
@@ -172,6 +189,8 @@ test('RBAC blocks editor from contact, themes install, library, content-structur
     '#/patterns',
     '#/content-structure/content-types',
     '#/content-structure/taxonomies',
+    '#/content-structure/field-groups',
+    '#/content-structure/options-pages',
     '#/users',
     '#/tools/redirects',
     '#/settings/general',
@@ -252,8 +271,10 @@ test('buildMenuTree matches reorganized IA order, icons, groups, and clean Edito
 
   const schema = fullTree.find(item => item.id === 'schema');
   assert.deepEqual(schema.children, [
-    { label: 'Content types & fields', hash: '#/content-structure/content-types' },
-    { label: 'Custom taxonomies', hash: '#/content-structure/taxonomies' },
+    { label: 'Content types', hash: '#/content-structure/content-types' },
+    { label: 'Taxonomies', hash: '#/content-structure/taxonomies' },
+    { label: 'Field groups', hash: '#/content-structure/field-groups' },
+    { label: 'Options pages', hash: '#/content-structure/options-pages' },
   ]);
 
   const users = fullTree.find(item => item.id === 'users');

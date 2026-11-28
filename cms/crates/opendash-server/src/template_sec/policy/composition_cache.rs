@@ -21,6 +21,13 @@ impl ThemeCompositionCache {
         GLOBAL.get_or_init(|| Arc::new(Self::new()))
     }
 
+    pub fn clear(&self) {
+        self.inner
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+
     pub fn get_or_compile(
         &self,
         revision_digest: &str,

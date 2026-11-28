@@ -1,7 +1,7 @@
 # OpenDash — Hợp đồng Hệ kiểu Trường Thống nhất (`UNIFIED_FIELD_SCHEMA` V1)
 
 - **Phiên bản:** `1.0.0` (`Clean-Slate V1` — hướng tới phát hành V1.0 đầu tiên; mọi mã nguồn/schema tiền-V1 cũ đều bị loại bỏ hoàn toàn thay vì đánh nhánh phiên bản kế thừa; đã gộp đầy đủ `spacing.property`, `select.options_source`, `term_ref.taxonomy_from_field`, `entry_ref.target_types: ["*"]` và bỏ `bindable` / `storage/builder_binding.rs` theo quyết định D1=1B của Luồng A)
-- **Trạng thái:** `AGREED` *(Chủ dự án phê duyệt 2026-11-26)* · `not_yet_implemented` *(hợp đồng giao diện bắt buộc trước khi triển khai mã nguồn ở các Design Spec EGM liên quan)*
+- **Trạng thái:** `IMPLEMENTED` *(Chủ dự án phê duyệt 2026-11-26; **Đợt 1 [Unified Field Engine](../designs/unified-field-engine.md)** đã `Verified` — xem [biên bản](../verification/2026-11-27-unified-field-engine-verified.md); **Đợt 2 [ACF Content Structure](../designs/acf-content-structure.md)** đã hoàn tất `Implemented` trên `0061` / PR `#631`)*
 - **Tài liệu liên quan:** [Yêu cầu sản phẩm V1](../product/PRODUCT_REQUIREMENTS.md) · [Core Foundation](CORE_FOUNDATION.md) · [Plugin ABI](PLUGIN_ABI.md) · [M8 Writer Inventory](M8_WRITER_INVENTORY.md) · [Design Sitemap](../designs/SITEMAP.md)
 
 ---

@@ -72,6 +72,30 @@ pub(crate) const fn default_true() -> bool {
     true
 }
 
+pub(crate) fn is_false_bool(value: &bool) -> bool {
+    !*value
+}
+
+pub(crate) fn is_true_bool(value: &bool) -> bool {
+    *value
+}
+
+pub(crate) const fn default_archive_per_page_12() -> u16 {
+    12
+}
+
+pub(crate) fn is_default_archive_per_page_12(value: &u16) -> bool {
+    *value == 12
+}
+
+pub(crate) const fn default_menu_position_50() -> i32 {
+    50
+}
+
+pub(crate) fn is_default_menu_position_50(value: &i32) -> bool {
+    *value == 50
+}
+
 pub fn valid_default_value(field: &crate::field_schema::FieldSpec, value: &Value) -> bool {
     if value.is_null() {
         return false;
@@ -85,6 +109,47 @@ pub enum ContentSupport {
     Editor,
     FeaturedImage,
     Builder,
+    Excerpt,
+    MenuOrder,
+    CustomTemplate,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentDefaultSort {
+    #[default]
+    PublishedAtDesc,
+    CreatedAtDesc,
+    UpdatedAtDesc,
+    TitleAsc,
+    MenuOrderAsc,
+}
+
+impl ContentDefaultSort {
+    pub fn is_default(&self) -> bool {
+        *self == Self::PublishedAtDesc
+    }
+}
+
+pub const MAX_CPT_LIST_COLUMNS: usize = 8;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentListColumnKind {
+    Field,
+    Taxonomy,
+    MenuOrder,
+    Parent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContentListColumn {
+    pub kind: ContentListColumnKind,
+    #[serde(default)]
+    pub key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +176,30 @@ pub struct ContentTypeSettings {
     pub has_archive: bool,
     pub publication: ContentPublication,
     pub supports: Vec<ContentSupport>,
+    #[serde(default, skip_serializing_if = "is_false_bool")]
+    pub hierarchical: bool,
+    #[serde(
+        default = "default_archive_per_page_12",
+        skip_serializing_if = "is_default_archive_per_page_12"
+    )]
+    pub archive_per_page: u16,
+    #[serde(default, skip_serializing_if = "ContentDefaultSort::is_default")]
+    pub default_sort: ContentDefaultSort,
+    #[serde(default, skip_serializing_if = "is_false_bool")]
+    pub exclude_from_sitemap: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub menu_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub menu_icon: Option<String>,
+    #[serde(
+        default = "default_menu_position_50",
+        skip_serializing_if = "is_default_menu_position_50"
+    )]
+    pub menu_position: i32,
+    #[serde(default = "default_true", skip_serializing_if = "is_true_bool")]
+    pub show_in_menu: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub list_columns: Vec<ContentListColumn>,
 }
 
 impl Default for ContentTypeSettings {
@@ -120,6 +209,15 @@ impl Default for ContentTypeSettings {
             has_archive: true,
             publication: ContentPublication::Immediate,
             supports: vec![ContentSupport::Editor, ContentSupport::FeaturedImage],
+            hierarchical: false,
+            archive_per_page: 12,
+            default_sort: ContentDefaultSort::PublishedAtDesc,
+            exclude_from_sitemap: false,
+            menu_name: None,
+            menu_icon: None,
+            menu_position: 50,
+            show_in_menu: true,
+            list_columns: Vec::new(),
         }
     }
 }
@@ -137,6 +235,7 @@ impl ContentTypeSettings {
     pub fn builtin_publication() -> Self {
         Self {
             publication: ContentPublication::DraftPublish,
+            archive_per_page: 20,
             ..Self::default()
         }
     }
@@ -146,6 +245,7 @@ impl ContentTypeSettings {
         // Page has no archive of its own; its Builder capability is an
         // entry-owned content surface, not a shared template or archive.
         settings.has_archive = false;
+        settings.archive_per_page = 12;
         settings.supports.push(ContentSupport::Builder);
         settings
     }
@@ -156,6 +256,15 @@ impl ContentTypeSettings {
             has_archive: false,
             publication: ContentPublication::Immediate,
             supports: vec![ContentSupport::Builder],
+            hierarchical: false,
+            archive_per_page: 12,
+            default_sort: ContentDefaultSort::PublishedAtDesc,
+            exclude_from_sitemap: true,
+            menu_name: None,
+            menu_icon: None,
+            menu_position: 50,
+            show_in_menu: false,
+            list_columns: Vec::new(),
         }
     }
 
@@ -165,6 +274,63 @@ impl ContentTypeSettings {
         self.supports.dedup();
         if self.supports.len() != original_len {
             return Err("supports không được chứa tính năng trùng lặp.");
+        }
+        if !(1..=100).contains(&self.archive_per_page) {
+            return Err("archive_per_page phải nằm trong khoảng 1..=100.");
+        }
+        if !(0..=1000).contains(&self.menu_position) {
+            return Err("menu_position phải nằm trong khoảng 0..=1000.");
+        }
+        if let Some(raw) = self.menu_name.as_deref() {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                self.menu_name = None;
+            } else if !valid_label(trimmed) {
+                return Err("menu_name không hợp lệ (tối đa 100 ký tự).");
+            } else {
+                self.menu_name = Some(trimmed.to_owned());
+            }
+        }
+        if let Some(raw) = self.menu_icon.as_deref() {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                self.menu_icon = None;
+            } else if crate::icons::lookup_core_icon_paths(trimmed).is_none() {
+                return Err("menu_icon phải thuộc danh mục CORE_ICONS.");
+            } else {
+                self.menu_icon = Some(trimmed.to_owned());
+            }
+        }
+        if self.list_columns.len() > MAX_CPT_LIST_COLUMNS {
+            return Err("Mỗi loại nội dung tối đa 8 list_columns.");
+        }
+        let mut seen_cols = HashSet::new();
+        for col in &mut self.list_columns {
+            match col.kind {
+                ContentListColumnKind::Field | ContentListColumnKind::Taxonomy => {
+                    if !valid_snake_key(&col.key) {
+                        return Err("Khóa cột trong list_columns phải là snake_case hợp lệ.");
+                    }
+                }
+                ContentListColumnKind::MenuOrder | ContentListColumnKind::Parent => {
+                    if !col.key.is_empty() {
+                        return Err("Cột menu_order/parent trong list_columns không nhận key.");
+                    }
+                }
+            }
+            if let Some(raw_lbl) = col.label.as_deref() {
+                let trimmed = raw_lbl.trim();
+                if trimmed.is_empty() {
+                    col.label = None;
+                } else if !valid_label(trimmed) {
+                    return Err("Nhãn cột trong list_columns không hợp lệ.");
+                } else {
+                    col.label = Some(trimmed.to_owned());
+                }
+            }
+            if !seen_cols.insert((col.kind, col.key.clone())) {
+                return Err("list_columns không được chứa cột trùng lặp.");
+            }
         }
         Ok(())
     }
@@ -199,6 +365,9 @@ pub enum SchemaTransitionError {
     InvalidFieldDefault(String),
     AdminRequiredFieldMissingDefault(String),
     RequiredFieldHiddenOrInaccessible(String),
+    InvalidLocationRulesDomain(String),
+    SyncEntryTermsLocationCycle(String),
+    DuplicateSyncEntryTermsTaxonomy(String),
 }
 
 impl SchemaTransitionError {
@@ -211,6 +380,9 @@ impl SchemaTransitionError {
             Self::InvalidFieldDefault(_) => "invalid_field_default",
             Self::AdminRequiredFieldMissingDefault(_) => "admin_required_field_missing_default",
             Self::RequiredFieldHiddenOrInaccessible(_) => "required_field_hidden_or_inaccessible",
+            Self::InvalidLocationRulesDomain(_) => "invalid_location_rules_domain",
+            Self::SyncEntryTermsLocationCycle(_) => "sync_entry_terms_location_cycle",
+            Self::DuplicateSyncEntryTermsTaxonomy(_) => "duplicate_sync_entry_terms_taxonomy",
         }
     }
 
@@ -222,7 +394,10 @@ impl SchemaTransitionError {
             | Self::InvalidFieldAcl(m)
             | Self::InvalidFieldDefault(m)
             | Self::AdminRequiredFieldMissingDefault(m)
-            | Self::RequiredFieldHiddenOrInaccessible(m) => format!("{}: {m}", self.code()),
+            | Self::RequiredFieldHiddenOrInaccessible(m)
+            | Self::InvalidLocationRulesDomain(m)
+            | Self::SyncEntryTermsLocationCycle(m)
+            | Self::DuplicateSyncEntryTermsTaxonomy(m) => format!("{}: {m}", self.code()),
         }
     }
 }
@@ -240,34 +415,13 @@ pub(crate) fn classify_validation_error(err: &str) -> SchemaTransitionError {
         SchemaTransitionError::FieldKeyCollision(rest.trim().to_owned())
     } else if let Some(rest) = err.strip_prefix("cannot_remove_field_with_data:") {
         SchemaTransitionError::CannotRemoveFieldWithData(rest.trim().to_owned())
+    } else if let Some(rest) = err.strip_prefix("invalid_location_rules_domain:") {
+        SchemaTransitionError::InvalidLocationRulesDomain(rest.trim().to_owned())
+    } else if let Some(rest) = err.strip_prefix("sync_entry_terms_location_cycle:") {
+        SchemaTransitionError::SyncEntryTermsLocationCycle(rest.trim().to_owned())
+    } else if let Some(rest) = err.strip_prefix("duplicate_sync_entry_terms_taxonomy:") {
+        SchemaTransitionError::DuplicateSyncEntryTermsTaxonomy(rest.trim().to_owned())
     } else {
         SchemaTransitionError::IncompatibleSchemaChange(err.to_owned())
     }
-}
-
-/// Package-declared taxonomy defaults. Owner, version and provider status are
-/// assigned and checked by the canonical registry/storage layer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TaxonomyDeclaration {
-    pub key: String,
-    pub label: String,
-    #[serde(default)]
-    pub hierarchical: bool,
-    #[serde(default = "taxonomy_public_default")]
-    pub public: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rewrite_base: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TaxonomyEligibilityDeclaration {
-    pub content_type: String,
-    #[serde(default)]
-    pub taxonomies: Vec<String>,
-}
-
-pub(crate) fn taxonomy_public_default() -> bool {
-    true
 }

@@ -46,7 +46,8 @@ pub(super) async fn load_entry_canonical_snapshot_in_conn(
 ) -> ApiResult<LoadedEntrySnapshot> {
     let row = sqlx::query(
         "SELECT id, content_type_key, slug, title, values_json, content_mode,
-                page_layout_key, custom_template_key, primary_category_term_id, version
+                page_layout_key, custom_template_key, primary_category_term_id,
+                parent_id, menu_order, version
            FROM content_entries
           WHERE id = ?",
     )
@@ -70,6 +71,8 @@ pub(super) async fn load_entry_canonical_snapshot_in_conn(
         .try_get::<Option<String>, _>("custom_template_key")?
         .filter(|s| !s.is_empty());
     let primary_category_term_id: Option<i64> = row.try_get("primary_category_term_id")?;
+    let parent_id: Option<i64> = row.try_get("parent_id")?;
+    let menu_order: i32 = row.try_get("menu_order")?;
     let version: i64 = row.try_get("version")?;
 
     let content_mode = parse_content_mode(&content_mode_raw)?;
@@ -152,6 +155,8 @@ pub(super) async fn load_entry_canonical_snapshot_in_conn(
             page_layout_key,
             custom_template_key,
             seo,
+            parent_id,
+            menu_order,
         },
     })
 }
@@ -181,8 +186,8 @@ async fn insert_revision_row_in_tx(
              restored_from_revision_number, author_user_id, author_username,
              title, slug, content_mode, values_json, builder_document_json,
              term_ids_json, primary_category_term_id, page_layout_key,
-             custom_template_key, seo_json, entry_version
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             custom_template_key, seo_json, parent_id, menu_order, entry_version
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(snapshot.entry_id)
     .bind(&snapshot.content_type_key)
@@ -202,6 +207,8 @@ async fn insert_revision_row_in_tx(
     .bind(snapshot.payload.page_layout_key.as_deref())
     .bind(snapshot.payload.custom_template_key.as_deref())
     .bind(seo_json.as_deref())
+    .bind(snapshot.payload.parent_id)
+    .bind(snapshot.payload.menu_order)
     .bind(snapshot.version)
     .execute(&mut *conn)
     .await?;

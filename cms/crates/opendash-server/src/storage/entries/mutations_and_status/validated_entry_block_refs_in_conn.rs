@@ -101,12 +101,29 @@ pub struct EntryFilters {
     pub locale: Option<String>,
 }
 
-/// The only allowed SQL orderings for a published Builder list.
+/// The only allowed SQL orderings for a published Builder list or CPT archive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PublishedListSort {
     #[default]
     IdDesc,
     IdAsc,
+    PublishedAtDesc,
+    CreatedAtDesc,
+    UpdatedAtDesc,
+    TitleAsc,
+    MenuOrderAsc,
+}
+
+impl PublishedListSort {
+    pub fn from_content_default_sort(sort: opendash_core::content::ContentDefaultSort) -> Self {
+        match sort {
+            opendash_core::content::ContentDefaultSort::PublishedAtDesc => Self::PublishedAtDesc,
+            opendash_core::content::ContentDefaultSort::CreatedAtDesc => Self::CreatedAtDesc,
+            opendash_core::content::ContentDefaultSort::UpdatedAtDesc => Self::UpdatedAtDesc,
+            opendash_core::content::ContentDefaultSort::TitleAsc => Self::TitleAsc,
+            opendash_core::content::ContentDefaultSort::MenuOrderAsc => Self::MenuOrderAsc,
+        }
+    }
 }
 
 /// Missing references are a valid list configuration state, not a database failure.

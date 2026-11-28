@@ -299,6 +299,7 @@ impl PluginManager {
                     publication_after: Some(record.publication_status.clone()),
                     trashed_at: None,
                     published_at: record.published_at.clone(),
+                    detached_parent_id: None,
                 });
             } else if let Some(del) = exec_out.staged_lifecycle_command {
                 if del.operation != StagedLifecycleOperation::Trash {

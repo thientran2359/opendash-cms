@@ -351,3 +351,64 @@ pub async fn resolve_public_path(
         redirect,
     }))
 }
+
+pub(in crate::storage) async fn set_site_rewrite_override_in_tx(
+    conn: &mut SqliteConnection,
+    resource_kind: &str,
+    key: &str,
+    patch: &opendash_core::content::PatchField<String>,
+) -> ApiResult<()> {
+    use opendash_core::content::PatchField;
+    let next_val: Option<Option<String>> = match patch {
+        PatchField::Omitted => return Ok(()),
+        PatchField::Clear => Some(None),
+        PatchField::Set(raw) => {
+            let trimmed = raw.trim().to_owned();
+            if trimmed.is_empty() {
+                Some(None)
+            } else {
+                Some(Some(trimmed))
+            }
+        }
+    };
+    let current = read_settings(conn).await?;
+    let mut input = current.input();
+    let map = match resource_kind {
+        "content_type" => &mut input.content_type_bases,
+        "taxonomy" => &mut input.taxonomy_bases,
+        _ => return Err(ApiError::bad_request("resource_kind rewrite không hợp lệ.")),
+    };
+    match next_val {
+        Some(Some(base)) => {
+            map.insert(key.to_owned(), Some(base));
+        }
+        Some(None) => {
+            // Explicit None overrides provider_rewrite_defaults if provider-owned, else clears override cleanly
+            let has_provider_default: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM provider_rewrite_defaults WHERE resource_kind=? AND resource_key=?)",
+            )
+            .bind(resource_kind)
+            .bind(key)
+            .fetch_one(&mut *conn)
+            .await?;
+            if has_provider_default {
+                map.insert(key.to_owned(), None);
+            } else {
+                map.remove(key);
+            }
+        }
+        None => unreachable!(),
+    }
+    validate_input_in_tx(conn, &input).await?;
+    let cpt_json = serde_json::to_string(&input.content_type_bases)?;
+    let tax_json = serde_json::to_string(&input.taxonomy_bases)?;
+    sqlx::query(
+        "UPDATE site_permalink_settings SET version=version+1,
+           content_type_bases_json=?, taxonomy_bases_json=? WHERE id=1",
+    )
+    .bind(cpt_json)
+    .bind(tax_json)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}

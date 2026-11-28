@@ -147,15 +147,26 @@ async fn site_instance_id_downgrade_scrub_and_fallback_save() {
     let alice_id = alice["id"].as_i64().unwrap();
     let alice_ver = alice["version"].as_i64().unwrap();
 
-    // Create CPT `portfolio` with admin-only field and editor field
+    // Create CPT `portfolio` + FieldGroup with admin-only field and editor field
     let cpt = client
         .post(format!("{}/api/admin/content-types", srv.base_url))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
+        .json(&json!({ "key": "portfolio", "label": "Portfolio" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cpt.status(), StatusCode::CREATED);
+    let fg = client
+        .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+        .header("Cookie", &admin_cookie)
+        .header("Origin", &srv.base_url)
+        .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
-            "key": "portfolio",
-            "label": "Portfolio",
+            "local_key": "portfolio_fields",
+            "title": "Portfolio Fields",
+            "target_types": ["portfolio"],
             "fields": [
                 { "key": "client", "label": "Client", "type": "text", "required": true },
                 {
@@ -170,7 +181,7 @@ async fn site_instance_id_downgrade_scrub_and_fallback_save() {
         .send()
         .await
         .unwrap();
-    assert_eq!(cpt.status(), StatusCode::CREATED);
+    assert_eq!(fg.status(), StatusCode::CREATED);
 
     // Alice logs in as Admin -> sees `margin` in effective-editor-config
     let (alice_cookie1, _, alice_site1) =

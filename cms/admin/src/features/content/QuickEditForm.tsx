@@ -863,13 +863,10 @@ export function QuickEditForm({
             {_x("Cancel", "quick_edit.cancel")}
           </AdminButton>
         </div>
-        <button
-          type="button"
-          className="text-xs font-medium text-od-accent hover:underline"
-          onClick={() => onNavigateHash(editHref)}
-        >
-          {__("Open Single Edit")}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {(row.parent_id || (row.menu_order ?? 0) !== 0) && <span className="text-[11px] text-zinc-500">{row.parent_id ? __("Parent #{{value1}}", { value1: row.parent_id }) : __("Top level")} · {__("Order {{value1}}", { value1: row.menu_order ?? 0 })}</span>}
+          <button type="button" className="text-xs font-medium text-od-accent hover:underline" onClick={() => onNavigateHash(editHref)}>{__("Open Single Edit")}</button>
+        </div>
       </div>
     </form>
   );

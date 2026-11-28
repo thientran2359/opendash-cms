@@ -1,15 +1,11 @@
 //! Durable, owner-aware, bounded Admin contributions. All SQL remains here.
 //! Config is data only; provider-controlled HTML/JS is never evaluated.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use opendash_core::admin_extensions::{
-    AdminColumn, AdminExtensions, AdminTermPanel, ColumnFormat, MAX_COLUMNS_EFFECTIVE,
+    AdminColumn, AdminExtensions, ColumnFormat, MAX_COLUMNS_EFFECTIVE,
 };
-use opendash_core::content::FieldRole;
-use opendash_core::field_schema::{FieldContext, FieldSpec};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use sha2::{Digest, Sha256};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::error::{ApiError, ApiResult};
@@ -18,7 +14,6 @@ use crate::error::{ApiError, ApiResult};
 #[serde(tag = "kind", content = "config", rename_all = "snake_case")]
 enum Declaration {
     Column(AdminColumn),
-    TermPanel(AdminTermPanel),
 }
 
 #[derive(Debug, Clone)]
@@ -47,24 +42,6 @@ pub struct EffectiveColumn {
 pub struct EffectiveListConfig {
     pub schema_version: u8,
     pub columns: Vec<EffectiveColumn>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct EffectiveTermPanel {
-    pub key: String,
-    pub label: String,
-    pub order: i32,
-    pub fields: Vec<FieldSpec>,
-    #[serde(default)]
-    pub read_only_keys: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct EffectiveTermConfig {
-    pub schema_version: u8,
-    pub schema_token: String,
-    pub panels: Vec<EffectiveTermPanel>,
-    pub extensions: BTreeMap<String, BTreeMap<String, Value>>,
 }
 
 fn qualified(kind: &str, id: &str, key: &str) -> String {
@@ -192,19 +169,6 @@ pub async fn sync_owner_in_conn(
             .bind(owner_kind).bind(owner_id).bind(&column.local_key).bind(raw).bind(status)
             .execute(&mut *conn).await?;
     }
-    for panel in &ext.term_panels {
-        let mut panel = panel.clone();
-        opendash_core::field_schema::normalize_field_specs_for_scope(
-            &mut panel.fields,
-            FieldContext::Term,
-            opendash_core::field_schema::FieldScopeKind::TermPanelField,
-        )
-        .map_err(ApiError::bad_request)?;
-        let raw = serde_json::to_string(&Declaration::TermPanel(panel.clone()))?;
-        sqlx::query("INSERT INTO admin_extensions (owner_kind,owner_id,local_key,declaration_json,provider_status) VALUES (?,?,?,?,?)")
-            .bind(owner_kind).bind(owner_id).bind(&panel.local_key).bind(raw).bind(status)
-            .execute(&mut *conn).await?;
-    }
     Ok(())
 }
 
@@ -236,253 +200,6 @@ pub async fn set_theme_active_in_conn(
     Ok(())
 }
 
-fn allowed_field_role(role: &str, min: FieldRole) -> bool {
-    role == "admin" || (role == "editor" && min == FieldRole::Editor)
-}
-
-fn token_for(kind: &str, role: &str, panels: &[EffectiveTermPanel], gens: &[String]) -> String {
-    let canonical =
-        serde_json::to_vec(&(kind, role, panels, gens)).expect("bounded serializable declarations");
-    Sha256::digest(canonical)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
-pub async fn effective_term_in_conn(
-    conn: &mut SqliteConnection,
-    term_id: i64,
-    kind: &str,
-    actor_role: &str,
-) -> ApiResult<EffectiveTermConfig> {
-    let mut panels = Vec::new();
-    let mut gens = Vec::new();
-    for reg in active_in_conn(conn).await? {
-        gens.push(format!(
-            "{}:{}:{}:{}",
-            reg.owner_kind, reg.owner_id, reg.local_key, reg.generation,
-        ));
-        if let Declaration::TermPanel(panel) = reg.declaration {
-            if panel.kind != kind {
-                continue;
-            }
-            let fields = panel
-                .fields
-                .into_iter()
-                .filter(|field| allowed_field_role(actor_role, field.effective_acl().0))
-                .collect::<Vec<_>>();
-            if !fields.iter().any(|field| !field.is_ui_only()) {
-                continue;
-            }
-            let read_only_keys = fields
-                .iter()
-                .filter(|field| {
-                    !field.is_ui_only() && !allowed_field_role(actor_role, field.effective_acl().1)
-                })
-                .map(|field| field.key.clone())
-                .collect();
-            let key = qualified(&reg.owner_kind, &reg.owner_id, &reg.local_key);
-            panels.push(EffectiveTermPanel {
-                key,
-                label: panel.label,
-                order: panel.order,
-                fields,
-                read_only_keys,
-            });
-        }
-    }
-    panels.sort_by(|a, b| (a.order, &a.key).cmp(&(b.order, &b.key)));
-    gens.sort();
-    let schema_token = token_for(kind, actor_role, &panels, &gens);
-    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT owner_kind,owner_id,local_key,values_json FROM term_extension_values WHERE term_id=?")
-        .bind(term_id).fetch_all(&mut *conn).await?;
-    let stored: BTreeMap<String, BTreeMap<String, Value>> = rows
-        .into_iter()
-        .filter_map(|(owner_kind, owner_id, local_key, raw)| {
-            serde_json::from_str(&raw)
-                .ok()
-                .map(|value| (qualified(&owner_kind, &owner_id, &local_key), value))
-        })
-        .collect();
-    let mut extensions = BTreeMap::new();
-    for panel in &panels {
-        let allowed: BTreeSet<_> = panel.fields.iter().map(|f| f.key.as_str()).collect();
-        let values = stored
-            .get(&panel.key)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|(k, _)| allowed.contains(k.as_str()))
-            .collect();
-        extensions.insert(panel.key.clone(), values);
-    }
-    Ok(EffectiveTermConfig {
-        schema_version: 1,
-        schema_token,
-        panels,
-        extensions,
-    })
-}
-
-pub async fn effective_term(
-    db: &SqlitePool,
-    term_id: i64,
-    kind: &str,
-    role: &str,
-) -> ApiResult<EffectiveTermConfig> {
-    let mut conn = db.acquire().await?;
-    effective_term_in_conn(&mut conn, term_id, kind, role).await
-}
-
-/// Validate full patch before any extension write; caller holds the same term
-/// versioned core update transaction. Stored non-mentioned values survive.
-pub async fn update_term_values_in_conn(
-    conn: &mut SqliteConnection,
-    term_id: i64,
-    kind: &str,
-    actor_role: &str,
-    schema_token: &str,
-    patches: &BTreeMap<String, Value>,
-) -> ApiResult<()> {
-    let current = effective_term_in_conn(conn, term_id, kind, actor_role).await?;
-    // Check explicit unauthorized fields before token comparison, so a role
-    // downgrade never discloses their schema via a conflict response.
-    for (panel_key, raw) in patches {
-        let panel = current
-            .panels
-            .iter()
-            .find(|p| &p.key == panel_key)
-            .ok_or_else(|| ApiError::conflict("Panel đã rút khỏi registry hoặc không có quyền."))?;
-        let fields = raw
-            .as_object()
-            .ok_or_else(|| ApiError::bad_request("extensions panel phải là JSON object."))?;
-        for key in fields.keys() {
-            let Some(def) = panel
-                .fields
-                .iter()
-                .find(|field| &field.key == key && !field.is_ui_only())
-            else {
-                return Err(ApiError::forbidden(
-                    "Không có quyền cập nhật extension field.",
-                ));
-            };
-            if !allowed_field_role(actor_role, def.effective_acl().1) {
-                return Err(ApiError::forbidden(
-                    "Không có quyền chỉnh sửa trường extension này.",
-                ));
-            }
-        }
-    }
-    if current.schema_token != schema_token {
-        return Err(ApiError::conflict(
-            "schema_token đã thay đổi, giữ bản nhập và tải lại cấu hình.",
-        ));
-    }
-    if patches.is_empty() {
-        return Ok(());
-    }
-    let term_locale: String = sqlx::query_scalar("SELECT locale FROM taxonomy_terms WHERE id=?")
-        .bind(term_id)
-        .fetch_one(&mut *conn)
-        .await?;
-    let mut full_panels: BTreeMap<String, Vec<FieldSpec>> = BTreeMap::new();
-    for reg in active_in_conn(conn).await? {
-        if let Declaration::TermPanel(panel) = reg.declaration
-            && panel.kind == kind
-        {
-            full_panels.insert(
-                qualified(&reg.owner_kind, &reg.owner_id, &reg.local_key),
-                panel.fields,
-            );
-        }
-    }
-    for (panel_key, fields) in patches {
-        let full_fields = full_panels
-            .get(panel_key)
-            .ok_or_else(|| ApiError::conflict("Panel đã rút khỏi registry hoặc không có quyền."))?;
-        let raw = fields
-            .as_object()
-            .ok_or_else(|| ApiError::bad_request("extensions panel phải là JSON object."))?;
-        let segments = panel_key.split('/').collect::<Vec<_>>();
-        if segments.len() != 3 {
-            return Err(ApiError::bad_request("Extension key không hợp lệ."));
-        }
-        // IMPORTANT: the role-filtered GET projection is not a valid base for
-        // a write. Editor must preserve admin-only keys the actor cannot see.
-        let previous: Option<String> = sqlx::query_scalar(
-            "SELECT values_json FROM term_extension_values
-             WHERE term_id=? AND owner_kind=? AND owner_id=? AND local_key=?",
-        )
-        .bind(term_id)
-        .bind(segments[0])
-        .bind(segments[1])
-        .bind(segments[2])
-        .fetch_optional(&mut *conn)
-        .await?;
-        let previous_saved: BTreeMap<String, Value> = previous
-            .as_deref()
-            .map(serde_json::from_str)
-            .transpose()
-            .map_err(|_| ApiError::internal("Dữ liệu extension đã lưu không hợp lệ."))?
-            .unwrap_or_default();
-        let mut saved = previous_saved.clone();
-        for (field_key, value) in raw {
-            if value.is_null() {
-                saved.remove(field_key);
-            } else {
-                saved.insert(field_key.clone(), value.clone());
-            }
-        }
-        let valid_keys: BTreeSet<&str> = full_fields
-            .iter()
-            .filter(|f| !f.is_ui_only())
-            .map(|f| f.key.as_str())
-            .collect();
-        let validation_prev: BTreeMap<String, Value> = previous_saved
-            .iter()
-            .filter(|(k, _)| valid_keys.contains(k.as_str()))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let validation_saved: BTreeMap<String, Value> = saved
-            .iter()
-            .filter(|(k, _)| valid_keys.contains(k.as_str()))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        opendash_core::field_schema::validate_field_values(
-            full_fields,
-            opendash_core::field_schema::FieldContext::Term,
-            &validation_saved,
-            Some(&validation_prev),
-        )
-        .map_err(ApiError::bad_request)?;
-        let collected_media =
-            opendash_core::field_schema::collect_media_ids(full_fields, &validation_saved);
-        crate::storage::fields::verify_collected_media_ids_in_conn(conn, &collected_media).await?;
-        crate::storage::fields::validate_relational_refs_in_conn(
-            conn,
-            full_fields,
-            &validation_saved,
-            Some(&validation_prev),
-            Some(&term_locale),
-        )
-        .await?;
-        sqlx::query(
-            "INSERT INTO term_extension_values (term_id,owner_kind,owner_id,local_key,values_json)
-             VALUES (?,?,?,?,?) ON CONFLICT(term_id,owner_kind,owner_id,local_key)
-             DO UPDATE SET values_json=excluded.values_json",
-        )
-        .bind(term_id)
-        .bind(segments[0])
-        .bind(segments[1])
-        .bind(segments[2])
-        .bind(serde_json::to_string(&saved)?)
-        .execute(&mut *conn)
-        .await?;
-    }
-    Ok(())
-}
-
 pub async fn effective_list(
     db: &SqlitePool,
     type_key: &str,
@@ -508,8 +225,10 @@ pub async fn effective_list(
                 continue;
             };
             if field.effective_status != EffectiveFieldStatus::Active
-                || role < field.definition.effective_acl().0
                 || field.definition.effective_acl().2 != PublicExposure::Public
+                || role < field.definition.effective_acl().0
+                || (role < opendash_core::content::FieldRole::Admin
+                    && effective.is_group_admin_only(&field.source_id))
             {
                 continue;
             }
@@ -573,4 +292,19 @@ pub async fn effective_list(
         schema_version: 1,
         columns,
     })
+}
+
+/// Returns the set of `field_key`s targeted by active `AdminColumn` declarations for `type_key`.
+pub(in crate::storage) async fn active_column_field_keys_in_conn(
+    conn: &mut SqliteConnection,
+    type_key: &str,
+) -> ApiResult<std::collections::BTreeSet<String>> {
+    let mut keys = std::collections::BTreeSet::new();
+    for reg in active_in_conn(conn).await? {
+        let Declaration::Column(column) = reg.declaration;
+        if column.type_keys.iter().any(|k| k == type_key) {
+            keys.insert(column.field_key);
+        }
+    }
+    Ok(keys)
 }

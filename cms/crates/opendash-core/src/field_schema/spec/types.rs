@@ -49,11 +49,13 @@ pub enum HydrationVisibility {
 
 impl HydrationVisibility {
     /// Options fields declare `public: true` only at top level; once a public
-    /// Group/Repeater is admitted, child sub-fields are readable (`All`).
+    /// Group/Repeater is admitted, child sub-fields obey Editor-readable ACL.
     /// Content fields propagate `ContentPublic` ACL filtering recursively.
     pub const fn child_visibility(self) -> Self {
         match self {
-            Self::OptionsPublicOnly => Self::All,
+            Self::OptionsPublicOnly => Self::ContentPublic {
+                max_view_role: FieldRole::Editor,
+            },
             other => other,
         }
     }
@@ -64,7 +66,10 @@ impl HydrationVisibility {
         }
         match self {
             Self::All => true,
-            Self::OptionsPublicOnly => spec.public,
+            Self::OptionsPublicOnly => {
+                let (min_view, _, exposure) = spec.effective_acl();
+                spec.public && min_view <= FieldRole::Editor && exposure == PublicExposure::Public
+            }
             Self::ContentPublic { max_view_role } => {
                 let (min_view, _, exposure) = spec.effective_acl();
                 exposure == PublicExposure::Public && min_view <= max_view_role
@@ -79,7 +84,6 @@ pub enum FieldScopeKind {
     BaseCptField,
     ExtensionGroupField,
     UserFieldGroup,
-    TermPanelField,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -231,6 +235,12 @@ pub enum TermPickerStyle {
     Tags,
     Select,
     Radio,
+}
+
+impl TermPickerStyle {
+    pub fn is_default(&self) -> bool {
+        *self == Self::Auto
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]

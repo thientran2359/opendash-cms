@@ -173,12 +173,36 @@ fn forbids_secret_ref_subkey_inside_any_group() {
 }
 
 #[test]
-fn forbids_sync_entry_terms_in_wave_1() {
+fn validates_sync_entry_terms_constraints_in_content_context() {
     let mut tr = FieldSpec::new(FieldType::TermRef, "cats", "Categories");
     tr.taxonomy = Some("category".to_owned());
     tr.sync_entry_terms = true;
-    let err = validate_field_specs(&[tr], FieldContext::Content).unwrap_err();
-    assert!(err.contains("Đợt 2"));
+    assert!(validate_field_specs(std::slice::from_ref(&tr), FieldContext::Content).is_ok());
+
+    // Rejected in Term and Options contexts
+    assert!(validate_field_specs(std::slice::from_ref(&tr), FieldContext::Term).is_err());
+    assert!(validate_field_specs(std::slice::from_ref(&tr), FieldContext::Options).is_err());
+
+    // Rejected when min_edit_role == Admin
+    let mut admin_tr = tr.clone();
+    admin_tr.acl = Some(FieldAcl::canonical(
+        FieldRole::Editor,
+        FieldRole::Admin,
+        PublicExposure::Public,
+    ));
+    let err = validate_field_specs(&[admin_tr], FieldContext::Content).unwrap_err();
+    assert!(err.starts_with("invalid_field_acl:"));
+
+    // Rejected inside Group or Repeater
+    let mut grp = FieldSpec::new(FieldType::Group, "g", "G");
+    grp.fields = vec![tr.clone()];
+    assert!(validate_field_specs(&[grp], FieldContext::Content).is_err());
+
+    // Rejected duplicate sync_entry_terms for same taxonomy
+    let mut tr2 = tr.clone();
+    tr2.key = "cats_dup".to_owned();
+    let dup_err = validate_field_specs(&[tr, tr2], FieldContext::Content).unwrap_err();
+    assert!(dup_err.starts_with("duplicate_sync_entry_terms_taxonomy:"));
 }
 
 #[test]
@@ -324,31 +348,33 @@ fn normalizes_acl_and_enforces_m7_s09_invariants() {
     assert_eq!(acl.min_view_role, Some(FieldRole::Editor));
     assert_eq!(acl.min_edit_role, Some(FieldRole::Editor));
 
-    let mut term_panel = vec![f.clone()];
+    let mut ext_term_specs = vec![f.clone()];
     normalize_field_specs_for_scope(
-        &mut term_panel,
+        &mut ext_term_specs,
         FieldContext::Term,
-        FieldScopeKind::TermPanelField,
+        FieldScopeKind::ExtensionGroupField,
     )
     .unwrap();
     assert_eq!(
-        term_panel[0].acl.as_ref().unwrap().public_exposure,
+        ext_term_specs[0].acl.as_ref().unwrap().public_exposure,
         Some(PublicExposure::Private)
     );
 
-    let mut pub_term_panel = vec![f.clone()];
-    pub_term_panel[0].acl = Some(FieldAcl::canonical(
+    let mut pub_term_specs = vec![f.clone()];
+    pub_term_specs[0].acl = Some(FieldAcl::canonical(
         FieldRole::Editor,
         FieldRole::Editor,
         PublicExposure::Public,
     ));
-    assert!(
-        normalize_field_specs_for_scope(
-            &mut pub_term_panel,
-            FieldContext::Term,
-            FieldScopeKind::TermPanelField
-        )
-        .is_err()
+    normalize_field_specs_for_scope(
+        &mut pub_term_specs,
+        FieldContext::Term,
+        FieldScopeKind::ExtensionGroupField,
+    )
+    .unwrap();
+    assert_eq!(
+        pub_term_specs[0].acl.as_ref().unwrap().public_exposure,
+        Some(PublicExposure::Public)
     );
 
     // M7-S09 #1: min_edit_role < min_view_role rejected

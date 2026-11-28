@@ -20,7 +20,8 @@ pub async fn preview_studio_with_cache_and_locale(
         settings::resolve_requested_locale_in_conn(&mut *tx, preview_locale).await?;
     validate_typed_target_in_tx(&mut tx, target).await?;
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
-    let url_policy = active_theme_url_policy(active.as_ref())?;
+    let url_policy =
+        active_theme_url_policy_in_conn(&mut tx, active.as_ref(), Some(&key), None, None).await?;
     let mut state =
         builder::read_render_context_for_locale_tx(&mut tx, Some(&effective_locale), true, None)
             .await?;
@@ -173,12 +174,21 @@ pub async fn preview_studio_with_cache_and_locale(
         })?;
         (built.theme_context, body)
     } else {
+        let custom_options =
+            crate::storage::options_pages::load_active_custom_options_public_in_conn(
+                &mut tx,
+                Some(&effective_locale),
+                true,
+                Some(&mut shared_rb.richtext_nonces),
+            )
+            .await?;
         let theme_context = build_placeholder_preview_theme_context(
             target,
             active.as_ref(),
             &site,
             &site_options,
             &options,
+            &custom_options,
             &menus,
             &effective_locale,
         )?;
@@ -385,11 +395,19 @@ pub async fn preview_studio_with_cache_and_locale(
                 } else {
                     Some(slot_fragment.as_str())
                 };
-                let out = render_csec_template_for_preview(
+                let tpl_url_policy = active_theme_url_policy_in_conn(
+                    &mut tx,
+                    active.as_ref(),
+                    Some(&target_key),
+                    entry.as_ref().map(|(_, eff)| eff),
+                    None,
+                )
+                .await?;
+                let out = render_csec_template_for_preview_with_policy(
                     &target_key,
                     &html,
                     active.as_ref(),
-                    entry.as_ref().map(|(_, eff)| eff),
+                    &tpl_url_policy,
                     &theme_context,
                     slot,
                     &mut public_budget,

@@ -47,6 +47,8 @@ fn canonical_revision_payload_sorts_terms_and_collapses_empty_seo() {
             canonical_url: None,
             noindex: false,
         }),
+        parent_id: None,
+        menu_order: 0,
     };
     let p2 = CanonicalRevisionPayload {
         title: "Bài viết".to_owned(),
@@ -58,6 +60,8 @@ fn canonical_revision_payload_sorts_terms_and_collapses_empty_seo() {
         page_layout_key: Some(String::new()),
         custom_template_key: None,
         seo: None,
+        parent_id: None,
+        menu_order: 0,
     };
     assert_eq!(canonical_revision_json(&p1), canonical_revision_json(&p2));
 }
@@ -222,5 +226,9 @@ fn missing_refs_blocking_ignores_non_blocking_report_fields() {
     };
     assert!(!report.has_blocking_refs());
     report.missing_pattern_ids.push(99);
+    assert!(report.has_blocking_refs());
+    report.missing_pattern_ids.clear();
+    assert!(!report.has_blocking_refs());
+    report.parent_id = Some(42);
     assert!(report.has_blocking_refs());
 }

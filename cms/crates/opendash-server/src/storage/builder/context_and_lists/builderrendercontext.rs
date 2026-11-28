@@ -456,12 +456,17 @@ pub(in crate::storage) async fn validate_entry_builder_document(
                     match &binding.source {
                         BindingSource::RouteContext { field_key } if field_key == "cover_url" => {
                             // The existing resolver picks the first public base image.
-                            if let Some(field) =
-                                current.schema.base.descriptor.fields.iter().find(|f| {
-                                    f.field_type == opendash_core::field_schema::FieldType::Media
-                                        && f.effective_acl().2 == PublicExposure::Public
+                            if let Some(entry) =
+                                current.schema.effective_fields.values().find(|e| {
+                                    e.definition.field_type
+                                        == opendash_core::field_schema::FieldType::Media
+                                        && e.definition.effective_acl().2 == PublicExposure::Public
                                 })
-                                && !visible_builder_field(&current.schema, &field.key, role)
+                                && !visible_builder_field(
+                                    &current.schema,
+                                    &entry.definition.key,
+                                    role,
+                                )
                             {
                                 return Err(ApiError::forbidden(
                                     "Builder cover field is not accessible.",

@@ -1,5 +1,15 @@
 use super::*;
 
+fn normalized_description(raw: &str) -> ApiResult<String> {
+    let trimmed = raw.trim();
+    if trimmed.chars().count() > 500 || trimmed.chars().any(|c| c.is_control() && c != '\n') {
+        return Err(ApiError::bad_request(
+            "Mô tả term tối đa 500 ký tự và không chứa ký tự điều khiển.",
+        ));
+    }
+    Ok(trimmed.to_owned())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn create_term_with_locale(
     db: &SqlitePool,
@@ -12,10 +22,51 @@ pub async fn create_term_with_locale(
     source_term_id: Option<i64>,
     featured_image_media_id: Option<&str>,
 ) -> ApiResult<TaxonomyTerm> {
+    create_term_full(
+        db,
+        actor,
+        kind,
+        name,
+        slug,
+        parent_id,
+        None,
+        None,
+        locale,
+        source_term_id,
+        featured_image_media_id,
+        None,
+        None,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_term_full(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    kind: &str,
+    name: &str,
+    slug: &str,
+    parent_id: Option<i64>,
+    description: Option<&str>,
+    sort_order: Option<i32>,
+    locale: Option<&str>,
+    source_term_id: Option<i64>,
+    featured_image_media_id: Option<&str>,
+    values: Option<&BTreeMap<String, Value>>,
+    schema_token: Option<&str>,
+    seo: Option<&TermSeoInput>,
+) -> ApiResult<TaxonomyTerm> {
     if !opendash_core::content::valid_content_type_key(kind) {
         return Err(ApiError::bad_request("Khóa taxonomy không hợp lệ."));
     }
     let name = normalized_name(name)?;
+    let desc = match description {
+        Some(raw) => normalized_description(raw)?,
+        None => String::new(),
+    };
+    let sort_order = sort_order.unwrap_or(0);
     if !opendash_core::id::valid_kebab_segment_with_limit(slug, 64) {
         return Err(ApiError::bad_request(
             "Slug phải là kebab-case, tối đa 64 ký tự.",
@@ -24,7 +75,12 @@ pub async fn create_term_with_locale(
     if source_term_id.is_some_and(|sid| sid <= 0) {
         return Err(ApiError::bad_request("source_term_id không hợp lệ."));
     }
-    let mut tx = begin_admin_write(db, actor, false).await?;
+    if actor.user.role == crate::auth::Role::Editor && seo.is_some() {
+        return Err(ApiError::forbidden(
+            "Editor không được chỉnh sửa SEO của term.",
+        ));
+    }
+    let mut tx = begin_admin_write(db, actor, true).await?;
     let taxonomy = definition_in_write(&mut tx, kind)
         .await?
         .ok_or_else(|| ApiError::bad_request("Taxonomy không tồn tại."))?;
@@ -32,6 +88,11 @@ pub async fn create_term_with_locale(
         || taxonomy.declaration_state != DeclarationState::Declared
     {
         return Err(ApiError::conflict("Taxonomy không còn khả dụng."));
+    }
+    if actor.user.role == crate::auth::Role::Editor && !taxonomy.settings.editor_can_create_terms {
+        return Err(ApiError::forbidden(
+            "Editor không có quyền tạo term cho phân loại này.",
+        ));
     }
     if !taxonomy.hierarchical && parent_id.is_some() {
         return Err(ApiError::bad_request(
@@ -118,7 +179,7 @@ pub async fn create_term_with_locale(
         None => None,
     };
     let id = sqlx::query(
-        "INSERT INTO taxonomy_terms(kind, locale, translation_group_id, name, slug, parent_id, featured_image_media_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO taxonomy_terms(kind, locale, translation_group_id, name, slug, parent_id, featured_image_media_id, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(kind)
     .bind(&target_locale)
@@ -127,10 +188,34 @@ pub async fn create_term_with_locale(
     .bind(slug)
     .bind(effective_parent_id)
     .bind(validated_featured_image.as_deref())
+    .bind(&desc)
+    .bind(sort_order)
     .execute(&mut *tx)
     .await
     .map_err(mutation_error)?
     .last_insert_rowid();
+    if values.is_some() || seo.is_some() {
+        let actor_role = if actor.user.role == crate::auth::Role::Admin {
+            FieldRole::Admin
+        } else {
+            FieldRole::Editor
+        };
+        let seo_patch = match seo {
+            Some(s) => opendash_core::content::PatchField::Set(s.clone()),
+            None => opendash_core::content::PatchField::Omitted,
+        };
+        super::super::meta::write_term_meta_and_seo_in_tx(
+            &mut tx,
+            id,
+            kind,
+            &target_locale,
+            actor_role,
+            schema_token,
+            values,
+            &seo_patch,
+        )
+        .await?;
+    }
     let created = term_in_write(&mut tx, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải term vừa tạo."))?;
@@ -150,10 +235,45 @@ pub async fn patch_term(
     slug: Option<&str>,
     parent_id: Option<Option<i64>>,
     featured_image_media_id: Option<Option<&str>>,
-    extensions: Option<&BTreeMap<String, Value>>,
+    values: Option<&BTreeMap<String, Value>>,
     schema_token: Option<&str>,
 ) -> ApiResult<TaxonomyTerm> {
+    patch_term_full(
+        db,
+        actor,
+        id,
+        expected_version,
+        name,
+        slug,
+        parent_id,
+        None,
+        None,
+        featured_image_media_id,
+        values,
+        schema_token,
+        &opendash_core::content::PatchField::Omitted,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn patch_term_full(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    id: i64,
+    expected_version: i64,
+    name: Option<&str>,
+    slug: Option<&str>,
+    parent_id: Option<Option<i64>>,
+    description: Option<&str>,
+    sort_order: Option<i32>,
+    featured_image_media_id: Option<Option<&str>>,
+    values: Option<&BTreeMap<String, Value>>,
+    schema_token: Option<&str>,
+    seo_patch: &opendash_core::content::PatchField<TermSeoInput>,
+) -> ApiResult<TaxonomyTerm> {
     let name = name.map(normalized_name).transpose()?;
+    let next_description = description.map(normalized_description).transpose()?;
     if slug.is_some_and(|s| !opendash_core::id::valid_kebab_segment_with_limit(s, 64)) {
         return Err(ApiError::bad_request(
             "Slug phải là kebab-case, tối đa 64 ký tự.",
@@ -163,8 +283,11 @@ pub async fn patch_term(
         && name.is_none()
         && slug.is_none()
         && parent_id.is_none()
+        && next_description.is_none()
+        && sort_order.is_none()
         && featured_image_media_id.is_none()
-        && extensions.is_some();
+        && seo_patch.is_omitted()
+        && values.is_some();
     let mut tx = begin_admin_write(db, actor, editor_extension_only).await?;
     if actor.user.role != crate::auth::Role::Admin && !editor_extension_only {
         return Err(ApiError::forbidden(
@@ -198,34 +321,36 @@ pub async fn patch_term(
         )
         .await?;
     }
-    if let Some(patch) = extensions {
-        let token = schema_token
-            .ok_or_else(|| ApiError::bad_request("Thiếu schema_token để ghi extension field."))?;
-        // All validation and writes happen inside the same writer reservation
-        // as the core version CAS, so any failed field rolls everything back.
-        crate::storage::admin_extensions::update_term_values_in_conn(
+    if values.is_some() || !seo_patch.is_omitted() {
+        let actor_role = if actor.user.role == crate::auth::Role::Admin {
+            FieldRole::Admin
+        } else {
+            FieldRole::Editor
+        };
+        super::super::meta::write_term_meta_and_seo_in_tx(
             &mut tx,
             id,
             &existing.kind,
-            if actor.user.role == crate::auth::Role::Admin {
-                "admin"
-            } else {
-                "editor"
-            },
-            token,
-            patch,
+            &existing.locale,
+            actor_role,
+            schema_token,
+            values,
+            seo_patch,
         )
         .await?;
     }
     let updated = sqlx::query(
         "UPDATE taxonomy_terms
-            SET name = ?, slug = ?, parent_id = ?, featured_image_media_id = ?, version = version + 1
+            SET name = ?, slug = ?, parent_id = ?, featured_image_media_id = ?,
+                description = ?, sort_order = ?, version = version + 1
           WHERE id = ? AND version = ?",
     )
     .bind(name.unwrap_or(&existing.name))
     .bind(slug.unwrap_or(&existing.slug))
     .bind(next_parent)
     .bind(next_featured_image.as_deref())
+    .bind(next_description.as_deref().unwrap_or(&existing.description))
+    .bind(sort_order.unwrap_or(existing.sort_order))
     .bind(id)
     .bind(expected_version)
     .execute(&mut *tx)

@@ -296,7 +296,9 @@ async fn execute_restore_in_writer_tx(
         "UPDATE content_entries
             SET title = ?, values_json = ?, content_mode = ?,
                 page_layout_key = ?, custom_template_key = ?,
-                primary_category_term_id = ?, version = version + 1,
+                primary_category_term_id = ?,
+                parent_id = ?, menu_order = ?,
+                version = version + 1,
                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
           WHERE content_type_key = ? AND id = ? AND version = ? AND trashed_at IS NULL",
     )
@@ -306,6 +308,8 @@ async fn execute_restore_in_writer_tx(
     .bind(prepared.candidate_payload.page_layout_key.as_deref())
     .bind(prepared.candidate_payload.custom_template_key.as_deref())
     .bind(prepared.candidate_payload.primary_category_term_id)
+    .bind(prepared.candidate_payload.parent_id)
+    .bind(prepared.candidate_payload.menu_order)
     .bind(type_key)
     .bind(entry_id)
     .bind(expected_version)
@@ -323,6 +327,38 @@ async fn execute_restore_in_writer_tx(
         .execute(&mut *tx)
         .await?;
     entries::replace_term_ids(&mut tx, entry_id, &prepared.candidate_payload.term_ids).await?;
+    let loc_ctx = entries::build_entry_location_ctx_in_conn(
+        &mut *tx,
+        type_key,
+        Some(entry_id),
+        &live.locale,
+        caller_role,
+        prepared.candidate_payload.page_layout_key.clone(),
+        prepared.candidate_payload.custom_template_key.clone(),
+        &prepared.candidate_payload.term_ids,
+    )
+    .await?;
+    entries::sync_entry_values_json_with_terms_in_tx(
+        &mut tx,
+        entry_id,
+        &effective,
+        &loc_ctx,
+        &prepared.candidate_payload.term_ids,
+    )
+    .await
+    .map_err(|e| map_validation_api_err(e, None))?;
+    if prepared.was_published {
+        entries::enforce_taxonomy_publish_rules_in_tx(
+            &mut tx,
+            type_key,
+            entry_id,
+            &live.locale,
+            Some(&effective),
+            Some(&loc_ctx),
+        )
+        .await
+        .map_err(|e| map_validation_api_err(e, Some("term_ids")))?;
+    }
 
     if body_editable {
         entries::sync_entry_body_refs_in_conn(

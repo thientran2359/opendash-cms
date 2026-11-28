@@ -27,6 +27,10 @@ pub struct ContentEntryRecord {
     pub content_mode: ContentMode,
     /// Server-owned status; legacy CPT entries remain published on Save.
     pub publication_status: String,
+    #[serde(default)]
+    pub parent_id: Option<i64>,
+    #[serde(default)]
+    pub menu_order: i32,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -63,6 +67,8 @@ pub(in crate::storage) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRec
         custom_template_key: None,
         content_mode: ContentMode::Editor,
         publication_status,
+        parent_id: None,
+        menu_order: 0,
         version,
         created_at,
         updated_at,
@@ -77,16 +83,27 @@ pub(in crate::storage) async fn decoded_with_terms(
 ) -> ApiResult<ContentEntryRecord> {
     let mut record = decode_row(row)?;
     record.term_ids = read_term_ids(tx, record.id).await?;
-    let (locale, translation_group_id, layout, custom, mode, primary_category_term_id): (
+    let (
+        locale,
+        translation_group_id,
+        layout,
+        custom,
+        mode,
+        primary_category_term_id,
+        parent_id,
+        menu_order,
+    ): (
         String,
         String,
         Option<String>,
         Option<String>,
         String,
         Option<i64>,
+        Option<i64>,
+        i32,
     ) = sqlx::query_as(
         "SELECT locale, translation_group_id, page_layout_key, custom_template_key,
-                content_mode, primary_category_term_id
+                content_mode, primary_category_term_id, parent_id, menu_order
            FROM content_entries WHERE id = ?",
     )
     .bind(record.id)
@@ -110,6 +127,8 @@ pub(in crate::storage) async fn decoded_with_terms(
     record.page_layout_key = layout;
     record.custom_template_key = custom;
     record.primary_category_term_id = primary_category_term_id;
+    record.parent_id = parent_id;
+    record.menu_order = menu_order;
     record.content_mode = match mode.as_str() {
         "editor" => ContentMode::Editor,
         "builder" => ContentMode::Builder,
@@ -181,6 +200,10 @@ pub struct CompositeEntrySaveInput {
     pub content_mode: PatchField<ContentMode>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub seo: PatchField<crate::seo::SeoMetadataInput>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub parent_id: PatchField<i64>,
+    #[serde(default)]
+    pub menu_order: Option<i32>,
     #[serde(default)]
     pub created_at: Option<String>,
     #[serde(default)]
@@ -480,4 +503,6 @@ pub struct EntryTranslationPlan {
     pub page_layout_key: Option<String>,
     pub custom_template_key: Option<String>,
     pub content_mode: ContentMode,
+    pub parent_id: Option<i64>,
+    pub menu_order: i32,
 }

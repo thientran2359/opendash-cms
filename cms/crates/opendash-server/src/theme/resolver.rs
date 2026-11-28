@@ -78,7 +78,7 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
             obj.insert("field_groups".into(), top_fg);
         }
     }
-    let parsed: ThemeDeclarations = serde_json::from_value(raw_decl)
+    let mut parsed: ThemeDeclarations = serde_json::from_value(raw_decl)
         .map_err(|_| "Khai báo declarations trong theme.json không đúng định dạng.")?;
     let mut seen_keys = std::collections::HashSet::new();
     let declared_taxonomies: std::collections::HashSet<&str> = parsed
@@ -90,13 +90,7 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
         return Err("Theme khai báo taxonomy trùng key.");
     }
     for tax in &parsed.taxonomy_definitions {
-        opendash_core::content::TaxonomyDefinitionInput {
-            key: tax.key.clone(),
-            label: tax.label.clone(),
-            hierarchical: tax.hierarchical,
-            public: tax.public,
-        }
-        .validate()?;
+        tax.validate()?;
     }
     for ct in &parsed.content_types {
         if !seen_keys.insert(ct.key.as_str()) {
@@ -107,10 +101,12 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
         let def = opendash_core::content::ContentTypeDefinition {
             key: ct.key.clone(),
             label: ct.label.clone(),
-            fields: ct.fields.clone(),
+            singular_label: ct.singular_label.clone(),
+            description: ct.description.clone(),
             settings,
         };
         def.validate()?;
+        opendash_core::content::validate_provider_rewrite_base(ct.rewrite_base.as_deref())?;
         for tax in &ct.taxonomies {
             if !opendash_core::content::valid_content_type_key(tax) {
                 return Err("Theme taxonomy eligibility key không hợp lệ.");
@@ -137,7 +133,19 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
                 "duplicate_panel_id: Trùng local_key trong danh sách field_groups của theme.",
             );
         }
-        fg.validate_and_normalize()?;
+        fg.validate_and_normalize_full(
+            opendash_core::field_schema::FieldScopeKind::ExtensionGroupField,
+        )?;
+    }
+    if parsed.options_pages.len() > opendash_core::content::MAX_CUSTOM_OPTIONS_PAGES_PER_PACKAGE {
+        return Err("Theme vượt quá số lượng tối đa custom_options_pages cho phép.");
+    }
+    let mut seen_pages = std::collections::HashSet::new();
+    for page in &mut parsed.options_pages {
+        if !seen_pages.insert(page.page_key.clone()) {
+            return Err("Theme khai báo trùng page_key trong options_pages.");
+        }
+        page.validate_and_normalize()?;
     }
     Ok(parsed)
 }
@@ -170,15 +178,176 @@ pub fn declared_fields_for_cpt(
     let mut fields = Vec::new();
     for ct in &declarations.content_types {
         if ct.key == cpt_key {
-            fields.extend(ct.fields.iter().cloned());
+            let mut settings = ct.settings.clone().unwrap_or_default();
+            if settings.validate_and_normalize().is_ok()
+                && let Ok(eff) = opendash_core::content::EffectiveContentSchema::assemble(
+                    opendash_core::registry::OwnedDescriptor {
+                        owner: opendash_core::registry::ResourceOwner::User,
+                        status: opendash_core::registry::ProviderStatus::Active,
+                        declaration_state: opendash_core::registry::DeclarationState::Declared,
+                        descriptor: opendash_core::content::ContentTypeDefinition {
+                            key: ct.key.clone(),
+                            label: ct.label.clone(),
+                            singular_label: ct.singular_label.clone(),
+                            description: ct.description.clone(),
+                            settings,
+                        },
+                    },
+                    1,
+                    Vec::new(),
+                )
+            {
+                fields.extend(eff.effective_fields.into_values().map(|e| e.definition));
+            }
         }
     }
     for fg in &declarations.field_groups {
-        if fg.target_types.iter().any(|t| t == cpt_key) {
-            fields.extend(fg.fields.iter().cloned());
+        if let Ok(norm) = fg.validate_and_normalize_full(
+            opendash_core::field_schema::FieldScopeKind::ExtensionGroupField,
+        ) && norm.domain == opendash_core::content::FieldGroupDomain::Content
+            && opendash_core::content::group_allows_role_for_target(
+                &norm.location,
+                "content_type",
+                cpt_key,
+                opendash_core::content::FieldRole::Admin,
+            )
+        {
+            fields.extend(norm.fields);
         }
     }
     fields
+}
+
+pub fn taxonomy_scope_for_target_key<'a>(target_key: &'a str) -> Option<&'a str> {
+    if let Some(rest) = target_key.strip_prefix("taxonomy:key:") {
+        return rest.split(':').next().filter(|s| !s.is_empty());
+    }
+    None
+}
+
+pub fn declared_fields_for_taxonomy(
+    declarations: &ThemeDeclarations,
+    tax_key: Option<&str>,
+) -> Vec<opendash_core::field_schema::FieldSpec> {
+    use opendash_core::content::{
+        FieldGroupDomain, FieldRole, LocationEvalContext, evaluate_location_rules,
+        is_restricted_to_admin_only,
+    };
+    use opendash_core::field_schema::FieldScopeKind;
+
+    let mut fields = Vec::new();
+    for fg in &declarations.field_groups {
+        let Ok(norm) = fg.validate_and_normalize_full(FieldScopeKind::ExtensionGroupField) else {
+            continue;
+        };
+        if norm.domain != FieldGroupDomain::Term || is_restricted_to_admin_only(&norm.location) {
+            continue;
+        }
+        let matches = match tax_key {
+            Some(key) => evaluate_location_rules(
+                &norm.location,
+                &LocationEvalContext {
+                    taxonomy_term: Some(key.to_owned()),
+                    user_role: FieldRole::Editor,
+                    ..Default::default()
+                },
+            ),
+            None => true,
+        };
+        if matches {
+            fields.extend(norm.fields);
+        }
+    }
+    fields
+}
+
+pub fn declared_custom_options_pages_fields(
+    declarations: &ThemeDeclarations,
+) -> BTreeMap<String, Vec<opendash_core::field_schema::FieldSpec>> {
+    use opendash_core::content::{
+        FieldGroupDomain, FieldRole, LocationEvalContext, evaluate_location_rules,
+        is_restricted_to_admin_only,
+    };
+    use opendash_core::field_schema::FieldScopeKind;
+
+    let mut out = BTreeMap::new();
+    for page in &declarations.options_pages {
+        out.entry(page.page_key.clone()).or_insert_with(Vec::new);
+    }
+    for fg in &declarations.field_groups {
+        let Ok(norm) = fg.validate_and_normalize_full(FieldScopeKind::ExtensionGroupField) else {
+            continue;
+        };
+        if norm.domain != FieldGroupDomain::OptionsPage
+            || is_restricted_to_admin_only(&norm.location)
+        {
+            continue;
+        }
+        for page in &declarations.options_pages {
+            let page_ref = format!("custom:{}", page.page_key);
+            if evaluate_location_rules(
+                &norm.location,
+                &LocationEvalContext {
+                    options_page: Some(page_ref),
+                    user_role: FieldRole::Editor,
+                    ..Default::default()
+                },
+            ) && let Some(list) = out.get_mut(&page.page_key)
+            {
+                list.extend(norm.fields.clone());
+            }
+        }
+    }
+    out
+}
+
+pub fn declared_extra_site_and_theme_options_fields(
+    declarations: &ThemeDeclarations,
+    theme_id: &str,
+) -> (
+    Vec<opendash_core::field_schema::FieldSpec>,
+    Vec<opendash_core::field_schema::FieldSpec>,
+) {
+    use opendash_core::content::{
+        FieldGroupDomain, FieldRole, LocationEvalContext, evaluate_location_rules,
+        is_restricted_to_admin_only,
+    };
+    use opendash_core::field_schema::FieldScopeKind;
+
+    let mut site_fields = Vec::new();
+    let mut theme_fields = Vec::new();
+    let theme_ref = format!("theme:{theme_id}");
+    for fg in &declarations.field_groups {
+        let Ok(norm) = fg.validate_and_normalize_full(FieldScopeKind::ExtensionGroupField) else {
+            continue;
+        };
+        if norm.domain != FieldGroupDomain::OptionsPage
+            || is_restricted_to_admin_only(&norm.location)
+        {
+            continue;
+        }
+        if evaluate_location_rules(
+            &norm.location,
+            &LocationEvalContext {
+                options_page: Some("site_global".to_owned()),
+                user_role: FieldRole::Editor,
+                ..Default::default()
+            },
+        ) {
+            site_fields.extend(norm.fields.clone());
+        }
+        if evaluate_location_rules(
+            &norm.location,
+            &LocationEvalContext {
+                options_page: Some(theme_ref.clone()),
+                user_role: FieldRole::Editor,
+                ..Default::default()
+            },
+        ) {
+            theme_fields.extend(norm.fields);
+        }
+    }
+    (site_fields, theme_fields)
 }
 
 pub fn theme_asset_mime(rel_path: &str) -> Option<&'static str> {

@@ -22,11 +22,13 @@ pub(crate) async fn load_single_active_row_in_tx(
         Option<String>,
         String,
         String,
+        Option<i64>,
+        i32,
     );
     let row: SelectedRow = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
-                e.locale, e.translation_group_id
+                e.locale, e.translation_group_id, e.parent_id, e.menu_order
            FROM content_entries e
           WHERE e.content_type_key = ? AND e.id = ? AND e.trashed_at IS NULL",
     )
@@ -49,6 +51,8 @@ pub(crate) async fn load_single_active_row_in_tx(
         published_at,
         locale,
         translation_group_id,
+        parent_id,
+        menu_order,
     ) = row;
 
     let is_draft_publish =
@@ -88,13 +92,10 @@ pub(crate) async fn load_single_active_row_in_tx(
         updated_at,
         published_at.clone(),
     ))?;
-    record.values.retain(|key, _| {
-        effective.effective_fields.get(key).is_some_and(|field| {
-            field.effective_status == EffectiveFieldStatus::Active
-                && caller_role >= field.definition.effective_acl().0
-                && field.definition.effective_acl().2 == PublicExposure::Public
-        })
-    });
+    let admin_col_keys =
+        crate::storage::admin_extensions::active_column_field_keys_in_conn(&mut **tx, type_key)
+            .await?;
+    filter_entry_table_fields_for_role(&mut record.values, effective, &admin_col_keys, caller_role);
     let is_reading_assigned = assigned_reading_pages.contains(&record.id);
     let mut blocked_reasons = BTreeMap::new();
     if is_reading_assigned {
@@ -115,6 +116,8 @@ pub(crate) async fn load_single_active_row_in_tx(
         updated_at: record.updated_at,
         published_at,
         trashed_at: None,
+        parent_id,
+        menu_order,
         term_ids,
         public_url,
         fields: record.values,
@@ -256,6 +259,8 @@ pub(in crate::storage) async fn query_retained_trash_maintenance(
                 updated_at,
                 published_at,
                 trashed_at,
+                parent_id: None,
+                menu_order: 0,
                 term_ids: Vec::new(),
                 public_url: None,
                 fields: BTreeMap::new(),

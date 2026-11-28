@@ -118,6 +118,10 @@ pub async fn get_entry_autosave(
             seo: saved.seo,
             builder_document,
             term_ids: saved.term_ids,
+            parent_id_touched: saved.parent_id_touched,
+            parent_id: saved.parent_id,
+            menu_order_touched: saved.menu_order_touched,
+            menu_order: saved.menu_order,
             has_hidden_admin_fields,
             missing_refs,
         }),
@@ -185,22 +189,7 @@ pub async fn upsert_entry_autosave(
         });
     }
 
-    let (
-        title,
-        content_mode,
-        values,
-        cleared_fields,
-        builder_document_json,
-        term_ids,
-        primary_category_touched,
-        primary_category_term_id,
-        page_layout_touched,
-        page_layout_key,
-        custom_template_touched,
-        custom_template_key,
-        seo_touched,
-        seo,
-    ) = if type_key == "pattern" {
+    let merged = if type_key == "pattern" {
         build_pattern_autosave_row(&live, existing.as_ref(), input)?
     } else if input.source_surface == AutosaveSurface::Studio {
         build_studio_autosave_row(&live, existing.as_ref(), input, caller_role)?
@@ -208,15 +197,15 @@ pub async fn upsert_entry_autosave(
         build_editor_autosave_row(&live, existing.as_ref(), input, caller_role)?
     };
 
-    let values_json = serde_json::to_string(&values)?;
+    let values_json = serde_json::to_string(&merged.values)?;
     if values_json.len() > MAX_CONTENT_ENTRY_JSON_BYTES {
         return Err(ApiError::bad_request(
             "Dữ liệu bản lưu tự động vượt giới hạn 768 KiB.",
         ));
     }
-    let cleared_json = serde_json::to_string(&cleared_fields)?;
-    let term_ids_json = serde_json::to_string(&term_ids)?;
-    let seo_json = seo.as_ref().map(serde_json::to_string).transpose()?;
+    let cleared_json = serde_json::to_string(&merged.cleared_fields)?;
+    let term_ids_json = serde_json::to_string(&merged.term_ids)?;
+    let seo_json = merged.seo.as_ref().map(serde_json::to_string).transpose()?;
     let surface_str = match input.source_surface {
         AutosaveSurface::Editor => "editor",
         AutosaveSurface::Studio => "studio",
@@ -228,8 +217,10 @@ pub async fn upsert_entry_autosave(
              title, content_mode, values_json, cleared_fields_json, builder_document_json,
              term_ids_json, primary_category_touched, primary_category_term_id,
              page_layout_touched, page_layout_key, custom_template_touched,
-             custom_template_key, seo_touched, seo_json, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             custom_template_key, seo_touched, seo_json,
+             parent_id_touched, parent_id, menu_order_touched, menu_order,
+             updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          ON CONFLICT(entry_id, user_id) DO UPDATE SET
              content_type_key = excluded.content_type_key,
              source_surface = excluded.source_surface,
@@ -249,6 +240,10 @@ pub async fn upsert_entry_autosave(
              custom_template_key = excluded.custom_template_key,
              seo_touched = excluded.seo_touched,
              seo_json = excluded.seo_json,
+             parent_id_touched = excluded.parent_id_touched,
+             parent_id = excluded.parent_id,
+             menu_order_touched = excluded.menu_order_touched,
+             menu_order = excluded.menu_order,
              updated_at = excluded.updated_at
          RETURNING updated_at",
     )
@@ -258,20 +253,24 @@ pub async fn upsert_entry_autosave(
     .bind(surface_str)
     .bind(input.base_version)
     .bind(input.client_seq)
-    .bind(&title)
-    .bind(content_mode.as_str())
+    .bind(&merged.title)
+    .bind(merged.content_mode.as_str())
     .bind(&values_json)
     .bind(&cleared_json)
-    .bind(builder_document_json.as_deref())
+    .bind(merged.builder_document_json.as_deref())
     .bind(&term_ids_json)
-    .bind(i64::from(primary_category_touched))
-    .bind(primary_category_term_id)
-    .bind(i64::from(page_layout_touched))
-    .bind(page_layout_key.as_deref())
-    .bind(i64::from(custom_template_touched))
-    .bind(custom_template_key.as_deref())
-    .bind(i64::from(seo_touched))
+    .bind(i64::from(merged.primary_category_touched))
+    .bind(merged.primary_category_term_id)
+    .bind(i64::from(merged.page_layout_touched))
+    .bind(merged.page_layout_key.as_deref())
+    .bind(i64::from(merged.custom_template_touched))
+    .bind(merged.custom_template_key.as_deref())
+    .bind(i64::from(merged.seo_touched))
     .bind(seo_json.as_deref())
+    .bind(i64::from(merged.parent_id_touched))
+    .bind(merged.parent_id)
+    .bind(i64::from(merged.menu_order_touched))
+    .bind(merged.menu_order)
     .fetch_one(&mut *tx)
     .await?;
 

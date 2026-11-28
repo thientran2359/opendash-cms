@@ -85,6 +85,20 @@ pub(super) async fn inspect_missing_refs_in_conn(
         }
 
         inspect_missing_templates(&mut *conn, &mut cache, live, payload, &mut report).await?;
+        if let Some(pid) = payload.parent_id
+            && crate::storage::entries::validate_entry_parent_in_conn(
+                &mut *conn,
+                &live.content_type_key,
+                &live.effective.base.descriptor.settings,
+                &live.locale,
+                Some(live.id),
+                Some(pid),
+            )
+            .await
+            .is_err()
+        {
+            report.parent_id = Some(pid);
+        }
     }
 
     if inspect_body
@@ -177,7 +191,7 @@ fn collect_scoped_custom_fields(
     for (k, v) in &payload.values {
         if k == "body" {
             if inspect_body
-                && matches!(live.content_type_key.as_str(), "post" | "page")
+                && !matches!(live.content_type_key.as_str(), "pattern" | "section")
                 && !(live
                     .effective
                     .base
@@ -202,15 +216,22 @@ fn collect_scoped_custom_fields(
             continue;
         }
         if allowed_keys.contains(k.as_str()) {
-            if k == "featured_image"
-                && matches!(live.content_type_key.as_str(), "post" | "page")
-                && !live
-                    .effective
-                    .base
-                    .descriptor
-                    .settings
-                    .supports(ContentSupport::FeaturedImage)
-            {
+            let unsupported = !matches!(live.content_type_key.as_str(), "pattern" | "section")
+                && ((k == "featured_image"
+                    && !live
+                        .effective
+                        .base
+                        .descriptor
+                        .settings
+                        .supports(ContentSupport::FeaturedImage))
+                    || (k == "excerpt"
+                        && !live
+                            .effective
+                            .base
+                            .descriptor
+                            .settings
+                            .supports(ContentSupport::Excerpt)));
+            if unsupported {
                 if !restore_editable_scope
                     || live
                         .effective

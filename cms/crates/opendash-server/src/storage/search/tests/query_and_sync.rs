@@ -3,9 +3,9 @@ use opendash_core::{
     builder_blocks::serialize_builder_document_to_blocks,
     content::{
         ContentPublication, ContentSupport, ContentTypeDefinition, ContentTypeDefinitionInput,
-        ContentTypeSettings,
+        ContentTypeSettings, PatchField,
     },
-    field_schema::{FieldRole, FieldType, MediaFieldKind, PublicExposure},
+    field_schema::{FieldRole, FieldSpec, FieldType, MediaFieldKind, PublicExposure},
 };
 use serde_json::json;
 use sqlx::SqlitePool;
@@ -13,7 +13,7 @@ use sqlx::SqlitePool;
 use super::super::*;
 use super::{TempDirGuard, spec};
 
-fn build_test_cpts() -> (ContentTypeDefinition, ContentTypeDefinition) {
+fn build_test_cpts() -> (ContentTypeDefinition, ContentTypeDefinition, Vec<FieldSpec>) {
     let mut group_spec = spec(
         FieldType::Group,
         "meta_group",
@@ -72,51 +72,16 @@ fn build_test_cpts() -> (ContentTypeDefinition, ContentTypeDefinition) {
     let guide_def = ContentTypeDefinitionInput {
         key: "guide".into(),
         label: "Hướng dẫn".into(),
-        fields: vec![
-            spec(
-                FieldType::Richtext,
-                "body",
-                "Body",
-                FieldRole::Editor,
-                PublicExposure::Public,
-            ),
-            group_spec,
-            rep_spec,
-            spec(
-                FieldType::Email,
-                "api_secret",
-                "Contact Email",
-                FieldRole::Editor,
-                PublicExposure::Public,
-            ),
-            spec(
-                FieldType::Url,
-                "doc_url",
-                "URL",
-                FieldRole::Editor,
-                PublicExposure::Public,
-            ),
-            banner,
-            spec(
-                FieldType::Text,
-                "private_f",
-                "Private",
-                FieldRole::Editor,
-                PublicExposure::Private,
-            ),
-            spec(
-                FieldType::Text,
-                "admin_f",
-                "Admin",
-                FieldRole::Admin,
-                PublicExposure::Private,
-            ),
-        ],
+        singular_label: None,
+        description: None,
+        taxonomies: None,
+        rewrite_base: PatchField::Omitted,
         settings: Some(ContentTypeSettings {
             public: true,
             has_archive: true,
             publication: ContentPublication::Immediate,
             supports: vec![ContentSupport::Editor, ContentSupport::Builder],
+            ..Default::default()
         }),
     }
     .into_canonical()
@@ -125,24 +90,56 @@ fn build_test_cpts() -> (ContentTypeDefinition, ContentTypeDefinition) {
     let priv_def = ContentTypeDefinitionInput {
         key: "note_priv".into(),
         label: "Internal Note".into(),
-        fields: vec![spec(
-            FieldType::Text,
-            "body",
-            "Body",
-            FieldRole::Editor,
-            PublicExposure::Public,
-        )],
+        singular_label: None,
+        description: None,
+        taxonomies: None,
+        rewrite_base: PatchField::Omitted,
         settings: Some(ContentTypeSettings {
             public: false,
             has_archive: false,
             publication: ContentPublication::Immediate,
             supports: vec![ContentSupport::Editor],
+            ..Default::default()
         }),
     }
     .into_canonical()
     .unwrap();
 
-    (guide_def, priv_def)
+    let guide_custom_fields = vec![
+        group_spec,
+        rep_spec,
+        spec(
+            FieldType::Email,
+            "api_secret",
+            "Contact Email",
+            FieldRole::Editor,
+            PublicExposure::Public,
+        ),
+        spec(
+            FieldType::Url,
+            "doc_url",
+            "URL",
+            FieldRole::Editor,
+            PublicExposure::Public,
+        ),
+        banner,
+        spec(
+            FieldType::Text,
+            "private_f",
+            "Private",
+            FieldRole::Editor,
+            PublicExposure::Private,
+        ),
+        spec(
+            FieldType::Text,
+            "admin_f",
+            "Admin",
+            FieldRole::Admin,
+            PublicExposure::Private,
+        ),
+    ];
+
+    (guide_def, priv_def, guide_custom_fields)
 }
 
 async fn search(
@@ -171,7 +168,7 @@ async fn query_public_search_bm25_vietnamese_facets_acl_and_snippets() {
     let db_path = tmp.path().join("test.sqlite");
     let pool = crate::storage::init_db(&db_path).await.unwrap();
 
-    let (guide_def, priv_def) = build_test_cpts();
+    let (guide_def, priv_def, guide_custom_fields) = build_test_cpts();
     for def in [&guide_def, &priv_def] {
         sqlx::query(
             "INSERT INTO content_types (key, definition_json, owner_kind, owner_id)
@@ -183,6 +180,24 @@ async fn query_public_search_bm25_vietnamese_facets_acl_and_snippets() {
         .await
         .unwrap();
     }
+    sqlx::query(
+        "INSERT INTO content_field_groups
+         (group_id, owner_kind, owner_id, local_key, title, description, fields_json,
+          domain, location_rules_json, presentation_json, active, default_region, default_order, collapsible, status, version)
+         VALUES ('user:guide_meta', 'user', NULL, 'guide_meta', 'Guide Meta', '', ?, 'content', ?, '{}', 1, 'main_bottom', 10, 0, 'active', 1)",
+    )
+    .bind(serde_json::to_string(&guide_custom_fields).unwrap())
+    .bind(r#"[[{"param":"content_type","op":"eq","value":"guide"}]]"#)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO content_field_group_targets (group_id, target_kind, target_key, association_state)
+         VALUES ('user:guide_meta', 'content_type', 'guide', 'declared')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     sqlx::query(
         "INSERT INTO taxonomy_definitions (key, label, hierarchical, public, owner_kind)

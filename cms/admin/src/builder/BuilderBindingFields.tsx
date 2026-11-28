@@ -1,9 +1,19 @@
 import { __, _x, useI18n } from '../i18n/index.tsx';
 import { useEffect, useRef, useState } from 'react';
-import { getContentEntry, listContentEntries, listContentTypes } from '../api/content.ts';
+import {
+  getContentEntry,
+  getEffectiveEditorConfig,
+  listContentEntries,
+  listContentTypes,
+} from '../api/content.ts';
 import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../api/locales.ts';
 import { ApiClientError } from '../api/client.ts';
-import type { ContentEntryRecord, FieldType, OwnedContentType } from '../features/content/types.ts';
+import type {
+  ContentEntryRecord,
+  FieldSpec,
+  FieldType,
+  OwnedContentType,
+} from '../features/content/types.ts';
 import type { BindingSource, BindingTarget, BuilderElement, ElementBinding, ElementType } from './document.ts';
 
 /** ADR-0009. Do not infer safe coercions from the displayed entry value. */
@@ -75,6 +85,7 @@ export function BuilderBindingFields({
   const signature = JSON.stringify(existing);
   const targets = TARGETS[element.type as ElementType];
   const [types, setTypes] = useState<OwnedContentType[]>([]);
+  const [allowedFields, setAllowedFields] = useState<FieldSpec[]>([]);
   const [entries, setEntries] = useState<ContentEntryRecord[]>([]);
   const [typeKey, setTypeKey] = useState(existing?.type_key ?? '');
   const [entryLocale, setEntryLocale] = useState(existing?.entry_locale ?? '');
@@ -82,6 +93,7 @@ export function BuilderBindingFields({
   const [target, setTarget] = useState<BindingTarget>(existing?.target ?? targets[0].key);
   const [sourceKey, setSourceKey] = useState(existing ? sourceValue(existing.source) : '');
   const [typesBusy, setTypesBusy] = useState(false);
+  const [fieldsBusy, setFieldsBusy] = useState(false);
   const [entriesBusy, setEntriesBusy] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [lookupError, setLookupError] = useState('');
@@ -89,6 +101,7 @@ export function BuilderBindingFields({
   const [selectionChecked, setSelectionChecked] = useState(false);
   const [savedStatus, setSavedStatus] = useState('');
   const entrySequence = useRef(0);
+  const fieldSequence = useRef(0);
 
   useEffect(() => {
     setTypeKey(existing?.type_key ?? '');
@@ -139,10 +152,31 @@ export function BuilderBindingFields({
     return () => { entrySequence.current += 1; };
   }, [typeKey, entryLocale, lookupRevision]);
 
+  useEffect(() => {
+    const sequence = ++fieldSequence.current;
+    setAllowedFields([]);
+    if (!typeKey || typeKey === 'pattern' || typeKey === 'section') return;
+    setFieldsBusy(true);
+    getEffectiveEditorConfig(typeKey).then(cfg => {
+      if (sequence !== fieldSequence.current) return;
+      const activeFields = Object.values(cfg.effective_fields)
+        .filter(item => item.effective_status === 'active')
+        .map(item => item.definition);
+      setAllowedFields(activeFields);
+    }).catch(cause => {
+      if (sequence !== fieldSequence.current) return;
+      setLookupError(__("Could not load fields for the content type; saved binding is preserved."));
+      if (cause instanceof ApiClientError && cause.status === 401)
+        onError(cause, __("Your session expired while looking up fields."));
+    }).finally(() => {
+      if (sequence === fieldSequence.current) setFieldsBusy(false);
+    });
+    return () => { fieldSequence.current += 1; };
+  }, [typeKey, lookupRevision]);
+
   const selectedType = types.find(type => type.descriptor.key === typeKey);
   const typeActive = selectedType?.status === 'active';
   const selectedEntry = entries.find(entry => entry.slug === entrySlug);
-  const allowedFields = selectedType?.descriptor.fields ?? [];
   const currentField = sourceKey.startsWith('field:')
     ? allowedFields.find(field => field.key === sourceKey.slice(6)) : undefined;
   const canUseTitle = target !== 'media_id' && target !== 'url';
@@ -153,10 +187,10 @@ export function BuilderBindingFields({
   const imageAltNeedsMedia = element.type === 'core/image' && target === 'alt'
     && (typeof element.props.media_id !== 'string' || element.props.media_id.trim() === '');
   const isRouteContext = sourceKey.startsWith('route_context:');
-  const validRouteContext = allowRouteContext && isRouteContext && !imageAltNeedsMedia && !typesBusy && !lookupError;
+  const validRouteContext = allowRouteContext && isRouteContext && !imageAltNeedsMedia && !typesBusy && !fieldsBusy && !lookupError;
   const valid = validRouteContext || (!!typeActive && !!selectedEntry && !!entrySlug && sourceAllowed
     && (selectionChecked || existing?.entry_slug === entrySlug && existing.type_key === typeKey)
-    && !imageAltNeedsMedia && !entriesBusy && !typesBusy && !lookupError);
+    && !imageAltNeedsMedia && !entriesBusy && !typesBusy && !fieldsBusy && !lookupError);
 
   const chooseEntry = (slug: string) => {
     setEntrySlug(slug);
