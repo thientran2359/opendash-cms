@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "id": "core/gallery",
+  "title": "Thư viện ảnh (Gallery)",
+  "category": "media",
+  "icon": "eye",
+  "render": "native",
+  "supports_children": false,
+  "allowed_contexts": ["*", "!loop_item"],
+  "fields": [
+    {
+      "type": "gallery",
+      "key": "images",
+      "label": "Danh sách ảnh",
+      "media_kind": "image",
+      "max_items": 24
+    },
+    {
+      "type": "textarea",
+      "key": "captions",
+      "label": "Chú thích / Alt theo từng dòng",
+      "rows": 4,
+      "max_chars": 4000,
+      "default": ""
+    },
+    {
+      "type": "select",
+      "key": "layout",
+      "label": "Kiểu bố cục",
+      "options": [
+        { "value": "grid", "label": "Lưới đều (Grid)" },
+        { "value": "masonry", "label": "Xếp gạch (Masonry)" }
+      ],
+      "default": "grid"
+    },
+    {
+      "type": "select",
+      "key": "columns",
+      "label": "Số cột",
+      "responsive": true,
+      "options": [
+        { "value": "1", "label": "1 cột" },
+        { "value": "2", "label": "2 cột" },
+        { "value": "3", "label": "3 cột" },
+        { "value": "4", "label": "4 cột" },
+        { "value": "5", "label": "5 cột" },
+        { "value": "6", "label": "6 cột" }
+      ],
+      "default": "3"
+    },
+    {
+      "type": "select",
+      "key": "gap",
+      "label": "Khoảng cách",
+      "options": [
+        { "value": "8", "label": "Nhỏ (8px)" },
+        { "value": "16", "label": "Vừa (16px)" },
+        { "value": "24", "label": "Lớn (24px)" }
+      ],
+      "default": "16"
+    },
+    {
+      "type": "select",
+      "key": "aspect_ratio",
+      "label": "Tỉ lệ khung hình",
+      "options": [
+        { "value": "auto", "label": "Tự động" },
+        { "value": "16_9", "label": "16:9" },
+        { "value": "4_3", "label": "4:3" },
+        { "value": "1_1", "label": "1:1" },
+        { "value": "3_4", "label": "3:4" }
+      ],
+      "default": "4_3"
+    },
+    {
+      "type": "select",
+      "key": "radius",
+      "label": "Bo góc",
+      "options": [
+        { "value": "none", "label": "Không" },
+        { "value": "sm", "label": "Nhỏ" },
+        { "value": "md", "label": "Vừa" },
+        { "value": "lg", "label": "Lớn" },
+        { "value": "xl", "label": "Rất lớn" }
+      ],
+      "default": "lg"
+    },
+    {
+      "type": "boolean",
+      "key": "lightbox",
+      "label": "Mở phóng lớn ảnh (Lightbox)",
+      "default": true
+    },
+    {
+      "type": "boolean",
+      "key": "show_captions",
+      "label": "Hiện chú thích dưới ảnh",
+      "default": false
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true
+    },
+    {
+      "type": "spacing",
+      "key": "margin",
+      "label": "Lề ngoài (Margin)",
+      "property": "margin",
+      "unit": "px",
+      "min": -128,
+      "max": 128,
+      "responsive": true
+    }
+  ]
+}

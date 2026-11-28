@@ -67,7 +67,7 @@ pub(crate) struct LocalIconBatch {
     pub(crate) bytes_delta: usize,
 }
 
-fn find_top_level_body_close(html: &str) -> Option<usize> {
+pub fn find_top_level_body_close(html: &str) -> Option<usize> {
     let bytes = html.as_bytes();
     let mut scanner = HtmlBodyScanner::new();
     let mut last_close = None;

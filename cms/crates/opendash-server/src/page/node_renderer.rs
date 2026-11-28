@@ -2,12 +2,14 @@ use std::collections::BTreeMap;
 
 use opendash_core::{
     builder::{BlockNode, BuilderDocument},
-    field_schema::{FieldSpec, FieldType},
     registry::{DeclarationState, ProviderStatus},
 };
 use serde_json::{Value, json};
 
 use super::{
+    blocks_interactive::{
+        active_child_nodes, build_children_meta, compute_child_native_parent, scalar_parent_props,
+    },
     blocks_layout::{NativeParentInfo, render_native_container},
     blocks_leaf::render_native_leaf,
     blocks_runtime::render_native_runtime,
@@ -44,6 +46,8 @@ struct RenderEnv<'a> {
     slot_table: HtmlSlotTable,
     diagnostics: Vec<BuilderDiagnostic>,
     has_active_contact_form: bool,
+    used_entry_content: bool,
+    has_popup: bool,
 }
 
 fn node_preview_kind(
@@ -95,85 +99,6 @@ fn extra_classes_for(node: &BlockNode) -> Vec<String> {
         classes.extend(raw.split_whitespace().map(str::to_owned));
     }
     classes
-}
-
-fn active_child_nodes<'a>(
-    children: &'a [BlockNode],
-    declared: &'a BTreeMap<String, RegisteredBlockDef>,
-) -> Vec<(&'a BlockNode, &'a RegisteredBlockDef)> {
-    children
-        .iter()
-        .filter_map(|child| {
-            let def = declared.get(&child.block_id)?;
-            (def.status == ProviderStatus::Active
-                && def.declaration_state == DeclarationState::Declared)
-                .then_some((child, def))
-        })
-        .collect()
-}
-
-fn build_children_meta(active: &[(&BlockNode, &RegisteredBlockDef)]) -> Vec<Value> {
-    active
-        .iter()
-        .enumerate()
-        .map(|(idx, (child, def))| {
-            let defaulted = def.schema.schema.apply_field_defaults(&child.props);
-            let title = defaulted.get("title").and_then(Value::as_str).unwrap_or("");
-            let open_by_default = defaulted
-                .get("open_by_default")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let icon = defaulted
-                .get("icon")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|name| opendash_core::icons::lookup_core_icon_paths(name).is_some())
-                .map(|name| json!({ "name": name }))
-                .unwrap_or(Value::Null);
-            json!({
-                "id": child.id,
-                "block_id": child.block_id,
-                "index": idx,
-                "title": title,
-                "icon": icon,
-                "open_by_default": open_by_default,
-            })
-        })
-        .collect()
-}
-
-fn scalar_parent_props(fields: &[FieldSpec], defaulted: &BTreeMap<String, Value>) -> Value {
-    let mut map = serde_json::Map::new();
-    for spec in fields {
-        if spec.is_ui_only() {
-            continue;
-        }
-        let allowed_scalar = matches!(
-            spec.field_type,
-            FieldType::Boolean
-                | FieldType::Checkbox
-                | FieldType::Text
-                | FieldType::Textarea
-                | FieldType::Number
-                | FieldType::Range
-                | FieldType::Email
-                | FieldType::Select
-                | FieldType::RadioButtons
-                | FieldType::Color
-                | FieldType::Date
-                | FieldType::Datetime
-                | FieldType::Time
-        );
-        if !allowed_scalar {
-            continue;
-        }
-        if let Some(val) = defaulted.get(&spec.key)
-            && matches!(val, Value::Bool(_) | Value::String(_) | Value::Number(_))
-        {
-            map.insert(spec.key.clone(), val.clone());
-        }
-    }
-    Value::Object(map)
 }
 
 fn render_csec_node(
@@ -275,7 +200,7 @@ fn render_node(
     env: &mut RenderEnv<'_>,
     node: &BlockNode,
     parent_ctx: Option<&Value>,
-    native_parent: NativeParentInfo,
+    native_parent: NativeParentInfo<'_>,
     out: &mut String,
 ) -> ApiResult<()> {
     let node_scope = loop_node_scope(env.scope, None, &node.id);
@@ -332,6 +257,9 @@ fn render_node(
     }
 
     if def.schema.schema.supports_children && node.block_id != "core/list" {
+        if node.block_id == "core/popup" {
+            env.has_popup = true;
+        }
         let active = active_child_nodes(&node.children, &env.state.declared_blocks);
         let active_count = active.len();
         let children_meta = if is_native {
@@ -345,9 +273,13 @@ fn render_node(
             match render_native_container(
                 node,
                 &def.schema.schema.fields,
+                &active,
                 &child_nonce,
+                &node_scope,
                 native_parent,
-            ) {
+                env.is_preview,
+                env.budget,
+            )? {
                 Some(html) => html,
                 None => {
                     return push_unavailable_placeholder(
@@ -382,6 +314,9 @@ fn render_node(
                 }
             }
         };
+        if raw_shell.is_empty() {
+            return Ok(());
+        }
         let wrapped = apply_single_root_wrapper(&raw_shell, &attrs, env.is_preview);
         let emitted_nonce = match scan_child_nonce_in_shell(&wrapped, &child_nonce) {
             Ok(flag) => flag,
@@ -411,31 +346,21 @@ fn render_node(
         if emitted_nonce {
             let defaulted_parent = def.schema.schema.apply_field_defaults(&node.props);
             let p_props = scalar_parent_props(&def.schema.schema.fields, &defaulted_parent);
-            let child_native_parent = if node.block_id == "core/row" {
-                let mode = match defaulted_parent.get("layout_mode").and_then(Value::as_str) {
-                    Some("grid_12") => "grid_12",
-                    _ => "equal",
-                };
-                NativeParentInfo {
-                    layout_mode: Some(mode),
-                    active_child_count: active_count,
-                }
-            } else {
-                NativeParentInfo {
-                    layout_mode: None,
-                    active_child_count: active_count,
-                }
-            };
             let mut children_buf = String::new();
             for (idx, child) in node.children.iter().enumerate() {
-                let child_meta_idx = active
-                    .iter()
-                    .position(|(ac, _)| ac.id == child.id)
-                    .unwrap_or(idx);
+                let child_native_parent = compute_child_native_parent(
+                    node,
+                    &defaulted_parent,
+                    &active,
+                    child,
+                    idx,
+                    &node_scope,
+                    native_parent,
+                );
                 let child_parent_ctx = json!({
                     "parent_id": node.id,
                     "parent_block_id": node.block_id,
-                    "index": child_meta_idx,
+                    "index": child_native_parent.child_index,
                     "sibling_count": active_count,
                     "parent_props": &p_props,
                 });
@@ -464,16 +389,20 @@ fn render_node(
             env.context,
             env.patterns,
             env.list_base_path,
+            native_parent.in_popup,
             env.budget,
             &mut env.has_active_contact_form,
             &mut diag_buf,
         )? {
+            env.used_entry_content |= rt.used_entry_content;
+            env.has_popup |= rt.has_popup;
             (rt.html, rt.already_charged)
         } else if let Some(leaf) = render_native_leaf(
             node,
             &def.schema.schema.fields,
             &env.state.hydration_media,
             env.is_preview,
+            native_parent,
             env.budget,
         )? {
             (Some(leaf), 0)
@@ -570,6 +499,8 @@ pub(super) fn render_document(
         slot_table: HtmlSlotTable::new(),
         diagnostics: Vec::new(),
         has_active_contact_form: false,
+        used_entry_content: false,
+        has_popup: false,
     };
     for node in &document.blocks {
         render_node(
@@ -581,6 +512,8 @@ pub(super) fn render_document(
         )?;
     }
     let has_active_contact_form = env.has_active_contact_form;
+    let used_entry_content = env.used_entry_content;
+    let has_popup = env.has_popup;
     let diagnostics = env.diagnostics;
     let mut slot_table = env.slot_table;
 
@@ -588,6 +521,9 @@ pub(super) fn render_document(
     let html = assemble_slot_table(&root_html, &mut slot_table).map_err(ApiError::bad_request)?;
     Ok(RenderedLayout {
         has_active_contact_form,
+        needs_blocks_js: env.budget.needs_blocks_js,
+        used_entry_content,
+        has_popup,
         html,
         diagnostics,
     })

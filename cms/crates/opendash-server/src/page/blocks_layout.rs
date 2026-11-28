@@ -6,10 +6,17 @@ use opendash_core::{
 };
 use serde_json::Value;
 
+use crate::{error::ApiResult, storage::page::RegisteredBlockDef, template_sec::RenderBudget};
+
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct NativeParentInfo {
+pub(super) struct NativeParentInfo<'a> {
+    pub parent_node_scope: Option<&'a str>,
     pub layout_mode: Option<&'static str>,
     pub active_child_count: usize,
+    pub child_index: usize,
+    pub initial_active_index: usize,
+    pub in_deferred_media: bool,
+    pub in_popup: bool,
 }
 
 pub(super) fn str_prop<'a>(
@@ -460,17 +467,64 @@ fn render_stack(node: &BlockNode, fields: &[FieldSpec], child_nonce: &str) -> St
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_native_container(
     node: &BlockNode,
     fields: &[FieldSpec],
+    active_children: &[(&BlockNode, &RegisteredBlockDef)],
     child_nonce: &str,
-    parent: NativeParentInfo,
-) -> Option<String> {
+    node_scope: &str,
+    parent: NativeParentInfo<'_>,
+    is_preview: bool,
+    budget: &mut RenderBudget,
+) -> ApiResult<Option<String>> {
     match node.block_id.as_str() {
-        "core/section" => Some(render_section(node, fields, child_nonce)),
-        "core/row" => Some(render_row(node, fields, child_nonce)),
-        "core/column" => Some(render_column(node, fields, child_nonce, parent)),
-        "core/stack" => Some(render_stack(node, fields, child_nonce)),
-        _ => None,
+        "core/section" => Ok(Some(render_section(node, fields, child_nonce))),
+        "core/row" => Ok(Some(render_row(node, fields, child_nonce))),
+        "core/column" => Ok(Some(render_column(node, fields, child_nonce, parent))),
+        "core/stack" => Ok(Some(render_stack(node, fields, child_nonce))),
+        "core/tabs" => super::blocks_interactive::render_tabs(
+            node,
+            fields,
+            active_children,
+            child_nonce,
+            node_scope,
+            is_preview,
+            budget,
+        )
+        .map(Some),
+        "core/tab-panel" => Ok(Some(super::blocks_interactive::render_tab_panel(
+            node,
+            fields,
+            child_nonce,
+            parent,
+        ))),
+        "core/slider" => super::blocks_interactive::render_slider(
+            node,
+            fields,
+            active_children,
+            child_nonce,
+            is_preview,
+            budget,
+        )
+        .map(Some),
+        "core/slide" => Ok(Some(super::blocks_interactive::render_slide(
+            node,
+            fields,
+            child_nonce,
+            parent,
+            budget,
+        ))),
+        "core/popup" => super::blocks_popup::render_popup(
+            node,
+            fields,
+            child_nonce,
+            node_scope,
+            parent,
+            is_preview,
+            budget,
+        )
+        .map(Some),
+        _ => Ok(None),
     }
 }

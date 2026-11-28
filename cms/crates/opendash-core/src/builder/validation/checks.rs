@@ -91,6 +91,7 @@ impl<'a> ValidationWalk<'a> {
         parent_schema: Option<&'a BlockSchema>,
         inactive_ancestor_subtree: Option<&'a HashSet<&'a str>>,
         mut loop_scope: Option<(&mut LoopCounters, usize)>,
+        in_popup: bool,
     ) -> Result<(), BuilderError> {
         if nodes.is_empty() {
             return Ok(());
@@ -188,6 +189,7 @@ impl<'a> ValidationWalk<'a> {
                     None,
                     Some(allowed_subtree),
                     next_loop,
+                    in_popup || node.block_id == "core/popup",
                 )?;
                 continue;
             }
@@ -231,6 +233,7 @@ impl<'a> ValidationWalk<'a> {
                     None,
                     Some(&prev.subtree_ids),
                     next_loop,
+                    in_popup || node.block_id == "core/popup",
                 )?;
                 continue;
             };
@@ -267,6 +270,9 @@ impl<'a> ValidationWalk<'a> {
                 ));
             }
             let parent_token = parent_schema.map_or("root", |ps| ps.id.as_str());
+            if in_popup && node.block_id == "core/popup" {
+                return Err(BuilderError::Invalid("Nested core/popup is not allowed"));
+            }
             if !matches_pattern_list(schema.allowed_parents.as_deref(), parent_token) {
                 return Err(BuilderError::Invalid(
                     "Block is not allowed under this parent",
@@ -330,6 +336,7 @@ impl<'a> ValidationWalk<'a> {
                 }
             }
 
+            let next_in_popup = in_popup || node.block_id == "core/popup";
             if node.block_id == "core/loop-item" {
                 let mut child_loop_counters = LoopCounters::default();
                 self.visit_nodes(
@@ -339,6 +346,7 @@ impl<'a> ValidationWalk<'a> {
                     Some(schema),
                     None,
                     Some((&mut child_loop_counters, 1)),
+                    next_in_popup,
                 )?;
             } else {
                 let next_loop = loop_scope.as_mut().map(|(lc, rd)| (&mut **lc, *rd + 1));
@@ -349,6 +357,7 @@ impl<'a> ValidationWalk<'a> {
                     Some(schema),
                     None,
                     next_loop,
+                    next_in_popup,
                 )?;
             }
         }
@@ -383,7 +392,7 @@ impl BuilderDocument {
             lists: 0,
             pattern_refs: 0,
         };
-        walk.visit_nodes(&self.blocks, 1, None, None, None, None)?;
+        walk.visit_nodes(&self.blocks, 1, None, None, None, None, false)?;
         self.to_json()?;
         Ok(())
     }

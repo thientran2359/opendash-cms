@@ -137,3 +137,10 @@ line-clamp-1 line-clamp-2 line-clamp-3 line-clamp-4
 aspect-auto aspect-[3/2] aspect-[4/5]
 peer peer-checked:flex sr-only pointer-events-none md:col-start-2
 rounded-sm
+# Spec A3 Interactive & Marketing Blocks
+columns-1 columns-2 columns-3 columns-4 columns-5 columns-6
+md:columns-1 md:columns-2 md:columns-3 md:columns-4 md:columns-5 md:columns-6
+lg:columns-1 lg:columns-2 lg:columns-3 lg:columns-4 lg:columns-5 lg:columns-6
+break-inside-avoid mb-2 mb-4 mb-6 text-amber-500
+md:justify-start md:justify-center md:justify-end lg:justify-start lg:justify-center lg:justify-end
+grayscale hover:grayscale-0

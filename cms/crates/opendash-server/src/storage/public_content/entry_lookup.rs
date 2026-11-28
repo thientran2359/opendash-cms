@@ -237,6 +237,14 @@ pub async fn load_entry_render_snapshot_with_options(
                     && fe.definition.effective_acl().0 == FieldRole::Editor
             });
     let mut render_budget = crate::page::RenderBudget::new();
+    populate_entry_render_budget(
+        &mut tx,
+        &mut render_budget,
+        &entry_locale,
+        &entry.title,
+        list_base_path,
+    )
+    .await?;
     let raw_body = entry.values.get("body").and_then(serde_json::Value::as_str);
     let body = if !matches!(entry.content_type_key.as_str(), "pattern" | "section")
         && effective_schema

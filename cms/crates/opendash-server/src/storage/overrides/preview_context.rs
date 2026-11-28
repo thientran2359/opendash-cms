@@ -156,6 +156,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
     .await?;
     let active = theme::load_active_theme_in_conn(&mut tx, themes_root).await?;
     let mut budget = PreviewCompositionBudget::new();
+    budget.locale = effective_locale.clone();
     let url_policy =
         active_theme_url_policy_in_conn(&mut tx, active.as_ref(), Some(&key), None, None).await?;
     let graph = preview_part_graph(&mut tx, target, document, active.as_ref(), &mut budget).await?;

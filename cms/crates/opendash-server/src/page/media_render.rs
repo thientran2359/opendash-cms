@@ -29,6 +29,29 @@ pub(super) fn render_responsive_image_html(
     hydration_media: &BTreeMap<String, HydratedMediaRow>,
     is_preview: bool,
 ) -> String {
+    render_responsive_image_html_with_priority(
+        media_id,
+        alt,
+        class,
+        sizes,
+        hydration_media,
+        is_preview,
+        "lazy",
+        "",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_responsive_image_html_with_priority(
+    media_id: &str,
+    alt: &str,
+    class: &str,
+    sizes: &str,
+    hydration_media: &BTreeMap<String, HydratedMediaRow>,
+    is_preview: bool,
+    loading: &str,
+    fetchpriority: &str,
+) -> String {
     if let Some(row) = hydration_media.get(media_id)
         && row.kind == "image"
     {
@@ -44,9 +67,9 @@ pub(super) fn render_responsive_image_html(
                 sizes,
                 class,
                 alt,
-                loading: "lazy",
+                loading,
                 decoding: "async",
-                fetchpriority: "",
+                fetchpriority,
             },
             is_preview,
         ) {
@@ -58,13 +81,19 @@ pub(super) fn render_responsive_image_html(
     } else {
         format!(" class=\"{}\"", escape_html(class))
     };
+    let fp_attr = if fetchpriority.is_empty() {
+        String::new()
+    } else {
+        format!(" fetchpriority=\"{}\"", escape_html(fetchpriority))
+    };
     format!(
-        "<img src=\"{}\" alt=\"{}\" loading=\"lazy\"{class_attr}>",
+        "<img src=\"{}\" alt=\"{}\" loading=\"{}\"{fp_attr}{class_attr}>",
         escape_html(&versioned_media_file_url(
             media_id,
             hydration_media,
             is_preview
         )),
         escape_html(alt),
+        escape_html(loading),
     )
 }

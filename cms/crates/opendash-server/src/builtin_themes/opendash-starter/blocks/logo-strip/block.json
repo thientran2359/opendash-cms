@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "id": "opendash-starter/logo-strip",
+  "title": "Dải Logo đối tác (Logo Strip)",
+  "category": "marketing",
+  "icon": "globe",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "text",
+      "key": "heading",
+      "label": "Tiêu đề nhóm đối tác",
+      "max_chars": 120,
+      "default": "Được tin dùng bởi các đội ngũ"
+    },
+    {
+      "type": "repeater",
+      "key": "items",
+      "label": "Danh sách logo",
+      "min_items": 1,
+      "max_items": 12,
+      "button_label": "Thêm logo",
+      "item_label_field": "name",
+      "default": [
+        { "name": "Acme Corp", "image": "", "url": "" },
+        { "name": "Northstar", "image": "", "url": "" },
+        { "name": "Vanguard Lab", "image": "", "url": "" },
+        { "name": "OpenStack VN", "image": "", "url": "" }
+      ],
+      "fields": [
+        {
+          "type": "text",
+          "key": "name",
+          "label": "Tên thương hiệu",
+          "required": true,
+          "max_chars": 80,
+          "default": "Đối tác"
+        },
+        {
+          "type": "media",
+          "key": "image",
+          "label": "Logo (tùy chọn)",
+          "media_kind": "image"
+        },
+        {
+          "type": "url",
+          "key": "url",
+          "label": "Liên kết (tùy chọn)",
+          "default": ""
+        }
+      ]
+    },
+    {
+      "type": "boolean",
+      "key": "grayscale",
+      "label": "Hiển thị đơn sắc (hover bật màu)",
+      "default": true
+    },
+    {
+      "type": "select",
+      "key": "columns",
+      "label": "Số cột",
+      "responsive": true,
+      "css_var": "--od-cols",
+      "options": [
+        { "value": "3", "label": "3 cột" },
+        { "value": "4", "label": "4 cột" },
+        { "value": "5", "label": "5 cột" },
+        { "value": "6", "label": "6 cột" }
+      ],
+      "default": "4"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 20, "right": 16, "bottom": 20, "left": 16 }
+    }
+  ]
+}

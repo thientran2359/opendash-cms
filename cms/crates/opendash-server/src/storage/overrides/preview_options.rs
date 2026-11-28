@@ -63,3 +63,18 @@ pub(in crate::storage) async fn validate_transient_options_pages_refs_in_conn(
     }
     Ok(())
 }
+
+pub(in crate::storage) fn escape_preview_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}

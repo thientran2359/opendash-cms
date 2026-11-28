@@ -318,6 +318,7 @@ pub async fn preview_entry_builder_with_cache(
         RenderAnnotationScope::EntryBodyOnly
     };
     let mut render_budget = page::RenderBudget::new();
+    render_budget.locale = current.locale.clone();
     let rendered = render_entry_builder_preview_with_budget(
         &mut tx,
         &current,

@@ -1,0 +1,14 @@
+<section class="od-starter-logo-strip {{ padding.classes }}" data-od-spacing="padding">
+  {% if heading %}<p class="mb-6 text-center text-xs font-semibold uppercase tracking-wider text-od-muted">{{ heading }}</p>{% endif %}
+  <div class="od-responsive-grid grid items-center gap-6">
+    {% for logo in items %}
+    <div class="flex items-center justify-center p-2{% if grayscale %} grayscale transition duration-200 hover:grayscale-0{% endif %}">
+      {% if logo.url %}
+      <a href="{{ logo.url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center">{% if logo.image and logo.image.url %}{{ od_image(logo.image, sizes="160px", class="max-h-10 w-auto object-contain", alt=logo.name) }}{% else %}<span class="rounded-lg border border-od-border bg-od-surface-alt px-4 py-2 text-sm font-semibold text-od-muted">{{ logo.name }}</span>{% endif %}</a>
+      {% else %}
+      {% if logo.image and logo.image.url %}{{ od_image(logo.image, sizes="160px", class="max-h-10 w-auto object-contain", alt=logo.name) }}{% else %}<span class="rounded-lg border border-od-border bg-od-surface-alt px-4 py-2 text-sm font-semibold text-od-muted">{{ logo.name }}</span>{% endif %}
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>

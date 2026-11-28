@@ -81,6 +81,8 @@ pub(super) struct PublicRouteContext<'a> {
 pub struct ResolvedPublicHtml {
     pub html: String,
     pub has_active_contact_form: bool,
+    pub needs_blocks_js: bool,
+    pub used_entry_content: bool,
     /// Page Layouts own their canvas; wrapping them in the site's default
     /// header/footer would violate the layout choice.
     pub canvas_layout: bool,
@@ -161,6 +163,8 @@ pub(super) async fn render_resolved_public_template_html_with_surface(
         return Ok(ResolvedPublicHtml {
             html: fallback_html.to_owned(),
             has_active_contact_form: false,
+            needs_blocks_js: false,
+            used_entry_content: true,
             canvas_layout: false,
             theme_context: serde_json::Value::Null,
             precompiled_shell: overrides::PrecompiledPublicShell::default(),
@@ -276,6 +280,8 @@ pub(super) async fn render_resolved_public_template_html_with_surface(
                 return Ok(ResolvedPublicHtml {
                     html: fallback_html.to_owned(),
                     has_active_contact_form: false,
+                    needs_blocks_js: false,
+                    used_entry_content: true,
                     canvas_layout: false,
                     theme_context: context,
                     precompiled_shell: inspection.precompiled_shell,
@@ -288,6 +294,8 @@ pub(super) async fn render_resolved_public_template_html_with_surface(
         TemplateResolution::CoreFallback => Ok(ResolvedPublicHtml {
             html: fallback_html.to_owned(),
             has_active_contact_form: false,
+            needs_blocks_js: false,
+            used_entry_content: true,
             canvas_layout: false,
             theme_context: context,
             precompiled_shell: inspection.precompiled_shell,
@@ -327,6 +335,8 @@ pub(super) async fn render_resolved_public_template_html_with_surface(
             Ok(ResolvedPublicHtml {
                 html: rendered.html,
                 has_active_contact_form: rendered.has_active_contact_form,
+                needs_blocks_js: rendered.needs_blocks_js,
+                used_entry_content: rendered.used_entry_content,
                 canvas_layout,
                 theme_context: context,
                 precompiled_shell: inspection.precompiled_shell,
@@ -378,6 +388,8 @@ pub(super) async fn render_resolved_public_template_html_with_surface(
             Ok(ResolvedPublicHtml {
                 html,
                 has_active_contact_form: false,
+                needs_blocks_js: false,
+                used_entry_content: compiled.has_entry_content(),
                 canvas_layout: overrides::is_canvas_page_layout(
                     active,
                     target_key.strip_prefix("page_layout:"),

@@ -603,3 +603,57 @@ test('S04 loop cardinality, allowlist, 16-node cap without reorder double-count,
   assert.equal(canDeleteNode(listDoc, 'li-list', { blockCatalog: loopCat }), true);
   assert.ok(removeNode(listDoc, 'li-list', { blockCatalog: loopCat }));
 });
+
+test('S03-S04 repeater insert clones field.default and BRIDGE_SCRIPT reveals popup/nested tabs/slider', () => {
+  const repSchema = {
+    schema_version: 1, id: 'test/stats', title: 'Stats', category: 'marketing', render: 'render.html',
+    fields: [{ type: 'repeater', key: 'items', label: 'Items', min_items: 1, max_items: 6, default: [{ value: '100+', label: 'Clients' }], fields: [{ type: 'text', key: 'value', label: 'Val', required: true, default: '1' }, { type: 'text', key: 'label', label: 'Lbl', required: true, default: 'Item' }] }],
+  };
+  const next = insertBlock(makeDoc([]), 'test/stats', 'col-1', undefined, [...catalog, { block_id: 'test/stats', owner_kind: 'theme', owner_id: 't', status: 'active', declaration_state: 'declared', schema: repSchema }]);
+  const inserted = locate(next.document, next.id).node;
+  assert.deepEqual(inserted.props.items, [{ value: '100+', label: 'Clients' }]);
+  inserted.props.items[0].value = 'mutated';
+  assert.equal(repSchema.fields[0].default[0].value, '100+');
+
+  class El {
+    constructor(tag, attrs = {}, left = 0) {
+      this.tagName = tag.toUpperCase(); this.attrs = new Map(Object.entries(attrs));
+      this.children = []; this.parentElement = null; this.scrollLeft = 100; this._left = left;
+    }
+    hasAttribute(k) { return this.attrs.has(k); }
+    getAttribute(k) { return this.attrs.get(k) ?? null; }
+    setAttribute(k, v) { this.attrs.set(k, String(v)); }
+    removeAttribute(k) { this.attrs.delete(k); }
+    add(c) { c.parentElement = this; this.children.push(c); return c; }
+    getBoundingClientRect() { return { left: this._left, top: 0, right: this._left + 20, bottom: 20 }; }
+    closest(sel) {
+      const k = sel.slice(1, -1);
+      for (let c = this; c; c = c.parentElement) if (c.hasAttribute(k)) return c;
+      return null;
+    }
+    querySelectorAll(sel) {
+      const out = [], walk = (n) => { for (const c of n.children) { if ((sel === '[role="tabpanel"]' && c.getAttribute('role') === 'tabpanel') || (sel === '[role="tab"]' && c.getAttribute('role') === 'tab') || (sel === '.od-slider-track' && String(c.getAttribute('class') || '').includes('od-slider-track'))) out.push(c); walk(c); } };
+      walk(this); return out;
+    }
+  }
+  const popEmpty = new El('div', { 'data-od-popup-host': '' });
+  const popHost = new El('div', { 'data-od-popup-host': '', 'data-od-popup-id': 'p1' });
+  const dlg = popHost.add(new El('dialog'));
+  const tOuter = dlg.add(new El('div', { 'data-od-tabs-root': '' }));
+  const tabO1 = tOuter.add(new El('button', { role: 'tab', 'data-od-tab-index': '1', 'aria-selected': 'false', tabindex: '-1' }));
+  const panO0 = tOuter.add(new El('div', { role: 'tabpanel', 'data-od-panel-index': '0', tabindex: '0' }));
+  const panO1 = tOuter.add(new El('div', { role: 'tabpanel', 'data-od-panel-index': '1', hidden: 'until-found' }));
+  const track = panO1.add(new El('div', { 'data-od-slider-root': '' })).add(new El('div', { class: 'od-slider-track' }, 50));
+  const target = track.add(new El('div', { 'data-od-slide-index': '1' }, 210)).add(new El('div', { 'data-od-editable': '1', 'data-node-id': 'deep-1' }));
+  let scrolled = null; track.scrollTo = (opts) => { scrolled = opts; };
+  const listeners = new Map(), parentWin = {};
+  const document = { querySelector: (s) => (s.includes('nonce') ? { getAttribute: () => 'n1' } : null), querySelectorAll: (s) => (s === '[data-od-popup-host]' ? [popEmpty, popHost] : s.includes('[data-node-id]') ? [target] : []), addEventListener: () => {} };
+  const window = { parent: parentWin, addEventListener: (t, cb) => listeners.set(t, cb), scrollTo() {}, scrollX: 0, scrollY: 0 };
+  runInNewContext(bridgeScript, { document, window, setTimeout, clearTimeout });
+  listeners.get('message')({ source: parentWin, data: { nonce: 'n1', type: 'od-highlight', selectedId: 'deep-1', scroll: false } });
+  assert.equal(popHost.getAttribute('data-od-popup-preview-open'), '1'); assert.equal(dlg.getAttribute('open'), '');
+  assert.equal(panO1.hasAttribute('hidden'), false); assert.equal(panO0.getAttribute('hidden'), 'until-found');
+  assert.equal(tabO1.getAttribute('aria-selected'), 'true'); assert.equal(scrolled?.left, 260); assert.equal(scrolled?.behavior, 'auto');
+  listeners.get('message')({ source: parentWin, data: { nonce: 'n1', type: 'od-highlight', selectedId: null, scroll: false } });
+  assert.equal(popHost.hasAttribute('data-od-popup-preview-open'), false); assert.equal(dlg.hasAttribute('open'), false);
+});

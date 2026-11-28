@@ -1,52 +1,105 @@
 {
   "schema_version": 1,
   "id": "opendash-starter/stats-bar",
-  "title": "Thanh chỉ số",
-  "category": "content",
-  "icon": "chart-no-axes-column",
+  "title": "Thanh chỉ số (Stats Bar)",
+  "category": "marketing",
+  "icon": "arrow-up",
   "render": "render.html",
   "fields": [
     {
-      "type": "text",
-      "key": "stat_1_value",
-      "label": "Chỉ số 1",
-      "required": true,
-      "default": "100+"
+      "type": "repeater",
+      "key": "items",
+      "label": "Danh sách chỉ số",
+      "min_items": 1,
+      "max_items": 6,
+      "button_label": "Thêm chỉ số",
+      "item_label_field": "label",
+      "default": [
+        { "value": "100+", "label": "Dự án triển khai", "prefix": "", "suffix": "", "icon": "" },
+        { "value": "99%", "label": "Khách hàng hài lòng", "prefix": "", "suffix": "", "icon": "" },
+        { "value": "24/7", "label": "Hỗ trợ kỹ thuật", "prefix": "", "suffix": "", "icon": "" }
+      ],
+      "fields": [
+        {
+          "type": "text",
+          "key": "value",
+          "label": "Giá trị",
+          "required": true,
+          "max_chars": 32,
+          "default": "100+"
+        },
+        {
+          "type": "text",
+          "key": "label",
+          "label": "Nhãn mô tả",
+          "required": true,
+          "max_chars": 80,
+          "default": "Khách hàng"
+        },
+        {
+          "type": "text",
+          "key": "prefix",
+          "label": "Tiền tố",
+          "max_chars": 16,
+          "default": ""
+        },
+        {
+          "type": "text",
+          "key": "suffix",
+          "label": "Hậu tố",
+          "max_chars": 16,
+          "default": ""
+        },
+        {
+          "type": "icon",
+          "key": "icon",
+          "label": "Icon (tùy chọn)",
+          "default": ""
+        }
+      ]
     },
     {
-      "type": "text",
-      "key": "stat_1_label",
-      "label": "Nhãn chỉ số 1",
-      "required": true,
-      "default": "Khách hàng"
+      "type": "select",
+      "key": "columns",
+      "label": "Số cột",
+      "responsive": true,
+      "css_var": "--od-cols",
+      "options": [
+        { "value": "2", "label": "2 cột" },
+        { "value": "3", "label": "3 cột" },
+        { "value": "4", "label": "4 cột" }
+      ],
+      "default": "3"
     },
     {
-      "type": "text",
-      "key": "stat_2_value",
-      "label": "Chỉ số 2",
-      "required": true,
-      "default": "99%"
+      "type": "select",
+      "key": "surface_style",
+      "label": "Kiểu bề mặt",
+      "options": [
+        { "value": "card", "label": "Thẻ nổi (Card)" },
+        { "value": "bordered", "label": "Có viền" },
+        { "value": "minimal", "label": "Tối giản" }
+      ],
+      "default": "card"
     },
     {
-      "type": "text",
-      "key": "stat_2_label",
-      "label": "Nhãn chỉ số 2",
-      "required": true,
-      "default": "Hài lòng"
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn lề",
+      "options": [
+        { "value": "center", "label": "Giữa" },
+        { "value": "left", "label": "Trái" }
+      ],
+      "default": "center"
     },
     {
-      "type": "text",
-      "key": "stat_3_value",
-      "label": "Chỉ số 3",
-      "required": true,
-      "default": "24/7"
-    },
-    {
-      "type": "text",
-      "key": "stat_3_label",
-      "label": "Nhãn chỉ số 3",
-      "required": true,
-      "default": "Hỗ trợ"
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 24, "right": 24, "bottom": 24, "left": 24 }
     }
   ]
 }

@@ -14,6 +14,9 @@ impl Default for RenderBudget {
             image_nonces: ImageNonceTable::default(),
             richtext_nonces: RichTextNonceTable::default(),
             hook_nonces: HookNonceTable::default(),
+            needs_blocks_js: false,
+            page_canonical_url: None,
+            page_title: None,
         }
     }
 }
@@ -59,6 +62,9 @@ impl Default for PreviewCompositionBudget {
             image_nonces: ImageNonceTable::default(),
             richtext_nonces: RichTextNonceTable::default(),
             hook_nonces: HookNonceTable::default(),
+            needs_blocks_js: false,
+            page_canonical_url: None,
+            page_title: None,
         }
     }
 }

@@ -1,0 +1,16 @@
+{% set item_border = 'border-b border-od-border pb-4' if dividers else '' %}
+{% set ic_cls = 'bg-emerald-50 text-emerald-600' if icon_color == 'emerald' else ('bg-slate-100 text-slate-600' if icon_color == 'neutral' else 'bg-blue-50 text-od-primary') %}
+<section class="od-starter-feature-list {{ padding.classes }}" data-od-spacing="padding">
+  {% if heading %}<h3 class="mb-4 font-od-heading text-xl font-bold text-od-text">{{ heading }}</h3>{% endif %}
+  <ul role="list" class="od-responsive-grid grid gap-4">
+    {% for item in items %}
+    <li class="flex items-start gap-3 {{ item_border }}">
+      {% if item.icon and item.icon.name %}<span class="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg {{ ic_cls }}">{{ od_icon(item.icon.name, "h-4 w-4") }}</span>{% endif %}
+      <div class="min-w-0 flex-1">
+        <div class="font-semibold text-od-text">{{ item.title }}</div>
+        {% if item.description %}<p class="mt-1 text-sm text-od-muted">{{ item.description }}</p>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>

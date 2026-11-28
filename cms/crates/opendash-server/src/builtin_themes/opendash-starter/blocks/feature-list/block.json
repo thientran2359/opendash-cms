@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "id": "opendash-starter/feature-list",
+  "title": "Danh sách tính năng (Feature List)",
+  "category": "marketing",
+  "icon": "check-circle",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "text",
+      "key": "heading",
+      "label": "Tiêu đề (tùy chọn)",
+      "max_chars": 120,
+      "default": ""
+    },
+    {
+      "type": "repeater",
+      "key": "items",
+      "label": "Danh sách tính năng",
+      "min_items": 1,
+      "max_items": 16,
+      "button_label": "Thêm tính năng",
+      "item_label_field": "title",
+      "default": [
+        { "title": "Hiệu năng cao", "description": "Biên dịch native Rust phản hồi nhanh và ổn định.", "icon": "check-circle" },
+        { "title": "Chủ động dữ liệu", "description": "Một tệp SQLite duy nhất dễ sao lưu và phục hồi.", "icon": "check-circle" },
+        { "title": "An toàn mặc định", "description": "Cơ chế kiểm soát CSP và tách sandbox cho plugin.", "icon": "check-circle" }
+      ],
+      "fields": [
+        {
+          "type": "text",
+          "key": "title",
+          "label": "Tên tính năng",
+          "required": true,
+          "max_chars": 120,
+          "default": "Hiệu năng cao"
+        },
+        {
+          "type": "textarea",
+          "key": "description",
+          "label": "Mô tả",
+          "rows": 2,
+          "max_chars": 400,
+          "default": ""
+        },
+        {
+          "type": "icon",
+          "key": "icon",
+          "label": "Biểu tượng",
+          "default": "check-circle"
+        }
+      ]
+    },
+    {
+      "type": "select",
+      "key": "columns",
+      "label": "Số cột",
+      "responsive": true,
+      "css_var": "--od-cols",
+      "options": [
+        { "value": "1", "label": "1 cột" },
+        { "value": "2", "label": "2 cột" }
+      ],
+      "default": "1"
+    },
+    {
+      "type": "boolean",
+      "key": "dividers",
+      "label": "Hiện đường ngăn giữa các mục",
+      "default": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "icon_color",
+      "label": "Màu biểu tượng",
+      "options": [
+        { "value": "primary", "label": "Chủ đạo" },
+        { "value": "emerald", "label": "Xanh lá" },
+        { "value": "neutral", "label": "Trung tính" }
+      ],
+      "default": "primary"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 16, "right": 16, "bottom": 16, "left": 16 }
+    }
+  ]
+}

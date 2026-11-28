@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "id": "core/popup",
+  "title": "Hộp thoại / Ngăn trượt (Popup)",
+  "category": "interactive",
+  "icon": "external-link",
+  "render": "native",
+  "supports_children": true,
+  "allowed_children": ["*", "!core/section", "!core/popup"],
+  "allowed_contexts": ["*", "!loop_item"],
+  "default_children": [
+    {
+      "block_id": "core/heading",
+      "props": { "level": "h3", "text": "Tiêu đề hộp thoại", "size": "xl" }
+    },
+    {
+      "block_id": "core/text",
+      "props": {
+        "content": "<p>Thêm ảnh, video, biểu mẫu hoặc liên kết điều hướng vào đây.</p>"
+      }
+    }
+  ],
+  "presets": [
+    {
+      "key": "center_modal",
+      "title": "Modal chính giữa",
+      "icon": "sparkles",
+      "props": {
+        "position": "center",
+        "width": { "desktop": 560, "tablet": 520, "mobile": 340 },
+        "full_height": false,
+        "backdrop_style": "blur",
+        "radius": "xl"
+      }
+    },
+    {
+      "key": "left_drawer",
+      "title": "Ngăn trượt bên trái",
+      "icon": "menu",
+      "props": {
+        "position": "left",
+        "width": { "desktop": 360, "tablet": 340, "mobile": 300 },
+        "full_height": true,
+        "backdrop_style": "dark",
+        "radius": "none"
+      }
+    },
+    {
+      "key": "right_drawer",
+      "title": "Ngăn trượt bên phải",
+      "icon": "arrow-left",
+      "props": {
+        "position": "right",
+        "width": { "desktop": 400, "tablet": 360, "mobile": 320 },
+        "full_height": true,
+        "backdrop_style": "dark",
+        "radius": "none"
+      }
+    }
+  ],
+  "fields": [
+    {
+      "type": "accordion",
+      "key": "config_section",
+      "label": "Cấu hình & Kích hoạt",
+      "open_by_default": true,
+      "multi_expand": true
+    },
+    {
+      "type": "text",
+      "key": "popup_id",
+      "label": "ID kích hoạt (Popup ID)",
+      "instructions": "Đặt URL #popup-1 trên core/button, liên kết hoặc <a href=\"#popup-1\"> để mở popup này.",
+      "required": true,
+      "max_chars": 48,
+      "default": "popup-1"
+    },
+    {
+      "type": "text",
+      "key": "aria_label",
+      "label": "Nhãn trợ năng (ARIA label)",
+      "max_chars": 120,
+      "default": ""
+    },
+    {
+      "type": "boolean",
+      "key": "close_on_backdrop",
+      "label": "Đóng khi bấm nền mờ ngoài hộp thoại",
+      "default": true
+    },
+    {
+      "type": "boolean",
+      "key": "show_close_button",
+      "label": "Hiện nút Đóng",
+      "default": true
+    },
+    {
+      "type": "boolean",
+      "key": "open_on_hash",
+      "label": "Tự mở khi truy cập URL có #ID",
+      "default": true
+    },
+    {
+      "type": "accordion",
+      "key": "style_section",
+      "label": "Bố cục & Giao diện",
+      "open_by_default": true,
+      "multi_expand": true
+    },
+    {
+      "type": "radio_buttons",
+      "key": "position",
+      "label": "Vị trí mở",
+      "options": [
+        { "value": "center", "label": "Giữa" },
+        { "value": "left", "label": "Trái" },
+        { "value": "right", "label": "Phải" },
+        { "value": "top", "label": "Trên" },
+        { "value": "bottom", "label": "Dưới" }
+      ],
+      "default": "center"
+    },
+    {
+      "type": "range",
+      "key": "width",
+      "label": "Chiều rộng",
+      "min": 240,
+      "max": 1200,
+      "step": 10,
+      "default": 560,
+      "unit": "px",
+      "responsive": true,
+      "css_var": "--od-popup-w"
+    },
+    {
+      "type": "boolean",
+      "key": "full_height",
+      "label": "Chiều cao toàn màn hình",
+      "default": false
+    },
+    {
+      "type": "select",
+      "key": "backdrop_style",
+      "label": "Kiểu nền mờ (Backdrop)",
+      "options": [
+        { "value": "blur", "label": "Mờ (Blur)" },
+        { "value": "dark", "label": "Tối (Dark)" },
+        { "value": "light", "label": "Sáng (Light)" },
+        { "value": "none", "label": "Trong suốt" }
+      ],
+      "default": "blur"
+    },
+    {
+      "type": "color",
+      "key": "bg_color",
+      "label": "Màu nền hộp thoại",
+      "default": "",
+      "css_var": "--od-popup-bg"
+    },
+    {
+      "type": "select",
+      "key": "radius",
+      "label": "Bo góc",
+      "options": [
+        { "value": "none", "label": "Không" },
+        { "value": "md", "label": "Vừa" },
+        { "value": "lg", "label": "Lớn" },
+        { "value": "xl", "label": "Rất lớn" },
+        { "value": "2xl", "label": "Cực lớn" }
+      ],
+      "default": "xl"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 24, "right": 24, "bottom": 24, "left": 24 }
+    }
+  ]
+}

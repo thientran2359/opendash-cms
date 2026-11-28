@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "id": "core/slider",
+  "title": "Trình chiếu (Slider)",
+  "category": "interactive",
+  "icon": "arrow-right",
+  "render": "native",
+  "supports_children": true,
+  "allowed_children": ["core/slide"],
+  "allowed_contexts": ["*", "!loop_item"],
+  "default_children": [
+    {
+      "block_id": "core/slide",
+      "children": [
+        {
+          "block_id": "core/heading",
+          "props": { "level": "h3", "text": "Slide 1", "size": "xl" }
+        }
+      ]
+    },
+    {
+      "block_id": "core/slide",
+      "children": [
+        {
+          "block_id": "core/heading",
+          "props": { "level": "h3", "text": "Slide 2", "size": "xl" }
+        }
+      ]
+    },
+    {
+      "block_id": "core/slide",
+      "children": [
+        {
+          "block_id": "core/heading",
+          "props": { "level": "h3", "text": "Slide 3", "size": "xl" }
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "key": "hero_single",
+      "title": "1 Slide toàn khung",
+      "icon": "eye",
+      "props": {
+        "slides_per_view": { "desktop": "1", "tablet": "1", "mobile": "1" },
+        "show_arrows": true,
+        "show_dots": true,
+        "loop": true
+      }
+    },
+    {
+      "key": "card_carousel_3",
+      "title": "Băng chuyền 3 thẻ",
+      "icon": "arrow-right",
+      "props": {
+        "slides_per_view": { "desktop": "3", "tablet": "2", "mobile": "1" },
+        "show_arrows": true,
+        "show_dots": true,
+        "loop": false
+      }
+    }
+  ],
+  "fields": [
+    {
+      "type": "select",
+      "key": "slides_per_view",
+      "label": "Số slide hiển thị mỗi khung",
+      "responsive": true,
+      "options": [
+        { "value": "1", "label": "1 slide" },
+        { "value": "2", "label": "2 slide" },
+        { "value": "3", "label": "3 slide" }
+      ],
+      "default": "1"
+    },
+    {
+      "type": "range",
+      "key": "gap",
+      "label": "Khoảng cách giữa các slide",
+      "min": 0,
+      "max": 48,
+      "step": 4,
+      "default": 16,
+      "unit": "px",
+      "css_var": "--od-slider-gap"
+    },
+    {
+      "type": "boolean",
+      "key": "show_arrows",
+      "label": "Hiện nút mũi tên",
+      "default": true
+    },
+    {
+      "type": "boolean",
+      "key": "show_dots",
+      "label": "Hiện chấm chỉ báo",
+      "default": true
+    },
+    {
+      "type": "boolean",
+      "key": "loop",
+      "label": "Cuộn vòng lặp (1 slide/khung, >= 3 slide)",
+      "default": true
+    },
+    {
+      "type": "range",
+      "key": "autoplay_seconds",
+      "label": "Tự động chuyển slide (giây, 0 = tắt)",
+      "instructions": "Đặt > 0 để bật tự động chuyển; tự động tạm dừng khi giảm chuyển động.",
+      "min": 0,
+      "max": 12,
+      "step": 1,
+      "default": 0
+    },
+    {
+      "type": "text",
+      "key": "aria_label",
+      "label": "Nhãn trợ năng (ARIA label)",
+      "max_chars": 120,
+      "default": ""
+    },
+    {
+      "type": "spacing",
+      "key": "margin",
+      "label": "Lề ngoài (Margin)",
+      "property": "margin",
+      "unit": "px",
+      "min": -128,
+      "max": 128,
+      "responsive": true
+    }
+  ]
+}

@@ -1,6 +1,18 @@
 /// Public Tailwind v4 stylesheet is compiled at build time and embedded in the
 /// executable so public pages never depend on Node or a remote CDN.
 pub const PUBLIC_TAILWIND_CSS: &[u8] = include_bytes!("opendash-tailwind.css");
+pub const PUBLIC_BLOCKS_JS: &[u8] = include_bytes!("opendash-blocks.js");
+
+pub fn public_blocks_js_version_hash() -> &'static str {
+    use sha2::{Digest, Sha256};
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| {
+        let mut h = Sha256::new();
+        h.update(PUBLIC_BLOCKS_JS);
+        let full = format!("{:x}", h.finalize());
+        full[..12].to_owned()
+    })
+}
 
 use std::collections::BTreeMap;
 
@@ -29,6 +41,30 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
             include_bytes!("opendash-starter/assets/style.css").to_vec(),
         ),
         (
+            "blocks/feature-list/block.json".to_owned(),
+            include_bytes!("opendash-starter/blocks/feature-list/block.json").to_vec(),
+        ),
+        (
+            "blocks/feature-list/render.html".to_owned(),
+            include_bytes!("opendash-starter/blocks/feature-list/render.html").to_vec(),
+        ),
+        (
+            "blocks/icon-box/block.json".to_owned(),
+            include_bytes!("opendash-starter/blocks/icon-box/block.json").to_vec(),
+        ),
+        (
+            "blocks/icon-box/render.html".to_owned(),
+            include_bytes!("opendash-starter/blocks/icon-box/render.html").to_vec(),
+        ),
+        (
+            "blocks/logo-strip/block.json".to_owned(),
+            include_bytes!("opendash-starter/blocks/logo-strip/block.json").to_vec(),
+        ),
+        (
+            "blocks/logo-strip/render.html".to_owned(),
+            include_bytes!("opendash-starter/blocks/logo-strip/render.html").to_vec(),
+        ),
+        (
             "blocks/quote-box/block.json".to_owned(),
             include_bytes!("opendash-starter/blocks/quote-box/block.json").to_vec(),
         ),
@@ -43,6 +79,14 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
         (
             "blocks/stats-bar/render.html".to_owned(),
             include_bytes!("opendash-starter/blocks/stats-bar/render.html").to_vec(),
+        ),
+        (
+            "blocks/testimonial/block.json".to_owned(),
+            include_bytes!("opendash-starter/blocks/testimonial/block.json").to_vec(),
+        ),
+        (
+            "blocks/testimonial/render.html".to_owned(),
+            include_bytes!("opendash-starter/blocks/testimonial/render.html").to_vec(),
         ),
         (
             "footer.html".to_owned(),

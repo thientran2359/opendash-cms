@@ -27,6 +27,30 @@ pub fn compose_document_with_seo(
 }
 
 /// Server-owned SVG substitution happens only after document normalization.
+/// Conditionally inject `/assets/opendash-blocks.js?v=<hash>` right before the
+/// top-level `</body>` closing tag when at least one interactive Core block needs it.
+pub fn finalize_document_blocks_js(mut html: String, needs_blocks_js: bool) -> ApiResult<String> {
+    if html.contains(HEAD_END_MARKER) {
+        html = html.replace(HEAD_END_MARKER, "");
+    }
+    if !needs_blocks_js {
+        return Ok(html);
+    }
+    let tag = format!(
+        "<script src=\"/assets/opendash-blocks.js?v={}\" defer></script>",
+        crate::builtin_themes::public_blocks_js_version_hash()
+    );
+    if let Some(pos) = crate::template_sec::find_top_level_body_close(&html) {
+        let mut out = String::with_capacity(html.len() + tag.len());
+        out.push_str(&html[..pos]);
+        out.push_str(&tag);
+        out.push_str(&html[pos..]);
+        Ok(out)
+    } else {
+        Ok(html)
+    }
+}
+
 pub fn finalize_document_icons(
     mut html: String,
     icon_nonces: &crate::template_sec::IconNonceTable,

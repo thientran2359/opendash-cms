@@ -65,7 +65,13 @@ pub(crate) async fn render_not_found_response_for_locale(
             .await?;
     let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active.as_ref(), &resolved_locale, locale_ctx);
+    budget.render_budget.locale = resolved_locale.clone();
+    budget.render_budget.page_canonical_url = Some(public_content::format_public_canonical_url(
+        pub_settings.public_origin.as_deref(),
+        "/",
+    ));
     let l10n = content_render::core_l10n(&resolved_locale);
+    budget.render_budget.page_title = Some(l10n.not_found_title.to_string());
     let breadcrumbs = content_render::not_found_breadcrumbs(
         &l10n.home_label,
         Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
@@ -163,6 +169,10 @@ pub(crate) async fn render_not_found_response_for_locale(
     let html = content_render::finalize_document_images(html, &budget.render_budget.image_nonces)?;
     let html =
         content_render::finalize_document_richtext(html, &budget.render_budget.richtext_nonces)?;
+    let html = content_render::finalize_document_blocks_js(
+        html,
+        body.needs_blocks_js || budget.render_budget.needs_blocks_js,
+    )?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
         html,
         body.has_active_contact_form || shell_has_form,
@@ -380,6 +390,21 @@ pub(crate) async fn render_canonical_archive(
     .await?;
     let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active_v3.as_ref(), &locale, locale_ctx);
+    budget.render_budget.locale = locale.clone();
+    let canonical_for_archive = if query.page > 1 {
+        CanonicalUrlBuilder::with_query(
+            canonical_base.clone(),
+            query.clone(),
+            QueryScope::ContentArchive,
+        )
+    } else {
+        canonical_base.clone()
+    };
+    budget.render_budget.page_canonical_url = Some(public_content::format_public_canonical_url(
+        pub_settings.public_origin.as_deref(),
+        &canonical_for_archive,
+    ));
+    budget.render_budget.page_title = Some(schema.label.clone());
     // Do not export ContentTypeDefinition fields/settings/defaults to a
     // public theme: field-level access is represented exclusively by
     // exposure-filtered EntryView values.
@@ -487,15 +512,18 @@ pub(crate) async fn render_canonical_archive(
     )
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::finalize_document_richtext(
-            content_render::finalize_document_images(
-                content_render::finalize_document_icons(
-                    composed,
-                    &budget.render_budget.icon_nonces,
+        content_render::finalize_document_blocks_js(
+            content_render::finalize_document_richtext(
+                content_render::finalize_document_images(
+                    content_render::finalize_document_icons(
+                        composed,
+                        &budget.render_budget.icon_nonces,
+                    )?,
+                    &budget.render_budget.image_nonces,
                 )?,
-                &budget.render_budget.image_nonces,
+                &budget.render_budget.richtext_nonces,
             )?,
-            &budget.render_budget.richtext_nonces,
+            body.needs_blocks_js || budget.render_budget.needs_blocks_js,
         )?,
         body.has_active_contact_form || shell_has_form,
     ))

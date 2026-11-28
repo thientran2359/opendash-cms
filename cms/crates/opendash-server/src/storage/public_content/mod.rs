@@ -1,6 +1,7 @@
 mod adjacent_entries;
 mod entry_context_loaders;
 mod entry_lookup;
+mod entry_render_meta;
 mod hydration_and_related;
 mod related_entries;
 mod taxonomy_queries;
@@ -8,6 +9,7 @@ mod taxonomy_queries;
 pub use adjacent_entries::*;
 pub use entry_context_loaders::*;
 pub use entry_lookup::*;
+pub use entry_render_meta::*;
 pub use hydration_and_related::*;
 pub use related_entries::*;
 pub use taxonomy_queries::*;

@@ -82,6 +82,7 @@ pub async fn preview_studio_with_cache_and_locale(
     let mut has_active_contact_form = false;
     let mut route = None;
     let mut shared_rb = page::RenderBudget::new();
+    shared_rb.locale = effective_locale.clone();
     let resolved_term = resolve_preview_term_in_tx(
         &mut tx,
         target,
@@ -469,8 +470,8 @@ pub async fn preview_studio_with_cache_and_locale(
                 } else {
                     format!(
                         "<main><h1>{}</h1><p>{}</p>{}</main>",
-                        escape_preview_text(&general.site_title),
-                        escape_preview_text(&general.tagline),
+                        super::escape_preview_text(&general.site_title),
+                        super::escape_preview_text(&general.tagline),
                         slot_fragment
                     )
                 }
@@ -550,24 +551,12 @@ pub async fn preview_studio_with_cache_and_locale(
     tx.rollback().await?;
     Ok(RenderedLayout {
         has_active_contact_form,
+        needs_blocks_js: preview_budget.needs_blocks_js,
+        used_entry_content: false,
+        has_popup: false,
         html: full_html,
         diagnostics,
     })
-}
-
-pub(in crate::storage) fn escape_preview_text(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
 }
 
 #[allow(clippy::too_many_arguments)]

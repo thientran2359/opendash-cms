@@ -118,7 +118,7 @@ fn render_loop_subtree_node(
     is_clone: bool,
     is_preview: bool,
     allow_editable: bool,
-    native_parent: NativeParentInfo,
+    native_parent: NativeParentInfo<'_>,
     cache: &super::BlockTemplateCache,
     budget: &mut RenderBudget,
     context: Option<&BuilderTemplateContext<'_>>,
@@ -156,8 +156,16 @@ fn render_loop_subtree_node(
         }
         let nonce =
             crate::template_sec::generate_children_nonce().map_err(ApiError::bad_request)?;
-        let Some(shell) =
-            render_native_container(node, &def.schema.schema.fields, &nonce, native_parent)
+        let Some(shell) = render_native_container(
+            node,
+            &def.schema.schema.fields,
+            &[],
+            &nonce,
+            &node_scope,
+            native_parent,
+            is_preview,
+            budget,
+        )?
         else {
             return Ok(String::new());
         };
@@ -175,11 +183,12 @@ fn render_loop_subtree_node(
             NativeParentInfo {
                 layout_mode: Some(mode),
                 active_child_count: active_cnt,
+                ..Default::default()
             }
         } else {
             NativeParentInfo {
-                layout_mode: None,
                 active_child_count: active_cnt,
+                ..Default::default()
             }
         };
         let mut children_html = String::new();
@@ -228,6 +237,7 @@ fn render_loop_subtree_node(
             &def.schema.schema.fields,
             &state.hydration_media,
             is_preview,
+            native_parent,
             budget,
         )?
     } else {

@@ -467,5 +467,8 @@ pub(in crate::storage) async fn render_public_part(
         html,
         diagnostics: Vec::new(),
         has_active_contact_form: false,
+        needs_blocks_js: budget.render_budget.needs_blocks_js,
+        used_entry_content: compiled.has_entry_content(),
+        has_popup: false,
     }))
 }

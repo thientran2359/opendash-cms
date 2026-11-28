@@ -150,6 +150,18 @@ pub(crate) async fn render_search_response_for_locale(
         ..Default::default()
     };
     let mut budget = overrides::PublicCompositionBudget::default();
+    budget.render_budget.locale = resolved_locale.clone();
+    let canonical_search_url = build_search_url(
+        &search_url,
+        (!output.query.is_empty()).then_some(output.query.as_str()),
+        output.content_type.as_deref(),
+        output.page,
+    );
+    budget.render_budget.page_canonical_url =
+        Some(crate::storage::public_content::format_public_canonical_url(
+            pub_settings.public_origin.as_deref(),
+            &canonical_search_url,
+        ));
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
     let custom_opts = crate::storage::options_pages::load_active_custom_options_public(
         db,
@@ -161,6 +173,15 @@ pub(crate) async fn render_search_response_for_locale(
     budget.set_locale_context(active.as_ref(), &resolved_locale, locale_ctx);
 
     let l10n = content_render::core_l10n(&resolved_locale);
+    let page_title = if search_view.has_query {
+        format!(
+            "{} — {} | {}",
+            l10n.search_title, search_view.query, site.site_title
+        )
+    } else {
+        format!("{} | {}", l10n.search_title, site.site_title)
+    };
+    budget.render_budget.page_title = Some(page_title.clone());
     let breadcrumbs =
         content_render::search_breadcrumbs(&l10n.home_label, Some(&home_url), &l10n.search_title);
     let fallback_html = content_render::render_default_search_html(
@@ -237,14 +258,6 @@ pub(crate) async fn render_search_response_for_locale(
             )
             .await?
         };
-    let page_title = if search_view.has_query {
-        format!(
-            "{} — {} | {}",
-            l10n.search_title, search_view.query, site.site_title
-        )
-    } else {
-        format!("{} | {}", l10n.search_title, site.site_title)
-    };
     let seo_view = crate::seo::SeoView::for_search_page(&bcp47_tag, &dir, &page_title);
     let enqueued = enqueued_for_route(active.as_ref(), EnqueueCondition::Search);
     let composed = content_render::compose_document_with_seo_with_assets(
@@ -274,6 +287,10 @@ pub(crate) async fn render_search_response_for_locale(
             &budget.render_budget.image_nonces,
         )?,
         &budget.render_budget.richtext_nonces,
+    )?;
+    let html = content_render::finalize_document_blocks_js(
+        html,
+        body.needs_blocks_js || budget.render_budget.needs_blocks_js,
     )?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
         html,

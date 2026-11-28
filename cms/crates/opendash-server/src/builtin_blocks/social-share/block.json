@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "id": "core/social-share",
+  "title": "Chia sẻ (Social Share)",
+  "category": "marketing",
+  "icon": "share-2",
+  "render": "native",
+  "supports_children": false,
+  "allowed_contexts": ["*", "!loop_item"],
+  "fields": [
+    {
+      "type": "text",
+      "key": "heading",
+      "label": "Tiêu đề (tùy chọn)",
+      "max_chars": 120,
+      "default": ""
+    },
+    { "type": "boolean", "key": "show_facebook", "label": "Facebook", "default": true },
+    { "type": "boolean", "key": "show_x", "label": "X (Twitter)", "default": false },
+    { "type": "boolean", "key": "show_linkedin", "label": "LinkedIn", "default": true },
+    { "type": "boolean", "key": "show_telegram", "label": "Telegram", "default": false },
+    { "type": "boolean", "key": "show_email", "label": "Email", "default": true },
+    { "type": "boolean", "key": "show_copy_link", "label": "Sao chép liên kết", "default": true },
+    {
+      "type": "url",
+      "key": "custom_url",
+      "label": "URL tùy chỉnh (để trống = trang hiện tại)",
+      "default": ""
+    },
+    {
+      "type": "radio_buttons",
+      "key": "display_style",
+      "label": "Kiểu hiển thị",
+      "options": [
+        { "value": "pill", "label": "Icon + Tên" },
+        { "value": "icon_only", "label": "Chỉ Icon" },
+        { "value": "minimal", "label": "Tối giản" }
+      ],
+      "default": "pill"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn chỉnh",
+      "responsive": true,
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "right", "label": "Phải" }
+      ],
+      "default": "left"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true
+    },
+    {
+      "type": "spacing",
+      "key": "margin",
+      "label": "Lề ngoài (Margin)",
+      "property": "margin",
+      "unit": "px",
+      "min": -128,
+      "max": 128,
+      "responsive": true
+    }
+  ]
+}

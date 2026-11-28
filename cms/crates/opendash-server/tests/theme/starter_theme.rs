@@ -190,8 +190,19 @@ async fn starter_bootstrap_import_repair_and_admin_theme_selection_are_durable()
     assert_eq!(manifest["sample"]["pages"].as_array().unwrap().len(), 5);
     assert_eq!(manifest["sample"]["menus"].as_array().unwrap().len(), 2);
     assert_eq!(manifest["sample"]["settings"].as_array().unwrap().len(), 2);
-    assert!(fs::read(rev_root.join("blocks/stats-bar/block.json")).is_ok());
-    assert!(fs::read(rev_root.join("blocks/quote-box/block.json")).is_ok());
+    for slug in [
+        "icon-box",
+        "testimonial",
+        "stats-bar",
+        "logo-strip",
+        "feature-list",
+        "quote-box",
+    ] {
+        assert!(
+            fs::read(rev_root.join(format!("blocks/{slug}/block.json"))).is_ok(),
+            "missing starter block {slug}"
+        );
+    }
     let stylesheet = client
         .get(format!("{}/assets/opendash-tailwind.css", srv.origin))
         .send()
@@ -222,7 +233,11 @@ async fn starter_bootstrap_import_repair_and_admin_theme_selection_are_durable()
         "core/accordion",
         "core/divider",
         "core/spacer",
+        "opendash-starter/icon-box",
+        "opendash-starter/testimonial",
         "opendash-starter/stats-bar",
+        "opendash-starter/logo-strip",
+        "opendash-starter/feature-list",
         "opendash-starter/quote-box",
     ] {
         assert!(
@@ -312,6 +327,91 @@ async fn starter_bootstrap_import_repair_and_admin_theme_selection_are_durable()
     assert_eq!(home.status(), StatusCode::OK);
     let html = home.text().await.unwrap();
     assert!(html.contains("/assets/opendash-tailwind.css"));
+    assert!(!html.contains("/assets/opendash-blocks.js"));
+
+    let mkt_created: Value = client
+        .post(format!(
+            "{}/api/admin/content-types/page/entries",
+            srv.origin
+        ))
+        .header(header::COOKIE, &cookie)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::ORIGIN, &srv.origin)
+        .json(&json!({ "title": "Starter Marketing", "slug": "starter-marketing", "values": {} }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mkt_id = mkt_created["id"].as_i64().unwrap();
+    let mkt_doc = json!({
+        "schema_version": 1,
+        "blocks": [{
+            "id": "mkt-sec",
+            "block_id": "core/section",
+            "children": [
+                { "id": "mkt-ib", "block_id": "opendash-starter/icon-box", "props": { "title": "Tốc độ Rust" } },
+                { "id": "mkt-tm", "block_id": "opendash-starter/testimonial", "props": { "quote": "Rất nhanh", "author": "An", "rating": 5 } },
+                { "id": "mkt-sb", "block_id": "opendash-starter/stats-bar", "props": { "columns": { "desktop": "3" }, "items": [{ "value": "100+", "label": "Dự án" }] } },
+                { "id": "mkt-ls", "block_id": "opendash-starter/logo-strip", "props": { "columns": { "desktop": "4" }, "items": [{ "name": "Acme Corp" }] } },
+                { "id": "mkt-fl", "block_id": "opendash-starter/feature-list", "props": { "columns": { "desktop": "2" }, "items": [{ "title": "An toàn CSP" }] } }
+            ]
+        }]
+    });
+    assert_eq!(
+        client
+            .put(format!(
+                "{}/api/admin/entries/page/{mkt_id}/builder",
+                srv.origin
+            ))
+            .header(header::COOKIE, &cookie)
+            .header("X-CSRF-Token", &csrf)
+            .header(header::ORIGIN, &srv.origin)
+            .header(header::IF_MATCH, "\"v1\"")
+            .json(&mkt_doc)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        client
+            .post(format!(
+                "{}/api/admin/content-types/page/entries/{mkt_id}/publication",
+                srv.origin
+            ))
+            .header(header::COOKIE, &cookie)
+            .header("X-CSRF-Token", &csrf)
+            .header(header::ORIGIN, &srv.origin)
+            .header(header::IF_MATCH, "\"v2\"")
+            .json(&json!({ "status": "published" }))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let mkt_html = client
+        .get(format!("{}/starter-marketing", srv.origin))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(!mkt_html.contains("/assets/opendash-blocks.js"));
+    for tok in [
+        "od-starter-icon-box",
+        "od-starter-testimonial",
+        "od-star-filled",
+        "od-starter-stats-bar",
+        "od-starter-logo-strip",
+        "od-starter-feature-list",
+    ] {
+        assert!(mkt_html.contains(tok), "missing {tok} in starter page");
+    }
 
     drop(srv);
     // Interrupted or missing marker is repaired using embedded bytes on startup.

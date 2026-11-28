@@ -11,6 +11,7 @@ fn assert_ordered_markup(html: &str, fragments: &[&str]) {
     }
 }
 
+mod interactive_blocks_unit;
 mod suite_01;
 mod suite_02;
 mod unified_field_view_regressions;

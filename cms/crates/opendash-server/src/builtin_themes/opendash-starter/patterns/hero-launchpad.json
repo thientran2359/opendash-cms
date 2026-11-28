@@ -43,12 +43,12 @@
           "id": "hero-stats",
           "block_id": "opendash-starter/stats-bar",
           "props": {
-            "stat_1_value": "100+",
-            "stat_1_label": "Dự án",
-            "stat_2_value": "99%",
-            "stat_2_label": "Hài lòng",
-            "stat_3_value": "24/7",
-            "stat_3_label": "Đồng hành"
+            "columns": { "desktop": "3", "tablet": "3", "mobile": "2" },
+            "items": [
+              { "value": "100+", "label": "Dự án", "prefix": "", "suffix": "", "icon": "" },
+              { "value": "99%", "label": "Hài lòng", "prefix": "", "suffix": "", "icon": "" },
+              { "value": "24/7", "label": "Đồng hành", "prefix": "", "suffix": "", "icon": "" }
+            ]
           }
         }
       ]

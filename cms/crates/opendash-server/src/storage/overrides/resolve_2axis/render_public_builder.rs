@@ -14,6 +14,9 @@ pub(in crate::storage) async fn render_public_builder(
     let mut parts = BTreeMap::new();
     let mut child_diagnostics = Vec::new();
     let mut child_forms = false;
+    let mut child_needs_js = false;
+    let mut child_used_entry_content = false;
+    let mut child_has_popup = false;
     let schemas = ctx.state.unified_block_schemas()?;
     // Count every occurrence, including repeated references. A stored Builder
     // part wins before consulting the immutable active-theme source.
@@ -23,6 +26,9 @@ pub(in crate::storage) async fn render_public_builder(
             Box::pin(render_public_part(tx, &key, depth + 1, stack, ctx, budget)).await?
         {
             child_forms |= rendered.has_active_contact_form;
+            child_needs_js |= rendered.needs_blocks_js;
+            child_used_entry_content |= rendered.used_entry_content;
+            child_has_popup |= rendered.has_popup;
             child_diagnostics.append(&mut rendered.diagnostics);
             parts.insert(key, rendered.html);
         }
@@ -58,6 +64,9 @@ pub(in crate::storage) async fn render_public_builder(
         ctx.cache,
     )?;
     rendered.has_active_contact_form |= child_forms;
+    rendered.needs_blocks_js |= child_needs_js;
+    rendered.used_entry_content |= child_used_entry_content;
+    rendered.has_popup |= child_has_popup;
     rendered.diagnostics.append(&mut child_diagnostics);
     Ok(rendered)
 }
@@ -298,6 +307,9 @@ pub async fn resolve_and_render_header_footer_with_template_data_for_locale(
                 html,
                 diagnostics: Vec::new(),
                 has_active_contact_form: false,
+                needs_blocks_js: budget.render_budget.needs_blocks_js,
+                used_entry_content: compiled.has_entry_content(),
+                has_popup: false,
             }));
         }
         render_public_part(tx, slot_key, 0, &[], context, budget).await

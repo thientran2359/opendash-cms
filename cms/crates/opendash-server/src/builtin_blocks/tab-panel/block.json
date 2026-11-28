@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "core/tab-panel",
+  "title": "Mục Tab (Tab Panel)",
+  "category": "interactive",
+  "icon": "file-text",
+  "render": "native",
+  "supports_children": true,
+  "allowed_parents": ["core/tabs"],
+  "allowed_children": ["*", "!core/section", "!core/tab-panel"],
+  "allowed_contexts": ["*", "!loop_item"],
+  "default_children": [
+    {
+      "block_id": "core/text",
+      "props": { "content": "<p>Nội dung mục tab.</p>" }
+    }
+  ],
+  "fields": [
+    {
+      "type": "text",
+      "key": "title",
+      "label": "Tiêu đề Tab",
+      "required": true,
+      "max_chars": 80,
+      "default": "Tab mới"
+    },
+    {
+      "type": "icon",
+      "key": "icon",
+      "label": "Icon (tùy chọn)"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 16, "right": 0, "bottom": 0, "left": 0 }
+    }
+  ]
+}

@@ -240,6 +240,24 @@ impl HtmlScanState {
                     }
                 }
             }
+            Self::Textarea { closing_prefix } => {
+                const CLOSE: &[u8] = b"</textarea>";
+                let lowered = byte.to_ascii_lowercase();
+                let next = if lowered == CLOSE[closing_prefix] {
+                    closing_prefix + 1
+                } else if lowered == b'<' {
+                    1
+                } else {
+                    0
+                };
+                if next == CLOSE.len() {
+                    Self::Body
+                } else {
+                    Self::Textarea {
+                        closing_prefix: next,
+                    }
+                }
+            }
             Self::Tag {
                 mut quote,
                 mut prefix,
@@ -296,6 +314,14 @@ impl HtmlScanState {
                             .is_some_and(|b| b.is_ascii_whitespace() || *b == b'>')
                     {
                         return Self::Title { closing_prefix: 0 };
+                    }
+                    if lower.starts_with("<textarea")
+                        && lower
+                            .as_bytes()
+                            .get(9)
+                            .is_some_and(|b| b.is_ascii_whitespace() || *b == b'>')
+                    {
+                        return Self::Textarea { closing_prefix: 0 };
                     }
                     return Self::Body;
                 } else if byte == b'/' {
