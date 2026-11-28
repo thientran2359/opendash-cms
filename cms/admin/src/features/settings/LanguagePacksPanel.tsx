@@ -7,6 +7,8 @@ import {
   type LanguageDomainSummary,
 } from '../../api/locales.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { ConfirmDialog } from '../../components/ConfirmDialog.tsx';
+import { UploadFileButton } from '../../components/UploadFileButton.tsx';
 import { useI18n } from '../../i18n/index.tsx';
 
 interface Props {
@@ -93,8 +95,11 @@ export function LanguagePacksPanel({ csrfToken, onApiError }: Props) {
     }
   };
 
+  const [deleteTarget, setDeleteTarget] = useState<{ scope: L10nPackScope; domain: string; locale: string } | null>(null);
+
   const handleDelete = async (scope: L10nPackScope, domain: string, packLocale: string) => {
     if (!csrfToken) return;
+    setDeleteTarget(null);
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -151,17 +156,19 @@ export function LanguagePacksPanel({ csrfToken, onApiError }: Props) {
             required
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {__("Translation file (.po / .mo)")}
-          <input
-            type="file"
+        <div className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-800">{__("Translation file (.po / .mo)")}</span>
+          <UploadFileButton
             accept=".po,.mo"
-            data-testid="l10n-pack-file"
+            testId="l10n-pack-file"
             disabled={busy}
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             required
+            buttonLabel={__("Choose file")}
+            selectedFileName={file?.name ?? null}
+            ariaLabel={__("Translation file (.po / .mo)")}
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           />
-        </label>
+        </div>
         <div>
           <AdminButton
             type="submit"
@@ -219,7 +226,7 @@ export function LanguagePacksPanel({ csrfToken, onApiError }: Props) {
                               size="sm"
                               disabled={busy || !csrfToken}
                               data-testid={`l10n-pack-delete-${dom.scope}-${dom.domain}-${pack.locale}`}
-                              onClick={() => handleDelete(dom.scope, dom.domain, pack.locale)}
+                              onClick={() => setDeleteTarget({ scope: dom.scope, domain: dom.domain, locale: pack.locale })}
                             >
                               {_x("Delete override", "l10n.pack.delete")}
                             </AdminButton>
@@ -236,6 +243,20 @@ export function LanguagePacksPanel({ csrfToken, onApiError }: Props) {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={__("Remove custom language pack?")}
+        description={__("Delete custom translation override for {{domain}} ({{locale}})? The site will fall back to built-in strings.", { domain: deleteTarget?.domain ?? '', locale: deleteTarget?.locale ?? '' })}
+        confirmLabel={busy ? __("Deleting…") : _x("Delete override", "l10n.pack.delete")}
+        busy={busy}
+        testId="confirm-delete-l10n-pack-dialog"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          void handleDelete(deleteTarget.scope, deleteTarget.domain, deleteTarget.locale);
+        }}
+      />
     </div>
   );
 }

@@ -17220,11 +17220,11 @@ msgstr "Theme URL phải có 1–4096 ký tự Unicode."
 
 #: admin:feature.themes.themespanel.theme_v1_manifest_version_1_theme_json_templates_parts_and_declared_assets
 msgid "Theme v1 (manifest_version=1, theme.json, templates, parts and declared assets)."
-msgstr "Theme v3 (manifest_version=3, theme.json, templates, parts và assets được khai báo)."
+msgstr "Theme v1 (manifest_version=1, theme.json, templates, parts và assets được khai báo)."
 
 #: admin:feature.themes.themespanel.theme_v1_revisions
 msgid "Theme v1 revisions"
-msgstr "Revision theme v3"
+msgstr "Revision theme v1"
 
 #: admin:studio.theme_specific_options
 msgid "Theme-specific options"
@@ -21460,6 +21460,7 @@ msgstr "Thư viện mẫu"
 #: admin:feature.themes.themespanel.install_v3_zip_subtitle
 msgid "Upload a Theme v1 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder."
 msgstr "Tải lên gói Theme v1 dạng ZIP. Kích hoạt theme không làm thay đổi block, trường hay dữ liệu đã lưu trong trình dựng trang."
+
 #: server:error:restore.pre_v1_theme_revision_unsupported
 msgid "Backup restore archive contains unsupported pre-V1 theme revisions."
 msgstr "Bản sao khôi phục chứa theme revision tiền-V1 không được hỗ trợ."
@@ -21548,3 +21549,364 @@ msgstr "Tùy biến từng thẻ (Thêm Loop Item)"
 
 msgid "Revert to default cards"
 msgstr "Quay về thẻ mặc định"
+
+#: admin:admin-ui-ux-polish
+msgid "#{{id}} · {{slug}} · {{count}} content references"
+msgstr "#{{id}} · {{slug}} · {{count}} nội dung đang tham chiếu"
+
+#: admin:admin-ui-ux-polish
+msgid "+ Create translation ({{locale}})"
+msgstr "+ Tạo bản dịch ({{locale}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Attempt #{{attempt}}: {{state}}"
+msgstr "Lần thử #{{attempt}}: {{state}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Blog prefix (/blog/%postname%)"
+msgstr "Tiền tố Blog (/blog/%postname%)"
+
+#: admin:admin-ui-ux-polish
+msgid "Cancel job ({{state}})"
+msgstr "Hủy tác vụ ({{state}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Category and post name (/%category%/%postname%)"
+msgstr "Chuyên mục và tên bài viết (/%category%/%postname%)"
+
+#: admin:admin-ui-ux-polish
+msgid "Choose backup file"
+msgstr "Chọn tệp sao lưu"
+
+#: admin:admin-ui-ux-polish
+msgid "Choose file"
+msgstr "Chọn tệp"
+
+#: admin:admin-ui-ux-polish
+msgid "Choose theme ZIP"
+msgstr "Chọn gói theme ZIP"
+
+#: admin:admin-ui-ux-polish
+msgid "Contact inbox ({{count}})"
+msgstr "Hộp thư liên hệ ({{count}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Continue with v{{version}} (retain edited fields)"
+msgstr "Tiếp tục với v{{version}} (giữ nguyên các trường đã sửa)"
+
+#: admin:admin-ui-ux-polish
+msgid "Controls"
+msgstr "Thiết lập"
+
+#: admin:admin-ui-ux-polish
+msgid "Could not apply quarantine."
+msgstr "Không thể áp dụng cách ly tệp."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not cancel backup job."
+msgstr "Không thể hủy tác vụ sao lưu."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not create backup."
+msgstr "Không thể tạo bản sao lưu."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not create reconciliation plan."
+msgstr "Không thể tạo kế hoạch đối soát lưu trữ."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not delete backup package."
+msgstr "Không thể xóa gói sao lưu."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not delete contact form."
+msgstr "Không thể xóa biểu mẫu liên hệ."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not delete contact message."
+msgstr "Không thể xóa tin nhắn liên hệ."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not load contact message."
+msgstr "Không thể tải nội dung tin nhắn liên hệ."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not load storage diagnostics."
+msgstr "Không thể tải chẩn đoán lưu trữ."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not resend SMTP notification."
+msgstr "Không thể gửi lại thông báo SMTP."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not save contact form."
+msgstr "Không thể lưu biểu mẫu liên hệ."
+
+#: admin:admin-ui-ux-polish
+msgid "Could not send SMTP test email."
+msgstr "Không thể gửi email kiểm tra SMTP."
+
+#: admin:admin-ui-ux-polish
+msgid "Create translation ({{locale}})"
+msgstr "Tạo bản dịch ({{locale}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Customize in Studio"
+msgstr "Tùy biến trong Studio"
+
+#: admin:admin-ui-ux-polish
+msgid "Declarative UI ({{pluginId}})"
+msgstr "Giao diện khai báo ({{pluginId}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Definitions ({{count}}/64)"
+msgstr "Định nghĩa ({{count}}/64)"
+
+#: admin:admin-ui-ux-polish
+msgid "Delete backup"
+msgstr "Xóa bản sao lưu"
+
+#: admin:admin-ui-ux-polish
+msgid "Delete backup package?"
+msgstr "Xóa gói sao lưu?"
+
+#: admin:admin-ui-ux-polish
+msgid "Delete contact form “{{title}}” (#{{id}})? Existing public submissions using this slug will stop working."
+msgstr "Xóa biểu mẫu liên hệ “{{title}}” (#{{id}})? Các biểu mẫu công khai dùng slug này sẽ ngừng hoạt động."
+
+#: admin:admin-ui-ux-polish
+msgid "Delete contact form?"
+msgstr "Xóa biểu mẫu liên hệ?"
+
+#: admin:admin-ui-ux-polish
+msgid "Delete contact message?"
+msgstr "Xóa tin nhắn liên hệ?"
+
+#: admin:admin-ui-ux-polish
+msgid "Delete custom translation override for {{domain}} ({{locale}})? The site will fall back to built-in strings."
+msgstr "Xóa bản dịch tùy chỉnh cho {{domain}} ({{locale}})? Hệ thống sẽ quay về chuỗi mặc định tích hợp sẵn."
+
+#: admin:admin-ui-ux-polish
+msgid "Dismiss status message"
+msgstr "Đóng thông báo trạng thái"
+
+#: admin:admin-ui-ux-polish
+msgid "Email delivery status: {{state}}"
+msgstr "Trạng thái gửi email: {{state}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Fallback srcset"
+msgstr "Srcset dự phòng"
+
+#: admin:admin-ui-ux-polish
+msgid "Fields ({{count}}/20)"
+msgstr "Trường dữ liệu ({{count}}/20)"
+
+#: admin:admin-ui-ux-polish
+msgid "ID"
+msgstr "ID"
+
+#: admin:admin-ui-ux-polish
+msgid "Installed ({{count}} v1 revisions)"
+msgstr "Đã cài đặt ({{count}} phiên bản v1)"
+
+#: admin:admin-ui-ux-polish
+msgid "Installed v1 revisions ({{count}})"
+msgstr "Các phiên bản v1 đã cài ({{count}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Job: {{id}} — Status: {{state}}"
+msgstr "Tác vụ: {{id}} — Trạng thái: {{state}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Label"
+msgstr "Nhãn hiển thị"
+
+#: admin:admin-ui-ux-polish
+msgid "Lost connection while checking restore job status."
+msgstr "Mất kết nối khi kiểm tra trạng thái tác vụ khôi phục."
+
+#: admin:admin-ui-ux-polish
+msgid "Manage field groups"
+msgstr "Quản lý nhóm trường"
+
+#: admin:admin-ui-ux-polish
+msgid "Message #{{id}} · Form #{{formId}} (v{{version}}) · {{date}}"
+msgstr "Tin nhắn #{{id}} · Biểu mẫu #{{formId}} (v{{version}}) · {{date}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Message details #{{id}}"
+msgstr "Chi tiết tin nhắn #{{id}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Move media to quarantine?"
+msgstr "Chuyển tệp media vào khu cách ly?"
+
+#: admin:admin-ui-ux-polish
+msgid "Move to quarantine"
+msgstr "Chuyển vào cách ly"
+
+#: admin:admin-ui-ux-polish
+msgid "Move “{{filename}}” to quarantine? Files still referenced by published content or settings will be blocked automatically."
+msgstr "Chuyển “{{filename}}” vào khu cách ly? Các tệp còn đang được nội dung hoặc cài đặt tham chiếu sẽ tự động được bảo vệ."
+
+#: admin:admin-ui-ux-polish
+msgid "No file selected"
+msgstr "Chưa chọn tệp nào"
+
+#: admin:admin-ui-ux-polish
+msgid "Numeric archive (/archives/%post_id%)"
+msgstr "Lưu trữ theo ID (/archives/%post_id%)"
+
+#: admin:admin-ui-ux-polish
+msgid "OG image"
+msgstr "Ảnh chia sẻ (OG image)"
+
+#: admin:admin-ui-ux-polish
+msgid "OG image preview"
+msgstr "Xem trước ảnh OG"
+
+#: admin:admin-ui-ux-polish
+msgid "Original theme: {{theme}} · {{digest}}"
+msgstr "Theme gốc: {{theme}} · {{digest}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Owner"
+msgstr "Chủ sở hữu"
+
+#: admin:admin-ui-ux-polish
+msgid "Page {{page}} · {{count}} files loaded"
+msgstr "Trang {{page}} · đã tải {{count}} tệp"
+
+#: admin:admin-ui-ux-polish
+msgid "Pattern #{{id}} · version v{{version}} · {{count}} entries using this pattern · no public URL"
+msgstr "Mẫu #{{id}} · phiên bản v{{version}} · {{count}} mục đang dùng mẫu này · không có URL công khai"
+
+#: admin:admin-ui-ux-polish
+msgid "Permanently delete backup file “{{filename}}”? This cannot be undone."
+msgstr "Xóa vĩnh viễn tệp sao lưu “{{filename}}”? Hành động này không thể hoàn tác."
+
+#: admin:admin-ui-ux-polish
+msgid "Permanently delete contact message #{{id}}? This cannot be undone."
+msgstr "Xóa vĩnh viễn tin nhắn liên hệ #{{id}}? Hành động này không thể hoàn tác."
+
+#: admin:admin-ui-ux-polish
+msgid "Plan {{planId}}… — Scanned {{records}} records, {{files}} files; missing files: {{missing}}; orphaned ≥ 24h: {{orphans}} (canonical: {{canonical}}, variants: {{variants}}); new orphans (< 24h): {{recent}}."
+msgstr "Kế hoạch {{planId}}… — Đã quét {{records}} bản ghi, {{files}} tệp; thiếu tệp: {{missing}}; tệp mồ côi ≥ 24h: {{orphans}} (gốc: {{canonical}}, biến thể: {{variants}}); mồ côi mới (< 24h): {{recent}}."
+
+#: admin:admin-ui-ux-polish
+msgid "Port must be a number between 1 and 65535."
+msgstr "Cổng phải là số nguyên từ 1 đến 65535."
+
+#: admin:admin-ui-ux-polish
+msgid "Post name (/%postname%)"
+msgstr "Tên bài viết (/%postname%)"
+
+#: admin:admin-ui-ux-polish
+msgid "Provider {{status}}, declaration {{state}}; data is retained."
+msgstr "Nguồn cung cấp {{status}}, khai báo {{state}}; dữ liệu vẫn được bảo toàn."
+
+#: admin:admin-ui-ux-polish
+msgid "Public metadata for the homepage (v{{version}})."
+msgstr "Siêu dữ liệu công khai cho trang chủ (v{{version}})."
+
+#: admin:admin-ui-ux-polish
+msgid "READY.json generation: {{jobId}} (files: {{count}})"
+msgstr "Thế hệ READY.json: {{jobId}} (số tệp: {{count}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Remove custom language pack?"
+msgstr "Gỡ gói ngôn ngữ tùy chỉnh?"
+
+#: admin:admin-ui-ux-polish
+msgid "Remove field {{value1}}"
+msgstr "Xóa trường {{value1}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Required field {{value1}}"
+msgstr "Trường bắt buộc {{value1}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Revision: {{id}} · {{digest}}"
+msgstr "Bản ghi: {{id}} · {{digest}}"
+
+#: admin:admin-ui-ux-polish
+msgid "SHA-256 media ID (optional)"
+msgstr "Mã SHA-256 của tệp media (tùy chọn)"
+
+#: admin:admin-ui-ux-polish
+msgid "SMTP password ({{status}})"
+msgstr "Mật khẩu SMTP ({{status}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Select 404 log {{path}}"
+msgstr "Chọn nhật ký 404 {{path}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Select all 404 logs on this page"
+msgstr "Chọn tất cả nhật ký 404 trên trang này"
+
+#: admin:admin-ui-ux-polish
+msgid "Server version: v{{version}} · {{name}} · /{{slug}}"
+msgstr "Phiên bản máy chủ: v{{version}} · {{name}} · /{{slug}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Site template overrides ({{count}})"
+msgstr "Bản ghi đè giao diện của trang ({{count}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Studio mobile view"
+msgstr "Chế độ xem Studio trên di động"
+
+#: admin:admin-ui-ux-polish
+msgid "Synced patterns ({{count}})"
+msgstr "Mẫu đồng bộ ({{count}})"
+
+#: admin:admin-ui-ux-polish
+msgid "Taxonomy {{key}} was deleted or is no longer accessible. Your input remains visible below for copying; it cannot be saved to the missing definition."
+msgstr "Phân loại {{key}} đã bị xóa hoặc không còn truy cập được. Dữ liệu bạn nhập vẫn được giữ bên dưới để sao chép nhưng không thể lưu."
+
+#: admin:admin-ui-ux-polish
+msgid "Theme: {{theme}} · {{state}}"
+msgstr "Giao diện: {{theme}} · {{state}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Use selected media"
+msgstr "Dùng tệp media đã chọn"
+
+#: admin:admin-ui-ux-polish
+msgid "Use {{count}} selected file"
+msgid_plural "Use {{count}} selected files"
+msgstr[0] "Dùng {{count}} tệp đã chọn"
+
+#: admin:admin-ui-ux-polish
+msgid "Version v{{version}} · {{source}}"
+msgstr "Phiên bản v{{version}} · {{source}}"
+
+#: admin:admin-ui-ux-polish
+msgid "Version {{version}} · SHA {{sha}}…"
+msgstr "Phiên bản {{version}} · SHA {{sha}}…"
+
+#: admin:admin-ui-ux-polish
+msgid "WebP srcset"
+msgstr "Srcset WebP"
+
+#: admin:admin-ui-ux-polish
+msgid "Withdraw field group {{value1}}?"
+msgstr "Rút lại nhóm trường {{value1}}?"
+
+#: admin:admin-ui-ux-polish
+msgid "Withdrawing detaches this field group from active editors while preserving existing stored values until purged."
+msgstr "Rút lại sẽ gỡ nhóm trường này khỏi trình soạn thảo nhưng vẫn giữ nguyên dữ liệu đã lưu cho tới khi xóa vĩnh viễn."
+
+#: admin:admin-ui-ux-polish
+msgid "Withdrawing…"
+msgstr "Đang rút lại…"
+
+#: admin:admin-ui-ux-polish
+msgid "{{count}} entries"
+msgstr "{{count}} mục"
+
+#: admin:admin-ui-ux-polish
+msgid "· Selected version {{version}}"
+msgstr "· Phiên bản đang chọn {{version}}"

@@ -23,13 +23,20 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
   const [plan, setPlan] = useState<ReconcilePlan | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const reportError = (err: unknown, fallback: string) => {
+    setErrorMessage(err instanceof Error ? err.message : fallback);
+    onApiError(err);
+  };
 
   const loadDiagnostics = async () => {
     try {
+      setErrorMessage(null);
       const data = await getOperationsDiagnostics();
       setDiagnostics(data);
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not load storage diagnostics."));
     }
   };
 
@@ -41,13 +48,14 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
     if (!csrfToken) return;
     setBusy(true);
     setNotice(null);
+    setErrorMessage(null);
     try {
       const next = await planReconcile(csrfToken);
       setPlan(next);
       setNotice(__("Reconciliation plan created (generation {{value1}}, {{value2}} orphaned files >= 24h).", { value1: next.generation, value2: next.orphan_candidates.length }));
       await loadDiagnostics();
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not create reconciliation plan."));
     } finally {
       setBusy(false);
     }
@@ -60,13 +68,14 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
     }
     setBusy(true);
     setNotice(null);
+    setErrorMessage(null);
     try {
       const res = await applyReconcile(csrfToken, plan);
       setPlan(null);
       setNotice(__("Quarantined {{value1}} files (generation {{value2}}).", { value1: res.quarantined_files, value2: res.generation }));
       await loadDiagnostics();
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not apply quarantine."));
     } finally {
       setBusy(false);
     }
@@ -79,6 +88,7 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
     }
     setBusy(true);
     setNotice(null);
+    setErrorMessage(null);
     try {
       const res = await purgeQuarantine(csrfToken);
       setNotice(
@@ -86,7 +96,7 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
       );
       await loadDiagnostics();
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not purge quarantine."));
     } finally {
       setBusy(false);
     }
@@ -114,6 +124,7 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
             <AdminButton variant="danger" size="sm" disabled={busy || !csrfToken} onClick={handlePurge}>{__("Purge quarantine (≥ 7 days)")}</AdminButton>
           </div>
         </div>
+        {errorMessage && <AdminAlert tone="error">{errorMessage}</AdminAlert>}
 
         {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
 
@@ -144,11 +155,17 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
 
         {plan && (
           <div className="space-y-3">
-            <AdminAlert tone="warning">{__("Plan")}{' '}<code className="font-mono text-xs">{plan.plan_id.slice(0, 12)}...</code>{' '}{__("— Scan")}{' '}{plan.scanned_records}{' '}{__("records,")}{' '}
-              {plan.scanned_files}{' '}{__("files; missing files:")}{' '}{plan.missing_canonical_files.length}{__("; orphaned ≥ 24h:")}{' '}
-              {plan.orphan_candidates.length}{' '}
-              {__("(canonical: {{value1}}, variants: {{value2}})", { value1: canonicalOrphans.length, value2: variantOrphans.length })}
-              {__("; new orphans (< 24h):")}{' '}{plan.recent_orphans_under_grace}.
+            <AdminAlert tone="warning">
+              {__("Plan {{planId}}… — Scanned {{records}} records, {{files}} files; missing files: {{missing}}; orphaned ≥ 24h: {{orphans}} (canonical: {{canonical}}, variants: {{variants}}); new orphans (< 24h): {{recent}}.", {
+                planId: plan.plan_id.slice(0, 12),
+                records: plan.scanned_records,
+                files: plan.scanned_files,
+                missing: plan.missing_canonical_files.length,
+                orphans: plan.orphan_candidates.length,
+                canonical: canonicalOrphans.length,
+                variants: variantOrphans.length,
+                recent: plan.recent_orphans_under_grace,
+              })}
             </AdminAlert>
             {plan.orphan_candidates.length > 0 && (
               <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white">

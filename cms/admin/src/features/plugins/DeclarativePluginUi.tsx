@@ -1,6 +1,7 @@
 import { __, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import { getPluginUiSchema, invokePluginAction } from '../../api/plugins.ts';
 import type { PluginLifecycleConfirmation as PluginLifecycleConfirmationDto } from '../../types.ts';
 import {
@@ -76,7 +77,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
 
   if (!pluginId) return null;
   if (loadError) {
-    return <div className="notice notice-error">{loadError}</div>;
+    return <AdminAlert tone="error">{loadError}</AdminAlert>;
   }
   if (!schema || schema.screens.length === 0) {
     return null;
@@ -224,10 +225,10 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
     }
     if (node.kind === 'button') {
       return (
-        <button
+        <AdminButton
           key={node.id}
-          type="button"
-          className="btn-primary"
+          variant="primary"
+          size="sm"
           disabled={isSubmitting}
           onClick={() => {
             if (node.action_id) {
@@ -236,22 +237,22 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
           }}
         >
           {isSubmitting ? __("Executing...") : (node.label ?? node.action_id ?? __("Execute"))}
-        </button>
+        </AdminButton>
       );
     }
     if (node.kind === 'tabs') {
       return (
-        <div key={node.id} className="declarative-tabs">
+        <div key={node.id} className="flex flex-wrap gap-2 border-b border-zinc-200 pb-2">
           {(node.children ?? []).map(child => renderNode(child, formId))}
         </div>
       );
     }
     if (node.kind === 'table' || node.kind === 'list') {
       return (
-        <div key={node.id} className="declarative-collection">
-          {node.label && <strong>{node.label}</strong>}
+        <div key={node.id} className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 text-sm">
+          {node.label && <strong className="font-semibold text-zinc-900">{node.label}</strong>}
           {node.columns && node.columns.length > 0 && (
-            <div className="muted">{__("Columns:")}{' '}{node.columns.join(', ')}</div>
+            <div className="mt-1 text-xs text-zinc-600">{__("Columns:")}{' '}{node.columns.join(', ')}</div>
           )}
         </div>
       );
@@ -260,22 +261,33 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
   };
 
   return (
-    <section aria-label={__("Declarative plugin UI")} style={{ marginTop: 16 }}>
-      <h3>{__("Declarative UI (")}{schema.plugin_id})</h3>
+    <section aria-label={__("Declarative plugin UI")} className="mt-4 space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
+      <h3 className="text-sm font-semibold text-zinc-950">
+        {__("Declarative UI ({{pluginId}})", { pluginId: schema.plugin_id })}
+      </h3>
       {schema.screens.length > 1 && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          {schema.screens.map(scr => (
-            <button
-              key={scr.id}
-              type="button"
-              onClick={() => setActiveScreenId(scr.id)}
-            >
-              {scr.title}
-            </button>
-          ))}
+        <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-2.5">
+          {schema.screens.map(scr => {
+            const isActive = scr.id === activeScreen.id;
+            return (
+              <button
+                key={scr.id}
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => setActiveScreenId(scr.id)}
+                className={`inline-flex h-8 items-center rounded-md px-3 text-xs font-medium transition-colors ${
+                  isActive
+                    ? 'bg-zinc-900 text-white'
+                    : 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50'
+                }`}
+              >
+                {scr.title}
+              </button>
+            );
+          })}
         </div>
       )}
-      {activeScreen.nodes.map(node => renderNode(node, 'default'))}
+      <div className="space-y-3">{activeScreen.nodes.map(node => renderNode(node, 'default'))}</div>
       {pendingConfirmation && (
         <div className="mt-3">
           <PluginLifecycleConfirmation
@@ -305,8 +317,10 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
           />
         </div>
       )}
-      {actionError && <div className="notice notice-error">{actionError}</div>}
-      {actionResult && <pre>{actionResult}</pre>}
+      {actionError && <AdminAlert tone="error">{actionError}</AdminAlert>}
+      {actionResult && (
+        <pre className="overflow-x-auto rounded-lg bg-zinc-900 p-3 text-xs text-zinc-100">{actionResult}</pre>
+      )}
     </section>
   );
 };

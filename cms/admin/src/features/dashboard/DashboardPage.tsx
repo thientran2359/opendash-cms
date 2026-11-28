@@ -9,15 +9,14 @@ interface DashboardPageProps {
   onApiError: (error: unknown, fallback: string) => void;
 }
 
-const metrics = [
-  { kind: 'post', status: 'published', label: 'feature.dashboard.dashboardpage.published_posts' },
-  { kind: 'post', status: 'draft', label: 'feature.dashboard.dashboardpage.draft_posts' },
-  { kind: 'page', status: 'published', label: 'feature.dashboard.dashboardpage.published_pages' },
-  { kind: 'page', status: 'draft', label: 'feature.dashboard.dashboardpage.draft_pages' },
-] as const;
-
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onApiError }) => {
   const { __, _x } = useI18n();
+  const metrics = [
+    { kind: 'post', status: 'published', label: __("Published posts") },
+    { kind: 'post', status: 'draft', label: __("Draft posts") },
+    { kind: 'page', status: 'published', label: __("Published pages") },
+    { kind: 'page', status: 'draft', label: __("Draft pages") },
+  ] as const;
   const [counts, setCounts] = useState<DashboardCounts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -83,7 +82,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onApiError }) => {
             className="min-w-0 rounded-xl border border-zinc-200 bg-white p-4"
             data-dashboard-metric={metric.kind + '-' + metric.status}
           >
-            <p className="text-xs font-medium text-zinc-500">{__(metric.label)}</p>
+            <p className="text-xs font-medium text-zinc-500">{metric.label}</p>
             <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-zinc-950">
               {loading ? <span role="status" className="text-sm font-medium text-zinc-400">{__("Loading…")}</span>
                 : counts ? formatNumber(counts[metric.kind][metric.status])

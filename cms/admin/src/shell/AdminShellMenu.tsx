@@ -127,11 +127,13 @@ export function buildMenuTree(
         label: page.menu_label,
         icon: page.menu_icon?.trim() || 'settings',
         hash: `#/options/${encodeURIComponent(page.page_key)}`,
-        group: (page.parent_menu === 'appearance'
-          ? 'appearance'
-          : page.parent_menu === 'system' || page.parent_menu === 'settings'
-            ? 'system'
-            : 'content') as 'content' | 'appearance' | 'system',
+        group: (page.parent_menu === 'top_level'
+          ? undefined
+          : page.parent_menu === 'appearance'
+            ? 'appearance'
+            : page.parent_menu === 'system' || page.parent_menu === 'settings'
+              ? 'system'
+              : 'content') as NavigationGroup | undefined,
         adminOnly: page.min_edit_role === 'admin',
       })),
     {

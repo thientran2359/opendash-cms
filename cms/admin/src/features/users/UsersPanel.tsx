@@ -74,9 +74,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   }, [csrfToken, currentUserId, page, onApiError]);
 
   useEffect(() => {
+    if (mode !== 'list') return;
     void refresh();
     return () => { refreshSeq.current += 1; };
-  }, [refresh]);
+  }, [mode, refresh]);
 
   useEffect(() => {
     if (editing) editInputRef.current?.focus();

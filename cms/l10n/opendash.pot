@@ -21456,3 +21456,438 @@ msgstr ""
 
 msgid "Revert to default cards"
 msgstr ""
+
+
+#: admin:admin-ui-ux-polish
+msgid "#{{id}} · {{slug}} · {{count}} content references"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "+ Create translation ({{locale}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Admin permission is required for search index tools."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Another maintenance or backup task is currently active. Try again after it completes."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Attempt #{{attempt}}: {{state}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Blog prefix (/blog/%postname%)"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Cancel job ({{state}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Category and post name (/%category%/%postname%)"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Choose backup file"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Choose file"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Choose theme ZIP"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Contact inbox ({{count}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Continue with v{{version}} (retain edited fields)"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Controls"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not apply quarantine."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not cancel backup job."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not create backup."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not create reconciliation plan."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not delete backup package."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not delete contact form."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not delete contact message."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not load contact message."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not load search index status."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not load storage diagnostics."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not rebuild search index."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not resend SMTP notification."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not save contact form."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Could not send SMTP test email."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Create translation ({{locale}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Customize in Studio"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Declarative UI ({{pluginId}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Definitions ({{count}}/64)"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Delete backup"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Delete backup package?"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Delete contact form “{{title}}” (#{{id}})? Existing public submissions using this slug will stop working."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Delete contact form?"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Delete contact message?"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Delete custom translation override for {{domain}} ({{locale}})? The site will fall back to built-in strings."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Dismiss status message"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Eligible published entries"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Email delivery status: {{state}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Fallback srcset"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Fields ({{count}}/20)"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Finished at: {{time}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "ID"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "In sync"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Indexed documents"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Inspect SQLite FTS5 coverage across published public entries and rebuild the index on demand."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Installed ({{count}} v1 revisions)"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Installed v1 revisions ({{count}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Job: {{id}} — Status: {{state}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Label"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Last reindex job"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Lost connection while checking restore job status."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Maintenance mode is active on this site. Reindex will stay disabled until it finishes."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Manage field groups"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Message #{{id}} · Form #{{formId}} (v{{version}}) · {{date}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Message details #{{id}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Move media to quarantine?"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Move to quarantine"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Move “{{filename}}” to quarantine? Files still referenced by published content or settings will be blocked automatically."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "No file selected"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Numeric archive (/archives/%post_id%)"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "OG image"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "OG image preview"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Original theme: {{theme}} · {{digest}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Out of sync"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Owner"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Page {{page}} · {{count}} files loaded"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Pattern #{{id}} · version v{{version}} · {{count}} entries using this pattern · no public URL"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Permanently delete backup file “{{filename}}”? This cannot be undone."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Permanently delete contact message #{{id}}? This cannot be undone."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Plan {{planId}}… — Scanned {{records}} records, {{files}} files; missing files: {{missing}}; orphaned ≥ 24h: {{orphans}} (canonical: {{canonical}}, variants: {{variants}}); new orphans (< 24h): {{recent}}."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Port must be a number between 1 and 65535."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Post name (/%postname%)"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Provider {{status}}, declaration {{state}}; data is retained."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Public metadata for the homepage (v{{version}})."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "READY.json generation: {{jobId}} (files: {{count}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Rebuild search index"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Rebuilding search index..."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Remove custom language pack?"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Remove field {{value1}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Required field {{value1}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Revision: {{id}} · {{digest}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "SHA-256 media ID (optional)"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "SMTP password ({{status}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Search Results blocks only display items on the search route."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Search index"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Search index rebuilt: {{count}} indexed entries in {{ms}} ms."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Select 404 log {{path}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Select all 404 logs on this page"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Server is busy processing active writes (503). Please retry shortly."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Server version: v{{version}} · {{name}} · /{{slug}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Site template overrides ({{count}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Studio mobile view"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Synced patterns ({{count}})"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Taxonomy {{key}} was deleted or is no longer accessible. Your input remains visible below for copying; it cannot be saved to the missing definition."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Theme: {{theme}} · {{state}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Use selected media"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Use {{count}} selected file"
+msgid_plural "Use {{count}} selected files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: admin:admin-ui-ux-polish
+msgid "Version v{{version}} · {{source}}"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Version {{version}} · SHA {{sha}}…"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "WebP srcset"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Withdraw field group {{value1}}?"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Withdrawing detaches this field group from active editors while preserving existing stored values until purged."
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "Withdrawing…"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "{{count}} entries"
+msgstr ""
+
+#: admin:admin-ui-ux-polish
+msgid "· Selected version {{version}}"
+msgstr ""

@@ -12,6 +12,7 @@ import {
   type OperationJob,
 } from '../../api/operations.ts';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { ConfirmDialog } from '../../components/ConfirmDialog.tsx';
 
 interface BackupsPanelProps {
   csrfToken: string | null;
@@ -33,17 +34,25 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
   const [activeJob, setActiveJob] = useState<OperationJob | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; filename: string } | null>(null);
+
+  const reportError = useCallback((error: unknown, fallback: string) => {
+    setErrorMessage(error instanceof Error ? error.message : fallback);
+    onApiError(error);
+  }, [onApiError]);
 
   const refresh = useCallback(async () => {
     try {
+      setErrorMessage(null);
       const res = await listBackups(20);
       setData(res);
       const running = res.jobs.find((j) => j.state === 'queued' || j.state === 'running') ?? null;
       setActiveJob(running);
     } catch (error) {
-      onApiError(error);
+      reportError(error, __("Could not load backups."));
     }
-  }, [onApiError]);
+  }, [reportError]);
 
   useEffect(() => {
     void refresh();
@@ -94,7 +103,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
       setNotice(__("Started backup job {{value1}}…", { value1: job.id.slice(0, 12) }));
       await refresh();
     } catch (error) {
-      onApiError(error);
+      reportError(error, __("Could not create backup."));
     } finally {
       setBusy(false);
     }
@@ -103,13 +112,14 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
   const handleCancel = async () => {
     if (!activeJob || !csrfToken) return;
     setBusy(true);
+    setErrorMessage(null);
     try {
       const updated = await cancelOperationJob(csrfToken, activeJob.id, activeJob.version);
       setActiveJob(updated);
       setNotice(__("Cancelled job {{value1}}…", { value1: updated.id.slice(0, 12) }));
       await refresh();
     } catch (error) {
-      onApiError(error);
+      reportError(error, __("Could not cancel backup job."));
     } finally {
       setBusy(false);
     }
@@ -118,12 +128,13 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
   const handleDeleteArtifact = async (id: string) => {
     if (!csrfToken) return;
     setBusy(true);
+    setErrorMessage(null);
     try {
       await deleteBackupArtifact(csrfToken, id);
       setNotice(__("Deleted backup package {{value1}}…", { value1: id.slice(0, 12) }));
       await refresh();
     } catch (error) {
-      onApiError(error);
+      reportError(error, __("Could not delete backup package."));
     } finally {
       setBusy(false);
     }
@@ -179,46 +190,78 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <AdminButton type="submit" variant="primary" disabled={busy || Boolean(activeJob)}>{__("Create encrypted backup")}</AdminButton>
           {activeJob && (activeJob.state === 'queued' || activeJob.state === 'running') && (
-            <AdminButton variant="danger" onClick={handleCancel} disabled={busy}>{__("Cancel job (")}{activeJob.state})
+            <AdminButton variant="danger" onClick={handleCancel} disabled={busy}>
+              {__("Cancel job ({{state}})", { state: activeJob.state })}
             </AdminButton>
           )}
         </div>
       </form>
 
+      {errorMessage && <AdminAlert tone="error">{errorMessage}</AdminAlert>}
       {notice && <AdminAlert tone="info">{notice}</AdminAlert>}
 
       {data && data.artifacts.length > 0 && (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{__("File")}</th>
-              <th>{__("Size")}</th>
-              <th>SHA-256</th>
-              <th>{__("Created at")}</th>
-              <th>{__("Actions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.artifacts.map((art) => (
-              <tr key={art.id}>
-                <td>{art.filename}</td>
-                <td>{formatMediaBytes(art.size_bytes)}</td>
-                <td><code>{art.sha256.slice(0, 16)}…</code></td>
-                <td>{formatMediaDate(art.created_at)}</td>
-                <td className="row-gap">
-                  <a className="btn-secondary" href={getBackupDownloadUrl(art.id)} download={art.filename}>{__("Download")}</a>
-                  <button
-                    type="button"
-                    className="btn-danger"
-                    onClick={() => void handleDeleteArtifact(art.id)}
-                    disabled={busy}
-                  >{__("Delete")}</button>
-                </td>
+        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+          <table className="min-w-full divide-y divide-zinc-200 text-left text-sm">
+            <thead className="bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-600">
+              <tr>
+                <th className="px-3 py-2.5">{__("File")}</th>
+                <th className="px-3 py-2.5">{__("Size")}</th>
+                <th className="px-3 py-2.5">SHA-256</th>
+                <th className="px-3 py-2.5">{__("Created at")}</th>
+                <th className="px-3 py-2.5 text-right">{__("Actions")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 text-zinc-800">
+              {data.artifacts.map((art) => (
+                <tr key={art.id} className="hover:bg-zinc-50/70">
+                  <td className="whitespace-nowrap px-3 py-2.5 font-medium text-zinc-900">{art.filename}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-zinc-600">{formatMediaBytes(art.size_bytes)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5">
+                    <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs text-zinc-700">{art.sha256.slice(0, 16)}…</code>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-zinc-600">{formatMediaDate(art.created_at)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right">
+                    <div className="inline-flex items-center justify-end gap-2">
+                      <a
+                        className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 no-underline transition-colors hover:bg-zinc-50"
+                        href={getBackupDownloadUrl(art.id)}
+                        download={art.filename}
+                      >
+                        {__("Download")}
+                      </a>
+                      <AdminButton
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setDeleteTarget({ id: art.id, filename: art.filename })}
+                        disabled={busy}
+                      >
+                        {__("Delete")}
+                      </AdminButton>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={__("Delete backup package?")}
+        description={__("Permanently delete backup file “{{filename}}”? This cannot be undone.", { filename: deleteTarget?.filename ?? '' })}
+        confirmLabel={busy ? __("Deleting…") : __("Delete backup")}
+        busy={busy}
+        testId="confirm-delete-backup-dialog"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          const targetId = deleteTarget.id;
+          setDeleteTarget(null);
+          void handleDeleteArtifact(targetId);
+        }}
+      />
     </section>
   );
 }

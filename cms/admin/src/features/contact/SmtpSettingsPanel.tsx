@@ -20,7 +20,7 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
   const [settings, setSettings] = useState<SmtpSettingsPublic | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [host, setHost] = useState('');
-  const [port, setPort] = useState(587);
+  const [portInput, setPortInput] = useState('587');
   const [tlsMode, setTlsMode] = useState<TlsMode>('starttls');
   const [username, setUsername] = useState('');
   const [fromAddress, setFromAddress] = useState('');
@@ -29,12 +29,18 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
   const [passwordValue, setPasswordValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const reportError = (err: unknown, fallback: string) => {
+    setErrorMessage(err instanceof Error ? err.message : fallback);
+    onApiError(err);
+  };
 
   const applySettings = (data: SmtpSettingsPublic) => {
     setSettings(data);
     setEnabled(data.enabled);
     setHost(data.host);
-    setPort(data.port);
+    setPortInput(String(data.port));
     setTlsMode(data.tls_mode);
     setUsername(data.username);
     setFromAddress(data.from_address);
@@ -46,10 +52,11 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
   useEffect(() => {
     void (async () => {
       try {
+        setErrorMessage('');
         const data = await getSmtpSettings();
         applySettings(data);
       } catch (err) {
-        onApiError(err);
+        reportError(err, __("Could not load SMTP settings."));
       }
     })();
   }, []);
@@ -57,13 +64,19 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!settings) return;
+    const parsedPort = Number(portInput.trim());
+    if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+      setErrorMessage(__("Port must be a number between 1 and 65535."));
+      return;
+    }
     setBusy(true);
     setNotice('');
+    setErrorMessage('');
     try {
       const updated = await updateSmtpSettings(csrfToken, settings.version, {
         enabled,
         host,
-        port,
+        port: parsedPort,
         tls_mode: tlsMode,
         username,
         from_address: fromAddress,
@@ -76,7 +89,7 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
       applySettings(updated);
       setNotice(__("SMTP settings saved."));
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not save SMTP settings."));
     } finally {
       setBusy(false);
     }
@@ -85,11 +98,12 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
   const handleTest = async () => {
     setBusy(true);
     setNotice('');
+    setErrorMessage('');
     try {
       await testSmtpSettings(csrfToken);
       setNotice(__("SMTP test email sent successfully."));
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not send SMTP test email."));
     } finally {
       setBusy(false);
     }
@@ -109,6 +123,7 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
         >{__("Contact forms & inbox")}</a>
       </div>
 
+      {errorMessage && <AdminAlert tone="error" className="mt-3 max-w-2xl">{errorMessage}</AdminAlert>}
       {notice && <AdminAlert tone="success" className="mt-3 max-w-2xl">{notice}</AdminAlert>}
 
       <form onSubmit={handleSave} className="mt-4 max-w-2xl space-y-4 rounded-xl border border-zinc-200 bg-white p-5">
@@ -136,8 +151,8 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
               type="number"
               min={1}
               max={65535}
-              value={port}
-              onChange={(e) => setPort(Number(e.target.value) || 587)}
+              value={portInput}
+              onChange={(e) => setPortInput(e.target.value)}
               className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             />
           </label>
@@ -168,7 +183,9 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>{__("SMTP password (")}{settings?.has_password ? __("configured") : __("not set")})</span>
+            <span>
+              {__("SMTP password ({{status}})", { status: settings?.has_password ? __("configured") : __("not set") })}
+            </span>
             <select
               value={passwordMode}
               onChange={(e) => setPasswordMode(e.target.value as PasswordUpdateMode)}

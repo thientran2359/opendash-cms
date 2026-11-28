@@ -260,7 +260,7 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
         </span>
         <span className="text-xs text-zinc-400">{layout.regions[region].length}</span>
       </div>
-      <ul className="space-y-2">
+      <ul className="list-none space-y-2 pl-0">
         {layout.regions[region].map((pl, idx) => {
           const def = snapshot.panels.find(p => p.panel_id === pl.panel_id);
           const allowedRegions = def?.allowed_regions?.length ? def.allowed_regions : [...REGION_KEYS];

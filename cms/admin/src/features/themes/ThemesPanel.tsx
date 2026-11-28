@@ -20,6 +20,7 @@ import {
   type ThemesSummary,
 } from '../../api/themes.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { UploadFileButton } from '../../components/UploadFileButton.tsx';
 import {
   buildOwnerOptionsSubmitPayload,
   OwnerOptionsForm,
@@ -257,19 +258,32 @@ export const ThemesPanel: React.FC<Props> = ({
         </div>
       </div>
       {mode === 'install' && (
-        <label className="block max-w-2xl rounded-xl border border-dashed border-zinc-300 bg-zinc-50/70 p-4 transition-colors hover:border-od-accent/60 hover:bg-od-accent-soft/25">
-          <span className="block text-sm font-semibold text-zinc-900">{__("Install theme from ZIP")}</span>
-          <span className="mt-0.5 block text-xs text-zinc-600">{__("Theme v1 (manifest_version=1, theme.json, templates, parts and declared assets).")}</span>
-          <input data-testid="themes-upload" type="file" accept=".zip,application/zip" onChange={upload} disabled={!csrfToken || busy} className="mt-3 block max-w-full text-sm text-zinc-700 file:mr-3 file:rounded-md file:border file:border-zinc-300 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-zinc-800 hover:file:bg-zinc-50" />
-        </label>
+        <div className="max-w-2xl space-y-3 rounded-xl border border-dashed border-zinc-300 bg-zinc-50/70 p-4 transition-colors hover:border-od-accent/60 hover:bg-od-accent-soft/25">
+          <div>
+            <span className="block text-sm font-semibold text-zinc-900">{__("Install theme from ZIP")}</span>
+            <span className="mt-0.5 block text-xs text-zinc-600">{__("Theme v1 (manifest_version=1, theme.json, templates, parts and declared assets).")}</span>
+          </div>
+          <UploadFileButton
+            testId="themes-upload"
+            accept=".zip,application/zip"
+            disabled={!csrfToken || busy}
+            buttonLabel={__("Choose theme ZIP")}
+            ariaLabel={__("Install theme from ZIP")}
+            showFileName={false}
+            onChange={upload}
+          />
+        </div>
       )}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {mode === 'list' && <>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-2.5">
-        <h3 className="text-base font-semibold text-zinc-900">{__("Installed (")}{v1Revisions.length}{' '}{__("revisions)")}</h3>
+        <h3 className="text-base font-semibold text-zinc-900">{__("Installed ({{count}} v1 revisions)", { count: v1Revisions.length })}</h3>
         {!loading && data && (
-          <p className="text-xs text-zinc-600" data-testid="active-theme">{__("Active theme:")}{' '}<strong className="font-semibold text-zinc-900">{data.selection.source_format === 'v1' ? `${data.selection.theme_id}` : __("No theme")}</strong>{' '}{__("· Selected version")}{' '}{data.selection.version}
+          <p className="text-xs text-zinc-600" data-testid="active-theme">
+            {__("Active theme:")}{' '}
+            <strong className="font-semibold text-zinc-900">{data.selection.source_format === 'v1' ? data.selection.theme_id : __("No theme")}</strong>{' '}
+            {__("· Selected version {{version}}", { version: data.selection.version })}
           </p>
         )}
       </div>
@@ -279,8 +293,8 @@ export const ThemesPanel: React.FC<Props> = ({
           {v1Revisions.length === 0 && <p className="text-sm text-zinc-500">{__("No themes yet. Install a ZIP to get started.")}</p>}
           {v1Revisions.length > 0 && (
             <section className="space-y-3" aria-label={__("Theme v1 revisions")} data-testid="theme-v1-revisions">
-              <h4 className="text-sm font-semibold text-zinc-700">{__("Installed v1 revisions (")}{v1Revisions.length})</h4>
-              <ul className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+              <h4 className="text-sm font-semibold text-zinc-700">{__("Installed v1 revisions ({{count}})", { count: v1Revisions.length })}</h4>
+              <ul className="grid min-w-0 list-none grid-cols-1 gap-3 pl-0 sm:grid-cols-2">
                 {v1Revisions.map(revision => {
                   const isActive = data.selection.revision_id === revision.revision_id;
                   const isSelected = selectedRevisionId === revision.revision_id;
@@ -297,7 +311,9 @@ export const ThemesPanel: React.FC<Props> = ({
                         <div className="break-all font-semibold text-zinc-950">{revision.theme_id}</div>
                         {isActive && <AdminBadge tone="success">{_x("Active", "feature.themes")}</AdminBadge>}
                       </div>
-                      <p className="break-all font-mono text-xs text-zinc-500">{__("Version")}{' '}{revision.version} · SHA {revision.revision_digest.slice(0, 12)}…</p>
+                      <p className="break-all font-mono text-xs text-zinc-500">
+                        {__("Version {{version}} · SHA {{sha}}…", { version: revision.version, sha: revision.revision_digest.slice(0, 12) })}
+                      </p>
                       {!isActive && (
                         <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-zinc-700">
                           <input type="radio" name="selected-theme-revision" value={revision.revision_id}
@@ -491,7 +507,7 @@ export const ThemesPanel: React.FC<Props> = ({
                     {__("No Theme Functions logs recorded yet.")}
                   </p>
                 ) : (
-                  <ul className="space-y-1.5 text-xs">
+                  <ul className="list-none space-y-1.5 pl-0 text-xs">
                     {fnLogs.map(log => (
                       <li
                         key={log.id}

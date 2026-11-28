@@ -356,12 +356,12 @@ export const RevisionHistoryModal: React.FC<RevisionHistoryModalProps> = ({
     >
       <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-5 py-3.5">
         <div className="min-w-0">
-          <h1
+          <h2
             id="revision-history-modal-title"
             className="text-base font-semibold text-zinc-950"
           >
             {__("Revision History")}
-          </h1>
+          </h2>
           <p className="text-xs text-zinc-500">
             {__("Current saved version: v{{value1}}", { value1: currentVersion })}
           </p>

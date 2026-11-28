@@ -15,7 +15,6 @@ import {
 import { getStudioTargets, postStudioPreview, type StudioTargetItem, type TransientStudioOverrides } from '../api/studio.ts';
 import { saveThemeOptions } from '../api/themes.ts';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
-import { BuilderPreviewFrame } from '../builder/BuilderPreviewFrame.tsx';
 import {
   EMPTY_DOCUMENT, VALID_TEMPLATE_PART_KEY, allNodes, countBlocksByType,
   createStarterTemplateDocument, locate, visibleNodesInTree,
@@ -26,7 +25,7 @@ import { useStudioMode2Revisions } from '../features/revisions/useStudioMode2Rev
 import type { ParsedRoute, StudioPanelId } from '../shell/router.ts';
 import type { AuthUser } from '../types.ts';
 import { StudioCustomizerNav } from './StudioCustomizerNav.tsx';
-import { StudioSamplePickerBar } from './StudioSamplePickerBar.tsx';
+import { StudioMobileViewTabs, StudioPreviewPane } from './StudioPreviewPane.tsx';
 import { StudioSidebarHeader } from './StudioSidebarHeader.tsx';
 import { StudioSidebarFooter } from './StudioSidebarFooter.tsx';
 import type { StudioMenuRequest } from './StudioBlockTree.tsx';
@@ -95,8 +94,12 @@ export const StudioWorkspace: React.FC<Props> = ({
   const isPatternEntry = isMode2 && entryTypeKey === 'pattern';
 
   // Shared UI & preview state
-  const [viewport, setViewport] = useState<BuilderViewport>('desktop');
+  const [viewport, setViewport] = useState<BuilderViewport>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 768 ? 'mobile' : 'desktop',
+  );
+  const [mobilePane, setMobilePane] = useState<'controls' | 'preview'>('controls');
   const [loading, setLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [previewHtml, setPreviewHtml] = useState('');
@@ -680,6 +683,8 @@ export const StudioWorkspace: React.FC<Props> = ({
     if (isMode2 && (!entryTypeKey || entryId === null || entryVersion === null || entryTrashedBlocked)) return;
 
     const seq = ++previewSeqRef.current;
+    const delay = previewHtml ? 250 : 0;
+    setPreviewLoading(true);
     const timer = window.setTimeout(() => {
       previewAbortRef.current?.abort();
       const controller = new AbortController();
@@ -700,11 +705,17 @@ export const StudioWorkspace: React.FC<Props> = ({
               return;
             }
             onApiError(cause, __("Cannot create a page builder preview."));
+          })
+          .finally(() => {
+            if (!controller.signal.aborted && seq === previewSeqRef.current) setPreviewLoading(false);
           });
         return;
       }
 
-      if (!previewTargetCandidate) return;
+      if (!previewTargetCandidate) {
+        setPreviewLoading(false);
+        return;
+      }
       const transient: TransientStudioOverrides = {};
       if (!localeDraftConflict && generalDirty && generalDraft) transient.general = generalDraft;
       if (!localeDraftConflict && globalOptionsDirty && globalOptionsDraft) transient.global_options = globalOptionsDraft;
@@ -737,8 +748,11 @@ export const StudioWorkspace: React.FC<Props> = ({
           } else {
             onApiError(cause, __("Cannot preview appearance customization."));
           }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted && seq === previewSeqRef.current) setPreviewLoading(false);
         });
-    }, 250);
+    }, delay);
 
     return () => {
       window.clearTimeout(timer);
@@ -1081,9 +1095,10 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-zinc-100 text-zinc-900" data-testid="studio-workspace">
+      <StudioMobileViewTabs mobilePane={mobilePane} onMobilePaneChange={setMobilePane} />
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside
-          className="flex max-h-[50vh] w-full shrink-0 flex-col overflow-hidden border-b border-zinc-200 bg-white md:max-h-none md:h-full md:w-[320px] md:border-r md:border-b-0"
+          className={`min-h-0 w-full shrink-0 flex-col overflow-hidden border-b border-zinc-200 bg-white md:flex md:h-full md:w-[320px] md:border-r md:border-b-0 ${mobilePane === 'controls' ? 'flex flex-1 md:flex-none' : 'hidden'}`}
           aria-label={isMode2 ? __("Page builder content panel") : __("Studio customization panel")}
         >
           <StudioSidebarHeader
@@ -1184,7 +1199,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               data-testid="studio-sidebar-alert"
               className="flex items-center justify-between gap-2 border-b border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-800"
             >
-              <span className="min-w-0 flex-1 truncate" title={entryTrashedBlocked ? __("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio.") : localeDraftConflict || previewLocaleInvalid ? __("The preview language changed or is no longer available. Drafts are retained; reload to switch languages.") : localeReloadPending ? __("Reload the preview language successfully before saving. Your draft is retained until then.") : notice || __("Data version conflict.")}>
+              <span className="min-w-0 flex-1 break-words leading-snug">
                 {entryTrashedBlocked ? __("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio.") : localeDraftConflict || previewLocaleInvalid ? __("The preview language changed or is no longer available. Drafts are retained; reload to switch languages.") : localeReloadPending ? __("Reload the preview language successfully before saving. Your draft is retained until then.") : error && notice ? notice : __("Data changed on the server (412).")}
               </span>
               {entryTrashedBlocked && !isPatternEntry ? (
@@ -1342,45 +1357,30 @@ export const StudioWorkspace: React.FC<Props> = ({
           />
         </aside>
 
-        <main className={'flex min-w-0 flex-1 flex-col overflow-hidden ' + (viewport === 'desktop' ? 'bg-white' : 'bg-zinc-200/70')}>
-          {!isMode2 && panel === 'templates' && selectedTarget && (
-            <StudioSamplePickerBar
-              target={selectedTarget}
-              previewLocale={effectivePreviewLocale}
-              previewEntry={previewEntry}
-              previewTerm={previewTerm}
-              onChangePreviewEntry={setPreviewEntry}
-              onChangePreviewTerm={setPreviewTerm}
-              disabled={loading || saving || !csrfToken}
-            />
-          )}
-          <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-4')}>
-            {previewHtml ? (
-              <BuilderPreviewFrame
-                html={previewHtml}
-                viewport={viewport}
-                interactive={isMode2 || Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled)}
-                selectedId={activeSelectedId}
-                document={activeDoc}
-                onSelectNode={handleCanvasPick}
-                onEditNode={handleCanvasEdit}
-                onOpenNodeMenu={handleCanvasMenu}
-                onApiError={onApiError}
-                title={isMode2 ? __("Content preview") : __("Website preview")}
-                className="h-full w-full"
-                frameClassName={
-                  viewport === 'desktop'
-                    ? '!h-full !w-full !border-0 !rounded-none !shadow-none'
-                    : '!h-full min-h-[540px] !border border-zinc-300 rounded-lg shadow-sm'
-                }
-              />
-            ) : (
-              <div className="flex h-full min-h-[360px] items-center justify-center bg-white p-8 text-center text-sm text-zinc-500">
-                {loading ? __("Preparing live preview…") : __("No preview content for this target yet.")}
-              </div>
-            )}
-          </div>
-        </main>
+        <StudioPreviewPane
+          active={active}
+          mobilePane={mobilePane}
+          viewport={viewport}
+          loading={loading}
+          previewLoading={previewLoading}
+          previewHtml={previewHtml}
+          isMode2={isMode2}
+          panel={panel}
+          selectedTarget={selectedTarget}
+          templateEditingEnabled={templateEditingEnabled}
+          activeSelectedId={activeSelectedId}
+          activeDoc={activeDoc}
+          effectivePreviewLocale={effectivePreviewLocale}
+          previewEntry={previewEntry}
+          previewTerm={previewTerm}
+          onChangePreviewEntry={setPreviewEntry}
+          onChangePreviewTerm={setPreviewTerm}
+          disableSamplePicker={loading || saving || !csrfToken}
+          onSelectNode={handleCanvasPick}
+          onEditNode={handleCanvasEdit}
+          onOpenNodeMenu={handleCanvasMenu}
+          onApiError={onApiError}
+        />
       </div>
     </div>
   );

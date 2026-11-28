@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
+import { ConfirmDialog } from '../../components/ConfirmDialog.tsx';
 import {
   deleteMedia,
   formatMediaIfMatch,
@@ -125,8 +126,11 @@ export const MediaDetailsPanel: React.FC<MediaDetailsPanelProps> = ({
     }
   };
 
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+
   const handleDelete = async () => {
     if (!csrfToken || !isAdmin || actionDisabled) return;
+    setConfirmDeleteOpen(false);
     setDeleting(true);
     setDeleteDiagnostics(null);
     setReplaceError('');
@@ -228,13 +232,13 @@ export const MediaDetailsPanel: React.FC<MediaDetailsPanelProps> = ({
               <summary>{__("View srcset markup")}</summary>
               {details.webp_srcset && (
                 <div className="od-media-srcset-block">
-                  <span>WebP srcset</span>
+                  <span>{__("WebP srcset")}</span>
                   <code className="od-media-code od-media-break">{details.webp_srcset}</code>
                 </div>
               )}
               {details.fallback_srcset && (
                 <div className="od-media-srcset-block">
-                  <span>Fallback srcset</span>
+                  <span>{__("Fallback srcset")}</span>
                   <code className="od-media-code od-media-break">{details.fallback_srcset}</code>
                 </div>
               )}
@@ -268,11 +272,21 @@ export const MediaDetailsPanel: React.FC<MediaDetailsPanelProps> = ({
               type="button"
               className="od-media-secondary"
               disabled={actionDisabled}
-              onClick={handleDelete}
+              onClick={() => setConfirmDeleteOpen(true)}
             >
               {deleting ? __("Deleting…") : __("Delete media (quarantine)")}
             </button>
           </div>
+          <ConfirmDialog
+            open={confirmDeleteOpen}
+            title={__("Move media to quarantine?")}
+            description={__("Move “{{filename}}” to quarantine? Files still referenced by published content or settings will be blocked automatically.", { filename: active.filename })}
+            confirmLabel={deleting ? __("Deleting…") : __("Move to quarantine")}
+            busy={deleting}
+            testId="confirm-delete-media-dialog"
+            onCancel={() => setConfirmDeleteOpen(false)}
+            onConfirm={() => void handleDelete()}
+          />
           <p className="od-media-help">{__("Replacing keeps the existing media ID and bumps its version query token.")}</p>
           {replaceError && <p className="od-media-notice od-media-error" role="alert">{replaceError}</p>}
           {deleteDiagnostics && (

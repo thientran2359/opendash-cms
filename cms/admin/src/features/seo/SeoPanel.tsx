@@ -8,16 +8,20 @@ import {
 } from '../../api/locales.ts';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import { LocaleTabs } from '../../components/LocaleTabs.tsx';
+import { mediaThumbnailUrl } from '../../api/media.ts';
+import { MediaPicker } from '../media/MediaPicker.tsx';
 
 interface SeoPanelProps {
   csrfToken: string | null;
   onApiError: (error: unknown) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   localeState?: AdminLocaleState;
 }
 
 export function SeoPanel({
   csrfToken,
   onApiError,
+  onDirtyChange,
   localeState = EMPTY_ADMIN_LOCALE_STATE,
 }: SeoPanelProps) {
   const { __ } = useI18n();
@@ -42,22 +46,48 @@ export function SeoPanel({
   const [ogImageId, setOgImageId] = useState('');
   const [canonicalUrl, setCanonicalUrl] = useState('');
   const [noindex, setNoindex] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState({
+    title: '', description: '', ogImageId: '', canonicalUrl: '', noindex: false,
+  });
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [staleConflict, setStaleConflict] = useState(false);
+
+  const dirty = !loading && (
+    title !== savedSnapshot.title ||
+    description !== savedSnapshot.description ||
+    ogImageId !== savedSnapshot.ogImageId ||
+    canonicalUrl !== savedSnapshot.canonicalUrl ||
+    noindex !== savedSnapshot.noindex
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => () => { onDirtyChange?.(false); }, [onDirtyChange]);
 
   const load = async () => {
     setLoading(true);
     setStaleConflict(false);
     try {
       const snap = await getHomeSeo(effectiveLocale);
+      const next = {
+        title: snap.title ?? '',
+        description: snap.description ?? '',
+        ogImageId: snap.og_image_id ?? '',
+        canonicalUrl: snap.canonical_url ?? '',
+        noindex: snap.noindex,
+      };
       setVersion(snap.version);
-      setTitle(snap.title ?? '');
-      setDescription(snap.description ?? '');
-      setOgImageId(snap.og_image_id ?? '');
-      setCanonicalUrl(snap.canonical_url ?? '');
-      setNoindex(snap.noindex);
+      setTitle(next.title);
+      setDescription(next.description);
+      setOgImageId(next.ogImageId);
+      setCanonicalUrl(next.canonicalUrl);
+      setNoindex(next.noindex);
+      setSavedSnapshot(next);
     } catch (error) {
       onApiError(error);
     } finally {
@@ -89,6 +119,13 @@ export function SeoPanel({
         effectiveLocale,
       );
       setVersion(saved.version);
+      setSavedSnapshot({
+        title: title.trim(),
+        description: description.trim(),
+        ogImageId: ogImageId.trim(),
+        canonicalUrl: canonicalUrl.trim(),
+        noindex,
+      });
       setStatus(__("Homepage SEO saved (v{{value1}}).", { value1: saved.version }));
     } catch (error) {
       if (error instanceof ApiClientError && error.status === 412) {
@@ -107,7 +144,8 @@ export function SeoPanel({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-zinc-950">{__("Homepage SEO")}</h2>
-          <p className="mt-0.5 text-sm text-zinc-600">{__("Public metadata for the homepage (")}<code className="text-xs">v{version}</code>).
+          <p className="mt-0.5 text-sm text-zinc-600">
+            {__("Public metadata for the homepage (v{{version}}).", { version })}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -122,7 +160,11 @@ export function SeoPanel({
       <LocaleTabs
         localeState={localeState}
         activeLocale={effectiveLocale ?? defaultLocaleCode}
-        onSelectLocale={setActiveLocale}
+        onSelectLocale={(code) => {
+          if (code === (effectiveLocale ?? defaultLocaleCode) || saving) return;
+          if (dirty && !window.confirm(__("Switch language and discard unsaved changes in this tab?"))) return;
+          setActiveLocale(code);
+        }}
         testId="seo-locale-tabs"
       />
       {status && (
@@ -154,16 +196,48 @@ export function SeoPanel({
           />
         </label>
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-800">{__("OG image media ID (SHA-256)")}</span>
+          <div className="flex flex-col gap-1.5 text-sm">
+            <label htmlFor="seo-og-image-input" className="font-medium text-zinc-800">
+              {__("OG image")}
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <AdminButton
+                variant="secondary"
+                size="sm"
+                disabled={loading || saving}
+                data-testid="seo-choose-og-image"
+                onClick={() => setPickerOpen(true)}
+              >
+                {__("Choose OG image")}
+              </AdminButton>
+              {ogImageId && (
+                <AdminButton
+                  variant="ghost"
+                  size="sm"
+                  disabled={loading || saving}
+                  onClick={() => setOgImageId('')}
+                >
+                  {__("Clear")}
+                </AdminButton>
+              )}
+            </div>
+            {ogImageId && /^[0-9a-f]{64}$/i.test(ogImageId.trim()) && (
+              <img
+                src={mediaThumbnailUrl(ogImageId.trim())}
+                alt={__("OG image preview")}
+                className="h-16 w-28 rounded-md border border-zinc-200 bg-zinc-100 object-cover"
+              />
+            )}
             <input
+              id="seo-og-image-input"
               type="text"
+              placeholder={__("SHA-256 media ID (optional)")}
               className="h-9 rounded-md border border-zinc-300 bg-white px-3 font-mono text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
               value={ogImageId}
               disabled={loading || saving}
               onChange={(e) => setOgImageId(e.target.value)}
             />
-          </label>
+          </div>
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-zinc-800">{__("Custom canonical URL")}</span>
             <input
@@ -190,6 +264,20 @@ export function SeoPanel({
           </AdminButton>
         </div>
       </form>
+      {pickerOpen && (
+        <MediaPicker
+          mode="image"
+          acceptKind="image"
+          selectedIds={ogImageId ? [ogImageId] : []}
+          csrfToken={csrfToken}
+          onApply={(ids) => {
+            setOgImageId(ids[0] ?? '');
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+          onError={(err) => onApiError(err)}
+        />
+      )}
     </section>
   );
 }

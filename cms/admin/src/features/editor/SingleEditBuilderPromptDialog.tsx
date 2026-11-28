@@ -34,9 +34,9 @@ export const SingleEditBuilderPromptDialog: React.FC<SingleEditBuilderPromptDial
       onClose={onClose}
       className="od-modal-dialog m-auto max-w-md rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-xl"
     >
-      <h1 id="builder-unsaved-title" className="text-base font-semibold text-zinc-950">
+      <h2 id="builder-unsaved-title" className="text-base font-semibold text-zinc-950">
         {__("Unsaved editor changes")}
-      </h1>
+      </h2>
       <p className="mt-2 text-sm text-zinc-600">
         {__(
           "Do you want to save your current edits before opening Appearance customization (Builder)?",

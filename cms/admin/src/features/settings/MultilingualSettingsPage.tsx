@@ -242,12 +242,14 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
   const conflictPanel = conflicts.length > 0 && (
     <AdminAlert tone="error" data-testid="locale-conflicts">
       <p className="font-semibold">{__("Public URL conflicts")}</p>
-      <table className="mt-2 w-full text-left text-xs">
-        <thead><tr><th>{__("Path")}</th><th>{__("New target")}</th><th>{__("Existing target")}</th></tr></thead>
-        <tbody>{conflicts.map((item, i) => (
-          <tr key={item.path + '-' + i}><td><code>{item.path}</code></td><td>{item.new_target}</td><td>{item.existing_target}</td></tr>
-        ))}</tbody>
-      </table>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[320px] text-left text-xs">
+          <thead><tr><th className="pr-2">{__("Path")}</th><th className="pr-2">{__("New target")}</th><th>{__("Existing target")}</th></tr></thead>
+          <tbody>{conflicts.map((item, i) => (
+            <tr key={item.path + '-' + i}><td className="pr-2"><code>{item.path}</code></td><td className="pr-2">{item.new_target}</td><td>{item.existing_target}</td></tr>
+          ))}</tbody>
+        </table>
+      </div>
     </AdminAlert>
   );
   const stalePanel = stale && (

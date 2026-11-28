@@ -1043,7 +1043,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                     )}
                   </div>
                   <p className="mt-1 text-xs text-zinc-500">
-                    {__("Key")}: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> · {__("· Owner:")}{' '}{activeType.owner.kind}
+                    {__("Key")}: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> · {__("Owner")}:{' '}{activeType.owner.kind}
                     {activeType.rewrite_base ? <> · <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">/{activeType.rewrite_base}/</code></> : null}
                   </p>
                 </div>

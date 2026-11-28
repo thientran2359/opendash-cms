@@ -1,6 +1,7 @@
 import { useI18n } from '../i18n/index.tsx';
 import { useEffect, useRef, useState } from 'react';
 import { getThemePattern, listThemePatterns, type ThemePatternItem } from '../api/patterns.ts';
+import { AdminButton } from '../components/AdminPrimitives.tsx';
 import type { BuilderDocument } from './document.ts';
 
 interface Props {
@@ -111,14 +112,15 @@ export function PatternLibraryModal({ onClose, onInsert, onApiError }: Props) {
             </h2>
             <p className="mt-1 text-sm text-slate-600">{__("Patterns from the active theme. Insert a copy to edit independently.")}</p>
           </div>
-          <button type="button" className="btn-secondary" aria-label={__("Close pattern library")}
-            disabled={Boolean(inserting)} onClick={onClose}>{__("Close")}</button>
+          <AdminButton variant="secondary" size="sm" aria-label={__("Close pattern library")}
+            disabled={Boolean(inserting)} onClick={onClose}>{__("Close")}</AdminButton>
         </header>
         <div className="border-b border-slate-200 p-4 sm:px-5">
           <label htmlFor="pattern-library-search" className="mb-1 block text-xs font-semibold text-slate-700">{__("Find patterns")}
           </label>
           <input ref={searchRef} id="pattern-library-search" type="search"
-            className="w-full max-w-lg text-sm" placeholder={__("Search by name, description or category…")}
+            className="h-9 w-full max-w-lg rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:outline-2 focus-visible:outline-od-accent"
+            placeholder={__("Search by name, description or category…")}
             value={search} onChange={event => setSearch(event.target.value)} />
         </div>
         <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
@@ -149,11 +151,11 @@ export function PatternLibraryModal({ onClose, onInsert, onApiError }: Props) {
                       <span className="text-xs font-medium uppercase tracking-wide text-sky-700">{item.category}</span>
                       <h3 className="!m-0 text-base font-semibold text-slate-900">{item.title}</h3>
                       {item.description && <p className="text-sm text-slate-600">{item.description}</p>}
-                      <button type="button" className="mt-auto w-full" disabled={Boolean(inserting)}
+                      <AdminButton variant="primary" size="sm" className="mt-auto w-full" disabled={Boolean(inserting)}
                         data-testid={'insert-theme-pattern-' + item.key}
                         onClick={() => void insert(item)}>
                         {inserting === item.key ? __("Inserting…") : __("Insert a copy")}
-                      </button>
+                      </AdminButton>
                     </div>
                   </article>)}
                 </div>}

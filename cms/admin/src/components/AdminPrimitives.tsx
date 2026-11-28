@@ -155,7 +155,7 @@ export function AdminTabs<T extends string = string>({
       role="tablist"
       aria-label={ariaLabel}
       data-testid={testId}
-      className={`flex flex-wrap items-center gap-1 border-b border-zinc-200 ${className}`.trim()}
+      className={`flex flex-nowrap items-center gap-1 overflow-x-auto border-b border-zinc-200 ${className}`.trim()}
     >
       {tabs.map((tab, index) => {
         const active = tab.id === activeId;
@@ -180,7 +180,7 @@ export function AdminTabs<T extends string = string>({
               }
             }}
             onKeyDown={(event) => handleKeyDown(event, index)}
-            className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-od-accent disabled:pointer-events-none disabled:opacity-45 ${
+            className={`-mb-px inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-od-accent disabled:pointer-events-none disabled:opacity-45 ${
               active
                 ? 'border-od-accent font-semibold text-zinc-950'
                 : 'border-transparent font-medium text-zinc-600 hover:border-zinc-300 hover:text-zinc-900'

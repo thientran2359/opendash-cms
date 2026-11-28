@@ -122,12 +122,16 @@ export function ReadingSettingsPanel({
   const dirty = Boolean(saved && draft && !sameDraft(draft, snapshot(saved)));
 
   useEffect(() => {
-    onDirtyRef.current?.(dirty);
     if (draftKey && saved && draft && baseVersion !== null) {
       if (dirty) pendingDrafts.set(draftKey, { baseVersion, values: { ...draft } });
       else pendingDrafts.delete(draftKey);
     }
-  }, [draftKey, saved, draft, baseVersion, dirty]);
+    const prefix = actorId === null ? null : `${siteInstanceId}:${actorId}:`;
+    const anyPending = Boolean(
+      dirty || (prefix && Array.from(pendingDrafts.keys()).some(key => key.startsWith(prefix))),
+    );
+    onDirtyRef.current?.(anyPending);
+  }, [draftKey, saved, draft, baseVersion, dirty, actorId, siteInstanceId]);
 
   useEffect(() => () => { onDirtyRef.current?.(false); }, []);
 

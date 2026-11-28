@@ -299,8 +299,18 @@ export const CustomOptionsPageView: React.FC<CustomOptionsPageViewProps> = ({
       {snapshot && !loading && (
         <form onSubmit={e => void handleSave(e)} className="space-y-4">
           {sortedGroups.length === 0 ? (
-            <AdminAlert tone="info">
-              {__("No active field groups are attached to options_page = custom:{{value1}} yet.", { value1: pageKey })}
+            <AdminAlert tone="info" className="flex flex-wrap items-center justify-between gap-3">
+              <span>{__("No active field groups are attached to options_page = custom:{{value1}} yet.", { value1: pageKey })}</span>
+              {user.role === 'admin' && (
+                <AdminButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onNavigateHash('#/content-structure/field-groups')}
+                >
+                  {__("Manage field groups")}
+                </AdminButton>
+              )}
             </AdminAlert>
           ) : (
             sortedGroups.map(grp => {
