@@ -165,8 +165,7 @@ export const SingleEditTranslationsPanel: React.FC<SingleEditTranslationsPanelPr
                       data-testid={`create-translation-${loc.code}`}
                       className="inline-flex h-7 items-center rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
                     >
-                      {__("+ Create translation (")}
-                      {loc.code})
+                      {__("+ Create translation ({{locale}})", { locale: loc.code })}
                     </button>
                   ))}
                 </div>

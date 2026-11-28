@@ -77,7 +77,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
 
   if (!pluginId) return null;
   if (loadError) {
-    return <div className="notice notice-error">{loadError}</div>;
+    return <AdminAlert tone="error">{loadError}</AdminAlert>;
   }
   if (!schema || schema.screens.length === 0) {
     return null;

@@ -8,6 +8,7 @@ import {
 } from '../../api/locales.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 import { ConfirmDialog } from '../../components/ConfirmDialog.tsx';
+import { UploadFileButton } from '../../components/UploadFileButton.tsx';
 import { useI18n } from '../../i18n/index.tsx';
 
 interface Props {
@@ -155,17 +156,19 @@ export function LanguagePacksPanel({ csrfToken, onApiError }: Props) {
             required
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {__("Translation file (.po / .mo)")}
-          <input
-            type="file"
+        <div className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-800">{__("Translation file (.po / .mo)")}</span>
+          <UploadFileButton
             accept=".po,.mo"
-            data-testid="l10n-pack-file"
+            testId="l10n-pack-file"
             disabled={busy}
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             required
+            buttonLabel={__("Choose file")}
+            selectedFileName={file?.name ?? null}
+            ariaLabel={__("Translation file (.po / .mo)")}
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           />
-        </label>
+        </div>
         <div>
           <AdminButton
             type="submit"

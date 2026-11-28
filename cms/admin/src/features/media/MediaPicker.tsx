@@ -3,6 +3,7 @@ import { __, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { listMedia, mediaThumbnailUrl, uploadMedia, uploadVideo, MediaAsset, MediaKind } from '../../api/media.ts';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { UploadFileButton } from '../../components/UploadFileButton.tsx';
 
 type PickerMode = 'browse' | 'image' | 'gallery';
 
@@ -192,19 +193,16 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
         </div>
 
         <div className="flex flex-wrap items-end gap-3 border-b border-zinc-200 bg-zinc-50/70 px-5 py-3">
-          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>{acceptKind === 'image' ? __("+ Upload image") : acceptKind === 'video' ? __("+ Upload video") : __("+ Upload media")}</span>
-            <input
-              type="file"
-              accept={acceptKind === 'any' ? 'image/jpeg,image/png,image/webp,video/mp4'
-                : acceptKind === 'video' ? 'video/mp4' : 'image/jpeg,image/png,image/webp'}
-              multiple={mode !== 'image'}
-              onChange={upload}
-              disabled={!csrfToken || busy}
-              aria-label={__("Upload media to the media library")}
-              className="block max-w-xs text-xs text-zinc-700 file:mr-2 file:rounded-md file:border file:border-zinc-300 file:bg-white file:px-2.5 file:py-1.5 file:text-xs file:font-medium file:text-zinc-800 hover:file:bg-zinc-50"
-            />
-          </label>
+          <UploadFileButton
+            accept={acceptKind === 'any' ? 'image/jpeg,image/png,image/webp,video/mp4'
+              : acceptKind === 'video' ? 'video/mp4' : 'image/jpeg,image/png,image/webp'}
+            multiple={mode !== 'image'}
+            disabled={!csrfToken || busy}
+            buttonLabel={acceptKind === 'image' ? __("+ Upload image") : acceptKind === 'video' ? __("+ Upload video") : __("+ Upload media")}
+            ariaLabel={__("Upload media to the media library")}
+            showFileName={false}
+            onChange={upload}
+          />
           {acceptKind === 'any' && (
             <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
               <span>{__("Media type")}</span>

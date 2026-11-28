@@ -264,7 +264,9 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
           <nav className="od-media-pagination" aria-label={__("Library pagination")}>
             <button type="button" className="od-media-secondary" disabled={loading || uploading || offset === 0}
               onClick={() => setOffset(previous => Math.max(0, previous - PAGE_SIZE))}>{__("← Previous page")}</button>
-            <span aria-live="polite">{__("Page")}{' '}{offset / PAGE_SIZE + 1} · {assets.length}{' '}{__("files loaded")}</span>
+            <span aria-live="polite">
+              {__("Page {{page}} · {{count}} files loaded", { page: offset / PAGE_SIZE + 1, count: assets.length })}
+            </span>
             <button type="button" className="od-media-secondary" disabled={loading || uploading || !!error || !hasNext}
               onClick={() => setOffset(previous => previous + PAGE_SIZE)}>{__("Next page →")}</button>
           </nav>

@@ -155,11 +155,17 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
 
         {plan && (
           <div className="space-y-3">
-            <AdminAlert tone="warning">{__("Plan")}{' '}<code className="font-mono text-xs">{plan.plan_id.slice(0, 12)}...</code>{' '}{__("— Scan")}{' '}{plan.scanned_records}{' '}{__("records,")}{' '}
-              {plan.scanned_files}{' '}{__("files; missing files:")}{' '}{plan.missing_canonical_files.length}{__("; orphaned ≥ 24h:")}{' '}
-              {plan.orphan_candidates.length}{' '}
-              {__("(canonical: {{value1}}, variants: {{value2}})", { value1: canonicalOrphans.length, value2: variantOrphans.length })}
-              {__("; new orphans (< 24h):")}{' '}{plan.recent_orphans_under_grace}.
+            <AdminAlert tone="warning">
+              {__("Plan {{planId}}… — Scanned {{records}} records, {{files}} files; missing files: {{missing}}; orphaned ≥ 24h: {{orphans}} (canonical: {{canonical}}, variants: {{variants}}); new orphans (< 24h): {{recent}}.", {
+                planId: plan.plan_id.slice(0, 12),
+                records: plan.scanned_records,
+                files: plan.scanned_files,
+                missing: plan.missing_canonical_files.length,
+                orphans: plan.orphan_candidates.length,
+                canonical: canonicalOrphans.length,
+                variants: variantOrphans.length,
+                recent: plan.recent_orphans_under_grace,
+              })}
             </AdminAlert>
             {plan.orphan_candidates.length > 0 && (
               <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white">

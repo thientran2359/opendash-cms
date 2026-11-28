@@ -439,9 +439,11 @@ export function TermEditPage({
               </AdminButton>
             ) : (
               <>
-                <p className="text-xs">{__("Server version: v")}{latest.version} · {latest.name} · /{latest.slug}</p>
+                <p className="text-xs">
+                  {__("Server version: v{{version}} · {{name}} · /{{slug}}", { version: latest.version, name: latest.name, slug: latest.slug })}
+                </p>
                 <AdminButton type="button" variant="secondary" size="sm" disabled={busy} onClick={continueWithLatest}>
-                  {__("Continue with v")}{latest.version} {__("(retain edited fields)")}
+                  {__("Continue with v{{version}} (retain edited fields)", { version: latest.version })}
                 </AdminButton>
               </>
             )}
