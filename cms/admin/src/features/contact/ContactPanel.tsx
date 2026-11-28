@@ -17,6 +17,7 @@ import {
 } from '../../api/contact.ts';
 import { notifyContactSubmission } from '../../api/smtp.ts';
 import { AdminAlert, AdminTabPanel, AdminTabs } from '../../components/AdminPrimitives.tsx';
+import { ConfirmDialog } from '../../components/ConfirmDialog.tsx';
 
 type ContactTabId = 'forms' | 'inbox';
 
@@ -50,6 +51,8 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
   const [notice, setNotice] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [activeTab, setActiveTab] = useState<ContactTabId>(initialTab);
+  const [confirmDeleteFormOpen, setConfirmDeleteFormOpen] = useState(false);
+  const [confirmDeleteSubId, setConfirmDeleteSubId] = useState<number | null>(null);
 
   const reportError = (err: unknown, fallback: string) => {
     setErrorMessage(err instanceof Error ? err.message : fallback);
@@ -246,7 +249,7 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
           </div>
 
           <form onSubmit={handleSaveForm} className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="block text-xs font-medium text-slate-700">{__("Slug")}<input
                   type="text"
                   value={slug}
@@ -265,7 +268,7 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
               </label>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="block text-xs font-medium text-slate-700">{__("Status")}<select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as 'active' | 'disabled')}
@@ -405,7 +408,7 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={handleDeleteForm}
+                  onClick={() => setConfirmDeleteFormOpen(true)}
                   className="rounded border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                 >{__("Delete form")}</button>
               )}
@@ -420,23 +423,23 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
         labelledBy="contact-tab-inbox"
       >
         <div className="max-w-3xl space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-          <h3 className="text-sm font-semibold text-slate-900">{__("Contact inbox (")}{submissions.length})</h3>
+          <h3 className="text-sm font-semibold text-slate-900">{__("Contact inbox ({{count}})", { count: submissions.length })}</h3>
           {submissions.length === 0 ? (
             <p className="text-sm text-slate-500">{__("No contact messages yet.")}</p>
           ) : (
-            <ul className="divide-y divide-slate-100">
+            <ul className="list-none divide-y divide-slate-100 pl-0">
               {submissions.map((sub) => (
-                <li key={sub.id} className="flex items-center justify-between py-2 text-sm">
+                <li key={sub.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                   <button
                     type="button"
                     onClick={() => handleOpenSubmission(sub.id)}
                     className="text-left font-medium text-slate-800 hover:underline"
-                  >{__("Message #")}{sub.id}{' '}{__("· Form #")}{sub.form_id} (v{sub.form_version}) · {formatMediaDate(sub.created_at)}
+                  >{__("Message #{{id}} · Form #{{formId}} (v{{version}}) · {{date}}", { id: sub.id, formId: sub.form_id, version: sub.form_version, date: formatMediaDate(sub.created_at) })}
                   </button>
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => handleDeleteSubmission(sub.id)}
+                    onClick={() => setConfirmDeleteSubId(sub.id)}
                     className="text-xs text-rose-600 hover:underline"
                   >{__("Delete")}</button>
                 </li>
@@ -446,15 +449,15 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
 
           {selectedSub && (
             <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-sm">
-              <div className="flex items-center justify-between">
-                <strong className="text-slate-900">{__("Message details #")}{selectedSub.id}</strong>
-                <span className="text-xs text-slate-500">{__("Email delivery status:")}{' '}{selectedSub.notification_state}</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <strong className="text-slate-900">{__("Message details #{{id}}", { id: selectedSub.id })}</strong>
+                <span className="text-xs text-slate-500">{__("Email delivery status: {{state}}", { state: selectedSub.notification_state })}</span>
               </div>
               <dl className="mt-2 space-y-1.5">
                 {selectedSub.schema_snapshot.fields.map((field) => (
-                  <div key={field.key} className="grid grid-cols-3 gap-2">
+                  <div key={field.key} className="grid grid-cols-1 gap-1 sm:grid-cols-3 sm:gap-2">
                     <dt className="font-medium text-slate-700">{field.label}</dt>
-                    <dd className="col-span-2 whitespace-pre-wrap break-words text-slate-900">
+                    <dd className="whitespace-pre-wrap break-words text-slate-900 sm:col-span-2">
                       {String(selectedSub.values[field.key] ?? '')}
                     </dd>
                   </div>
@@ -463,9 +466,10 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
               {selectedSub.notification_attempts.length > 0 && (
                 <div className="mt-3 border-t border-slate-200 pt-2">
                   <p className="text-xs font-semibold text-slate-700">{__("SMTP notification history")}</p>
-                  <ul className="mt-1 space-y-1 text-xs text-slate-600">
+                  <ul className="mt-1 list-none space-y-1 pl-0 text-xs text-slate-600">
                     {selectedSub.notification_attempts.map((att) => (
-                      <li key={att.id}>{__("Attempt #")}{att.attempt_number}: <strong>{att.state}</strong>
+                      <li key={att.id}>
+                        {__("Attempt #{{attempt}}: {{state}}", { attempt: att.attempt_number, state: att.state })}
                         {att.diagnostic_code ? ` (${att.diagnostic_code})` : ''}
                       </li>
                     ))}
@@ -496,7 +500,7 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
                               setAckDupRisk(false);
                               await loadAll();
                             } catch (err) {
-                              onApiError(err);
+                              reportError(err, __("Could not resend SMTP notification."));
                             } finally {
                               setBusy(false);
                             }
@@ -512,6 +516,36 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
           )}
         </div>
       </AdminTabPanel>
+
+      <ConfirmDialog
+        open={confirmDeleteFormOpen}
+        title={__("Delete contact form?")}
+        description={__("Delete contact form “{{title}}” (#{{id}})? Existing public submissions using this slug will stop working.", { title, id: selectedId ?? '' })}
+        confirmLabel={busy ? __("Deleting…") : __("Delete form")}
+        busy={busy}
+        testId="confirm-delete-contact-form-dialog"
+        onCancel={() => setConfirmDeleteFormOpen(false)}
+        onConfirm={() => {
+          setConfirmDeleteFormOpen(false);
+          void handleDeleteForm();
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmDeleteSubId !== null}
+        title={__("Delete contact message?")}
+        description={__("Permanently delete contact message #{{id}}? This cannot be undone.", { id: confirmDeleteSubId ?? '' })}
+        confirmLabel={busy ? __("Deleting…") : __("Delete")}
+        busy={busy}
+        testId="confirm-delete-contact-sub-dialog"
+        onCancel={() => setConfirmDeleteSubId(null)}
+        onConfirm={() => {
+          if (confirmDeleteSubId === null) return;
+          const id = confirmDeleteSubId;
+          setConfirmDeleteSubId(null);
+          void handleDeleteSubmission(id);
+        }}
+      />
     </section>
   );
 }

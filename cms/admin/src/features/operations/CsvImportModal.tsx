@@ -118,6 +118,17 @@ export function CsvImportModal({
     preview.create_count + preview.update_count > 0 &&
     busyMode === null;
 
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && busyMode === null) {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [busyMode, onClose]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 p-4"
@@ -125,12 +136,17 @@ export function CsvImportModal({
       aria-modal="true"
       aria-label={__('Import Redirects from CSV')}
       data-testid="csv-import-modal"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && busyMode === null) {
+          onClose();
+        }
+      }}
     >
       <div className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-xl border border-zinc-200 bg-white p-5 shadow-xl">
         <div className="mb-4 flex items-center justify-between gap-2">
-          <h3 className="text-base font-semibold text-zinc-900">
+          <h2 className="text-base font-semibold text-zinc-900">
             {__('Import Redirects from CSV')}
-          </h3>
+          </h2>
           <AdminButton variant="ghost" size="sm" onClick={onClose} disabled={busyMode !== null}>
             {_x('Cancel', 'redirects')}
           </AdminButton>
@@ -141,10 +157,11 @@ export function CsvImportModal({
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-700">
+              <label htmlFor="csv-file-input" className="mb-1 block text-xs font-medium text-zinc-700">
                 {__('Choose .csv file (max 2 MiB / 5,000 rows)')}
               </label>
               <input
+                id="csv-file-input"
                 type="file"
                 accept=".csv,text/csv"
                 onChange={(e) => {
@@ -156,10 +173,11 @@ export function CsvImportModal({
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-700">
+              <label htmlFor="csv-conflict-policy" className="mb-1 block text-xs font-medium text-zinc-700">
                 {__('Duplicate source path policy')}
               </label>
               <select
+                id="csv-conflict-policy"
                 value={conflictPolicy}
                 onChange={(e) => {
                   setPreview(null);
@@ -177,10 +195,11 @@ export function CsvImportModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-700">
+            <label htmlFor="csv-textarea" className="mb-1 block text-xs font-medium text-zinc-700">
               {__('Or paste CSV content')}
             </label>
             <textarea
+              id="csv-textarea"
               rows={6}
               value={csvText}
               onChange={(e) => {

@@ -527,7 +527,7 @@ export const OptionsPagesListPage: React.FC<OptionsPagesListPageProps> = ({
       <dialog
         ref={dialogRef}
         aria-labelledby="delete-options-page-title"
-        className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-xl backdrop:bg-zinc-950/40 backdrop:overflow-hidden backdrop:[overscroll-behavior:contain] [overscroll-behavior:contain]"
+        className="fixed inset-0 m-auto w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-xl backdrop:bg-zinc-950/40 backdrop:overflow-hidden backdrop:[overscroll-behavior:contain] [overscroll-behavior:contain]"
         onCancel={e => {
           if (busy) {
             e.preventDefault();
@@ -538,9 +538,9 @@ export const OptionsPagesListPage: React.FC<OptionsPagesListPageProps> = ({
       >
         {deleteTarget && (
           <div className="space-y-4">
-            <h1 id="delete-options-page-title" className="text-base font-bold text-zinc-950">
+            <h2 id="delete-options-page-title" className="text-base font-bold text-zinc-950">
               {__("Delete options page {{value1}}?", { value1: deleteTarget.title })}
-            </h1>
+            </h2>
             <p className="text-sm text-zinc-600">
               {__("Key")}: <code className="font-mono text-xs">{deleteTarget.page_key}</code>
             </p>

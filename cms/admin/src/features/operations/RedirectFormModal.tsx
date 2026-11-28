@@ -52,6 +52,23 @@ export function RedirectFormModal({
 }: RedirectFormModalProps) {
   const { __, _x } = useI18n();
   const [rebasing, setRebasing] = React.useState(false);
+  const sourceInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    sourceInputRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy && !rebasing) {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      prev?.focus();
+    };
+  }, [busy, rebasing, onClose]);
 
   const title =
     mode === 'edit'
@@ -80,10 +97,15 @@ export function RedirectFormModal({
       aria-modal="true"
       aria-label={title}
       data-testid="redirect-form-modal"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy && !rebasing) {
+          onClose();
+        }
+      }}
     >
       <div className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-5 shadow-xl">
         <div className="mb-4 flex items-center justify-between gap-2">
-          <h3 className="text-base font-semibold text-zinc-900">{title}</h3>
+          <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
           <AdminButton variant="ghost" size="sm" onClick={onClose} disabled={busy || rebasing}>
             {_x('Cancel', 'redirects')}
           </AdminButton>
@@ -119,10 +141,12 @@ export function RedirectFormModal({
 
         <form onSubmit={onSubmit} className="space-y-3.5">
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-700">
+            <label htmlFor="redirect-source-input" className="mb-1 block text-xs font-medium text-zinc-700">
               {__('Source Path')}
             </label>
             <input
+              ref={sourceInputRef}
+              id="redirect-source-input"
               type="text"
               value={sourcePath}
               onChange={(e) => onChange({ sourcePath: e.target.value })}
@@ -135,10 +159,11 @@ export function RedirectFormModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-700">
+            <label htmlFor="redirect-target-input" className="mb-1 block text-xs font-medium text-zinc-700">
               {__('Target URL')}
             </label>
             <input
+              id="redirect-target-input"
               type="text"
               value={targetUrl}
               onChange={(e) => onChange({ targetUrl: e.target.value })}
@@ -151,10 +176,11 @@ export function RedirectFormModal({
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-700">
+              <label htmlFor="redirect-status-select" className="mb-1 block text-xs font-medium text-zinc-700">
                 {__('HTTP Status Code')}
               </label>
               <select
+                id="redirect-status-select"
                 value={statusCode}
                 onChange={(e) => onChange({ statusCode: e.target.value === '302' ? 302 : 301 })}
                 data-testid="redirect-status-select"
@@ -180,10 +206,11 @@ export function RedirectFormModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-700">
+            <label htmlFor="redirect-note-input" className="mb-1 block text-xs font-medium text-zinc-700">
               {__('Note (optional)')}
             </label>
             <input
+              id="redirect-note-input"
               type="text"
               value={note}
               maxLength={256}

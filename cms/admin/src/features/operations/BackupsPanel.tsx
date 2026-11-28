@@ -12,6 +12,7 @@ import {
   type OperationJob,
 } from '../../api/operations.ts';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { ConfirmDialog } from '../../components/ConfirmDialog.tsx';
 
 interface BackupsPanelProps {
   csrfToken: string | null;
@@ -34,6 +35,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; filename: string } | null>(null);
 
   const reportError = useCallback((error: unknown, fallback: string) => {
     setErrorMessage(error instanceof Error ? error.message : fallback);
@@ -231,7 +233,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
                       <AdminButton
                         variant="danger"
                         size="sm"
-                        onClick={() => void handleDeleteArtifact(art.id)}
+                        onClick={() => setDeleteTarget({ id: art.id, filename: art.filename })}
                         disabled={busy}
                       >
                         {__("Delete")}
@@ -244,6 +246,22 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={__("Delete backup package?")}
+        description={__("Permanently delete backup file “{{filename}}”? This cannot be undone.", { filename: deleteTarget?.filename ?? '' })}
+        confirmLabel={busy ? __("Deleting…") : __("Delete backup")}
+        busy={busy}
+        testId="confirm-delete-backup-dialog"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          const targetId = deleteTarget.id;
+          setDeleteTarget(null);
+          void handleDeleteArtifact(targetId);
+        }}
+      />
     </section>
   );
 }

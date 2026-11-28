@@ -1319,7 +1319,10 @@ export const StudioWorkspace: React.FC<Props> = ({
           />
         </aside>
 
-        <main className={'flex min-w-0 flex-1 flex-col overflow-hidden ' + (viewport === 'desktop' ? 'bg-white' : 'bg-zinc-200/70')}>
+        {(() => {
+          const PreviewTag: 'main' | 'div' = active ? 'main' : 'div';
+          return (
+        <PreviewTag className={'flex min-w-0 flex-1 flex-col overflow-hidden ' + (viewport === 'desktop' ? 'bg-white' : 'bg-zinc-200/70')}>
           <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-4')}>
             {previewHtml ? (
               <BuilderPreviewFrame
@@ -1346,7 +1349,9 @@ export const StudioWorkspace: React.FC<Props> = ({
               </div>
             )}
           </div>
-        </main>
+        </PreviewTag>
+          );
+        })()}
       </div>
     </div>
   );

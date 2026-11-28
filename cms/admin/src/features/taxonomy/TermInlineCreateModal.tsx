@@ -95,7 +95,7 @@ export const TermInlineCreateModal: React.FC<TermInlineCreateModalProps> = ({
       ref={dialogRef}
       aria-labelledby="inline-term-create-title"
       data-testid={`inline-create-term-dialog-${definition.key}`}
-      className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-xl backdrop:bg-zinc-950/40 backdrop:overflow-hidden backdrop:[overscroll-behavior:contain] [overscroll-behavior:contain]"
+      className="fixed inset-0 m-auto w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-xl backdrop:bg-zinc-950/40 backdrop:overflow-hidden backdrop:[overscroll-behavior:contain] [overscroll-behavior:contain]"
       onCancel={e => {
         if (busy) {
           e.preventDefault();
@@ -105,9 +105,9 @@ export const TermInlineCreateModal: React.FC<TermInlineCreateModalProps> = ({
       }}
     >
       <form onSubmit={e => void handleSubmit(e)} className="space-y-4">
-        <h1 id="inline-term-create-title" className="text-base font-bold text-zinc-950">
+        <h2 id="inline-term-create-title" className="text-base font-bold text-zinc-950">
           {__("Add new {{value1}}", { value1: definition.label })}
-        </h1>
+        </h2>
         {error && <AdminAlert tone="error">{error}</AdminAlert>}
 
         <label htmlFor="inline-term-name" className="block text-xs font-medium text-zinc-700">
