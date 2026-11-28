@@ -1,1 +1,11 @@
-<section class="od-starter-stats-bar grid grid-cols-1 gap-6 rounded-2xl border border-od-border bg-od-surface p-6 shadow-xs sm:grid-cols-3"><div class="text-center"><strong class="font-od-heading text-3xl font-bold text-od-primary">{{ stat_1_value }}</strong><p class="mt-2 text-sm text-od-muted">{{ stat_1_label }}</p></div><div class="text-center"><strong class="font-od-heading text-3xl font-bold text-od-primary">{{ stat_2_value }}</strong><p class="mt-2 text-sm text-od-muted">{{ stat_2_label }}</p></div><div class="text-center"><strong class="font-od-heading text-3xl font-bold text-od-primary">{{ stat_3_value }}</strong><p class="mt-2 text-sm text-od-muted">{{ stat_3_label }}</p></div></section>
+{% set surf_cls = 'border border-od-border bg-od-surface' if surface_style == 'bordered' else ('bg-transparent' if surface_style == 'minimal' else 'rounded-2xl border border-od-border bg-od-surface shadow-xs') %}
+{% set align_cls = 'text-left' if align == 'left' else 'text-center' %}
+<section class="od-starter-stats-bar od-responsive-grid grid gap-6 rounded-2xl {{ surf_cls }} {{ padding.classes }}" data-od-spacing="padding">
+  {% for item in items %}
+  <div class="{{ align_cls }}">
+    {% if item.icon and item.icon.name %}<div class="mb-2 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-od-surface-alt text-od-primary">{{ od_icon(item.icon.name, "h-5 w-5") }}</div>{% endif %}
+    <div class="font-od-heading text-3xl font-bold tracking-tight text-od-primary">{% if item.prefix %}<span>{{ item.prefix }}</span>{% endif %}<span>{{ item.value }}</span>{% if item.suffix %}<span>{{ item.suffix }}</span>{% endif %}</div>
+    <p class="mt-2 text-sm text-od-muted">{{ item.label }}</p>
+  </div>
+  {% endfor %}
+</section>

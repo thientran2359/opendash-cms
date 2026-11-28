@@ -1,0 +1,14 @@
+{% set surf_cls = 'border border-od-border bg-od-surface' if surface_style == 'bordered' else 'border border-od-border bg-od-surface shadow-sm' %}
+<figure class="od-starter-testimonial flex flex-col justify-between rounded-2xl {{ surf_cls }} {{ padding.classes }}" data-od-spacing="padding">
+  <div>
+    {% if rating > 0 %}<div class="mb-3 flex items-center gap-0.5 text-amber-500" role="img" aria-label="{{ rating }}/5">{% for i in [1, 2, 3, 4, 5] %}{% if i <= rating %}{{ od_icon("star", "od-star-filled h-4 w-4") }}{% endif %}{% endfor %}</div>{% endif %}
+    <blockquote class="text-base leading-relaxed text-od-text">“{{ quote }}”</blockquote>
+  </div>
+  <figcaption class="mt-5 flex items-center gap-3">
+    {% if avatar and avatar.url %}{{ od_image(avatar, sizes="44px", class="h-11 w-11 shrink-0 rounded-full object-cover", alt=author) }}{% endif %}
+    <div class="min-w-0">
+      <div class="text-sm font-semibold text-od-text">{{ author }}</div>
+      {% if role or company %}<div class="text-xs text-od-muted">{% if role %}{{ role }}{% endif %}{% if role and company %} · {% endif %}{% if company %}{{ company }}{% endif %}</div>{% endif %}
+    </div>
+  </figcaption>
+</figure>

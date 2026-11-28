@@ -41,6 +41,30 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
             include_bytes!("opendash-starter/assets/style.css").to_vec(),
         ),
         (
+            "blocks/feature-list/block.json".to_owned(),
+            include_bytes!("opendash-starter/blocks/feature-list/block.json").to_vec(),
+        ),
+        (
+            "blocks/feature-list/render.html".to_owned(),
+            include_bytes!("opendash-starter/blocks/feature-list/render.html").to_vec(),
+        ),
+        (
+            "blocks/icon-box/block.json".to_owned(),
+            include_bytes!("opendash-starter/blocks/icon-box/block.json").to_vec(),
+        ),
+        (
+            "blocks/icon-box/render.html".to_owned(),
+            include_bytes!("opendash-starter/blocks/icon-box/render.html").to_vec(),
+        ),
+        (
+            "blocks/logo-strip/block.json".to_owned(),
+            include_bytes!("opendash-starter/blocks/logo-strip/block.json").to_vec(),
+        ),
+        (
+            "blocks/logo-strip/render.html".to_owned(),
+            include_bytes!("opendash-starter/blocks/logo-strip/render.html").to_vec(),
+        ),
+        (
             "blocks/quote-box/block.json".to_owned(),
             include_bytes!("opendash-starter/blocks/quote-box/block.json").to_vec(),
         ),
@@ -55,6 +79,14 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
         (
             "blocks/stats-bar/render.html".to_owned(),
             include_bytes!("opendash-starter/blocks/stats-bar/render.html").to_vec(),
+        ),
+        (
+            "blocks/testimonial/block.json".to_owned(),
+            include_bytes!("opendash-starter/blocks/testimonial/block.json").to_vec(),
+        ),
+        (
+            "blocks/testimonial/render.html".to_owned(),
+            include_bytes!("opendash-starter/blocks/testimonial/render.html").to_vec(),
         ),
         (
             "footer.html".to_owned(),

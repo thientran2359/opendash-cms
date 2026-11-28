@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "id": "opendash-starter/testimonial",
+  "title": "Đánh giá khách hàng (Testimonial)",
+  "category": "marketing",
+  "icon": "message-circle",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "textarea",
+      "key": "quote",
+      "label": "Nội dung đánh giá",
+      "required": true,
+      "rows": 4,
+      "max_chars": 1200,
+      "default": "OpenDash giúp đội ngũ chúng tôi ra mắt website nhanh gấp đôi."
+    },
+    {
+      "type": "text",
+      "key": "author",
+      "label": "Tên tác giả",
+      "required": true,
+      "max_chars": 120,
+      "default": "Nguyễn Minh Anh"
+    },
+    {
+      "type": "text",
+      "key": "role",
+      "label": "Chức vụ",
+      "max_chars": 120,
+      "default": "Giám đốc sản phẩm"
+    },
+    {
+      "type": "text",
+      "key": "company",
+      "label": "Công ty / Tổ chức",
+      "max_chars": 120,
+      "default": ""
+    },
+    {
+      "type": "media",
+      "key": "avatar",
+      "label": "Ảnh đại diện",
+      "media_kind": "image"
+    },
+    {
+      "type": "range",
+      "key": "rating",
+      "label": "Số sao (0 = ẩn)",
+      "min": 0,
+      "max": 5,
+      "step": 1,
+      "default": 5
+    },
+    {
+      "type": "select",
+      "key": "surface_style",
+      "label": "Kiểu bề mặt",
+      "options": [
+        { "value": "card", "label": "Thẻ nổi (Card)" },
+        { "value": "bordered", "label": "Có viền" }
+      ],
+      "default": "card"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 24, "right": 24, "bottom": 24, "left": 24 }
+    }
+  ]
+}

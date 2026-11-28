@@ -1,0 +1,9 @@
+{% set surf_cls = 'border border-od-border bg-od-surface' if surface_style == 'bordered' else ('bg-transparent' if surface_style == 'flat' else 'border border-od-border bg-od-surface shadow-sm') %}
+{% set align_cls = 'items-center text-center' if align == 'center' else 'items-start text-left' %}
+{% set icon_cls = 'bg-od-primary text-white' if icon_style == 'solid' else ('border border-od-primary text-od-primary bg-transparent' if icon_style == 'outline' else 'bg-blue-50 text-od-primary') %}
+<article class="od-starter-icon-box flex flex-col rounded-2xl {{ surf_cls }} {{ align_cls }} {{ padding.classes }}" data-od-spacing="padding">
+  {% if icon and icon.name %}<div class="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl {{ icon_cls }}">{{ od_icon(icon.name, "h-6 w-6") }}</div>{% endif %}
+  <h3 class="font-od-heading text-lg font-bold text-od-text">{{ title }}</h3>
+  {% if description %}<p class="mt-2 text-sm leading-relaxed text-od-muted">{{ description }}</p>{% endif %}
+  {% if cta and cta.url %}<a href="{{ cta.url }}" target="{{ cta.target }}" rel="{{ cta.rel }}" class="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-od-primary hover:underline">{% if cta.label %}{{ cta.label }}{% else %}→{% endif %}</a>{% endif %}
+</article>

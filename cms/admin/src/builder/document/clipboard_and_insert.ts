@@ -42,10 +42,12 @@ export function initialBlockProps(fields: readonly FieldSpec[]): Record<string, 
     if (field.type === 'group') {
       props[field.key] = initialBlockProps(field.fields ?? []);
     } else if (field.type === 'repeater') {
-      props[field.key] = Array.from(
-        { length: field.min_items ?? 0 },
-        () => initialBlockProps(field.fields ?? []),
-      );
+      props[field.key] = Array.isArray(field.default)
+        ? clone(field.default)
+        : Array.from(
+            { length: field.min_items ?? 0 },
+            () => initialBlockProps(field.fields ?? []),
+          );
     } else if (field.default !== undefined && field.default !== null) {
       const defCopy = typeof field.default === 'object' ? clone(field.default) : field.default;
       props[field.key] = field.responsive ? { desktop: defCopy } : defCopy;

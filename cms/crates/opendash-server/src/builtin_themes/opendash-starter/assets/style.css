@@ -4,6 +4,7 @@
 .builder-row { display: flex; flex-wrap: wrap; gap: 1.5rem; }
 .builder-column { min-width: 0; flex: 1 1 240px; }
 .builder-element { min-width: 0; }
-.od-starter-stats-bar p { margin: .5rem 0 0; }
-.od-starter-quote-box blockquote { margin: 0; }
+.od-starter-stats-bar p { margin: .375rem 0 0; }
+.od-starter-quote-box blockquote,
+.od-starter-testimonial blockquote { margin: 0; }
 @media (max-width: 767px) { .builder-column { flex-basis: 100%; } }

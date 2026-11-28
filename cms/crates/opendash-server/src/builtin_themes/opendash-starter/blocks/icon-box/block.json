@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "opendash-starter/icon-box",
+  "title": "Hộp Biểu Tượng (Icon Box)",
+  "category": "marketing",
+  "icon": "sparkles",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "icon",
+      "key": "icon",
+      "label": "Biểu tượng",
+      "default": "sparkles"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "icon_style",
+      "label": "Kiểu khung biểu tượng",
+      "options": [
+        { "value": "soft", "label": "Nền nhẹ" },
+        { "value": "solid", "label": "Nền đậm" },
+        { "value": "outline", "label": "Viền mảnh" }
+      ],
+      "default": "soft"
+    },
+    {
+      "type": "text",
+      "key": "title",
+      "label": "Tiêu đề",
+      "required": true,
+      "max_chars": 120,
+      "default": "Tính năng nổi bật"
+    },
+    {
+      "type": "textarea",
+      "key": "description",
+      "label": "Mô tả ngắn",
+      "rows": 3,
+      "max_chars": 600,
+      "default": "Mô tả ngắn gọn giá trị mang lại cho khách hàng."
+    },
+    {
+      "type": "link",
+      "key": "cta",
+      "label": "Liên kết CTA (tùy chọn)"
+    },
+    {
+      "type": "select",
+      "key": "surface_style",
+      "label": "Kiểu bề mặt",
+      "options": [
+        { "value": "card", "label": "Thẻ nổi (Card)" },
+        { "value": "bordered", "label": "Có viền" },
+        { "value": "flat", "label": "Phẳng" }
+      ],
+      "default": "card"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "align",
+      "label": "Căn lề",
+      "options": [
+        { "value": "left", "label": "Trái" },
+        { "value": "center", "label": "Giữa" }
+      ],
+      "default": "left"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 24, "right": 24, "bottom": 24, "left": 24 }
+    }
+  ]
+}

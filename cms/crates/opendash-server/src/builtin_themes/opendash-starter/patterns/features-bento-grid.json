@@ -18,29 +18,15 @@
               "block_id": "core/column",
               "children": [
                 {
-                  "id": "feature-card-1",
-                  "block_id": "core/card",
+                  "id": "feature-icon-1",
+                  "block_id": "opendash-starter/icon-box",
                   "props": {
-                    "surface_style": "bordered"
-                  },
-                  "children": [
-                    {
-                      "id": "feature-card-1-heading",
-                      "block_id": "core/heading",
-                      "props": {
-                        "level": "h3",
-                        "text": "Hiệu năng cao",
-                        "size": "lg"
-                      }
-                    },
-                    {
-                      "id": "feature-card-1-text",
-                      "block_id": "core/text",
-                      "props": {
-                        "content": "<p>Rust mang đến khả năng phục vụ nhanh và ổn định.</p>"
-                      }
-                    }
-                  ]
+                    "icon": "sparkles",
+                    "icon_style": "soft",
+                    "surface_style": "bordered",
+                    "title": "Hiệu năng cao",
+                    "description": "Rust mang đến khả năng phục vụ nhanh và ổn định."
+                  }
                 }
               ]
             },
@@ -49,29 +35,15 @@
               "block_id": "core/column",
               "children": [
                 {
-                  "id": "feature-card-2",
-                  "block_id": "core/card",
+                  "id": "feature-icon-2",
+                  "block_id": "opendash-starter/icon-box",
                   "props": {
-                    "surface_style": "bordered"
-                  },
-                  "children": [
-                    {
-                      "id": "feature-card-2-heading",
-                      "block_id": "core/heading",
-                      "props": {
-                        "level": "h3",
-                        "text": "Thiết kế linh hoạt",
-                        "size": "lg"
-                      }
-                    },
-                    {
-                      "id": "feature-card-2-text",
-                      "block_id": "core/text",
-                      "props": {
-                        "content": "<p>Builder trực quan thích ứng mọi màn hình.</p>"
-                      }
-                    }
-                  ]
+                    "icon": "globe",
+                    "icon_style": "soft",
+                    "surface_style": "bordered",
+                    "title": "Thiết kế linh hoạt",
+                    "description": "Builder trực quan thích ứng mọi màn hình."
+                  }
                 }
               ]
             },
@@ -80,29 +52,15 @@
               "block_id": "core/column",
               "children": [
                 {
-                  "id": "feature-card-3",
-                  "block_id": "core/card",
+                  "id": "feature-icon-3",
+                  "block_id": "opendash-starter/icon-box",
                   "props": {
-                    "surface_style": "bordered"
-                  },
-                  "children": [
-                    {
-                      "id": "feature-card-3-heading",
-                      "block_id": "core/heading",
-                      "props": {
-                        "level": "h3",
-                        "text": "Dữ liệu chủ động",
-                        "size": "lg"
-                      }
-                    },
-                    {
-                      "id": "feature-card-3-text",
-                      "block_id": "core/text",
-                      "props": {
-                        "content": "<p>SQLite gọn nhẹ, sao lưu và khôi phục dễ dàng.</p>"
-                      }
-                    }
-                  ]
+                    "icon": "check-circle",
+                    "icon_style": "soft",
+                    "surface_style": "bordered",
+                    "title": "Dữ liệu chủ động",
+                    "description": "SQLite gọn nhẹ, sao lưu và khôi phục dễ dàng."
+                  }
                 }
               ]
             }
