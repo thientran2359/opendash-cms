@@ -61,6 +61,8 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     options: &BTreeMap<String, serde_json::Value>,
     menus: &BTreeMap<String, menu::MenuViewModel>,
     route_kind: &str,
+    options_locale: &str,
+    transient: Option<&TransientStudioOverrides>,
     mut richtext_nonces: Option<&mut template_sec::RichTextNonceTable>,
 ) -> ApiResult<BuiltEntryPreviewContext> {
     let definition = &effective_schema.base.descriptor;
@@ -105,13 +107,15 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
         view.url.clone(),
     );
     let ct_value = serde_json::to_value(definition)?;
-    let custom_options = crate::storage::options_pages::load_active_custom_options_public_in_conn(
-        &mut **tx,
-        Some(&record.locale),
-        true,
-        richtext_nonces,
-    )
-    .await?;
+    let custom_options =
+        crate::storage::options_pages::load_active_custom_options_public_with_overrides_in_conn(
+            &mut **tx,
+            Some(options_locale),
+            true,
+            transient.and_then(|t| t.options_pages.as_ref()),
+            richtext_nonces,
+        )
+        .await?;
     let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
     let empty_entries = Vec::new();
     let pagination = PaginationView::empty();
@@ -259,6 +263,8 @@ pub async fn preview_typed_override_with_cache_and_locale(
             &options,
             &menus,
             route_kind_for_candidate(target.kind),
+            &effective_locale,
+            None,
             Some(&mut budget.richtext_nonces),
         )
         .await?;
@@ -464,11 +470,12 @@ pub(in crate::storage) async fn build_preview_context_in_tx(
         .zip(manifest_json.as_deref())
         .map(|(a, m)| (a.manifest.theme_id.as_str(), m));
     let (site_options, options) =
-        settings::resolve_merged_public_options_with_overrides_in_conn_with_nonces(
+        settings::resolve_merged_public_options_with_all_overrides_in_conn_with_nonces(
             &mut **tx,
             active_ref,
             transient.and_then(|t| t.global_options.as_ref()),
             transient.and_then(|t| t.theme_options.as_ref()),
+            transient.and_then(|t| t.options_pages.as_ref()),
             true,
             Some(locale),
             richtext_nonces,

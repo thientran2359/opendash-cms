@@ -23,6 +23,7 @@ use super::super::locales::{get_default_locale_code_in_conn, resolve_requested_l
 use super::schema::*;
 use super::storage::*;
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::storage) async fn resolve_merged_public_options_with_overrides_in_conn_with_nonces(
     conn: &mut SqliteConnection,
     active_theme: Option<(&str, &str)>,
@@ -35,11 +36,39 @@ pub(in crate::storage) async fn resolve_merged_public_options_with_overrides_in_
     BTreeMap<String, serde_json::Value>,
     BTreeMap<String, serde_json::Value>,
 )> {
+    resolve_merged_public_options_with_all_overrides_in_conn_with_nonces(
+        conn,
+        active_theme,
+        transient_global,
+        transient_theme,
+        None,
+        is_preview,
+        requested_locale,
+        richtext_nonces,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::storage) async fn resolve_merged_public_options_with_all_overrides_in_conn_with_nonces(
+    conn: &mut SqliteConnection,
+    active_theme: Option<(&str, &str)>,
+    transient_global: Option<&BTreeMap<String, serde_json::Value>>,
+    transient_theme: Option<&BTreeMap<String, serde_json::Value>>,
+    transient_options_pages: Option<&BTreeMap<String, BTreeMap<String, serde_json::Value>>>,
+    is_preview: bool,
+    requested_locale: Option<&str>,
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<(
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, serde_json::Value>,
+)> {
     resolve_merged_public_options_with_overrides_in_conn_with_options(
         conn,
         active_theme,
         transient_global,
         transient_theme,
+        transient_options_pages,
         is_preview,
         requested_locale,
         richtext_nonces,
@@ -54,6 +83,7 @@ async fn resolve_merged_public_options_with_overrides_in_conn_with_options(
     active_theme: Option<(&str, &str)>,
     transient_global: Option<&BTreeMap<String, serde_json::Value>>,
     transient_theme: Option<&BTreeMap<String, serde_json::Value>>,
+    transient_options_pages: Option<&BTreeMap<String, BTreeMap<String, serde_json::Value>>>,
     is_preview: bool,
     requested_locale: Option<&str>,
     mut richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
@@ -237,18 +267,33 @@ async fn resolve_merged_public_options_with_overrides_in_conn_with_options(
     )
     .map_err(ApiError::internal)?;
 
-    if crate::storage::content::table_exists_in_tx(conn, "content_field_groups").await? {
-        let extra_global = crate::storage::options_pages::load_public_options_page_values_in_conn(
-            conn,
-            "site_global",
-            requested_locale,
-            is_preview,
-            richtext_nonces.as_deref_mut(),
-        )
-        .await?;
+    let has_field_groups =
+        crate::storage::content::table_exists_in_tx(conn, "content_field_groups").await?;
+    let transient_global_extra = transient_options_pages.and_then(|m| m.get("site_global"));
+    if has_field_groups {
+        let global_reserved: BTreeSet<String> = global_fields
+            .iter()
+            .filter(|s| !s.is_ui_only())
+            .map(|s| s.key.clone())
+            .collect();
+        let extra_global =
+            crate::storage::options_pages::load_public_options_page_values_with_override_in_conn(
+                conn,
+                "site_global",
+                requested_locale,
+                is_preview,
+                transient_global_extra,
+                Some(&global_reserved),
+                richtext_nonces.as_deref_mut(),
+            )
+            .await?;
         for (k, v) in extra_global {
             site_options.entry(k).or_insert(v);
         }
+    } else if transient_global_extra.is_some_and(|m| !m.is_empty()) {
+        return Err(ApiError::unprocessable(
+            "Không có field group công khai nào gắn với site_global để xem trước.",
+        ));
     }
 
     let mut merged = site_options.clone();
@@ -263,20 +308,33 @@ async fn resolve_merged_public_options_with_overrides_in_conn_with_options(
         .map_err(ApiError::internal)?;
         merged.extend(theme_hydrated);
     }
-    if let Some((theme_id, _)) = active_theme
-        && crate::storage::content::table_exists_in_tx(conn, "content_field_groups").await?
-    {
+    if let Some((theme_id, _)) = active_theme {
         let page_ref = format!("theme:{theme_id}");
-        let extra_theme = crate::storage::options_pages::load_public_options_page_values_in_conn(
-            conn,
-            &page_ref,
-            requested_locale,
-            is_preview,
-            richtext_nonces,
-        )
-        .await?;
-        for (k, v) in extra_theme {
-            merged.entry(k).or_insert(v);
+        let transient_theme_extra = transient_options_pages.and_then(|m| m.get(&page_ref));
+        if has_field_groups {
+            let theme_reserved: BTreeSet<String> = theme_specs
+                .iter()
+                .filter(|s| !s.is_ui_only())
+                .map(|s| s.key.clone())
+                .collect();
+            let extra_theme =
+                crate::storage::options_pages::load_public_options_page_values_with_override_in_conn(
+                    conn,
+                    &page_ref,
+                    requested_locale,
+                    is_preview,
+                    transient_theme_extra,
+                    Some(&theme_reserved),
+                    richtext_nonces,
+                )
+                .await?;
+            for (k, v) in extra_theme {
+                merged.entry(k).or_insert(v);
+            }
+        } else if transient_theme_extra.is_some_and(|m| !m.is_empty()) {
+            return Err(ApiError::unprocessable(
+                "Không có field group công khai nào gắn với theme để xem trước.",
+            ));
         }
     }
 
@@ -395,6 +453,7 @@ pub async fn get_active_public_theme_options_for_locale(
         active_ref,
         None,
         None,
+        None,
         false,
         requested_locale,
         None,
@@ -428,6 +487,7 @@ pub(in crate::storage) async fn get_public_theme_options_in_conn_for_locale_with
         Some((theme_id, manifest_json)),
         None,
         None,
+        None,
         false,
         requested_locale,
         richtext_nonces,
@@ -448,6 +508,7 @@ pub(in crate::storage) async fn get_public_theme_options_in_conn_for_locale(
     resolve_merged_public_options_with_overrides_in_conn_with_options(
         conn,
         Some((theme_id, manifest_json)),
+        None,
         None,
         None,
         false,

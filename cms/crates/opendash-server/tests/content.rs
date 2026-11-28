@@ -26,6 +26,8 @@ mod lifecycle_closure;
 mod lifecycle_quick_edit_hooks;
 #[path = "content/lifecycle_trash_restore_purge.rs"]
 mod lifecycle_trash_restore_purge;
+#[path = "content/options_pages_preview.rs"]
+mod options_pages_preview;
 #[path = "content/page_taxonomy_defaults.rs"]
 mod page_taxonomy_defaults;
 #[path = "content/permalink_redirects_cas.rs"]
