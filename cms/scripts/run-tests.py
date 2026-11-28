@@ -1019,7 +1019,7 @@ class RunTestsSelfTest(unittest.TestCase):
         cases = (
             ("cms/crates/opendash-core/src/theme/mod.rs", {"theme"}),
             ("cms/crates/opendash-core/src/content/types.rs", {"content"}),
-            ("cms/crates/opendash-server/src/template_sec/policy/mod.rs", {"theme"}),
+            ("cms/crates/opendash-server/src/template_sec/policy/mod.rs", {"theme", "builder"}),
             ("cms/crates/opendash-server/src/storage/entries/list.rs", {"content"}),
             ("cms/crates/opendash-server/src/storage/entry_lifecycle/trash.rs", {"content", "plugin"}),
             ("cms/crates/opendash-server/src/routes/revisions/revisions_handlers.rs", {"builder", "content", "ops"}),
