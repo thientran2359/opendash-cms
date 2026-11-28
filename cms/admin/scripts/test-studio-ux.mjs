@@ -14,10 +14,11 @@ const { outputFiles: [{ text: code }] } = await build({
 const {
   EMPTY_DOCUMENT, allNodes, canDeleteNode, canInsertBlockAt, canParentAcceptChild, canPasteOptions,
   cloneWithFreshNodeIds, computeDragMask, copyNodeOptions, createStarterTemplateDocument,
-  duplicateNode, getLockedCompoundChild, hasLockedAncestor, insertBlock, isContainerBlock,
-  isLockedCompoundChildSchema, isLockedNode, locate, matchesContextTarget, matchesPatternList,
+  duplicateNode, findEnclosingList, getLockedCompoundChild, hasLockedAncestor, insertBlock,
+  isContainerBlock, isInsideLoopItem, isLockedCompoundChildSchema, isLockedNode,
+  isLoopSchemaCompatible, locate, matchesContextTarget, matchesPatternList,
   moveNode, moveNodeSibling, nodeTitle, pasteNodeOptions, patchNodeProps, preservesAnchors,
-  removeNode, setNodeMeta, setNodeProps, visibleNodesInTree,
+  removeNode, setNodeMeta, setNodeProps, validateLoopInvariants, visibleNodesInTree,
 } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 
 const schemaSection = {
@@ -150,6 +151,7 @@ test('canvas bridge mounts gears on section/container/block and auto-opens enclo
     appendChild(node) { node.parentElement = this; this.children.push(node); return node; }
     closest(selector) {
       for (let cur = this; cur; cur = cur.parentElement) {
+        if (selector.includes('[data-od-loop-clone=') && cur.getAttribute('data-od-loop-clone') === '1') return cur;
         if (selector === '[data-od-gear]' && cur.getAttribute('data-od-gear') !== null) return cur;
         if (selector.includes('[data-od-editable=') && cur.getAttribute('data-od-editable') === '1'
           && cur.getAttribute('data-node-id')) return cur;
@@ -166,6 +168,10 @@ test('canvas bridge mounts gears on section/container/block and auto-opens enclo
   const details = new Node('details', 'acc-item-id', 'container');
   const nestedBlock = new Node('div', 'nested-txt-id', 'block');
   details.appendChild(nestedBlock);
+  const cloneHost = new Node('article', null, null);
+  cloneHost.setAttribute('data-od-loop-clone', '1');
+  const cloneInner = new Node('a', null, null);
+  cloneHost.appendChild(cloneInner);
   const img = new Node('img', 'img-id', 'block');
   const video = new Node('video', 'vid-id', 'block');
   const nodes = [section, container, details, nestedBlock, img, video];
@@ -201,6 +207,22 @@ test('canvas bridge mounts gears on section/container/block and auto-opens enclo
   listeners.get('click')({ target: nestedBlock, preventDefault() {}, stopPropagation() {} });
   assert.equal(nestedBlock.getAttribute('data-od-selected'), '1');
   assert.equal(details.open, true);
+
+  const msgBeforeClone = messages.length;
+  for (const evtName of ['mouseover', 'click', 'dblclick', 'contextmenu']) {
+    let prevented = false;
+    let stopped = false;
+    listeners.get(evtName)({
+      target: cloneInner,
+      clientX: 10,
+      clientY: 10,
+      preventDefault() { prevented = true; },
+      stopPropagation() { stopped = true; },
+    });
+    assert.equal(prevented, true, `${evtName} on loop clone must preventDefault`);
+    assert.equal(stopped, true, `${evtName} on loop clone must stopPropagation`);
+  }
+  assert.equal(messages.length, msgBeforeClone);
 });
 
 test('insertBlock instantiates presets and recursive default_children accurately', () => {
@@ -232,8 +254,10 @@ test('matchesPatternList and matchesContextTarget mirror Rust matching rules', (
   assert.equal(matchesPatternList(['*', '!core/section'], 'core/section'), false);
   assert.equal(matchesPatternList(['!core/section'], 'core/row'), true);
 
-  assert.equal(matchesContextTarget({ kind: 'loop_item' }, ['*']), false);
-  assert.equal(matchesContextTarget({ kind: 'loop_item' }, null), false);
+  assert.equal(matchesContextTarget({ kind: 'loop_item' }, ['*']), true);
+  assert.equal(matchesContextTarget({ kind: 'loop_item' }, ['loop_item']), true);
+  assert.equal(matchesContextTarget({ kind: 'loop_item' }, ['*', '!loop_item']), false);
+  assert.equal(matchesContextTarget({ kind: 'loop_item' }, ['single', 'page']), false);
   assert.equal(matchesContextTarget({ kind: 'single', type_key: 'post' }, ['template']), true);
   assert.equal(matchesContextTarget({ kind: 'single', type_key: 'post' }, ['single:post']), true);
   assert.equal(matchesContextTarget({ kind: 'single', type_key: 'post' }, ['single:product']), false);
@@ -407,4 +431,105 @@ test('unified appearance routes redirect #/appearance/options and #/appearance/m
   assert.equal(menusRoute.view, 'studio');
   assert.equal(menusRoute.studioPanel, 'menus');
   assert.equal(menusRoute.redirectHash, '#/studio?panel=menus');
+});
+
+test('S04 loop cardinality, allowlist, 16-node cap without reorder double-count, rel depth 4, and html_id guard', () => {
+  const schemaLoopItem = {
+    schema_version: 1, id: 'core/loop-item', title: 'Loop Item', category: 'template', render: 'native',
+    supports_children: true, allowed_parents: ['core/archive-loop', 'core/entry-related', 'core/list'],
+    allowed_children: ['*'], fields: [],
+  };
+  const schemaArchiveLoop = {
+    schema_version: 1, id: 'core/archive-loop', title: 'Archive Loop', category: 'template', render: 'native',
+    supports_children: true, allowed_contexts: ['archive', 'taxonomy', 'index'], allowed_children: ['core/loop-item'],
+    default_children: [{ block_id: 'core/loop-item', children: [{ block_id: 'core/entry-title' }] }],
+    fields: [],
+  };
+  const schemaEntryContent = {
+    schema_version: 1, id: 'core/entry-content', title: 'Entry Content', category: 'template', render: 'native',
+    allowed_contexts: ['single', 'page'], fields: [],
+  };
+  const schemaEntryTitle = {
+    schema_version: 1, id: 'core/entry-title', title: 'Entry Title', category: 'template', render: 'native',
+    allowed_contexts: ['single', 'loop_item'], fields: [],
+  };
+  const schemaList = {
+    schema_version: 1, id: 'core/list', title: 'List', category: 'content', render: 'native',
+    supports_children: true, allowed_contexts: ['*', '!pattern'], allowed_children: ['core/loop-item'],
+    fields: [{ type: 'select', key: 'type_key', label: 'Type', default: 'post' }],
+  };
+  const schemaStack = {
+    schema_version: 1, id: 'core/stack', title: 'Stack', category: 'layout', render: 'native',
+    supports_children: true, allowed_children: ['*'], fields: [],
+  };
+  const loopCat = [
+    ...catalog,
+    ...[schemaLoopItem, schemaArchiveLoop, schemaEntryContent, schemaEntryTitle, schemaList, schemaStack].map(s => ({
+      block_id: s.id, owner_kind: 'core', owner_id: 'core', status: 'active', declaration_state: 'declared', schema: s,
+    })),
+  ];
+
+  const archDoc = {
+    schema_version: 1,
+    blocks: [{
+      id: 'loop-1', block_id: 'core/archive-loop',
+      children: [{
+        id: 'li-1', block_id: 'core/loop-item',
+        children: [{ id: 'et-1', block_id: 'core/entry-title' }],
+      }],
+    }],
+  };
+  assert.equal(canDeleteNode(archDoc, 'li-1', { blockCatalog: loopCat }), false);
+  assert.equal(removeNode(archDoc, 'li-1', { blockCatalog: loopCat }), null);
+  assert.equal(insertBlock(archDoc, 'core/loop-item', 'loop-1', undefined, loopCat), null);
+
+  assert.equal(isLoopSchemaCompatible(schemaEntryTitle), true);
+  assert.equal(isLoopSchemaCompatible(schemaEntryContent), false);
+  assert.equal(insertBlock(archDoc, 'core/entry-content', 'li-1', undefined, loopCat, { contextTarget: { kind: 'archive' } }), null);
+  assert.equal(setNodeMeta(archDoc, 'et-1', { html_id: 'dup' }, loopCat), null);
+  assert.equal(setNodeMeta(archDoc, 'li-1', { html_id: 'dup-li' }, loopCat), null);
+  assert.equal(validateLoopInvariants(archDoc, loopCat), true);
+
+  const fullChildren = Array.from({ length: 16 }, (_, idx) => ({ id: `item-${idx}`, block_id: 'core/entry-title' }));
+  const fullDoc = {
+    schema_version: 1,
+    blocks: [{ id: 'loop-f', block_id: 'core/archive-loop', children: [{ id: 'li-f', block_id: 'core/loop-item', children: fullChildren }] }],
+  };
+  assert.equal(insertBlock(fullDoc, 'core/entry-title', 'li-f', undefined, loopCat, { contextTarget: { kind: 'archive' } }), null);
+  const reordered = moveNodeSibling(fullDoc, 'item-0', 'down', loopCat, { kind: 'archive' });
+  assert.ok(reordered, 'reordering inside a 16-node loop-item must not double-count');
+
+  const depth4Doc = {
+    schema_version: 1,
+    blocks: [{
+      id: 'loop-d', block_id: 'core/archive-loop',
+      children: [{
+        id: 'li-d', block_id: 'core/loop-item',
+        children: [{
+          id: 'st-1', block_id: 'core/stack',
+          children: [{
+            id: 'st-2', block_id: 'core/stack',
+            children: [{
+              id: 'st-3', block_id: 'core/stack',
+              children: [{ id: 'st-4', block_id: 'core/stack', children: [] }],
+            }],
+          }],
+        }],
+      }],
+    }],
+  };
+  assert.equal(validateLoopInvariants(depth4Doc, loopCat), true);
+  assert.equal(insertBlock(depth4Doc, 'core/entry-title', 'st-4', undefined, loopCat), null);
+
+  const listDoc = {
+    schema_version: 1,
+    blocks: [{
+      id: 'list-1', block_id: 'core/list', props: { type_key: 'product' },
+      children: [{ id: 'li-list', block_id: 'core/loop-item', children: [{ id: 't-list', block_id: 'core/entry-title' }] }],
+    }],
+  };
+  assert.equal(findEnclosingList(listDoc, 't-list')?.node.props?.type_key, 'product');
+  assert.equal(isInsideLoopItem(listDoc, 't-list'), true);
+  assert.equal(canDeleteNode(listDoc, 'li-list', { blockCatalog: loopCat }), true);
+  assert.ok(removeNode(listDoc, 'li-list', { blockCatalog: loopCat }));
 });

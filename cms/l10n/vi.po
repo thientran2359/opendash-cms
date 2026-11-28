@@ -21527,3 +21527,24 @@ msgstr "(Bản nháp xem trước)"
 #: server:core_l10n.posts_count_suffix
 msgid "posts"
 msgstr "bài viết"
+
+msgid "Preview entry"
+msgstr "Bài xem trước"
+
+msgid "Preview term"
+msgstr "Phân loại xem trước"
+
+msgid "Loading samples…"
+msgstr "Đang tải mẫu…"
+
+msgid "Auto (latest)"
+msgstr "Tự động (mới nhất)"
+
+msgid "Loop limits or block allowlist prevent this action."
+msgstr "Giới hạn vòng lặp hoặc danh sách block cho phép không hỗ trợ thao tác này."
+
+msgid "Customize each card (Add Loop Item)"
+msgstr "Tùy biến từng thẻ (Thêm Loop Item)"
+
+msgid "Revert to default cards"
+msgstr "Quay về thẻ mặc định"

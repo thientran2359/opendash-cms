@@ -36,6 +36,7 @@ import {
   removeNode,
   setNodeMeta,
   setNodeProps,
+  validateLoopInvariants,
   withinBuilderLimits,
 } from './document.ts';
 import { BuilderInspector } from './BuilderInspector.tsx';
@@ -145,7 +146,37 @@ export function BuilderEditorCore({
       onMessage?.(__("Builder exceeds the limit of 512 nodes or 256 KiB."), true);
       return false;
     }
+    if (!validateLoopInvariants(next, blockSchemas)) {
+      onMessage?.(__("Loop limits or block allowlist prevent this action."), true);
+      return false;
+    }
     return onChangeDocument(next, nextSelected, removedId);
+  };
+
+  const handleToggleListLoopItem = (listId: string, enable: boolean) => {
+    if (disabled) return;
+    if (enable) {
+      const result = insertBlock(draft, 'core/loop-item', listId, 0, blockSchemas, {
+        contextTarget,
+        propsOverride: { layout: 'vertical', surface_style: 'bordered', card_link_to_entry: true },
+        childrenSpecs: [
+          { block_id: 'core/entry-featured-image', props: { aspect_ratio: '16_9' } },
+          { block_id: 'core/entry-title', props: { tag: 'h3', size: { desktop: 'lg' }, link_to_entry: true } },
+          { block_id: 'core/entry-excerpt', props: { max_lines: '2' } },
+        ],
+      });
+      if (!result) {
+        onMessage?.(__("Loop limits or block allowlist prevent this action."), true);
+        return;
+      }
+      finishInsert(result.document, result.id, true);
+      return;
+    }
+    const listLoc = locate(draft, listId);
+    const loopChild = listLoc?.node.children?.find(c => c.block_id === 'core/loop-item');
+    if (!loopChild) return;
+    const next = removeNode(draft, loopChild.id, { requiresContentSlot, blockCatalog: blockSchemas });
+    if (next) applyUpdate(next, listId, loopChild.id);
   };
 
   const finishInsert = (next: BuilderDocument, id: string, openProperties = false): boolean => {
@@ -450,6 +481,7 @@ export function BuilderEditorCore({
             const next = setNodeMeta(draft, id, patch, blockSchemas);
             if (next) applyUpdate(next, id);
           }}
+          onToggleListLoopItem={handleToggleListLoopItem}
           onDelete={remove}
           onApiError={onApiError}
         />

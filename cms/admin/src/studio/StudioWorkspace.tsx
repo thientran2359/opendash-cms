@@ -26,6 +26,7 @@ import { useStudioMode2Revisions } from '../features/revisions/useStudioMode2Rev
 import type { ParsedRoute, StudioPanelId } from '../shell/router.ts';
 import type { AuthUser } from '../types.ts';
 import { StudioCustomizerNav } from './StudioCustomizerNav.tsx';
+import { StudioSamplePickerBar } from './StudioSamplePickerBar.tsx';
 import { StudioSidebarHeader } from './StudioSidebarHeader.tsx';
 import { StudioSidebarFooter } from './StudioSidebarFooter.tsx';
 import type { StudioMenuRequest } from './StudioBlockTree.tsx';
@@ -130,6 +131,8 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [activeThemeName, setActiveThemeName] = useState<string | null>(null);
   const [targets, setTargets] = useState<StudioTargetItem[]>([]);
   const [selectedTargetKey, setSelectedTargetKey] = useState<string | null>(route.studioTemplateKey ?? null);
+  const [previewEntry, setPreviewEntry] = useState<builderApi.TemplatePreviewEntry | null>(null);
+  const [previewTerm, setPreviewTerm] = useState<builderApi.TemplatePreviewTerm | null>(null);
 
   const [generalSaved, setGeneralSaved] = useState<GeneralSettings | null>(null);
   const [generalDraft, setGeneralDraft] = useState<GeneralSettingsDraft | null>(null);
@@ -249,6 +252,8 @@ export const StudioWorkspace: React.FC<Props> = ({
     setThemeOptionsDirty(false);
     setThemeOptionsVersion(null);
     setTemplateEditingEnabled(false);
+    setPreviewEntry(null);
+    setPreviewTerm(null);
     setTemplateDoc(EMPTY_DOCUMENT);
     setTemplateSavedDoc(EMPTY_DOCUMENT);
     setEntryDoc(EMPTY_DOCUMENT);
@@ -711,6 +716,8 @@ export const StudioWorkspace: React.FC<Props> = ({
         {
           target: previewTargetCandidate,
           document: editingSelectedTemplate ? templateDoc : null,
+          preview_entry: previewEntry ?? undefined,
+          preview_term: previewTerm ?? undefined,
           preview_annotations: editingSelectedTemplate,
           preview_locale: effectivePreviewLocale || undefined,
           transient,
@@ -759,6 +766,8 @@ export const StudioWorkspace: React.FC<Props> = ({
     menuSlotsDraft,
     menuPreviewSeq,
     effectivePreviewLocale,
+    previewEntry,
+    previewTerm,
     previewLocaleInvalid,
     localeDraftConflict,
     localeReloadPending,
@@ -771,6 +780,8 @@ export const StudioWorkspace: React.FC<Props> = ({
         return;
       }
     }
+    setPreviewEntry(null);
+    setPreviewTerm(null);
     setSelectedTargetKey(nextKey);
     setTemplateDiagnostics([]);
     hydrateTemplateTarget(nextKey, targets, overrideDocs);
@@ -1149,6 +1160,8 @@ export const StudioWorkspace: React.FC<Props> = ({
                     setThemeOptionsDraft(null);
                     setThemeOptionsDirty(false);
                   }
+                  setPreviewEntry(null);
+                  setPreviewTerm(null);
                   setPreviewLocale(next);
                   setLocaleReloadPending(true);
                   setLoading(true);
@@ -1242,6 +1255,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               onMenuRequestHandled={() => setMenuRequest(null)}
               canvasPickSeq={canvasPickSeq}
               openPatternSeq={patternRequestSeq}
+              previewEntryTypeKey={previewEntry?.type_key ?? null}
               panel={panel}
               onPanelChange={handlePanelChange}
               localeState={localeState}
@@ -1329,6 +1343,17 @@ export const StudioWorkspace: React.FC<Props> = ({
         </aside>
 
         <main className={'flex min-w-0 flex-1 flex-col overflow-hidden ' + (viewport === 'desktop' ? 'bg-white' : 'bg-zinc-200/70')}>
+          {!isMode2 && panel === 'templates' && selectedTarget && (
+            <StudioSamplePickerBar
+              target={selectedTarget}
+              previewLocale={effectivePreviewLocale}
+              previewEntry={previewEntry}
+              previewTerm={previewTerm}
+              onChangePreviewEntry={setPreviewEntry}
+              onChangePreviewTerm={setPreviewTerm}
+              disabled={loading || saving || !csrfToken}
+            />
+          )}
           <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-4')}>
             {previewHtml ? (
               <BuilderPreviewFrame

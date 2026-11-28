@@ -63,6 +63,7 @@ const BRIDGE_SCRIPT = [
   'icon.appendChild(outline);icon.appendChild(circle);gear.appendChild(icon);host.appendChild(gear);',
   '}',
   'document.addEventListener("mouseover",function(e){',
+  'if(e.target&&e.target.closest&&e.target.closest("[data-od-loop-clone=\\"1\\"]")){applyAttr("data-od-hover",null,false);e.preventDefault();e.stopPropagation();return;}',
   'var t=e.target&&e.target.closest?e.target.closest("[data-od-editable=\\"1\\"][data-node-id]"):null;',
   'var id=t?t.getAttribute("data-node-id"):null;',
   'applyAttr("data-od-hover",id,false);',
@@ -76,6 +77,7 @@ const BRIDGE_SCRIPT = [
   '}',
   '},true);',
   'document.addEventListener("click",function(e){',
+  'if(e.target&&e.target.closest&&e.target.closest("[data-od-loop-clone=\\"1\\"]")){e.preventDefault();e.stopPropagation();return;}',
   'var gear=e.target&&e.target.closest?e.target.closest("[data-od-gear]"):null;',
   'if(gear){',
   'e.preventDefault();e.stopPropagation();',
@@ -97,6 +99,7 @@ const BRIDGE_SCRIPT = [
   'window.parent.postMessage({type:"od-studio-pick",nonce:nonce,nodeId:nodeId,kind:el.getAttribute("data-od-kind")||""},"*");',
   '},true);',
   'document.addEventListener("dblclick",function(e){',
+  'if(e.target&&e.target.closest&&e.target.closest("[data-od-loop-clone=\\"1\\"]")){e.preventDefault();e.stopPropagation();return;}',
   'if(e.target&&e.target.closest&&e.target.closest("[data-od-gear]"))return;',
   'var el=e.target&&e.target.closest?e.target.closest("[data-od-editable=\\"1\\"][data-node-id]"):null;',
   'if(!el)return;',
@@ -106,6 +109,7 @@ const BRIDGE_SCRIPT = [
   'window.parent.postMessage({type:"od-studio-edit",nonce:nonce,nodeId:nodeId},"*");',
   '},true);',
   'document.addEventListener("contextmenu",function(e){',
+  'if(e.target&&e.target.closest&&e.target.closest("[data-od-loop-clone=\\"1\\"]")){e.preventDefault();e.stopPropagation();return;}',
   'var gear=e.target&&e.target.closest?e.target.closest("[data-od-gear]"):null;',
   'var el=gear?null:(e.target&&e.target.closest?e.target.closest("[data-od-editable=\\"1\\"][data-node-id]"):null);',
   'var nodeId=gear?gear.getAttribute("data-od-gear"):(el?el.getAttribute("data-node-id"):null);',
@@ -132,7 +136,7 @@ const BRIDGE_SCRIPT = [
   '})();',
 ].join('\n');
 
-const BRIDGE_SCRIPT_SHA256 = 'nhn4sQjJEPssH234n9sJ7uB1zD8gJ1/vb7e2th/SeG8=';
+const BRIDGE_SCRIPT_SHA256 = '2ICmnmjfN1MPMUtRO168mdiAJG/zSvE34oxEj1gnuRA=';
 
 function generateStudioNonce(): string {
   const bytes = new Uint8Array(16);

@@ -21435,3 +21435,24 @@ msgstr ""
 #: server:core_l10n.posts_count_suffix
 msgid "posts"
 msgstr ""
+
+msgid "Preview entry"
+msgstr ""
+
+msgid "Preview term"
+msgstr ""
+
+msgid "Loading samples…"
+msgstr ""
+
+msgid "Auto (latest)"
+msgstr ""
+
+msgid "Loop limits or block allowlist prevent this action."
+msgstr ""
+
+msgid "Customize each card (Add Loop Item)"
+msgstr ""
+
+msgid "Revert to default cards"
+msgstr ""

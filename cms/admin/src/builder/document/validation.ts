@@ -14,6 +14,12 @@ import {
   maxSubtreeDepth,
   object,
 } from './types_and_tree.ts';
+import {
+  canDeleteInLoop,
+  canInsertIntoLoop,
+  canMoveWithLoopRules,
+  isInsideLoopItem,
+} from './loop_validation.ts';
 
 export const MAX_BUILDER_DEPTH = 8;
 export const MAX_BUILDER_NODES = 512;
@@ -61,8 +67,9 @@ export function matchesPatternList(
 }
 
 function matchesContextToken(target: BuilderContextTarget, token: string): boolean {
-  if (target.kind === 'loop_item') return false;
   if (token === '*') return true;
+  if (token === 'loop_item') return target.kind === 'loop_item';
+  if (target.kind === 'loop_item') return false;
   if (token === 'template') return TEMPLATE_CONTEXT_KINDS.has(target.kind);
   if (token === 'single') {
     return target.kind === 'single' || target.kind === 'single_custom' || target.kind === 'singular';
@@ -91,7 +98,6 @@ export function matchesContextTarget(
   allowedContexts: readonly string[] | null | undefined,
 ): boolean {
   if (!contextTarget) return true;
-  if (contextTarget.kind === 'loop_item') return false;
   if (!allowedContexts || allowedContexts.length === 0) return true;
   if (allowedContexts.some(token => token.startsWith('!') && matchesContextToken(contextTarget, token.slice(1)))) {
     return false;
@@ -213,7 +219,7 @@ export function canDeleteNode(
     ).length;
     if (allEntryCount > 0 && subtreeEntryCount >= allEntryCount) return false;
   }
-  return true;
+  return canDeleteInLoop(document, id);
 }
 
 export function withinBuilderLimits(document: BuilderDocument): boolean {
@@ -250,7 +256,7 @@ export function computeDragMask(
   const sourceSchema = findActiveCatalogItem(blockCatalog, source.node.block_id)?.schema;
   const sourceLocked = isLockedNode(source.node, blockCatalog);
 
-  if (sourceSubtreeHeight <= MAX_BUILDER_DEPTH) {
+  if (sourceSubtreeHeight <= MAX_BUILDER_DEPTH && canMoveWithLoopRules(document, sourceId, null, blockCatalog)) {
     if (!sourceLocked && sourceSchema) {
       if (
         matchesContextTarget(contextTarget, sourceSchema.allowed_contexts)
@@ -266,15 +272,19 @@ export function computeDragMask(
   for (const entry of entries) {
     if (subtreeIds.has(entry.node.id)) continue;
     if (entry.depth + sourceSubtreeHeight > MAX_BUILDER_DEPTH) continue;
+    if (!canMoveWithLoopRules(document, sourceId, entry.node.id, blockCatalog)) continue;
     if (isLockedNode(entry.node, blockCatalog) || hasLockedAncestor(document, entry.node.id, blockCatalog)) {
       continue;
     }
     const parentSchema = findActiveCatalogItem(blockCatalog, entry.node.block_id)?.schema;
     if (!parentSchema?.supports_children) continue;
 
+    const effectiveCtx = isInsideLoopItem(document, entry.node.id)
+      ? ({ kind: 'loop_item' } as const)
+      : contextTarget;
     if (!sourceLocked && sourceSchema) {
       if (
-        matchesContextTarget(contextTarget, sourceSchema.allowed_contexts)
+        matchesContextTarget(effectiveCtx, sourceSchema.allowed_contexts)
         && canParentAcceptChild(parentSchema, sourceSchema, entry.node.id)
       ) {
         validParentIds.add(entry.node.id);
@@ -329,8 +339,12 @@ export function canInsertBlockAt(
   blockCatalog: readonly BlockCatalogItemDto[],
   contextTarget?: BuilderContextTarget | null,
   presetKey?: string,
+  childrenSpecsOverride?: readonly DefaultChildSpec[],
 ): boolean {
-  if (!matchesContextTarget(contextTarget, schema.allowed_contexts)) return false;
+  const effectiveCtx = parentId !== null && isInsideLoopItem(document, parentId)
+    ? ({ kind: 'loop_item' } as const)
+    : contextTarget;
+  if (!matchesContextTarget(effectiveCtx, schema.allowed_contexts)) return false;
 
   let parentDepth = 0;
   let parentSchema: BlockSchema | null = null;
@@ -348,7 +362,11 @@ export function canInsertBlockAt(
   if (!canParentAcceptChild(parentSchema, schema, parentId)) return false;
 
   const preset = presetKey ? schema.presets?.find(p => p.key === presetKey) : undefined;
-  const childSpecs = preset?.children?.length ? preset.children : schema.default_children;
+  const childSpecs = childrenSpecsOverride?.length
+    ? childrenSpecsOverride
+    : preset?.children?.length
+      ? preset.children
+      : schema.default_children;
   const sub = summarizeDefaultChildren(childSpecs);
   const subtreeHeight = 1 + sub.height;
   if (parentDepth + subtreeHeight > MAX_BUILDER_DEPTH) return false;
@@ -363,7 +381,7 @@ export function canInsertBlockAt(
   if (countBlocksByType(document, 'core/pattern-ref') + patternRefsAdded > MAX_BUILDER_PATTERN_INSTANCES) {
     return false;
   }
-  return true;
+  return canInsertIntoLoop(document, schema, parentId, blockCatalog, childSpecs);
 }
 
 /** Guarantee immutable/inactive nodes retain identity, props, and inactive container subtrees. */
