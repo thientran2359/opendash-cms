@@ -147,7 +147,11 @@ pub(super) fn render_complex_spec_value(
             let max_refs = if in_loop { 5 } else { 24 };
             let list: Vec<&serde_json::Map<String, Value>> = match val {
                 Some(Value::Object(obj)) => vec![obj],
-                Some(Value::Array(arr)) => arr.iter().filter_map(Value::as_object).take(max_refs).collect(),
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(Value::as_object)
+                    .take(max_refs)
+                    .collect(),
                 _ => Vec::new(),
             };
             if list.is_empty() {
@@ -185,7 +189,10 @@ pub(super) fn render_complex_spec_value(
                 }
             }
             Ok((!out.is_empty()).then(|| {
-                format!("<span class=\"inline-flex flex-wrap gap-2\">{}</span>", out.join(""))
+                format!(
+                    "<span class=\"inline-flex flex-wrap gap-2\">{}</span>",
+                    out.join("")
+                )
             }))
         }
         FieldType::Group => {
@@ -214,7 +221,10 @@ pub(super) fn render_complex_spec_value(
                     ));
                 }
             }
-            Ok((!items.is_empty()).then(|| format!("<dl class=\"space-y-1 text-sm\">{items}</dl>")))
+            Ok(
+                (!items.is_empty())
+                    .then(|| format!("<dl class=\"space-y-1 text-sm\">{items}</dl>")),
+            )
         }
         FieldType::Repeater => {
             let rows: Vec<&serde_json::Map<String, Value>> = val

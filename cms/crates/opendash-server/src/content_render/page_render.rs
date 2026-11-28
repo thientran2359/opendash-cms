@@ -223,7 +223,10 @@ pub(crate) fn rewrite_preview_media_urls(mut view: EntryView, type_key: &str) ->
     if let Some(ref mut cm) = view.cover_media {
         super::rewrite_media_urls_in_value(cm);
     }
-    view.cover = view.cover_media.as_ref().and_then(HydratedMedia::from_value);
+    view.cover = view
+        .cover_media
+        .as_ref()
+        .and_then(HydratedMedia::from_value);
     for val in view.fields.values_mut() {
         super::rewrite_media_urls_in_value(val);
     }

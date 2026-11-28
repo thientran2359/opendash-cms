@@ -118,8 +118,10 @@ pub(in crate::storage) async fn inspect_preview_surfaces_in_tx(
     let stack = vec![root_key.clone()];
 
     if let Some(doc) = draft_doc {
-        inspect_db_document_surfaces_in_tx(tx, doc, 0, &stack, active, url_policy, &schemas, &mut acc)
-            .await?;
+        inspect_db_document_surfaces_in_tx(
+            tx, doc, 0, &stack, active, url_policy, &schemas, &mut acc,
+        )
+        .await?;
     } else if let Some(res) = resolution {
         match res {
             TemplateResolution::DbOverride(record) => {
@@ -150,11 +152,7 @@ pub(in crate::storage) async fn inspect_preview_surfaces_in_tx(
                     )
                 } else {
                     template_sec::validate_and_compile_csec_composition_with_theme_urls(
-                        target_key,
-                        html,
-                        parts,
-                        kind,
-                        url_policy,
+                        target_key, html, parts, kind, url_policy,
                     )
                     .map(Arc::new)
                 }
@@ -170,10 +168,14 @@ pub(in crate::storage) async fn inspect_preview_surfaces_in_tx(
     }
 
     if target.kind != TemplateCandidateKind::Part && !is_canvas {
-        inspect_part_slot_in_tx(tx, "header", 1, &stack, active, url_policy, &schemas, &mut acc)
-            .await?;
-        inspect_part_slot_in_tx(tx, "footer", 1, &stack, active, url_policy, &schemas, &mut acc)
-            .await?;
+        inspect_part_slot_in_tx(
+            tx, "header", 1, &stack, active, url_policy, &schemas, &mut acc,
+        )
+        .await?;
+        inspect_part_slot_in_tx(
+            tx, "footer", 1, &stack, active, url_policy, &schemas, &mut acc,
+        )
+        .await?;
     }
 
     Ok(acc)
@@ -341,15 +343,13 @@ pub(in crate::storage) async fn build_preview_template_data_in_tx(
         input.target.kind,
         K::Single | K::SingleCustom | K::Singular | K::Page | K::PageLayout
     ) {
-        let ct_key = input
-            .target
-            .content_type
-            .as_deref()
-            .unwrap_or(if matches!(input.target.kind, K::Page | K::PageLayout) {
+        let ct_key = input.target.content_type.as_deref().unwrap_or(
+            if matches!(input.target.kind, K::Page | K::PageLayout) {
                 "page"
             } else {
                 "post"
-            });
+            },
+        );
         let loaded_schema =
             crate::storage::content::load_effective_content_schema_in_tx(&mut **tx, ct_key).await?;
         let placeholder = build_placeholder_preview_entry(ct_key);

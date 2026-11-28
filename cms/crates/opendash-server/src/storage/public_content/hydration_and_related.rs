@@ -384,7 +384,14 @@ pub async fn hydrate_entry_views_projected_in_conn(
         .collect();
     let eval_meta: Vec<(i64, String, Option<String>, Option<String>)> = records
         .iter()
-        .map(|r| (r.id, r.content_type_key.clone(), r.page_layout_key.clone(), r.custom_template_key.clone()))
+        .map(|r| {
+            (
+                r.id,
+                r.content_type_key.clone(),
+                r.page_layout_key.clone(),
+                r.custom_template_key.clone(),
+            )
+        })
         .collect();
 
     let urls =
@@ -397,9 +404,8 @@ pub async fn hydrate_entry_views_projected_in_conn(
         std::collections::BTreeMap::new()
     };
     let eval_map = batch_load_entry_eval_contexts_in_conn(conn, &eval_meta, max_view_role).await?;
-    let load_terms = projection.needs_all_fields
-        || projection.needs_terms
-        || projection.needs_primary_category;
+    let load_terms =
+        projection.needs_all_fields || projection.needs_terms || projection.needs_primary_category;
     let mut terms_map = if load_terms {
         batch_load_public_entry_terms_in_conn(conn, &pairs).await?
     } else {

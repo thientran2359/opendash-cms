@@ -434,6 +434,9 @@ async fn migration_0063_clean_slate_and_restore_pre_v1_rejection() {
     .fetch_one(&db)
     .await
     .unwrap();
-    assert!(schema_rows <= 256, "sqlite_schema count {schema_rows} > 256");
+    assert!(
+        schema_rows <= 256,
+        "sqlite_schema count {schema_rows} > 256"
+    );
     db.close().await;
 }

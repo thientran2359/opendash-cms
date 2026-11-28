@@ -598,7 +598,10 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     .unwrap();
     let zip_a2 = build_zip(&[
         ("theme.json", &manifest_a2),
-        ("index.html", b"<main>Alpha v2 Home{{ od_content() }}</main>"),
+        (
+            "index.html",
+            b"<main>Alpha v2 Home{{ od_content() }}</main>",
+        ),
         (
             "single.html",
             b"<main>Alpha v2 Single: {{ entry.title }}{{ od_content() }}</main>",

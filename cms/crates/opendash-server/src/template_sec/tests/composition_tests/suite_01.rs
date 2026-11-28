@@ -516,12 +516,20 @@ fn icon_symbol_dedupe_and_unique_usage_caps() {
         .unwrap();
     assert!(!out.contains("id=\"od-sym-check\""));
     assert!(out.contains("<symbol id=\"od-sym-arrow-right\" viewBox=\"0 0 24 24\">"));
-    assert_eq!(out.matches("<use href=\"#od-sym-arrow-right\"></use>").count(), 2);
+    assert_eq!(
+        out.matches("<use href=\"#od-sym-arrow-right\"></use>")
+            .count(),
+        2
+    );
 
     let mut unique_cap = IconNonceTable::default();
     for idx in 0..MAX_UNIQUE_ICONS_PER_REQUEST {
         unique_cap.unique_names.insert(format!("synthetic-{idx}"));
     }
     let mut bytes_used = 0usize;
-    assert!(unique_cap.register_icon("check", None, &mut bytes_used).is_err());
+    assert!(
+        unique_cap
+            .register_icon("check", None, &mut bytes_used)
+            .is_err()
+    );
 }

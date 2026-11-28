@@ -220,11 +220,10 @@ pub async fn validate_restored_db_read_only(db_path: &Path) -> ApiResult<i64> {
     .fetch_optional(&mut conn)
     .await?;
     if has_theme_source_format.is_some() {
-        let non_v1_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM theme_revisions WHERE source_format != 'v1'",
-        )
-        .fetch_one(&mut conn)
-        .await?;
+        let non_v1_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM theme_revisions WHERE source_format != 'v1'")
+                .fetch_one(&mut conn)
+                .await?;
         if non_v1_count > 0 {
             return Err(ApiError::bad_request(
                 "Bản sao khôi phục chứa theme revision tiền-V1 không được hỗ trợ.",

@@ -3,14 +3,12 @@
 
 mod media_and_links;
 
-pub use media_and_links::{
-    hydrate_media_row, hydrate_media_row_for_template,
-};
 pub(crate) use media_and_links::build_media_urls_and_srcsets;
 use media_and_links::{
     hydrate_entry_row, hydrate_link_value, hydrate_media_for_ctx, hydrate_spacing_value,
     hydrate_term_row, parse_i64_id, unwrap_responsive_desktop,
 };
+pub use media_and_links::{hydrate_media_row, hydrate_media_row_for_template};
 
 pub(super) use std::collections::{BTreeMap, BTreeSet};
 

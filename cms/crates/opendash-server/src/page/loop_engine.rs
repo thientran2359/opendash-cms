@@ -154,8 +154,11 @@ fn render_loop_subtree_node(
         if !node.block_id.starts_with("core/") {
             return Ok(String::new());
         }
-        let nonce = crate::template_sec::generate_children_nonce().map_err(ApiError::bad_request)?;
-        let Some(shell) = render_native_container(node, &def.schema.schema.fields, &nonce, native_parent) else {
+        let nonce =
+            crate::template_sec::generate_children_nonce().map_err(ApiError::bad_request)?;
+        let Some(shell) =
+            render_native_container(node, &def.schema.schema.fields, &nonce, native_parent)
+        else {
             return Ok(String::new());
         };
         let active_cnt = node
@@ -229,16 +232,7 @@ fn render_loop_subtree_node(
         )?
     } else {
         Some(render_loop_csec_leaf(
-            node,
-            def,
-            state,
-            entry,
-            entry_json,
-            loop_index,
-            loop_count,
-            is_preview,
-            cache,
-            budget,
+            node, def, state, entry, entry_json, loop_index, loop_count, is_preview, cache, budget,
         )?)
     };
 
@@ -332,7 +326,11 @@ fn render_loop_item_iterations(
         let mut stretched = String::new();
         if card_link
             && !is_preview
-            && let Some(u) = entry.url.as_deref().map(str::trim).filter(|u| valid_safe_url(u))
+            && let Some(u) = entry
+                .url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| valid_safe_url(u))
         {
             cls.push("relative".to_owned());
             cls.push("od-loop-card-linked".to_owned());
@@ -418,7 +416,11 @@ pub(super) fn render_loop_container_block(
     budget: &mut RenderBudget,
     diagnostics: &mut Vec<BuilderDiagnostic>,
 ) -> ApiResult<Option<String>> {
-    let Some(loop_item) = node.children.iter().find(|c| c.block_id == "core/loop-item") else {
+    let Some(loop_item) = node
+        .children
+        .iter()
+        .find(|c| c.block_id == "core/loop-item")
+    else {
         return Ok(None);
     };
     let l10n = core_l10n(&budget.locale);

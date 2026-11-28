@@ -24,8 +24,7 @@ pub(in crate::storage) struct SurfaceScanAcc {
     pub requested_menu_slots: BTreeSet<String>,
     pub requested_menu_keys: BTreeSet<String>,
     pub loop_projection: opendash_core::builder::LoopProjection,
-    pub inspected_parts:
-        BTreeMap<String, Option<Arc<template_sec::CompiledCsecComposition>>>,
+    pub inspected_parts: BTreeMap<String, Option<Arc<template_sec::CompiledCsecComposition>>>,
     pub part_expansions: usize,
 }
 

@@ -161,9 +161,11 @@ pub(super) async fn inspect_builder_doc_refs(
             let mut opts = Vec::new();
             collect_all_options_sources_with_paths(block_specs, &node.props, None, &mut opts);
             let effective_fields_override = match enclosing_list_type.as_deref() {
-                Some(type_key) => cache
-                    .public_context_fields_for_cpt(&mut *conn, type_key, caller_role)
-                    .await?,
+                Some(type_key) => {
+                    cache
+                        .public_context_fields_for_cpt(&mut *conn, type_key, caller_role)
+                        .await?
+                }
                 None => None,
             };
             let effective_fields = effective_fields_override

@@ -96,8 +96,8 @@ pub(crate) async fn render_home_for_locale(
             .await
         }
         ReadingPageState::Unconfigured => {
-            let query =
-                parse_query(raw_query, QueryScope::ContentArchive).map_err(ApiError::bad_request)?;
+            let query = parse_query(raw_query, QueryScope::ContentArchive)
+                .map_err(ApiError::bad_request)?;
             if query.filters != PublicFilters::default() {
                 return Err(ApiError::bad_request(
                     "Trang chủ không hỗ trợ bộ lọc taxonomy.",

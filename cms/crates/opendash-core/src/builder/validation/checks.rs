@@ -120,7 +120,9 @@ impl<'a> ValidationWalk<'a> {
                     .and_then(|m| m.html_id.as_deref())
                     .is_some_and(|s| !s.is_empty())
             {
-                return Err(BuilderError::Invalid("Loop item nodes cannot declare html_id"));
+                return Err(BuilderError::Invalid(
+                    "Loop item nodes cannot declare html_id",
+                ));
             }
 
             if let Some((lc, rel_depth)) = loop_scope.as_mut().map(|(lc, rd)| (&mut **lc, *rd)) {

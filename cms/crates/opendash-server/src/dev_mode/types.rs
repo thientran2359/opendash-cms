@@ -218,7 +218,8 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     let mut page_layouts = BTreeMap::new();
     for layout in &manifest.page_layouts {
         validate_theme_relative_path(&layout.file).map_err(str::to_owned)?;
-        let cap = crate::theme::theme_entry_cap_and_allowlist(&layout.file).map_err(str::to_owned)?;
+        let cap =
+            crate::theme::theme_entry_cap_and_allowlist(&layout.file).map_err(str::to_owned)?;
         let bytes = add_read(&layout.file, cap)?;
         let src = String::from_utf8(bytes)
             .map_err(|_| format!("Page layout '{}' không phải UTF-8 hợp lệ.", layout.file))?;
@@ -247,7 +248,8 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     // Patterns (fingerprint + sanity check)
     for pattern in &manifest.patterns {
         validate_theme_relative_path(&pattern.file).map_err(str::to_owned)?;
-        let cap = crate::theme::theme_entry_cap_and_allowlist(&pattern.file).map_err(str::to_owned)?;
+        let cap =
+            crate::theme::theme_entry_cap_and_allowlist(&pattern.file).map_err(str::to_owned)?;
         let _ = add_read(&pattern.file, cap)?;
     }
 

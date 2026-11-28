@@ -340,7 +340,13 @@ pub(in crate::storage) fn document_slot_scan_with_schemas(
     let mut parts = Vec::new();
     let mut slots = 0;
     let mut entry_blocks = 0;
-    collect_parts_and_slots_rec(&document.blocks, schemas, &mut parts, &mut slots, &mut entry_blocks);
+    collect_parts_and_slots_rec(
+        &document.blocks,
+        schemas,
+        &mut parts,
+        &mut slots,
+        &mut entry_blocks,
+    );
     Ok((parts, slots, entry_blocks))
 }
 
@@ -361,8 +367,7 @@ pub(in crate::storage) fn validate_content_slots(
 ) -> ApiResult<()> {
     let valid = match entry_content_rule_for_target(target.kind) {
         EntryContentRule::RequiredOrEntryBlock => {
-            entry_content_count <= 1
-                && (entry_content_count == 1 || entry_context_block_count >= 1)
+            entry_content_count <= 1 && (entry_content_count == 1 || entry_context_block_count >= 1)
         }
         EntryContentRule::OptionalMaxOne => entry_content_count <= 1,
         EntryContentRule::Forbidden => entry_content_count == 0,

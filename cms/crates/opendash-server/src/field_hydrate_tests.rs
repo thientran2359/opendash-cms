@@ -457,7 +457,12 @@ fn content_public_visibility_filters_nested_private_and_admin_group_repeater_chi
         None,
     )
     .unwrap();
-    assert!(hydrated_rt["bio"].as_str().unwrap().starts_with("OD_RICHTEXT_"));
+    assert!(
+        hydrated_rt["bio"]
+            .as_str()
+            .unwrap()
+            .starts_with("OD_RICHTEXT_")
+    );
     assert_eq!(rt_html.get("bio").map(String::as_str), Some("<p>Top</p>"));
     assert_eq!(
         rt_html.get("meta.note").map(String::as_str),

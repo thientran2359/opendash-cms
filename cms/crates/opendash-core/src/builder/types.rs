@@ -1,5 +1,5 @@
-pub(super) use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 pub(super) use super::{BlockNode, BuilderDocument};
+pub(super) use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub(super) use serde::{Deserialize, Serialize};
 pub(super) use serde_json::Value;

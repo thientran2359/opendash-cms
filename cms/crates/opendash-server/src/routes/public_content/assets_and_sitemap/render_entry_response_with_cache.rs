@@ -152,16 +152,17 @@ pub(crate) async fn render_entry_response_with_cache(
     let entry_has_form = entry_body
         .as_ref()
         .is_some_and(|body| body.has_active_contact_form);
-    let builder_body_fragment = entry_body.as_ref().map(|body| {
-        match crate::document::normalize_public_document_with_options(&body.html, true) {
-            Ok(parts) => {
-                let mut fragment = parts.authorized_styles.concat();
-                fragment.push_str(&parts.body_fragment);
-                fragment
-            }
-            Err(_) => body.html.clone(),
-        }
-    });
+    let builder_body_fragment =
+        entry_body.as_ref().map(
+            |body| match crate::document::normalize_public_document_with_options(&body.html, true) {
+                Ok(parts) => {
+                    let mut fragment = parts.authorized_styles.concat();
+                    fragment.push_str(&parts.body_fragment);
+                    fragment
+                }
+                Err(_) => body.html.clone(),
+            },
+        );
     let classic_body_fragment = if entry_body.is_none() {
         content_render::render_entry_body_fragment(&entry.values, &effective_schema)
     } else {

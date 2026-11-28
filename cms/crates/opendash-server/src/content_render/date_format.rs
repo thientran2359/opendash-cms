@@ -101,7 +101,10 @@ fn en_month_short(month: i8) -> &'static str {
     }
 }
 
-fn parse_civil_date_in_tz(raw: &str, tz_name: &str) -> Option<(jiff::civil::Date, Option<jiff::civil::Time>)> {
+fn parse_civil_date_in_tz(
+    raw: &str,
+    tz_name: &str,
+) -> Option<(jiff::civil::Date, Option<jiff::civil::Time>)> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -218,11 +221,7 @@ pub fn format_number_locale(value: f64, locale: &str) -> String {
         grouped.push(ch);
     }
     let int_fmt: String = grouped.chars().rev().collect();
-    let mut out = if neg {
-        format!("-{int_fmt}")
-    } else {
-        int_fmt
-    };
+    let mut out = if neg { format!("-{int_fmt}") } else { int_fmt };
     if !frac_part.is_empty() {
         out.push(dec_sep);
         out.push_str(frac_part);

@@ -63,7 +63,11 @@ fn render_core_field_value(
             (!txt.is_empty()).then(|| escape_text_or_badge(txt, display_format))
         }
         "url" => {
-            let url = entry.url.as_deref().map(str::trim).filter(|u| valid_safe_url(u))?;
+            let url = entry
+                .url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| valid_safe_url(u))?;
             let lbl = if in_loop {
                 clamp_chars_ellipsis(url, LOOP_URL_LABEL_CLAMP_CHARS)
             } else {
@@ -104,7 +108,11 @@ fn render_core_field_value(
     }
 }
 
-fn render_string_list_pills(val: Option<&Value>, in_loop: bool, display_format: &str) -> Option<String> {
+fn render_string_list_pills(
+    val: Option<&Value>,
+    in_loop: bool,
+    display_format: &str,
+) -> Option<String> {
     let items: Vec<String> = val
         .and_then(Value::as_array)
         .into_iter()
@@ -160,7 +168,11 @@ pub(super) fn render_spec_value(
 
     match spec.field_type {
         FieldType::Text | FieldType::Textarea | FieldType::RadioButtons => {
-            let Some(s) = val.and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) else {
+            let Some(s) = val
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            else {
                 return Ok(None);
             };
             let clamped = if in_loop {
@@ -174,7 +186,11 @@ pub(super) fn render_spec_value(
             if spec.multiple {
                 Ok(render_string_list_pills(val, in_loop, display_format))
             } else {
-                let Some(s) = val.and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) else {
+                let Some(s) = val
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                else {
                     return Ok(None);
                 };
                 let clamped = if in_loop {
@@ -187,7 +203,11 @@ pub(super) fn render_spec_value(
         }
         FieldType::Checkbox => Ok(render_string_list_pills(val, in_loop, display_format)),
         FieldType::Email => {
-            let Some(s) = val.and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) else {
+            let Some(s) = val
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            else {
                 return Ok(None);
             };
             let mailto = format!("mailto:{s}");
@@ -267,20 +287,37 @@ pub(super) fn render_spec_value(
             let Some(num) = val.and_then(Value::as_f64).filter(|f| f.is_finite()) else {
                 return Ok(None);
             };
-            Ok(Some(escape_text_or_badge(&format_number_locale(num, locale), display_format)))
+            Ok(Some(escape_text_or_badge(
+                &format_number_locale(num, locale),
+                display_format,
+            )))
         }
         FieldType::Boolean => {
             let Some(flag) = val.and_then(Value::as_bool) else {
                 return Ok(None);
             };
-            let text = if flag { l10n.yes.as_ref() } else { l10n.no.as_ref() };
+            let text = if flag {
+                l10n.yes.as_ref()
+            } else {
+                l10n.no.as_ref()
+            };
             Ok(Some(escape_text_or_badge(text, display_format)))
         }
         FieldType::Date | FieldType::Datetime | FieldType::Time => {
-            let Some(s) = val.and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) else {
+            let Some(s) = val
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            else {
                 return Ok(None);
             };
-            let fmt = format_temporal_field(spec.field_type, s, DateFormatPreset::DmySlash, timezone, locale);
+            let fmt = format_temporal_field(
+                spec.field_type,
+                s,
+                DateFormatPreset::DmySlash,
+                timezone,
+                locale,
+            );
             Ok(Some(escape_text_or_badge(&fmt, display_format)))
         }
         FieldType::Color => {
@@ -301,10 +338,18 @@ pub(super) fn render_spec_value(
             }
         }
         FieldType::Icon => {
-            let Some(name) = val.and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) else {
+            let Some(name) = val
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            else {
                 return Ok(None);
             };
-            Ok(register_core_icon_in_budget(budget, name, Some("w-4 h-4 inline-block"))?)
+            Ok(register_core_icon_in_budget(
+                budget,
+                name,
+                Some("w-4 h-4 inline-block"),
+            )?)
         }
         FieldType::Richtext => {
             let clean_html = richtext_override
@@ -345,10 +390,16 @@ fn render_sanitized_richtext_field(
     if in_loop || display_format == "text" {
         let plain = strip_richtext_to_plain(html);
         let clean = clamp_chars_ellipsis(
-            plain.split_whitespace().collect::<Vec<_>>().join(" ").as_str(),
+            plain
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .as_str(),
             LOOP_TEXT_CLAMP_CHARS,
         );
-        return Ok((!clean.trim().is_empty()).then(|| format!("<span>{}</span>", escape_html(&clean))));
+        return Ok(
+            (!clean.trim().is_empty()).then(|| format!("<span>{}</span>", escape_html(&clean)))
+        );
     }
     let nonce = budget.richtext_nonces.register_sanitized(html.to_owned())?;
     Ok(Some(format!("<div class=\"od-prose\">{nonce}</div>")))
@@ -440,7 +491,8 @@ pub(super) fn render_entry_field(
             let lbl = if !custom_label.is_empty() {
                 custom_label.to_owned()
             } else {
-                fv.map(|f| f.label.clone()).unwrap_or_else(|| field_key.to_owned())
+                fv.map(|f| f.label.clone())
+                    .unwrap_or_else(|| field_key.to_owned())
             };
             let html = fv.and_then(|f| {
                 let txt = f.text.trim();

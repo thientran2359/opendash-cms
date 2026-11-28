@@ -22,13 +22,15 @@ pub(crate) async fn render_index_home_response_for_locale(
         })
         .map(|s| s.base.descriptor.clone());
     let l10n = content_render::core_l10n(locale);
-    let schema = active_post_schema.clone().unwrap_or_else(|| ContentTypeDefinition {
-        key: "post".to_owned(),
-        label: l10n.latest_posts_heading.to_string(),
-        singular_label: None,
-        description: None,
-        settings: Default::default(),
-    });
+    let schema = active_post_schema
+        .clone()
+        .unwrap_or_else(|| ContentTypeDefinition {
+            key: "post".to_owned(),
+            label: l10n.latest_posts_heading.to_string(),
+            singular_label: None,
+            description: None,
+            settings: Default::default(),
+        });
     let per_page = i64::from(schema.settings.archive_per_page).max(1);
     let offset = (page - 1) * per_page;
     let sort = crate::storage::entries::PublishedListSort::from_content_default_sort(

@@ -1,15 +1,15 @@
 use std::collections::BTreeMap;
 
 use opendash_core::{
-    builder::BlockNode,
-    content::EffectiveContentSchema,
-    field_schema::valid_safe_url,
+    builder::BlockNode, content::EffectiveContentSchema, field_schema::valid_safe_url,
     media::valid_media_render_url,
 };
 use serde_json::Value;
 
 use super::{
-    blocks_chrome::{align_justify_classes, align_text_classes, bool_prop, preview_empty_placeholder},
+    blocks_chrome::{
+        align_justify_classes, align_text_classes, bool_prop, preview_empty_placeholder,
+    },
     blocks_entry_field::render_entry_field,
     blocks_entry_nav::{render_entry_content, render_entry_nav, render_entry_terms},
     blocks_layout::{responsive_str_cascade, str_prop},
@@ -120,7 +120,11 @@ pub(super) fn render_entry_title(
 
     let esc_title = escape_html(&entry.title);
     let inner = if bool_prop(&node.props, "link_to_entry", false)
-        && let Some(u) = entry.url.as_deref().map(str::trim).filter(|u| valid_safe_url(u))
+        && let Some(u) = entry
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| valid_safe_url(u))
     {
         format!(
             "<a href=\"{}\" class=\"hover:text-od-primary transition-colors\">{esc_title}</a>",
@@ -153,10 +157,12 @@ pub(super) fn render_entry_featured_image(
     let radius = radius_class(str_prop(&node.props, "radius", "lg"));
     let img_cls = format!("w-full h-full {fit}");
 
-    let media_opt = entry
-        .cover
-        .clone()
-        .or_else(|| entry.cover_media.as_ref().and_then(HydratedMedia::from_value));
+    let media_opt = entry.cover.clone().or_else(|| {
+        entry
+            .cover_media
+            .as_ref()
+            .and_then(HydratedMedia::from_value)
+    });
     let sizes = if in_loop {
         "(max-width: 768px) 100vw, 480px"
     } else {
@@ -203,7 +209,11 @@ pub(super) fn render_entry_featured_image(
     };
 
     let body = if bool_prop(&node.props, "link_to_entry", false)
-        && let Some(u) = entry.url.as_deref().map(str::trim).filter(|u| valid_safe_url(u))
+        && let Some(u) = entry
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| valid_safe_url(u))
     {
         format!(
             "<a href=\"{}\" class=\"block w-full h-full\">{media_markup}</a>",
@@ -313,7 +323,12 @@ pub(super) fn render_entry_meta(
                         String::new()
                     };
                     let name_html = escape_html(&cat.name);
-                    let inner = match cat.url.as_deref().map(str::trim).filter(|u| valid_safe_url(u)) {
+                    let inner = match cat
+                        .url
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|u| valid_safe_url(u))
+                    {
                         Some(u) => format!(
                             "<a href=\"{}\" class=\"hover:text-od-primary\">{name_html}</a>",
                             escape_html(u)
@@ -426,7 +441,10 @@ pub(super) fn render_entry_block_with_context(
             .or_else(|| state_schemas.get(&e.type_key))
     });
     match node.block_id.as_str() {
-        "core/entry-title" => Ok(Some((render_entry_title(node, entry, in_loop, is_preview), 0))),
+        "core/entry-title" => Ok(Some((
+            render_entry_title(node, entry, in_loop, is_preview),
+            0,
+        ))),
         "core/entry-featured-image" => Ok(Some((
             render_entry_featured_image(node, entry, in_loop, is_preview),
             0,
@@ -442,9 +460,11 @@ pub(super) fn render_entry_block_with_context(
             is_preview,
         ))),
         "core/entry-terms" => Ok(Some((render_entry_terms(node, entry, is_preview), 0))),
-        "core/entry-field" => render_entry_field(node, entry, schema, in_loop, is_preview, timezone, budget)
-            .map(|h| Some((h, 0)))
-            .map_err(ApiError::bad_request),
+        "core/entry-field" => {
+            render_entry_field(node, entry, schema, in_loop, is_preview, timezone, budget)
+                .map(|h| Some((h, 0)))
+                .map_err(ApiError::bad_request)
+        }
         "core/entry-nav" => render_entry_nav(node, td, is_preview, budget)
             .map(|h| Some((h, 0)))
             .map_err(ApiError::bad_request),

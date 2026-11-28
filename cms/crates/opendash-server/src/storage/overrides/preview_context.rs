@@ -227,8 +227,10 @@ pub async fn preview_typed_override_with_cache_and_locale(
     };
     let mut body_diagnostics = Vec::new();
     let mut route = None;
-    let mut built_entry: Option<(content_render::EntryView, Vec<content_render::BreadcrumbItem>)> =
-        None;
+    let mut built_entry: Option<(
+        content_render::EntryView,
+        Vec<content_render::BreadcrumbItem>,
+    )> = None;
     let mut entry_has_builder_body = false;
     let (mut theme_context, body) = if let Some((record, effective_schema)) = &entry {
         route = Some((record.content_type_key.as_str(), record.slug.as_str()));
@@ -282,29 +284,27 @@ pub async fn preview_typed_override_with_cache_and_locale(
             None
         };
         entry_has_builder_body = builder_rendered.is_some();
-        let body = builder_rendered
-            .map(Ok)
-            .unwrap_or_else(|| {
-                let html = content_render::render_single_with_context_for_locale(
-                    definition,
-                    &built_view,
-                    None,
-                    &site,
-                    built.archive_url.as_deref(),
-                    &built_breadcrumbs,
-                    &fmt_cfg,
-                    &effective_locale,
-                )?;
-                crate::document::normalize_document_with_policy(
-                    &html,
-                    crate::document::DocumentNormalizeOptions {
-                        allow_trusted_theme_markup: false,
-                        allow_admin_media_preview: true,
-                    },
-                )
-                .map(|doc| doc.body_fragment)
-                .map_err(|_| ApiError::bad_request("Invalid preview body."))
-            })?;
+        let body = builder_rendered.map(Ok).unwrap_or_else(|| {
+            let html = content_render::render_single_with_context_for_locale(
+                definition,
+                &built_view,
+                None,
+                &site,
+                built.archive_url.as_deref(),
+                &built_breadcrumbs,
+                &fmt_cfg,
+                &effective_locale,
+            )?;
+            crate::document::normalize_document_with_policy(
+                &html,
+                crate::document::DocumentNormalizeOptions {
+                    allow_trusted_theme_markup: false,
+                    allow_admin_media_preview: true,
+                },
+            )
+            .map(|doc| doc.body_fragment)
+            .map_err(|_| ApiError::bad_request("Invalid preview body."))
+        })?;
         built_entry = Some((built_view, built_breadcrumbs));
         (built.theme_context, body)
     } else {

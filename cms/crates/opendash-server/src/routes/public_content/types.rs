@@ -308,23 +308,22 @@ pub(super) async fn render_resolved_public_template_html_with_surface(
                         pagination: route_ctx.pagination,
                     });
             let td_ref = owned_td.as_render_data(site_ctx);
-            let rendered =
-                overrides::render_resolved_public_builder_with_template_data_for_locale(
-                    db,
-                    &record,
-                    active,
-                    &context,
-                    route_entry,
-                    locale,
-                    Some(&slot_html),
-                    route_ctx.list_pages.unwrap_or(&empty_pages),
-                    route_ctx.route_path.unwrap_or("/"),
-                    search_data,
-                    Some(&td_ref),
-                    budget,
-                    cache,
-                )
-                .await?;
+            let rendered = overrides::render_resolved_public_builder_with_template_data_for_locale(
+                db,
+                &record,
+                active,
+                &context,
+                route_entry,
+                locale,
+                Some(&slot_html),
+                route_ctx.list_pages.unwrap_or(&empty_pages),
+                route_ctx.route_path.unwrap_or("/"),
+                search_data,
+                Some(&td_ref),
+                budget,
+                cache,
+            )
+            .await?;
             Ok(ResolvedPublicHtml {
                 html: rendered.html,
                 has_active_contact_form: rendered.has_active_contact_form,

@@ -191,8 +191,12 @@ fn loop_item_validation_enforces_limits_allowlist_html_id_and_projection() {
     let reg = |cat: &mut RegistryCatalog<RegisteredBlockSchema>, raw: serde_json::Value| {
         let s: BlockSchema = serde_json::from_value(raw).unwrap();
         s.validate("core").unwrap();
-        cat.register(s.id.clone(), ResourceOwner::Core, RegisteredBlockSchema { schema: s })
-            .unwrap();
+        cat.register(
+            s.id.clone(),
+            ResourceOwner::Core,
+            RegisteredBlockSchema { schema: s },
+        )
+        .unwrap();
     };
     reg(
         &mut cat,
@@ -298,7 +302,17 @@ fn loop_item_validation_enforces_limits_allowlist_html_id_and_projection() {
     assert!(empty_loop.validate_for_save(&cat, &idx_ctx, None).is_err());
 
     // html_id inside core/loop-item fails
-    let mut bad_meta = node("loop-1", "core/archive-loop", json!({}), vec![node("item-1", "core/loop-item", json!({}), vec![node("t1", "core/entry-title", json!({}), vec![])])]);
+    let mut bad_meta = node(
+        "loop-1",
+        "core/archive-loop",
+        json!({}),
+        vec![node(
+            "item-1",
+            "core/loop-item",
+            json!({}),
+            vec![node("t1", "core/entry-title", json!({}), vec![])],
+        )],
+    );
     bad_meta.children[0].children[0].meta = Some(NodeMeta {
         html_id: Some("dup-id".into()),
         ..Default::default()
@@ -307,7 +321,11 @@ fn loop_item_validation_enforces_limits_allowlist_html_id_and_projection() {
         schema_version: 1,
         blocks: vec![bad_meta],
     };
-    assert!(bad_meta_doc.validate_for_save(&cat, &idx_ctx, None).is_err());
+    assert!(
+        bad_meta_doc
+            .validate_for_save(&cat, &idx_ctx, None)
+            .is_err()
+    );
 
     // Incompatible 3p block (richtext) fails inside loop
     let bad_3p = BuilderDocument {
@@ -337,7 +355,12 @@ fn loop_item_validation_enforces_limits_allowlist_html_id_and_projection() {
                 "item-1",
                 "core/loop-item",
                 json!({}),
-                vec![node("cf", "core/contact-form", json!({ "form_id": 1 }), vec![])],
+                vec![node(
+                    "cf",
+                    "core/contact-form",
+                    json!({ "form_id": 1 }),
+                    vec![],
+                )],
             )],
         )],
     };
@@ -353,7 +376,12 @@ fn loop_item_validation_enforces_limits_allowlist_html_id_and_projection() {
             "loop-1",
             "core/archive-loop",
             json!({}),
-            vec![node("item-1", "core/loop-item", json!({}), too_many_children)],
+            vec![node(
+                "item-1",
+                "core/loop-item",
+                json!({}),
+                too_many_children,
+            )],
         )],
     };
     assert!(bad_count.validate_for_save(&cat, &idx_ctx, None).is_err());
@@ -372,7 +400,12 @@ fn loop_item_validation_enforces_limits_allowlist_html_id_and_projection() {
                     json!({}),
                     vec![
                         node("img-1", "core/entry-featured-image", json!({}), vec![]),
-                        node("fld-1", "core/entry-field", json!({ "field_key": "price" }), vec![]),
+                        node(
+                            "fld-1",
+                            "core/entry-field",
+                            json!({ "field_key": "price" }),
+                            vec![],
+                        ),
                     ],
                 )],
             ),

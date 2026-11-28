@@ -41,8 +41,7 @@ pub(crate) async fn render_canonical_taxonomy(
         Some(root) => theme_storage::load_active_theme(db, &root.0).await?,
         None => None,
     };
-    let term_schema =
-        crate::storage::taxonomy::load_effective_term_schema(db, &kind_key).await?;
+    let term_schema = crate::storage::taxonomy::load_effective_term_schema(db, &kind_key).await?;
     let candidates = overrides::build_candidates(&PublicTemplateContext::Taxonomy {
         taxonomy: kind_key.clone(),
         term_id,
@@ -224,8 +223,7 @@ pub(crate) async fn render_canonical_taxonomy(
         .as_ref()
         .map(|ts| ts.taxonomy.label.clone())
         .unwrap_or_else(|| schema.key.clone());
-    let term_summary =
-        content_render::TermRenderSummary::from_detail(&term_detail, taxonomy_label);
+    let term_summary = content_render::TermRenderSummary::from_detail(&term_detail, taxonomy_label);
     let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
     let cache = crate::page::BlockTemplateCache::global();
     let body = render_resolved_public_template_html_with_surface(

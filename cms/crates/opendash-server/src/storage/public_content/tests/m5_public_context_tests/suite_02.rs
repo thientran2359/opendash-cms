@@ -523,8 +523,14 @@ async fn adjacent_entries_use_idx_0063_without_temp_btree_and_respect_visibility
     .unwrap();
 
     for (newer, tax_filter) in [
-        (false, crate::storage::public_content::AdjacentTaxFilter::None),
-        (true, crate::storage::public_content::AdjacentTaxFilter::None),
+        (
+            false,
+            crate::storage::public_content::AdjacentTaxFilter::None,
+        ),
+        (
+            true,
+            crate::storage::public_content::AdjacentTaxFilter::None,
+        ),
         (
             false,
             crate::storage::public_content::AdjacentTaxFilter::PrimaryCategory,
@@ -538,11 +544,10 @@ async fn adjacent_entries_use_idx_0063_without_temp_btree_and_respect_visibility
             "EXPLAIN QUERY PLAN {}",
             crate::storage::public_content::build_adjacent_sql(newer, tax_filter)
         );
-        let plan_rows: Vec<(i64, i64, i64, String)> =
-            sqlx::query_as(sqlx::AssertSqlSafe(plan_sql))
-                .fetch_all(&db)
-                .await
-                .unwrap();
+        let plan_rows: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(plan_sql))
+            .fetch_all(&db)
+            .await
+            .unwrap();
         let detail = plan_rows
             .iter()
             .map(|r| r.3.as_str())

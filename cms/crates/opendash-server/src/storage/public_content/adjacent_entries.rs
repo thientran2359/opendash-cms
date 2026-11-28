@@ -290,10 +290,11 @@ pub async fn query_adjacent_entries_in_tx(
     let urls = if is_preview {
         BTreeMap::new()
     } else {
-        crate::storage::seo::resolve_public_entry_paths_by_entry_ids_in_conn(&mut **tx, &ids).await?
+        crate::storage::seo::resolve_public_entry_paths_by_entry_ids_in_conn(&mut **tx, &ids)
+            .await?
     };
-    let eff_schema = crate::storage::content::load_effective_content_schema_in_tx(&mut **tx, type_key)
-        .await?;
+    let eff_schema =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut **tx, type_key).await?;
     let cover_key = eff_schema.as_ref().and_then(select_cover_media_spec_keys);
 
     let extract_media_id = |values_json: &str| -> Option<String> {
@@ -320,7 +321,9 @@ pub async fn query_adjacent_entries_in_tx(
     let build_item = |row: AdjacentSqlRow, mid_opt: Option<String>| -> AdjacentEntryItem {
         let id = row.0;
         let url = if is_preview {
-            Some(format!("/api/admin/content-types/{type_key}/entries/{id}/preview"))
+            Some(format!(
+                "/api/admin/content-types/{type_key}/entries/{id}/preview"
+            ))
         } else {
             urls.get(&id).cloned()
         };

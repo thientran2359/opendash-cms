@@ -215,7 +215,12 @@ pub(super) fn build_entry_view_with_defs(
             match definition.field_type {
                 FieldType::Media => pure_media_fallback(value).unwrap_or(Value::Null),
                 FieldType::Gallery => Value::Array(
-                    value.as_array().into_iter().flatten().filter_map(pure_media_fallback).collect(),
+                    value
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(pure_media_fallback)
+                        .collect(),
                 ),
                 FieldType::Richtext => {
                     if let Some(raw_str) = value.as_str().filter(|s| !s.trim().is_empty())

@@ -115,12 +115,11 @@ pub(in crate::storage) async fn resolve_preview_term_in_tx(
     };
 
     let resolved_id = if let Some(explicit_id) = target.term_id {
-        let row: Option<(i64, String, String)> = sqlx::query_as(
-            "SELECT t.id, t.kind, t.locale FROM taxonomy_terms t WHERE t.id = ?",
-        )
-        .bind(explicit_id)
-        .fetch_optional(&mut **tx)
-        .await?;
+        let row: Option<(i64, String, String)> =
+            sqlx::query_as("SELECT t.id, t.kind, t.locale FROM taxonomy_terms t WHERE t.id = ?")
+                .bind(explicit_id)
+                .fetch_optional(&mut **tx)
+                .await?;
         let Some((tid, kind, locale)) = row else {
             return Err(ApiError::not_found(
                 "Không tìm thấy term phân loại để xem trước.",

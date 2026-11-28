@@ -1,10 +1,14 @@
 use std::collections::BTreeMap;
 
-use opendash_core::{builder::BlockNode, field_schema::valid_safe_url, media::valid_media_render_url};
+use opendash_core::{
+    builder::BlockNode, field_schema::valid_safe_url, media::valid_media_render_url,
+};
 use serde_json::Value;
 
 use super::{
-    blocks_chrome::{align_justify_classes, align_text_classes, bool_prop, preview_empty_placeholder},
+    blocks_chrome::{
+        align_justify_classes, align_text_classes, bool_prop, preview_empty_placeholder,
+    },
     blocks_entry::{aspect_ratio_class, radius_class},
     blocks_layout::{responsive_i64_cascade, responsive_str_cascade, str_prop},
     render::escape_html,
@@ -140,7 +144,10 @@ fn render_archive_description(
         return preview_empty_placeholder("Archive Description", is_preview);
     };
 
-    let mut cls = vec!["od-archive-description".to_owned(), "text-od-muted".to_owned()];
+    let mut cls = vec![
+        "od-archive-description".to_owned(),
+        "text-od-muted".to_owned(),
+    ];
     let (sz_resp, ds, ts, ms) = responsive_str_cascade(&node.props, "font_size", "base");
     let map_sz = |s: &str| match s {
         "sm" => "text-sm",
@@ -262,7 +269,12 @@ fn render_archive_pagination(
     cls.extend(align_justify_classes(&node.props, "center"));
 
     let mut inner = String::new();
-    if let Some(u) = pag.previous_url.as_deref().map(str::trim).filter(|u| valid_safe_url(u)) {
+    if let Some(u) = pag
+        .previous_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| valid_safe_url(u))
+    {
         inner.push_str(&format!(
             "<a href=\"{}\" class=\"rounded border border-od-border px-3 py-1.5 hover:border-od-primary\">{}</a>",
             escape_html(u),
@@ -279,7 +291,12 @@ fn render_archive_pagination(
                     inner.push_str(&format!(
                         "<span aria-current=\"page\" class=\"rounded bg-od-primary px-3 py-1.5 font-semibold text-white\">{num}</span>"
                     ));
-                } else if let Some(u) = link.url.as_deref().map(str::trim).filter(|u| valid_safe_url(u)) {
+                } else if let Some(u) = link
+                    .url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|u| valid_safe_url(u))
+                {
                     inner.push_str(&format!(
                         "<a href=\"{}\" class=\"rounded border border-od-border px-3 py-1.5 hover:border-od-primary\">{num}</a>",
                         escape_html(u)
@@ -294,7 +311,12 @@ fn render_archive_pagination(
         ));
     }
 
-    if let Some(u) = pag.next_url.as_deref().map(str::trim).filter(|u| valid_safe_url(u)) {
+    if let Some(u) = pag
+        .next_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| valid_safe_url(u))
+    {
         inner.push_str(&format!(
             "<a href=\"{}\" class=\"rounded border border-od-border px-3 py-1.5 hover:border-od-primary\">{}</a>",
             escape_html(u),
@@ -320,12 +342,13 @@ pub(super) fn render_archive_block(
     match node.block_id.as_str() {
         "core/archive-title" => Some(render_archive_title(node, td, &budget.locale, is_preview)),
         "core/archive-description" => Some(render_archive_description(node, td, is_preview)),
-        "core/archive-featured-image" => {
-            Some(render_archive_featured_image(node, td, is_preview))
-        }
-        "core/archive-pagination" => {
-            Some(render_archive_pagination(node, td, &budget.locale, is_preview))
-        }
+        "core/archive-featured-image" => Some(render_archive_featured_image(node, td, is_preview)),
+        "core/archive-pagination" => Some(render_archive_pagination(
+            node,
+            td,
+            &budget.locale,
+            is_preview,
+        )),
         _ => None,
     }
 }

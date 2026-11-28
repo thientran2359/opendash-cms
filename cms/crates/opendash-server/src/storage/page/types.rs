@@ -87,10 +87,7 @@ pub(in crate::storage) const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, Option<&str>)
         include_str!("../../builtin_blocks/language-switcher/block.json"),
         None,
     ),
-    (
-        include_str!("../../builtin_blocks/menu/block.json"),
-        None,
-    ),
+    (include_str!("../../builtin_blocks/menu/block.json"), None),
     (
         include_str!("../../builtin_blocks/breadcrumbs/block.json"),
         None,

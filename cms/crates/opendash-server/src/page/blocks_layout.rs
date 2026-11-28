@@ -12,7 +12,11 @@ pub(super) struct NativeParentInfo {
     pub active_child_count: usize,
 }
 
-pub(super) fn str_prop<'a>(props: &'a BTreeMap<String, Value>, key: &str, default: &'a str) -> &'a str {
+pub(super) fn str_prop<'a>(
+    props: &'a BTreeMap<String, Value>,
+    key: &str,
+    default: &'a str,
+) -> &'a str {
     props
         .get(key)
         .and_then(Value::as_str)

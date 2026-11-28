@@ -1,7 +1,5 @@
 use opendash_core::{
-    builder::BlockNode,
-    field_schema::valid_safe_url,
-    media::valid_media_render_url,
+    builder::BlockNode, field_schema::valid_safe_url, media::valid_media_render_url,
 };
 use serde_json::Value;
 
@@ -50,9 +48,13 @@ pub(super) fn render_entry_terms(
 
     let style = str_prop(&node.props, "style", "pill");
     let item_cls = match style {
-        "outline" => "inline-block rounded-full border border-od-border px-2.5 py-0.5 text-xs hover:border-od-primary",
+        "outline" => {
+            "inline-block rounded-full border border-od-border px-2.5 py-0.5 text-xs hover:border-od-primary"
+        }
         "text" => "inline-block text-xs text-od-muted hover:text-od-primary",
-        _ => "inline-block rounded-full bg-od-surface-alt px-2.5 py-0.5 text-xs font-medium hover:text-od-primary",
+        _ => {
+            "inline-block rounded-full bg-od-surface-alt px-2.5 py-0.5 text-xs font-medium hover:text-od-primary"
+        }
     };
     let link_to_term = bool_prop(&node.props, "link_to_term", true);
     let mut cls = vec![
@@ -80,7 +82,11 @@ pub(super) fn render_entry_terms(
     for term in terms {
         let name = escape_html(&term.name);
         if link_to_term
-            && let Some(u) = term.url.as_deref().map(str::trim).filter(|u| valid_safe_url(u))
+            && let Some(u) = term
+                .url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| valid_safe_url(u))
         {
             inner.push_str(&format!(
                 "<a href=\"{}\" class=\"{item_cls}\">{name}</a>",
@@ -183,7 +189,11 @@ pub(super) fn render_entry_nav(
 
     let mut cols = String::new();
     if let Some(prev) = &adj.prev
-        && let Some(href) = prev.url.as_deref().map(str::trim).filter(|u| valid_safe_url(u))
+        && let Some(href) = prev
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| valid_safe_url(u))
     {
         let arrow = register_core_icon_in_budget(budget, "arrow-left", Some("w-4 h-4 shrink-0"))?
             .unwrap_or_default();
@@ -211,7 +221,11 @@ pub(super) fn render_entry_nav(
     }
 
     if let Some(next) = &adj.next
-        && let Some(href) = next.url.as_deref().map(str::trim).filter(|u| valid_safe_url(u))
+        && let Some(href) = next
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| valid_safe_url(u))
     {
         let arrow = register_core_icon_in_budget(budget, "arrow-right", Some("w-4 h-4 shrink-0"))?
             .unwrap_or_default();

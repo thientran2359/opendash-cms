@@ -1,9 +1,6 @@
 use std::collections::BTreeMap;
 
-use opendash_core::{
-    builder::BlockNode,
-    field_schema::valid_safe_url,
-};
+use opendash_core::{builder::BlockNode, field_schema::valid_safe_url};
 use serde_json::Value;
 
 use super::{
@@ -114,7 +111,8 @@ fn render_site_brand(
         );
         if let Some(pic) = opendash_core::media::render_responsive_picture_html(&input, is_preview)
         {
-            logo_html = format!("<span class=\"od-brand-logo inline-flex items-center\">{pic}</span>");
+            logo_html =
+                format!("<span class=\"od-brand-logo inline-flex items-center\">{pic}</span>");
         }
     }
 
@@ -218,7 +216,11 @@ fn render_language_switcher(
                     continue;
                 }
                 let text = label_for(&alt.code, &alt.label);
-                let cur_attr = if alt.is_current { " aria-current=\"true\" class=\"block px-3 py-1.5 text-xs font-semibold text-od-primary\"" } else { " class=\"block px-3 py-1.5 text-xs hover:bg-od-surface-alt\"" };
+                let cur_attr = if alt.is_current {
+                    " aria-current=\"true\" class=\"block px-3 py-1.5 text-xs font-semibold text-od-primary\""
+                } else {
+                    " class=\"block px-3 py-1.5 text-xs hover:bg-od-surface-alt\""
+                };
                 list.push_str(&format!(
                     "<li><a href=\"{}\"{cur_attr}>{}</a></li>",
                     escape_html(&alt.url),
@@ -242,7 +244,11 @@ fn render_language_switcher(
                 } else {
                     "rounded-full border border-od-border px-3 py-1 text-xs font-medium hover:bg-od-surface-alt"
                 };
-                let cur_attr = if alt.is_current { " aria-current=\"true\"" } else { "" };
+                let cur_attr = if alt.is_current {
+                    " aria-current=\"true\""
+                } else {
+                    ""
+                };
                 items.push_str(&format!(
                     "<a href=\"{}\" class=\"{item_cls}\"{cur_attr}>{}</a>",
                     escape_html(&alt.url),
@@ -263,7 +269,11 @@ fn render_language_switcher(
                 } else {
                     "text-xs text-od-muted hover:text-od-text"
                 };
-                let cur_attr = if alt.is_current { " aria-current=\"true\"" } else { "" };
+                let cur_attr = if alt.is_current {
+                    " aria-current=\"true\""
+                } else {
+                    ""
+                };
                 items.push(format!(
                     "<a href=\"{}\" class=\"{item_cls}\"{cur_attr}>{}</a>",
                     escape_html(&alt.url),
@@ -375,10 +385,7 @@ fn render_menu_block(
     let items_html = render_menu_items_html(&menu.items, max_depth, 1, is_vertical);
 
     if is_vertical {
-        let ul_cls = format!(
-            "flex flex-col list-none p-0 {}",
-            justify.join(" ")
-        );
+        let ul_cls = format!("flex flex-col list-none p-0 {}", justify.join(" "));
         return Ok(Some(format!(
             "<nav class=\"{}\" aria-label=\"{}\"><ul class=\"{ul_cls}\" style=\"gap:var(--od-menu-gap,16px);\">{items_html}</ul></nav>",
             nav_cls.join(" "),
@@ -464,7 +471,9 @@ fn render_breadcrumbs_block(
                 _ => register_core_icon_in_budget(budget, "chevron-right", Some("w-3.5 h-3.5"))?
                     .unwrap_or_else(|| "/".to_owned()),
             };
-            lis.push_str(&format!("<li class=\"inline-flex items-center\" aria-hidden=\"true\">{sep_html}</li>"));
+            lis.push_str(&format!(
+                "<li class=\"inline-flex items-center\" aria-hidden=\"true\">{sep_html}</li>"
+            ));
         }
         let home_icon = if idx == 0 && show_home_icon {
             register_core_icon_in_budget(budget, "home", Some("w-3.5 h-3.5 inline-block mr-1"))?
@@ -474,7 +483,11 @@ fn render_breadcrumbs_block(
         };
         let label = format!("{home_icon}{}", escape_html(&item.name));
         if item.is_current || item.url.as_deref().is_none_or(|u| !valid_safe_url(u)) {
-            let cur_attr = if item.is_current { " aria-current=\"page\" class=\"font-medium text-od-text\"" } else { "" };
+            let cur_attr = if item.is_current {
+                " aria-current=\"page\" class=\"font-medium text-od-text\""
+            } else {
+                ""
+            };
             lis.push_str(&format!("<li{cur_attr}>{label}</li>"));
         } else if let Some(url) = item.url.as_deref() {
             lis.push_str(&format!(

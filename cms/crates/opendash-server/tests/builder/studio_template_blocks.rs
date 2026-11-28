@@ -2,7 +2,9 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 use opendash_core::{
     block_schema::{BlockSchema, RegisteredBlockSchema, validate_block_catalog_templates},
-    builder::{BlockNode, BuilderContextTarget, BuilderDocument, NodeMeta, inspect_loop_projection},
+    builder::{
+        BlockNode, BuilderContextTarget, BuilderDocument, NodeMeta, inspect_loop_projection,
+    },
     registry::{RegistryCatalog, ResourceOwner},
     theme::TemplateCandidateKind,
 };
@@ -171,11 +173,9 @@ async fn s03_template_blocks_loops_xss_preview_and_public_routes_e2e() {
         .await
         .unwrap();
     let items = targets["items"].as_array().unwrap();
-    assert!(
-        items
-            .iter()
-            .any(|i| i["group"] == "taxonomies" && i["canonical_target_key"] == "taxonomy:key:category")
-    );
+    assert!(items.iter().any(
+        |i| i["group"] == "taxonomies" && i["canonical_target_key"] == "taxonomy:key:category"
+    ));
     assert_eq!(
         items
             .iter()
@@ -185,7 +185,9 @@ async fn s03_template_blocks_loops_xss_preview_and_public_routes_e2e() {
     );
 
     // 2. Mode 2 rejects template blocks
-    let page_for_mode2 = app.create_entry("page", "Mode2 Reject", "mode2-reject").await;
+    let page_for_mode2 = app
+        .create_entry("page", "Mode2 Reject", "mode2-reject")
+        .await;
     let bad_mode2 = app
         .send_json(
             Method::PUT,
@@ -287,7 +289,8 @@ async fn s03_template_blocks_loops_xss_preview_and_public_routes_e2e() {
     let draft_img = app.upload_png("draft-product.png").await;
     let create_prod = |title: &str, slug: &str, values: Value| {
         let app = &app;
-        let payload = json!({ "title": title, "slug": slug, "values": values, "term_ids": [cat_term_id] });
+        let payload =
+            json!({ "title": title, "slug": slug, "values": values, "term_ids": [cat_term_id] });
         async move {
             app.send_json(
                 Method::POST,
@@ -441,7 +444,11 @@ async fn s03_template_blocks_loops_xss_preview_and_public_routes_e2e() {
         .await;
         let status = resp.status();
         let body_text = resp.text().await.unwrap();
-        assert_eq!(status, StatusCode::CREATED, "create_prod {slug} failed: {body_text}");
+        assert_eq!(
+            status,
+            StatusCode::CREATED,
+            "create_prod {slug} failed: {body_text}"
+        );
         let created: Value = serde_json::from_str(&body_text).unwrap();
         let pid = created["id"].as_i64().unwrap();
         assert_eq!(
@@ -473,9 +480,18 @@ async fn s03_template_blocks_loops_xss_preview_and_public_routes_e2e() {
     assert!(!pub_p2.contains("TOP_SECRET_TOKEN"));
     assert!(!pub_p2.contains("<script>alert(1)</script>"));
     assert!(pub_p2.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
-    assert!(!pub_p2.contains("<dl>"), "unexpected fallback <dl> in {pub_p2}");
-    assert!(pub_p2.contains("od-entry-nav"), "missing od-entry-nav in {pub_p2}");
-    assert!(pub_p2.contains("od-entry-related"), "missing od-entry-related in {pub_p2}");
+    assert!(
+        !pub_p2.contains("<dl>"),
+        "unexpected fallback <dl> in {pub_p2}"
+    );
+    assert!(
+        pub_p2.contains("od-entry-nav"),
+        "missing od-entry-nav in {pub_p2}"
+    );
+    assert!(
+        pub_p2.contains("od-entry-related"),
+        "missing od-entry-related in {pub_p2}"
+    );
 
     // 7. Archive override with CPT description, SVG <symbol> dedupe, od-lt-* CSS, loop clone guard, richtext clamp
     let arch_doc = json!({
@@ -550,7 +566,10 @@ async fn s03_template_blocks_loops_xss_preview_and_public_routes_e2e() {
         .as_str()
         .unwrap()
         .to_owned();
-    assert_eq!(arch_prev_html.matches("data-node-id=\"li-title\"").count(), 1);
+    assert_eq!(
+        arch_prev_html.matches("data-node-id=\"li-title\"").count(),
+        1
+    );
     assert!(arch_prev_html.matches("data-od-loop-clone=\"1\"").count() >= 2);
 
     // 8. Header part (site-brand + 0-JS menu + language-switcher) on / and core/list with core/loop-item on page
