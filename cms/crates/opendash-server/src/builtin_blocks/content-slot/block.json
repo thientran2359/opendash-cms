@@ -5,6 +5,6 @@
   "category": "content",
   "icon": "book-open",
   "render": "native",
-  "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "home", "index"],
+  "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "index"],
   "fields": []
 }

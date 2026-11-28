@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn enqueued_for_route(
-    active: Option<&theme_storage::ActiveThemeV3>,
+    active: Option<&theme_storage::ActiveTheme>,
     condition: EnqueueCondition,
 ) -> ResolvedEnqueuedAssets {
     active.map_or_else(ResolvedEnqueuedAssets::default, |active| {
@@ -27,7 +27,7 @@ pub(crate) async fn render_not_found_response_for_locale(
     services: Option<&PublicRenderServices>,
 ) -> ApiResult<Response> {
     let active = match themes_root {
-        Some(Extension(root)) => theme_storage::load_active_theme_v3(db, &root.0).await?,
+        Some(Extension(root)) => theme_storage::load_active_theme(db, &root.0).await?,
         None => None,
     };
     let site = settings::get_general_for_locale(db, locale).await?;
@@ -290,7 +290,7 @@ pub(crate) async fn render_canonical_archive(
         Some(canonical_base.clone()),
     );
     let active_v3 = match themes_root {
-        Some(Extension(root)) => theme_storage::load_active_theme_v3(&db, &root.0).await?,
+        Some(Extension(root)) => theme_storage::load_active_theme(&db, &root.0).await?,
         None => None,
     };
     let site = settings::get_general_for_locale(&db, Some(&locale)).await?;

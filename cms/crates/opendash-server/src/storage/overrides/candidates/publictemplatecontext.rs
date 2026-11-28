@@ -4,9 +4,6 @@ use super::*;
 /// eligibility and assigned template eligibility before constructing context.
 #[derive(Debug, Clone)]
 pub enum PublicTemplateContext {
-    Home {
-        page_layout_key: Option<String>,
-    },
     Page {
         page_layout_key: Option<String>,
     },
@@ -26,13 +23,14 @@ pub enum PublicTemplateContext {
     },
     NotFound,
     Search,
+    Index,
     Part {
         part_key: String,
     },
 }
 
 pub(crate) fn is_canvas_page_layout(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     layout_key: Option<&str>,
 ) -> bool {
     let Some(layout_key) = layout_key else {
@@ -52,7 +50,7 @@ pub(crate) fn is_canvas_page_layout(
 }
 
 pub(in crate::storage) fn is_canvas_target(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     target: &TemplateCandidate,
 ) -> bool {
     target.kind == TemplateCandidateKind::PageLayout
@@ -60,7 +58,7 @@ pub(in crate::storage) fn is_canvas_target(
 }
 
 pub(in crate::storage) fn is_canvas_resolved_key(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     target_key: &str,
 ) -> bool {
     is_canvas_page_layout(active, target_key.strip_prefix("page_layout:"))
@@ -70,16 +68,6 @@ pub fn build_candidates(context: &PublicTemplateContext) -> ApiResult<Vec<Templa
     use TemplateCandidateKind as K;
     let mut result = Vec::new();
     match context {
-        PublicTemplateContext::Home { page_layout_key } => {
-            result.push(candidate(K::Home));
-            if let Some(layout_key) = page_layout_key {
-                let mut layout = candidate(K::PageLayout);
-                layout.layout_key = Some(layout_key.clone());
-                result.push(layout);
-            }
-            result.push(candidate(K::Page));
-            result.push(candidate(K::Index));
-        }
         PublicTemplateContext::Page { page_layout_key } => {
             if let Some(layout_key) = page_layout_key {
                 let mut layout = candidate(K::PageLayout);
@@ -150,6 +138,9 @@ pub fn build_candidates(context: &PublicTemplateContext) -> ApiResult<Vec<Templa
             result.push(candidate(K::Search));
             result.push(candidate(K::Index));
         }
+        PublicTemplateContext::Index => {
+            result.push(candidate(K::Index));
+        }
         PublicTemplateContext::Part { part_key } => {
             let mut part = candidate(K::Part);
             part.part_key = Some(part_key.clone());
@@ -183,29 +174,6 @@ pub(in crate::storage) async fn build_reset_candidate_chain_for_locale_in_conn(
     use TemplateCandidateKind as K;
     let mut candidates = vec![target.clone()];
     match target.kind {
-        K::Home => {
-            let effective_locale = settings::resolve_requested_locale_in_conn(conn, locale).await?;
-            let layout: Option<String> = sqlx::query_scalar(
-                "SELECT e.page_layout_key FROM site_reading_settings AS reading
-                   JOIN content_entries AS e ON e.id = reading.homepage_page_id
-                  WHERE reading.locale = ?
-                    AND e.content_type_key='page'
-                    AND e.locale = reading.locale
-                    AND e.trashed_at IS NULL
-                    AND e.publication_status='published'",
-            )
-            .bind(&effective_locale)
-            .fetch_optional(&mut *conn)
-            .await?
-            .flatten();
-            if let Some(layout_key) = layout {
-                let mut layout_candidate = candidate(K::PageLayout);
-                layout_candidate.layout_key = Some(layout_key);
-                candidates.push(layout_candidate);
-            }
-            candidates.push(candidate(K::Page));
-            candidates.push(candidate(K::Index));
-        }
         K::PageLayout => {
             candidates.push(candidate(K::Page));
             candidates.push(candidate(K::Index));
@@ -291,7 +259,6 @@ pub(in crate::storage) async fn build_reset_candidate_chain_for_locale_in_conn(
 pub(in crate::storage) fn template_kind_str(kind: TemplateCandidateKind) -> &'static str {
     use TemplateCandidateKind as K;
     match kind {
-        K::Home => "home",
         K::Page => "page",
         K::PageLayout => "page_layout",
         K::Single => "single",
@@ -367,7 +334,7 @@ pub(in crate::storage) fn validate_content_slots(
 ) -> ApiResult<()> {
     use TemplateCandidateKind as K;
     let valid = match target.kind {
-        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular => slots == 1,
+        K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular => slots == 1,
         K::Index => slots <= 1,
         K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part => slots == 0,
     };

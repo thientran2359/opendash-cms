@@ -1,4 +1,4 @@
-//! Admin-only theme v3 revision install/activation/rollback,
+//! Admin-only Theme Format V1 revision install/activation/rollback,
 //! and revision-scoped `/theme/{revision_digest}/{*path}` asset serving.
 
 use super::*;
@@ -41,7 +41,7 @@ pub(super) use crate::{
             self, RevisionActivationOutcome, RevisionInstallOutcome, ThemeList, ThemeRevisionRecord,
         },
     },
-    theme::{parse_theme_zip_v3, theme_asset_mime},
+    theme::{parse_theme_zip, theme_asset_mime},
 };
 
 #[derive(Deserialize)]
@@ -90,7 +90,7 @@ pub struct ActivateInput {
 }
 
 #[derive(Serialize)]
-pub(super) struct ThemeV3InstallResponse {
+pub(super) struct ThemeInstallResponse {
     pub(super) revision_id: String,
     pub(super) theme_id: String,
     pub(super) version: String,

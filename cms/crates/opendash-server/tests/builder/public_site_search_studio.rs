@@ -175,7 +175,7 @@ async fn studio_search_target_blocks_diagnostics_and_public_override() {
         .header(header::ORIGIN, &site.base)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "index" },
             "document": home_doc,
             "preview_annotations": true
         }))

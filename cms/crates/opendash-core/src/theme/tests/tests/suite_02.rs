@@ -4,7 +4,6 @@ use super::*;
 fn candidate_keys_cover_all_dimensions_and_reject_ambiguous_targets() {
     use TemplateCandidateKind as Kind;
     for (kind, key) in [
-        (Kind::Home, "home"),
         (Kind::Page, "page"),
         (Kind::Single, "single"),
         (Kind::Archive, "archive"),
@@ -73,8 +72,8 @@ fn candidate_keys_cover_all_dimensions_and_reject_ambiguous_targets() {
 }
 
 #[test]
-fn v3_rejects_paths_outside_their_declared_directories() {
-    let valid = v3_manifest();
+fn theme_rejects_paths_outside_their_declared_directories() {
+    let valid = theme_manifest();
     for path in [
         "templates/index.html",
         "../index.html",
@@ -130,8 +129,8 @@ fn v3_rejects_paths_outside_their_declared_directories() {
 }
 
 #[test]
-fn v3_rejects_duplicate_keys_and_invalid_custom_templates() {
-    let valid = v3_manifest();
+fn theme_rejects_duplicate_keys_and_invalid_custom_templates() {
+    let valid = theme_manifest();
     let mut manifest = valid.clone();
     manifest.page_layouts.push(manifest.page_layouts[0].clone());
     assert!(manifest.validate().is_err());
@@ -164,10 +163,10 @@ fn v3_rejects_duplicate_keys_and_invalid_custom_templates() {
 }
 
 #[test]
-fn v3_options_accept_null_and_reject_global_type_overrides() {
-    let mut raw = serde_json::to_value(v3_manifest()).unwrap();
+fn theme_options_accept_null_and_reject_global_type_overrides() {
+    let mut raw = serde_json::to_value(theme_manifest()).unwrap();
     raw["options"] = json!(null);
-    let parsed: ThemeV3Manifest = serde_json::from_value(raw.clone()).unwrap();
+    let parsed: ThemeManifest = serde_json::from_value(raw.clone()).unwrap();
     assert!(parsed.options.is_empty());
     assert!(parsed.validate().is_ok());
 
@@ -175,7 +174,7 @@ fn v3_options_accept_null_and_reject_global_type_overrides() {
     raw["options"] = json!([
         { "key": "social_facebook", "label": "FB", "type": "text", "public": true }
     ]);
-    let bad_url: ThemeV3Manifest = serde_json::from_value(raw.clone()).unwrap();
+    let bad_url: ThemeManifest = serde_json::from_value(raw.clone()).unwrap();
     assert!(bad_url.validate().is_err());
 
     // Rejects overriding site_logo with non-image or text type
@@ -183,7 +182,7 @@ fn v3_options_accept_null_and_reject_global_type_overrides() {
         { "key": "site_logo", "label": "Logo", "type": "text", "public": true }
     ]);
     assert!(
-        serde_json::from_value::<ThemeV3Manifest>(raw.clone())
+        serde_json::from_value::<ThemeManifest>(raw.clone())
             .unwrap()
             .validate()
             .is_err()
@@ -192,7 +191,7 @@ fn v3_options_accept_null_and_reject_global_type_overrides() {
         { "key": "site_logo", "label": "Logo", "type": "media", "media_kind": "video", "public": true }
     ]);
     assert!(
-        serde_json::from_value::<ThemeV3Manifest>(raw.clone())
+        serde_json::from_value::<ThemeManifest>(raw.clone())
             .unwrap()
             .validate()
             .is_err()
@@ -203,6 +202,6 @@ fn v3_options_accept_null_and_reject_global_type_overrides() {
         { "key": "social_facebook", "label": "FB", "type": "url", "public": true },
         { "key": "site_logo", "label": "Logo", "type": "media", "media_kind": "image", "public": true }
     ]);
-    let ok_manifest: ThemeV3Manifest = serde_json::from_value(raw).unwrap();
+    let ok_manifest: ThemeManifest = serde_json::from_value(raw).unwrap();
     assert!(ok_manifest.validate().is_ok());
 }

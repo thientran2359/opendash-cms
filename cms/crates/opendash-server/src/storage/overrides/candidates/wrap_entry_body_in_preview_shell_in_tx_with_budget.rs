@@ -17,7 +17,7 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         .await?
         .ok_or_else(|| ApiError::not_found("Content entry not found."))?;
     entries::filter_entry_values_for_role(&mut record, schema, actor_role);
-    let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
+    let active = theme::load_active_theme_in_conn(&mut **tx, themes_root).await?;
     let url_policy =
         active_theme_url_policy_in_conn(&mut **tx, active.as_ref(), None, Some(schema), None)
             .await?;

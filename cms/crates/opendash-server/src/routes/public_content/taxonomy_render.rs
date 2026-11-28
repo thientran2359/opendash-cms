@@ -142,8 +142,8 @@ pub(crate) async fn render_canonical_taxonomy(
         description: None,
         settings: Default::default(),
     };
-    let active_v3 = match themes_root {
-        Some(root) => theme_storage::load_active_theme_v3(db, &root.0).await?,
+    let active_theme = match themes_root {
+        Some(root) => theme_storage::load_active_theme(db, &root.0).await?,
         None => None,
     };
     let site_ctx = SiteContext {
@@ -201,13 +201,13 @@ pub(crate) async fn render_canonical_taxonomy(
     )
     .await?;
     let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
-    budget.set_locale_context(active_v3.as_ref(), &locale, locale_ctx);
+    budget.set_locale_context(active_theme.as_ref(), &locale, locale_ctx);
     let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
     let cache = crate::page::BlockTemplateCache::global();
     let body = resolve_public_template_html(
         db,
         &candidates,
-        active_v3.as_ref(),
+        active_theme.as_ref(),
         &site_ctx,
         &site_opts,
         &theme_opts,
@@ -243,7 +243,7 @@ pub(crate) async fn render_canonical_taxonomy(
     } else {
         overrides::resolve_and_render_header_footer_with_context_for_locale(
             db,
-            active_v3.as_ref(),
+            active_theme.as_ref(),
             &body.theme_context,
             &body.precompiled_shell,
             Some(&locale),
@@ -263,7 +263,7 @@ pub(crate) async fn render_canonical_taxonomy(
     )
     .await?;
     let tax_class = format!("od-tax-{}", schema.key);
-    let enqueued = enqueued_for_route(active_v3.as_ref(), EnqueueCondition::Taxonomy);
+    let enqueued = enqueued_for_route(active_theme.as_ref(), EnqueueCondition::Taxonomy);
     let canonical_query =
         crate::cache::canonicalize_public_query(raw_query, QueryScope::TaxonomyArchive(kind));
     let composed = content_render::compose_document_with_seo_with_assets(
@@ -273,7 +273,7 @@ pub(crate) async fn render_canonical_taxonomy(
         &seo_view,
         &["od-route-taxonomy", &tax_class],
         &enqueued,
-        active_v3.is_some(),
+        active_theme.is_some(),
     )?;
     let composed = apply_public_render_hooks(
         composed,

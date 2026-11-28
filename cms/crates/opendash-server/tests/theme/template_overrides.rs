@@ -108,7 +108,7 @@ fn build_theme_v3_zip(id: &str, header_html: &str, single_html: &str) -> Vec<u8>
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = serde_json::json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": id,
             "name": id,
             "version": "1.0.0",
@@ -704,7 +704,7 @@ async fn v3_page_canvas_and_custom_single_selections_survive_theme_switch() {
         let mut writer = ZipWriter::new(std::io::Cursor::new(&mut bytes));
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version":3,"theme_id":"layout-v3","name":"Layout V3","version":"1.0.0",
+            "manifest_version":1,"theme_id":"layout-v3","name":"Layout V3","version":"1.0.0",
             "templates":[
                 {"kind":"single","file":"single.html"},
                 {"kind":"single_custom","custom_key":"feature","label":"Feature",
@@ -925,7 +925,7 @@ fn preview_part_document(keys: &[&str]) -> Value {
 
 fn build_mixed_preview_theme_zip() -> Vec<u8> {
     let manifest = json!({
-        "manifest_version":3, "theme_id":"mixed-preview", "name":"Mixed Preview",
+        "manifest_version":1, "theme_id":"mixed-preview", "name":"Mixed Preview",
         "version":"1.0.0",
         "templates":[{"kind":"single","file":"single.html"}],
         "parts":{

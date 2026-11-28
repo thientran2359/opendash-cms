@@ -77,7 +77,7 @@ async fn cuj2_0061_migration_preserves_legacy_cpt_term_extensions_and_zero_delta
     .await
     .unwrap();
 
-    migrator.run(&pool).await.unwrap();
+    migrator.run_to(61, &pool).await.unwrap();
     let post_objects: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sqlite_schema WHERE name != '_sqlx_migrations' AND name != 'sqlite_sequence' AND name NOT LIKE 'sqlite_stat%'",
     )
@@ -89,6 +89,7 @@ async fn cuj2_0061_migration_preserves_legacy_cpt_term_extensions_and_zero_delta
         "0061 must maintain +0 net sqlite_schema objects"
     );
     assert!(post_objects < 256);
+    migrator.run(&pool).await.unwrap();
 
     let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
         .fetch_one(&pool)

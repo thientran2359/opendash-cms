@@ -47,12 +47,12 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
     .unwrap();
 
     let theme_manifest = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "acf-e2e-theme",
         "name": "ACF Theme",
         "version": "1.0.0",
         "templates": [
-            {"kind": "home", "file": "home.html"},
+            {"kind": "page", "file": "page.html"},
             {"kind": "single", "file": "single.html"},
             {"kind": "archive", "file": "archive.html"},
             {"kind": "taxonomy", "taxonomy": "theme_topic", "file": "taxonomy-theme_topic.html"},
@@ -92,7 +92,7 @@ async fn cuj1_cuj3_cuj4_acf_end_to_end_api_public_seo_and_acl() {
     .unwrap();
     let zip = build_zip(&[
         ("theme.json", &theme_manifest),
-        ("home.html", b"<main data-hotline='{{ custom_options.theme_opts.hotline | default(\"\") }}'>{% if custom_options.theme_opts.logo %}{{ od_image(custom_options.theme_opts.logo) }}{% endif %}{{ od_content() }}</main>"),
+        ("page.html", b"<main data-hotline='{{ custom_options.theme_opts.hotline | default(\"\") }}'>{% if custom_options.theme_opts.logo %}{{ od_image(custom_options.theme_opts.logo) }}{% endif %}{{ od_content() }}</main>"),
         ("single.html", b"<article data-order='{{ entry.menu_order }}' data-excerpt='{{ entry.excerpt }}'><h1>{{ entry.title }}</h1>{% if entry.parent %}<a href='{{ entry.parent.url }}'>{{ entry.parent.title }}</a>{% endif %}{{ od_content() }}</article>"),
         ("archive.html", b"<section>{% for e in entries %}<div class='item'>{{ e.title }}</div>{% endfor %}</section>"),
         ("taxonomy-theme_topic.html", b"<section data-desc='{{ term.description }}' data-sort='{{ term.sort_order }}' data-color='{{ term.fields.accent_color | default(\"\") }}'>{% if term.featured_image %}{{ od_image(term.featured_image) }}{% endif %}{% if term.fields.banner_img %}{{ od_image(term.fields.banner_img) }}{% endif %}</section>"),

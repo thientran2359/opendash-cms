@@ -2,7 +2,7 @@
 
 ## Overview
 
-Owns **100% of SQLite queries (`sqlx::query*`, `sqlx::raw_sql`)** in OpenDash across 34 domain storage modules (`admin_extensions`–`theme`, `fields`, `redirects`, `entry_lifecycle`, and `contact`) wired through [`mod.rs`](mod.rs) (plus `s03_media_acl_tests.rs`, `theme_tests/`, `operations_tests.rs`, `smtp_tests.rs`, and `settings_timezones_2026f.txt`). Configures SQLite WAL mode, `foreign_keys = ON`, and `5s` `busy_timeout`, runs `preflight_builtin_key_collisions`, applies migrations `0001_builder_slice.sql` through `0060_public_site_search_fts5.sql` (`0016` omitted) from `cms/migrations/`, and seeds embedded core blocks in `[mod.rs:init_db]`.
+Owns **100% of SQLite queries (`sqlx::query*`, `sqlx::raw_sql`)** in OpenDash across 34 domain storage modules (`admin_extensions`–`theme`, `fields`, `redirects`, `entry_lifecycle`, and `contact`) wired through [`mod.rs`](mod.rs) (plus `s03_media_acl_tests.rs`, `theme_tests/`, `operations_tests.rs`, `smtp_tests.rs`, and `settings_timezones_2026f.txt`). Configures SQLite WAL mode, `foreign_keys = ON`, and `5s` `busy_timeout`, runs `preflight_builtin_key_collisions`, applies migrations `0001_builder_slice.sql` through `0063_theme_v1_clean_slate_and_adjacent_index.sql` (`0016` omitted) from `cms/migrations/`, and seeds embedded core blocks in `[mod.rs:init_db]`.
 
 See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 Writer Inventory](../../../../../docs/contracts/M8_WRITER_INVENTORY.md) for persistence and admission rules.
 
@@ -21,7 +21,7 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
   - `[page.rs:ensure_embedded_core_blocks]`, `[page.rs:load_unified_block_catalog_in_conn]`, `[page.rs:sync_owner_blocks_in_tx]`, `[page.rs:set_owner_block_status_in_tx]`, `[page.rs:resync_plugin_block_acls_in_tx]`.
   - `[builder.rs:BuilderRenderContext]`, `[builder.rs:read_render_context_tx]`, `[builder.rs:resolve_patterns_in_tx_with_budget]`, `[builder.rs:validate_media_refs_in_tx]` (plus entry-builder storage helpers).
   - `[overrides.rs:resolve_template_2axis]`, `[overrides.rs:save_typed_override]`, `[overrides.rs:reset_typed_override]`, `[overrides.rs:preview_typed_override_with_cache_and_locale]`, `[overrides.rs:render_resolved_public_builder_with_cache_for_locale]`, `[overrides.rs:list_studio_targets]`, `[overrides.rs:preview_studio_with_cache_and_locale]`.
-  - `[theme.rs:stage_and_commit_v3_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[theme.rs:activate_revision]`, `[theme.rs:load_active_theme_v3]`, `[theme.rs:sync_dev_theme_in_db]`, `[theme.rs:list]`, `[theme.rs:verify_revision_durability]`.
+  - `[theme.rs:stage_and_commit_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[theme.rs:activate_revision]`, `[theme.rs:load_active_theme]`, `[theme.rs:sync_dev_theme_in_db]`, `[theme.rs:list]`, `[theme.rs:verify_revision_durability]`.
   - `[import.rs:ImportPlan]`, `[import.rs:DryRunImportInput]`, `[import.rs:ThemeSampleManifest]` (dry-run, execution, and orphan import recovery).
   - `[menu.rs:create_menu_in_tx]`, `[menu.rs:replace_menu_items_in_tx]`, `[menu.rs:get_slot_version_for_locale_in_tx]`, `[menu.rs:MAX_MENU_ITEMS]`, `[menu.rs:MAX_MENU_DEPTH]`.
 - **Plugins, Theme Functions, KV, Projections & Admin Extensions** ([`plugin.rs`](plugin/mod.rs), [`plugin_kv.rs`](plugin_kv.rs), [`plugin_projections.rs`](plugin_projections/mod.rs), [`admin_extensions.rs`](admin_extensions.rs)):
@@ -56,8 +56,8 @@ See [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) and [M8 
 
 ## Side Effects
 
-- Creates/opens the site SQLite database in WAL mode, executes migrations `0001`–`0060`, and reads/writes all CMS tables (`[mod.rs:init_db]`).
-- Stages and verifies immutable theme and plugin revision directories and `.complete` markers on disk under `themes_root` and `plugins_root` (`[theme.rs:stage_and_commit_v3_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[plugin.rs:stage_and_publish_plugin_revision_with_extensions]`).
+- Creates/opens the site SQLite database in WAL mode, executes migrations `0001`–`0063`, and reads/writes all CMS tables (`[mod.rs:init_db]`).
+- Stages and verifies immutable theme and plugin revision directories and `.complete` markers on disk under `themes_root` and `plugins_root` (`[theme.rs:stage_and_commit_revision]`, `[theme.rs:ensure_default_starter_theme]`, `[plugin.rs:stage_and_publish_plugin_revision_with_extensions]`).
 - Creates consistent SQLite snapshot files via `VACUUM INTO` during backup jobs (`[backup.rs:vacuum_into_snapshot]`).
 
 ## Verification

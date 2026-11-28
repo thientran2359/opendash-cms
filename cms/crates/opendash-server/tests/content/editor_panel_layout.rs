@@ -605,7 +605,7 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
 
     // Reject theme declaring `editor_panels` (Theme cannot register Action panels)
     let bad_theme_manifest = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "bad-action-theme",
         "name": "Bad Action Theme",
         "version": "1.0.0",

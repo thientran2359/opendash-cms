@@ -40,7 +40,7 @@ impl PublicCompositionBudget {
     /// once per request across header, body and footer segments.
     pub fn set_locale_context(
         &mut self,
-        active: Option<&ActiveThemeV3>,
+        active: Option<&ActiveTheme>,
         locale_code: &str,
         locale_ctx: serde_json::Value,
     ) {
@@ -54,7 +54,7 @@ impl PublicCompositionBudget {
 
     pub fn set_locale_context_with_registry(
         &mut self,
-        active: Option<&ActiveThemeV3>,
+        active: Option<&ActiveTheme>,
         registry: Option<&crate::l10n::CatalogRegistry>,
         locale_code: &str,
         locale_ctx: serde_json::Value,
@@ -131,7 +131,7 @@ impl PublicCompositionBudget {
 
 pub(in crate::storage) struct PublicBuilderContext<'a> {
     pub(in crate::storage) state: &'a BuilderRenderContext,
-    pub(in crate::storage) active: Option<&'a ActiveThemeV3>,
+    pub(in crate::storage) active: Option<&'a ActiveTheme>,
     pub(in crate::storage) theme_context: &'a serde_json::Value,
     pub(in crate::storage) route_entry: Option<(&'a str, &'a str)>,
     pub(in crate::storage) render_locale: &'a str,
@@ -147,7 +147,7 @@ pub(in crate::storage) struct PublicBuilderContext<'a> {
 pub async fn render_resolved_public_builder_with_cache_for_locale(
     db: &SqlitePool,
     record: &TemplateOverrideRecord,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     theme_context: &serde_json::Value,
     route_entry: Option<(&str, &str)>,
     locale: Option<&str>,
@@ -177,7 +177,7 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
 pub async fn render_resolved_public_builder_with_query_for_locale(
     db: &SqlitePool,
     record: &TemplateOverrideRecord,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     theme_context: &serde_json::Value,
     route_entry: Option<(&str, &str)>,
     locale: Option<&str>,
@@ -208,7 +208,7 @@ pub async fn render_resolved_public_builder_with_query_for_locale(
 pub async fn render_resolved_public_builder_with_query_and_search_for_locale(
     db: &SqlitePool,
     record: &TemplateOverrideRecord,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     theme_context: &serde_json::Value,
     route_entry: Option<(&str, &str)>,
     locale: Option<&str>,
@@ -292,7 +292,7 @@ pub async fn render_resolved_public_builder_with_query_and_search_for_locale(
 pub(in crate::storage) fn render_csec_template_for_preview_with_policy(
     target_key: &str,
     html: &str,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     url_policy: &template_sec::ThemeUrlPolicy,
     theme_context: &serde_json::Value,
     slot_html: Option<&str>,

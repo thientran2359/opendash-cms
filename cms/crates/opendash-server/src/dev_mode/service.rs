@@ -420,19 +420,19 @@ pub fn read_dev_theme_asset_from_root(
     rel_path: &str,
 ) -> Result<Vec<u8>, String> {
     let safe_rel = validate_theme_relative_path(rel_path).map_err(str::to_owned)?;
-    if !valid_v3_asset_path(&safe_rel) {
+    if !valid_theme_asset_path(&safe_rel) {
         return Err("Đường dẫn asset không hợp lệ.".to_owned());
     }
     let (manifest_bytes, _, _) =
         read_bounded_contract_file(canonical_root, "theme.json", V2_MAX_TEXT_BYTES)?;
     let manifest_json =
         String::from_utf8(manifest_bytes).map_err(|_| "theme.json không hợp lệ.".to_owned())?;
-    let manifest: ThemeV3Manifest =
+    let manifest: ThemeManifest =
         serde_json::from_str(&manifest_json).map_err(|_| "theme.json không hợp lệ.".to_owned())?;
     if !manifest.assets.iter().any(|a| a == &safe_rel) {
         return Err("Asset chưa được khai báo trong theme.json.".to_owned());
     }
-    let cap = crate::theme::v3_entry_cap_and_allowlist(&safe_rel).map_err(str::to_owned)?;
+    let cap = crate::theme::theme_entry_cap_and_allowlist(&safe_rel).map_err(str::to_owned)?;
     let (bytes, _, _) = read_bounded_contract_file(canonical_root, &safe_rel, cap)?;
     if safe_rel.ends_with(".css") {
         let css = std::str::from_utf8(&bytes)

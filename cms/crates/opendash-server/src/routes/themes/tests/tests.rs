@@ -21,7 +21,7 @@ async fn s01_serves_revision_scoped_js_and_sandboxed_svg() {
         .await
         .unwrap();
     let themes_root = root.join("themes");
-    let manifest = r#"{"manifest_version":3,"theme_id":"asset-test","name":"Asset Test","version":"1.0.0","assets":["assets/main.js","assets/module.mjs","assets/icon.svg","assets/style.css"]}"#;
+    let manifest = r#"{"manifest_version":1,"theme_id":"asset-test","name":"Asset Test","version":"1.0.0","assets":["assets/main.js","assets/module.mjs","assets/icon.svg","assets/style.css"]}"#;
     let assets: [(&str, &[u8], &str); 4] = [
         (
             "assets/main.js",
@@ -45,7 +45,7 @@ async fn s01_serves_revision_scoped_js_and_sandboxed_svg() {
     for (path, bytes, _) in assets {
         files.insert(path.to_owned(), bytes.to_vec());
     }
-    let revision = match theme::stage_and_commit_v3_revision(
+    let revision = match theme::stage_and_commit_revision(
         &db,
         &themes_root,
         "s01-assets",

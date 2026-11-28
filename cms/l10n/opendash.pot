@@ -778,8 +778,8 @@ msgstr ""
 msgid "A url option value must be a string."
 msgstr ""
 
-#: server:error:themes.a_v3_theme_revision_id_is_required
-msgid "A v3 theme revision_id is required."
+#: server:error:themes.a_v1_theme_revision_id_is_required
+msgid "A v1 theme revision_id is required."
 msgstr ""
 
 #: admin:builder.studio_field_controls.token_accent
@@ -7101,7 +7101,7 @@ msgid "Homepage and reading settings affect homepage routing; select Save change
 msgstr ""
 
 #: server:core_l10n
-msgid "Homepage is not configured."
+msgid "Latest posts"
 msgstr ""
 
 #: admin:feature.seo.seopanel.homepage_seo
@@ -7441,7 +7441,7 @@ msgid "Insert a copy"
 msgstr ""
 
 #: admin:builder.builder_inspector.part_help
-msgid "Insert a reusable part from a DB override or the theme v3 parts/ folder. You can edit, change the key or delete it normally."
+msgid "Insert a reusable part from a DB override or the theme v1 parts/ folder. You can edit, change the key or delete it normally."
 msgstr ""
 
 #: admin:studio.insert_image_from_media_library
@@ -7496,8 +7496,8 @@ msgstr ""
 msgid "Installed themes"
 msgstr ""
 
-#: admin:feature.themes.themespanel.installed_v3_revisions
-msgid "Installed v3 revisions ("
+#: admin:feature.themes.themespanel.installed_v1_revisions
+msgid "Installed v1 revisions ("
 msgstr ""
 
 #: admin:feature.plugins.pluginspanel.installing_a_zip_automatically_enables_the_plugin_if_its_id_matches_an_installed
@@ -7649,7 +7649,7 @@ msgid "Invalid Builder UTF-8 document."
 msgstr ""
 
 #: server:error:server.error
-msgid "Invalid built-in Starter Theme v3."
+msgid "Invalid built-in Starter Theme v1."
 msgstr ""
 
 #: server:error:builder.invalid_button_label_or_url
@@ -8888,28 +8888,28 @@ msgstr ""
 msgid "Invalid user role."
 msgstr ""
 
-#: server:error:theme.invalid_v3_theme_blocks_slug_path
-msgid "Invalid v3 theme blocks/<slug>/ path."
+#: server:error:theme.invalid_v1_theme_blocks_slug_path
+msgid "Invalid v1 theme blocks/<slug>/ path."
 msgstr ""
 
-#: server:error:theme.invalid_v3_theme_directory_name
-msgid "Invalid v3 theme directory name."
+#: server:error:theme.invalid_v1_theme_directory_name
+msgid "Invalid v1 theme directory name."
 msgstr ""
 
-#: server:error:theme.invalid_v3_theme_file_name
-msgid "Invalid v3 theme file name."
+#: server:error:theme.invalid_v1_theme_file_name
+msgid "Invalid v1 theme file name."
 msgstr ""
 
-#: server:error:theme.invalid_v3_theme_files_or_manifest
-msgid "Invalid v3 theme files or manifest."
+#: server:error:theme.invalid_v1_theme_files_or_manifest
+msgid "Invalid v1 theme files or manifest."
 msgstr ""
 
-#: server:error:server.error server:error:theme.invalid_v3_theme_manifest
-msgid "Invalid v3 theme manifest."
+#: server:error:server.error server:error:theme.invalid_v1_theme_manifest
+msgid "Invalid v1 theme manifest."
 msgstr ""
 
-#: server:error:theme.invalid_v3_theme_revision_manifest
-msgid "Invalid v3 theme revision manifest."
+#: server:error:theme.invalid_v1_theme_revision_manifest
+msgid "Invalid v1 theme revision manifest."
 msgstr ""
 
 #: server:error:request.invalid_if_match
@@ -10457,28 +10457,28 @@ msgstr ""
 msgid "No active theme or the active theme has no menu locations."
 msgstr ""
 
-#: server:error:overrides.no_active_v3_theme_is_available_for_previewing_menu_slots
-msgid "No active v3 theme is available for previewing menu_slots."
+#: server:error:overrides.no_active_v1_theme_is_available_for_previewing_menu_slots
+msgid "No active v1 theme is available for previewing menu_slots."
 msgstr ""
 
-#: server:error:settings.no_active_v3_theme_is_available_for_previewing_theme_options
-msgid "No active v3 theme is available for previewing theme_options."
+#: server:error:settings.no_active_v1_theme_is_available_for_previewing_theme_options
+msgid "No active v1 theme is available for previewing theme_options."
 msgstr ""
 
-#: server:error:entries.no_active_v3_theme_is_available_for_selecting_a_layout_template
-msgid "No active v3 theme is available for selecting a layout/template."
+#: server:error:entries.no_active_v1_theme_is_available_for_selecting_a_layout_template
+msgid "No active v1 theme is available for selecting a layout/template."
 msgstr ""
 
-#: server:error:import.no_active_v3_theme_revision
-msgid "No active v3 theme revision."
+#: server:error:import.no_active_v1_theme_revision
+msgid "No active v1 theme revision."
 msgstr ""
 
-#: admin:studio.no_active_v3_theme_with_configurable_options
-msgid "No active v3 theme with configurable options."
+#: admin:studio.no_active_v1_theme_with_configurable_options
+msgid "No active v1 theme with configurable options."
 msgstr ""
 
-#: server:error:patterns.no_active_v3_theme
-msgid "No active v3 theme."
+#: server:error:patterns.no_active_v1_theme
+msgid "No active v1 theme."
 msgstr ""
 
 #: admin:fields.select.no_dynamic_items
@@ -16245,8 +16245,8 @@ msgstr ""
 msgid "The revision directory on disk does not match .complete or is corrupted."
 msgstr ""
 
-#: server:error:import.the_revision_does_not_belong_to_the_requested_theme_or_is_not_v3
-msgid "The revision does not belong to the requested theme or is not v3."
+#: server:error:import.the_revision_does_not_belong_to_the_requested_theme_or_is_not_v1
+msgid "The revision does not belong to the requested theme or is not v1."
 msgstr ""
 
 #: server:error:themes.the_revision_on_disk_is_missing_or_does_not_match_complete_digest
@@ -16965,32 +16965,32 @@ msgstr ""
 msgid "The username must start with a letter or digit."
 msgstr ""
 
-#: server:error:theme.the_v3_theme_assets_format_is_prohibited
-msgid "The v3 theme assets format is prohibited."
+#: server:error:theme.the_v1_theme_assets_format_is_prohibited
+msgid "The v1 theme assets format is prohibited."
 msgstr ""
 
-#: server:error:theme.the_v3_theme_assets_path_does_not_match_schema_d01
-msgid "The v3 theme assets path does not match schema D01."
+#: server:error:theme.the_v1_theme_assets_path_does_not_match_schema_d01
+msgid "The v1 theme assets path does not match schema D01."
 msgstr ""
 
-#: server:error:theme.the_v3_theme_exceeds_the_file_count_limit
-msgid "The v3 theme exceeds the file count limit."
+#: server:error:theme.the_v1_theme_exceeds_the_file_count_limit
+msgid "The v1 theme exceeds the file count limit."
 msgstr ""
 
-#: server:error:theme.the_v3_theme_exceeds_the_total_decoded_size_limit_of_32_mib
-msgid "The v3 theme exceeds the total decoded size limit of 32 MiB."
+#: server:error:theme.the_v1_theme_exceeds_the_total_decoded_size_limit_of_32_mib
+msgid "The v1 theme exceeds the total decoded size limit of 32 MiB."
 msgstr ""
 
-#: server:error:theme.the_v3_theme_manifest_json_does_not_match_theme_json
-msgid "The v3 theme manifest_json does not match theme.json."
+#: server:error:theme.the_v1_theme_manifest_json_does_not_match_theme_json
+msgid "The v1 theme manifest_json does not match theme.json."
 msgstr ""
 
-#: server:error:theme.the_v3_theme_package_contains_a_file_outside_the_root_or_four_allowed_directories
-msgid "The v3 theme package contains a file outside the root or four allowed directories."
+#: server:error:theme.the_v1_theme_package_contains_a_file_outside_the_root_or_four_allowed_directories
+msgid "The v1 theme package contains a file outside the root or four allowed directories."
 msgstr ""
 
-#: server:error:import.the_v3_theme_revision_does_not_exist
-msgid "The v3 theme revision does not exist."
+#: server:error:import.the_v1_theme_revision_does_not_exist
+msgid "The v1 theme revision does not exist."
 msgstr ""
 
 #: server:error:content.the_values_contain_an_undeclared_custom_field
@@ -17157,12 +17157,12 @@ msgstr ""
 msgid "Theme HTML contains a prohibited internal marker."
 msgstr ""
 
-#: server:error:theme.theme_manifest_version_must_be_3
-msgid "Theme manifest_version must be 3"
+#: server:error:theme.theme_manifest_version_must_be_1
+msgid "Theme manifest_version must be 1"
 msgstr ""
 
-#: server:error:theme.theme_metadata_does_not_match_the_v3_manifest
-msgid "Theme metadata does not match the v3 manifest."
+#: server:error:theme.theme_metadata_does_not_match_the_v1_manifest
+msgid "Theme metadata does not match the v1 manifest."
 msgstr ""
 
 #: server:error:menu.theme_not_found
@@ -17221,12 +17221,12 @@ msgstr ""
 msgid "Theme URLs must contain 1–4096 Unicode characters."
 msgstr ""
 
-#: admin:feature.themes.themespanel.theme_v3_manifest_version_3_theme_json_templates_parts_and_declared_assets
-msgid "Theme v3 (manifest_version=3, theme.json, templates, parts and declared assets)."
+#: admin:feature.themes.themespanel.theme_v1_manifest_version_1_theme_json_templates_parts_and_declared_assets
+msgid "Theme v1 (manifest_version=1, theme.json, templates, parts and declared assets)."
 msgstr ""
 
-#: admin:feature.themes.themespanel.theme_v3_revisions
-msgid "Theme v3 revisions"
+#: admin:feature.themes.themespanel.theme_v1_revisions
+msgid "Theme v1 revisions"
 msgstr ""
 
 #: admin:studio.theme_specific_options
@@ -18041,8 +18041,8 @@ msgstr ""
 msgid "Using a custom site base."
 msgstr ""
 
-#: admin:feature.themes.themespanel.v3_revisions
-msgid "v3 revisions)"
+#: admin:feature.themes.themespanel.v1_revisions
+msgid "revisions)"
 msgstr ""
 
 #: server:error:server.error
@@ -21357,5 +21357,12 @@ msgid "Template library"
 msgstr ""
 
 #: admin:feature.themes.themespanel.install_v3_zip_subtitle
-msgid "Upload a Theme v3 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder."
+msgid "Upload a Theme v1 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder."
+msgstr ""
+#: server:error:restore.pre_v1_theme_revision_unsupported
+msgid "Backup restore archive contains unsupported pre-V1 theme revisions."
+msgstr ""
+
+#: server:error:public.home_taxonomy_filter_unsupported
+msgid "Homepage does not support taxonomy filters."
 msgstr ""

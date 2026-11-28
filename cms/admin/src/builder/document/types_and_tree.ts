@@ -67,7 +67,6 @@ export type BuilderContextTarget =
   | { kind: 'singular' }
   | { kind: 'page' }
   | { kind: 'page_layout' }
-  | { kind: 'home' }
   | { kind: 'index' }
   | { kind: 'archive'; type_key?: string | null }
   | { kind: 'taxonomy'; taxonomy_key?: string | null }

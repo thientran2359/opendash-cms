@@ -96,7 +96,7 @@ async fn get_json(client: &Client, origin: &str, cookie: &str, path: &str) -> Va
     resp.json().await.unwrap()
 }
 fn custom_theme_zip() -> Vec<u8> {
-    let manifest = br#"{"manifest_version":3,"theme_id":"test-custom-v3","name":"User Custom Theme","version":"1.0.0","templates":[{"kind":"single","file":"single.html"}]}"#;
+    let manifest = br#"{"manifest_version":1,"theme_id":"test-custom-v3","name":"User Custom Theme","version":"1.0.0","templates":[{"kind":"single","file":"single.html"}]}"#;
     let mut bytes = Vec::new();
     {
         let mut writer = ZipWriter::new(std::io::Cursor::new(&mut bytes));

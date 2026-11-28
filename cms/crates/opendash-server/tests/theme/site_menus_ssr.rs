@@ -68,7 +68,7 @@ fn build_theme_with_menu_header(id: &str, header_html: &str) -> Vec<u8> {
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": id,
             "name": id,
             "version": "1.0.0",

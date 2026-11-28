@@ -251,7 +251,7 @@ pub async fn get_menu(db: &SqlitePool, menu_id: i64) -> ApiResult<Option<MenuWit
 }
 
 pub fn extract_declared_menu_slots(manifest_json: &str) -> Vec<String> {
-    let Ok(manifest) = serde_json::from_str::<opendash_core::theme::ThemeV3Manifest>(manifest_json)
+    let Ok(manifest) = serde_json::from_str::<opendash_core::theme::ThemeManifest>(manifest_json)
     else {
         return Vec::new();
     };

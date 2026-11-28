@@ -102,9 +102,7 @@ pub(in crate::storage) fn row_to_record(row: OverrideRow) -> ApiResult<TemplateO
     let document = BuilderDocument::from_json(row.4.as_bytes())
         .map_err(|_| ApiError::internal("Template override AST trong DB không hợp lệ."))?;
     let role = match target.kind {
-        TemplateCandidateKind::Home
-        | TemplateCandidateKind::Page
-        | TemplateCandidateKind::PageLayout => "page",
+        TemplateCandidateKind::Page | TemplateCandidateKind::PageLayout => "page",
         TemplateCandidateKind::Single
         | TemplateCandidateKind::SingleCustom
         | TemplateCandidateKind::Singular => "single",
@@ -353,7 +351,6 @@ pub(in crate::storage) fn normalized_origin(public_origin: Option<&str>) -> &str
 
 pub(in crate::storage) fn route_kind_for_candidate(kind: TemplateCandidateKind) -> &'static str {
     match kind {
-        TemplateCandidateKind::Home => "home",
         TemplateCandidateKind::Page | TemplateCandidateKind::PageLayout => "page",
         TemplateCandidateKind::Single
         | TemplateCandidateKind::SingleCustom
@@ -370,7 +367,7 @@ pub(in crate::storage) fn route_kind_for_candidate(kind: TemplateCandidateKind) 
 /// Previews need the theme's styles, while scripts are reserved for the public
 /// page. The source manifest and digest are already verified by theme storage.
 pub(in crate::storage) fn preview_enqueued_styles(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     route: EnqueueCondition,
 ) -> ResolvedEnqueuedAssets {
     let Some(active) = active else {
@@ -384,7 +381,6 @@ pub(in crate::storage) fn preview_enqueued_styles(
 
 pub(in crate::storage) fn preview_condition(kind: TemplateCandidateKind) -> EnqueueCondition {
     match kind {
-        TemplateCandidateKind::Home => EnqueueCondition::Home,
         TemplateCandidateKind::Page | TemplateCandidateKind::PageLayout => EnqueueCondition::Page,
         TemplateCandidateKind::Single
         | TemplateCandidateKind::SingleCustom
@@ -464,7 +460,7 @@ pub(in crate::storage) fn push_studio_target_item(
     items: &mut Vec<StudioTargetItem>,
     seen: &mut BTreeSet<String>,
     overrides_map: &BTreeMap<String, &TemplateOverrideRecord>,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     target: TemplateCandidate,
     label: String,
     group: &'static str,

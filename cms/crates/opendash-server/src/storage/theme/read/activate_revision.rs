@@ -24,13 +24,11 @@ pub async fn activate_revision(
         return Ok(RevisionActivationOutcome::NotFound);
     };
     let revision = row_to_revision(row)?;
-    // Legacy ZIP revisions can stay in historical DB records; only validated
-    // v3 revisions may be newly activated after the S02 cutover.
-    if revision.source_format != ThemeSourceFormat::V3 {
+    if revision.source_format != ThemeSourceFormat::V1 {
         return Ok(RevisionActivationOutcome::NotFound);
     }
-    let manifest: ThemeV3Manifest = serde_json::from_str(&revision.manifest_json)
-        .map_err(|_| ApiError::bad_request("Theme revision manifest v3 không hợp lệ."))?;
+    let manifest: ThemeManifest = serde_json::from_str(&revision.manifest_json)
+        .map_err(|_| ApiError::bad_request("Theme revision manifest v1 không hợp lệ."))?;
     manifest.validate().map_err(ApiError::bad_request)?;
     if manifest.theme_id != revision.theme_id || manifest.version != revision.version {
         return Err(ApiError::bad_request(
@@ -205,7 +203,7 @@ pub async fn activate_revision(
     }
 }
 
-impl ActiveThemeV3 {
+impl ActiveTheme {
     pub fn asset_url_map(&self) -> BTreeMap<String, String> {
         self.manifest
             .assets
@@ -332,7 +330,7 @@ pub async fn list_local_theme_templates(
             theme_templates: vec![],
         });
     }
-    if selection.source_format != Some(ThemeSourceFormat::V3) {
+    if selection.source_format != Some(ThemeSourceFormat::V1) {
         return Ok(LocalThemeCatalog {
             active_theme_id: selection.theme_id,
             theme_state: "unsupported_theme_format",
@@ -342,7 +340,7 @@ pub async fn list_local_theme_templates(
     // This accessor verifies the active manifest, file digests and complete
     // marker before enumerating role keys. A withdrawn/corrupt provider yields
     // a deterministic fallback, never stale or remotely fetched templates.
-    let Some(active) = load_active_theme_v3(db, themes_root).await? else {
+    let Some(active) = load_active_theme(db, themes_root).await? else {
         return Ok(LocalThemeCatalog {
             active_theme_id: selection.theme_id,
             theme_state: "active_theme_unavailable",
@@ -404,7 +402,7 @@ pub async fn load_active_theme_functions_snapshot(
     else {
         return Ok(None);
     };
-    if ThemeSourceFormat::from_db(&source_format)? != ThemeSourceFormat::V3 {
+    if ThemeSourceFormat::from_db(&source_format)? != ThemeSourceFormat::V1 {
         return Ok(None);
     }
     let file_digests: BTreeMap<String, String> = serde_json::from_str(&file_digests_json)?;
@@ -418,29 +416,29 @@ pub async fn load_active_theme_functions_snapshot(
     }))
 }
 
-pub async fn load_active_theme_v3(
+pub async fn load_active_theme(
     db: &SqlitePool,
     themes_root: &Path,
-) -> ApiResult<Option<ActiveThemeV3>> {
+) -> ApiResult<Option<ActiveTheme>> {
     let mut conn = db.acquire().await?;
-    load_active_theme_v3_in_conn(&mut conn, themes_root).await
+    load_active_theme_in_conn(&mut conn, themes_root).await
 }
 
-pub(in crate::storage) async fn load_active_theme_v3_in_conn(
+pub(in crate::storage) async fn load_active_theme_in_conn(
     conn: &mut sqlx::SqliteConnection,
     themes_root: &Path,
-) -> ApiResult<Option<ActiveThemeV3>> {
-    let Some(CapturedThemeV3 {
+) -> ApiResult<Option<ActiveTheme>> {
+    let Some(CapturedTheme {
         manifest,
         revision,
         rev_dir,
         dev_overlay,
-    }) = capture_active_theme_v3_in_conn(conn, themes_root).await?
+    }) = capture_active_theme_in_conn(conn, themes_root).await?
     else {
         return Ok(None);
     };
     if let Some(snap) = dev_overlay {
-        return Ok(Some(ActiveThemeV3 {
+        return Ok(Some(ActiveTheme {
             revision_id: revision.revision_id,
             revision_digest: snap.revision_digest,
             manifest: snap.manifest,
@@ -499,7 +497,7 @@ pub(in crate::storage) async fn load_active_theme_v3_in_conn(
             }
         }
     }
-    Ok(Some(ActiveThemeV3 {
+    Ok(Some(ActiveTheme {
         revision_id: revision.revision_id,
         revision_digest: revision.revision_digest,
         manifest,

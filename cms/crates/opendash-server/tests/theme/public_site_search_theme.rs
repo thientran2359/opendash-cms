@@ -115,7 +115,7 @@ fn build_theme_zip(theme_id: &str, templates: &[(&str, &str)], search_html: &str
             .map(|(kind, file)| json!({ "kind": kind, "file": file }))
             .collect();
         let manifest = json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": theme_id,
             "name": theme_id,
             "version": "1.0.0",
@@ -274,7 +274,7 @@ async fn starter_search_template_header_option_and_csec_theme_validation() {
     ] {
         let zip = build_theme_zip(
             id,
-            &[("home", "home.html"), ("search", "search.html")],
+            &[("index", "index.html"), ("search", "search.html")],
             bad_html,
         );
         let upload = client
@@ -297,7 +297,7 @@ async fn starter_search_template_header_option_and_csec_theme_validation() {
 
     let safe_zip = build_theme_zip(
         "good-search-theme",
-        &[("home", "home.html"), ("search", "search.html")],
+        &[("index", "index.html"), ("search", "search.html")],
         r#"<main><search><form method="get" action="{{ search.action_url }}"><input type="search" name="s" value="{{ search.query }}"><button type="submit">Go</button></form></search></main>"#,
     );
     let safe_upload = client

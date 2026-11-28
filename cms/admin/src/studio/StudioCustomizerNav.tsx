@@ -91,7 +91,6 @@ function contextTargetForTemplate(target: TemplateTargetInput): BuilderContextTa
     case 'singular': return { kind: 'singular' };
     case 'page': return { kind: 'page' };
     case 'page_layout': return { kind: 'page_layout' };
-    case 'home': return { kind: 'home' };
     case 'index': return { kind: 'index' };
     case 'not_found': return { kind: 'not_found' };
     case 'search': return { kind: 'search' };
@@ -367,7 +366,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
             </h2>
             {!activeThemeId ? (
               <AdminAlert tone="info">
-                {__("No active v3 theme with configurable options.")}
+                {__("No active v1 theme with configurable options.")}
               </AdminAlert>
             ) : (
               <fieldset disabled={disabled} className="min-w-0">

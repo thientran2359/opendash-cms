@@ -156,7 +156,7 @@ fn plugin_zip(manifest: &Value, wasm: &[u8]) -> Vec<u8> {
 
 fn theme_zip(theme_id: &str, version: &str, with_declarations: bool) -> Vec<u8> {
     let mut manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": theme_id,
         "name": theme_id,
         "version": version,
@@ -1964,9 +1964,10 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     // Revisions & Autosave adds 0059 (`entry_revisions` + `entry_autosaves`),
     // Public Site Search S01 adds 0060 (`entry_search_fts` + `'search'`/`'search_reindex'`),
     // and Studio Unified Recursive AST adds 0062 (`template_override_media_ref_roles`);
+    // and Spec A2 S01 adds 0063 (`Theme V1 clean-slate` + `idx_content_entries_pub_order`);
     // and ACF Content Structure adds 0061 (`content_field_groups.domain/location_rules_json`, `custom_options_pages`, term meta);
     // the 0040→0041 permalink preservation assertions above must still hold.
-    assert_eq!(migration_version, 62);
+    assert_eq!(migration_version, 63);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

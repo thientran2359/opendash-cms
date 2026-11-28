@@ -48,7 +48,7 @@ pub(crate) async fn render_search_response_for_locale(
     }
 
     let active = match themes_root {
-        Some(Extension(root)) => theme_storage::load_active_theme_v3(db, &root.0).await?,
+        Some(Extension(root)) => theme_storage::load_active_theme(db, &root.0).await?,
         None => None,
     };
     let site = settings::get_general_for_locale(db, Some(locale)).await?;

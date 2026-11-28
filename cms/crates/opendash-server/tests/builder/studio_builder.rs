@@ -157,12 +157,12 @@ fn build_theme_v3_zip() -> Vec<u8> {
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "studio-s04-theme",
             "name": "Studio S04 Theme",
             "version": "1.0.0",
             "templates": [
-                { "kind": "home", "file": "home.html" },
+                { "kind": "index", "file": "index.html" },
                 { "kind": "page", "file": "page.html" },
                 { "kind": "single", "file": "single.html" }
             ],
@@ -190,7 +190,7 @@ fn build_theme_v3_zip() -> Vec<u8> {
         zip.start_file("footer.html", opts).unwrap();
         zip.write_all(b"<footer data-theme-footer=\"1\">{{ site.tagline }}</footer>")
             .unwrap();
-        zip.start_file("home.html", opts).unwrap();
+        zip.start_file("index.html", opts).unwrap();
         zip.write_all(b"<article data-theme-home=\"1\">{{ od_content() }}</article>")
             .unwrap();
         zip.start_file("page.html", opts).unwrap();
@@ -823,7 +823,7 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
             .header(header::COOKIE, &ed_cookie)
             .header(header::ORIGIN, &site.base)
             .header("X-CSRF-Token", &ed_csrf)
-            .json(&json!({ "target": { "kind": "home" }, "transient": { "general": { "site_title": "Hack", "tagline": "x", "timezone": "UTC" } } }))
+            .json(&json!({ "target": { "kind": "index" }, "transient": { "general": { "site_title": "Hack", "tagline": "x", "timezone": "UTC" } } }))
             .send()
             .await
             .unwrap()
@@ -986,7 +986,7 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
         .header(header::ORIGIN, &site.base)
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "index" },
             "transient": {
                 "general": {
                     "site_title": xss_script,

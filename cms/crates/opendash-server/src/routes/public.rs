@@ -13,7 +13,10 @@ use crate::{
     content_render,
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
-    public_context::{has_search_param, validate_percent_encoding, validate_single_query},
+    public_context::{
+        PublicFilters, QueryScope, has_search_param, parse_query, validate_percent_encoding,
+        validate_single_query,
+    },
     routes::{
         public_content::{PublicRenderServices, extract_origin_host},
         search::{SearchRateLimiter, peer_rate_limit_key},
@@ -49,9 +52,9 @@ pub(crate) async fn render_home_for_locale(
         )
         .await;
     }
-    validate_single_query(raw_query).map_err(ApiError::bad_request)?;
     match seo::reading_page_state_for_locale(db, Some(locale), true).await? {
         ReadingPageState::Published(page_id) => {
+            validate_single_query(raw_query).map_err(ApiError::bad_request)?;
             // Re-check publication in the content snapshot. A stale Reading
             // assignment must never expose a draft/private Page.
             let Some(page) = public_content::get_published_by_id(db, page_id).await? else {
@@ -83,6 +86,7 @@ pub(crate) async fn render_home_for_locale(
             .await
         }
         ReadingPageState::Missing => {
+            validate_single_query(raw_query).map_err(ApiError::bad_request)?;
             super::public_content::render_not_found_response_for_locale(
                 db,
                 themes_root,
@@ -92,49 +96,23 @@ pub(crate) async fn render_home_for_locale(
             .await
         }
         ReadingPageState::Unconfigured => {
-            // No implicit Page selection or migration of the old Builder layout.
-            let mut view =
-                seo::build_home_seo_view_for_locale(db, Some(locale), &canonical_path, false)
-                    .await?;
-            view.robots = "noindex,nofollow".to_owned();
-            view.alternates.clear();
-            let l10n = content_render::core_l10n(locale);
-            let mut html = content_render::compose_document_with_seo(
-                None,
-                &format!("<main><p>{}</p></main>", l10n.home_unconfigured),
-                None,
-                &view,
-            )?;
-            if let Some(svc) = services {
-                let ctx = crate::hooks::RenderHookContext {
-                    route_kind: "home",
-                    route_path: &canonical_path,
-                    canonical_query: "",
-                    is_not_found: false,
-                    locale,
-                    origin_host: &svc.origin_host,
-                    site: serde_json::json!({}),
-                    options: serde_json::json!({}),
-                    entry: None,
-                    entries: None,
-                    principal: opendash_core::hooks::ExecutionPrincipal::Public,
-                };
-                let rendered = svc
-                    .hooks
-                    .dispatch_render_hooks(&ctx, &[], &svc.render_cache)
-                    .await;
-                html = content_render::apply_render_hooks_to_document(
-                    html,
-                    &rendered.head_html,
-                    &rendered.head_styles,
-                    &rendered.head_scripts,
-                    &rendered.footer_html,
-                    &rendered.slot_replacements,
-                )?;
-            } else {
-                html = html.replace(content_render::HEAD_END_MARKER, "");
+            let query =
+                parse_query(raw_query, QueryScope::ContentArchive).map_err(ApiError::bad_request)?;
+            if query.filters != PublicFilters::default() {
+                return Err(ApiError::bad_request(
+                    "Trang chủ không hỗ trợ bộ lọc taxonomy.",
+                ));
             }
-            Ok(rendered_layout(html))
+            super::public_content::render_index_home_response_for_locale(
+                db,
+                themes_root,
+                locale,
+                canonical_path,
+                query,
+                raw_query,
+                services,
+            )
+            .await
         }
     }
 }

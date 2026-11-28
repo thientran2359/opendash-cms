@@ -664,7 +664,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   // Debounced 250ms Live Preview (read-only)
   const previewTargetCandidate = isMode2
     ? null
-    : (selectedTarget?.target ?? targets.find(t => t.canonical_target_key === 'home')?.target ?? targets[0]?.target ?? null);
+    : (selectedTarget?.target ?? targets.find(t => t.canonical_target_key === 'index')?.target ?? targets[0]?.target ?? null);
 
   useEffect(() => {
     if (!active || !user || !csrfToken) return;

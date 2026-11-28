@@ -448,7 +448,7 @@ async fn s02_secondary_routing_home_chain_builder_list_pagination_and_archive_is
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "page" },
             "document": {
                 "schema_version": 1,
                 "blocks": [{

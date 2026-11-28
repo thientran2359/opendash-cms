@@ -9,7 +9,7 @@ use super::TempDirGuard;
 async fn migration_0060_fresh_and_baseline_upgrade_and_restore_validation() {
     let tmp = TempDirGuard::new("mig60");
 
-    // 1. Fresh init_db: verify version 62, <= 256 objects, FTS5 shadow tables, CHECKs & unique index.
+    // 1. Fresh init_db: verify version 63, <= 256 objects, FTS5 shadow tables, CHECKs & unique index.
     let fresh_db = tmp.path().join("fresh.sqlite");
     let pool = crate::storage::init_db(&fresh_db).await.unwrap();
 
@@ -18,7 +18,7 @@ async fn migration_0060_fresh_and_baseline_upgrade_and_restore_validation() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(max_ver, 62);
+    assert_eq!(max_ver, 63);
 
     let obj_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
@@ -128,12 +128,12 @@ async fn migration_0060_fresh_and_baseline_upgrade_and_restore_validation() {
     let ro_ver = crate::storage::restore::validate_restored_db_read_only(&up_db)
         .await
         .unwrap();
-    assert_eq!(ro_ver, 62);
+    assert_eq!(ro_ver, 63);
 
     let rebased_ver = crate::storage::restore::validate_and_rebase_copy(&up_db)
         .await
         .unwrap();
-    assert_eq!(rebased_ver, 62);
+    assert_eq!(rebased_ver, 63);
 
     let verify_pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&up_db))
         .await

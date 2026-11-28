@@ -89,7 +89,7 @@ pub(in crate::storage) async fn render_preview_part(
 
 pub(in crate::storage) fn build_placeholder_preview_theme_context(
     target: &TemplateCandidate,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     site: &SiteContext<'_>,
     site_options: &BTreeMap<String, serde_json::Value>,
     options: &BTreeMap<String, serde_json::Value>,
@@ -99,7 +99,7 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
 ) -> ApiResult<serde_json::Value> {
     use TemplateCandidateKind as K;
     let route_kind = route_kind_for_candidate(target.kind);
-    let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
+    let theme_assets = active.map(ActiveTheme::asset_url_map).unwrap_or_default();
     let sample_entries = if target.kind == K::Search {
         content_render::SearchView::preview_sample_entries(preview_locale)
     } else {
@@ -109,16 +109,16 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
 
     let archive_url: Option<&str> = match target.kind {
         K::Single | K::SingleCustom | K::Singular | K::Index | K::Archive => Some("/posts"),
-        K::Home | K::Page | K::PageLayout | K::Taxonomy | K::NotFound | K::Search | K::Part => None,
+        K::Page | K::PageLayout | K::Taxonomy | K::NotFound | K::Search | K::Part => None,
     };
 
     let placeholder_entry = matches!(
         target.kind,
-        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
+        K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
     )
     .then(|| {
         let ct_key = target.content_type.as_deref().unwrap_or(
-            if matches!(target.kind, K::Home | K::Page | K::PageLayout) {
+            if matches!(target.kind, K::Page | K::PageLayout) {
                 "page"
             } else {
                 "post"
@@ -129,16 +129,16 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
 
     let ct_value: Option<serde_json::Value> = if matches!(
         target.kind,
-        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
+        K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
     ) {
         let ct_key = target.content_type.as_deref().unwrap_or(
-            if matches!(target.kind, K::Home | K::Page | K::PageLayout) {
+            if matches!(target.kind, K::Page | K::PageLayout) {
                 "page"
             } else {
                 "post"
             },
         );
-        let label = if matches!(target.kind, K::Home | K::Page | K::PageLayout) {
+        let label = if matches!(target.kind, K::Page | K::PageLayout) {
             "Trang"
         } else {
             "Bài viết"
@@ -177,7 +177,7 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         });
 
     let breadcrumbs = match target.kind {
-        K::Home => content_render::home_breadcrumbs(
+        K::Index => content_render::home_breadcrumbs(
             content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
             Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
         ),
@@ -268,7 +268,7 @@ pub(in crate::storage) async fn resolve_preview_entry(
     tx: &mut Transaction<'_, Sqlite>,
     target: &TemplateCandidate,
     sample: Option<&TemplatePreviewEntry>,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     preview_locale: &str,
     actor_role: FieldRole,
 ) -> ApiResult<Option<(entries::ContentEntryRecord, EffectiveContentSchema)>> {
@@ -305,7 +305,7 @@ pub(in crate::storage) async fn resolve_preview_entry(
         return Err(ApiError::not_found("Preview entry not found."));
     }
     let valid = match target.kind {
-        K::Home | K::Page | K::PageLayout => type_key == "page",
+        K::Page | K::PageLayout => type_key == "page",
         K::Single => {
             type_key != "page"
                 && target.content_type.as_ref().is_none_or(|t| t == &type_key)
@@ -357,7 +357,7 @@ pub(in crate::storage) async fn resolve_preview_entry(
 pub async fn inspect_public_surfaces_and_precompile(
     db: &SqlitePool,
     resolution: &TemplateResolution,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     url_policy: &template_sec::ThemeUrlPolicy,
 ) -> ApiResult<PublicSurfaceInspection> {
     let mut tx = db.begin().await?;
@@ -465,7 +465,7 @@ pub(in crate::storage) fn target_requires_and_forbids_slot(
     use TemplateCandidateKind as K;
     let requires = matches!(
         kind,
-        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular
+        K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular
     );
     let forbids = matches!(
         kind,

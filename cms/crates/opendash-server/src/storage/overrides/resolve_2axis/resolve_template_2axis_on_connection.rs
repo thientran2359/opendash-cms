@@ -23,7 +23,7 @@ pub(in crate::storage) async fn resolve_template_2axis_on_connection(
 }
 
 /// The `templates`, `parts`, `layouts` maps MUST come from the verified active
-/// durable revision (storage::theme::load_active_theme_v3); raw untrusted theme
+/// durable revision (storage::theme::load_active_theme); raw untrusted theme
 /// paths, without verification, must never be passed into this resolver.
 pub async fn resolve_template_2axis(
     db: &SqlitePool,
@@ -224,7 +224,7 @@ pub(in crate::storage) async fn preview_part_graph_from_edges(
     tx: &mut Transaction<'_, Sqlite>,
     root_key: &str,
     edges: Vec<String>,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
     let url_policy = active_theme_url_policy_in_conn(tx, active, None, None, None).await?;
@@ -287,7 +287,7 @@ pub(in crate::storage) async fn preview_part_graph(
     tx: &mut Transaction<'_, Sqlite>,
     target: &TemplateCandidate,
     document: &BuilderDocument,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
     let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut **tx).await?;

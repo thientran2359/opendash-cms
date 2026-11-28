@@ -15,7 +15,7 @@ pub(super) use opendash_core::{
     },
     id::valid_snake_key,
     registry::{DeclarationState, ProviderStatus, RegistryCatalog},
-    theme::ThemeV3Manifest,
+    theme::ThemeManifest,
 };
 
 pub(super) use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ pub(super) use crate::{
     error::{ApiError, ApiResult},
     storage::{
         content::load_effective_content_schema_in_tx, menu::extract_declared_menu_slots,
-        theme::load_active_theme_v3_in_conn,
+        theme::load_active_theme_in_conn,
     },
 };
 
@@ -144,7 +144,7 @@ pub async fn validate_block_dynamic_options_in_tx(
     }
 
     let mut manifest_loaded = false;
-    let mut active_manifest: Option<ThemeV3Manifest> = None;
+    let mut active_manifest: Option<ThemeManifest> = None;
 
     for (field_path, source, selected_values) in current {
         let prev_set = prev_map.get(&field_path);
@@ -161,7 +161,7 @@ pub async fn validate_block_dynamic_options_in_tx(
             SelectOptionsSource::MenuSlots | SelectOptionsSource::TemplateParts
         ) && !manifest_loaded
         {
-            active_manifest = load_active_v3_manifest_in_conn(conn).await?;
+            active_manifest = load_active_theme_manifest_in_conn(conn).await?;
             manifest_loaded = true;
         }
 

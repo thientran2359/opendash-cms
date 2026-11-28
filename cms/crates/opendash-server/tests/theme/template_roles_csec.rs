@@ -245,7 +245,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
 
     // 2. Reject v2 theme violating C-SEC at install time
     let bad_manifest = br#"{
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "bad-csec",
         "name": "Bad CSEC",
         "version": "1.0.0",
@@ -272,12 +272,12 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
 
     // 3. Install & activate valid v2 theme with roles
     let good_manifest = br#"{
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "editorial-roles",
         "name": "Editorial Roles",
         "version": "1.0.0",
         "assets": ["assets/style.css"],
-        "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }, { "kind": "taxonomy", "file": "taxonomy.html" }], "parts": { "header": "header.html", "footer": "footer.html" }
+        "templates": [{ "kind": "page", "file": "page.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }, { "kind": "taxonomy", "file": "taxonomy.html" }], "parts": { "header": "header.html", "footer": "footer.html" }
     }"#;
     let good_zip = build_zip(&[
         ("theme.json", good_manifest, CompressionMethod::Deflated),
@@ -292,7 +292,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
             CompressionMethod::Deflated,
         ),
         (
-            "home.html",
+            "page.html",
             b"<main data-role=\"home\"><h1>{{ site.title }}</h1>{{ od_content() }}</main>",
             CompressionMethod::Deflated,
         ),
@@ -415,7 +415,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         .header("Cookie", &cookie).header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
         .json(&serde_json::json!({
-            "target":{"kind":"home"},
+            "target":{"kind":"page"},
             "document":{"schema_version":1,"blocks":[{"id":"shared-sec","block_id":"core/section","children":[
                 {"id":"shared-row","block_id":"core/row","children":[{"id":"shared-col","block_id":"core/column","children":[
                     {"id":"shared-title","block_id":"core/heading","props":{"level":"h1","text":"Shared Home Template"}},

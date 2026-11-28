@@ -44,10 +44,10 @@ pub struct ThemeScriptEnqueueDecl {
     pub conditions: Vec<EnqueueCondition>,
 }
 
-impl ThemeV3Manifest {
+impl ThemeManifest {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.manifest_version != 3 {
-            return Err("Theme manifest_version must be 3");
+        if self.manifest_version != THEME_MANIFEST_VERSION {
+            return Err("Theme manifest_version must be 1");
         }
         validate_package_id(&self.theme_id)?;
         if !valid_label(&self.name, 128) || !validate_semver(&self.version) {
@@ -102,7 +102,7 @@ impl ThemeV3Manifest {
                     .is_some_and(|desc| desc.len() > 4096 || desc.chars().any(char::is_control))
                 || !valid_subdir_file(&pattern.file, "patterns/", ".json")
                 || pattern.preview_asset.as_deref().is_some_and(|path| {
-                    !valid_v3_asset_path(path)
+                    !valid_theme_asset_path(path)
                         || !matches!(
                             path.rsplit_once('.').map(|(_, ext)| ext),
                             Some("png" | "jpg" | "jpeg" | "webp" | "gif")
@@ -114,7 +114,7 @@ impl ThemeV3Manifest {
         }
         let mut asset_paths = BTreeSet::new();
         for path in &self.assets {
-            if !valid_v3_asset_path(path) || !asset_paths.insert(path.as_str()) {
+            if !valid_theme_asset_path(path) || !asset_paths.insert(path.as_str()) {
                 return Err("Invalid or duplicate theme asset path");
             }
         }
@@ -161,7 +161,7 @@ impl ThemeV3Manifest {
             return Err("Too many theme enqueue declarations");
         }
         for style in &self.styles {
-            if !valid_v3_asset_path(&style.src)
+            if !valid_theme_asset_path(&style.src)
                 || !style.src.ends_with(".css")
                 || !asset_paths.contains(style.src.as_str())
                 || style.media.as_deref().is_some_and(|media| {
@@ -176,7 +176,7 @@ impl ThemeV3Manifest {
             }
         }
         for script in &self.scripts {
-            if !valid_v3_asset_path(&script.src)
+            if !valid_theme_asset_path(&script.src)
                 || !(script.src.ends_with(".js") || script.src.ends_with(".mjs"))
                 || !asset_paths.contains(script.src.as_str())
             {
@@ -300,7 +300,7 @@ pub struct ResolvedEnqueuedAssets {
 
 /// Resolve only declared, validated local assets into safe HTML tags.
 pub fn resolve_enqueued_assets(
-    manifest: &ThemeV3Manifest,
+    manifest: &ThemeManifest,
     revision_digest: &str,
     route_condition: EnqueueCondition,
 ) -> ResolvedEnqueuedAssets {

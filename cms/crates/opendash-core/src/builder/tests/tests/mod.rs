@@ -126,7 +126,7 @@ fn active_test_catalog() -> RegistryCatalog<RegisteredBlockSchema> {
             "title": "Slot",
             "category": "content",
             "render": "native",
-            "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "home", "index"],
+            "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "index"],
             "fields": []
         }),
     ];

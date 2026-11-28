@@ -35,7 +35,7 @@ pub struct PublicEntryRenderSnapshot {
     pub effective_schema: opendash_core::content::EffectiveContentSchema,
     pub eligible_public_taxonomies: Vec<String>,
     pub terms: Vec<crate::content_render::PublicTermView>,
-    pub active: Option<crate::storage::theme::ActiveThemeV3>,
+    pub active: Option<crate::storage::theme::ActiveTheme>,
     pub resolution: crate::storage::overrides::TemplateResolution,
     pub body: Option<crate::page::RenderedLayout>,
     pub budget: crate::page::RenderBudget,
@@ -117,6 +117,41 @@ pub async fn list_published_archive_with_total(
     require_public_archive_in_conn(&mut tx, type_key).await?;
     let res = entries::list_published_filtered_with_total_in_tx(
         &mut tx, type_key, limit, offset, filters, sort,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(res)
+}
+
+/// Loads published `"post"` entries for `/` / `/{locale}` (`Unconfigured`)
+/// using `Index`, bypassing `has_archive == false` while enforcing `active` & `public`.
+pub async fn list_published_for_index_home(
+    db: &SqlitePool,
+    limit: i64,
+    offset: i64,
+    locale: Option<&str>,
+    sort: entries::PublishedListSort,
+) -> ApiResult<(Vec<ContentEntryRecord>, i64)> {
+    let mut tx = db.begin().await?;
+    let visible: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM content_types
+            WHERE key = 'post' AND provider_status = 'active'
+              AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1
+        )",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if visible == 0 {
+        tx.commit().await?;
+        return Ok((Vec::new(), 0));
+    }
+    let filters = EntryFilters {
+        locale: locale.map(str::to_owned),
+        ..Default::default()
+    };
+    let res = entries::list_published_filtered_with_total_in_tx(
+        &mut tx, "post", limit, offset, filters, sort,
     )
     .await?;
     tx.commit().await?;

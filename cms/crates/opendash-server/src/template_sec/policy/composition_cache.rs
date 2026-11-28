@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 
 pub enum CsecContentKind {
-    /// Home, Page, PageLayout, Single* and Singular require exactly one slot.
+    /// Page, PageLayout, Single* and Singular require exactly one slot.
     Entry,
     /// Index may omit the slot or include it once.
     Index,

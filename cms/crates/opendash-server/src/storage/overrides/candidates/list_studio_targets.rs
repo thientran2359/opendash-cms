@@ -5,7 +5,7 @@ pub async fn list_studio_targets(
     themes_root: &Path,
 ) -> ApiResult<StudioTargetsResponse> {
     use TemplateCandidateKind as K;
-    let active = theme::load_active_theme_v3(db, themes_root).await?;
+    let active = theme::load_active_theme(db, themes_root).await?;
     let overrides_list = list_overrides(db).await?;
     let overrides_map: BTreeMap<String, &TemplateOverrideRecord> = overrides_list
         .iter()
@@ -49,7 +49,6 @@ pub async fn list_studio_targets(
     }
 
     for (kind, label) in [
-        (K::Home, "Trang chủ (Home)"),
         (K::Page, "Trang mặc định (Page)"),
         (K::Single, "Chi tiết bài viết (Single)"),
         (K::Archive, "Danh sách lưu trữ (Archive)"),

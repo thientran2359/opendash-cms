@@ -220,7 +220,7 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
 
     let mkzip = |version: &str, markup: &str| -> Vec<u8> {
         let manifest = json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "f02-editorial",
             "name": "F02 Editorial",
             "version": version,
@@ -250,7 +250,7 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
             .unwrap();
         assert_eq!(res.status(), expected);
         let value = res.json::<Value>().await.unwrap();
-        assert_eq!(value["source_format"], "v3");
+        assert_eq!(value["source_format"], "v1");
         assert_eq!(value["activated"], false);
         ids.push(value["revision_id"].as_str().unwrap().to_owned());
     }
@@ -300,8 +300,8 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
     assert_eq!(f02_rows.len(), 2);
     assert_eq!(f02_rows[0]["version"], "1.0.0");
     assert_eq!(f02_rows[1]["version"], "2.0.0");
-    assert_eq!(f02_rows[0]["source_format"], "v3");
-    assert_eq!(f02_rows[1]["source_format"], "v3");
+    assert_eq!(f02_rows[0]["source_format"], "v1");
+    assert_eq!(f02_rows[1]["source_format"], "v1");
     assert_eq!(
         starter_selected["selection"]["theme_id"],
         "opendash-starter"
@@ -366,7 +366,7 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
     assert_eq!(v3_active.status(), 200);
     let active_body = v3_active.json::<Value>().await.unwrap();
     assert_eq!(active_body["revision_id"], ids[0]);
-    assert_eq!(active_body["source_format"], "v3");
+    assert_eq!(active_body["source_format"], "v1");
     let current = list(&client, &srv.base, &admin).await;
     assert_eq!(current["selection"]["revision_id"], ids[0]);
     assert_eq!(current["selection"]["theme_id"], "f02-editorial");

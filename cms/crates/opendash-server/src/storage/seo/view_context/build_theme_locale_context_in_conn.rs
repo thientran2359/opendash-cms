@@ -58,10 +58,26 @@ pub(crate) async fn build_theme_locale_context_in_conn(
     match target {
         ThemeLocaleTarget::Home => {
             let rows: Vec<(String,)> = sqlx::query_as(
-                "SELECT sr.locale
-                   FROM site_reading_settings sr
-                   JOIN content_entries e ON e.id = sr.homepage_page_id
-                  WHERE e.trashed_at IS NULL AND e.publication_status = 'published' AND e.content_type_key = 'page'",
+                "SELECT sl.code
+                   FROM site_locales sl
+                   LEFT JOIN site_reading_settings sr ON sr.locale = sl.code
+                   LEFT JOIN content_entries e ON e.id = sr.homepage_page_id
+                   LEFT JOIN content_types t ON t.key = e.content_type_key
+                  WHERE sl.enabled = 1
+                    AND sl.deleted_at IS NULL
+                    AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+                    AND (
+                      sr.homepage_page_id IS NULL
+                      OR (
+                        e.id IS NOT NULL
+                        AND e.content_type_key = 'page'
+                        AND e.locale = sl.code
+                        AND e.trashed_at IS NULL
+                        AND e.publication_status = 'published'
+                        AND t.provider_status = 'active'
+                        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+                      )
+                    )",
             )
             .fetch_all(&mut *conn)
             .await?;

@@ -111,7 +111,6 @@ impl BuilderContextTarget {
                     ..
                 }
             ),
-            "home" => matches!(self, Self::Template { kind: K::Home, .. }),
             "index" => matches!(self, Self::Template { kind: K::Index, .. }),
             "archive" => matches!(
                 self,

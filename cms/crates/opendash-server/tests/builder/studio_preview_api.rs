@@ -97,12 +97,12 @@ fn build_studio_theme_v3_zip() -> Vec<u8> {
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-studio-s02",
             "name": "Theme Studio S02",
             "version": "1.0.0",
             "templates": [
-                { "kind": "home", "file": "home.html" },
+                { "kind": "index", "file": "index.html" },
                 { "kind": "page", "file": "page.html" }
             ],
             "parts": {
@@ -135,7 +135,7 @@ fn build_studio_theme_v3_zip() -> Vec<u8> {
         zip.start_file("footer.html", opts).unwrap();
         zip.write_all(b"<footer data-theme-footer=\"1\">Footer: {{ site.tagline }}</footer>")
             .unwrap();
-        zip.start_file("home.html", opts).unwrap();
+        zip.start_file("index.html", opts).unwrap();
         zip.write_all(b"<article data-theme-home=\"1\">{{ od_content() }}</article>")
             .unwrap();
         zip.start_file("page.html", opts).unwrap();

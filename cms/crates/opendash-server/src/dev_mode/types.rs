@@ -20,7 +20,7 @@ pub(super) use opendash_core::{
     backup::PortableRuntimeConfigV1,
     block_schema::BlockSchema,
     plugin::PluginManifest,
-    theme::{TemplateCandidateKind, ThemeV3Manifest, valid_v3_asset_path},
+    theme::{TemplateCandidateKind, ThemeManifest, valid_theme_asset_path},
 };
 
 pub(super) use sha2::{Digest, Sha256};
@@ -53,7 +53,7 @@ pub struct DevPluginOverlay {
 
 #[derive(Debug, Clone)]
 pub struct DevThemeSnapshot {
-    pub manifest: ThemeV3Manifest,
+    pub manifest: ThemeManifest,
     pub manifest_json: String,
     pub revision_digest: String,
     pub templates: BTreeMap<String, String>,
@@ -124,8 +124,8 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     let manifest_bytes = add_read("theme.json", V2_MAX_TEXT_BYTES)?;
     let manifest_json = String::from_utf8(manifest_bytes)
         .map_err(|_| "theme.json phải là UTF-8 hợp lệ.".to_owned())?;
-    let manifest: ThemeV3Manifest = serde_json::from_str(&manifest_json)
-        .map_err(|_| "theme.json v3 không đúng định dạng JSON.".to_owned())?;
+    let manifest: ThemeManifest = serde_json::from_str(&manifest_json)
+        .map_err(|_| "theme.json v1 không đúng định dạng JSON.".to_owned())?;
     manifest.validate().map_err(str::to_owned)?;
     let url_policy =
         crate::storage::settings::theme_url_policy(&manifest_json).map_err(str::to_owned)?;
@@ -153,7 +153,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     }
     let functions_js = if has_func_file {
         let cap =
-            crate::theme::v3_entry_cap_and_allowlist("functions.js").map_err(str::to_owned)?;
+            crate::theme::theme_entry_cap_and_allowlist("functions.js").map_err(str::to_owned)?;
         let bytes = add_read("functions.js", cap)?;
         let src = std::str::from_utf8(&bytes)
             .map_err(|_| "File functions.js phải là UTF-8 hợp lệ.".to_owned())?;
@@ -168,7 +168,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     let mut parts = BTreeMap::new();
     for (key, path) in &manifest.parts {
         validate_theme_relative_path(path).map_err(str::to_owned)?;
-        let cap = crate::theme::v3_entry_cap_and_allowlist(path).map_err(str::to_owned)?;
+        let cap = crate::theme::theme_entry_cap_and_allowlist(path).map_err(str::to_owned)?;
         let bytes = add_read(path, cap)?;
         let src = String::from_utf8(bytes)
             .map_err(|_| format!("Template part '{path}' không phải UTF-8 hợp lệ."))?;
@@ -182,7 +182,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     let mut templates = BTreeMap::new();
     for decl in &manifest.templates {
         validate_theme_relative_path(&decl.file).map_err(str::to_owned)?;
-        let cap = crate::theme::v3_entry_cap_and_allowlist(&decl.file).map_err(str::to_owned)?;
+        let cap = crate::theme::theme_entry_cap_and_allowlist(&decl.file).map_err(str::to_owned)?;
         let bytes = add_read(&decl.file, cap)?;
         let src = String::from_utf8(bytes)
             .map_err(|_| format!("Template '{}' không phải UTF-8 hợp lệ.", decl.file))?;
@@ -198,8 +198,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
             None => &url_policy,
         };
         let kind = match decl.kind {
-            TemplateCandidateKind::Home
-            | TemplateCandidateKind::Page
+            TemplateCandidateKind::Page
             | TemplateCandidateKind::PageLayout
             | TemplateCandidateKind::Single
             | TemplateCandidateKind::SingleCustom
@@ -219,7 +218,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     let mut page_layouts = BTreeMap::new();
     for layout in &manifest.page_layouts {
         validate_theme_relative_path(&layout.file).map_err(str::to_owned)?;
-        let cap = crate::theme::v3_entry_cap_and_allowlist(&layout.file).map_err(str::to_owned)?;
+        let cap = crate::theme::theme_entry_cap_and_allowlist(&layout.file).map_err(str::to_owned)?;
         let bytes = add_read(&layout.file, cap)?;
         let src = String::from_utf8(bytes)
             .map_err(|_| format!("Page layout '{}' không phải UTF-8 hợp lệ.", layout.file))?;
@@ -248,7 +247,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     // Patterns (fingerprint + sanity check)
     for pattern in &manifest.patterns {
         validate_theme_relative_path(&pattern.file).map_err(str::to_owned)?;
-        let cap = crate::theme::v3_entry_cap_and_allowlist(&pattern.file).map_err(str::to_owned)?;
+        let cap = crate::theme::theme_entry_cap_and_allowlist(&pattern.file).map_err(str::to_owned)?;
         let _ = add_read(&pattern.file, cap)?;
     }
 
@@ -258,7 +257,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     let mut block_files = BTreeMap::new();
     for rel in block_rel_paths {
         validate_theme_relative_path(&rel).map_err(str::to_owned)?;
-        let cap = crate::theme::v3_entry_cap_and_allowlist(&rel).map_err(str::to_owned)?;
+        let cap = crate::theme::theme_entry_cap_and_allowlist(&rel).map_err(str::to_owned)?;
         let bytes = add_read(&rel, cap)?;
         block_files.insert(rel, bytes);
     }
@@ -275,7 +274,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
         .unwrap_or(&manifest.theme_id);
     for rel in lang_rel_paths {
         validate_theme_relative_path(&rel).map_err(str::to_owned)?;
-        let cap = crate::theme::v3_entry_cap_and_allowlist(&rel).map_err(str::to_owned)?;
+        let cap = crate::theme::theme_entry_cap_and_allowlist(&rel).map_err(str::to_owned)?;
         let bytes = add_read(&rel, cap)?;
         if let Some(stem) = rel
             .strip_prefix("languages/")
@@ -303,7 +302,7 @@ pub fn read_dev_theme_package(canonical_root: &Path) -> Result<DevThemeSnapshot,
     // Declared assets (verify existence, no symlink, record mtime/len in fingerprint)
     for asset_path in &manifest.assets {
         validate_theme_relative_path(asset_path).map_err(str::to_owned)?;
-        if !valid_v3_asset_path(asset_path) {
+        if !valid_theme_asset_path(asset_path) {
             return Err(format!("Đường dẫn asset không hợp lệ: '{asset_path}'."));
         }
         let resolved = safe_resolve_under_root(canonical_root, asset_path)?;

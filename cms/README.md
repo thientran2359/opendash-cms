@@ -17,7 +17,7 @@
 - `crates/opendash-plugin-sdk`: [`./crates/opendash-plugin-sdk/README.md`](./crates/opendash-plugin-sdk/README.md) — Guest-side Rust SDK targeting `opendash_v1` ABI v1/v1.1 with `export_plugin!`, typed host wrappers, and native `MockHost`.
 - `crates/opendash-server`: [`./crates/opendash-server/README.md`](./crates/opendash-server/README.md) — Single-binary Axum server (`opendash`) embedding `cms/admin/dist/` and orchestrating `SiteCoordinator`, `SitePaths`, C-SEC rendering, media/SMTP, and backup/restore.
   - `src/routes/`: [`./crates/opendash-server/src/routes/README.md`](./crates/opendash-server/src/routes/README.md) — 25 Axum HTTP handler modules (auth/RBAC, CSRF, `If-Match`, `AdmittedMutation`; zero direct SQL).
-  - `src/storage/`: [`./crates/opendash-server/src/storage/README.md`](./crates/opendash-server/src/storage/README.md) — 34 SQLite/SQLx domain submodules (`mod` + 34 domains) owning 100% of `sqlx::query*`/`sqlx::raw_sql` and migrations `0001`–`0057`.
+  - `src/storage/`: [`./crates/opendash-server/src/storage/README.md`](./crates/opendash-server/src/storage/README.md) — 34 SQLite/SQLx domain submodules (`mod` + 34 domains) owning 100% of `sqlx::query*`/`sqlx::raw_sql` and migrations `0001`–`0063`.
   - `src/plugin/`: [`./crates/opendash-server/src/plugin/README.md`](./crates/opendash-server/src/plugin/README.md) — Isolated `--plugin-worker` Wasmi (`=2.0.0`) sandbox, `StagedCommitGuard`, and DNS-pinned SSRF-hardened egress.
 
 ### React Admin (`admin/src/`)
@@ -30,7 +30,7 @@
 - `admin/src/i18n`: [`./admin/src/i18n/README.md`](./admin/src/i18n/README.md) — GNU Gettext (`.pot`/`.po`/`.mo`) site-wide i18n provider (`__`, `_x`, `_n`, `_nx`) backed by `cms/l10n/` (`opendash.pot`, `vi.po`, `error_codes.json`) and `Intl` formatters.
 
 ### Database, SDK, Tooling & Deployment
-- `migrations/`: [`./migrations/README.md`](./migrations/README.md) — 56 embedded forward-only SQLite migrations (`0001`–`0057`, omitting `0016`).
+- `migrations/`: [`./migrations/README.md`](./migrations/README.md) — 62 embedded forward-only SQLite migrations (`0001`–`0063`, omitting `0016`).
 - `sdk/`: [`./sdk/README.md`](./sdk/README.md) — AssemblyScript guest SDK (`sdk/as/opendash.ts`) & JS type contract (`sdk/js/opendash.d.ts`) for `opendash_v1` ABI v1/v1.1 (19 Host Ops) and Node test harness.
 - `scripts/`: [`./scripts/README.md`](./scripts/README.md) — 37 build, grouped fast test, health, architecture/plan/i18n gate, CodeGraph, smoke, benchmark, and live-browser E2E scripts.
 - `deploy/`: [`./deploy/README.md`](./deploy/README.md) — Linux installer, hardened `systemd` unit, and Nginx TLS reverse-proxy template.
@@ -38,7 +38,7 @@
 ### Examples & Fixtures
 - `examples/plugins/rust-seo-plugin`: [`./examples/plugins/rust-seo-plugin/README.md`](./examples/plugins/rust-seo-plugin/README.md) — Standalone Rust WASM plugin example (`manifest_schema: 3`) with `MockHost` tests.
 - `examples/plugins/sample-plugin`: [`./examples/plugins/sample-plugin/README.md`](./examples/plugins/sample-plugin/README.md) — Legacy v1 AssemblyScript transformer plugin example (`manifest_schema: 1`).
-- `examples/themes/sample-theme-v3`: [`./examples/themes/sample-theme-v3/README.md`](./examples/themes/sample-theme-v3/README.md) — Minimal Theme Format v3 (`manifest_version: 3`) reference package.
+- `examples/themes/sample-theme`: [`./examples/themes/sample-theme/README.md`](./examples/themes/sample-theme/README.md) — Minimal Theme Format V1 (`manifest_version: 1`) reference package.
 - `fixtures/`: [`./fixtures/README.md`](./fixtures/README.md) — Baseline SQLite upgrade fixture (`baseline_0001.sqlite`), `admin-review/` manifests, [`./fixtures/demo-website/README.md`](./fixtures/demo-website/README.md), [`./fixtures/m7/README.md`](./fixtures/m7/README.md), and [`./fixtures/m8/README.md`](./fixtures/m8/README.md).
 
 ## Global Invariants

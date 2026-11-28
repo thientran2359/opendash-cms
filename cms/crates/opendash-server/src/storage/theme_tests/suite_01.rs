@@ -54,24 +54,40 @@ async fn migration_0042_upgrades_legacy_schema_and_preserves_deleted_reading_ref
         .await
         .unwrap();
     assert_eq!(count, 0);
-    let (revision_id, selection_cas): (String, i64) =
-        sqlx::query_as("SELECT revision_id,version FROM theme_active_selection WHERE id=1")
+    assert!(
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT revision_id FROM theme_active_selection WHERE id=1"
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap()
+        .is_none(),
+        "0063 must clear active selection pointing to purged pre-V1 revision while preserving CAS version"
+    );
+    let selection_cas: i64 =
+        sqlx::query_scalar("SELECT version FROM theme_active_selection WHERE id=1")
             .fetch_one(&db)
             .await
             .unwrap();
-    assert_eq!((revision_id.as_str(), selection_cas), ("old-site-rev", 17));
-    let preserved: (String, String, String) = sqlx::query_as(
-        "SELECT p.source_format,r.source_format,r.revision_digest
-           FROM theme_packages p JOIN theme_revisions r ON r.theme_id=p.theme_id
-          WHERE p.theme_id='old-site-theme'",
-    )
-    .fetch_one(&db)
-    .await
-    .unwrap();
-    assert_eq!(preserved, ("v2".into(), "v2".into(), "digest-v2".into()));
+    assert_eq!(selection_cas, 17);
+    let pre_v1_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM theme_packages")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(pre_v1_count, 0, "0063 must drop pre-V1 theme_packages");
+    assert!(
+        sqlx::query(
+            "INSERT INTO theme_packages (theme_id,display_name,source_format)
+             VALUES ('legacy-site-theme','LegacyV3','v3')",
+        )
+        .execute(&db)
+        .await
+        .is_err(),
+        "0063 CHECK must reject non-v1 source_format"
+    );
     sqlx::query(
-        "INSERT INTO theme_packages (theme_id,display_name,source_format,is_legacy)
-         VALUES ('new-site-theme','V3','v3',0)",
+        "INSERT INTO theme_packages (theme_id,display_name,source_format)
+         VALUES ('new-site-theme','V1','v1')",
     )
     .execute(&db)
     .await
@@ -80,7 +96,7 @@ async fn migration_0042_upgrades_legacy_schema_and_preserves_deleted_reading_ref
         "INSERT INTO theme_revisions (
             revision_id,theme_id,version,revision_digest,source_format,
             manifest_json,file_digests_json,provenance_json
-         ) VALUES ('new-site-rev','new-site-theme','3.0.0','digest-v3','v3','{}','{}','{}')",
+         ) VALUES ('new-site-rev','new-site-theme','1.0.0','digest-v1','v1','{}','{}','{}')",
     )
     .execute(&db)
     .await
@@ -164,18 +180,13 @@ async fn pre_0042_legacy_theme_rows_list_cleanly_without_http_500() {
     let db = init_db(&path).await.unwrap();
     let listed = list(&db)
         .await
-        .expect("pre-0042 theme rows must list without 500");
+        .expect("0063 clean-slate migration must list cleanly without 500");
     assert_eq!(listed.version, 9);
-    assert_eq!(listed.selection.revision_id.as_deref(), Some("old-v2-rev"));
-    assert_eq!(listed.selection.source_format, Some(ThemeSourceFormat::V2));
-    assert!(listed.revisions.iter().any(
-        |r| r.revision_id == "legacy-v1-rev" && r.source_format == ThemeSourceFormat::V1Legacy
-    ));
+    assert!(listed.selection.revision_id.is_none());
+    assert!(listed.selection.source_format.is_none());
     assert!(
-        listed
-            .revisions
-            .iter()
-            .any(|r| r.revision_id == "old-v2-rev" && r.source_format == ThemeSourceFormat::V2)
+        listed.revisions.is_empty(),
+        "0063 clean-slate must purge pre-V1 v1_legacy/v2 rows"
     );
 }
 
@@ -240,16 +251,23 @@ async fn two_axis_specific_theme_beats_generic_db_and_same_candidate_db_wins() {
 }
 
 #[tokio::test]
-async fn candidate_order_covers_layout_home_taxonomy_not_found_and_parts() {
-    let home = build_candidates(&PublicTemplateContext::Home {
+async fn candidate_order_covers_layout_page_taxonomy_not_found_and_parts() {
+    let page = build_candidates(&PublicTemplateContext::Page {
         page_layout_key: Some("canvas".into()),
     })
     .unwrap();
     assert_eq!(
-        home.iter()
+        page.iter()
             .map(|c| c.canonical_key().unwrap())
             .collect::<Vec<_>>(),
-        ["home", "page_layout:canvas", "page", "index"]
+        ["page_layout:canvas", "page", "index"]
+    );
+    let idx = build_candidates(&PublicTemplateContext::Index).unwrap();
+    assert_eq!(
+        idx.iter()
+            .map(|c| c.canonical_key().unwrap())
+            .collect::<Vec<_>>(),
+        ["index"]
     );
     let taxonomy = build_candidates(&PublicTemplateContext::Taxonomy {
         taxonomy: "category".into(),
@@ -306,7 +324,7 @@ async fn candidate_order_covers_layout_home_taxonomy_not_found_and_parts() {
     assert!(matches!(result, TemplateResolution::ActiveTheme { .. }));
     let mut layouts = BTreeMap::new();
     layouts.insert("canvas".into(), "<main>Canvas</main>".into());
-    let result = resolve_template_2axis(&db, &home, None, None, Some(&layouts))
+    let result = resolve_template_2axis(&db, &page, None, None, Some(&layouts))
         .await
         .unwrap();
     assert!(

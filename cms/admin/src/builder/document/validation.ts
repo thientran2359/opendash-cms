@@ -28,7 +28,6 @@ const TEMPLATE_CONTEXT_KINDS = new Set<BuilderContextTarget['kind']>([
   'singular',
   'page',
   'page_layout',
-  'home',
   'index',
   'archive',
   'taxonomy',

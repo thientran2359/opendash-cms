@@ -209,7 +209,7 @@ async fn typed_url_fresh_public_saved_and_unsaved_preview() {
         .header(header::COOKIE, &cookie)
         .header(header::ORIGIN, &srv.origin)
         .header("X-CSRF-Token", &csrf)
-        .json(&json!({"target":{"kind":"home"},
+        .json(&json!({"target":{"kind":"index"},
             "transient":{"theme_options":{"header_cta_url":"#contact"}}}))
         .send()
         .await
@@ -227,7 +227,7 @@ async fn typed_url_fresh_public_saved_and_unsaved_preview() {
         .header(header::COOKIE, &cookie)
         .header(header::ORIGIN, &srv.origin)
         .header("X-CSRF-Token", &csrf)
-        .json(&json!({"target":{"kind":"home"},
+        .json(&json!({"target":{"kind":"index"},
             "transient":{"theme_options":{"header_cta_url":"#contact"}}}))
         .send()
         .await
@@ -251,7 +251,7 @@ async fn typed_url_fresh_public_saved_and_unsaved_preview() {
         .header(header::COOKIE, &cookie)
         .header(header::ORIGIN, &srv.origin)
         .header("X-CSRF-Token", &csrf)
-        .json(&json!({"target":{"kind":"home"},
+        .json(&json!({"target":{"kind":"index"},
             "transient":{"theme_options":{"header_cta_url":"//evil.test"}}}))
         .send()
         .await

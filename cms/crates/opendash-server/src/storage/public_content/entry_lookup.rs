@@ -175,7 +175,7 @@ pub async fn load_entry_render_snapshot_with_options(
     .remove(&entry.id)
     .unwrap_or_default();
     let active = match themes_root {
-        Some(root) => theme::load_active_theme_v3_in_conn(&mut tx, root).await?,
+        Some(root) => theme::load_active_theme_in_conn(&mut tx, root).await?,
         None => None,
     };
     let context = if entry.content_type_key == "page" {

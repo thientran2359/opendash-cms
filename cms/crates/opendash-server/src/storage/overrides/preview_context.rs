@@ -55,7 +55,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     record: &entries::ContentEntryRecord,
     effective_schema: &EffectiveContentSchema,
     actor_role: FieldRole,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     site: &SiteContext<'_>,
     site_options: &BTreeMap<String, serde_json::Value>,
     options: &BTreeMap<String, serde_json::Value>,
@@ -112,7 +112,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
         richtext_nonces,
     )
     .await?;
-    let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
+    let theme_assets = active.map(ActiveTheme::asset_url_map).unwrap_or_default();
     let empty_entries = Vec::new();
     let pagination = PaginationView::empty();
     let search_url =
@@ -177,7 +177,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
         existing.as_ref().map(|r| &r.document),
     )
     .await?;
-    let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
+    let active = theme::load_active_theme_in_conn(&mut tx, themes_root).await?;
     let mut budget = PreviewCompositionBudget::new();
     let url_policy =
         active_theme_url_policy_in_conn(&mut tx, active.as_ref(), Some(&key), None, None).await?;
@@ -422,7 +422,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
 
 pub(in crate::storage) async fn build_preview_context_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     transient: Option<&TransientStudioOverrides>,
     locale: &str,
     richtext_nonces: Option<&mut template_sec::RichTextNonceTable>,
@@ -512,7 +512,7 @@ pub(in crate::storage) async fn build_preview_context_in_tx(
         .is_some_and(|m| !m.is_empty())
     {
         return Err(ApiError::unprocessable(
-            "Không có theme v3 đang kích hoạt để xem trước menu_slots.",
+            "Không có theme v1 đang kích hoạt để xem trước menu_slots.",
         ));
     }
     Ok((general, pub_settings, site_options, options, menus))
@@ -523,7 +523,7 @@ pub(in crate::storage) async fn render_preview_named_part_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     key: &str,
     state: &BuilderRenderContext,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     theme_context: &serde_json::Value,
     route: Option<(&str, &str)>,
     render_locale: &str,

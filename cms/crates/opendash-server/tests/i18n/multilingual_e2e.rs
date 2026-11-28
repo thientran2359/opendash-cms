@@ -407,7 +407,7 @@ async fn multilingual_end_to_end_cuj_suite() {
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "index" },
             "preview_locale": secondary_code
         }))
         .send()

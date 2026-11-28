@@ -19,7 +19,7 @@ pub async fn preview_studio_with_cache_and_locale(
     let effective_locale =
         settings::resolve_requested_locale_in_conn(&mut *tx, preview_locale).await?;
     validate_typed_target_in_tx(&mut tx, target).await?;
-    let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
+    let active = theme::load_active_theme_in_conn(&mut tx, themes_root).await?;
     let url_policy =
         active_theme_url_policy_in_conn(&mut tx, active.as_ref(), Some(&key), None, None).await?;
     let mut state =
@@ -61,36 +61,11 @@ pub async fn preview_studio_with_cache_and_locale(
         current_year: content_render::current_year_in_timezone(&general.timezone),
     };
 
-    let default_home_entry: Option<TemplatePreviewEntry> = if preview_entry.is_none()
-        && target.kind == K::Home
-    {
-        let reading =
-            settings::get_reading_in_conn_for_locale(&mut *tx, Some(&effective_locale)).await?;
-        match reading.homepage_page_id {
-            Some(id) => {
-                let exists: Option<i64> = sqlx::query_scalar(
-                        "SELECT id FROM content_entries WHERE id = ? AND content_type_key = 'page' AND locale = ? AND trashed_at IS NULL",
-                    )
-                    .bind(id)
-                    .bind(&effective_locale)
-                    .fetch_optional(&mut *tx)
-                    .await?;
-                exists.map(|entry_id| TemplatePreviewEntry {
-                    type_key: "page".to_owned(),
-                    entry_id,
-                })
-            }
-            None => None,
-        }
-    } else {
-        None
-    };
-    let effective_sample = preview_entry.or(default_home_entry.as_ref());
     let actor_role = actor_field_role(actor);
     let entry = resolve_preview_entry(
         &mut tx,
         target,
-        effective_sample,
+        preview_entry,
         active.as_ref(),
         &effective_locale,
         actor_role,

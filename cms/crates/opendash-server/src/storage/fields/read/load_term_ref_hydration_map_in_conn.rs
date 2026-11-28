@@ -346,9 +346,9 @@ pub async fn validate_relational_refs_in_conn(
     Ok(())
 }
 
-pub async fn load_active_v3_manifest_in_conn(
+pub async fn load_active_theme_manifest_in_conn(
     conn: &mut SqliteConnection,
-) -> ApiResult<Option<ThemeV3Manifest>> {
+) -> ApiResult<Option<ThemeManifest>> {
     if let Some(dev) = DevOverlayConfig::global()
         && dev.dev_theme_root().is_some()
         && let Ok(Some(snap)) = dev.load_dev_theme()
@@ -360,14 +360,14 @@ pub async fn load_active_v3_manifest_in_conn(
         "SELECT r.manifest_json
            FROM theme_active_selection a
            JOIN theme_revisions r ON r.revision_id = a.revision_id
-          WHERE a.id = 1 AND r.source_format = 'v3'",
+          WHERE a.id = 1 AND r.source_format = 'v1'",
     )
     .fetch_optional(&mut *conn)
     .await?;
     let Some(raw) = manifest_json else {
         return Ok(None);
     };
-    let Ok(manifest) = serde_json::from_str::<ThemeV3Manifest>(&raw) else {
+    let Ok(manifest) = serde_json::from_str::<ThemeManifest>(&raw) else {
         return Ok(None);
     };
     Ok(Some(manifest))

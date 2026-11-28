@@ -1255,7 +1255,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
         .header("Origin", &srv.base_url)
         .header("x-csrf-token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "index" },
             "document": list_doc,
             "preview_locale": "en"
         }))
@@ -1284,7 +1284,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
         .header("Origin", &srv.base_url)
         .header("x-csrf-token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "index" },
             "preview_locale": "xx"
         }))
         .send()

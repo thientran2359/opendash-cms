@@ -67,7 +67,7 @@ pub(in crate::storage) async fn inspect_part_slot_in_tx(
     key: &str,
     depth: usize,
     stack: &[String],
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     url_policy: &template_sec::ThemeUrlPolicy,
     schemas: &opendash_core::registry::RegistryCatalog<
         opendash_core::block_schema::RegisteredBlockSchema,
@@ -132,7 +132,7 @@ pub(in crate::storage) async fn inspect_db_document_surfaces_in_tx(
     document: &BuilderDocument,
     depth: usize,
     stack: &[String],
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     url_policy: &template_sec::ThemeUrlPolicy,
     schemas: &opendash_core::registry::RegistryCatalog<
         opendash_core::block_schema::RegisteredBlockSchema,
@@ -160,7 +160,7 @@ pub(in crate::storage) async fn inspect_db_document_surfaces_in_tx(
 #[allow(clippy::too_many_arguments)]
 pub async fn resolve_and_render_header_footer_with_context_for_locale(
     db: &SqlitePool,
-    active_v3: Option<&ActiveThemeV3>,
+    active_v3: Option<&ActiveTheme>,
     theme_context: &serde_json::Value,
     precompiled_shell: &PrecompiledPublicShell,
     locale: Option<&str>,

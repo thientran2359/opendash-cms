@@ -200,7 +200,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
         let active_theme_id: Option<String> = sqlx::query_scalar(
             "SELECT r.theme_id FROM theme_active_selection a
                JOIN theme_revisions r ON r.revision_id = a.revision_id
-              WHERE a.id = 1 AND r.source_format = 'v3'",
+              WHERE a.id = 1 AND r.source_format = 'v1'",
         )
         .fetch_optional(&mut *conn)
         .await?;

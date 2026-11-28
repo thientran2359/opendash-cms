@@ -172,7 +172,7 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
     assert!(!home_single_html.contains("/gioi-thieu\">Giới thiệu</a>"));
 
     // 2. C-SEC Hardening rejections (400 Bad Request).
-    let base_manifest = r#"{"manifest_version":3,"theme_id":"bad-l10n","name":"Bad","version":"1.0.0","default_locale":"vi","templates":[{"kind":"single","file":"single.html"},{"kind":"archive","file":"archive.html"}]}"#;
+    let base_manifest = r#"{"manifest_version":1,"theme_id":"bad-l10n","name":"Bad","version":"1.0.0","default_locale":"vi","templates":[{"kind":"single","file":"single.html"},{"kind":"archive","file":"archive.html"}]}"#;
     let vi_dict = r#"{"hello":"Xin chào"}"#.as_bytes();
 
     // 2a. Legacy locales/*.json is rejected under Clean-Slate V1
@@ -322,7 +322,7 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
     assert_eq!(en_home.status(), StatusCode::OK);
     let en_home_html = en_home.text().await.unwrap();
     assert!(en_home_html.contains("<html lang=\"en\" dir=\"ltr\">"));
-    assert!(en_home_html.contains("Homepage is not configured."));
+    assert!(en_home_html.contains("Latest posts"));
 
     // /en/no-such-page 404 uses Starter 1.1.0 English dictionary & language-switcher
     let en_404 = client
@@ -346,7 +346,7 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
     assert!(en_404_html.contains("href=\"&#x2f;en\""));
 
     // 4. Install valid theme with gettext `languages/good-l10n-{vi,en}.po` -> 201 Created!
-    let good_manifest = r#"{"manifest_version":3,"theme_id":"good-l10n","name":"Good L10n","version":"1.0.0","default_locale":"vi","text_domain":"good-l10n","templates":[{"kind":"single","file":"single.html"},{"kind":"archive","file":"archive.html"},{"kind":"not_found","file":"404.html"}]}"#;
+    let good_manifest = r#"{"manifest_version":1,"theme_id":"good-l10n","name":"Good L10n","version":"1.0.0","default_locale":"vi","text_domain":"good-l10n","templates":[{"kind":"single","file":"single.html"},{"kind":"archive","file":"archive.html"},{"kind":"not_found","file":"404.html"}]}"#;
     let vi_po = "msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=UTF-8\\n\"\n\nmsgid \"Greeting\"\nmsgstr \"Xin chào\"\n\nmsgid \"Fallback only\"\nmsgstr \"Chỉ có ở gốc\"\n";
     let en_po = "msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=UTF-8\\n\"\n\nmsgid \"Greeting\"\nmsgstr \"Hello\"\n";
     let r_good = upload_theme(

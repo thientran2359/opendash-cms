@@ -59,7 +59,6 @@ pub fn valid_allowed_context_token(token: &str) -> bool {
             | "singular"
             | "page"
             | "page_layout"
-            | "home"
             | "index"
             | "archive"
             | "taxonomy"

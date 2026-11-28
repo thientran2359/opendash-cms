@@ -226,7 +226,7 @@ impl CatalogRegistry {
         self.reload_from_site_paths(paths, embedded, bundled_packages, dev_overlays)
     }
 
-    /// Builds a `{domain}` catalog map for Theme v3 C-SEC rendering at `locale`,
+    /// Builds a `{domain}` catalog map for Theme V1 C-SEC rendering at `locale`,
     /// combining Theme catalogs (with site overrides) and Core `"opendash"` fallbacks.
     pub fn theme_render_catalogs(
         &self,
@@ -246,7 +246,7 @@ impl CatalogRegistry {
     }
 
     /// Reloads `<site_root>/languages/`, embedded Core `vi.mo`, and bundled `languages/*.{mo,po}`
-    /// from the currently active Theme v3 revision and enabled Plugin revisions.
+    /// from the currently active Theme V1 revision and enabled Plugin revisions.
     pub async fn reload_site_with_active_packages(
         &self,
         db: &sqlx::SqlitePool,

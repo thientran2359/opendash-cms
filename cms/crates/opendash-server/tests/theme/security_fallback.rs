@@ -193,11 +193,11 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
 
     // 1. Install & activate valid Theme A with `public: false` option
     let manifest_a = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "safe-theme",
         "name": "Safe Theme",
         "version": "1.0.0",
-        "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
         "options": [
             { "key": "public_title", "label": "Title", "type": "text", "default": "SafeSite", "public": true },
             { "key": "secret_key", "label": "Secret", "type": "text", "default": "TOP_SECRET_VALUE_999", "public": false }
@@ -207,7 +207,7 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
     let zip_a = build_zip(&[
         ("theme.json", &manifest_a),
         ("header.html", b"<header><nav><a href=\"/\">{{ options.public_title }}</a></nav></header>"),
-        ("home.html", b"<main><h1>{{ options.public_title }}</h1>{{ od_content() }}</main>"),
+        ("index.html", b"<main><h1>{{ options.public_title }}</h1>{{ od_content() }}</main>"),
         ("single.html", b"<main><h1>{{ entry.title }}</h1>{{ od_content() }}</main>"),
         ("archive.html", b"<main><h1>Archive</h1>{% for e in entries %}<article><h2>{{ e.title }}</h2></article>{% endfor %}</main>"),
         ("footer.html", b"<footer><p>Footer</p></footer>"),
@@ -381,14 +381,14 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
     ];
     for (idx, (label, tpl)) in bad_templates.iter().enumerate() {
         let bad_manifest = serde_json::to_vec(&json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": format!("evil-{idx}"),
             "name": "Evil",
             "version": "1.0.0",
-            "templates": [{ "kind": "home", "file": "home.html" }]
+            "templates": [{ "kind": "index", "file": "index.html" }]
         }))
         .unwrap();
-        let bad_zip = build_zip(&[("theme.json", &bad_manifest), ("home.html", tpl)]);
+        let bad_zip = build_zip(&[("theme.json", &bad_manifest), ("index.html", tpl)]);
         let resp = client
             .post(format!("{}/api/admin/themes", srv.base_url))
             .header("Content-Type", "application/zip")

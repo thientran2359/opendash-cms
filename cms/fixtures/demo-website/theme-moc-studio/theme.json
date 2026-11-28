@@ -1,5 +1,5 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 1,
   "theme_id": "moc-studio",
   "name": "Mộc Studio Editorial",
   "version": "1.0.0",
@@ -8,7 +8,6 @@
     "footer": "footer.html"
   },
   "templates": [
-    { "kind": "home", "file": "home.html" },
     { "kind": "page", "file": "page.html" },
     { "kind": "archive", "file": "archive.html" },
     { "kind": "single", "file": "single.html" },

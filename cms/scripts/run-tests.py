@@ -50,7 +50,7 @@ class GroupSpec:
 GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec(
         name="theme",
-        description="Theme v3, Starter revisions, C-SEC templates, overrides, imports, public rendering",
+        description="Theme v1, Starter revisions, C-SEC templates, overrides, imports, public rendering",
         test_patterns=("theme",),
         unit_filters=(
             "theme::",

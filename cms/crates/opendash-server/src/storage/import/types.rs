@@ -13,7 +13,7 @@ pub(super) use opendash_core::field_schema::{
 
 pub(super) use opendash_core::id::{valid_kebab_segment_with_limit, valid_snake_key};
 
-pub(super) use opendash_core::theme::ThemeV3Manifest;
+pub(super) use opendash_core::theme::ThemeManifest;
 
 pub(super) use serde::{Deserialize, Serialize};
 

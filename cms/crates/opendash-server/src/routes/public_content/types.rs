@@ -85,7 +85,7 @@ pub struct ResolvedPublicHtml {
 pub(super) async fn render_resolved_public_template_html(
     db: &SqlitePool,
     resolution: TemplateResolution,
-    active: Option<&theme_storage::ActiveThemeV3>,
+    active: Option<&theme_storage::ActiveTheme>,
     site_ctx: &SiteContext<'_>,
     site_opts: &BTreeMap<String, serde_json::Value>,
     theme_opts: &BTreeMap<String, serde_json::Value>,
@@ -149,7 +149,7 @@ pub(super) async fn render_resolved_public_template_html(
         Vec::new()
     };
     let theme_assets = active
-        .map(theme_storage::ActiveThemeV3::asset_url_map)
+        .map(theme_storage::ActiveTheme::asset_url_map)
         .unwrap_or_default();
     let context = content_render::build_public_theme_context(PublicThemeContextInput {
         site: site_ctx,
@@ -257,7 +257,7 @@ pub(super) async fn render_resolved_public_template_html(
                     use crate::template_sec::CsecContentKind;
                     let kind = if target_key == "index" {
                         CsecContentKind::Index
-                    } else if matches!(target_key.as_str(), "home" | "page" | "singular" | "single")
+                    } else if matches!(target_key.as_str(), "page" | "singular" | "single")
                         || target_key.starts_with("single:")
                         || target_key.starts_with("single_custom:")
                         || target_key.starts_with("page_layout:")

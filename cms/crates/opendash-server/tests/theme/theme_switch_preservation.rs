@@ -144,11 +144,11 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
 
     // 2. Install & activate Theme A1 (CPT `portfolio` + fields + options_schema + menu_slots)
     let manifest_a1 = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "theme-a",
         "name": "Theme Alpha",
         "version": "1.0.0",
-        "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }],
+        "templates": [{ "kind": "index", "file": "index.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }],
         "declarations": {
             "content_types": [
                 {
@@ -176,7 +176,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     .unwrap();
     let zip_a1 = build_zip(&[
         ("theme.json", &manifest_a1),
-        ("home.html", b"<main>Alpha Home{{ od_content() }}</main>"),
+        ("index.html", b"<main>Alpha Home{{ od_content() }}</main>"),
         (
             "single.html",
             b"<main>Alpha Single: {{ entry.title }}{{ od_content() }}</main>",
@@ -317,16 +317,16 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
 
     // 4. Install & activate Theme B (empty v2 theme, NO `portfolio`, NO `options_schema`)
     let manifest_b = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "theme-b",
         "name": "Theme Beta",
         "version": "1.0.0",
-        "templates": [{ "kind": "home", "file": "home.html" }]
+        "templates": [{ "kind": "index", "file": "index.html" }]
     }))
     .unwrap();
     let zip_b = build_zip(&[
         ("theme.json", &manifest_b),
-        ("home.html", b"<main>Beta Home{{ od_content() }}</main>"),
+        ("index.html", b"<main>Beta Home{{ od_content() }}</main>"),
     ]);
     let inst_b = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -565,11 +565,11 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
 
     // 6. Install & activate Theme A2 (v2.0.0 with `portfolio` + extra optional field `year`)
     let manifest_a2 = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "theme-a",
         "name": "Theme Alpha",
         "version": "2.0.0",
-        "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }],
+        "templates": [{ "kind": "index", "file": "index.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }],
         "declarations": {
             "content_types": [
                 {
@@ -598,7 +598,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     .unwrap();
     let zip_a2 = build_zip(&[
         ("theme.json", &manifest_a2),
-        ("home.html", b"<main>Alpha v2 Home{{ od_content() }}</main>"),
+        ("index.html", b"<main>Alpha v2 Home{{ od_content() }}</main>"),
         (
             "single.html",
             b"<main>Alpha v2 Single: {{ entry.title }}{{ od_content() }}</main>",

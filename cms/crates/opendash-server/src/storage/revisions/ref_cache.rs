@@ -3,16 +3,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use opendash_core::block_schema::RegisteredBlockSchema;
 use opendash_core::content::EffectiveContentSchema;
 use opendash_core::registry::RegistryCatalog;
-use opendash_core::theme::ThemeV3Manifest;
+use opendash_core::theme::ThemeManifest;
 use sqlx::SqliteConnection;
 
 use crate::error::ApiResult;
-use crate::storage::fields::load_active_v3_manifest_in_conn;
+use crate::storage::fields::load_active_theme_manifest_in_conn;
 use crate::storage::media::valid_media_id;
 
 pub(super) struct InspectionCaches {
     pub(super) schemas: RegistryCatalog<RegisteredBlockSchema>,
-    manifest: Option<ThemeV3Manifest>,
+    manifest: Option<ThemeManifest>,
     manifest_loaded: bool,
     active_media: BTreeMap<(String, Option<String>), bool>,
     active_cpts: BTreeMap<String, bool>,
@@ -58,9 +58,9 @@ impl InspectionCaches {
     pub(super) async fn ensure_manifest(
         &mut self,
         conn: &mut SqliteConnection,
-    ) -> ApiResult<Option<&ThemeV3Manifest>> {
+    ) -> ApiResult<Option<&ThemeManifest>> {
         if !self.manifest_loaded {
-            self.manifest = load_active_v3_manifest_in_conn(conn).await?;
+            self.manifest = load_active_theme_manifest_in_conn(conn).await?;
             self.manifest_loaded = true;
         }
         Ok(self.manifest.as_ref())

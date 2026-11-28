@@ -204,7 +204,7 @@ fn build_s03_test_theme_zip() -> Vec<u8> {
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version": 3,
+            "manifest_version": 1,
             "theme_id": "theme-s03-test",
             "name": "Theme S03 Test",
             "version": "1.0.0",
@@ -216,7 +216,7 @@ fn build_s03_test_theme_zip() -> Vec<u8> {
                 "part-b": "template-part/part-b.html"
             },
             "templates": [
-                { "kind": "home", "file": "home.html" },
+                { "kind": "index", "file": "index.html" },
                 { "kind": "page", "file": "page.html" },
                 { "kind": "single", "file": "single.html" }
             ]
@@ -232,7 +232,7 @@ fn build_s03_test_theme_zip() -> Vec<u8> {
         zip.write_all(b"<div>Part A</div>").unwrap();
         zip.start_file("template-part/part-b.html", opts).unwrap();
         zip.write_all(b"<div>Part B</div>").unwrap();
-        zip.start_file("home.html", opts).unwrap();
+        zip.start_file("index.html", opts).unwrap();
         zip.write_all(b"<main>{{ od_content() }}</main>").unwrap();
         zip.start_file("page.html", opts).unwrap();
         zip.write_all(b"<main>{{ od_content() }}</main>").unwrap();

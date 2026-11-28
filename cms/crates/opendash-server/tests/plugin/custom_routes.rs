@@ -495,7 +495,7 @@ async fn s03_scoped_custom_routes_public_session_admin_webhook_ssrf_and_ratelimi
 
     // 3. Install & activate Theme with a custom route (/p/route-theme/banner) and explicit render_trusted_html: false opt-out
     let theme_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "route-theme",
         "name": "Route Theme",
         "version": "1.0.0",
