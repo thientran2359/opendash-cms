@@ -27,6 +27,7 @@ pub(crate) const RESERVED_CONTEXT_VARS: &[&str] = &[
     "pagination",
     "breadcrumbs",
     "taxonomy",
+    "search",
     "related_entries",
     "recent_posts",
     "route",

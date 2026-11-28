@@ -124,6 +124,7 @@ pub async fn set_publication_status(
     if needs_claim_sync {
         crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     }
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, id).await?;
     let record = get_entry_in_tx(&mut tx, type_key, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải trạng thái xuất bản."))?;

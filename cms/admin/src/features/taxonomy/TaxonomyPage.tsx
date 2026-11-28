@@ -164,8 +164,10 @@ export function TaxonomyPage({
             <p className="mt-0.5 text-xs text-amber-700">{__("Taxonomy is inactive; saved terms remain visible.")}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <AdminButton variant="secondary" size="sm" disabled={busy}
-            onClick={() => onNavigateHash('#/taxonomy/definitions')}>{__("Taxonomy definitions")}</AdminButton>
+          {admin && (
+            <AdminButton variant="secondary" size="sm" disabled={busy}
+              onClick={() => onNavigateHash('#/content-structure/taxonomies')}>{__("Taxonomy definitions")}</AdminButton>
+          )}
           <AdminButton variant="secondary" size="sm" disabled={loading || busy}
             onClick={() => void refresh()}>{__("Refresh")}</AdminButton>
           {canCreateTerms && routeMode === 'edit' && (

@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn map_maintenance_error(err: MaintenanceError) -> ApiError {
+pub(crate) fn map_maintenance_error(err: MaintenanceError) -> ApiError {
     match err {
         MaintenanceError::AlreadyActive => {
             ApiError::conflict("Đang có tác vụ bảo trì khác đang thực thi.")

@@ -10,6 +10,7 @@ pub struct BuilderRenderContext {
     pub hydration_entries: BTreeMap<i64, crate::storage::fields::HydratedEntryRefRow>,
     pub hydration_terms: BTreeMap<i64, crate::storage::fields::HydratedTermRefRow>,
     pub timezone: String,
+    pub locale_search_url: String,
 }
 
 impl Default for BuilderRenderContext {
@@ -23,6 +24,7 @@ impl Default for BuilderRenderContext {
             hydration_entries: BTreeMap::new(),
             hydration_terms: BTreeMap::new(),
             timezone: "UTC".to_owned(),
+            locale_search_url: "/".to_owned(),
         }
     }
 }
@@ -191,12 +193,15 @@ pub(crate) async fn read_render_context_for_locale_tx(
     let timezone = crate::storage::settings::get_general_in_conn(&mut **tx)
         .await?
         .timezone;
+    let locale_search_url =
+        crate::storage::seo::resolve_locale_search_url_in_conn(&mut **tx, requested_locale).await?;
     Ok(BuilderRenderContext {
         declared_blocks,
         site_options,
         options,
         menus,
         timezone,
+        locale_search_url,
         ..Default::default()
     })
 }

@@ -174,6 +174,19 @@ pub async fn sync_theme_declarations_in_tx(
     .fetch_all(&mut *conn)
     .await?;
     changed_keys.extend(elig_keys);
+    if table_exists_in_tx(conn, "content_field_groups").await? {
+        let fg_keys: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT t.target_key
+               FROM content_field_group_targets t
+               JOIN content_field_groups g ON g.group_id = t.group_id
+              WHERE g.owner_kind = 'theme' AND g.owner_id != ? AND g.status != 'withdrawn'
+                AND t.target_kind = 'content_type'",
+        )
+        .bind(theme_id)
+        .fetch_all(&mut *conn)
+        .await?;
+        changed_keys.extend(fg_keys);
+    }
     sqlx::query(
         "UPDATE content_types
          SET provider_status = 'provider_inactive', updated_at = datetime('now')
@@ -193,7 +206,7 @@ pub async fn sync_theme_declarations_in_tx(
     .bind(theme_id)
     .execute(&mut *conn)
     .await?;
-    bump_provider_cpt_cas_in_tx(conn, changed_keys).await?;
+    bump_provider_cpt_cas_in_tx(conn, changed_keys.clone()).await?;
 
     if table_exists_in_tx(conn, "content_field_groups").await? {
         sqlx::query(
@@ -234,6 +247,13 @@ pub async fn sync_theme_declarations_in_tx(
         options_pages: declarations.options_pages.clone(),
     };
     sync_owner_cnt_declarations_in_tx(conn, "theme", theme_id, &neutral, false).await?;
+    if changed_keys.contains("*") {
+        crate::storage::search::rebuild_search_index_in_conn(conn).await?;
+    } else {
+        for key in &changed_keys {
+            crate::storage::search::sync_entries_for_type_in_conn(conn, key).await?;
+        }
+    }
     crate::storage::permalinks::sync_claims_in_tx(conn).await
 }
 
@@ -288,6 +308,19 @@ pub async fn set_plugin_cnt_provider_status_in_tx(
     .fetch_all(&mut *conn)
     .await?;
     changed_keys.extend(changed_eligibility);
+    if table_exists_in_tx(conn, "content_field_groups").await? {
+        let fg_keys: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT t.target_key
+               FROM content_field_group_targets t
+               JOIN content_field_groups g ON g.group_id = t.group_id
+              WHERE g.owner_kind = 'plugin' AND g.owner_id = ? AND g.status != 'withdrawn'
+                AND t.target_kind = 'content_type'",
+        )
+        .bind(plugin_id)
+        .fetch_all(&mut *conn)
+        .await?;
+        changed_keys.extend(fg_keys);
+    }
     if active {
         sqlx::query(
             "UPDATE content_types
@@ -365,7 +398,14 @@ pub async fn set_plugin_cnt_provider_status_in_tx(
         conn, "plugin", plugin_id, active,
     )
     .await?;
-    bump_provider_cpt_cas_in_tx(conn, changed_keys).await?;
+    bump_provider_cpt_cas_in_tx(conn, changed_keys.clone()).await?;
+    if changed_keys.contains("*") {
+        crate::storage::search::rebuild_search_index_in_conn(conn).await?;
+    } else {
+        for key in &changed_keys {
+            crate::storage::search::sync_entries_for_type_in_conn(conn, key).await?;
+        }
+    }
     crate::storage::permalinks::sync_claims_in_tx(conn).await?;
     Ok(())
 }

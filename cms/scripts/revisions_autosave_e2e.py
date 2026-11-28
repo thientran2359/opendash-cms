@@ -410,9 +410,13 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     )
                     expect(page.get_by_test_id("admin-layout")).to_be_visible(timeout=15000)
                     # Leaving Posts -> Pages must NOT re-prompt for stale Studio dirty state
-                    page.get_by_role("navigation", name="Admin sections").locator(
-                        'button[data-menu-id="pages"]'
-                    ).click()
+                    admin_nav = page.get_by_role("navigation", name="Admin sections")
+                    pages_btn = admin_nav.locator('button[data-menu-id="pages"]')
+                    if pages_btn.get_attribute("aria-expanded") != "true":
+                        pages_btn.click()
+                    all_pages_link = admin_nav.locator('a[href="#/pages"]')
+                    expect(all_pages_link).to_be_visible(timeout=10000)
+                    all_pages_link.click()
                     expect(page).to_have_url(re.compile(r"#/pages$"), timeout=10000)
                     checks.append("cuj2_studio_mode2_diff_restore_pattern_and_mayleave")
 

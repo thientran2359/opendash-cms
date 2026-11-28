@@ -6,7 +6,7 @@
 * **Baseline:** `main@b3fba26`
 * **Approved By:** Owner
 * **Approval Evidence:** Chủ dự án phê duyệt trực tiếp đặc tả ngày 2026-11-28 ("mình chốt" tại phiên EGM Bước 4, chốt Cách 1 Clean-Slate và yêu cầu mở đoạn chat mới cùng Feature Worktree riêng feat/acf-content-structure để triển khai trọn gói Bước 5 từ S01 đến S06).
-* **Migration Reserved:** `0063_acf_content_structure.sql` *(Làn song song: `0060` Search `+5` objects → `247/256`; `0061` Spec A1 `+0` → `247/256`; `0062` Spec A2 `-3` → `244/256`; `0063` đặc tả này **`+0` net `sqlite_schema` objects**; tự động đánh lại số `NNNN` nối tiếp khi sync `origin/main` ở Bước 5/7 nếu thứ tự merge thay đổi)*
+* **Migration Reserved:** `0063_acf_content_structure.sql` *(đánh số nối tiếp thành `0061_acf_content_structure.sql` khi đồng bộ `origin/main@fcf17a1` có `0060_public_site_search_fts5.sql`: `0060` Search `+5` objects → `247/256`; `0061` đặc tả này **`+0` net `sqlite_schema` objects** → giữ nguyên `247/256 < 256`)*
 * **Goldfish Review:** Đã hoàn tất 2 vòng rà soát bởi 4 reviewer độc lập (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`, `egm-structural`; tối đa 2 vòng theo `AGENTS.md`). Đã vá 100% Blocker, Major, Minor và Nit sau Vòng 2.
 * **Related Contracts & Specs:**
   * [Hợp đồng Hệ kiểu Trường Thống nhất (`UNIFIED_FIELD_SCHEMA` V1)](../contracts/UNIFIED_FIELD_SCHEMA.md)

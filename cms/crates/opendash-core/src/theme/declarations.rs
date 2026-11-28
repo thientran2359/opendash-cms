@@ -29,6 +29,7 @@ pub enum TemplateCandidateKind {
     Singular,
     Index,
     NotFound,
+    Search,
     Part,
 }
 
@@ -120,6 +121,7 @@ impl TemplateCandidate {
             TemplateCandidateKind::Singular if only_plain => Ok("singular".into()),
             TemplateCandidateKind::Index if only_plain => Ok("index".into()),
             TemplateCandidateKind::NotFound if only_plain => Ok("not_found".into()),
+            TemplateCandidateKind::Search if only_plain => Ok("search".into()),
             TemplateCandidateKind::PageLayout
                 if self.layout_key.is_some()
                     && self.content_type.is_none()

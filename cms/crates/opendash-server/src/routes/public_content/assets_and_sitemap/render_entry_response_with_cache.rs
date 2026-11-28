@@ -185,6 +185,7 @@ pub(crate) async fn render_entry_response_with_cache(
         },
     )
     .await?;
+    let inactive_search = content_render::SearchView::inactive_for_locale_ctx(&locale_ctx);
     budget.set_locale_context(active_v3.as_ref(), &entry_locale, locale_ctx);
     let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
     let pagination = PaginationView::empty();
@@ -216,6 +217,7 @@ pub(crate) async fn render_entry_response_with_cache(
             term_schema: None,
             content_type: Some(&ct_value),
             entry: Some(&view),
+            search: &inactive_search,
         },
         &mut budget,
         cache,

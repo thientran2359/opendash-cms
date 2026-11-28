@@ -7,6 +7,7 @@ export type AdminView =
   | 'patterns'
   | 'cpt'
   | 'media'
+  | 'contact'
   | 'taxonomy'
   | 'themes'
   | 'studio'
@@ -232,6 +233,17 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     return { view: 'taxonomy', sub: 'invalid', taxonomyMode: 'invalid', rawHash: hash };
   }
   if (first === 'appearance' || first === 'themes') {
+    if (first === 'themes' && segs[1] === 'install') {
+      return {
+        view: 'themes',
+        sub: 'install',
+        rawHash: '#/themes/install',
+        redirectHash: '#/appearance/themes/install',
+      };
+    }
+    if (first === 'appearance' && segs[1] === 'themes' && segs[2] === 'install') {
+      return { view: 'themes', sub: 'install', rawHash: '#/appearance/themes/install' };
+    }
     const sub = first === 'themes' ? 'themes' : (segs[1] ?? 'themes');
     if (sub === 'content-types') {
       const typeKey = segs[2] ? decodeURIComponent(segs[2]) : undefined;
@@ -390,9 +402,12 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     };
   }
   if (first === 'contact') {
-    // Preserve legacy contact deep links while routing to the same guarded
-    // feature screen as #/settings/contact.
-    return { view: 'settings', sub: 'contact', rawHash: `#/contact/${segs[1] ?? 'submissions'}` };
+    const isInbox = segs[1] === 'inbox' || segs[1] === 'submissions';
+    return {
+      view: 'contact',
+      sub: isInbox ? 'inbox' : 'forms',
+      rawHash: isInbox ? `#/contact/${segs[1]}` : '#/contact',
+    };
   }
   if (first === 'plugins') {
     return { view: 'plugins', sub: segs[1] === 'install' ? 'install' : 'list', rawHash: `#/plugins${segs[1] === 'install' ? '/install' : ''}` };
@@ -410,6 +425,15 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
   // settings permission guard below applies to this deep link as well.
   if (first === 'settings') {
     const sub = segs[1] ?? 'general';
+    if (sub === 'contact') {
+      const isInbox = segs[2] === 'inbox' || segs[2] === 'submissions';
+      return {
+        view: 'contact',
+        sub: isInbox ? 'inbox' : 'forms',
+        rawHash: isInbox ? `#/settings/contact/${segs[2]}` : '#/settings/contact',
+        redirectHash: isInbox ? '#/contact/inbox' : '#/contact',
+      };
+    }
     const typeKey = sub === 'content-types' && segs[2] ? decodeURIComponent(segs[2]) : undefined;
     if (sub === 'content-types') {
       return {
@@ -450,6 +474,7 @@ export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
   // Editors may list, create (guarded by `editor_can_create_terms`), and edit terms.
   if (route.view === 'taxonomy' && !['list', 'new', 'edit'].includes(route.taxonomyMode ?? '')) return false;
   if (
+    route.view === 'contact' ||
     route.view === 'themes' ||
     route.view === 'plugins' ||
     route.view === 'users' ||
@@ -468,5 +493,15 @@ export function parseAdminView(hash: string, pathname: string = '/admin/'): Admi
 
 export function isViewAllowed(view: AdminView, role: Role): boolean {
   if (role === 'admin') return true;
-  return !['themes', 'plugins', 'users', 'tools', 'settings', 'content-structure', 'patterns', 'studio'].includes(view);
+  return !['contact', 'themes', 'plugins', 'users', 'tools', 'settings', 'content-structure', 'patterns', 'studio'].includes(view);
+}
+
+export function isPlainLeftClick(event: {
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  button: number;
+}): boolean {
+  return !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0;
 }

@@ -82,6 +82,7 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_budget(
     let context = shared_preview.then_some(page::BuilderTemplateContext {
         content_html: None,
         parts: &parts,
+        search: None,
     });
     let scope = if current.opened.type_key == "pattern" {
         format!("pat_{}", current.opened.entry_id)

@@ -8,6 +8,7 @@ import type { AdminLocaleState } from '../api/locales.ts';
 import { BuilderBindingFields } from './BuilderBindingFields.tsx';
 import { BuilderListFields } from './BuilderListFields.tsx';
 import { BuilderContactFormFields } from './BuilderContactFormFields.tsx';
+import { BuilderSearchFields } from './BuilderSearchFields.tsx';
 import { UnifiedFieldForm } from '../fields/UnifiedFieldForm.tsx';
 import { useSiteTimezone } from '../fields/useSiteTimezone.ts';
 import {
@@ -477,6 +478,8 @@ export function BuilderInspector({
       {element && !locked && ![
         'core/list',
         'core/contact_form',
+        'core/search_form',
+        'core/search_results',
         'core/video',
         'core/pattern_ref',
         'core/template_part',
@@ -694,6 +697,9 @@ export function BuilderInspector({
       )}
       {element?.type === 'core/contact_form' && !locked && (
         <BuilderContactFormFields key={element.id} element={element} onChange={onChange} onError={onError} />
+      )}
+      {(element?.type === 'core/search_form' || element?.type === 'core/search_results') && !locked && (
+        <BuilderSearchFields key={element.id} element={element} onChange={onChange} />
       )}
       {binding != null && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900">

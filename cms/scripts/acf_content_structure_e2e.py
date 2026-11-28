@@ -49,7 +49,7 @@ def run(binary: pathlib.Path, artifact_dir: pathlib.Path) -> None:
                     go("/dashboard")
                     expect(page.get_by_test_id("admin-layout")).to_be_visible()
 
-                    # Verify Migration 0063 schema budget (< 256 sqlite_schema objects, no forbidden tables).
+                    # Verify Migration 0061 schema budget (< 256 sqlite_schema objects, no forbidden tables).
                     with closing(sqlite3.connect(db_path)) as conn:
                         total_objs = conn.execute(
                             "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'"

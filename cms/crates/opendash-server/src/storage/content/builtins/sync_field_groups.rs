@@ -170,6 +170,32 @@ pub(super) async fn verify_snapshots_after_write_in_tx(
     Ok(())
 }
 
+pub(super) async fn sync_search_for_field_group_targets_in_tx(
+    conn: &mut SqliteConnection,
+    domain: FieldGroupDomain,
+    targets: &[(String, String)],
+) -> ApiResult<()> {
+    if domain != FieldGroupDomain::Content || targets.is_empty() {
+        return Ok(());
+    }
+    if targets
+        .iter()
+        .any(|(kind, key)| kind == "content_type" && key == "*")
+    {
+        crate::storage::search::rebuild_search_index_in_conn(conn).await?;
+        return Ok(());
+    }
+    let distinct: BTreeSet<&str> = targets
+        .iter()
+        .filter(|(kind, _)| kind == "content_type")
+        .map(|(_, key)| key.as_str())
+        .collect();
+    for key in distinct {
+        crate::storage::search::sync_entries_for_type_in_conn(conn, key).await?;
+    }
+    Ok(())
+}
+
 pub(super) async fn upsert_group_targets_in_tx(
     conn: &mut SqliteConnection,
     group_id: &str,
@@ -416,5 +442,10 @@ pub(super) async fn sync_owner_field_groups_in_tx(
         }
     }
 
-    verify_snapshots_after_write_in_tx(conn, &snapshots, incompat_as_conflict).await
+    verify_snapshots_after_write_in_tx(conn, &snapshots, incompat_as_conflict).await?;
+    if let Some(content_targets) = all_targets_by_domain.get(&FieldGroupDomain::Content) {
+        sync_search_for_field_group_targets_in_tx(conn, FieldGroupDomain::Content, content_targets)
+            .await?;
+    }
+    Ok(())
 }

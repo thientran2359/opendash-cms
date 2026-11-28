@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     Extension,
-    extract::{RawQuery, State},
+    extract::{ConnectInfo, RawQuery, State},
     http::{HeaderMap, header},
     response::{Html, IntoResponse, Response},
 };
@@ -13,9 +13,10 @@ use crate::{
     content_render,
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
-    public_context::validate_single_query,
+    public_context::{has_search_param, validate_percent_encoding, validate_single_query},
     routes::{
         public_content::{PublicRenderServices, extract_origin_host},
+        search::{SearchRateLimiter, peer_rate_limit_key},
         themes::ThemeStoreRoot,
     },
     storage::{
@@ -32,7 +33,22 @@ pub(crate) async fn render_home_for_locale(
     canonical_path: String,
     raw_query: Option<&str>,
     services: Option<&PublicRenderServices>,
+    search_limiter: Option<&SearchRateLimiter>,
+    peer_key: &str,
 ) -> ApiResult<Response> {
+    validate_percent_encoding(raw_query).map_err(ApiError::bad_request)?;
+    if has_search_param(raw_query) {
+        return super::public_content::render_search_response_for_locale(
+            db,
+            themes_root,
+            locale,
+            raw_query,
+            services,
+            search_limiter,
+            peer_key,
+        )
+        .await;
+    }
     validate_single_query(raw_query).map_err(ApiError::bad_request)?;
     match seo::reading_page_state_for_locale(db, Some(locale), true).await? {
         ReadingPageState::Published(page_id) => {
@@ -128,6 +144,8 @@ pub async fn public_page(
     State(hooks): State<Arc<HookDispatcher>>,
     State(render_cache): State<Arc<ExtensionRenderCache>>,
     themes_root: Option<Extension<ThemeStoreRoot>>,
+    search_limiter: Option<Extension<SearchRateLimiter>>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
 ) -> ApiResult<Response> {
@@ -137,6 +155,7 @@ pub async fn public_page(
         render_cache,
         origin_host: extract_origin_host(&headers),
     };
+    let peer_key = peer_rate_limit_key(peer.as_ref());
     render_home_for_locale(
         &db,
         themes_root,
@@ -144,11 +163,14 @@ pub async fn public_page(
         "/".to_owned(),
         raw.as_deref(),
         Some(&services),
+        search_limiter.as_ref().map(|Extension(l)| l),
+        &peer_key,
     )
     .await
 }
 
 pub fn rendered_layout_with_form_csp(html: String, allow_form_self: bool) -> Response {
+    let allow_form_self = allow_form_self || crate::document::contains_html_form_tag(&html);
     let has_video = html.contains("<video ");
     let csp = match (allow_form_self, has_video) {
         (true, true) => {

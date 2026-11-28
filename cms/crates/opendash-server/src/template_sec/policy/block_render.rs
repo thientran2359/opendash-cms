@@ -234,7 +234,7 @@ pub fn render_block_csec_with_inputs(
     if shell.len() > MAX_RENDERED_HTML_BYTES {
         return Err("HTML render của block vượt quá giới hạn 512 KiB.");
     }
-    validate_html_and_css_context(shell, true, true)?;
+    validate_html_and_css_context(shell, true, true, false)?;
 
     let out = match inputs.local_richtext_nonces {
         Some(rt) if !rt.is_empty() => rt.substitute_into_document(shell.to_owned())?,

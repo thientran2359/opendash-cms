@@ -61,6 +61,12 @@ pub async fn create_user_field_group(
     let created = load_field_group_in_tx(&mut tx, &group_id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group vừa tạo."))?;
+    super::sync_field_groups::sync_search_for_field_group_targets_in_tx(
+        &mut tx,
+        norm.domain,
+        &targets,
+    )
+    .await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(created)
@@ -203,6 +209,24 @@ pub async fn update_user_field_group(
     let updated = load_field_group_in_tx(&mut tx, &group_id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group sau cập nhật."))?;
+    let mut search_sync_targets: Vec<(String, String)> = Vec::new();
+    if existing.domain == FieldGroupDomain::Content {
+        search_sync_targets.extend(
+            existing
+                .targets
+                .iter()
+                .map(|t| (t.target_kind.clone(), t.target_key.clone())),
+        );
+    }
+    if norm.domain == FieldGroupDomain::Content {
+        search_sync_targets.extend(incoming_targets.iter().cloned());
+    }
+    super::sync_field_groups::sync_search_for_field_group_targets_in_tx(
+        &mut tx,
+        FieldGroupDomain::Content,
+        &search_sync_targets,
+    )
+    .await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(updated)
@@ -265,6 +289,12 @@ pub async fn set_user_field_group_active(
     let updated = load_field_group_in_tx(&mut tx, &group_id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group sau cập nhật."))?;
+    super::sync_field_groups::sync_search_for_field_group_targets_in_tx(
+        &mut tx,
+        existing.domain,
+        &targets,
+    )
+    .await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(updated)
@@ -327,6 +357,17 @@ pub async fn withdraw_user_field_group(
     let withdrawn = load_field_group_in_tx(&mut tx, &group_id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải field group sau khi rút."))?;
+    let withdraw_targets: Vec<(String, String)> = existing
+        .targets
+        .iter()
+        .map(|t| (t.target_kind.clone(), t.target_key.clone()))
+        .collect();
+    super::sync_field_groups::sync_search_for_field_group_targets_in_tx(
+        &mut tx,
+        existing.domain,
+        &withdraw_targets,
+    )
+    .await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(withdrawn)
@@ -445,6 +486,17 @@ pub async fn delete_user_field_group(
         .bind(expected_version)
         .execute(&mut *tx)
         .await?;
+    let delete_targets: Vec<(String, String)> = existing
+        .targets
+        .iter()
+        .map(|t| (t.target_kind.clone(), t.target_key.clone()))
+        .collect();
+    super::sync_field_groups::sync_search_for_field_group_targets_in_tx(
+        &mut tx,
+        existing.domain,
+        &delete_targets,
+    )
+    .await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(())

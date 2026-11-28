@@ -108,7 +108,10 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   useEffect(() => () => {
     // Explicit route navigation has its own dirty confirmation in App. A 401
     // leaves this hash untouched, so it retains the account-scoped draft.
-    if (scope && window.location.hash.split('?')[0] !== '#/taxonomy/definitions') definitionDrafts.delete(scope);
+    const currentPath = window.location.hash.split('?')[0];
+    if (scope && currentPath !== '#/content-structure/taxonomies' && currentPath !== '#/taxonomy/definitions') {
+      definitionDrafts.delete(scope);
+    }
   }, [scope]);
 
   const reload = async (signal?: AbortSignal) => {

@@ -174,6 +174,7 @@ pub async fn sync_dev_plugin_in_db(
     )
     .await?;
     crate::storage::page::resync_plugin_block_acls_in_tx(&mut tx).await?;
+    crate::storage::search::sync_builder_entries_in_conn(&mut tx).await?;
     crate::storage::plugin_projections::delete_plugin_projections_in_tx(&mut tx, &manifest.id)
         .await
         .map_err(|_| crate::error::ApiError::internal("Lỗi xóa plugin projections cũ."))?;

@@ -17,4 +17,5 @@ pub mod redirects;
 pub mod registry;
 pub mod revisions;
 pub mod richtext;
+pub mod search;
 pub mod theme;

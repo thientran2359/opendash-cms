@@ -8,6 +8,7 @@ fn build_public_theme_context_includes_all_strict_base_keys() {
     let menus = BTreeMap::new();
     let custom_opts = BTreeMap::new();
     let pagination = PaginationView::empty();
+    let search = SearchView::inactive("/");
     let ctx = build_public_theme_context(PublicThemeContextInput {
         site: &DEFAULT_SITE,
         site_options: &site_opts,
@@ -29,6 +30,7 @@ fn build_public_theme_context_includes_all_strict_base_keys() {
         term: None,
         content_type: None,
         entry: None,
+        search: &search,
     })
     .unwrap();
     for key in [
@@ -52,6 +54,7 @@ fn build_public_theme_context_includes_all_strict_base_keys() {
         "term",
         "content_type",
         "entry",
+        "search",
     ] {
         assert!(ctx.get(key).is_some(), "missing key {key}");
     }

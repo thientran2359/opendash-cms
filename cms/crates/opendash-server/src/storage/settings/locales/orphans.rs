@@ -258,6 +258,7 @@ pub async fn purge_orphan_locale(
     .bind(&code)
     .execute(&mut *tx)
     .await?;
+    crate::storage::search::delete_locale_search_index_in_conn(&mut tx, &code).await?;
     let entries = delete_locale_rows(
         &mut tx,
         &code,

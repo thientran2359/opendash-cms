@@ -25,7 +25,6 @@ import { CustomOptionsPageView } from './features/options-pages/CustomOptionsPag
 import { OptionsPagesListPage } from './features/options-pages/OptionsPagesListPage.tsx';
 import type { OptionsPageMenuItem } from './shell/AdminShellMenu.tsx';
 import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
-import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
 import { clearPermalinkDrafts, discardPermalinkDraft, PermalinkSettingsPage } from './features/settings/PermalinkSettingsPage.tsx';
 import { clearReadingDrafts, discardReadingDraft, ReadingSettingsPanel } from './features/settings/ReadingSettingsPanel.tsx';
@@ -41,9 +40,7 @@ import { ThemesPanel } from './features/themes/ThemesPanel.tsx';
 import { SeoPanel } from './features/seo/SeoPanel.tsx';
 import { ContactPanel } from './features/contact/ContactPanel.tsx';
 import { SmtpSettingsPanel } from './features/contact/SmtpSettingsPanel.tsx';
-import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
-import { BackupToolsPanel } from './features/operations/BackupToolsPanel.tsx';
-import { RedirectsToolsPanel } from './features/operations/RedirectsToolsPanel.tsx';
+import { AdminToolsOutlet } from './features/operations/AdminToolsOutlet.tsx';
 import { clearRedirectsDrafts, discardRedirectsDraft } from './features/operations/redirectsDraftStore.ts';
 import { useAdminPlugins } from './features/plugins/useAdminPlugins.ts';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
@@ -651,7 +648,7 @@ const AppContent: React.FC = () => {
       optionsPages={optionsPages}
       cptTaxonomies={Object.fromEntries(Object.entries(cptTaxonomies).map(([type, terms]) => [
         type, terms.map(term => ({
-          ...term, label: term.key === 'category' ? _x("Category", "app.category") : term.key === 'tag' ? __("Tag") : term.label,
+          ...term, label: term.key === 'category' ? __("Categories") : term.key === 'tag' ? __("Tags") : term.label,
         })),
       ]))}
       onNavigateHash={navigateHash}
@@ -678,7 +675,10 @@ const AppContent: React.FC = () => {
         onApiError={handleApiError}
         onSavedSettingsOrTheme={() => setThemeRevision(v => v + 1)}
       /> : null}
-      themesContent={<ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
+      themesContent={<ThemesPanel
+        mode={route.view === 'themes' && route.sub === 'install' ? 'install' : 'list'}
+        csrfToken={csrfToken}
+        onApiError={handleApiError}
         devTheme={devTheme}
         themeRevision={themeRevision}
         onInstalled={() => setThemeRevision(value => value + 1)}
@@ -767,19 +767,18 @@ const AppContent: React.FC = () => {
           }}
         />
       }
-      toolsContent={route.sub === 'backup'
-        ? (
-          <BackupToolsPanel
-            csrfToken={csrfToken}
-            onBackupError={(error) => handleApiError(error, __("Encrypted backup failed."))}
-            onRestoreError={(error) => handleApiError(error, __("Restore or safe mode failed."))}
-          />
-        )
-        : route.sub === 'media-reconcile'
-          ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("Media reconciliation or quarantine cleanup failed."))} />
-          : (route.sub === 'redirects' || route.sub === '404-log')
-            ? <RedirectsToolsPanel key={`${siteInstanceId}:${user?.id ?? 'guest'}`} initialTab={route.sub === '404-log' ? 'not-found' : 'redirects'} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={(error) => scopedTaxonomyApiError(error, __("Redirects & 404 operation failed"))} onDirtyChange={markToolsDirty} onNavigateHash={navigateHash} />
-            : route.sub === 'health' ? <SystemStatus /> : null}
+      toolsContent={
+        <AdminToolsOutlet
+          sub={route.sub}
+          user={user}
+          siteInstanceId={siteInstanceId}
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          scopedTaxonomyApiError={scopedTaxonomyApiError}
+          onToolsDirtyChange={markToolsDirty}
+          onNavigateHash={navigateHash}
+        />
+      }
       settingsContent={route.sub === 'general'
         ? <GeneralSettingsPanel key={`general:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, __("Site settings failed."))} />
         : route.sub === 'multilingual'
@@ -796,11 +795,16 @@ const AppContent: React.FC = () => {
               onDirtyChange={markReadingDirty} />
         : route.sub === 'seo'
           ? <SeoPanel csrfToken={csrfToken} localeState={localeState} onApiError={(error) => handleApiError(error, __("Homepage SEO failed."))} />
-          : route.sub === 'contact'
-            ? <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("Contact form management failed."))} />
-            : route.sub === 'smtp'
-              ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("SMTP settings failed."))} />
-              : null}
+          : route.sub === 'smtp'
+            ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, __("SMTP settings failed."))} />
+            : null}
+      contactContent={
+        <ContactPanel
+          csrfToken={csrfToken}
+          initialTab={route.view === 'contact' && route.sub === 'inbox' ? 'inbox' : 'forms'}
+          onApiError={(error) => handleApiError(error, __("Contact form management failed."))}
+        />
+      }
       usersContent={accountContextRole === 'admin' && <UsersPanel
         key={accountContextId ?? 'anonymous'}
         mode={route.view === 'users' && route.sub === 'new' ? 'new' : 'list'}

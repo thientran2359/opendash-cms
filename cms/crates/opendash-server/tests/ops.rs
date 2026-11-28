@@ -14,6 +14,8 @@ mod media_reconcile;
 mod media_replace_and_lifecycle;
 #[path = "ops/proxy_and_restore_cancel.rs"]
 mod proxy_and_restore_cancel;
+#[path = "ops/public_site_search_admin_tools.rs"]
+mod public_site_search_admin_tools;
 #[path = "ops/restore_admin_safe_mode.rs"]
 mod restore_admin_safe_mode;
 #[path = "ops/restore_failpoints.rs"]

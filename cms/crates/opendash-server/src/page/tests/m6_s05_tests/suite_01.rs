@@ -291,6 +291,7 @@ fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
     let ctx = BuilderTemplateContext {
         content_html: Some("<main><p data-node-id=\"entry-inner\">Entry</p></main>"),
         parts: &parts,
+        search: None,
     };
 
     // Public render (is_preview = false) and Scope::None emit zero data-od-editable attributes.

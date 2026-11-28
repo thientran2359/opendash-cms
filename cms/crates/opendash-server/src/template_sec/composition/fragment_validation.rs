@@ -20,7 +20,7 @@ pub(crate) fn validate_untrusted_extension_html_fragment(src: &str) -> Result<()
             cursor = end;
         }
     }
-    validate_html_and_css_context(src, true, false)
+    validate_html_and_css_context(src, true, false, false)
 }
 
 pub(crate) fn find_rawtext_or_rcdata_end(
@@ -252,5 +252,6 @@ pub(crate) const BLOCK_HTML_STEP_OPTIONS: HtmlStepOptions = HtmlStepOptions {
     is_part: false,
     is_full_doctype_doc: false,
     allow_trusted_theme_markup: true,
+    allow_search_form: false,
     forbid_style_tag: true,
 };

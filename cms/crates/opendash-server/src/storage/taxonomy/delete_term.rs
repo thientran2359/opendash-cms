@@ -70,6 +70,7 @@ pub async fn delete_term(
     .execute(&mut *tx)
     .await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entries_for_term_in_conn(&mut tx, id).await?;
     tx.commit().await.map_err(mutation_error)?;
     crate::cache::SiteCacheEpoch::global().bump();
     Ok(())

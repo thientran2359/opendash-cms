@@ -156,7 +156,7 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
             .unwrap();
     assert_eq!(
         count, 1,
-        "migration 0036 + 0063 must keep admin_extensions without legacy term_extension_values"
+        "migration 0036 + 0061 must keep admin_extensions without legacy term_extension_values"
     );
     let baseline = get(
         &client,

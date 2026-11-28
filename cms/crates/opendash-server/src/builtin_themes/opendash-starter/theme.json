@@ -46,6 +46,10 @@
       "file": "404.html"
     },
     {
+      "kind": "search",
+      "file": "search.html"
+    },
+    {
       "kind": "index",
       "file": "index.html"
     }
@@ -157,6 +161,13 @@
       "label": "Hiện tagline",
       "type": "boolean",
       "default": true,
+      "public": true
+    },
+    {
+      "key": "show_header_search",
+      "label": "Hiện ô tìm kiếm ở đầu trang",
+      "type": "boolean",
+      "default": false,
       "public": true
     }
   ],

@@ -147,6 +147,10 @@ pub enum KnownElement {
     List(ListProps),
     #[serde(rename = "core/contact_form")]
     ContactForm(ContactFormProps),
+    #[serde(rename = "core/search_form")]
+    SearchForm(SearchFormProps),
+    #[serde(rename = "core/search_results")]
+    SearchResults(SearchResultsProps),
     #[serde(rename = "core/content_slot")]
     ContentSlot(ContentSlotProps),
     #[serde(rename = "core/pattern_ref")]
@@ -292,6 +296,34 @@ pub(crate) fn default_submit_label() -> String {
     "Gửi liên hệ".to_string()
 }
 
+pub(crate) fn default_search_submit_label() -> String {
+    "Tìm kiếm".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchFormProps {
+    #[serde(default)]
+    pub placeholder: String,
+    #[serde(default = "default_search_submit_label")]
+    pub submit_label: String,
+    #[serde(default)]
+    pub show_type_filter: bool,
+    #[serde(default)]
+    pub preserve_type_filter: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchResultsProps {
+    #[serde(default = "default_true")]
+    pub show_facets: bool,
+    #[serde(default = "default_true")]
+    pub show_excerpt: bool,
+    #[serde(default)]
+    pub empty_message: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElementBinding {
@@ -333,6 +365,8 @@ impl KnownElement {
             Self::Legacy(_)
             | Self::List(_)
             | Self::ContactForm(_)
+            | Self::SearchForm(_)
+            | Self::SearchResults(_)
             | Self::ContentSlot(_)
             | Self::PatternRef(_)
             | Self::TemplatePart(_)

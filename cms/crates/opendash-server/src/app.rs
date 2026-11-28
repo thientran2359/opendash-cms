@@ -140,6 +140,10 @@ pub fn build_router_with_telemetry(
         .route("/api/health", get(crate::routes::health::status))
         .route("/api/i18n/admin", get(crate::routes::settings::admin_i18n_bootstrap))
         .route("/api/i18n/admin/catalog", get(crate::routes::l10n::admin_i18n_catalog))
+        .route(
+            "/api/public/search",
+            get(crate::routes::search::public_search),
+        )
         .route("/api/public/contact/received", get(crate::routes::contact::public_received))
         .route(
             "/api/public/contact/{id}",
@@ -398,6 +402,15 @@ pub fn build_router_with_telemetry(
         .route(
             "/api/admin/taxonomy/eligibility/{content_type_key}/configured",
             get(crate::routes::taxonomy::taxonomy_eligibility_configured),
+        )
+        .route(
+            "/api/admin/tools/search/status",
+            get(crate::routes::search::admin_search_status),
+        )
+        .route(
+            "/api/admin/tools/search/reindex",
+            post(crate::routes::search::admin_search_reindex)
+                .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
         )
         .route(
             "/api/admin/operations/diagnostics",
@@ -820,6 +833,9 @@ pub fn build_router_with_telemetry(
         .layer(axum::Extension(crate::contact::ContactAdmissionLimiter::new()))
         .layer(axum::Extension(
             crate::routes::extensions::ExtensionRouteRateLimiter::new(),
+        ))
+        .layer(axum::Extension(
+            crate::routes::search::SearchRateLimiter::new(),
         ));
 
     let router_without_telemetry = crate::app_origin::attach_host_origin_guards(

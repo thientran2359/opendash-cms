@@ -14,49 +14,35 @@ pub(crate) fn step_theme_raw_char(
     state: ThemeHtmlState,
     ch: char,
     opts: HtmlStepOptions,
-    svg_depth: usize,
+    depths: HtmlDepths,
 ) -> Result<ThemeHtmlState, &'static str> {
-    if let ThemeHtmlState::Trusted {
-        inner,
-        svg_depth: depth,
-    } = state
-    {
-        let completed_svg_tag = match inner.as_ref() {
+    if let ThemeHtmlState::Trusted { inner, depths } = state {
+        let completed_tracked_tag = match inner.as_ref() {
             ThemeHtmlState::Tag {
                 tag_name,
                 is_close,
                 phase,
                 quote,
                 ..
-            } if tag_name == "svg" && ch == '>' && quote.is_none() => {
-                Some((*is_close, *phase == TagPhase::SelfClosingSlash))
+            } if matches!(tag_name.as_str(), "svg" | "math" | "form")
+                && ch == '>'
+                && quote.is_none() =>
+            {
+                Some((
+                    tag_name.clone(),
+                    *is_close,
+                    *phase == TagPhase::SelfClosingSlash,
+                ))
             }
             _ => None,
         };
-        let next = step_theme_raw_char(
-            *inner,
-            ch,
-            HtmlStepOptions {
-                allow_trusted_theme_markup: true,
-                ..opts
-            },
-            depth,
-        )?;
-        let depth = if let Some((is_close, self_closing)) = completed_svg_tag {
-            if is_close {
-                depth.checked_sub(1).ok_or("Thẻ </svg> không có thẻ mở.")?
-            } else if self_closing {
-                depth
-            } else {
-                depth
-                    .checked_add(1)
-                    .filter(|d| *d <= 64)
-                    .ok_or("SVG lồng nhau quá sâu.")?
-            }
+        let next = step_theme_raw_char(*inner, ch, opts, depths)?;
+        let depths = if let Some((tag, is_close, self_closing)) = completed_tracked_tag {
+            advance_depths(depths, &tag, is_close, self_closing)?
         } else {
-            depth
+            depths
         };
-        return Ok(ThemeHtmlState::with_trust(next, true, depth));
+        return Ok(ThemeHtmlState::with_depths(next, true, depths));
     }
     let ascii = if ch.is_ascii() { Some(ch as u8) } else { None };
     match state {
@@ -235,360 +221,26 @@ pub(crate) fn step_theme_raw_char(
             Ok(ThemeHtmlState::Title { closing_prefix })
         }
         ThemeHtmlState::Tag {
-            mut tag_name,
+            tag_name,
             is_close,
             mut phase,
-            mut attr_name,
-            mut quote,
-            mut attr_has_static_bytes,
-            mut attr_expr_count,
-            mut seen_attrs,
-            mut link_rel_stylesheet,
-            mut link_has_valid_href,
-            mut meta_ok,
-            mut attr_static_buf,
+            attr_name,
+            quote,
+            attr_has_static_bytes,
+            attr_expr_count,
+            seen_attrs,
+            link_rel_stylesheet,
+            link_has_valid_href,
+            meta_ok,
+            form_has_action,
+            attr_static_buf,
         } => {
             if ascii == Some(0) {
                 return Err("Thẻ HTML chứa byte NUL bị cấm.");
             }
-            match phase {
-                TagPhase::TagName => match ascii {
-                    Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-') => {
-                        if tag_name.len() >= 32 {
-                            return Err("Tên thẻ HTML vượt giới hạn 32 ký tự.");
-                        }
-                        tag_name.push(ch.to_ascii_lowercase());
-                    }
-                    Some(b) if is_ascii_html_whitespace(b) => {
-                        check_theme_tag_name(&tag_name, is_close, opts, svg_depth)?;
-                        phase = TagPhase::BeforeAttr;
-                    }
-                    Some(b'/') => {
-                        if is_close
-                            || tag_name.is_empty()
-                            || matches!(tag_name.as_str(), "style" | "title" | "script")
-                        {
-                            return Err("Dấu tự đóng `/` trên thẻ HTML không hợp lệ.");
-                        }
-                        check_theme_tag_name(&tag_name, is_close, opts, svg_depth)?;
-                        phase = TagPhase::SelfClosingSlash;
-                    }
-                    Some(b'>') => {
-                        return finalize_theme_tag(
-                            &tag_name,
-                            is_close,
-                            link_rel_stylesheet,
-                            link_has_valid_href,
-                            meta_ok,
-                            opts,
-                            svg_depth,
-                        );
-                    }
-                    _ => return Err("Tên thẻ HTML chứa ký tự không hợp lệ."),
-                },
-                TagPhase::BeforeAttr => {
-                    if is_close {
-                        match ascii {
-                            Some(b) if is_ascii_html_whitespace(b) => {}
-                            Some(b'>') => {
-                                return finalize_theme_tag(
-                                    &tag_name,
-                                    is_close,
-                                    link_rel_stylesheet,
-                                    link_has_valid_href,
-                                    meta_ok,
-                                    opts,
-                                    svg_depth,
-                                );
-                            }
-                            _ => return Err("Thẻ đóng HTML không được chứa thuộc tính hoặc /."),
-                        }
-                    } else {
-                        match ascii {
-                            Some(b) if is_ascii_html_whitespace(b) => {}
-                            Some(b'a'..=b'z' | b'A'..=b'Z') => {
-                                attr_name.clear();
-                                attr_name.push(ch.to_ascii_lowercase());
-                                quote = None;
-                                attr_has_static_bytes = false;
-                                attr_expr_count = 0;
-                                attr_static_buf.clear();
-                                phase = TagPhase::AttrName;
-                            }
-                            Some(b'/') => {
-                                if matches!(tag_name.as_str(), "style" | "title" | "script") {
-                                    return Err("Thẻ <style>/<title> không được tự đóng.");
-                                }
-                                phase = TagPhase::SelfClosingSlash;
-                            }
-                            Some(b'>') => {
-                                return finalize_theme_tag(
-                                    &tag_name,
-                                    is_close,
-                                    link_rel_stylesheet,
-                                    link_has_valid_href,
-                                    meta_ok,
-                                    opts,
-                                    svg_depth,
-                                );
-                            }
-                            _ => return Err("Thuộc tính HTML phải bắt đầu bằng chữ cái ASCII."),
-                        }
-                    }
-                }
-                TagPhase::AttrName => match ascii {
-                    Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b':' | b'-') => {
-                        if attr_name.len() >= 32 {
-                            return Err("Tên thuộc tính HTML vượt giới hạn 32 ký tự.");
-                        }
-                        attr_name.push(ch.to_ascii_lowercase());
-                    }
-                    Some(b) if is_ascii_html_whitespace(b) => {
-                        phase = TagPhase::AfterAttrName;
-                    }
-                    Some(b'=') => {
-                        phase = TagPhase::BeforeAttrValue;
-                    }
-                    Some(b'/') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
-                        if matches!(tag_name.as_str(), "style" | "title" | "script") {
-                            return Err("Thẻ <style>/<title> không được tự đóng.");
-                        }
-                        phase = TagPhase::SelfClosingSlash;
-                    }
-                    Some(b'>') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
-                        return finalize_theme_tag(
-                            &tag_name,
-                            is_close,
-                            link_rel_stylesheet,
-                            link_has_valid_href,
-                            meta_ok,
-                            opts,
-                            svg_depth,
-                        );
-                    }
-                    _ => return Err("Tên thuộc tính HTML chứa ký tự không hợp lệ."),
-                },
-                TagPhase::AfterAttrName => match ascii {
-                    Some(b) if is_ascii_html_whitespace(b) => {}
-                    Some(b'=') => {
-                        phase = TagPhase::BeforeAttrValue;
-                    }
-                    Some(b'/') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
-                        if matches!(tag_name.as_str(), "style" | "title" | "script") {
-                            return Err("Thẻ <style>/<title> không được tự đóng.");
-                        }
-                        phase = TagPhase::SelfClosingSlash;
-                    }
-                    Some(b'>') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
-                        return finalize_theme_tag(
-                            &tag_name,
-                            is_close,
-                            link_rel_stylesheet,
-                            link_has_valid_href,
-                            meta_ok,
-                            opts,
-                            svg_depth,
-                        );
-                    }
-                    Some(b'a'..=b'z' | b'A'..=b'Z') => {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
-                        attr_name.push(ch.to_ascii_lowercase());
-                        phase = TagPhase::AttrName;
-                    }
-                    _ => return Err("Cú pháp sau tên thuộc tính HTML không hợp lệ."),
-                },
-                TagPhase::BeforeAttrValue => match ascii {
-                    Some(b) if is_ascii_html_whitespace(b) => {}
-                    Some(q @ (b'"' | b'\'')) => {
-                        quote = Some(q);
-                        phase = TagPhase::AttrValue;
-                    }
-                    Some(b'>' | b'<' | b'=' | b'`' | 0x00..=0x1f | 0x7f) => {
-                        return Err("Giá trị thuộc tính HTML chứa ký tự không hợp lệ.");
-                    }
-                    _ => {
-                        quote = None;
-                        phase = TagPhase::AttrValue;
-                        attr_has_static_bytes = true;
-                        if is_security_checked_attr(&attr_name) {
-                            if attr_static_buf.len() + ch.len_utf8() > 4096 {
-                                return Err("Giá trị thuộc tính tĩnh vượt quá 4096 bytes.");
-                            }
-                            attr_static_buf.push(ch);
-                        }
-                    }
-                },
-                TagPhase::AttrValue => {
-                    if let Some(q) = quote {
-                        if ascii == Some(q) {
-                            finalize_theme_attr(
-                                &tag_name,
-                                &mut attr_name,
-                                &mut quote,
-                                &mut attr_has_static_bytes,
-                                &mut attr_expr_count,
-                                &mut seen_attrs,
-                                &mut link_rel_stylesheet,
-                                &mut link_has_valid_href,
-                                &mut meta_ok,
-                                &mut attr_static_buf,
-                                opts.allow_trusted_theme_markup,
-                            )?;
-                            phase = TagPhase::BeforeAttr;
-                        } else {
-                            if matches!(attr_name.as_str(), "href" | "src" | "poster" | "cite")
-                                && attr_expr_count > 0
-                            {
-                                return Err(
-                                    "URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.",
-                                );
-                            }
-                            attr_has_static_bytes = true;
-                            if is_security_checked_attr(&attr_name) {
-                                if attr_static_buf.len() + ch.len_utf8() > 4096 {
-                                    return Err("Giá trị thuộc tính tĩnh vượt quá 4096 bytes.");
-                                }
-                                attr_static_buf.push(ch);
-                            }
-                        }
-                    } else if ascii.is_some_and(is_ascii_html_whitespace) {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
-                        phase = TagPhase::BeforeAttr;
-                    } else if ascii == Some(b'>') {
-                        finalize_theme_attr(
-                            &tag_name,
-                            &mut attr_name,
-                            &mut quote,
-                            &mut attr_has_static_bytes,
-                            &mut attr_expr_count,
-                            &mut seen_attrs,
-                            &mut link_rel_stylesheet,
-                            &mut link_has_valid_href,
-                            &mut meta_ok,
-                            &mut attr_static_buf,
-                            opts.allow_trusted_theme_markup,
-                        )?;
-                        return finalize_theme_tag(
-                            &tag_name,
-                            is_close,
-                            link_rel_stylesheet,
-                            link_has_valid_href,
-                            meta_ok,
-                            opts,
-                            svg_depth,
-                        );
-                    } else if matches!(
-                        ascii,
-                        Some(b'"' | b'\'' | b'<' | b'=' | b'`' | 0x00..=0x1f | 0x7f)
-                    ) {
-                        return Err(
-                            "Giá trị thuộc tính HTML không ngoặc kép chứa ký tự không hợp lệ.",
-                        );
-                    } else {
-                        attr_has_static_bytes = true;
-                        if is_security_checked_attr(&attr_name) {
-                            if attr_static_buf.len() + ch.len_utf8() > 4096 {
-                                return Err("Giá trị thuộc tính tĩnh vượt quá 4096 bytes.");
-                            }
-                            attr_static_buf.push(ch);
-                        }
-                    }
-                }
-                TagPhase::SelfClosingSlash => {
-                    if ascii == Some(b'>') {
-                        return finalize_theme_tag(
-                            &tag_name,
-                            is_close,
-                            link_rel_stylesheet,
-                            link_has_valid_href,
-                            meta_ok,
-                            opts,
-                            svg_depth,
-                        );
-                    }
-                    return Err("Sau `/` ở cuối thẻ mở phải là `>`.");
-                }
-            }
-            Ok(ThemeHtmlState::Tag {
+            let mut t = TagAcc {
                 tag_name,
                 is_close,
-                phase,
                 attr_name,
                 quote,
                 attr_has_static_bytes,
@@ -597,8 +249,159 @@ pub(crate) fn step_theme_raw_char(
                 link_rel_stylesheet,
                 link_has_valid_href,
                 meta_ok,
+                form_has_action,
                 attr_static_buf,
-            })
+            };
+            let forbid_sc = |name: &str| {
+                matches!(name, "style" | "title" | "script") || is_non_void_search_form_tag(name)
+            };
+            match phase {
+                TagPhase::TagName => match ascii {
+                    Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-') => {
+                        if t.tag_name.len() >= 32 {
+                            return Err("Tên thẻ HTML vượt giới hạn 32 ký tự.");
+                        }
+                        t.tag_name.push(ch.to_ascii_lowercase());
+                    }
+                    Some(b) if is_ascii_html_whitespace(b) => {
+                        check_theme_tag_name(&t.tag_name, t.is_close, opts, depths)?;
+                        phase = TagPhase::BeforeAttr;
+                    }
+                    Some(b'/') => {
+                        if t.is_close || t.tag_name.is_empty() || forbid_sc(&t.tag_name) {
+                            return Err("Dấu tự đóng `/` trên thẻ HTML không hợp lệ.");
+                        }
+                        check_theme_tag_name(&t.tag_name, t.is_close, opts, depths)?;
+                        phase = TagPhase::SelfClosingSlash;
+                    }
+                    Some(b'>') => return t.finish_tag(opts, depths),
+                    _ => return Err("Tên thẻ HTML chứa ký tự không hợp lệ."),
+                },
+                TagPhase::BeforeAttr => {
+                    if t.is_close {
+                        match ascii {
+                            Some(b) if is_ascii_html_whitespace(b) => {}
+                            Some(b'>') => return t.finish_tag(opts, depths),
+                            _ => return Err("Thẻ đóng HTML không được chứa thuộc tính hoặc /."),
+                        }
+                    } else {
+                        match ascii {
+                            Some(b) if is_ascii_html_whitespace(b) => {}
+                            Some(b'a'..=b'z' | b'A'..=b'Z') => {
+                                t.reset_attr(ch);
+                                phase = TagPhase::AttrName;
+                            }
+                            Some(b'/') => {
+                                if forbid_sc(&t.tag_name) {
+                                    return Err("Thẻ HTML này không được tự đóng.");
+                                }
+                                phase = TagPhase::SelfClosingSlash;
+                            }
+                            Some(b'>') => return t.finish_tag(opts, depths),
+                            _ => return Err("Thuộc tính HTML phải bắt đầu bằng chữ cái ASCII."),
+                        }
+                    }
+                }
+                TagPhase::AttrName => match ascii {
+                    Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b':' | b'-') => {
+                        if t.attr_name.len() >= 32 {
+                            return Err("Tên thuộc tính HTML vượt giới hạn 32 ký tự.");
+                        }
+                        t.attr_name.push(ch.to_ascii_lowercase());
+                    }
+                    Some(b) if is_ascii_html_whitespace(b) => phase = TagPhase::AfterAttrName,
+                    Some(b'=') => phase = TagPhase::BeforeAttrValue,
+                    Some(b'/') => {
+                        t.finish_attr(opts)?;
+                        if forbid_sc(&t.tag_name) {
+                            return Err("Thẻ HTML này không được tự đóng.");
+                        }
+                        phase = TagPhase::SelfClosingSlash;
+                    }
+                    Some(b'>') => {
+                        t.finish_attr(opts)?;
+                        return t.finish_tag(opts, depths);
+                    }
+                    _ => return Err("Tên thuộc tính HTML chứa ký tự không hợp lệ."),
+                },
+                TagPhase::AfterAttrName => match ascii {
+                    Some(b) if is_ascii_html_whitespace(b) => {}
+                    Some(b'=') => phase = TagPhase::BeforeAttrValue,
+                    Some(b'/') => {
+                        t.finish_attr(opts)?;
+                        if forbid_sc(&t.tag_name) {
+                            return Err("Thẻ HTML này không được tự đóng.");
+                        }
+                        phase = TagPhase::SelfClosingSlash;
+                    }
+                    Some(b'>') => {
+                        t.finish_attr(opts)?;
+                        return t.finish_tag(opts, depths);
+                    }
+                    Some(b'a'..=b'z' | b'A'..=b'Z') => {
+                        t.finish_attr(opts)?;
+                        t.attr_name.push(ch.to_ascii_lowercase());
+                        phase = TagPhase::AttrName;
+                    }
+                    _ => return Err("Cú pháp sau tên thuộc tính HTML không hợp lệ."),
+                },
+                TagPhase::BeforeAttrValue => match ascii {
+                    Some(b) if is_ascii_html_whitespace(b) => {}
+                    Some(q @ (b'"' | b'\'')) => {
+                        t.quote = Some(q);
+                        phase = TagPhase::AttrValue;
+                    }
+                    Some(b'>' | b'<' | b'=' | b'`' | 0x00..=0x1f | 0x7f) => {
+                        return Err("Giá trị thuộc tính HTML chứa ký tự không hợp lệ.");
+                    }
+                    _ => {
+                        t.quote = None;
+                        phase = TagPhase::AttrValue;
+                        t.push_static_char(ch)?;
+                    }
+                },
+                TagPhase::AttrValue => {
+                    if let Some(q) = t.quote {
+                        if ascii == Some(q) {
+                            t.finish_attr(opts)?;
+                            phase = TagPhase::BeforeAttr;
+                        } else {
+                            if matches!(
+                                t.attr_name.as_str(),
+                                "href" | "src" | "poster" | "cite" | "action"
+                            ) && t.attr_expr_count > 0
+                            {
+                                return Err(
+                                    "URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.",
+                                );
+                            }
+                            t.push_static_char(ch)?;
+                        }
+                    } else if ascii.is_some_and(is_ascii_html_whitespace) {
+                        t.finish_attr(opts)?;
+                        phase = TagPhase::BeforeAttr;
+                    } else if ascii == Some(b'>') {
+                        t.finish_attr(opts)?;
+                        return t.finish_tag(opts, depths);
+                    } else if matches!(
+                        ascii,
+                        Some(b'"' | b'\'' | b'<' | b'=' | b'`' | 0x00..=0x1f | 0x7f)
+                    ) {
+                        return Err(
+                            "Giá trị thuộc tính HTML không ngoặc kép chứa ký tự không hợp lệ.",
+                        );
+                    } else {
+                        t.push_static_char(ch)?;
+                    }
+                }
+                TagPhase::SelfClosingSlash => {
+                    if ascii == Some(b'>') {
+                        return t.finish_tag(opts, depths);
+                    }
+                    return Err("Sau `/` ở cuối thẻ mở phải là `>`.");
+                }
+            }
+            Ok(t.into_state(phase))
         }
         ThemeHtmlState::Trusted { .. } => unreachable!("trusted state unwrapped above"),
     }

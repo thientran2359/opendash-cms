@@ -117,8 +117,20 @@ fn enforces_depth_cap_null_and_byte_limits() {
 fn strips_richtext_to_plain_cleanly() {
     assert_eq!(
         strip_richtext_to_plain(
-            "<p>Xin   chào</p><script>evil()</script><p><b>OpenDash</b>&nbsp;Studio &amp; CMS</p>"
+            "<p>Xin   chào</p><script>evil()</script><style>.x{display:none}</style><!-- bí mật --><p><b>OpenDash</b>&nbsp;Studio &amp; CMS</p>"
         ),
         "Xin chào OpenDash Studio & CMS"
+    );
+    assert_eq!(
+        strip_richtext_to_plain("<p>1 < 2 it's ok</p><!-- unclosed secret"),
+        "1 < 2 it's ok"
+    );
+    assert_eq!(
+        strip_richtext_to_plain("<p>Giữ nguyên</p><script>unclosed"),
+        "Giữ nguyên"
+    );
+    assert_eq!(
+        strip_richtext_to_plain("&amp;lt;script&amp;gt;"),
+        "&lt;script&gt;"
     );
 }

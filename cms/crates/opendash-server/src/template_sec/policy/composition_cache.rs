@@ -210,7 +210,7 @@ impl CompiledCsecComposition {
         if shell.len() > MAX_RENDERED_HTML_BYTES {
             return Err("HTML render vượt quá giới hạn 512 KiB.");
         }
-        validate_html_and_css_context(&shell, true, true)?;
+        validate_html_and_css_context(&shell, true, true, true)?;
         let out = if let Some(nonce) = nonce {
             if shell.matches(&nonce).count() != 1 {
                 return Err("Nonce nội dung của theme không xuất hiện đúng một lần.");

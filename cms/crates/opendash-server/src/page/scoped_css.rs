@@ -296,3 +296,99 @@ pub(super) fn format_css_number(
         Some(format!("{n}{suffix}"))
     }
 }
+
+pub fn serialize_scoped_block_css(
+    state: &BuilderRenderContext,
+    document: &BuilderDocument,
+    scope: &str,
+    is_preview: bool,
+) -> ApiResult<String> {
+    use opendash_core::registry::{DeclarationState, ProviderStatus};
+
+    if scope.is_empty()
+        || !scope
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err(ApiError::bad_request("Scope CSS block không hợp lệ."));
+    }
+
+    let mut desktop_rules = String::new();
+    let mut tablet_rules = String::new();
+    let mut mobile_rules = String::new();
+
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if !valid_package_id(&element.id) {
+                        continue;
+                    }
+                    let ElementContent::Known(KnownElement::PluginBlock(props)) = &element.content
+                    else {
+                        continue;
+                    };
+                    let Some(def) = state.declared_blocks.get(&props.block_id) else {
+                        continue;
+                    };
+                    if def.status != ProviderStatus::Active
+                        || def.declaration_state != DeclarationState::Declared
+                    {
+                        continue;
+                    }
+
+                    let node_scope = format!("{scope}-{}", element.id);
+                    let mut desktop_props = String::new();
+                    let mut tablet_props = String::new();
+                    let mut mobile_props = String::new();
+
+                    collect_scoped_css_for_fields(
+                        &def.schema.schema.fields,
+                        &props.values,
+                        None,
+                        &node_scope,
+                        is_preview,
+                        &state.hydration_media,
+                        &mut desktop_props,
+                        &mut tablet_props,
+                        &mut mobile_props,
+                        &mut desktop_rules,
+                        &mut tablet_rules,
+                        &mut mobile_rules,
+                    );
+
+                    if !desktop_props.is_empty() {
+                        desktop_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"]{{{desktop_props}}}"
+                        ));
+                    }
+                    if !tablet_props.is_empty() {
+                        tablet_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"]{{{tablet_props}}}"
+                        ));
+                    }
+                    if !mobile_props.is_empty() {
+                        mobile_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"]{{{mobile_props}}}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if desktop_rules.is_empty() && tablet_rules.is_empty() && mobile_rules.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut css_body = desktop_rules;
+    if !tablet_rules.is_empty() {
+        css_body.push_str(&format!("@media (width < 1024px){{{tablet_rules}}}"));
+    }
+    if !mobile_rules.is_empty() {
+        css_body.push_str(&format!("@media (width < 768px){{{mobile_rules}}}"));
+    }
+    crate::template_sec::validate_safe_scoped_block_css(&css_body, is_preview)
+        .map_err(ApiError::bad_request)?;
+    Ok(format!("<style data-od-block-styles>{css_body}</style>"))
+}

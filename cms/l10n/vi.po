@@ -18945,6 +18945,109 @@ msgstr "Dữ liệu JSON chuyển hướng không hợp lệ hoặc vượt quá
 msgid "CSV import request payload exceeds the maximum allowed HTTP body size."
 msgstr "Nội dung yêu cầu nhập CSV vượt quá giới hạn kích thước HTTP cho phép."
 
+#: server:core_l10n.search_placeholder
+msgid "Search the site..."
+msgstr "Tìm kiếm trên trang..."
+
+#: server:core_l10n.search_empty_prompt
+msgid "Enter keywords to search published content."
+msgstr "Nhập từ khóa để tìm kiếm nội dung đã xuất bản."
+
+#: server:core_l10n.search_no_results
+msgid "No matching results found."
+msgstr "Không tìm thấy kết quả phù hợp."
+
+#: server:core_l10n.search_clear_type
+msgid "Show all types"
+msgstr "Xem tất cả loại nội dung"
+
+msgid "Search form"
+msgstr "Khung tìm kiếm"
+
+msgid "Search results"
+msgstr "Kết quả tìm kiếm"
+
+msgid "Placeholder"
+msgstr "Văn bản gợi ý"
+
+msgid "Show type filter"
+msgstr "Hiện bộ lọc loại nội dung"
+
+msgid "Preserve type filter"
+msgstr "Giữ bộ lọc loại nội dung"
+
+msgid "Show content type facets"
+msgstr "Hiện bộ lọc theo loại nội dung"
+
+msgid "Show excerpt / snippet"
+msgstr "Hiện đoạn trích kết quả"
+
+msgid "Empty state message"
+msgstr "Thông báo khi không có kết quả"
+
+msgid "Site search box"
+msgstr "Ô tìm kiếm toàn trang"
+
+msgid "Paginated search results"
+msgstr "Danh sách kết quả tìm kiếm phân trang"
+
+msgid "Search Results blocks only display items on the search route."
+msgstr "Khối Kết quả tìm kiếm chỉ hiển thị nội dung trên trang tìm kiếm."
+
+msgid "Search index"
+msgstr "Chỉ mục tìm kiếm"
+
+msgid "Could not load search index status."
+msgstr "Không thể tải trạng thái chỉ mục tìm kiếm."
+
+msgid "Could not rebuild search index."
+msgstr "Không thể lập lại chỉ mục tìm kiếm."
+
+msgid "Admin permission is required for search index tools."
+msgstr "Cần quyền Quản trị viên để dùng công cụ chỉ mục tìm kiếm."
+
+msgid "Search index rebuilt: {{count}} indexed entries in {{ms}} ms."
+msgstr "Đã lập lại chỉ mục tìm kiếm: {{count}} mục trong {{ms}} ms."
+
+msgid "Another maintenance or backup task is currently active. Try again after it completes."
+msgstr "Một tác vụ bảo trì hoặc sao lưu khác đang chạy. Vui lòng thử lại sau khi hoàn tất."
+
+msgid "Server is busy processing active writes (503). Please retry shortly."
+msgstr "Máy chủ đang bận xử lý tác vụ ghi (503). Vui lòng thử lại sau giây lát."
+
+msgid "Inspect SQLite FTS5 coverage across published public entries and rebuild the index on demand."
+msgstr "Kiểm tra độ phủ SQLite FTS5 trên các mục đã xuất bản công khai và lập lại chỉ mục khi cần."
+
+msgid "Rebuilding search index..."
+msgstr "Đang lập lại chỉ mục tìm kiếm..."
+
+msgid "Rebuild search index"
+msgstr "Lập lại chỉ mục tìm kiếm"
+
+msgid "Maintenance mode is active on this site. Reindex will stay disabled until it finishes."
+msgstr "Chế độ bảo trì đang bật trên trang này. Nút lập lại chỉ mục được khóa cho đến khi xong."
+
+msgid "Indexed documents"
+msgstr "Tài liệu đã lập chỉ mục"
+
+msgid "Eligible published entries"
+msgstr "Mục đã xuất bản hợp lệ"
+
+msgid "In sync"
+msgstr "Đồng bộ"
+
+msgid "Out of sync"
+msgstr "Lệch chỉ mục"
+
+msgid "Last reindex job"
+msgstr "Tác vụ lập lại chỉ mục gần nhất"
+
+msgid "Finished at: {{time}}"
+msgstr "Hoàn tất lúc: {{time}}"
+
+msgid "No reindex jobs recorded yet."
+msgstr "Chưa có tác vụ lập lại chỉ mục nào."
+
 #: server:error:revision.pattern_admin_only
 msgid "Only Administrators may operate on Pattern revisions or autosaves."
 msgstr "Chỉ Quản trị viên mới được phép thao tác Pattern."
@@ -20594,10 +20697,6 @@ msgid "Instructions"
 msgstr "Hướng dẫn nhập"
 
 #: admin:features.field-groups.FieldSpecEditorCard
-msgid "Placeholder"
-msgstr "Chữ gợi ý (Placeholder)"
-
-#: admin:features.field-groups.FieldSpecEditorCard
 msgid "Default value (string or JSON)"
 msgstr "Giá trị mặc định (chuỗi hoặc JSON)"
 
@@ -21220,3 +21319,15 @@ msgstr "Trang tùy chọn"
 #: admin:features.field-groups.FieldSpecEditorCard
 msgid "Translatable (multilingual)"
 msgstr "Đa ngôn ngữ (Translatable)"
+
+#: admin:shell.install
+msgid "Install"
+msgstr "Cài đặt"
+
+#: admin:shell.template_library
+msgid "Template library"
+msgstr "Thư viện mẫu"
+
+#: admin:feature.themes.themespanel.install_v3_zip_subtitle
+msgid "Upload a Theme v3 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder."
+msgstr "Tải lên gói Theme v3 dạng ZIP. Kích hoạt theme không làm thay đổi block, trường hay dữ liệu đã lưu trong trình dựng trang."

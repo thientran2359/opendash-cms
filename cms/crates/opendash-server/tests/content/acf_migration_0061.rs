@@ -6,9 +6,9 @@ use serde_json::{Value, json};
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 
 #[tokio::test]
-async fn cuj2_0063_migration_preserves_legacy_cpt_term_extensions_and_zero_delta() {
+async fn cuj2_0061_migration_preserves_legacy_cpt_term_extensions_and_zero_delta() {
     let dir = TempDirGuard::new("cuj2");
-    let db_path = dir.0.join("upgrade_0063.sqlite");
+    let db_path = dir.0.join("upgrade_0061.sqlite");
     let pool = SqlitePool::connect_with(
         SqliteConnectOptions::new()
             .filename(&db_path)
@@ -17,7 +17,7 @@ async fn cuj2_0063_migration_preserves_legacy_cpt_term_extensions_and_zero_delta
     .await
     .unwrap();
     let migrator = sqlx::migrate!("../../migrations");
-    migrator.run_to(62, &pool).await.unwrap();
+    migrator.run_to(60, &pool).await.unwrap();
 
     let pre_objects: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sqlite_schema WHERE name != '_sqlx_migrations' AND name != 'sqlite_sequence' AND name NOT LIKE 'sqlite_stat%'",
@@ -86,7 +86,7 @@ async fn cuj2_0063_migration_preserves_legacy_cpt_term_extensions_and_zero_delta
     .unwrap();
     assert_eq!(
         post_objects, pre_objects,
-        "0063 must maintain +0 net sqlite_schema objects"
+        "0061 must maintain +0 net sqlite_schema objects"
     );
     assert!(post_objects < 256);
 

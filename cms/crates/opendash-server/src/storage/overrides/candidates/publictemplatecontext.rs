@@ -25,6 +25,7 @@ pub enum PublicTemplateContext {
         slug: String,
     },
     NotFound,
+    Search,
     Part {
         part_key: String,
     },
@@ -143,6 +144,10 @@ pub fn build_candidates(context: &PublicTemplateContext) -> ApiResult<Vec<Templa
         }
         PublicTemplateContext::NotFound => {
             result.push(candidate(K::NotFound));
+            result.push(candidate(K::Index));
+        }
+        PublicTemplateContext::Search => {
+            result.push(candidate(K::Search));
             result.push(candidate(K::Index));
         }
         PublicTemplateContext::Part { part_key } => {
@@ -268,6 +273,7 @@ pub(in crate::storage) async fn build_reset_candidate_chain_for_locale_in_conn(
             candidates.push(candidate(K::Index));
         }
         K::NotFound => candidates.push(candidate(K::Index)),
+        K::Search => candidates.push(candidate(K::Index)),
         K::Index | K::Part => {}
     }
     let mut seen = std::collections::BTreeSet::new();
@@ -295,6 +301,7 @@ pub(in crate::storage) fn template_kind_str(kind: TemplateCandidateKind) -> &'st
         K::Singular => "singular",
         K::Index => "index",
         K::NotFound => "not_found",
+        K::Search => "search",
         K::Part => "part",
     }
 }
@@ -357,7 +364,7 @@ pub(in crate::storage) fn validate_content_slots(
     let valid = match target.kind {
         K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular => slots == 1,
         K::Index => slots <= 1,
-        K::Archive | K::Taxonomy | K::NotFound | K::Part => slots == 0,
+        K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part => slots == 0,
     };
     if valid {
         Ok(())

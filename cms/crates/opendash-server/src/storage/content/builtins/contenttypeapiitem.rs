@@ -264,6 +264,7 @@ pub async fn insert_user_content_type(
             verify_effective_schema_transition(None, &effective, false)
                 .map_err(|e| map_transition_error(e, true))?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+            crate::storage::search::sync_entries_for_type_in_conn(&mut tx, &definition.key).await?;
             let item = build_content_type_api_item_in_tx(&mut tx, effective).await?;
             tx.commit().await?;
             crate::cache::SiteCacheEpoch::global().bump();
@@ -443,6 +444,7 @@ pub async fn update_user_content_type(
         .map_err(|e| map_transition_error(e, true))?;
 
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entries_for_type_in_conn(&mut tx, type_key).await?;
     let item = build_content_type_api_item_in_tx(&mut tx, new_effective).await?;
     tx.commit().await?;
     crate::cache::SiteCacheEpoch::global().bump();
@@ -513,6 +515,14 @@ pub async fn delete_user_content_type(
         .bind(type_key)
         .execute(&mut *tx)
         .await?;
+        let purge_ids: Vec<i64> =
+            sqlx::query_scalar("SELECT id FROM content_entries WHERE content_type_key = ?")
+                .bind(type_key)
+                .fetch_all(&mut *tx)
+                .await?;
+        for eid in purge_ids {
+            crate::storage::search::delete_entry_search_index_in_conn(&mut *tx, eid).await?;
+        }
         sqlx::query("DELETE FROM content_entries WHERE content_type_key = ?")
             .bind(type_key)
             .execute(&mut *tx)

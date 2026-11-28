@@ -95,16 +95,21 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
     options: &BTreeMap<String, serde_json::Value>,
     custom_options: &BTreeMap<String, serde_json::Value>,
     menus: &BTreeMap<String, menu::MenuViewModel>,
+    preview_locale: &str,
 ) -> ApiResult<serde_json::Value> {
     use TemplateCandidateKind as K;
     let route_kind = route_kind_for_candidate(target.kind);
     let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
-    let empty_entries = Vec::new();
+    let sample_entries = if target.kind == K::Search {
+        content_render::SearchView::preview_sample_entries(preview_locale)
+    } else {
+        Vec::new()
+    };
     let pagination = PaginationView::empty();
 
     let archive_url: Option<&str> = match target.kind {
         K::Single | K::SingleCustom | K::Singular | K::Index | K::Archive => Some("/posts"),
-        K::Home | K::Page | K::PageLayout | K::Taxonomy | K::NotFound | K::Part => None,
+        K::Home | K::Page | K::PageLayout | K::Taxonomy | K::NotFound | K::Search | K::Part => None,
     };
 
     let placeholder_entry = matches!(
@@ -197,6 +202,13 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
             Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
             content_render::DEFAULT_BREADCRUMB_NOT_FOUND_LABEL,
         ),
+        K::Search => content_render::search_breadcrumbs(
+            content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+            Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+            content_render::core_l10n(preview_locale)
+                .search_title
+                .as_ref(),
+        ),
         K::Part => Vec::new(),
         _ => {
             let ct_key = target.content_type.as_deref().unwrap_or("page");
@@ -221,6 +233,12 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         }
     };
 
+    let search = if target.kind == K::Search {
+        content_render::SearchView::preview_sample("/", preview_locale)
+    } else {
+        content_render::SearchView::inactive("/")
+    };
+
     content_render::build_public_theme_context(PublicThemeContextInput {
         site,
         site_options,
@@ -235,13 +253,14 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         archive_url,
         previous_url: None,
         next_url: None,
-        entries: &empty_entries,
-        related_entries: &empty_entries,
-        recent_posts: &empty_entries,
+        entries: &sample_entries,
+        related_entries: &sample_entries[..0],
+        recent_posts: &sample_entries[..0],
         taxonomy: taxonomy_value.as_ref(),
         term: placeholder_term.as_ref(),
         content_type: ct_value.as_ref(),
         entry: placeholder_entry.as_ref(),
+        search: &search,
     })
 }
 
@@ -448,6 +467,9 @@ pub(in crate::storage) fn target_requires_and_forbids_slot(
         kind,
         K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular
     );
-    let forbids = matches!(kind, K::Archive | K::Taxonomy | K::NotFound | K::Part);
+    let forbids = matches!(
+        kind,
+        K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part
+    );
     (requires, forbids)
 }

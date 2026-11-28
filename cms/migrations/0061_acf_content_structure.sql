@@ -1,4 +1,4 @@
--- 0063_acf_content_structure.sql
+-- 0061_acf_content_structure.sql
 -- ACF Pro Content Structure (Đợt 2):
 --   - Clean-Slate CPT + Hierarchy (parent_id, menu_order) + CPT settings extensions
 --   - 4-Tab Field Groups (domain, location_rules_json, presentation_json, active) + polymorphic targets

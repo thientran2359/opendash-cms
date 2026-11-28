@@ -297,6 +297,7 @@ pub async fn create_entry_with_fence(
     .await?;
     let record = decoded_with_terms(&mut tx, row).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, id).await?;
     crate::storage::revisions::record_fenced_entry_revision_in_tx(&mut *tx, id, true, fence, actor)
         .await?;
     tx.commit().await?;
@@ -404,6 +405,7 @@ pub async fn update_entry_with_fence(
             .await?;
             let record = decoded_with_terms(&mut tx, row).await?;
             crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+            crate::storage::search::sync_entry_search_index_in_conn(&mut *tx, id).await?;
             crate::storage::revisions::record_fenced_entry_revision_in_tx(
                 &mut *tx, id, false, fence, actor,
             )

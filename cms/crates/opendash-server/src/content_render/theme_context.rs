@@ -21,6 +21,7 @@ pub struct PublicThemeContextInput<'a> {
     pub term: Option<&'a PublicTermDetailView>,
     pub content_type: Option<&'a Value>,
     pub entry: Option<&'a EntryView>,
+    pub search: &'a SearchView,
 }
 
 #[derive(Serialize)]
@@ -51,6 +52,7 @@ struct SerializedThemeContext<'a> {
     term: Option<&'a PublicTermDetailView>,
     content_type: Option<&'a Value>,
     entry: Option<&'a EntryView>,
+    search: &'a SearchView,
 }
 
 pub fn build_public_theme_context(input: PublicThemeContextInput<'_>) -> ApiResult<Value> {
@@ -78,6 +80,7 @@ pub fn build_public_theme_context(input: PublicThemeContextInput<'_>) -> ApiResu
         term: input.term,
         content_type: input.content_type,
         entry: input.entry,
+        search: input.search,
     };
     serde_json::to_value(payload).map_err(|err| ApiError::internal(err.to_string()))
 }

@@ -1,7 +1,7 @@
 #[path = "content/acf_content_structure.rs"]
 mod acf_content_structure;
-#[path = "content/acf_migration_0063.rs"]
-mod acf_migration_0063;
+#[path = "content/acf_migration_0061.rs"]
+mod acf_migration_0061;
 #[path = "content/admin_navigation_schema.rs"]
 mod admin_navigation_schema;
 #[path = "content/admin_view_url_preview.rs"]
@@ -32,6 +32,8 @@ mod page_taxonomy_defaults;
 mod permalink_redirects_cas;
 #[path = "content/provider_taxonomy_and_routes.rs"]
 mod provider_taxonomy_and_routes;
+#[path = "content/public_site_search_fts/mod.rs"]
+mod public_site_search_fts;
 #[path = "content/publication_create.rs"]
 mod publication_create;
 #[path = "content/revisions_crud_api.rs"]

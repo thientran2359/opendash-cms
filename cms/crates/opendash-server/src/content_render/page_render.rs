@@ -21,123 +21,6 @@ pub struct PublicTermView {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct BreadcrumbItem {
-    pub name: String,
-    pub url: Option<String>,
-    pub is_current: bool,
-}
-
-pub fn home_breadcrumbs(home_label: &str, home_url: Option<&str>) -> Vec<BreadcrumbItem> {
-    vec![BreadcrumbItem {
-        name: home_label.to_owned(),
-        url: home_url.map(str::to_owned),
-        is_current: true,
-    }]
-}
-
-pub fn archive_breadcrumbs(
-    home_label: &str,
-    home_url: Option<&str>,
-    content_type_label: &str,
-    archive_url: Option<String>,
-) -> Vec<BreadcrumbItem> {
-    vec![
-        BreadcrumbItem {
-            name: home_label.to_owned(),
-            url: home_url.map(str::to_owned),
-            is_current: false,
-        },
-        BreadcrumbItem {
-            name: content_type_label.to_owned(),
-            url: archive_url,
-            is_current: true,
-        },
-    ]
-}
-
-pub fn taxonomy_breadcrumbs(
-    home_label: &str,
-    home_url: Option<&str>,
-    mut ancestors: Vec<BreadcrumbItem>,
-    term_name: &str,
-    term_url: Option<String>,
-) -> Vec<BreadcrumbItem> {
-    let mut out = Vec::with_capacity(2 + ancestors.len());
-    out.push(BreadcrumbItem {
-        name: home_label.to_owned(),
-        url: home_url.map(str::to_owned),
-        is_current: false,
-    });
-    for item in &mut ancestors {
-        item.is_current = false;
-    }
-    out.extend(ancestors);
-    out.push(BreadcrumbItem {
-        name: term_name.to_owned(),
-        url: term_url,
-        is_current: true,
-    });
-    out
-}
-
-pub fn single_breadcrumbs(
-    home_label: &str,
-    home_url: Option<&str>,
-    type_key: &str,
-    content_type_label: &str,
-    has_archive: bool,
-    archive_url: Option<String>,
-    primary_category: Option<&PublicTermView>,
-    entry_title: &str,
-    entry_url: Option<String>,
-) -> Vec<BreadcrumbItem> {
-    let mut out = vec![BreadcrumbItem {
-        name: home_label.to_owned(),
-        url: home_url.map(str::to_owned),
-        is_current: false,
-    }];
-    if type_key != "page" && has_archive {
-        out.push(BreadcrumbItem {
-            name: content_type_label.to_owned(),
-            url: archive_url,
-            is_current: false,
-        });
-    }
-    if let Some(cat) = primary_category {
-        out.push(BreadcrumbItem {
-            name: cat.name.clone(),
-            url: cat.url.clone(),
-            is_current: false,
-        });
-    }
-    out.push(BreadcrumbItem {
-        name: entry_title.to_owned(),
-        url: entry_url,
-        is_current: true,
-    });
-    out
-}
-
-pub fn not_found_breadcrumbs(
-    home_label: &str,
-    home_url: Option<&str>,
-    not_found_label: &str,
-) -> Vec<BreadcrumbItem> {
-    vec![
-        BreadcrumbItem {
-            name: home_label.to_owned(),
-            url: home_url.map(str::to_owned),
-            is_current: false,
-        },
-        BreadcrumbItem {
-            name: not_found_label.to_owned(),
-            url: None,
-            is_current: true,
-        },
-    ]
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PaginationPageLink {
     pub number: Option<i64>,
     pub url: Option<String>,
@@ -179,6 +62,29 @@ impl PaginationView {
         total_items: i64,
         previous_url: Option<String>,
         next_url: Option<String>,
+        page_url: F,
+    ) -> Self
+    where
+        F: FnMut(i64) -> Option<String>,
+    {
+        Self::compute_with_max_pages(
+            page,
+            per_page,
+            total_items,
+            crate::public_context::MAX_ARCHIVE_PAGE,
+            previous_url,
+            next_url,
+            page_url,
+        )
+    }
+
+    pub fn compute_with_max_pages<F>(
+        page: i64,
+        per_page: i64,
+        total_items: i64,
+        max_pages: i64,
+        previous_url: Option<String>,
+        next_url: Option<String>,
         mut page_url: F,
     ) -> Self
     where
@@ -191,7 +97,7 @@ impl PaginationView {
         } else {
             ((total_items - 1) / per_page) + 1
         };
-        let total_pages = computed_pages.min(crate::public_context::MAX_ARCHIVE_PAGE);
+        let total_pages = computed_pages.min(max_pages.max(1));
 
         let push_page = |num: i64, out: &mut Vec<PaginationPageLink>, page_url: &mut F| {
             out.push(PaginationPageLink {
@@ -280,6 +186,10 @@ pub struct EntryView {
     pub ext: BTreeMap<String, Value>,
     #[serde(default)]
     pub theme_ext: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub snippet_segments: Vec<opendash_core::search::SnippetSegment>,
+    #[serde(default)]
+    pub type_label: String,
 }
 
 /// Only typed site strings enter the custom-template context; MiniJinja

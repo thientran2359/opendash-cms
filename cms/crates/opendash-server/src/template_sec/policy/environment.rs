@@ -176,7 +176,7 @@ pub fn validate_template_csec_with_theme_urls(
     source: &str,
     policy: &ThemeUrlPolicy,
 ) -> Result<(), &'static str> {
-    validate_template_csec_with_usage_flags(name, source, policy, false, false).map(|_| ())
+    validate_template_csec_with_usage_flags(name, source, policy, false, false, false).map(|_| ())
 }
 
 pub(crate) fn is_taxonomy_target_name(name: &str) -> bool {
@@ -193,6 +193,7 @@ pub(crate) fn validate_template_csec_with_usage_flags(
     policy: &ThemeUrlPolicy,
     allow_od_icon: bool,
     allow_trusted_theme_markup: bool,
+    allow_search_form: bool,
 ) -> Result<ThemeTemplateUsageFlags, &'static str> {
     validate_template_csec_for_taxonomy_and_usage(
         name,
@@ -201,6 +202,7 @@ pub(crate) fn validate_template_csec_with_usage_flags(
         allow_od_icon,
         allow_trusted_theme_markup,
         is_taxonomy_target_name(name),
+        allow_search_form,
     )
 }
 
@@ -211,6 +213,7 @@ pub(crate) fn validate_template_csec_for_taxonomy_and_usage(
     allow_od_icon: bool,
     allow_trusted_theme_markup: bool,
     is_taxonomy_template: bool,
+    allow_search_form: bool,
 ) -> Result<ThemeTemplateUsageFlags, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
@@ -238,6 +241,7 @@ pub(crate) fn validate_template_csec_for_taxonomy_and_usage(
         is_taxonomy_template,
         policy,
         allow_trusted_theme_markup,
+        allow_search_form,
     )?;
 
     let mut env = restricted_environment();
@@ -271,7 +275,7 @@ pub fn render_csec_with_config(
     if rendered.len() > MAX_RENDERED_HTML_BYTES {
         return Err("HTML render vượt quá giới hạn 512 KiB.");
     }
-    validate_html_and_css_context(&rendered, true, false)?;
+    validate_html_and_css_context(&rendered, true, false, false)?;
     Ok(rendered)
 }
 
@@ -282,7 +286,14 @@ pub fn render_csec_with_images_and_config(
     context: Value,
     fmt_cfg: &RenderFormattingConfig,
 ) -> Result<String, &'static str> {
-    validate_template_csec_with_usage_flags(name, source, &ThemeUrlPolicy::default(), true, false)?;
+    validate_template_csec_with_usage_flags(
+        name,
+        source,
+        &ThemeUrlPolicy::default(),
+        true,
+        false,
+        false,
+    )?;
     let mut env = restricted_environment_with_config(fmt_cfg);
     let existing = ImageNonceTable::default();
     let local_images = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -302,7 +313,7 @@ pub fn render_csec_with_images_and_config(
     if rendered.len() > MAX_RENDERED_HTML_BYTES {
         return Err("HTML render vượt quá giới hạn 512 KiB.");
     }
-    validate_html_and_css_context(&rendered, true, false)?;
+    validate_html_and_css_context(&rendered, true, false, false)?;
     let image_nonces = ImageNonceTable {
         entries: local_images
             .lock()
@@ -374,6 +385,7 @@ pub fn validate_and_compile_csec_composition_with_context(
         false,
         is_taxonomy_template,
         policy,
+        true,
     )?;
     let part_policy = policy.without_cpt_entry_fields();
     let mut part_sites = BTreeMap::new();
@@ -383,7 +395,7 @@ pub fn validate_and_compile_csec_composition_with_context(
         }
         part_sites.insert(
             key.clone(),
-            composition_sites_with_context(key, source, true, false, &part_policy)?,
+            composition_sites_with_context(key, source, true, false, &part_policy, true)?,
         );
     }
 
@@ -433,6 +445,7 @@ pub fn validate_and_compile_csec_composition_with_context(
         true,
         true,
         is_taxonomy_template,
+        true,
     )?;
     Ok(CompiledCsecComposition {
         source: compiled_source,
@@ -514,6 +527,7 @@ pub(crate) fn composition_sites(
     source: &str,
     is_part: bool,
     policy: &ThemeUrlPolicy,
+    allow_search_form: bool,
 ) -> Result<Vec<CompositionSite>, &'static str> {
     composition_sites_with_context(
         name,
@@ -521,6 +535,7 @@ pub(crate) fn composition_sites(
         is_part,
         !is_part && is_taxonomy_target_name(name),
         policy,
+        allow_search_form,
     )
 }
 
@@ -530,6 +545,7 @@ pub(crate) fn composition_sites_with_context(
     is_part: bool,
     is_taxonomy_template: bool,
     policy: &ThemeUrlPolicy,
+    allow_search_form: bool,
 ) -> Result<Vec<CompositionSite>, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
@@ -557,6 +573,7 @@ pub(crate) fn composition_sites_with_context(
         is_taxonomy_template,
         policy,
         true,
+        allow_search_form,
     )?;
     let mut sites = Vec::new();
     collect_composition_sites(&ast, source, false, &mut sites)?;
