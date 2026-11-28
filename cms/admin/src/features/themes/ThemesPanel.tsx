@@ -280,7 +280,7 @@ export const ThemesPanel: React.FC<Props> = ({
           {v3Revisions.length > 0 && (
             <section className="space-y-3" aria-label={__("Theme v3 revisions")} data-testid="theme-v3-revisions">
               <h4 className="text-sm font-semibold text-zinc-700">{__("Installed v3 revisions (")}{v3Revisions.length})</h4>
-              <ul className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+              <ul className="grid min-w-0 list-none grid-cols-1 gap-3 pl-0 sm:grid-cols-2">
                 {v3Revisions.map(revision => {
                   const isActive = data.selection.revision_id === revision.revision_id;
                   const isSelected = selectedRevisionId === revision.revision_id;
@@ -491,7 +491,7 @@ export const ThemesPanel: React.FC<Props> = ({
                     {__("No Theme Functions logs recorded yet.")}
                   </p>
                 ) : (
-                  <ul className="space-y-1.5 text-xs">
+                  <ul className="list-none space-y-1.5 pl-0 text-xs">
                     {fnLogs.map(log => (
                       <li
                         key={log.id}

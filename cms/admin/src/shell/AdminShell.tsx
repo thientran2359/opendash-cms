@@ -35,6 +35,8 @@ interface AdminShellProps {
   authPassword: string;
   statusMessage: string;
   isError: boolean;
+  statusErrorCode?: string | null;
+  onDismissStatus?: () => void;
   isProcessing: boolean;
   onUsernameChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
@@ -75,7 +77,7 @@ interface AdminShellProps {
 }
 
 export const AdminShell: React.FC<AdminShellProps> = ({
-  user, authUsername, authPassword, statusMessage, isError, isProcessing,
+  user, authUsername, authPassword, statusMessage, isError, statusErrorCode, onDismissStatus, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   route, routeForbidden, cptTypes, cptTaxonomies, optionsPages = [], onNavigateHash, hasUnsavedChanges,
   devMode = false, devTheme = null, devPlugins = [], devSyncing = false, onSyncDevManifest,
@@ -245,7 +247,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
             <p className="mb-6 mt-1.5 text-sm text-zinc-600">{__("Manage website content and design in one workspace.")}</p>
             <AuthPanel
               user={user} authUsername={authUsername} authPassword={authPassword}
-              statusMessage={statusMessage} isError={isError} isProcessing={isProcessing}
+              statusMessage={statusMessage} isError={isError} statusErrorCode={statusErrorCode} onDismissStatus={onDismissStatus} isProcessing={isProcessing}
               onUsernameChange={onUsernameChange} onPasswordChange={onPasswordChange}
               onSetup={onSetup} onLogin={onLogin} onLogout={onLogout}
             />
@@ -439,12 +441,13 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               {hasUnsavedChanges && <span className="od-unsaved-label" role="status">{__("● Unsaved changes")}</span>}
               {user && <AuthPanel
                 user={user} authUsername={authUsername} authPassword={authPassword}
-                statusMessage={statusMessage} isError={isError} isProcessing={isProcessing}
+                statusMessage={statusMessage} isError={isError} statusErrorCode={statusErrorCode} onDismissStatus={onDismissStatus} isProcessing={isProcessing}
                 onUsernameChange={onUsernameChange} onPasswordChange={onPasswordChange}
                 onSetup={onSetup} onLogin={onLogin} onLogout={onLogout}
                 profileHref="#/users/profile"
                 isProfileActive={route.view === 'profile'}
                 onNavigateProfile={() => navigate('#/users/profile')}
+                onNavigateHash={navigate}
               />}
             </div>
           </header>

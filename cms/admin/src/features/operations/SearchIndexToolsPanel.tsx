@@ -139,19 +139,19 @@ export const SearchIndexToolsPanel: React.FC<SearchIndexToolsPanelProps> = ({
           <dl className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3.5">
               <dt className="text-xs font-medium text-zinc-600">{__("Indexed documents")}</dt>
-              <dd className="mt-1 text-2xl font-semibold text-zinc-900" data-testid="search-indexed-count">
+              <dd className="ml-0 mt-1 text-2xl font-semibold text-zinc-900" data-testid="search-indexed-count">
                 {status.indexed_documents}
               </dd>
             </div>
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3.5">
               <dt className="text-xs font-medium text-zinc-600">{__("Eligible published entries")}</dt>
-              <dd className="mt-1 text-2xl font-semibold text-zinc-900" data-testid="search-eligible-count">
+              <dd className="ml-0 mt-1 text-2xl font-semibold text-zinc-900" data-testid="search-eligible-count">
                 {status.eligible_published_entries}
               </dd>
             </div>
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3.5">
               <dt className="text-xs font-medium text-zinc-600">{__("Status")}</dt>
-              <dd className="mt-2" data-testid="search-sync-badge">
+              <dd className="ml-0 mt-2" data-testid="search-sync-badge">
                 <AdminBadge tone={status.in_sync ? 'success' : 'warning'}>
                   {status.in_sync ? __("In sync") : __("Out of sync")}
                 </AdminBadge>

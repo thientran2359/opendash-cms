@@ -87,6 +87,7 @@ const AppContent: React.FC = () => {
   const [statusValue, setStatusMessage] = useState<string | (() => string)>(() => () => __("Checking session status…"));
   const statusMessage = typeof statusValue === 'function' ? statusValue() : statusValue;
   const [isError, setIsError] = useState<boolean>(false);
+  const [statusErrorCode, setStatusErrorCode] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [route, setRoute] = useState<ParsedRoute>(() => parseAdminRoute(window.location.hash, window.location.pathname));
   const [cptTypes, setCptTypes] = useState<api.OwnedContentTypeWithSettings[]>([]);
@@ -247,6 +248,7 @@ const AppContent: React.FC = () => {
     acceptedHashRef.current = hash;
     routeRef.current = next;
     setRoute(next);
+    setStatusMessage(''); setIsError(false); setStatusErrorCode(null);
     if (requested.view === 'content-structure' && requested.sub === 'content-types' && requested.typeKey) {
       setSelectedSchemaTypeKey(requested.typeKey);
     }
@@ -386,15 +388,18 @@ const AppContent: React.FC = () => {
     applyAcceptedRoute(target);
   };
 
-  const setStatus = (msg: string | (() => string), error: boolean = false) => {
+  const setStatus = (msg: string | (() => string), error: boolean = false, code: string | null = null) => {
     setStatusMessage(() => msg);
     setIsError(error);
+    setStatusErrorCode(error ? code : null);
   };
+  const clearStatus = useCallback(() => { setStatusMessage(''); setIsError(false); setStatusErrorCode(null); }, []);
 
   const handleApiError = useCallback((err: unknown, fallback: string) => {
     const is401 = err instanceof api.ApiClientError && err.status === 401;
+    const code = err instanceof api.ApiClientError ? (err.errorCode ?? null) : null;
     const msg = err instanceof Error ? err.message : fallback;
-    setStatus(msg, true);
+    setStatus(msg, true, code);
     if (is401) {
       authSessionEpochRef.current += 1;
       editorDraftStore.quarantineAll();
@@ -636,6 +641,8 @@ const AppContent: React.FC = () => {
       authPassword={authPassword}
       statusMessage={statusMessage}
       isError={isError}
+      statusErrorCode={statusErrorCode}
+      onDismissStatus={clearStatus}
       isProcessing={isProcessing}
       onUsernameChange={setAuthUsername}
       onPasswordChange={setAuthPassword}

@@ -16,7 +16,7 @@ import {
   type ContactSubmissionSummary,
 } from '../../api/contact.ts';
 import { notifyContactSubmission } from '../../api/smtp.ts';
-import { AdminTabPanel, AdminTabs } from '../../components/AdminPrimitives.tsx';
+import { AdminAlert, AdminTabPanel, AdminTabs } from '../../components/AdminPrimitives.tsx';
 
 type ContactTabId = 'forms' | 'inbox';
 
@@ -48,30 +48,20 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
   const [ackDupRisk, setAckDupRisk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const [activeTab, setActiveTab] = useState<ContactTabId>(initialTab);
+
+  const reportError = (err: unknown, fallback: string) => {
+    setErrorMessage(err instanceof Error ? err.message : fallback);
+    onApiError(err);
+  };
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
-  const loadAll = async (filterFormId?: number) => {
-    try {
-      const [formList, subList] = await Promise.all([
-        listContactForms(),
-        listContactSubmissions(filterFormId, 50, 0),
-      ]);
-      setForms(formList);
-      setSubmissions(subList);
-    } catch (err) {
-      onApiError(err);
-    }
-  };
-
-  useEffect(() => {
-    void loadAll();
-  }, []);
-
   const selectForm = (form: ContactFormRecord | null) => {
+    setErrorMessage('');
     if (!form) {
       setSelectedId(null);
       setSlug(__("contact"));
@@ -88,6 +78,27 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
     setFields(form.schema.fields);
     setReplyToField(form.schema.reply_to_field ?? '');
   };
+
+  const loadAll = async (filterFormId?: number, autoSelectFirst = false) => {
+    try {
+      setErrorMessage('');
+      const [formList, subList] = await Promise.all([
+        listContactForms(),
+        listContactSubmissions(filterFormId, 50, 0),
+      ]);
+      setForms(formList);
+      setSubmissions(subList);
+      if (autoSelectFirst && formList.length > 0) {
+        selectForm(formList[0]);
+      }
+    } catch (err) {
+      reportError(err, __("Could not load contact forms."));
+    }
+  };
+
+  useEffect(() => {
+    void loadAll(undefined, true);
+  }, []);
 
   const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,7 +128,7 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
       }
       await loadAll();
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not save contact form."));
     } finally {
       setBusy(false);
     }
@@ -129,13 +140,14 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
     if (!current) return;
     setBusy(true);
     setNotice('');
+    setErrorMessage('');
     try {
       await deleteContactForm(csrfToken, current.id, current.version);
       selectForm(null);
       setNotice(__("Contact form deleted."));
-      await loadAll();
+      await loadAll(undefined, true);
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not delete contact form."));
     } finally {
       setBusy(false);
     }
@@ -151,21 +163,23 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
 
   const handleOpenSubmission = async (id: number) => {
     try {
+      setErrorMessage('');
       const detail = await getContactSubmission(id);
       setSelectedSub(detail);
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not load contact message."));
     }
   };
 
   const handleDeleteSubmission = async (id: number) => {
     setBusy(true);
+    setErrorMessage('');
     try {
       await deleteContactSubmission(csrfToken, id);
       if (selectedSub?.id === id) setSelectedSub(null);
       await loadAll();
     } catch (err) {
-      onApiError(err);
+      reportError(err, __("Could not delete contact message."));
     } finally {
       setBusy(false);
     }
@@ -195,7 +209,8 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
         </div>
       </div>
 
-      {notice && <p className="mt-3 rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p>}
+      {errorMessage && <AdminAlert tone="error">{errorMessage}</AdminAlert>}
+      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
 
       <AdminTabs
         tabs={[
@@ -272,7 +287,7 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-700">{__("Fields (")}{fields.length}/20)</span>
+                <span className="text-xs font-medium text-slate-700">{__("Fields ({{count}}/20)", { count: fields.length })}</span>
                 <button
                   type="button"
                   onClick={handleAddField}
@@ -280,8 +295,15 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
                   className="text-xs font-medium text-indigo-600 hover:underline disabled:opacity-50"
                 >{_x("+ Add field", "feature.contact")}</button>
               </div>
+              <div className="hidden grid-cols-12 items-center gap-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:grid">
+                <span className="col-span-3">{__("Key")}</span>
+                <span className="col-span-4">{__("Label")}</span>
+                <span className="col-span-3">{__("Type")}</span>
+                <span className="col-span-1 text-center">{__("Required")}</span>
+                <span className="col-span-1 text-right sr-only">{__("Remove")}</span>
+              </div>
               {fields.map((f, idx) => (
-                <div key={idx} className="grid grid-cols-12 items-center gap-2 rounded border border-slate-100 bg-slate-50 p-2">
+                <div key={idx} className="grid grid-cols-1 items-center gap-2 rounded border border-slate-100 bg-slate-50 p-2 sm:grid-cols-12">
                   <input
                     type="text"
                     value={f.key}
@@ -291,7 +313,7 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
                       next[idx] = { ...f, key: e.target.value };
                       setFields(next);
                     }}
-                    className="col-span-3 rounded border border-slate-300 px-2 py-1 text-xs"
+                    className="w-full min-w-0 rounded border border-slate-300 bg-white px-2 py-1 text-xs sm:col-span-3"
                   />
                   <input
                     type="text"
@@ -302,7 +324,7 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
                       next[idx] = { ...f, label: e.target.value };
                       setFields(next);
                     }}
-                    className="col-span-4 rounded border border-slate-300 px-2 py-1 text-xs"
+                    className="w-full min-w-0 rounded border border-slate-300 bg-white px-2 py-1 text-xs sm:col-span-4"
                   />
                   <select
                     value={f.kind}
@@ -317,7 +339,7 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
                       };
                       setFields(next);
                     }}
-                    className="col-span-3 rounded border border-slate-300 px-1.5 py-1 text-xs"
+                    className="w-full min-w-0 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs sm:col-span-3"
                   >
                     <option value="text">{_x("Text", "feature.contact")}</option>
                     <option value="email">{__("Email")}</option>
@@ -325,26 +347,31 @@ export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Pr
                     <option value="select">{__("Select")}</option>
                     <option value="checkbox">{__("Checkbox")}</option>
                   </select>
-                  <label className="col-span-1 flex items-center justify-center text-xs" title={__("Required")}>
-                    <input
-                      type="checkbox"
-                      checked={f.required}
-                      onChange={(e) => {
-                        const next = [...fields];
-                        next[idx] = { ...f, required: e.target.checked };
-                        setFields(next);
-                      }}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setFields(fields.filter((_, i) => i !== idx))}
-                    disabled={fields.length <= 1}
-                    className="col-span-1 text-xs text-rose-600 disabled:opacity-30"
-                    title={_x("Remove field", "feature.contact")}
-                  >
-                    ×
-                  </button>
+                  <div className="flex items-center justify-between gap-2 sm:col-span-2 sm:grid sm:grid-cols-2">
+                    <label className="flex items-center gap-1.5 text-xs text-slate-700 sm:justify-center" title={__("Required")}>
+                      <input
+                        type="checkbox"
+                        checked={f.required}
+                        aria-label={__("Required field {{value1}}", { value1: idx + 1 })}
+                        onChange={(e) => {
+                          const next = [...fields];
+                          next[idx] = { ...f, required: e.target.checked };
+                          setFields(next);
+                        }}
+                      />
+                      <span className="sm:hidden">{__("Required")}</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setFields(fields.filter((_, i) => i !== idx))}
+                      disabled={fields.length <= 1}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded text-xs text-rose-600 hover:bg-rose-50 disabled:opacity-30 sm:mx-auto"
+                      title={_x("Remove field", "feature.contact")}
+                      aria-label={__("Remove field {{value1}}", { value1: idx + 1 })}
+                    >
+                      ×
+                    </button>
+                  </div>
                   {f.kind === 'select' && (
                     <input
                       type="text"

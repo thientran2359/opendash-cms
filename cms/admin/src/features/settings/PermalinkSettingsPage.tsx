@@ -26,10 +26,10 @@ interface Props {
 }
 
 const PRESETS = [
-  { value: '/%postname%', labelKey: 'permalink.preset_default' },
-  { value: '/blog/%postname%', labelKey: 'permalink.preset_blog' },
-  { value: '/%category%/%postname%', labelKey: 'permalink.preset_category' },
-  { value: '/archives/%post_id%', labelKey: 'permalink.preset_id' },
+  { value: '/%postname%', label: () => __("Post name (/%postname%)") },
+  { value: '/blog/%postname%', label: () => __("Blog prefix (/blog/%postname%)") },
+  { value: '/%category%/%postname%', label: () => __("Category and post name (/%category%/%postname%)") },
+  { value: '/archives/%post_id%', label: () => __("Numeric archive (/archives/%post_id%)") },
 ] as const;
 const CUSTOM = 'custom';
 const TOKENS = ['%category%', '%postname%', '%post_id%'] as const;
@@ -404,7 +404,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                   updateDraft({ ...draft, post_structure: event.target.value });
                 }
               }}>
-              {PRESETS.map(item => <option key={item.value} value={item.value}>{__(item.labelKey)}</option>)}
+              {PRESETS.map(item => <option key={item.value} value={item.value}>{item.label()}</option>)}
               <option value={CUSTOM}>{__("Custom")}</option>
             </select>
             {customMode && (

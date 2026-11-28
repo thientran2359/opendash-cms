@@ -57,6 +57,10 @@
     font: inherit;
     color: inherit;
   }
+
+  dl, dd {
+    margin: 0;
+  }
 }
 
 /* Existing Builder and unmigrated panels retain their styling inside .od-legacy-scope. */

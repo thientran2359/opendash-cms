@@ -73,9 +73,11 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
   const [presentation, setPresentation] = useState<FieldGroupPresentation>(
     () => structuredClone(seed?.presentation ?? DEFAULT_PRESENTATION),
   );
-  const [fields, setFields] = useState<FieldSpec[]>(
+  const initialFields = React.useMemo<FieldSpec[]>(
     () => structuredClone(seed?.fields ?? [createBlankFieldSpec([], false)]),
+    [seed?.group_id, seed?.version, duplicateSource?.group_id],
   );
+  const [fields, setFields] = useState<FieldSpec[]>(() => structuredClone(initialFields));
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -90,9 +92,9 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
         active: seed?.active ?? true,
         location: seed?.location ?? [[{ param: 'content_type', op: 'eq', value: 'post' }]],
         presentation: seed?.presentation ?? DEFAULT_PRESENTATION,
-        fields: seed?.fields ?? [],
+        fields: initialFields,
       }),
-    [seed?.group_id, seed?.version, duplicateSource?.group_id],
+    [seed?.group_id, seed?.version, duplicateSource?.group_id, initialFields],
   );
 
   const dirty =
