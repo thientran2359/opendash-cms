@@ -227,13 +227,19 @@ async fn s01_writer_hooks_sync_fts5_across_entry_lifecycle_and_schema_mutations(
         .header(header::IF_MATCH, "\"v2\"")
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "section",
+                "block_id": "core/section",
+                "props": {},
                 "children": [{
                     "id": "row",
+                    "block_id": "core/row",
+                    "props": {},
                     "children": [{
                         "id": "column",
-                        "children": [{"id": "heading", "type": "core/heading", "props": {"level": 2, "text": "Khối ĐườngBuilder"}}]
+                        "block_id": "core/column",
+                        "props": {},
+                        "children": [{"id": "heading", "block_id": "core/heading", "props": {"level": "h2", "text": "Khối ĐườngBuilder"}}]
                     }]
                 }]
             }]
@@ -254,13 +260,19 @@ async fn s01_writer_hooks_sync_fts5_across_entry_lifecycle_and_schema_mutations(
         .header(header::IF_MATCH, "\"v3\"")
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "section",
+                "block_id": "core/section",
+                "props": {},
                 "children": [{
                     "id": "row",
+                    "block_id": "core/row",
+                    "props": {},
                     "children": [{
                         "id": "column",
-                        "children": [{"id": "heading", "type": "core/heading", "props": {"level": 2, "text": "Khối ĐườngThayThế"}}]
+                        "block_id": "core/column",
+                        "props": {},
+                        "children": [{"id": "heading", "block_id": "core/heading", "props": {"level": "h2", "text": "Khối ĐườngThayThế"}}]
                     }]
                 }]
             }]

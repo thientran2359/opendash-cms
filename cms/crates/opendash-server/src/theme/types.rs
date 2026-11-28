@@ -7,8 +7,8 @@ pub(super) use std::{
 };
 
 pub(super) use opendash_core::{
-    block_schema::{BlockSchemaV1, RegisteredBlockSchema},
-    builder::BuilderDocument,
+    block_schema::{BlockSchema, RegisteredBlockSchema, validate_block_catalog_templates},
+    builder::{BuilderContextTarget, BuilderDocument},
     id::valid_kebab_segment_with_limit,
     registry::{DeclarationState, OwnedDescriptor, ProviderStatus, RegistryCatalog, ResourceOwner},
     theme::{TemplateCandidateKind, ThemeV3Manifest, valid_asset_path},
@@ -163,6 +163,7 @@ pub(crate) fn validate_theme_v3_files(
             },
         );
     }
+    validate_block_catalog_templates(&block_catalog).map_err(V2ZipError::BadRequest)?;
     let mut parts = BTreeMap::new();
     for (key, path) in &manifest.parts {
         let source = required_v3_utf8(&files, path)?;
@@ -293,7 +294,7 @@ pub(crate) fn validate_theme_v3_files(
         let document = BuilderDocument::from_json(source.as_bytes())
             .map_err(|_| V2ZipError::BadRequest("Theme Pattern JSON không hợp lệ."))?;
         document
-            .validate_for_save_with_schemas(&block_catalog, None)
+            .validate_for_save(&block_catalog, &BuilderContextTarget::ThemePattern, None)
             .map_err(|_| V2ZipError::BadRequest("Theme Pattern Builder AST không hợp lệ."))?;
         if let Some(path) = &pattern.preview_asset {
             let is_raster = [".png", ".jpg", ".jpeg", ".webp", ".gif"]

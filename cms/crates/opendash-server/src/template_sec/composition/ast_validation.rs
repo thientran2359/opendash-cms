@@ -40,6 +40,9 @@ pub(crate) const RESERVED_CONTEXT_VARS: &[&str] = &[
     "archive_url",
     "od_content",
     "od_part",
+    "children_html",
+    "children_meta",
+    "parent_ctx",
 ];
 
 pub(crate) fn binds_reserved_context(expr: &Expr<'_>) -> bool {

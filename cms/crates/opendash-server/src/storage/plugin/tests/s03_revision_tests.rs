@@ -1,6 +1,6 @@
 use super::*;
 
-fn sample_schema() -> BlockSchemaV1 {
+fn sample_schema() -> BlockSchema {
     serde_json::from_value(serde_json::json!({
         "schema_version": 1, "id": "sample-plugin/notice",
         "title": "Notice", "category": "content", "render": "render.html",

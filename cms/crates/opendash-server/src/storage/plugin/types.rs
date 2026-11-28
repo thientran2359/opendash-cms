@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) use std::{collections::BTreeMap, fs, io::Write, path::Path};
 
-pub(super) use opendash_core::{block_schema::BlockSchemaV1, registry::ProviderStatus};
+pub(super) use opendash_core::{block_schema::BlockSchema, registry::ProviderStatus};
 
 pub(super) use sha2::{Digest, Sha256};
 
@@ -13,7 +13,7 @@ pub(in crate::storage) const COMPLETE_MARKER: &str = ".complete";
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::storage) struct StoredBlock {
-    pub(in crate::storage) schema: BlockSchemaV1,
+    pub(in crate::storage) schema: BlockSchema,
     pub(in crate::storage) template: String,
 }
 

@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "id": "core/row",
+  "title": "Hàng lưới (Row)",
+  "category": "layout",
+  "icon": "columns-2",
+  "render": "native",
+  "supports_children": true,
+  "allowed_children": ["core/column"],
+  "default_children": [
+    { "block_id": "core/column" },
+    { "block_id": "core/column" }
+  ],
+  "presets": [
+    {
+      "key": "col_1",
+      "title": "1 Cột",
+      "props": { "layout_mode": "equal", "columns": 1 },
+      "children": [{ "block_id": "core/column" }]
+    },
+    {
+      "key": "col_2",
+      "title": "2 Cột đều",
+      "props": { "layout_mode": "equal", "columns": 2 },
+      "children": [{ "block_id": "core/column" }, { "block_id": "core/column" }]
+    },
+    {
+      "key": "col_3",
+      "title": "3 Cột đều",
+      "props": { "layout_mode": "equal", "columns": 3 },
+      "children": [
+        { "block_id": "core/column" },
+        { "block_id": "core/column" },
+        { "block_id": "core/column" }
+      ]
+    },
+    {
+      "key": "grid_8_4",
+      "title": "Lưới 8 / 4 (Chính + Sidebar)",
+      "props": { "layout_mode": "grid_12" },
+      "children": [
+        { "block_id": "core/column", "props": { "span": { "desktop": 8, "mobile": 12 } } },
+        { "block_id": "core/column", "props": { "span": { "desktop": 4, "mobile": 12 } } }
+      ]
+    },
+    {
+      "key": "grid_4_8",
+      "title": "Lưới 4 / 8 (Sidebar + Chính)",
+      "props": { "layout_mode": "grid_12" },
+      "children": [
+        { "block_id": "core/column", "props": { "span": { "desktop": 4, "mobile": 12 } } },
+        { "block_id": "core/column", "props": { "span": { "desktop": 8, "mobile": 12 } } }
+      ]
+    }
+  ],
+  "fields": [
+    {
+      "type": "radio_buttons",
+      "key": "layout_mode",
+      "label": "Chế độ chia cột",
+      "options": [
+        { "value": "equal", "label": "Chia đều" },
+        { "value": "grid_12", "label": "Lưới 12 cột" }
+      ],
+      "default": "equal"
+    },
+    {
+      "type": "range",
+      "key": "columns",
+      "label": "Số cột",
+      "min": 1,
+      "max": 6,
+      "step": 1,
+      "default": 2,
+      "responsive": true,
+      "conditions": [[{ "field": "layout_mode", "op": "eq", "value": "equal" }]]
+    },
+    {
+      "type": "range",
+      "key": "gap",
+      "label": "Khoảng cách cột",
+      "min": 0,
+      "max": 64,
+      "step": 4,
+      "default": 24,
+      "unit": "px",
+      "responsive": true
+    },
+    {
+      "type": "select",
+      "key": "v_align",
+      "label": "Căn dọc",
+      "options": [
+        { "value": "stretch", "label": "Kéo đều" },
+        { "value": "start", "label": "Trên" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "end", "label": "Dưới" }
+      ],
+      "default": "stretch"
+    },
+    {
+      "type": "select",
+      "key": "h_align",
+      "label": "Căn ngang",
+      "options": [
+        { "value": "start", "label": "Đầu" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "end", "label": "Cuối" },
+        { "value": "between", "label": "Giãn đều" }
+      ],
+      "default": "start"
+    },
+    {
+      "type": "boolean",
+      "key": "reverse_mobile",
+      "label": "Đảo ngược thứ tự trên Mobile",
+      "default": false
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true
+    },
+    {
+      "type": "spacing",
+      "key": "margin",
+      "label": "Lề ngoài (Margin)",
+      "property": "margin",
+      "min": -128,
+      "max": 256,
+      "unit": "px",
+      "responsive": true
+    }
+  ]
+}

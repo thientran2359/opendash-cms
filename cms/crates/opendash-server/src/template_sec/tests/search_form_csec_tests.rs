@@ -82,7 +82,7 @@ fn non_theme_render_and_blocks_still_forbid_search_forms() {
         .is_err()
     );
 
-    let schema: opendash_core::block_schema::BlockSchemaV1 =
+    let schema: opendash_core::block_schema::BlockSchema =
         serde_json::from_value(serde_json::json!({
             "schema_version": 1,
             "id": "search/test",

@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "id": "core/image",
+  "title": "Hình ảnh (Image)",
+  "category": "media",
+  "icon": "image",
+  "render": "native",
+  "fields": [
+    {
+      "type": "media",
+      "key": "image",
+      "label": "Ảnh",
+      "media_kind": "image"
+    },
+    {
+      "type": "text",
+      "key": "alt",
+      "label": "Văn bản thay thế (Alt)",
+      "max_chars": 512,
+      "default": ""
+    },
+    {
+      "type": "text",
+      "key": "caption",
+      "label": "Chú thích",
+      "max_chars": 512,
+      "default": ""
+    },
+    {
+      "type": "select",
+      "key": "aspect_ratio",
+      "label": "Tỉ lệ khung hình",
+      "options": [
+        { "value": "auto", "label": "Tự động" },
+        { "value": "16_9", "label": "16:9" },
+        { "value": "4_3", "label": "4:3" },
+        { "value": "1_1", "label": "1:1" },
+        { "value": "3_4", "label": "3:4" }
+      ],
+      "default": "auto"
+    },
+    {
+      "type": "select",
+      "key": "object_fit",
+      "label": "Kiểu phủ ảnh",
+      "options": [
+        { "value": "cover", "label": "Phủ kín (Cover)" },
+        { "value": "contain", "label": "Vừa khung (Contain)" }
+      ],
+      "default": "cover"
+    },
+    {
+      "type": "select",
+      "key": "radius",
+      "label": "Bo góc",
+      "options": [
+        { "value": "none", "label": "Không" },
+        { "value": "sm", "label": "Nhỏ" },
+        { "value": "md", "label": "Vừa" },
+        { "value": "lg", "label": "Lớn" },
+        { "value": "xl", "label": "Rất lớn" },
+        { "value": "2xl", "label": "Cực lớn" },
+        { "value": "full", "label": "Tròn / Viên thuốc" }
+      ],
+      "default": "lg"
+    },
+    {
+      "type": "link",
+      "key": "link",
+      "label": "Liên kết ảnh"
+    }
+  ]
+}

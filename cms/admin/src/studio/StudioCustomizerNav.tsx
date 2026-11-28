@@ -2,19 +2,19 @@ import { __, useI18n } from '../i18n/index.tsx';
 import React from 'react';
 import type { AdminLocaleState } from '../api/locales.ts';
 import type { MenuRecord, MenuSlotsSnapshot } from '../api/menus.ts';
-import type { PatternRecord } from '../api/patterns.ts';
+import type { StudioTargetGroup, StudioTargetItem } from '../api/studio.ts';
 import type {
   GeneralSettingsDraft,
   GlobalSiteOptionsSnapshot,
   ReadingSettings,
   ReadingSettingsDraft,
 } from '../api/settings.ts';
-import type { StudioTargetGroup, StudioTargetItem } from '../api/studio.ts';
+import type { TemplateTargetInput } from '../api/builder.ts';
 import type { FieldSpec } from '../fields/types.ts';
 import { UnifiedFieldForm } from '../fields/UnifiedFieldForm.tsx';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
 import type { StudioMenuRequest } from './StudioBlockTree.tsx';
-import type { BuilderDocument, BuilderViewport, StudioBuilderClipboard } from '../builder/document.ts';
+import type { BuilderContextTarget, BuilderDocument, BuilderViewport, StudioBuilderClipboard } from '../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../components/AdminPrimitives.tsx';
 import { ThemeOptionsForm } from '../features/themes/ThemeOptionsForm.tsx';
 import type { StudioPanelId } from '../shell/router.ts';
@@ -65,10 +65,6 @@ interface Props {
   templateDirty: boolean;
   viewport: BuilderViewport;
   themeRevision: number;
-  patterns: PatternRecord[];
-  patternsLoaded: boolean;
-  onRefreshPatterns: () => void;
-  availablePartKeys: string[];
   templateDiagnostics?: Array<{ node_id: string; code: string }>;
   onBuilderMessage: (msg: string, failed?: boolean) => void;
   onApiError: (error: unknown, fallback: string) => void;
@@ -83,6 +79,23 @@ interface Props {
   onMenuRequestHandled?: () => void;
   canvasPickSeq?: number;
   openPatternSeq?: number;
+}
+
+function contextTargetForTemplate(target: TemplateTargetInput): BuilderContextTarget {
+  switch (target.kind) {
+    case 'part': return { kind: 'part', part_key: target.part_key ?? null };
+    case 'single': return { kind: 'single', type_key: target.content_type ?? null };
+    case 'single_custom': return { kind: 'single_custom', type_key: target.content_type ?? null };
+    case 'archive': return { kind: 'archive', type_key: target.content_type ?? null };
+    case 'taxonomy': return { kind: 'taxonomy', taxonomy_key: target.taxonomy ?? null };
+    case 'singular': return { kind: 'singular' };
+    case 'page': return { kind: 'page' };
+    case 'page_layout': return { kind: 'page_layout' };
+    case 'home': return { kind: 'home' };
+    case 'index': return { kind: 'index' };
+    case 'not_found': return { kind: 'not_found' };
+    case 'search': return { kind: 'search' };
+  }
 }
 
 const INPUT_CLASS =
@@ -156,10 +169,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   templateDirty,
   viewport,
   themeRevision,
-  patterns,
-  patternsLoaded,
-  onRefreshPatterns,
-  availablePartKeys,
   templateDiagnostics = [],
   onBuilderMessage,
   onApiError,
@@ -476,7 +485,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   if (selectedTarget) {
     const badge = sourceBadge(selectedTarget);
     const showCreateWarning = !selectedTarget.override_id && !templateEditingEnabled;
-    const allowRouteContext = ['single', 'page', 'page_layout', 'single_custom'].includes(selectedTarget.target.kind);
     const contextTypeKey = selectedTarget.target.content_type ?? (selectedTarget.target.kind === 'page' ? 'page' : null);
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-template-editor">
@@ -527,19 +535,11 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               csrfToken={csrfToken}
               viewport={viewport}
               themeRevision={themeRevision}
-              patterns={patterns}
-              patternsLoaded={patternsLoaded}
-              onRefreshPatterns={onRefreshPatterns}
-              allowRouteContext={allowRouteContext}
+              contextTarget={contextTargetForTemplate(selectedTarget.target)}
               contextTypeKey={contextTypeKey}
               locale={previewLocale ?? localeState?.defaultLocale?.code ?? null}
               siteTimezone={generalDraft?.timezone}
-              allowPatternRef={false}
-              allowList={true}
-              allowContentSlot={!selectedTarget.forbids_content_slot}
-              allowTemplatePart={true} allowSearchResults={true}
               requiresContentSlot={selectedTarget.requires_content_slot}
-              availablePartKeys={availablePartKeys}
               diagnostics={templateDiagnostics}
               disabled={disabled}
               onMessage={onBuilderMessage}

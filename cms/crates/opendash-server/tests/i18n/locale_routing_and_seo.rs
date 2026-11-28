@@ -451,15 +451,18 @@ async fn s02_secondary_routing_home_chain_builder_list_pagination_and_archive_is
             "target": { "kind": "home" },
             "document": {
                 "schema_version": 1,
-                "sections": [{
+                "blocks": [{
                     "id": "home-sec",
+                    "block_id": "core/section",
                     "children": [{
                         "id": "home-row",
+                        "block_id": "core/row",
                         "children": [{
                             "id": "home-col",
+                            "block_id": "core/column",
                             "children": [
-                                { "id": "home-badge", "type": "core/heading", "props": { "level": 1, "text": "Shared Home Candidate Chain" } },
-                                { "id": "home-slot", "type": "core/content_slot", "props": {} }
+                                { "id": "home-badge", "block_id": "core/heading", "props": { "level": "h1", "text": "Shared Home Candidate Chain" } },
+                                { "id": "home-slot", "block_id": "core/content-slot", "props": {} }
                             ]
                         }]
                     }]
@@ -529,15 +532,18 @@ async fn s02_secondary_routing_home_chain_builder_list_pagination_and_archive_is
     // Put Builder core/list (page_size=1) on en_home BEFORE assigning en_home to /en.
     let en_builder_doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec-1",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "list-1",
-                        "type": "core/list",
+                        "block_id": "core/list",
                         "props": { "type_key": "post", "page_size": 1, "sort": "id_desc" }
                     }]
                 }]
@@ -1154,16 +1160,19 @@ async fn s02_disable_locale_hides_routes_redirects_and_media_acl_without_data_lo
         .header(header::IF_MATCH, format!("\"v{vi_page_ver}\""))
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "b-sec",
+                "block_id": "core/section",
                 "children": [{
                     "id": "b-row",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "b-col",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "b-img",
-                            "type": "core/image",
-                            "props": { "media_id": m_builder, "alt": "Builder" }
+                            "block_id": "core/image",
+                            "props": { "image": m_builder, "alt": "Builder" }
                         }]
                     }]
                 }]
@@ -1270,15 +1279,18 @@ async fn s02_disable_locale_hides_routes_redirects_and_media_acl_without_data_lo
             "target": { "kind": "single", "content_type": "post", "entry_id": vi_post_id },
             "document": {
                 "schema_version": 1,
-                "sections": [{
+                "blocks": [{
                     "id": "ov-sec",
+                    "block_id": "core/section",
                     "children": [{
                         "id": "ov-row",
+                        "block_id": "core/row",
                         "children": [{
                             "id": "ov-col",
+                            "block_id": "core/column",
                             "children": [
-                                { "id": "ov-img", "type": "core/image", "props": { "media_id": m_override, "alt": "OV" } },
-                                { "id": "ov-slot", "type": "core/content_slot", "props": {} }
+                                { "id": "ov-img", "block_id": "core/image", "props": { "image": m_override, "alt": "OV" } },
+                                { "id": "ov-slot", "block_id": "core/content-slot", "props": {} }
                             ]
                         }]
                     }]

@@ -2,7 +2,8 @@ use super::*;
 use crate::content_render::{
     EntryView, PaginationView, SearchView, core_l10n, render_snippet_segments_html,
 };
-use opendash_core::builder::{SearchFormProps, SearchResultsProps};
+use opendash_core::builder::BlockNode;
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuilderSearchData<'a> {
@@ -13,23 +14,41 @@ pub struct BuilderSearchData<'a> {
 
 pub(super) fn render_search_form_block(
     state: &BuilderRenderContext,
-    props: &SearchFormProps,
+    node: &BlockNode,
     context: Option<&BuilderTemplateContext<'_>>,
     is_preview: bool,
     locale: &str,
 ) -> String {
     let l10n = core_l10n(locale);
     let search_view = context.and_then(|ctx| ctx.search.as_ref()).map(|s| s.view);
-    let placeholder = if props.placeholder.trim().is_empty() {
-        l10n.search_placeholder.as_ref()
-    } else {
-        props.placeholder.trim()
-    };
-    let submit_label = if props.submit_label.trim().is_empty() {
+    let placeholder = node
+        .props
+        .get("placeholder")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(l10n.search_placeholder.as_ref());
+    let submit_raw = node
+        .props
+        .get("submit_label")
+        .and_then(Value::as_str)
+        .unwrap_or("Tìm kiếm")
+        .trim();
+    let submit_label = if submit_raw.is_empty() {
         l10n.search_submit.as_ref()
     } else {
-        props.submit_label.trim()
+        submit_raw
     };
+    let show_type_filter = node
+        .props
+        .get("show_type_filter")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let preserve_type_filter = node
+        .props
+        .get("preserve_type_filter")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let action_url = search_view
         .map(|s| s.action_url.as_str())
         .filter(|s| !s.trim().is_empty())
@@ -52,7 +71,7 @@ pub(super) fn render_search_form_block(
             escape_html(placeholder),
             escape_html(&l10n.search_title),
         );
-        if props.show_type_filter {
+        if show_type_filter {
             html.push_str(&format!(
                 r#"<select disabled aria-label="{}"><option value="">{}</option>"#,
                 escape_html(&l10n.search_title),
@@ -85,7 +104,7 @@ pub(super) fn render_search_form_block(
         escape_html(&l10n.search_title),
     );
     let mut emitted_select = false;
-    if props.show_type_filter
+    if show_type_filter
         && let Some(view) = search_view
         && !view.facets.is_empty()
     {
@@ -106,7 +125,7 @@ pub(super) fn render_search_form_block(
         html.push_str("</select>");
     }
     if !emitted_select
-        && props.preserve_type_filter
+        && preserve_type_filter
         && let Some(type_key) = active_type
     {
         html.push_str(&format!(
@@ -122,13 +141,29 @@ pub(super) fn render_search_form_block(
 }
 
 pub(super) fn render_search_results_block(
-    node_id: &str,
-    props: &SearchResultsProps,
+    node: &BlockNode,
     context: Option<&BuilderTemplateContext<'_>>,
     is_preview: bool,
     locale: &str,
     diagnostics: &mut Vec<BuilderDiagnostic>,
 ) -> Option<String> {
+    let node_id = node.id.as_str();
+    let show_facets = node
+        .props
+        .get("show_facets")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let show_excerpt = node
+        .props
+        .get("show_excerpt")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let empty_message = node
+        .props
+        .get("empty_message")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
     let Some(search_ctx) = context
         .and_then(|ctx| ctx.search)
         .filter(|s| s.view.is_search_route)
@@ -154,10 +189,10 @@ pub(super) fn render_search_results_block(
     let l10n = core_l10n(locale);
     let view = search_ctx.view;
     if !view.has_query {
-        let prompt = if props.empty_message.trim().is_empty() {
+        let prompt = if empty_message.is_empty() {
             l10n.search_empty_prompt.as_ref()
         } else {
-            props.empty_message.trim()
+            empty_message
         };
         return Some(format!(
             r#"<div class="od-search-results-block"><p class="od-search-empty-prompt">{}</p></div>"#,
@@ -166,7 +201,7 @@ pub(super) fn render_search_results_block(
     }
 
     let mut html = String::from(r#"<div class="od-search-results-block">"#);
-    if props.show_facets && !view.facets.is_empty() {
+    if show_facets && !view.facets.is_empty() {
         let all_active = if view.type_filter.is_none() {
             r#" aria-current="page""#
         } else {
@@ -207,10 +242,10 @@ pub(super) fn render_search_results_block(
     ));
 
     if search_ctx.entries.is_empty() {
-        let empty = if props.empty_message.trim().is_empty() {
+        let empty = if empty_message.is_empty() {
             l10n.search_no_results.as_ref()
         } else {
-            props.empty_message.trim()
+            empty_message
         };
         html.push_str(&format!(
             r#"<p class="od-search-no-results">{}</p>"#,
@@ -236,7 +271,7 @@ pub(super) fn render_search_results_block(
                 escape_html(href),
                 escape_html(&entry.title),
             ));
-            if props.show_excerpt {
+            if show_excerpt {
                 let snippet = render_snippet_segments_html(&entry.snippet_segments, &entry.excerpt);
                 html.push_str(&format!(r#"<p class="od-search-snippet">{snippet}</p>"#));
             }

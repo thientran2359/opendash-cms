@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "id": "core/list",
+  "title": "Danh sách bài viết",
+  "category": "content",
+  "icon": "list",
+  "render": "native",
+  "allowed_contexts": ["*", "!pattern", "!theme_pattern"],
+  "fields": [
+    {
+      "type": "select",
+      "key": "type_key",
+      "label": "Loại nội dung",
+      "options_source": "content_types",
+      "required": true,
+      "default": "post"
+    },
+    {
+      "type": "select",
+      "key": "taxonomy_key",
+      "label": "Phân loại lọc",
+      "options_source": "taxonomies",
+      "allow_null": true
+    },
+    {
+      "type": "term_ref",
+      "key": "term_id",
+      "label": "Chuyên mục / Nhãn",
+      "taxonomy_from_field": "taxonomy_key",
+      "multiple": false,
+      "conditions": [[{ "field": "taxonomy_key", "op": "not_empty" }]]
+    },
+    {
+      "type": "boolean",
+      "key": "include_descendants",
+      "label": "Gồm cả mục con",
+      "default": false,
+      "conditions": [[{ "field": "term_id", "op": "not_empty" }]]
+    },
+    {
+      "type": "select",
+      "key": "sort",
+      "label": "Thứ tự sắp xếp",
+      "options": [
+        { "value": "id_desc", "label": "Mới nhất" },
+        { "value": "id_asc", "label": "Cũ nhất" }
+      ],
+      "default": "id_desc"
+    },
+    {
+      "type": "number",
+      "key": "page_size",
+      "label": "Số bài / trang",
+      "min": 1,
+      "max": 24,
+      "default": 6
+    },
+    {
+      "type": "number",
+      "key": "offset",
+      "label": "Bỏ qua bài đầu",
+      "min": 0,
+      "max": 200,
+      "default": 0
+    },
+    {
+      "type": "radio_buttons",
+      "key": "layout",
+      "label": "Kiểu hiển thị",
+      "options": [
+        { "value": "grid", "label": "Lưới" },
+        { "value": "list", "label": "Danh sách" }
+      ],
+      "default": "grid"
+    },
+    {
+      "type": "range",
+      "key": "columns",
+      "label": "Số cột",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "default": 3,
+      "responsive": true,
+      "conditions": [[{ "field": "layout", "op": "eq", "value": "grid" }]]
+    },
+    {
+      "type": "boolean",
+      "key": "show_image",
+      "label": "Hiện ảnh bìa",
+      "default": true
+    },
+    {
+      "type": "boolean",
+      "key": "show_date",
+      "label": "Hiện ngày đăng",
+      "default": true
+    },
+    {
+      "type": "boolean",
+      "key": "show_excerpt",
+      "label": "Hiện trích đoạn",
+      "default": true
+    },
+    {
+      "type": "boolean",
+      "key": "show_taxonomy",
+      "label": "Hiện chuyên mục",
+      "default": true
+    },
+    {
+      "type": "text",
+      "key": "readmore_label",
+      "label": "Nhãn xem thêm",
+      "max_chars": 80,
+      "default": "Đọc tiếp"
+    }
+  ]
+}

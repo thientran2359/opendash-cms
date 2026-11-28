@@ -267,15 +267,21 @@ async fn query_public_search_bm25_vietnamese_facets_acl_and_snippets() {
 
     let bdoc: BuilderDocument = serde_json::from_value(json!({
         "schema_version": BUILDER_SCHEMA_VERSION,
-        "sections": [{
+        "blocks": [{
             "id": "s1",
+            "block_id": "core/section",
+            "props": {},
             "children": [{
                 "id": "r1",
+                "block_id": "core/row",
+                "props": {},
                 "children": [{
                     "id": "c1",
+                    "block_id": "core/column",
+                    "props": {},
                     "children": [
-                        {"id": "e1", "type": "core/heading", "props": {"level": 2, "text": "Hướng dẫn Đường phố"}},
-                        {"id": "e2", "type": "core/text", "props": {"text": "<p>Thiết kế kiến trúc Builder</p><style>.badcss{}</style>", "rich": true}}
+                        {"id": "e1", "block_id": "core/heading", "props": {"level": "h2", "text": "Hướng dẫn Đường phố"}},
+                        {"id": "e2", "block_id": "core/text", "props": {"content": "<p>Thiết kế kiến trúc Builder</p><style>.badcss{}</style>"}}
                     ]
                 }]
             }]
@@ -325,13 +331,19 @@ async fn query_public_search_bm25_vietnamese_facets_acl_and_snippets() {
     .last_insert_rowid();
     let legacy_json = json!({
         "schema_version": BUILDER_SCHEMA_VERSION,
-        "sections": [{
+        "blocks": [{
             "id": "ls1",
+            "block_id": "core/section",
+            "props": {},
             "children": [{
                 "id": "lr1",
+                "block_id": "core/row",
+                "props": {},
                 "children": [{
                     "id": "lc1",
-                    "children": [{"id": "le1", "type": "core/heading", "props": {"level": 2, "text": "Di sản Kiến trúc cổ"}}]
+                    "block_id": "core/column",
+                    "props": {},
+                    "children": [{"id": "le1", "block_id": "core/heading", "props": {"level": "h2", "text": "Di sản Kiến trúc cổ"}}]
                 }]
             }]
         }]

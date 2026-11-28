@@ -67,6 +67,7 @@ pub(super) struct PublicRouteContext<'a> {
     pub(super) term_schema: Option<&'a opendash_core::content::EffectiveTermSchema>,
     pub(super) content_type: Option<&'a serde_json::Value>,
     pub(super) entry: Option<&'a content_render::EntryView>,
+    pub(super) list_pages: Option<&'a BTreeMap<String, i64>>,
     pub(super) search: &'a content_render::SearchView,
 }
 
@@ -215,6 +216,7 @@ pub(super) async fn render_resolved_public_template_html(
             let canvas_layout = record.target.kind
                 == opendash_core::theme::TemplateCandidateKind::PageLayout
                 && overrides::is_canvas_page_layout(active, record.target.layout_key.as_deref());
+            let empty_pages = BTreeMap::new();
             let search_data =
                 route_ctx
                     .search
@@ -225,7 +227,7 @@ pub(super) async fn render_resolved_public_template_html(
                         pagination: route_ctx.pagination,
                     });
             let rendered =
-                overrides::render_resolved_public_builder_with_search_and_cache_for_locale(
+                overrides::render_resolved_public_builder_with_query_and_search_for_locale(
                     db,
                     &record,
                     active,
@@ -233,6 +235,8 @@ pub(super) async fn render_resolved_public_template_html(
                     route_entry,
                     locale,
                     Some(&slot_html),
+                    route_ctx.list_pages.unwrap_or(&empty_pages),
+                    route_ctx.route_path.unwrap_or("/"),
                     search_data,
                     budget,
                     cache,

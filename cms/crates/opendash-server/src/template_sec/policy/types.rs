@@ -33,6 +33,7 @@ impl Default for RenderFormattingConfig {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FieldTemplateNode {
     Scalar,
+    ScalarMap,
     Url,
     Link,
     Media,

@@ -58,6 +58,14 @@ pub(super) fn finalize_theme_attr(
     if !seen_attrs.insert(attr_name.clone()) {
         return Err("Thẻ HTML chứa thuộc tính bị trùng lặp.");
     }
+    if opts.forbid_style_tag
+        && matches!(
+            attr_name.as_str(),
+            "data-node-id" | "data-od-node-scope" | "data-od-editable" | "data-od-kind"
+        )
+    {
+        return Err("Template block không được tự khai báo thuộc tính hệ thống của Studio.");
+    }
     if is_dangerous_attr_name(
         tag_name,
         attr_name,

@@ -131,23 +131,22 @@ fn build_theme_v3_zip(id: &str, header_html: &str, single_html: &str) -> Vec<u8>
     buf
 }
 
-fn doc_with_heading(node_id: &str, text: &str, binding: Option<Value>) -> Value {
-    let mut props = json!({ "level": 2, "text": text });
-    if let Some(b) = binding {
-        props["binding"] = b;
-    }
+fn doc_with_heading(node_id: &str, text: &str) -> Value {
     json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": format!("sec-{node_id}"),
+            "block_id": "core/section",
             "children": [{
                 "id": format!("row-{node_id}"),
+                "block_id": "core/row",
                 "children": [{
                     "id": format!("col-{node_id}"),
+                    "block_id": "core/column",
                     "children": [{
                         "id": node_id,
-                        "type": "core/heading",
-                        "props": props
+                        "block_id": "core/heading",
+                        "props": { "level": "h2", "text": text }
                     }]
                 }]
             }]
@@ -259,7 +258,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
 
     // 4. The new typed API rejects malformed canonical targets; Home itself
     // is now a valid template identity, unlike the removed legacy endpoint.
-    let header_preview_doc = doc_with_heading("hdr-1", "Unsaved Preview Header", None);
+    let header_preview_doc = doc_with_heading("hdr-1", "Unsaved Preview Header");
     let invalid_target = client
         .put(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie)
@@ -396,7 +395,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
     assert!(public_post_1.contains("ThemeA Header"));
 
     // 7. Saving site-owned Header is a typed part target. CAS stays 428/412.
-    let header_v1_doc = doc_with_heading("hdr-1", "Site Header v1", None);
+    let header_v1_doc = doc_with_heading("hdr-1", "Site Header v1");
     let header_target = json!({"kind":"part","part_key":"header"});
     let save_h1 = client
         .put(format!("{}/api/admin/template-overrides", srv.base_url))
@@ -419,7 +418,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .header("Origin", &origin)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({"target":&header_target,
-                      "document":doc_with_heading("hdr-1", "Site Header v2", None)}))
+                      "document":doc_with_heading("hdr-1", "Site Header v2")}))
         .send()
         .await
         .unwrap();
@@ -431,7 +430,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .header("X-CSRF-Token", &csrf)
         .header("If-Match", "\"v99\"")
         .json(&json!({"target":&header_target,
-                      "document":doc_with_heading("hdr-1", "Site Header v2", None)}))
+                      "document":doc_with_heading("hdr-1", "Site Header v2")}))
         .send()
         .await
         .unwrap();
@@ -471,23 +470,13 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .remove("effective_source");
     assert_eq!(saved_row, h1_json);
 
-    // 8. Typed Single(post) still resolves RouteContext title per published
-    // entry. It must contain exactly one core/content_slot under S02.
-    let mut single_doc = doc_with_heading(
-        "sng-title",
-        "Fallback Title",
-        Some(json!({
-            "type_key": "post",
-            "entry_slug": "",
-            "source": { "kind": "route_context", "field_key": "title" },
-            "target": "text"
-        })),
-    );
-    single_doc["sections"][0]["children"][0]["children"][0]["children"]
+    // 8. Typed Single(post) renders per published entry via core/content-slot.
+    let mut single_doc = doc_with_heading("sng-title", "Single Shell Header");
+    single_doc["blocks"][0]["children"][0]["children"][0]["children"]
         .as_array_mut()
         .unwrap()
         .push(json!({
-            "id":"entry-slot","type":"core/content_slot","props":{}
+            "id":"entry-slot","block_id":"core/content-slot","props":{}
         }));
     let preview_single = preview_request()
         .json(&json!({
@@ -534,7 +523,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
     for (key, document) in [
         (
             "post-card",
-            doc_with_heading("db-card", "DB post card wins", None),
+            doc_with_heading("db-card", "DB post card wins"),
         ),
         ("public-card", preview_part_document(&["post-card"])),
     ] {
@@ -549,11 +538,11 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
             .unwrap();
         assert_eq!(saved_part.status(), 201);
     }
-    single_doc["sections"][0]["children"][0]["children"][0]["children"]
+    single_doc["blocks"][0]["children"][0]["children"][0]["children"]
         .as_array_mut()
         .unwrap()
         .push(
-            json!({"id":"nested-public-card","type":"core/template_part",
+            json!({"id":"nested-public-card","block_id":"core/template-part",
                      "props":{"part_key":"public-card"}}),
         );
     let save_single = client
@@ -921,13 +910,13 @@ async fn v3_page_canvas_and_custom_single_selections_survive_theme_switch() {
 }
 
 fn preview_part_document(keys: &[&str]) -> Value {
-    let mut doc = doc_with_heading("preview", "Unsaved root", None);
-    let children = doc["sections"][0]["children"][0]["children"][0]["children"]
+    let mut doc = doc_with_heading("preview", "Unsaved root");
+    let children = doc["blocks"][0]["children"][0]["children"][0]["children"]
         .as_array_mut()
         .unwrap();
     for (index, key) in keys.iter().enumerate() {
         children.push(
-            json!({"id":format!("part-{index}"),"type":"core/template_part",
+            json!({"id":format!("part-{index}"),"block_id":"core/template-part",
                              "props":{"part_key":key}}),
         );
     }

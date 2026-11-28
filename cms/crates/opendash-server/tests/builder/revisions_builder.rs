@@ -147,12 +147,31 @@ async fn api(
 
 fn builder_doc(heading: &str, extra_para: Option<&str>) -> Value {
     let mut children = vec![
-        json!({ "id": "hd-1", "type": "core/heading", "props": { "level": 2, "text": heading } }),
+        json!({ "id": "hd-1", "block_id": "core/heading", "props": { "level": "h2", "text": heading } }),
     ];
     if let Some(copy) = extra_para {
-        children.push(json!({ "id": "p-1", "type": "core/text", "props": { "text": copy } }));
+        children
+            .push(json!({ "id": "p-1", "block_id": "core/text", "props": { "content": copy } }));
     }
-    json!({ "schema_version": 1, "sections": [{ "id": "sec-1", "children": [{ "id": "row-1", "children": [{ "id": "col-1", "children": children }] }] }] })
+    json!({
+        "schema_version": 1,
+        "blocks": [{
+            "id": "sec-1",
+            "block_id": "core/section",
+            "props": {},
+            "children": [{
+                "id": "row-1",
+                "block_id": "core/row",
+                "props": {},
+                "children": [{
+                    "id": "col-1",
+                    "block_id": "core/column",
+                    "props": {},
+                    "children": children
+                }]
+            }]
+        }]
+    })
 }
 
 #[tokio::test]
@@ -353,7 +372,7 @@ async fn studio_mode2_revisions_block_diff_reset_and_autosave_restore() {
     .await
     .unwrap();
     assert_eq!(
-        ba["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["text"],
+        ba["document"]["blocks"][0]["children"][0]["children"][0]["children"][0]["props"]["text"],
         "Hero V1"
     );
 

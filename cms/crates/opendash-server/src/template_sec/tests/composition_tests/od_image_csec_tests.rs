@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn od_image_enforces_csec_provenance_nonce_boundaries_and_attributes() {
     let media_id = "a".repeat(64);
-    let schema: opendash_core::block_schema::BlockSchemaV1 =
+    let schema: opendash_core::block_schema::BlockSchema =
         serde_json::from_value(serde_json::json!({
             "schema_version": 1,
             "id": "demo/img",
@@ -45,6 +45,9 @@ fn od_image_enforces_csec_provenance_nonce_boundaries_and_attributes() {
             merged_options: None,
             site_options: None,
             menus: None,
+            children_html: None,
+            children_meta: None,
+            parent_ctx: None,
             is_preview: false,
             fmt_cfg: &fmt_cfg,
         },
@@ -91,6 +94,9 @@ fn od_image_enforces_csec_provenance_nonce_boundaries_and_attributes() {
                 merged_options: None,
                 site_options: None,
                 menus: None,
+                children_html: None,
+                children_meta: None,
+                parent_ctx: None,
                 is_preview: false,
                 fmt_cfg: &fmt_cfg,
             },

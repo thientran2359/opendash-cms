@@ -3,9 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::builder::{
-    BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, RowNode, SectionNode,
-};
+use crate::builder::{BlockNode, BuilderDocument};
 
 use super::MAX_BLOCK_DIFF_NODES;
 use super::canonical::canonical_json_value;
@@ -40,137 +38,58 @@ fn insert_serialized<T: Serialize>(
     }
 }
 
-fn element_type_and_label(content: &ElementContent) -> (String, String, BTreeMap<String, Value>) {
-    let mut props = BTreeMap::new();
-    match content {
-        ElementContent::Unresolved(map) => {
-            for (k, v) in map {
-                props.insert(format!("unresolved.{k}"), canonical_json_value(v));
-            }
-            let raw_type = map
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or("unresolved");
-            (raw_type.to_owned(), raw_type.to_owned(), props)
-        }
-        ElementContent::Known(known) => {
-            if let Some(binding) = known.binding()
-                && let Ok(val) = serde_json::to_value(binding)
-            {
-                props.insert("binding".to_owned(), canonical_json_value(&val));
-            }
-            match known {
-                KnownElement::Heading(p) => {
-                    insert_props_object(&mut props, p, &["binding"]);
-                    (
-                        "core/heading".to_owned(),
-                        format!("Heading (H{})", p.level),
-                        props,
-                    )
-                }
-                KnownElement::Text(p) => {
-                    insert_props_object(&mut props, p, &["binding"]);
-                    ("core/text".to_owned(), "Text".to_owned(), props)
-                }
-                KnownElement::Image(p) => {
-                    insert_props_object(&mut props, p, &["binding"]);
-                    ("core/image".to_owned(), "Image".to_owned(), props)
-                }
-                KnownElement::Video(p) => {
-                    insert_props_object(&mut props, p, &[]);
-                    ("core/video".to_owned(), "Video".to_owned(), props)
-                }
-                KnownElement::Button(p) => {
-                    insert_props_object(&mut props, p, &["binding"]);
-                    ("core/button".to_owned(), "Button".to_owned(), props)
-                }
-                KnownElement::List(p) => {
-                    insert_props_object(&mut props, p, &[]);
-                    (
-                        "core/list".to_owned(),
-                        format!("List ({})", p.type_key),
-                        props,
-                    )
-                }
-                KnownElement::ContactForm(p) => {
-                    insert_props_object(&mut props, p, &[]);
-                    (
-                        "core/contact_form".to_owned(),
-                        format!("Contact Form (#{})", p.form_id),
-                        props,
-                    )
-                }
-                KnownElement::SearchForm(p) => {
-                    insert_props_object(&mut props, p, &[]);
-                    (
-                        "core/search_form".to_owned(),
-                        "Search Form".to_owned(),
-                        props,
-                    )
-                }
-                KnownElement::SearchResults(p) => {
-                    insert_props_object(&mut props, p, &[]);
-                    (
-                        "core/search_results".to_owned(),
-                        "Search Results".to_owned(),
-                        props,
-                    )
-                }
-                KnownElement::ContentSlot(_) => (
-                    "core/content_slot".to_owned(),
-                    "Content Slot".to_owned(),
-                    props,
-                ),
-                KnownElement::PatternRef(p) => {
-                    insert_props_object(&mut props, p, &[]);
-                    (
-                        "core/pattern_ref".to_owned(),
-                        format!("Pattern (#{})", p.pattern_id),
-                        props,
-                    )
-                }
-                KnownElement::TemplatePart(p) => {
-                    insert_props_object(&mut props, p, &[]);
-                    (
-                        "core/template_part".to_owned(),
-                        format!("Template Part ({})", p.part_key),
-                        props,
-                    )
-                }
-                KnownElement::Legacy(p) => {
-                    insert_props_object(&mut props, p, &[]);
-                    (
-                        format!("legacy:{}", p.block_id),
-                        format!("Legacy ({})", p.block_id),
-                        props,
-                    )
-                }
-                KnownElement::PluginBlock(p) => {
-                    for (k, v) in &p.values {
-                        props.insert(format!("values.{k}"), canonical_json_value(v));
-                    }
-                    (
-                        format!("plugin:{}", p.block_id),
-                        format!("Block ({})", p.block_id),
-                        props,
-                    )
-                }
-            }
-        }
+fn node_kind_for_block_id(block_id: &str) -> BlockNodeKind {
+    match block_id {
+        "core/section" => BlockNodeKind::Section,
+        "core/row" => BlockNodeKind::Row,
+        "core/column" => BlockNodeKind::Column,
+        _ => BlockNodeKind::Element,
     }
 }
 
-fn insert_props_object<T: Serialize>(
-    out: &mut BTreeMap<String, Value>,
-    value: &T,
-    skip_keys: &[&str],
-) {
-    if let Ok(Value::Object(map)) = serde_json::to_value(value) {
-        for (k, v) in map {
-            if !skip_keys.contains(&k.as_str()) {
-                out.insert(format!("props.{k}"), canonical_json_value(&v));
-            }
-        }
+fn default_label_for_node(node: &BlockNode) -> String {
+    match node.block_id.as_str() {
+        "core/section" => "Section".to_owned(),
+        "core/row" => "Row".to_owned(),
+        "core/column" => "Column".to_owned(),
+        "core/stack" => "Stack".to_owned(),
+        "core/heading" => node.props.get("level").and_then(Value::as_str).map_or_else(
+            || "Heading".to_owned(),
+            |lvl| format!("Heading ({})", lvl.to_ascii_uppercase()),
+        ),
+        "core/text" => "Text".to_owned(),
+        "core/image" => "Image".to_owned(),
+        "core/video" => "Video".to_owned(),
+        "core/button" => "Button".to_owned(),
+        "core/list" => format!(
+            "List ({})",
+            node.props
+                .get("type_key")
+                .and_then(Value::as_str)
+                .unwrap_or("post")
+        ),
+        "core/contact-form" => "Contact Form".to_owned(),
+        "core/search-form" => "Search Form".to_owned(),
+        "core/search-results" => "Search Results".to_owned(),
+        "core/content-slot" => "Content Slot".to_owned(),
+        "core/pattern-ref" => node
+            .props
+            .get("pattern_id")
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| v.to_string())
+            })
+            .map_or_else(|| "Pattern".to_owned(), |pid| format!("Pattern (#{pid})")),
+        "core/template-part" => node
+            .props
+            .get("part_key")
+            .and_then(Value::as_str)
+            .map_or_else(
+                || "Template Part".to_owned(),
+                |key| format!("Template Part ({key})"),
+            ),
+        other => format!("Block ({other})"),
     }
 }
 
@@ -188,6 +107,56 @@ fn next_occurrence(
     current
 }
 
+fn flatten_nodes_rec(
+    items: &[BlockNode],
+    parent_id: Option<&str>,
+    parent_path: Option<&str>,
+    limit: usize,
+    nodes: &mut Vec<FlatBlockNode>,
+    total: &mut usize,
+    counts: &mut HashMap<(BlockNodeKind, String, String), usize>,
+) {
+    for (idx, node) in items.iter().enumerate() {
+        *total += 1;
+        let path = match parent_path {
+            Some(prefix) => format!("{prefix}.children[{idx}]"),
+            None => format!("blocks[{idx}]"),
+        };
+        if nodes.len() < limit {
+            let kind = node_kind_for_block_id(&node.block_id);
+            let mut props = BTreeMap::new();
+            for (k, v) in &node.props {
+                props.insert(format!("props.{k}"), canonical_json_value(v));
+            }
+            insert_serialized(&mut props, "meta", &node.meta);
+            let label = node
+                .meta
+                .as_ref()
+                .and_then(|m| m.name.as_deref())
+                .filter(|s| !s.is_empty())
+                .map_or_else(|| default_label_for_node(node), str::to_owned);
+            let occ = next_occurrence(counts, kind, &node.block_id, &node.id);
+            nodes.push(FlatBlockNode {
+                key: (kind, node.block_id.clone(), node.id.clone(), occ),
+                label,
+                parent_id: parent_id.map(str::to_owned),
+                path: path.clone(),
+                order_index: idx,
+                props,
+            });
+        }
+        flatten_nodes_rec(
+            &node.children,
+            Some(node.id.as_str()),
+            Some(path.as_str()),
+            limit,
+            nodes,
+            total,
+            counts,
+        );
+    }
+}
+
 fn flatten_document(doc: Option<&BuilderDocument>, limit: usize) -> (Vec<FlatBlockNode>, usize) {
     let Some(doc) = doc else {
         return (Vec::new(), 0);
@@ -195,167 +164,16 @@ fn flatten_document(doc: Option<&BuilderDocument>, limit: usize) -> (Vec<FlatBlo
     let mut nodes = Vec::new();
     let mut total = 0usize;
     let mut counts = HashMap::new();
-
-    for (s_idx, section) in doc.sections.iter().enumerate() {
-        total += 1;
-        if nodes.len() < limit {
-            nodes.push(build_section_node(section, s_idx, &mut counts));
-        }
-        for (r_idx, row) in section.children.iter().enumerate() {
-            total += 1;
-            let s_path = format!("sections[{s_idx}]");
-            if nodes.len() < limit {
-                nodes.push(build_row_node(
-                    row,
-                    &section.id,
-                    &s_path,
-                    r_idx,
-                    &mut counts,
-                ));
-            }
-            for (c_idx, col) in row.children.iter().enumerate() {
-                total += 1;
-                let r_path = format!("{s_path}.rows[{r_idx}]");
-                if nodes.len() < limit {
-                    nodes.push(build_column_node(col, &row.id, &r_path, c_idx, &mut counts));
-                }
-                for (e_idx, elem) in col.children.iter().enumerate() {
-                    total += 1;
-                    let c_path = format!("{r_path}.columns[{c_idx}]");
-                    if nodes.len() < limit {
-                        nodes.push(build_element_node(
-                            elem,
-                            &col.id,
-                            &c_path,
-                            e_idx,
-                            &mut counts,
-                        ));
-                    }
-                }
-            }
-        }
-    }
+    flatten_nodes_rec(
+        &doc.blocks,
+        None,
+        None,
+        limit,
+        &mut nodes,
+        &mut total,
+        &mut counts,
+    );
     (nodes, total)
-}
-
-fn build_section_node(
-    section: &SectionNode,
-    order_index: usize,
-    counts: &mut HashMap<(BlockNodeKind, String, String), usize>,
-) -> FlatBlockNode {
-    let mut props = BTreeMap::new();
-    insert_serialized(&mut props, "style", &section.style);
-    insert_serialized(&mut props, "responsive", &section.responsive);
-    insert_serialized(&mut props, "meta", &section.meta);
-    let label = section
-        .meta
-        .as_ref()
-        .and_then(|m| m.name.as_deref())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Section")
-        .to_owned();
-    let occ = next_occurrence(counts, BlockNodeKind::Section, "section", &section.id);
-    FlatBlockNode {
-        key: (
-            BlockNodeKind::Section,
-            "section".to_owned(),
-            section.id.clone(),
-            occ,
-        ),
-        label,
-        parent_id: None,
-        path: format!("sections[{order_index}]"),
-        order_index,
-        props,
-    }
-}
-
-fn build_row_node(
-    row: &RowNode,
-    parent_id: &str,
-    parent_path: &str,
-    order_index: usize,
-    counts: &mut HashMap<(BlockNodeKind, String, String), usize>,
-) -> FlatBlockNode {
-    let mut props = BTreeMap::new();
-    insert_serialized(&mut props, "responsive", &row.responsive);
-    insert_serialized(&mut props, "meta", &row.meta);
-    let label = row
-        .meta
-        .as_ref()
-        .and_then(|m| m.name.as_deref())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Row")
-        .to_owned();
-    let occ = next_occurrence(counts, BlockNodeKind::Row, "row", &row.id);
-    FlatBlockNode {
-        key: (BlockNodeKind::Row, "row".to_owned(), row.id.clone(), occ),
-        label,
-        parent_id: Some(parent_id.to_owned()),
-        path: format!("{parent_path}.rows[{order_index}]"),
-        order_index,
-        props,
-    }
-}
-
-fn build_column_node(
-    col: &ColumnNode,
-    parent_id: &str,
-    parent_path: &str,
-    order_index: usize,
-    counts: &mut HashMap<(BlockNodeKind, String, String), usize>,
-) -> FlatBlockNode {
-    let mut props = BTreeMap::new();
-    insert_serialized(&mut props, "responsive", &col.responsive);
-    insert_serialized(&mut props, "meta", &col.meta);
-    let label = col
-        .meta
-        .as_ref()
-        .and_then(|m| m.name.as_deref())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Column")
-        .to_owned();
-    let occ = next_occurrence(counts, BlockNodeKind::Column, "column", &col.id);
-    FlatBlockNode {
-        key: (
-            BlockNodeKind::Column,
-            "column".to_owned(),
-            col.id.clone(),
-            occ,
-        ),
-        label,
-        parent_id: Some(parent_id.to_owned()),
-        path: format!("{parent_path}.columns[{order_index}]"),
-        order_index,
-        props,
-    }
-}
-
-fn build_element_node(
-    elem: &ElementNode,
-    parent_id: &str,
-    parent_path: &str,
-    order_index: usize,
-    counts: &mut HashMap<(BlockNodeKind, String, String), usize>,
-) -> FlatBlockNode {
-    let (block_type, fallback_label, mut props) = element_type_and_label(&elem.content);
-    insert_serialized(&mut props, "meta", &elem.meta);
-    let label = elem
-        .meta
-        .as_ref()
-        .and_then(|m| m.name.as_deref())
-        .filter(|s| !s.is_empty())
-        .unwrap_or(&fallback_label)
-        .to_owned();
-    let occ = next_occurrence(counts, BlockNodeKind::Element, &block_type, &elem.id);
-    FlatBlockNode {
-        key: (BlockNodeKind::Element, block_type, elem.id.clone(), occ),
-        label,
-        parent_id: Some(parent_id.to_owned()),
-        path: format!("{parent_path}.elements[{order_index}]"),
-        order_index,
-        props,
-    }
 }
 
 fn collect_prop_changes(
@@ -402,6 +220,7 @@ fn diff_prop_maps(
     changes
 }
 
+/// Computes a bounded structural & prop diff across two V1 `BuilderDocument` snapshots.
 pub fn compute_builder_block_diff(
     before: Option<&BuilderDocument>,
     after: Option<&BuilderDocument>,

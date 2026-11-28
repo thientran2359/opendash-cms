@@ -85,6 +85,26 @@ impl IconNonceTable {
     }
 }
 
+pub(crate) fn register_core_icon_in_budget(
+    budget: &mut super::RenderBudget,
+    name: &str,
+    class: Option<&str>,
+) -> Result<Option<String>, &'static str> {
+    if name.trim().is_empty() {
+        return Ok(None);
+    }
+    let Some(svg) = opendash_core::icons::render_core_icon_svg(name, class) else {
+        return Err("od_icon: tên icon hoặc class không hợp lệ");
+    };
+    if budget.icon_nonces.entries.len() >= MAX_ICONS_PER_REQUEST {
+        return Err("od_icon vượt quá 128 icon/request");
+    }
+    let nonce = new_icon_nonce()?;
+    budget.charge_html_bytes(svg.len().saturating_sub(nonce.len()))?;
+    budget.icon_nonces.entries.push((nonce.clone(), svg));
+    Ok(Some(nonce))
+}
+
 pub(crate) fn new_icon_nonce() -> Result<String, &'static str> {
     let mut bytes = [0_u8; 16];
     OsRng

@@ -1,30 +1,41 @@
 {
   "schema_version": 1,
-  "sections": [
+  "blocks": [
     {
       "id": "cta-sec-1",
+      "block_id": "core/section",
       "children": [
         {
-          "id": "cta-row-1",
+          "id": "cta-banner",
+          "block_id": "core/banner",
           "children": [
             {
-              "id": "cta-col-1-1",
-              "children": [
-                {
-                  "id": "cta-banner",
-                  "type": "plugin/block",
-                  "props": {
-                    "block_id": "core/banner",
-                    "values": {
-                      "heading": "Cùng xây dựng điều tuyệt vời",
-                      "body": "<p>Liên hệ để bắt đầu câu chuyện của bạn.</p>",
-                      "show_cta": true,
-                      "cta_label": "Liên hệ",
-                      "cta_url": "/lien-he"
-                    }
-                  }
+              "id": "cta-heading",
+              "block_id": "core/heading",
+              "props": {
+                "level": "h2",
+                "text": "Cùng xây dựng điều tuyệt vời",
+                "size": "2xl"
+              }
+            },
+            {
+              "id": "cta-body",
+              "block_id": "core/text",
+              "props": {
+                "content": "<p>Liên hệ để bắt đầu câu chuyện của bạn.</p>"
+              }
+            },
+            {
+              "id": "cta-button",
+              "block_id": "core/button",
+              "props": {
+                "cta": {
+                  "url": "/lien-he",
+                  "label": "Liên hệ",
+                  "new_tab": false,
+                  "nofollow": false
                 }
-              ]
+              }
             }
           ]
         }

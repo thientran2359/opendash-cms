@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 
-use crate::builder::{
-    BuilderDocument, ColumnNode, ElementContent, ElementNode, HeadingProps, KnownElement, NodeMeta,
-    PluginBlockProps, RowNode, SectionNode,
-};
+use crate::builder::{BlockNode, BuilderDocument, NodeMeta};
 use crate::content::ContentMode;
 
 use super::*;
@@ -99,81 +96,83 @@ fn text_diff_handles_vietnamese_unicode_html_tags_and_word_budget() {
     assert!(capped_lines.truncated_diff);
 }
 
-fn sample_doc(elems_a: Vec<ElementNode>, elems_b: Vec<ElementNode>) -> BuilderDocument {
+fn block_node(
+    id: &str,
+    block_id: &str,
+    props: serde_json::Value,
+    meta: Option<NodeMeta>,
+    children: Vec<BlockNode>,
+) -> BlockNode {
+    let props_map = match props {
+        serde_json::Value::Object(m) => m.into_iter().collect(),
+        _ => BTreeMap::new(),
+    };
+    BlockNode {
+        id: id.to_owned(),
+        block_id: block_id.to_owned(),
+        props: props_map,
+        meta,
+        children,
+    }
+}
+
+fn sample_doc(elems_a: Vec<BlockNode>, elems_b: Vec<BlockNode>) -> BuilderDocument {
     BuilderDocument {
         schema_version: 1,
-        sections: vec![SectionNode {
-            id: "sec-1".to_owned(),
-            responsive: None,
-            style: None,
-            meta: None,
-            children: vec![RowNode {
-                id: "row-1".to_owned(),
-                responsive: None,
-                meta: None,
-                children: vec![
-                    ColumnNode {
-                        id: "col-1".to_owned(),
-                        responsive: None,
-                        meta: None,
-                        children: elems_a,
-                    },
-                    ColumnNode {
-                        id: "col-2".to_owned(),
-                        responsive: None,
-                        meta: None,
-                        children: elems_b,
-                    },
+        blocks: vec![block_node(
+            "sec-1",
+            "core/section",
+            json!({}),
+            None,
+            vec![block_node(
+                "row-1",
+                "core/row",
+                json!({}),
+                None,
+                vec![
+                    block_node("col-1", "core/column", json!({}), None, elems_a),
+                    block_node("col-2", "core/column", json!({}), None, elems_b),
                 ],
-            }],
-        }],
+            )],
+        )],
     }
 }
 
 #[test]
 fn block_diff_tracks_added_removed_moved_with_props_modified_and_truncation() {
-    let h1 = ElementNode {
-        id: "el-h1".to_owned(),
-        meta: Some(NodeMeta {
+    let h1 = block_node(
+        "el-h1",
+        "core/heading",
+        json!({ "level": "h1", "text": "Old Hero" }),
+        Some(NodeMeta {
             name: Some("Hero".to_owned()),
             ..Default::default()
         }),
-        content: ElementContent::Known(KnownElement::Heading(HeadingProps {
-            level: 1,
-            text: "Old Hero".to_owned(),
-            binding: None,
-        })),
-    };
-    let plugin = ElementNode {
-        id: "el-plug".to_owned(),
-        meta: None,
-        content: ElementContent::Known(KnownElement::PluginBlock(PluginBlockProps {
-            block_id: "acme/card".to_owned(),
-            values: BTreeMap::from([("title".to_owned(), json!("A"))]),
-        })),
-    };
+        vec![],
+    );
+    let plugin = block_node(
+        "el-plug",
+        "acme/card",
+        json!({ "title": "A" }),
+        None,
+        vec![],
+    );
     let doc_before = sample_doc(vec![h1.clone()], vec![plugin.clone()]);
 
     let mut h1_moved = h1;
-    h1_moved.content = ElementContent::Known(KnownElement::Heading(HeadingProps {
-        level: 2,
-        text: "New Hero".to_owned(),
-        binding: None,
-    }));
+    h1_moved.props = BTreeMap::from([
+        ("level".to_owned(), json!("h2")),
+        ("text".to_owned(), json!("New Hero")),
+    ]);
     let mut plugin_mod = plugin;
-    plugin_mod.content = ElementContent::Known(KnownElement::PluginBlock(PluginBlockProps {
-        block_id: "acme/card".to_owned(),
-        values: BTreeMap::from([("title".to_owned(), json!("B"))]),
-    }));
-    let added = ElementNode {
-        id: "el-new".to_owned(),
-        meta: None,
-        content: ElementContent::Known(KnownElement::Heading(HeadingProps {
-            level: 3,
-            text: "Sub".to_owned(),
-            binding: None,
-        })),
-    };
+    plugin_mod.props = BTreeMap::from([("title".to_owned(), json!("B"))]);
+    let added = block_node(
+        "el-new",
+        "core/heading",
+        json!({ "level": "h3", "text": "Sub" }),
+        None,
+        vec![],
+    );
     let doc_after = sample_doc(vec![added], vec![plugin_mod, h1_moved]);
 
     let summary = compute_builder_block_diff(Some(&doc_before), Some(&doc_after));
@@ -187,7 +186,7 @@ fn block_diff_tracks_added_removed_moved_with_props_modified_and_truncation() {
     assert!(summary.items.iter().any(|i| {
         i.kind == BlockDiffKind::Modified
             && i.node_id == "el-plug"
-            && i.prop_changes.iter().any(|p| p.prop_path == "values.title")
+            && i.prop_changes.iter().any(|p| p.prop_path == "props.title")
     }));
     assert!(
         summary
@@ -197,14 +196,14 @@ fn block_diff_tracks_added_removed_moved_with_props_modified_and_truncation() {
     );
 
     let many_elems = (0..600)
-        .map(|i| ElementNode {
-            id: format!("el-{i}"),
-            meta: None,
-            content: ElementContent::Known(KnownElement::Heading(HeadingProps {
-                level: 2,
-                text: format!("T{i}"),
-                binding: None,
-            })),
+        .map(|i| {
+            block_node(
+                &format!("el-{i}"),
+                "core/heading",
+                json!({ "level": "h2", "text": format!("T{i}") }),
+                None,
+                vec![],
+            )
         })
         .collect();
     let oversized = sample_doc(many_elems, vec![]);

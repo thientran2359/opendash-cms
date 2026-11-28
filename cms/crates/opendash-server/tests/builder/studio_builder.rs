@@ -326,25 +326,25 @@ async fn studio_s04_unified_body_roundtrip_and_cpt_builder() {
         assert_eq!(open_json["had_recovery"], false);
         assert_eq!(open_json["publication_policy"], "draft_publish");
         assert_eq!(open_json["publication_status"], "draft");
-        assert_eq!(
-            open_json["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["type"],
-            "core/text"
-        );
+        assert_eq!(open_json["document"]["blocks"][0]["block_id"], "core/text");
         let version = open_json["version"].as_i64().unwrap();
 
         // 4. Save structured AST in UX Builder.
         let doc = json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "sec-1",
+                "block_id": "core/section",
                 "children": [{
                     "id": "row-1",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "col-1",
+                        "block_id": "core/column",
                         "children": [
-                            { "id": "hd-1", "type": "core/heading", "props": { "level": 2, "text": format!("{title} Heading") } },
-                            { "id": "tx-1", "type": "core/text", "props": { "text": format!("{title} Body A") } },
-                            { "id": "bt-1", "type": "core/button", "props": { "label": "Liên hệ", "url": "/lien-he" } }
+                            { "id": "hd-1", "block_id": "core/heading", "props": { "level": "h2", "text": format!("{title} Heading") } },
+                            { "id": "tx-1", "block_id": "core/text", "props": { "content": format!("{title} Body A") } },
+                            { "id": "bt-1", "block_id": "core/button", "props": { "cta": { "label": "Liên hệ", "url": "/lien-he", "new_tab": false, "nofollow": false } } }
                         ]
                     }]
                 }]
@@ -381,9 +381,9 @@ async fn studio_s04_unified_body_roundtrip_and_cpt_builder() {
             .await
             .unwrap();
         let body = rec["values"]["body"].as_str().unwrap();
-        assert!(body.contains("<!-- od:section"));
-        assert!(body.contains("<!-- od:heading"));
-        assert!(body.contains("<!-- od:text"));
+        assert!(body.contains("<!-- od:core/section"));
+        assert!(body.contains("<!-- od:core/heading"));
+        assert!(body.contains("<!-- od:core/text"));
         assert!(!body.contains("<div class=\"od-section\">"));
 
         // 6. Edit via Classic Editor & publish -> verify round-trip back to UX Builder + public route.
@@ -426,8 +426,7 @@ async fn studio_s04_unified_body_roundtrip_and_cpt_builder() {
             .await
             .unwrap();
         assert_eq!(
-            reopen["document"]["sections"][0]["children"][0]["children"][0]["children"][1]["props"]
-                ["text"],
+            reopen["document"]["blocks"][0]["children"][0]["children"][0]["children"][1]["props"]["content"],
             format!("{title} Body Classic Edited")
         );
 
@@ -479,16 +478,19 @@ async fn studio_s04_plugin_writer_ref_sync_and_one_hop_pattern_acl() {
     // 1. Plugin content_save writing unified comment-block body on a draft page syncs media ACL pins.
     let block_doc: BuilderDocument = serde_json::from_value(json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec-plug",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-plug",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-plug",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "img-plug",
-                        "type": "core/image",
-                        "props": { "media_id": plugin_img, "alt": "Plugin Image" }
+                        "block_id": "core/image",
+                        "props": { "image": plugin_img, "alt": "Plugin Image" }
                     }]
                 }]
             }]
@@ -596,16 +598,19 @@ async fn studio_s04_plugin_writer_ref_sync_and_one_hop_pattern_acl() {
         .header(header::IF_MATCH, format!("\"v{pat_v}\""))
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "psec-1",
+                "block_id": "core/section",
                 "children": [{
                     "id": "prow-1",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "pcol-1",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "pimg-1",
-                            "type": "core/image",
-                            "props": { "media_id": pat_img, "alt": "Pattern Image" }
+                            "block_id": "core/image",
+                            "props": { "image": pat_img, "alt": "Pattern Image" }
                         }]
                     }]
                 }]
@@ -652,16 +657,19 @@ async fn studio_s04_plugin_writer_ref_sync_and_one_hop_pattern_acl() {
         .header(header::IF_MATCH, format!("\"v{host_v}\""))
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "hsec-1",
+                "block_id": "core/section",
                 "children": [{
                     "id": "hrow-1",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "hcol-1",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "href-1",
-                            "type": "core/pattern_ref",
-                            "props": { "pattern_id": pat_id }
+                            "block_id": "core/pattern-ref",
+                            "props": { "pattern_id": pat_id.to_string() }
                         }]
                     }]
                 }]
@@ -864,16 +872,19 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
         .header(header::IF_MATCH, format!("\"v{pv}\""))
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "xsec-1",
+                "block_id": "core/section",
                 "children": [{
                     "id": "xrow-1",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "xcol-1",
+                        "block_id": "core/column",
                         "children": [{
                             "id": "xbtn-1",
-                            "type": "core/button",
-                            "props": { "label": "Click", "url": "javascript:alert(1)" }
+                            "block_id": "core/button",
+                            "props": { "cta": { "label": "Click", "url": "javascript:alert(1)", "new_tab": false, "nofollow": false } }
                         }]
                     }]
                 }]
@@ -893,15 +904,18 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
         .header(header::IF_MATCH, format!("\"v{pv}\""))
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "xsec-2",
+                "block_id": "core/section",
                 "children": [{
                     "id": "xrow-2",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "xcol-2",
+                        "block_id": "core/column",
                         "children": [
-                            { "id": "xhd-1", "type": "core/heading", "props": { "level": 2, "text": xss_script } },
-                            { "id": "xtx-1", "type": "core/text", "props": { "text": xss_img } }
+                            { "id": "xhd-1", "block_id": "core/heading", "props": { "level": "h2", "text": xss_script } },
+                            { "id": "xtx-1", "block_id": "core/text", "props": { "content": xss_img } }
                         ]
                     }]
                 }]
@@ -923,15 +937,18 @@ async fn studio_s04_rbac_xss_and_preview_csp_hardening() {
         .header("X-CSRF-Token", &ed_csrf)
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "xsec-2",
+                "block_id": "core/section",
                 "children": [{
                     "id": "xrow-2",
+                    "block_id": "core/row",
                     "children": [{
                         "id": "xcol-2",
+                        "block_id": "core/column",
                         "children": [
-                            { "id": "xhd-1", "type": "core/heading", "props": { "level": 2, "text": xss_script } },
-                            { "id": "xtx-1", "type": "core/text", "props": { "text": xss_svg } }
+                            { "id": "xhd-1", "block_id": "core/heading", "props": { "level": "h2", "text": xss_script } },
+                            { "id": "xtx-1", "block_id": "core/text", "props": { "content": xss_svg } }
                         ]
                     }]
                 }]

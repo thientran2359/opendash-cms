@@ -211,20 +211,23 @@ async fn builder_contact_form_preview_live_csp_and_nojs_submit() {
     let form_id = form_resp["id"].as_i64().unwrap();
     let form_ver = form_resp["version"].as_i64().unwrap();
 
-    // 2. Build a BuilderDocument with core/contact_form
+    // 2. Build a BuilderDocument with core/contact-form
     let doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec-1",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "el-form-1",
-                        "type": "core/contact_form",
+                        "block_id": "core/contact-form",
                         "props": {
-                            "form_id": form_id,
+                            "form_id": form_id.to_string(),
                             "submit_label": "Gui ngay"
                         }
                     }]

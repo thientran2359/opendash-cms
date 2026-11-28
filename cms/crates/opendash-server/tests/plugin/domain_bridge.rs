@@ -1,11 +1,8 @@
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use opendash_core::block_schema::{BlockSchemaV1, RegisteredBlockSchema};
-use opendash_core::builder::{
-    BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps,
-    RowNode, SectionNode,
-};
+use opendash_core::block_schema::{BlockSchema, RegisteredBlockSchema};
+use opendash_core::builder::{BlockNode, BuilderContextTarget, BuilderDocument};
 use opendash_core::registry::{RegistryCatalog, ResourceOwner};
 use sqlx::sqlite::SqlitePoolOptions;
 
@@ -57,31 +54,12 @@ async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtri
     vals.insert("heading".into(), serde_json::json!("Plugin Block Title"));
     let doc = BuilderDocument {
         schema_version: 1,
-        sections: vec![SectionNode {
-            id: "sec-1".into(),
+        blocks: vec![BlockNode {
+            id: "el-1".into(),
+            block_id: "acme-plugin/hero".into(),
+            props: vals,
+            children: vec![],
             meta: None,
-            responsive: None,
-            style: None,
-            children: vec![RowNode {
-                id: "row-1".into(),
-                meta: None,
-                responsive: None,
-                children: vec![ColumnNode {
-                    id: "col-1".into(),
-                    meta: None,
-                    responsive: None,
-                    children: vec![ElementNode {
-                        id: "el-1".into(),
-                        meta: None,
-                        content: ElementContent::Known(KnownElement::PluginBlock(
-                            PluginBlockProps {
-                                block_id: "acme-plugin/hero".into(),
-                                values: vals,
-                            },
-                        )),
-                    }],
-                }],
-            }],
         }],
     };
 
@@ -113,7 +91,7 @@ async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtri
         .unwrap();
     assert_eq!(count, 0);
 
-    let hero_schema: BlockSchemaV1 = serde_json::from_value(serde_json::json!({
+    let hero_schema: BlockSchema = serde_json::from_value(serde_json::json!({
         "schema_version": 1,
         "id": "acme-plugin/hero",
         "title": "Hero",
@@ -134,15 +112,15 @@ async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtri
             },
         )
         .expect("register plugin block");
-    doc.validate_for_save_with_schemas(&active_reg, None)
+    let ctx = BuilderContextTarget::EntryBody {
+        content_type: "page".into(),
+    };
+    doc.validate_for_save(&active_reg, &ctx, None)
         .expect("active plugin block must validate");
 
     // When plugin is disabled/missing, newly introducing it fails, but round-tripping existing saved AST succeeds
     let empty_reg = RegistryCatalog::default();
-    assert!(
-        doc.validate_for_save_with_schemas(&empty_reg, None)
-            .is_err()
-    );
-    doc.validate_for_save_with_schemas(&empty_reg, Some(&doc))
+    assert!(doc.validate_for_save(&empty_reg, &ctx, None).is_err());
+    doc.validate_for_save(&empty_reg, &ctx, Some(&doc))
         .expect("saved AST with disabled plugin block must be preserved");
 }

@@ -1,287 +1,5 @@
 use super::*;
 
-pub(super) fn push_box_spacing_css(css: &mut String, prop: &str, spacing: Option<BoxSpacing>) {
-    let Some(s) = spacing else { return };
-    if let Some(v) = s.top {
-        css.push_str(&format!("{prop}-top:{v}px;"));
-    }
-    if let Some(v) = s.right {
-        css.push_str(&format!("{prop}-right:{v}px;"));
-    }
-    if let Some(v) = s.bottom {
-        css.push_str(&format!("{prop}-bottom:{v}px;"));
-    }
-    if let Some(v) = s.left {
-        css.push_str(&format!("{prop}-left:{v}px;"));
-    }
-}
-
-pub(super) fn plan_container_styles(
-    responsive: Option<&Responsive>,
-    kind: ContainerKind,
-    row_section_width: Option<SectionWidth>,
-) -> ContainerRenderPlan {
-    let mut tailwind_classes = Vec::new();
-    let mut fallback_desktop_css = String::new();
-    let mut fallback_tablet_css = String::new();
-    let mut fallback_mobile_css = String::new();
-
-    if matches!(kind, ContainerKind::Row)
-        && let Some(cw) = row_section_width
-    {
-        match cw {
-            SectionWidth::Boxed => {
-                tailwind_classes.extend(["w-full", "max-w-7xl", "mx-auto"].map(str::to_owned));
-            }
-            SectionWidth::Wide => {
-                tailwind_classes
-                    .extend(["w-full", "max-w-screen-2xl", "mx-auto"].map(str::to_owned));
-            }
-            SectionWidth::Full => {
-                tailwind_classes.extend(["w-full", "max-w-none"].map(str::to_owned));
-            }
-        }
-    }
-
-    let Some(resp) = responsive else {
-        return ContainerRenderPlan {
-            tailwind_classes,
-            fallback_desktop_css,
-            fallback_tablet_css,
-            fallback_mobile_css,
-        };
-    };
-
-    let d = resp.desktop.as_ref();
-    let t = resp.tablet.as_ref();
-    let m = resp.mobile.as_ref();
-
-    let (d_pad, t_pad, m_pad) = (
-        box_or_legacy_px(d),
-        box_or_legacy_px(t),
-        box_or_legacy_px(m),
-    );
-    if let Some(pad_classes) = compile_box_spacing_tailwind("p", d_pad, t_pad, m_pad, false) {
-        tailwind_classes.extend(pad_classes);
-    } else {
-        push_box_spacing_css(&mut fallback_desktop_css, "padding", d_pad);
-        push_box_spacing_css(&mut fallback_tablet_css, "padding", t_pad);
-        push_box_spacing_css(&mut fallback_mobile_css, "padding", m_pad);
-    }
-
-    let (d_mar, t_mar, m_mar) = (
-        d.and_then(|s| s.margin).filter(|b| !b.is_empty()),
-        t.and_then(|s| s.margin).filter(|b| !b.is_empty()),
-        m.and_then(|s| s.margin).filter(|b| !b.is_empty()),
-    );
-    if let Some(mar_classes) = compile_box_spacing_tailwind("m", d_mar, t_mar, m_mar, true) {
-        tailwind_classes.extend(mar_classes);
-    } else {
-        push_box_spacing_css(&mut fallback_desktop_css, "margin", d_mar);
-        push_box_spacing_css(&mut fallback_tablet_css, "margin", t_mar);
-        push_box_spacing_css(&mut fallback_mobile_css, "margin", m_mar);
-    }
-
-    if matches!(kind, ContainerKind::Row) && resp.opts_into_grid() {
-        tailwind_classes.push("grid".to_owned());
-        let d_col = d.and_then(|s| s.columns_per_row);
-        let t_col = t.and_then(|s| s.columns_per_row).or(d_col);
-        let m_col = m.and_then(|s| s.columns_per_row).or(t_col);
-        let m_v = m_col.unwrap_or(1);
-        let t_v = t_col.unwrap_or(1);
-        let d_v = d_col.unwrap_or(1);
-        tailwind_classes.push(format!("grid-cols-{m_v}"));
-        if t_v != m_v {
-            tailwind_classes.push(format!("md:grid-cols-{t_v}"));
-        }
-        if d_v != t_v {
-            tailwind_classes.push(format!("lg:grid-cols-{d_v}"));
-        }
-
-        let d_gap = d.and_then(|s| s.gap_px);
-        let t_gap = t.and_then(|s| s.gap_px).or(d_gap);
-        let m_gap = m.and_then(|s| s.gap_px).or(t_gap);
-        if d_gap.is_some() || t_gap.is_some() || m_gap.is_some() {
-            let m_g = m_gap.unwrap_or(0);
-            let t_g = t_gap.unwrap_or(0);
-            let d_g = d_gap.unwrap_or(0);
-            if let (Some(gm), Some(gt), Some(gd)) = (
-                gap_px_to_tw_step(m_g),
-                gap_px_to_tw_step(t_g),
-                gap_px_to_tw_step(d_g),
-            ) {
-                tailwind_classes.push(format!("gap-{gm}"));
-                if gt != gm {
-                    tailwind_classes.push(format!("md:gap-{gt}"));
-                }
-                if gd != gt {
-                    tailwind_classes.push(format!("lg:gap-{gd}"));
-                }
-            } else {
-                fallback_desktop_css.push_str(&format!("gap:{}px;", d_gap.unwrap_or(0)));
-                if let Some(tg) = t.and_then(|s| s.gap_px) {
-                    fallback_tablet_css.push_str(&format!("gap:{tg}px;"));
-                }
-                if let Some(mg) = m.and_then(|s| s.gap_px) {
-                    fallback_mobile_css.push_str(&format!("gap:{mg}px;"));
-                }
-            }
-        }
-    }
-
-    if matches!(kind, ContainerKind::Column) {
-        let d_al = d.and_then(|s| s.text_align);
-        let t_al = t.and_then(|s| s.text_align).or(d_al);
-        let m_al = m.and_then(|s| s.text_align).or(t_al);
-        if d_al.is_some() || t_al.is_some() || m_al.is_some() {
-            let m_cls = align_tailwind_class(m_al.unwrap_or(TextAlign::Start));
-            let t_cls = align_tailwind_class(t_al.unwrap_or(TextAlign::Start));
-            let d_cls = align_tailwind_class(d_al.unwrap_or(TextAlign::Start));
-            tailwind_classes.push(m_cls.to_owned());
-            if t_cls != m_cls {
-                tailwind_classes.push(format!("md:{t_cls}"));
-            }
-            if d_cls != t_cls {
-                tailwind_classes.push(format!("lg:{d_cls}"));
-            }
-        }
-    }
-
-    ContainerRenderPlan {
-        tailwind_classes,
-        fallback_desktop_css,
-        fallback_tablet_css,
-        fallback_mobile_css,
-    }
-}
-
-/// Emits `<style data-builder-responsive>` only for properties that cannot be represented
-/// as static Tailwind utility classes: Section backgrounds, node Visibility, and custom pixel fallbacks.
-pub(super) fn builder_responsive_css(
-    document: &BuilderDocument,
-    is_preview: bool,
-    hydration_media: &std::collections::BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
-) -> String {
-    let mut desktop = String::new();
-    let mut tablet = String::new();
-    let mut mobile = String::new();
-    let mut vis_desktop = String::new();
-    let mut vis_tablet = String::new();
-    let mut vis_mobile = String::new();
-    let mut append_visibility = |id: &str, meta: Option<&NodeMeta>| {
-        let Some(vis) = meta.and_then(|m| m.visibility.as_ref()) else {
-            return;
-        };
-        if vis.hide_desktop {
-            push_visibility_rule(&mut vis_desktop, id);
-        }
-        if vis.hide_tablet {
-            push_visibility_rule(&mut vis_tablet, id);
-        }
-        if vis.hide_mobile {
-            push_visibility_rule(&mut vis_mobile, id);
-        }
-    };
-    for section in &document.sections {
-        if !section.is_synthetic() {
-            let plan =
-                plan_container_styles(section.responsive.as_ref(), ContainerKind::Section, None);
-            push_scoped_rule(&mut desktop, &section.id, &plan.fallback_desktop_css);
-            push_scoped_rule(&mut tablet, &section.id, &plan.fallback_tablet_css);
-            push_scoped_rule(&mut mobile, &section.id, &plan.fallback_mobile_css);
-            append_visibility(&section.id, section.meta.as_ref());
-            if let Some(style) = section.style.as_ref()
-                && valid_package_id(&section.id)
-            {
-                let mut sec_css = String::new();
-                if let Some(bg_color) = style
-                    .background_color
-                    .as_deref()
-                    .filter(|s| !s.is_empty() && opendash_core::field_schema::valid_color_value(s))
-                {
-                    sec_css.push_str(&format!("background-color:{bg_color};"));
-                }
-                if let Some(bg_media) = style
-                    .background_media_id
-                    .as_deref()
-                    .filter(|id| !id.is_empty() && valid_package_id(id))
-                {
-                    let bg_url = super::media_render::versioned_media_file_url(
-                        bg_media,
-                        hydration_media,
-                        is_preview,
-                    );
-                    sec_css.push_str(&format!(
-                        "background-image:url(\"{bg_url}\");background-size:cover;background-position:center;"
-                    ));
-                }
-                push_scoped_rule(&mut desktop, &section.id, &sec_css);
-            }
-        }
-        let row_section_width = (!section.is_synthetic())
-            .then(|| section.style.as_ref().and_then(|s| s.content_width))
-            .flatten();
-        for row in &section.children {
-            if !row.is_synthetic() {
-                let plan = plan_container_styles(
-                    row.responsive.as_ref(),
-                    ContainerKind::Row,
-                    row_section_width,
-                );
-                push_scoped_rule(&mut desktop, &row.id, &plan.fallback_desktop_css);
-                push_scoped_rule(&mut tablet, &row.id, &plan.fallback_tablet_css);
-                push_scoped_rule(&mut mobile, &row.id, &plan.fallback_mobile_css);
-                append_visibility(&row.id, row.meta.as_ref());
-            }
-            for column in &row.children {
-                if !column.is_synthetic() {
-                    let plan = plan_container_styles(
-                        column.responsive.as_ref(),
-                        ContainerKind::Column,
-                        None,
-                    );
-                    push_scoped_rule(&mut desktop, &column.id, &plan.fallback_desktop_css);
-                    push_scoped_rule(&mut tablet, &column.id, &plan.fallback_tablet_css);
-                    push_scoped_rule(&mut mobile, &column.id, &plan.fallback_mobile_css);
-                    append_visibility(&column.id, column.meta.as_ref());
-                }
-                for element in &column.children {
-                    append_visibility(&element.id, element.meta.as_ref());
-                }
-            }
-        }
-    }
-    if desktop.is_empty()
-        && tablet.is_empty()
-        && mobile.is_empty()
-        && vis_desktop.is_empty()
-        && vis_tablet.is_empty()
-        && vis_mobile.is_empty()
-    {
-        return String::new();
-    }
-    let mut css = format!("<style data-builder-responsive>{desktop}");
-    if !tablet.is_empty() {
-        css.push_str(&format!("@media (width < 1024px){{{tablet}}}"));
-    }
-    if !mobile.is_empty() {
-        css.push_str(&format!("@media (width < 768px){{{mobile}}}"));
-    }
-    if !vis_desktop.is_empty() {
-        css.push_str(&format!("@media (width >= 1024px){{{vis_desktop}}}"));
-    }
-    if !vis_tablet.is_empty() {
-        css.push_str(&format!(
-            "@media (width >= 768px) and (width < 1024px){{{vis_tablet}}}"
-        ));
-    }
-    if !vis_mobile.is_empty() {
-        css.push_str(&format!("@media (width < 768px){{{vis_mobile}}}"));
-    }
-    css.push_str("</style>");
-    css
-}
-
 pub(super) fn format_css_number(
     n: f64,
     unit: Option<opendash_core::field_schema::CssUnit>,
@@ -297,14 +15,364 @@ pub(super) fn format_css_number(
     }
 }
 
+/// Emits `<style data-builder-responsive>` for per-node breakpoint visibility rules.
+pub(super) fn builder_visibility_css(document: &BuilderDocument) -> String {
+    let mut vis_desktop = String::new();
+    let mut vis_tablet = String::new();
+    let mut vis_mobile = String::new();
+    document.walk_blocks(|node, _| {
+        let Some(vis) = node.meta.as_ref().and_then(|m| m.visibility.as_ref()) else {
+            return;
+        };
+        if vis.hide_desktop {
+            push_visibility_rule(&mut vis_desktop, &node.id);
+        }
+        if vis.hide_tablet {
+            push_visibility_rule(&mut vis_tablet, &node.id);
+        }
+        if vis.hide_mobile {
+            push_visibility_rule(&mut vis_mobile, &node.id);
+        }
+    });
+    if vis_desktop.is_empty() && vis_tablet.is_empty() && vis_mobile.is_empty() {
+        return String::new();
+    }
+    let mut css = "<style data-builder-responsive>".to_owned();
+    if !vis_desktop.is_empty() {
+        css.push_str(&format!("@media (width >= 1024px){{{vis_desktop}}}"));
+    }
+    if !vis_tablet.is_empty() {
+        css.push_str(&format!(
+            "@media (width >= 768px) and (width < 1024px){{{vis_tablet}}}"
+        ));
+    }
+    if !vis_mobile.is_empty() {
+        css.push_str(&format!("@media (width < 768px){{{vis_mobile}}}"));
+    }
+    css.push_str("</style>");
+    css
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn collect_scoped_css_for_fields(
+    fields: &[opendash_core::field_schema::FieldSpec],
+    values: &std::collections::BTreeMap<String, serde_json::Value>,
+    path_prefix: Option<&str>,
+    node_scope: &str,
+    is_preview: bool,
+    hydration_media: &std::collections::BTreeMap<String, crate::storage::fields::HydratedMediaRow>,
+    desktop_props: &mut String,
+    tablet_props: &mut String,
+    mobile_props: &mut String,
+    desktop_rules: &mut String,
+    tablet_rules: &mut String,
+    mobile_rules: &mut String,
+) {
+    use opendash_core::field_schema::{
+        FieldType, MediaFieldKind, SpacingProperty, SpacingValue, valid_color_value,
+        valid_css_select_value, valid_css_var_name, valid_sha256_media_id,
+    };
+
+    for spec in fields {
+        if spec.is_ui_only() || spec.field_type == FieldType::Secret {
+            continue;
+        }
+        let field_path = match path_prefix {
+            Some(prefix) => format!("{prefix}.{}", spec.key),
+            None => spec.key.clone(),
+        };
+        match spec.field_type {
+            FieldType::Group => {
+                let child_values: std::collections::BTreeMap<String, serde_json::Value> = values
+                    .get(&spec.key)
+                    .and_then(serde_json::Value::as_object)
+                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                    .unwrap_or_default();
+                collect_scoped_css_for_fields(
+                    &spec.fields,
+                    &child_values,
+                    Some(&field_path),
+                    node_scope,
+                    is_preview,
+                    hydration_media,
+                    desktop_props,
+                    tablet_props,
+                    mobile_props,
+                    desktop_rules,
+                    tablet_rules,
+                    mobile_rules,
+                );
+            }
+            FieldType::Number | FieldType::Range => {
+                let Some(var_name) = spec.css_var.as_deref() else {
+                    continue;
+                };
+                if !valid_css_var_name(var_name) {
+                    continue;
+                }
+                let default_num = spec
+                    .default
+                    .as_ref()
+                    .and_then(serde_json::Value::as_f64)
+                    .or(if spec.field_type == FieldType::Range {
+                        spec.min
+                    } else {
+                        None
+                    });
+                let raw = values.get(&spec.key);
+                if spec.responsive
+                    && let Some(obj) = raw.and_then(|v| v.as_object())
+                {
+                    if let Some(d) = obj
+                        .get("desktop")
+                        .and_then(|v| v.as_f64())
+                        .or(default_num)
+                        .and_then(|n| format_css_number(n, spec.unit))
+                    {
+                        desktop_props.push_str(&format!("{var_name}:{d};"));
+                    }
+                    if let Some(t) = obj
+                        .get("tablet")
+                        .and_then(|v| v.as_f64())
+                        .and_then(|n| format_css_number(n, spec.unit))
+                    {
+                        tablet_props.push_str(&format!("{var_name}:{t};"));
+                    }
+                    if let Some(m) = obj
+                        .get("mobile")
+                        .and_then(|v| v.as_f64())
+                        .and_then(|n| format_css_number(n, spec.unit))
+                    {
+                        mobile_props.push_str(&format!("{var_name}:{m};"));
+                    }
+                } else if let Some(d) = raw
+                    .and_then(|v| v.as_f64())
+                    .or(default_num)
+                    .and_then(|n| format_css_number(n, spec.unit))
+                {
+                    desktop_props.push_str(&format!("{var_name}:{d};"));
+                }
+            }
+            FieldType::Select | FieldType::RadioButtons => {
+                let Some(var_name) = spec.css_var.as_deref() else {
+                    continue;
+                };
+                if !valid_css_var_name(var_name) {
+                    continue;
+                }
+                let default_str = spec.default.as_ref().and_then(serde_json::Value::as_str);
+                let raw = values.get(&spec.key);
+                if spec.responsive
+                    && let Some(obj) = raw.and_then(|v| v.as_object())
+                {
+                    if let Some(d) = obj
+                        .get("desktop")
+                        .and_then(|v| v.as_str())
+                        .or(default_str)
+                        .filter(|s| valid_css_select_value(s))
+                    {
+                        desktop_props.push_str(&format!("{var_name}:{d};"));
+                    }
+                    if let Some(t) = obj
+                        .get("tablet")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| valid_css_select_value(s))
+                    {
+                        tablet_props.push_str(&format!("{var_name}:{t};"));
+                    }
+                    if let Some(m) = obj
+                        .get("mobile")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| valid_css_select_value(s))
+                    {
+                        mobile_props.push_str(&format!("{var_name}:{m};"));
+                    }
+                } else if let Some(d) = raw
+                    .and_then(|v| v.as_str())
+                    .or(default_str)
+                    .filter(|s| valid_css_select_value(s))
+                {
+                    desktop_props.push_str(&format!("{var_name}:{d};"));
+                }
+            }
+            FieldType::Spacing => {
+                let css_unit = spec.effective_unit();
+                let spacing_prop = spec.effective_spacing_property();
+                let default_sv = spec
+                    .default
+                    .as_ref()
+                    .and_then(|v| serde_json::from_value::<SpacingValue>(v.clone()).ok());
+                let raw = values.get(&spec.key);
+                let (d_sv, t_sv, m_sv) = crate::template_sec::extract_spacing_breakpoint_values(
+                    raw,
+                    default_sv,
+                    spec.responsive,
+                );
+                if let Some(var_name) = spec.css_var.as_deref() {
+                    if !valid_css_var_name(var_name) {
+                        continue;
+                    }
+                    if let Some(d_css) = d_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        desktop_props.push_str(&format!("{var_name}:{d_css};"));
+                    }
+                    if let Some(t_css) = t_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        tablet_props.push_str(&format!("{var_name}:{t_css};"));
+                    }
+                    if let Some(m_css) = m_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        mobile_props.push_str(&format!("{var_name}:{m_css};"));
+                    }
+                } else if crate::template_sec::spacing_field_tailwind_classes(
+                    raw,
+                    default_sv,
+                    spec.responsive,
+                    css_unit,
+                    spacing_prop,
+                )
+                .is_none()
+                {
+                    let css_prop = match spacing_prop {
+                        SpacingProperty::Padding => "padding",
+                        SpacingProperty::Margin => "margin",
+                    };
+                    if let Some(d_css) = d_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        desktop_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"][data-od-spacing=\"{field_path}\"],[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{d_css};}}"
+                        ));
+                    }
+                    if let Some(t_css) = t_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        tablet_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"][data-od-spacing=\"{field_path}\"],[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{t_css};}}"
+                        ));
+                    }
+                    if let Some(m_css) = m_sv.and_then(|sv| sv.format_css(css_unit)) {
+                        mobile_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"][data-od-spacing=\"{field_path}\"],[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{field_path}\"]{{{css_prop}:{m_css};}}"
+                        ));
+                    }
+                }
+            }
+            FieldType::Color => {
+                let Some(var_name) = spec.css_var.as_deref() else {
+                    continue;
+                };
+                if !valid_css_var_name(var_name) {
+                    continue;
+                }
+                let default_str = spec.default.as_ref().and_then(serde_json::Value::as_str);
+                if let Some(c) = values
+                    .get(&spec.key)
+                    .and_then(|v| v.as_str())
+                    .or(default_str)
+                    .filter(|s| !s.is_empty() && valid_color_value(s))
+                {
+                    desktop_props.push_str(&format!("{var_name}:{c};"));
+                }
+            }
+            FieldType::Media if spec.effective_media_kind() == MediaFieldKind::Image => {
+                let Some(var_name) = spec.css_var.as_deref() else {
+                    continue;
+                };
+                if !valid_css_var_name(var_name) {
+                    continue;
+                }
+                let default_str = spec.default.as_ref().and_then(serde_json::Value::as_str);
+                if let Some(id) = values
+                    .get(&spec.key)
+                    .and_then(|v| v.as_str())
+                    .or(default_str)
+                    .filter(|s| !s.is_empty() && valid_sha256_media_id(s))
+                {
+                    let url_path = super::media_render::versioned_media_file_url(
+                        id,
+                        hydration_media,
+                        is_preview,
+                    );
+                    desktop_props.push_str(&format!("{var_name}:url(\"{url_path}\");"));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_block_css_rec(
+    nodes: &[BlockNode],
+    state: &BuilderRenderContext,
+    scope: &str,
+    is_preview: bool,
+    desktop_rules: &mut String,
+    tablet_rules: &mut String,
+    mobile_rules: &mut String,
+) {
+    use opendash_core::registry::{DeclarationState, ProviderStatus};
+
+    for node in nodes {
+        let Some(def) = state.declared_blocks.get(&node.block_id) else {
+            continue;
+        };
+        if def.status != ProviderStatus::Active
+            || def.declaration_state != DeclarationState::Declared
+        {
+            continue;
+        }
+        if valid_package_id(&node.id) {
+            let node_scope = format!("{scope}-{}", node.id);
+            let mut desktop_props = String::new();
+            let mut tablet_props = String::new();
+            let mut mobile_props = String::new();
+
+            collect_scoped_css_for_fields(
+                &def.schema.schema.fields,
+                &node.props,
+                None,
+                &node_scope,
+                is_preview,
+                &state.hydration_media,
+                &mut desktop_props,
+                &mut tablet_props,
+                &mut mobile_props,
+                desktop_rules,
+                tablet_rules,
+                mobile_rules,
+            );
+
+            if !desktop_props.is_empty() {
+                desktop_rules.push_str(&format!(
+                    "[data-od-node-scope=\"{node_scope}\"]{{{desktop_props}}}"
+                ));
+            }
+            if !tablet_props.is_empty() {
+                tablet_rules.push_str(&format!(
+                    "[data-od-node-scope=\"{node_scope}\"]{{{tablet_props}}}"
+                ));
+            }
+            if !mobile_props.is_empty() {
+                mobile_rules.push_str(&format!(
+                    "[data-od-node-scope=\"{node_scope}\"]{{{mobile_props}}}"
+                ));
+            }
+        }
+        collect_block_css_rec(
+            &node.children,
+            state,
+            scope,
+            is_preview,
+            desktop_rules,
+            tablet_rules,
+            mobile_rules,
+        );
+    }
+}
+
+/// Emits scoped CSS custom properties (`--od-*`) and `[data-od-spacing]` fallback
+/// rules for all active, declared `BlockNode` subtrees under `[data-od-node-scope="{scope}-{id}"]`.
 pub fn serialize_scoped_block_css(
     state: &BuilderRenderContext,
     document: &BuilderDocument,
     scope: &str,
     is_preview: bool,
 ) -> ApiResult<String> {
-    use opendash_core::registry::{DeclarationState, ProviderStatus};
-
     if scope.is_empty()
         || !scope
             .bytes()
@@ -317,65 +385,15 @@ pub fn serialize_scoped_block_css(
     let mut tablet_rules = String::new();
     let mut mobile_rules = String::new();
 
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if !valid_package_id(&element.id) {
-                        continue;
-                    }
-                    let ElementContent::Known(KnownElement::PluginBlock(props)) = &element.content
-                    else {
-                        continue;
-                    };
-                    let Some(def) = state.declared_blocks.get(&props.block_id) else {
-                        continue;
-                    };
-                    if def.status != ProviderStatus::Active
-                        || def.declaration_state != DeclarationState::Declared
-                    {
-                        continue;
-                    }
-
-                    let node_scope = format!("{scope}-{}", element.id);
-                    let mut desktop_props = String::new();
-                    let mut tablet_props = String::new();
-                    let mut mobile_props = String::new();
-
-                    collect_scoped_css_for_fields(
-                        &def.schema.schema.fields,
-                        &props.values,
-                        None,
-                        &node_scope,
-                        is_preview,
-                        &state.hydration_media,
-                        &mut desktop_props,
-                        &mut tablet_props,
-                        &mut mobile_props,
-                        &mut desktop_rules,
-                        &mut tablet_rules,
-                        &mut mobile_rules,
-                    );
-
-                    if !desktop_props.is_empty() {
-                        desktop_rules.push_str(&format!(
-                            "[data-od-node-scope=\"{node_scope}\"]{{{desktop_props}}}"
-                        ));
-                    }
-                    if !tablet_props.is_empty() {
-                        tablet_rules.push_str(&format!(
-                            "[data-od-node-scope=\"{node_scope}\"]{{{tablet_props}}}"
-                        ));
-                    }
-                    if !mobile_props.is_empty() {
-                        mobile_rules.push_str(&format!(
-                            "[data-od-node-scope=\"{node_scope}\"]{{{mobile_props}}}"
-                        ));
-                    }
-                }
-            }
-        }
-    }
+    collect_block_css_rec(
+        &document.blocks,
+        state,
+        scope,
+        is_preview,
+        &mut desktop_rules,
+        &mut tablet_rules,
+        &mut mobile_rules,
+    );
 
     if desktop_rules.is_empty() && tablet_rules.is_empty() && mobile_rules.is_empty() {
         return Ok(String::new());

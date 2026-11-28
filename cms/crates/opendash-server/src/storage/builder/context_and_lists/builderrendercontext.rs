@@ -29,14 +29,18 @@ impl Default for BuilderRenderContext {
     }
 }
 
-/// Only public-safe display text and a canonical, storage-resolved href leave
-/// the list resolver. IDs remain stable when a slug or permalink changes.
-#[derive(Debug, Clone)]
+/// Only public-safe display text, canonical storage-resolved URLs, and opted-in
+/// hydrated card metadata leave the list resolver. IDs remain stable across slug edits.
+#[derive(Debug, Clone, Default)]
 pub struct ListItem {
     pub entry_id: i64,
     pub title: String,
     pub slug: String,
     pub href: Option<String>,
+    pub cover_url: Option<String>,
+    pub published_at: Option<String>,
+    pub excerpt: Option<String>,
+    pub terms: Vec<super::ListItemTerm>,
 }
 
 #[derive(Debug)]
@@ -52,27 +56,31 @@ pub enum ResolvedList {
 
 pub type ListResults = BTreeMap<String, ResolvedList>;
 
-/// Use the same SQLite snapshot as the saved document/field bindings.
+fn bool_prop(props: &BTreeMap<String, Value>, key: &str, default: bool) -> bool {
+    props.get(key).and_then(Value::as_bool).unwrap_or(default)
+}
+
+/// Use the same SQLite snapshot as the saved document.
 pub async fn resolve_contact_forms_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     document: &BuilderDocument,
 ) -> ApiResult<crate::page::ContactFormResults> {
-    let mut results = crate::page::ContactFormResults::new();
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if let ElementContent::Known(KnownElement::ContactForm(props)) =
-                        &element.content
-                    {
-                        let rec =
-                            crate::storage::contact::get_form_in_conn(&mut *tx, props.form_id)
-                                .await?;
-                        results.insert(element.id.clone(), rec);
-                    }
-                }
-            }
+    let mut nodes: Vec<(String, Option<i64>)> = Vec::new();
+    document.walk_blocks(|node, _| {
+        if node.block_id == "core/contact-form" {
+            nodes.push((
+                node.id.clone(),
+                parse_positive_i64_prop(node.props.get("form_id")),
+            ));
         }
+    });
+    let mut results = crate::page::ContactFormResults::new();
+    for (node_id, fid_opt) in nodes {
+        let rec = match fid_opt {
+            Some(form_id) => crate::storage::contact::get_form_in_conn(&mut *tx, form_id).await?,
+            None => None,
+        };
+        results.insert(node_id, rec);
     }
     Ok(results)
 }
@@ -83,89 +91,156 @@ pub async fn resolve_lists_in_tx_for_locale(
     pages: &BTreeMap<String, i64>,
     render_locale: Option<&str>,
 ) -> ApiResult<ListResults> {
+    resolve_lists_in_tx_for_locale_inner(tx, document, pages, render_locale, None).await
+}
+
+/// Request-scoped variant that charges each list resolution against `RenderBudget`.
+pub async fn resolve_lists_in_tx_for_locale_with_budget(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    pages: &BTreeMap<String, i64>,
+    render_locale: Option<&str>,
+    budget: &mut crate::template_sec::RenderBudget,
+) -> ApiResult<ListResults> {
+    resolve_lists_in_tx_for_locale_inner(tx, document, pages, render_locale, Some(budget)).await
+}
+
+fn collect_list_nodes_rec<'a>(
+    nodes: &'a [opendash_core::builder::BlockNode],
+    out: &mut Vec<&'a opendash_core::builder::BlockNode>,
+) {
+    for node in nodes {
+        if node.block_id == "core/list" {
+            out.push(node);
+        }
+        collect_list_nodes_rec(&node.children, out);
+    }
+}
+
+async fn resolve_lists_in_tx_for_locale_inner(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    pages: &BTreeMap<String, i64>,
+    render_locale: Option<&str>,
+    mut budget: Option<&mut crate::template_sec::RenderBudget>,
+) -> ApiResult<ListResults> {
     let active_locale = match render_locale {
         Some(raw) => {
             crate::storage::settings::resolve_requested_locale_in_conn(&mut **tx, Some(raw)).await?
         }
         None => crate::storage::settings::get_default_locale_code_in_conn(&mut **tx).await?,
     };
+    let mut list_nodes = Vec::new();
+    collect_list_nodes_rec(&document.blocks, &mut list_nodes);
     let mut results = ListResults::new();
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    let ElementContent::Known(KnownElement::List(props)) = &element.content else {
-                        continue;
-                    };
-                    // Defensive cap even for corrupt historical stored data.
-                    if results.len() >= 8 {
-                        return Err(ApiError::bad_request("Builder vượt giới hạn 8 list."));
-                    }
-                    let page = pages
-                        .get(&element.id)
-                        .copied()
-                        .filter(|p| (1..=100).contains(p))
-                        .unwrap_or(1);
-                    let filters = EntryFilters {
-                        category_id: props.category_id,
-                        tag_id: props.tag_id,
-                        taxonomy_key: props.taxonomy_key.clone(),
-                        term_id: props.term_id,
-                        include_descendants: props.include_descendants,
-                        locale: Some(active_locale.clone()),
-                    };
-                    let sort = match props.sort {
-                        opendash_core::builder::ListSort::IdDesc => PublishedListSort::IdDesc,
-                        opendash_core::builder::ListSort::IdAsc => PublishedListSort::IdAsc,
-                    };
-                    let result = entries::list_published_page_in_tx(
-                        tx,
-                        &props.type_key,
+    for node in list_nodes {
+        if let Some(b) = budget.as_deref_mut() {
+            b.charge_builder_list().map_err(ApiError::bad_request)?;
+        }
+        // Defensive cap even for corrupt historical stored data.
+        if results.len() >= 8 {
+            return Err(ApiError::bad_request("Builder vượt giới hạn 8 list."));
+        }
+        let type_key = node
+            .props
+            .get("type_key")
+            .and_then(Value::as_str)
+            .unwrap_or("post");
+        let taxonomy_key = node
+            .props
+            .get("taxonomy_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        let term_id = parse_positive_i64_prop(node.props.get("term_id"));
+        let include_descendants = bool_prop(&node.props, "include_descendants", false);
+        let sort = match node.props.get("sort").and_then(Value::as_str) {
+            Some("id_asc") => PublishedListSort::IdAsc,
+            _ => PublishedListSort::IdDesc,
+        };
+        let page_size = node
+            .props
+            .get("page_size")
+            .and_then(Value::as_i64)
+            .unwrap_or(6)
+            .clamp(1, 24);
+        let extra_offset = node
+            .props
+            .get("offset")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .clamp(0, 200);
+        let hydration_opts = super::ListHydrationOptions {
+            show_image: bool_prop(&node.props, "show_image", true),
+            show_date: bool_prop(&node.props, "show_date", true),
+            show_excerpt: bool_prop(&node.props, "show_excerpt", true),
+            show_taxonomy: bool_prop(&node.props, "show_taxonomy", true),
+        };
+        let page = pages
+            .get(&node.id)
+            .copied()
+            .filter(|p| (1..=100).contains(p))
+            .unwrap_or(1);
+        let raw_filters = EntryFilters {
+            category_id: None,
+            tag_id: None,
+            taxonomy_key,
+            term_id,
+            include_descendants,
+            locale: Some(active_locale.clone()),
+        };
+        let filters = match super::resolve_list_filters_for_locale_in_tx(
+            tx,
+            type_key,
+            raw_filters,
+            &active_locale,
+        )
+        .await?
+        {
+            super::LocalizedListFilterOutcome::Ready(resolved) => resolved,
+            super::LocalizedListFilterOutcome::MissingConfig => {
+                results.insert(node.id.clone(), ResolvedList::MissingConfig);
+                continue;
+            }
+            super::LocalizedListFilterOutcome::EmptyDueToMissingTranslation => {
+                results.insert(
+                    node.id.clone(),
+                    ResolvedList::Page {
                         page,
-                        i64::from(props.page_size),
-                        sort,
-                        filters,
-                    )
-                    .await?;
-                    let rendered = match result {
-                        PublishedListResult::Page(result) => {
-                            // Keep every URL lookup in the very same read
-                            // snapshot as the list page and published guards.
-                            let mut items = Vec::with_capacity(result.entries.len());
-                            for entry in result.entries {
-                                let href = if crate::storage::seo::resolve_public_entry_path_in_tx(
-                                    &mut **tx, entry.id,
-                                )
-                                .await?
-                                .is_some()
-                                {
-                                    crate::storage::permalinks::canonical_entry_path_in_tx(
-                                        &mut **tx, entry.id,
-                                    )
-                                    .await?
-                                } else {
-                                    None
-                                };
-                                items.push(ListItem {
-                                    entry_id: entry.id,
-                                    title: entry.title,
-                                    slug: entry.slug,
-                                    href,
-                                });
-                            }
-                            ResolvedList::Page {
-                                page,
-                                out_of_range: page > 1 && items.is_empty(),
-                                items,
-                                has_next: result.has_next,
-                            }
-                        }
-                        PublishedListResult::MissingConfig(_) => ResolvedList::MissingConfig,
-                    };
-                    results.insert(element.id.clone(), rendered);
+                        out_of_range: page > 1,
+                        items: Vec::new(),
+                        has_next: false,
+                    },
+                );
+                continue;
+            }
+        };
+        let result = entries::list_published_page_with_offset_in_tx(
+            tx,
+            type_key,
+            page,
+            page_size,
+            extra_offset,
+            sort,
+            filters,
+        )
+        .await?;
+        let rendered = match result {
+            PublishedListResult::Page(result) => {
+                let items =
+                    super::hydrate_list_items_in_tx(tx, type_key, &result.entries, hydration_opts)
+                        .await?;
+                ResolvedList::Page {
+                    page,
+                    out_of_range: page > 1 && items.is_empty(),
+                    items,
+                    has_next: result.has_next,
                 }
             }
-        }
+            PublishedListResult::MissingConfig(_) => ResolvedList::MissingConfig,
+        };
+        results.insert(node.id.clone(), rendered);
     }
     Ok(results)
 }
@@ -292,11 +367,17 @@ pub async fn resolve_patterns_in_tx_with_budget(
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<page::PatternResults> {
     let schemas = state.unified_block_schemas()?;
-    let ids = pattern_ids_with_schemas(document, &schemas);
+    let instances = pattern_ref_instances_with_schemas(document, &schemas);
+    if instances.len() > opendash_core::builder::MAX_BUILDER_PATTERN_INSTANCES {
+        return Err(ApiError::bad_request(
+            "Builder exceeds 16 Pattern references.",
+        ));
+    }
+    let ids: BTreeSet<i64> = instances.iter().map(|(_, pid)| *pid).collect();
     let rows = load_pattern_rows_in_tx(tx, &ids).await?;
     let mut results = page::PatternResults::new();
     let mut parsed = BTreeMap::new();
-    for (id, slug, raw) in rows {
+    for (id, _slug, raw) in rows {
         let Some(raw) = raw else { continue };
         let Ok(doc) = BuilderDocument::from_json(raw.as_bytes()) else {
             continue;
@@ -304,29 +385,20 @@ pub async fn resolve_patterns_in_tx_with_budget(
         if has_nested_pattern_or_list_with_schemas(&doc, &schemas) {
             continue;
         }
-        parsed.insert(id, (slug, doc));
+        parsed.insert(id, doc);
     }
     let mut expanded_count = node_count(document);
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if let ElementContent::Known(KnownElement::PatternRef(props)) = &element.content
-                    {
-                        if let Some((_, doc)) = parsed.get(&props.pattern_id) {
-                            expanded_count = expanded_count.saturating_add(node_count(doc));
-                        }
-                    }
-                }
-            }
+    for (_, pid) in &instances {
+        if let Some(doc) = parsed.get(pid) {
+            expanded_count = expanded_count.saturating_add(node_count(doc));
         }
     }
-    if expanded_count > 1024 {
+    if expanded_count > opendash_core::builder::MAX_EXPANDED_BUILDER_NODES {
         return Err(ApiError::bad_request(
             "Expanded Pattern exceeds 1024 Builder nodes.",
         ));
     }
-    let pattern_doc_refs: Vec<&BuilderDocument> = parsed.values().map(|(_, doc)| doc).collect();
+    let pattern_doc_refs: Vec<&BuilderDocument> = parsed.values().collect();
     if !pattern_doc_refs.is_empty() {
         hydrate_render_context_for_documents_in_conn(
             &mut **tx,
@@ -336,22 +408,16 @@ pub async fn resolve_patterns_in_tx_with_budget(
         )
         .await?;
     }
-    for (id, (slug, doc)) in parsed {
-        let bindings = builder_binding::resolve_in_tx_with_route(
-            tx,
-            &doc,
-            is_preview,
-            Some(("pattern", &slug)),
-        )
-        .await?;
-        hydrate_binding_media_in_conn(&mut **tx, state, &doc, &bindings).await?;
-        let forms = resolve_contact_forms_in_tx(tx, &doc).await?;
-        let scope = format!("pat_{id}");
+    for (node_id, pid) in instances {
+        let Some(doc) = parsed.get(&pid) else {
+            continue;
+        };
+        let forms = resolve_contact_forms_in_tx(tx, doc).await?;
+        let scope = format!("pat-{pid}-{node_id}");
         let rendered = page::render_builder_with_budget(
             state,
-            &doc,
+            doc,
             is_preview,
-            &bindings,
             &ListResults::new(),
             &forms,
             None,
@@ -362,7 +428,7 @@ pub async fn resolve_patterns_in_tx_with_budget(
             budget,
             cache,
         )?;
-        results.insert(id, rendered);
+        results.insert(node_id, rendered);
     }
     Ok(results)
 }
@@ -379,11 +445,17 @@ pub(in crate::storage) async fn validate_entry_builder_document(
     let state =
         read_render_context_for_locale_tx(tx, Some(current.locale.as_str()), false, None).await?;
     let schemas = state.unified_block_schemas()?;
+    let ctx = if current.opened.type_key == "pattern" {
+        BuilderContextTarget::Pattern
+    } else {
+        BuilderContextTarget::EntryBody {
+            content_type: current.opened.type_key.clone(),
+        }
+    };
     document
-        .validate_for_save_with_schemas(&schemas, current.opened.document.as_ref())
+        .validate_for_save(&schemas, &ctx, current.opened.document.as_ref())
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
-    // Validate this entry's field keys using its effective field ACL.
     let allowed: Vec<String> = current
         .schema
         .effective_fields
@@ -391,16 +463,6 @@ pub(in crate::storage) async fn validate_entry_builder_document(
         .filter(|key| visible_builder_field(&current.schema, key, role))
         .cloned()
         .collect();
-    // Content Builder is always a singular route; only the Page CPT uses
-    // the Page role. Other CPTs bind to their own singular route context.
-    let route_role = if current.opened.type_key == "page" {
-        "page"
-    } else {
-        "single"
-    };
-    document
-        .validate_route_context_for_role(Some(route_role), Some(&allowed))
-        .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
     if current.opened.type_key == "pattern"
         && has_nested_pattern_or_list_with_schemas(document, &schemas)
@@ -434,73 +496,6 @@ pub(in crate::storage) async fn validate_entry_builder_document(
     )
     .await?;
 
-    let mut exact_schemas = BTreeMap::new();
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    let ElementContent::Known(known) = &element.content else {
-                        continue;
-                    };
-                    if matches!(
-                        known,
-                        KnownElement::ContentSlot(_) | KnownElement::TemplatePart(_)
-                    ) {
-                        return Err(ApiError::bad_request(
-                            "Template-only element in Content Builder.",
-                        ));
-                    }
-                    let Some(binding) = known.binding() else {
-                        continue;
-                    };
-                    match &binding.source {
-                        BindingSource::RouteContext { field_key } if field_key == "cover_url" => {
-                            // The existing resolver picks the first public base image.
-                            if let Some(entry) =
-                                current.schema.effective_fields.values().find(|e| {
-                                    e.definition.field_type
-                                        == opendash_core::field_schema::FieldType::Media
-                                        && e.definition.effective_acl().2 == PublicExposure::Public
-                                })
-                                && !visible_builder_field(
-                                    &current.schema,
-                                    &entry.definition.key,
-                                    role,
-                                )
-                            {
-                                return Err(ApiError::forbidden(
-                                    "Builder cover field is not accessible.",
-                                ));
-                            }
-                        }
-                        BindingSource::Field { key } => {
-                            // Exact-entry bindings may reference other content types.
-                            // Missing/inactive sources keep normal unavailable fallback;
-                            // private or actor-inaccessible fields must not be rendered.
-                            if !exact_schemas.contains_key(&binding.type_key) {
-                                let schema =
-                                    crate::storage::content::load_effective_content_schema_in_tx(
-                                        &mut **tx,
-                                        &binding.type_key,
-                                    )
-                                    .await?;
-                                exact_schemas.insert(binding.type_key.clone(), schema);
-                            }
-                            if let Some(Some(schema)) = exact_schemas.get(&binding.type_key)
-                                && schema.effective_fields.contains_key(key)
-                                && !visible_builder_field(schema, key, role)
-                            {
-                                return Err(ApiError::forbidden(
-                                    "Builder binding field is not accessible.",
-                                ));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
     validate_media_refs_in_tx(&mut **tx, document).await?;
     Ok(state)
 }

@@ -1,4 +1,5 @@
-use opendash_core::block_schema::BlockSchemaV1;
+use opendash_core::block_schema::BlockSchema;
+use opendash_core::registry::ResourceOwner;
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -153,7 +154,7 @@ pub struct PluginPackage {
     pub manifest: PluginManifest,
     pub admin_extensions: Option<opendash_core::admin_extensions::AdminExtensions>,
     pub wasm_bytes: Vec<u8>,
-    pub blocks: Vec<(BlockSchemaV1, String)>,
+    pub blocks: Vec<(BlockSchema, String)>,
 }
 
 impl PluginPackage {
@@ -355,6 +356,10 @@ impl PluginPackage {
             return Err("Gói plugin không được chứa đồng thời cả plugin.wasm và plugin.js.");
         }
         let blocks = crate::theme::collect_package_blocks(&block_files, &manifest.id)?;
+        crate::storage::page::validate_package_blocks_against_core_catalog(
+            ResourceOwner::Plugin(manifest.id.clone()),
+            &blocks,
+        )?;
         let raw: serde_json::Value = serde_json::from_str(&manifest_text)
             .map_err(|_| "admin_extensions không đúng JSON.")?;
         let admin_extensions = match raw.get("admin_extensions") {

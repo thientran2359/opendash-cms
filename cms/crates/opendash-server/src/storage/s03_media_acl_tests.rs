@@ -58,13 +58,12 @@ async fn fixture() -> (SqlitePool, BuilderDocument, String, String) {
     .unwrap();
     let doc = serde_json::from_value(json!({
         "schema_version": 1,
-        "sections": [{
-            "id": "sec-1", "children": [{
-                "id": "row-1", "children": [{
-                    "id": "col-1", "children": [{
-                        "id": "gallery-1", "type": "plugin/block",
-                        "props": {"block_id": "reef/gallery",
-                                  "values": {"hero": video, "slides": [{"thumb": img}]}}
+        "blocks": [{
+            "id": "sec-1", "block_id": "core/section", "children": [{
+                "id": "row-1", "block_id": "core/row", "children": [{
+                    "id": "col-1", "block_id": "core/column", "children": [{
+                        "id": "gallery-1", "block_id": "reef/gallery",
+                        "props": {"hero": video, "slides": [{"thumb": img}]}
                     }]
                 }]
             }]
@@ -95,12 +94,8 @@ async fn plugin_media_respects_catalog_kind_repeater_and_provider_state() {
 
     let mut any_image = document.clone();
     {
-        let ElementContent::Known(KnownElement::PluginBlock(props)) =
-            &mut any_image.sections[0].children[0].children[0].children[0].content
-        else {
-            panic!("expected plugin block");
-        };
-        props.values.insert("hero".into(), json!(image_id));
+        let props = &mut any_image.blocks[0].children[0].children[0].children[0].props;
+        props.insert("hero".into(), json!(image_id));
     }
     let image_resolved = resolve_document_media_refs_in_conn(&mut conn, &any_image)
         .await
@@ -109,14 +104,8 @@ async fn plugin_media_respects_catalog_kind_repeater_and_provider_state() {
     assert!(image_resolved.video_ids.is_empty());
 
     {
-        let ElementContent::Known(KnownElement::PluginBlock(props)) =
-            &mut any_image.sections[0].children[0].children[0].children[0].content
-        else {
-            panic!("expected plugin block");
-        };
-        props
-            .values
-            .insert("slides".into(), json!([{"thumb": video_id}]));
+        let props = &mut any_image.blocks[0].children[0].children[0].children[0].props;
+        props.insert("slides".into(), json!([{"thumb": video_id}]));
     }
     let wrong_kind = resolve_document_media_refs_in_conn(&mut conn, &any_image)
         .await

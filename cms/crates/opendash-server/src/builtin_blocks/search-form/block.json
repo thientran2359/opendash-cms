@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "core/search-form",
+  "title": "Khung tìm kiếm (Search Form)",
+  "category": "interactive",
+  "icon": "search",
+  "render": "native",
+  "fields": [
+    {
+      "type": "text",
+      "key": "placeholder",
+      "label": "Chữ gợi ý (Placeholder)",
+      "max_chars": 120,
+      "default": ""
+    },
+    {
+      "type": "text",
+      "key": "submit_label",
+      "label": "Nhãn nút tìm kiếm",
+      "required": true,
+      "max_chars": 64,
+      "default": "Tìm kiếm"
+    },
+    {
+      "type": "boolean",
+      "key": "show_type_filter",
+      "label": "Hiện bộ lọc loại nội dung",
+      "default": false
+    },
+    {
+      "type": "boolean",
+      "key": "preserve_type_filter",
+      "label": "Giữ bộ lọc loại đang chọn",
+      "default": false
+    }
+  ]
+}

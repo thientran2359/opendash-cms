@@ -205,7 +205,7 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
     // Builder blocks in body extract plain text without registering a richtext nonce.
     record.values.insert(
         "body".into(),
-        json!("<!-- od:text {\"id\":\"b1\"} -->\n<p>Builder Copy</p>\n<!-- /od:text -->"),
+        json!("<!-- od:core/text {\"id\":\"b1\"} -->\n<p>Builder Copy</p>\n<!-- /od:core/text -->"),
     );
     let mut builder_nonces = RichTextNonceTable::default();
     let builder_view = build_hydrated_entry_view_with_context(
@@ -223,7 +223,7 @@ fn f03_hydrated_entry_view_renders_v1_shapes_cover_preference_and_richtext_nonce
         .iter()
         .find(|f| f.key == "body")
         .unwrap();
-    assert_eq!(body_field.text, "<p>Builder Copy</p>");
+    assert_eq!(body_field.text, "Builder Copy");
     assert!(builder_nonces.is_empty());
 }
 

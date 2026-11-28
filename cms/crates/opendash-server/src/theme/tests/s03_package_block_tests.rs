@@ -28,10 +28,10 @@ fn v3_pattern_can_reference_a_block_from_same_theme() {
     files.insert("theme.json".into(), br#"{"manifest_version":3,"theme_id":"sample-theme","name":"Sample","version":"1.0.0","patterns":[{"key":"notice","title":"Notice","category":"banner","file":"patterns/notice.json"}]}"#.to_vec());
     let pattern = serde_json::json!({
         "schema_version":1,
-        "sections":[{"id":"section-one","children":[{"id":"row-one","children":[{
-            "id":"column-one","children":[{
-                "id":"element-one","type":"plugin/block",
-                "props":{"block_id":"sample-theme/banner","values":{}}
+        "blocks":[{"id":"section-one","block_id":"core/section","children":[{"id":"row-one","block_id":"core/row","children":[{
+            "id":"column-one","block_id":"core/column","children":[{
+                "id":"element-one","block_id":"sample-theme/banner",
+                "props":{}
             }]
         }]}]}]
     });
@@ -42,7 +42,7 @@ fn v3_pattern_can_reference_a_block_from_same_theme() {
     assert!(validate_theme_v3_files(files.clone()).is_ok());
 
     let mut unknown = pattern;
-    unknown["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["block_id"] =
+    unknown["blocks"][0]["children"][0]["children"][0]["children"][0]["type"] =
         "other-theme/banner".into();
     files.insert(
         "patterns/notice.json".into(),

@@ -14,7 +14,11 @@ mod public_site_search_studio;
 mod revisions_builder;
 #[path = "builder/studio_builder.rs"]
 mod studio_builder;
+#[path = "builder/studio_container_acl.rs"]
+mod studio_container_acl;
 #[path = "builder/studio_preview_api.rs"]
 mod studio_preview_api;
+#[path = "builder/studio_unified_ast.rs"]
+mod studio_unified_ast;
 #[path = "builder/unified_field_engine.rs"]
 mod unified_field_engine;

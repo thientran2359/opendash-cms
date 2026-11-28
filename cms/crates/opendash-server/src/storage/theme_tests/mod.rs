@@ -71,15 +71,18 @@ fn target(kind: Kind) -> TemplateCandidate {
 fn one_part(part_key: &str) -> BuilderDocument {
     serde_json::from_value(json!({
         "schema_version":1,
-        "sections":[{
+        "blocks":[{
             "id":"section-main",
+            "block_id":"core/section",
             "children":[{
                 "id":"row-main",
+                "block_id":"core/row",
                 "children":[{
                     "id":"column-main",
+                    "block_id":"core/column",
                     "children":[{
                         "id":"part-node",
-                        "type":"core/template_part",
+                        "block_id":"core/template-part",
                         "props":{"part_key":part_key}
                     }]
                 }]

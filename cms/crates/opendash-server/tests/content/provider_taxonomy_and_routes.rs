@@ -1963,9 +1963,10 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     // Responsive Media & Replace S01 adds 0058 (`media_variants` + `media_replace_jobs` + `'media_regenerate'`),
     // Revisions & Autosave adds 0059 (`entry_revisions` + `entry_autosaves`),
     // Public Site Search S01 adds 0060 (`entry_search_fts` + `'search'`/`'search_reindex'`),
+    // and Studio Unified Recursive AST adds 0062 (`template_override_media_ref_roles`);
     // and ACF Content Structure adds 0061 (`content_field_groups.domain/location_rules_json`, `custom_options_pages`, term meta);
     // the 0040→0041 permalink preservation assertions above must still hold.
-    assert_eq!(migration_version, 61);
+    assert_eq!(migration_version, 62);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

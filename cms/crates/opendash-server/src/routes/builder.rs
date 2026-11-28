@@ -8,7 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use opendash_core::{
-    block_schema::BlockSchemaV1,
+    block_schema::BlockSchema,
     builder::{BuilderDocument, MAX_BUILDER_JSON_BYTES},
     content::valid_content_type_key,
     registry::{DeclarationState, ProviderStatus, ResourceOwner},
@@ -120,7 +120,7 @@ pub struct BlockCatalogItemDto {
     pub owner_id: String,
     pub status: &'static str,
     pub declaration_state: &'static str,
-    pub schema: BlockSchemaV1,
+    pub schema: BlockSchema,
 }
 
 #[derive(Debug, Serialize)]
@@ -177,7 +177,7 @@ mod block_schema_api_tests {
 
     #[test]
     fn schema_catalog_dto_never_serializes_render_template_source() {
-        let schema: BlockSchemaV1 =
+        let schema: BlockSchema =
             serde_json::from_str(include_str!("../builtin_blocks/spacer/block.json")).unwrap();
         let response = BlockCatalogDto {
             items: vec![BlockCatalogItemDto {

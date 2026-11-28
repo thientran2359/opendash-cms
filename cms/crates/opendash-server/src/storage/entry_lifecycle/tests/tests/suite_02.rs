@@ -237,17 +237,22 @@ async fn startup_builder_migration_preserves_trashed_row_lifecycle_and_pins() {
     let page_id = seed_entry(&pool, "page", "vi", "legacy-demo-page", "published", "{}").await;
     let doc_json = serde_json::json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec-1",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "el-1",
-                        "type": "media",
-                        "media_id": pic_id,
-                        "alt": "Pic"
+                        "block_id": "core/image",
+                        "props": {
+                            "image": pic_id,
+                            "alt": "Pic"
+                        }
                     }]
                 }]
             }]

@@ -9,7 +9,7 @@ fn theme(source: &str) -> Result<CompiledCsecComposition, &'static str> {
     )
 }
 
-fn block_schema() -> opendash_core::block_schema::BlockSchemaV1 {
+fn block_schema() -> opendash_core::block_schema::BlockSchema {
     serde_json::from_value(serde_json::json!({
         "schema_version": 1,
         "id": "trusted/markup",
@@ -102,6 +102,9 @@ fn block_template_allows_static_js_svg_but_rejects_dynamic_handlers_and_scripts(
             merged_options: None,
             site_options: None,
             menus: None,
+            children_html: None,
+            children_meta: None,
+            parent_ctx: None,
             is_preview: false,
             fmt_cfg: &fmt_cfg,
         },

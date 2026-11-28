@@ -1,353 +1,319 @@
-import { __ } from '../../i18n/index.tsx';
 import { isUiOnlyFieldType } from '../../fields/helpers.ts';
 import type { FieldSpec } from '../../fields/types.ts';
-import type { BlockCatalogItemDto } from '../../types.ts';
-import type { BlockSchemaV1 } from '../../types.ts';
-import { type NodeMeta, type BuilderElement, type BuilderSection, type BuilderDocument, type BuilderNode, type NodeKind, type InsertableElementType, type NodeLocation, type StudioBuilderClipboard, allNodes, locate, isElement, newNodeId, carrierLocation, clone } from './types_and_tree.ts';
-import { hasUnexpectedElementFields, hasInvalidCoreBinding, isLockedElement, isProtectedNode, preservesAnchors, withinBuilderLimits, declaredBlockKeys, pluginValuesReadyForFreshNode, distinctPatternIdCount } from './validation.ts';
-import { object, countElementsByType, countDescendantElementsByType } from './mutations.ts';
+import type { BlockCatalogItemDto, BlockSchema, DefaultChildSpec } from '../../types.ts';
+import {
+  type BlockNode,
+  type BuilderContextTarget,
+  type BuilderDocument,
+  type StudioBuilderClipboard,
+  allNodes,
+  assignFreshSubtreeIds,
+  clone,
+  findActiveCatalogItem,
+  locate,
+  maxSubtreeDepth,
+  newNodeId,
+  object,
+} from './types_and_tree.ts';
+import {
+  MAX_BUILDER_CONTENT_SLOTS,
+  MAX_BUILDER_DEPTH,
+  MAX_BUILDER_LISTS,
+  MAX_BUILDER_PATTERN_INSTANCES,
+  canInsertBlockAt,
+  countBlocksByType,
+  countDescendantBlocksByType,
+  declaredBlockKeys,
+  distinctPatternIdCount,
+  hasLockedAncestor,
+  isLockedNode,
+  isProtectedNode,
+  pluginValuesReadyForFreshNode,
+  preservesAnchors,
+  withinBuilderLimits,
+} from './validation.ts';
 
-export function childrenAt(document: BuilderDocument, location: NodeLocation | undefined): BuilderNode[] | undefined {
-  if (!location) return document.sections;
-  if (location.kind === 'element') return undefined;
-  const current = locate(document, location.node.id);
-  return current && !isElement(current.node) ? current.node.children : undefined;
-}
-
-/** Group fields hold nested objects `{ ... }`; UI-only fields (`tab`, `accordion`, `message`)
- * emit no keys; repeater items hold their own object values; responsive defaults start at desktop. */
-
-export function initialBlockValues(fields: readonly FieldSpec[]): Record<string, unknown> {
-  const values: Record<string, unknown> = {};
+/** Build initial props from FieldSpec defaults, skipping UI-only layout fields. */
+export function initialBlockProps(fields: readonly FieldSpec[]): Record<string, unknown> {
+  const props: Record<string, unknown> = {};
   for (const field of fields) {
     if (isUiOnlyFieldType(field.type)) continue;
     if (field.type === 'group') {
-      values[field.key] = initialBlockValues(field.fields ?? []);
+      props[field.key] = initialBlockProps(field.fields ?? []);
     } else if (field.type === 'repeater') {
-      values[field.key] = Array.from({ length: field.min_items ?? 0 },
-        () => initialBlockValues(field.fields ?? []));
+      props[field.key] = Array.from(
+        { length: field.min_items ?? 0 },
+        () => initialBlockProps(field.fields ?? []),
+      );
     } else if (field.default !== undefined && field.default !== null) {
       const defCopy = typeof field.default === 'object' ? clone(field.default) : field.default;
-      values[field.key] = field.responsive ? { desktop: defCopy } : defCopy;
+      props[field.key] = field.responsive ? { desktop: defCopy } : defCopy;
     }
   }
-  return values;
+  return props;
 }
 
+function buildDefaultChildNode(
+  spec: DefaultChildSpec,
+  blockCatalog: readonly BlockCatalogItemDto[],
+  usedIds: Set<string>,
+): BlockNode {
+  const childSchema = findActiveCatalogItem(blockCatalog, spec.block_id)?.schema;
+  const baseProps = childSchema ? initialBlockProps(childSchema.fields) : {};
+  const mergedProps = { ...baseProps, ...(spec.props ? clone(spec.props) : {}) };
+  const id = newNodeId(spec.block_id, usedIds);
+  usedIds.add(id);
 
-export function appendNode(
-  document: BuilderDocument, parentId: string | null, kind: NodeKind, elementType: InsertableElementType,
-  options?: { blockSchema?: BlockSchemaV1 },
-): { document: BuilderDocument; id: string } | null {
-  const parent = locate(document, parentId);
-  if ((kind === 'section' && parentId !== null)
-      || (kind === 'row' && parent?.kind !== 'section')
-      || (kind === 'column' && parent?.kind !== 'row')
-      || (kind === 'element' && parent?.kind !== 'column')) return null;
-  const next = clone(document);
-  const children = childrenAt(next, parent);
-  if (!children) return null;
-  if (kind === 'element' && elementType === 'core/list'
-      && allNodes(document).filter(item => item.kind === 'element'
-        && (item.node as BuilderElement).type === 'core/list').length >= 8) return null;
-  const blockSchema = options?.blockSchema;
-  const declarative = kind === 'element'
-    && (elementType === 'plugin/block' || blockSchema?.id === elementType);
-  if (declarative && (!blockSchema || blockSchema.schema_version !== 1)) return null;
-  const id = newNodeId(kind, next);
-  const defaults: Record<string, Record<string, unknown>> = {
-    'core/heading': { level: 2, text: __("New heading") },
-    'core/text': { text: __("New content") },
-    'core/image': { media_id: '', alt: '' },
-    'core/video': { media_id: '', controls: true, muted: false },
-    'core/button': { label: __("New button"), url: '/' },
-    'core/list': { type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6 },
-    'core/contact_form': { form_id: 1, submit_label: __("Send message") },
-    'core/search_form': { placeholder: __("Search the site..."), submit_label: __("Search"), show_type_filter: false, preserve_type_filter: false },
-    'core/search_results': { show_facets: true, show_excerpt: true, empty_message: '' },
-    'core/pattern_ref': { pattern_id: 0 },
-    'core/content_slot': {},
-    'core/template_part': { part_key: 'header' },
-  };
-  if (kind === 'element' && !declarative && !Object.hasOwn(defaults, elementType)) return null;
-  const node: BuilderNode = kind === 'element'
-    ? declarative && blockSchema
-      ? { id, type: 'plugin/block', props: { block_id: blockSchema.id, values: initialBlockValues(blockSchema.fields) } }
-      : { id, type: elementType, props: { ...defaults[elementType] } }
-    : { id, children: [] };
-  children.push(node);
-  return { document: next, id };
+  const nestedSpecs = spec.children?.length ? spec.children : childSchema?.default_children;
+  const children = nestedSpecs?.length
+    ? nestedSpecs.map(childSpec => buildDefaultChildNode(childSpec, blockCatalog, usedIds))
+    : undefined;
+
+  const node: BlockNode = { id, block_id: spec.block_id };
+  if (Object.keys(mergedProps).length > 0) node.props = mergedProps;
+  if (children && children.length > 0) node.children = children;
+  else if (childSchema?.supports_children) node.children = [];
+  return node;
 }
 
-/** The server rejects documents beyond either bound. Count UTF-8 bytes, not
- * JavaScript string units, because Builder content can contain Unicode. */
+export function instantiateBlockNode(
+  schema: BlockSchema,
+  document: BuilderDocument,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
+  options?: {
+    presetKey?: string;
+    propsOverride?: Record<string, unknown>;
+    childrenSpecs?: readonly DefaultChildSpec[];
+  },
+): BlockNode {
+  const usedIds = new Set(allNodes(document).map(entry => entry.node.id));
+  const preset = options?.presetKey
+    ? schema.presets?.find(entry => entry.key === options.presetKey)
+    : undefined;
 
-export function duplicateNode(
-  document: BuilderDocument, id: string,
-  blockCatalog: BlockCatalogItemDto[] = [],
-): { document: BuilderDocument; id: string } | null {
-  const leafLoc = locate(document, id);
-  const source = carrierLocation(document, id);
-  if (!leafLoc || !source || isProtectedNode(document, source.node.id, blockCatalog)
-      || countDescendantElementsByType(document, source.node.id, 'core/content_slot') > 0
-      || countElementsByType(document, 'core/list')
-        + countDescendantElementsByType(document, source.node.id, 'core/list') > 8) return null;
+  const baseProps = initialBlockProps(schema.fields);
+  const presetProps = preset?.props ? clone(preset.props) : {};
+  const overrideProps = options?.propsOverride ? clone(options.propsOverride) : {};
+  const mergedProps = { ...baseProps, ...presetProps, ...overrideProps };
 
-  const sourcePath = source.path;
-  for (const entry of allNodes(document)) {
-    if (entry.kind !== 'element'
-        || !sourcePath.every((step, depth) => entry.path[depth] === step)) continue;
-    const element = entry.node as BuilderElement;
-    if (element.type !== 'plugin/block') continue;
-    const descriptor = blockCatalog.find(item => item.block_id === element.props.block_id
-      && item.status === 'active' && item.declaration_state === 'declared');
-    if (!descriptor || !object(element.props.values)
-        || !pluginValuesReadyForFreshNode(element.props.values, descriptor.schema)) return null;
-  }
+  const id = newNodeId(schema.id, usedIds);
+  usedIds.add(id);
 
-  const next = clone(document);
-  const siblings = childrenAt(next, source.parentId ? locate(next, source.parentId) : undefined);
-  if (!siblings) return null;
-  const index = source.path[source.path.length - 1];
-  siblings.splice(index + 1, 0, clone(siblings[index]));
-  const duplicatePath = [...source.path.slice(0, -1), index + 1];
-  const inserted = allNodes(next).filter(entry =>
-    duplicatePath.every((step, depth) => entry.path[depth] === step));
-  for (const entry of inserted) entry.node.id = newNodeId(entry.kind, next);
+  const childSpecs = options?.childrenSpecs?.length
+    ? options.childrenSpecs
+    : preset?.children?.length
+      ? preset.children
+      : schema.default_children;
+  const children = childSpecs?.length
+    ? childSpecs.map(spec => buildDefaultChildNode(spec, blockCatalog, usedIds))
+    : undefined;
 
-  if (distinctPatternIdCount(next, blockCatalog) > 16 || !withinBuilderLimits(next)
-      || !preservesAnchors(document, next, undefined, blockCatalog)) return null;
-  const targetRelPath = [...duplicatePath, ...leafLoc.path.slice(source.path.length)];
-  const returnEntry = inserted.find(entry =>
-    entry.path.length === targetRelPath.length
-    && targetRelPath.every((step, idx) => entry.path[idx] === step)) ?? inserted[0];
-  return { document: next, id: returnEntry.node.id };
+  const node: BlockNode = { id, block_id: schema.id };
+  if (Object.keys(mergedProps).length > 0) node.props = mergedProps;
+  if (children && children.length > 0) node.children = children;
+  else if (schema.supports_children) node.children = [];
+  return node;
 }
 
-/** Creates one row with its columns as a single undoable document mutation; when parentId is null, wraps in a transparent synthetic Section. */
-
-export function appendRowWithColumns(
-  document: BuilderDocument, parentId: string | null, columnCount: 1 | 2 | 3,
+export function insertBlock(
+  document: BuilderDocument,
+  blockId: string,
+  parentId: string | null,
+  index: number | undefined,
+  blockCatalog: readonly BlockCatalogItemDto[],
+  options?: {
+    contextTarget?: BuilderContextTarget | null;
+    presetKey?: string;
+    propsOverride?: Record<string, unknown>;
+  },
 ): { document: BuilderDocument; id: string } | null {
-  if (![1, 2, 3].includes(columnCount)) return null;
-  let working = document;
-  let sectionId = parentId;
-  if (parentId === null) {
-    const sec = appendNode(working, null, 'section', 'core/heading');
-    if (!sec) return null;
-    working = sec.document;
-    const secLoc = locate(working, sec.id);
-    if (secLoc) secLoc.node.meta = { synthetic: true };
-    sectionId = sec.id;
-  } else if (locate(working, parentId)?.kind !== 'section') {
+  const item = findActiveCatalogItem(blockCatalog, blockId);
+  if (!item) return null;
+  if (
+    !canInsertBlockAt(
+      document,
+      item.schema,
+      parentId,
+      blockCatalog,
+      options?.contextTarget,
+      options?.presetKey,
+    )
+  ) {
     return null;
   }
-  const row = appendNode(working, sectionId, 'row', 'core/heading');
-  if (!row) return null;
-  let next = row.document;
-  for (let index = 0; index < columnCount; index += 1) {
-    const column = appendNode(next, row.id, 'column', 'core/heading');
-    if (!column) return null;
-    next = column.document;
+
+  const next = clone(document);
+  const parentLoc = parentId !== null ? locate(next, parentId) : undefined;
+  const parentDepth = parentLoc ? parentLoc.depth : 0;
+  const node = instantiateBlockNode(item.schema, next, blockCatalog, options);
+  if (parentDepth + maxSubtreeDepth(node) > MAX_BUILDER_DEPTH) return null;
+
+  if (parentLoc) {
+    if (!Array.isArray(parentLoc.node.children)) parentLoc.node.children = [];
+    const targetList = parentLoc.node.children;
+    const insertAt = index === undefined
+      ? targetList.length
+      : Math.max(0, Math.min(index, targetList.length));
+    targetList.splice(insertAt, 0, node);
+  } else {
+    const insertAt = index === undefined
+      ? next.blocks.length
+      : Math.max(0, Math.min(index, next.blocks.length));
+    next.blocks.splice(insertAt, 0, node);
   }
-  const addedRow = locate(next, row.id)?.node;
-  if (!addedRow || isElement(addedRow)) return null;
-  if (columnCount > 1) addedRow.responsive = { desktop: { columns_per_row: columnCount } };
-  return withinBuilderLimits(next) ? { document: next, id: row.id } : null;
+
+  const ok = withinBuilderLimits(next)
+    && countBlocksByType(next, 'core/list') <= MAX_BUILDER_LISTS
+    && countBlocksByType(next, 'core/content-slot') <= MAX_BUILDER_CONTENT_SLOTS
+    && countBlocksByType(next, 'core/pattern-ref') <= MAX_BUILDER_PATTERN_INSTANCES
+    && distinctPatternIdCount(next, blockCatalog) <= MAX_BUILDER_PATTERN_INSTANCES
+    && preservesAnchors(document, next, undefined, blockCatalog);
+  return ok ? { document: next, id: node.id } : null;
 }
 
-/** Inserts an element at root (null), directly inside a Section, or inside a Column, creating transparent synthetic wrappers where needed. */
-
-export function appendFreeformElement(
+export function duplicateNode(
   document: BuilderDocument,
-  parentId: string | null,
-  elementType: InsertableElementType,
-  options?: { blockSchema?: BlockSchemaV1 },
+  id: string,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
 ): { document: BuilderDocument; id: string } | null {
-  const parentLoc = locate(document, parentId);
-  if (parentId === null) {
-    const sec = appendNode(document, null, 'section', 'core/heading');
-    if (!sec) return null;
-    const secLoc = locate(sec.document, sec.id);
-    if (secLoc) secLoc.node.meta = { synthetic: true };
-    const row = appendNode(sec.document, sec.id, 'row', 'core/heading');
-    if (!row) return null;
-    const rowLoc = locate(row.document, row.id);
-    if (rowLoc) rowLoc.node.meta = { synthetic: true };
-    const col = appendNode(row.document, row.id, 'column', 'core/heading');
-    if (!col) return null;
-    const colLoc = locate(col.document, col.id);
-    if (colLoc) colLoc.node.meta = { synthetic: true };
-    const el = appendNode(col.document, col.id, 'element', elementType, options);
-    return el && withinBuilderLimits(el.document) ? el : null;
+  const source = locate(document, id);
+  if (
+    !source
+    || hasLockedAncestor(document, id, blockCatalog)
+    || isProtectedNode(document, id, blockCatalog)
+    || countDescendantBlocksByType(document, id, 'core/content-slot') > 0
+  ) {
+    return null;
   }
-  if (parentLoc?.kind === 'section') {
-    const row = appendNode(document, parentId, 'row', 'core/heading');
-    if (!row) return null;
-    const rowLoc = locate(row.document, row.id);
-    if (rowLoc) rowLoc.node.meta = { synthetic: true };
-    const col = appendNode(row.document, row.id, 'column', 'core/heading');
-    if (!col) return null;
-    const colLoc = locate(col.document, col.id);
-    if (colLoc) colLoc.node.meta = { synthetic: true };
-    const el = appendNode(col.document, col.id, 'element', elementType, options);
-    return el && withinBuilderLimits(el.document) ? el : null;
+  if (
+    countBlocksByType(document, 'core/list') + countDescendantBlocksByType(document, id, 'core/list')
+    > MAX_BUILDER_LISTS
+  ) {
+    return null;
   }
-  if (parentLoc?.kind === 'column') {
-    const el = appendNode(document, parentId, 'element', elementType, options);
-    return el && withinBuilderLimits(el.document) ? el : null;
+  if (
+    countBlocksByType(document, 'core/pattern-ref')
+      + countDescendantBlocksByType(document, id, 'core/pattern-ref')
+    > MAX_BUILDER_PATTERN_INSTANCES
+  ) {
+    return null;
   }
-  return null;
-}
 
-/** Top-level persisted value keys for a unified V1 block schema (excluding UI-only fields).
- * Groups retain nested object values under their own field key. */
+  for (const entry of allNodes(document)) {
+    const inSubtree = entry.path.length >= source.path.length
+      && source.path.every((step, idx) => entry.path[idx] === step);
+    if (!inSubtree) continue;
+    const active = findActiveCatalogItem(blockCatalog, entry.node.block_id);
+    if (!active || !pluginValuesReadyForFreshNode(entry.node.props ?? {}, active.schema)) {
+      return null;
+    }
+  }
+
+  const next = clone(document);
+  const parentLoc = source.parentId !== null ? locate(next, source.parentId) : undefined;
+  const siblings = parentLoc ? parentLoc.node.children : next.blocks;
+  if (!siblings) return null;
+
+  const sourceIndex = source.path[source.path.length - 1];
+  const copy = clone(siblings[sourceIndex]);
+  if (!copy) return null;
+
+  const usedIds = new Set(allNodes(next).map(entry => entry.node.id));
+  assignFreshSubtreeIds([copy], usedIds);
+  siblings.splice(sourceIndex + 1, 0, copy);
+
+  const ok = withinBuilderLimits(next)
+    && distinctPatternIdCount(next, blockCatalog) <= MAX_BUILDER_PATTERN_INSTANCES
+    && preservesAnchors(document, next, undefined, blockCatalog);
+  return ok ? { document: next, id: copy.id } : null;
+}
 
 export function copyNodeOptions(
-  document: BuilderDocument, id: string,
-  blockCatalog: BlockCatalogItemDto[] = [],
+  document: BuilderDocument,
+  id: string,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
 ): StudioBuilderClipboard | null {
   const item = locate(document, id);
-  if (!item) return null;
-  const attachSharedStyle = (target: StudioBuilderClipboard): StudioBuilderClipboard => {
-    const className = item.node.meta?.class_name?.trim();
-    if (className) target.class_name = className;
-    const vis = item.node.meta?.visibility;
-    if (vis && (vis.hide_desktop || vis.hide_tablet || vis.hide_mobile)) {
-      target.visibility = clone(vis);
-    }
-    return target;
-  };
-  if (!isElement(item.node)) {
-    const responsive = item.node.responsive;
-    const base: StudioBuilderClipboard = {
-      kind: item.kind,
-      responsive: responsive && Object.keys(responsive).length ? clone(responsive) : undefined,
-    };
-    if (item.kind === 'section') {
-      const style = (item.node as BuilderSection).style;
-      if (style && (style.background_color || style.background_media_id || style.content_width)) {
-        base.sectionStyle = clone(style);
-      }
-    }
-    return attachSharedStyle(base);
+  if (
+    !item
+    || isLockedNode(item.node, blockCatalog)
+    || hasLockedAncestor(document, id, blockCatalog)
+    || item.node.block_id === 'core/content-slot'
+  ) {
+    return null;
   }
+  const active = findActiveCatalogItem(blockCatalog, item.node.block_id);
+  if (!active) return null;
 
-  const element = item.node;
-  if (element.type === 'core/content_slot' || isLockedElement(element, blockCatalog)) return null;
-  const clipboard: StudioBuilderClipboard = attachSharedStyle({
-    kind: 'element',
-    elementType: element.type,
-  });
-  if (element.type === 'plugin/block' || element.type === 'legacy/block') {
-    clipboard.blockId = element.props.block_id as string;
-    const values = element.props.values as Record<string, unknown>;
-    if (element.type === 'plugin/block') {
-      const active = blockCatalog.find(item => item.block_id === clipboard.blockId
-        && item.status === 'active' && item.declaration_state === 'declared');
-      if (!active) return null;
-      const keys = declaredBlockKeys(active.schema.fields);
-      // Clone the entire JSON payload first: optional draft fields may be
-      // undefined, and cloning an individual undefined value would throw.
-      clipboard.props = { values: Object.fromEntries(
-        Object.entries(clone(values)).filter(([key]) => keys.has(key)),
-      ) };
-      if (!pluginValuesReadyForFreshNode(
-        clipboard.props.values as Record<string, unknown>, active.schema,
-      )) return null;
-    } else {
-      clipboard.props = { values: clone(values) };
-    }
-  } else {
-    clipboard.props = clone(element.props);
-    delete clipboard.props.binding;
+  const allowedKeys = declaredBlockKeys(active.schema.fields);
+  const rawProps = clone(item.node.props ?? {});
+  const filteredProps = Object.fromEntries(
+    Object.entries(rawProps).filter(([key]) => allowedKeys.has(key)),
+  );
+  if (!pluginValuesReadyForFreshNode(filteredProps, active.schema)) return null;
+
+  const clipboard: StudioBuilderClipboard = {
+    block_id: item.node.block_id,
+    props: filteredProps,
+  };
+  const className = item.node.meta?.class_name?.trim();
+  if (className) clipboard.class_name = className;
+  const vis = item.node.meta?.visibility;
+  if (vis && (vis.hide_desktop || vis.hide_tablet || vis.hide_mobile)) {
+    clipboard.visibility = clone(vis);
   }
   return clipboard;
 }
 
-
 export function canPasteOptions(
-  clipboard: StudioBuilderClipboard | null, target: NodeLocation, locked: boolean,
+  clipboard: StudioBuilderClipboard | null,
+  target: BlockNode | { node: BlockNode },
+  lockedOrCatalog: boolean | readonly BlockCatalogItemDto[] = false,
 ): boolean {
-  if (!clipboard || locked || clipboard.kind !== target.kind) return false;
-  if (target.kind !== 'element') return true;
-  if (!isElement(target.node) || target.node.type !== clipboard.elementType
-      || target.node.type === 'core/content_slot') return false;
-  return (target.node.type !== 'plugin/block' && target.node.type !== 'legacy/block')
-    || target.node.props.block_id === clipboard.blockId;
+  if (!clipboard) return false;
+  const node = 'node' in target ? target.node : target;
+  const locked = typeof lockedOrCatalog === 'boolean'
+    ? lockedOrCatalog
+    : isLockedNode(node, lockedOrCatalog);
+  if (locked || node.block_id === 'core/content-slot') return false;
+  return node.block_id === clipboard.block_id;
 }
 
-/** Never transfer binding references or a block_id to the target node. */
-
 export function pasteNodeOptions(
-  document: BuilderDocument, id: string, clipboard: StudioBuilderClipboard,
-  blockCatalog: BlockCatalogItemDto[] = [],
+  document: BuilderDocument,
+  id: string,
+  clipboard: StudioBuilderClipboard,
+  blockCatalog: readonly BlockCatalogItemDto[] = [],
 ): BuilderDocument | null {
   const next = clone(document);
   const target = locate(next, id);
-  if (!target || !canPasteOptions(clipboard, target, false)) return null;
-  if (isElement(target.node)
-      && (hasUnexpectedElementFields(target.node) || hasInvalidCoreBinding(target.node))) return null;
-  if (!isElement(target.node)) {
-    if (clipboard.responsive && Object.keys(clipboard.responsive).length) {
-      target.node.responsive = clone(clipboard.responsive);
-    } else {
-      delete target.node.responsive;
-    }
-    if (target.kind === 'section') {
-      const sec = target.node as BuilderSection;
-      if (clipboard.sectionStyle && Object.keys(clipboard.sectionStyle).length) {
-        sec.style = clone(clipboard.sectionStyle);
-      } else {
-        delete sec.style;
-      }
-    }
-  } else if (target.node.type === 'plugin/block' || target.node.type === 'legacy/block') {
-    if (!object(clipboard.props?.values) || !object(target.node.props.values)) return null;
-    target.node.props.values = clone(clipboard.props.values);
-  } else {
-    if (!object(clipboard.props)) return null;
-    const props = clone(clipboard.props);
-    delete props.binding;
-    if (target.node.props.binding !== undefined) props.binding = target.node.props.binding;
-    target.node.props = props;
-  }
-  const mergedMeta: NodeMeta = { ...(target.node.meta ?? {}) };
+  if (!target || hasLockedAncestor(next, id, blockCatalog)) return null;
+  if (!canPasteOptions(clipboard, target, blockCatalog)) return null;
+
+  const active = findActiveCatalogItem(blockCatalog, target.node.block_id);
+  if (!active || (clipboard.props !== undefined && !object(clipboard.props))) return null;
+
+  const nextProps = clone(clipboard.props ?? {});
+  if (Object.keys(nextProps).length === 0) delete target.node.props;
+  else target.node.props = nextProps;
+
+  const mergedMeta = { ...(target.node.meta ?? {}) };
   if (clipboard.class_name) mergedMeta.class_name = clipboard.class_name;
   else delete mergedMeta.class_name;
-  if (clipboard.visibility && (clipboard.visibility.hide_desktop || clipboard.visibility.hide_tablet || clipboard.visibility.hide_mobile)) {
+  if (
+    clipboard.visibility
+    && (clipboard.visibility.hide_desktop || clipboard.visibility.hide_tablet || clipboard.visibility.hide_mobile)
+  ) {
     mergedMeta.visibility = clone(clipboard.visibility);
   } else {
     delete mergedMeta.visibility;
   }
   if (Object.keys(mergedMeta).length === 0) delete target.node.meta;
   else target.node.meta = mergedMeta;
-  return distinctPatternIdCount(next, blockCatalog) <= 16 && withinBuilderLimits(next) ? next : null;
-}
 
-/** Drag/drop may reorder siblings only if preserved nodes retain their exact
- * index, ancestor IDs, and serialized element content. Supports transparent carriers across freeform blocks. */
-
-export function reorderSiblingNode(
-  document: BuilderDocument, sourceId: string, targetId: string,
-  position: 'before' | 'after',
-  blockCatalog: BlockCatalogItemDto[] = [],
-): BuilderDocument | null {
-  if (sourceId === targetId || (position !== 'before' && position !== 'after')) return null;
-  const source = carrierLocation(document, sourceId);
-  const target = carrierLocation(document, targetId);
-  if (!source || !target || source.node.id === target.node.id
-      || source.kind !== target.kind || source.parentId !== target.parentId
-      || isProtectedNode(document, source.node.id, blockCatalog)) return null;
-  const next = clone(document);
-  const siblings = childrenAt(next, source.parentId ? locate(next, source.parentId) : undefined);
-  if (!siblings) return null;
-  const sourceIndex = source.path[source.path.length - 1];
-  const [moving] = siblings.splice(sourceIndex, 1);
-  const targetIndex = siblings.findIndex(node => node.id === target.node.id);
-  if (!moving || targetIndex === -1) return null;
-  const insertIndex = targetIndex + (position === 'after' ? 1 : 0);
-  if (insertIndex === sourceIndex) return null;
-  siblings.splice(insertIndex, 0, moving);
-  return preservesAnchors(document, next, undefined, blockCatalog) ? next : null;
+  return distinctPatternIdCount(next, blockCatalog) <= MAX_BUILDER_PATTERN_INSTANCES
+    && withinBuilderLimits(next)
+    && preservesAnchors(document, next, undefined, blockCatalog)
+    ? next
+    : null;
 }

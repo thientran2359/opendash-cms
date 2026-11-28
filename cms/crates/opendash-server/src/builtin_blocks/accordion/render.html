@@ -1,8 +1,3 @@
-<div class="od-block-accordion od-accordion-{{ style }} space-y-3">
-  {% for item in items %}
-  <details class="od-accordion-item"{% if item.open or (open_first and loop.first) %} open{% endif %}>
-    <summary class="od-accordion-title cursor-pointer px-5 py-4 font-od-heading font-semibold text-od-text">{{ item.title }}</summary>
-    {% if item.content %}<div class="od-accordion-content od-prose px-5 pb-4 text-od-muted">{{ item.content }}</div>{% endif %}
-  </details>
-  {% endfor %}
+<div class="od-block-accordion od-accordion-{{ style }}{% if style == 'separated' %} space-y-3{% elif style == 'bordered' %} divide-y divide-od-border rounded-xl border border-od-border bg-od-surface{% else %} divide-y divide-od-border{% endif %}">
+  {{ children_html }}
 </div>

@@ -289,16 +289,19 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
                 "target": { "kind": "part", "part_key": "header" },
                 "document": {
                   "schema_version": 1,
-                  "sections": [{
+                  "blocks": [{
                     "id": "sec-hdr-1",
+                    "block_id": "core/section",
                     "children": [{
                         "id": "row-hdr-1",
+                        "block_id": "core/row",
                         "children": [{
                             "id": "col-hdr-1",
+                            "block_id": "core/column",
                             "children": [{
                                 "id": "hdr-1",
-                                "type": "core/heading",
-                                "props": { "level": 2, "text": "Preserved Site Header" }
+                                "block_id": "core/heading",
+                                "props": { "level": "h2", "text": "Preserved Site Header" }
                             }]
                         }]
                     }]
@@ -779,7 +782,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
         .find(|item| item["canonical_target_key"] == "part:header")
         .expect("site-owned header survives theme switch and restart");
     assert_eq!(
-        saved_header["ast_json"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]
+        saved_header["ast_json"]["blocks"][0]["children"][0]["children"][0]["children"][0]["props"]
             ["text"],
         "Preserved Site Header"
     );

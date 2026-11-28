@@ -1,303 +1,265 @@
-import { useI18n, __, _x } from '../i18n/index.tsx';
+import { useI18n } from '../i18n/index.tsx';
 import { useState } from 'react';
-import type { BlockCatalogItemDto, BlockCategory, BlockSchemaV1 } from '../types.ts';
+import type { BlockCatalogItemDto, BlockCategory, BlockSchema } from '../types.ts';
 import {
-  type BuilderDocument, type BuilderRow, type InsertableElementType, type NodeKind,
-  allNodes, appendFreeformElement, appendNode, appendRowWithColumns, countElementsByType, locate,
+  type BuilderContextTarget,
+  type BuilderDocument,
+  MAX_BUILDER_BYTES,
+  MAX_BUILDER_CONTENT_SLOTS,
+  MAX_BUILDER_DEPTH,
+  MAX_BUILDER_LISTS,
+  MAX_BUILDER_NODES,
+  MAX_BUILDER_PATTERN_INSTANCES,
+  allNodes,
+  canInsertBlockAt,
+  canParentAcceptChild,
+  countBlocksByType,
+  findActiveCatalogItem,
+  hasLockedAncestor,
+  insertBlock,
+  isLockedNode,
+  locate,
+  matchesContextTarget,
+  withinBuilderLimits,
 } from '../builder/document.ts';
 
 export interface StudioBlockCatalogProps {
   document: BuilderDocument;
-  /** null means the document root; non-null must be an existing container. */
+  /** null targets document root; non-null must refer to an active editable container block. */
   parentId: string | null;
-  insertableTypes: InsertableElementType[];
-  blockSchemas?: BlockCatalogItemDto[];
+  blockSchemas: BlockCatalogItemDto[];
+  contextTarget?: BuilderContextTarget | null;
   disabled?: boolean;
-  onAddNode: (
-    parentId: string | null,
-    kind: 'section' | 'column' | 'element',
-    elementType?: InsertableElementType,
-  ) => void;
-  onAddRowWithColumns: (parentId: string | null, count: 1 | 2 | 3) => void;
+  onInsertBlock: (parentId: string | null, blockId: string, presetKey?: string) => void;
   onOpenPatternLibrary: () => void;
   onOpenMediaPicker: (parentId: string | null) => void;
 }
 
-/** Normalize parent/child tokens so `col` and `column` or `core/row` and `row` match uniformly. */
-function normalizeConstraintToken(token: string): string {
-  const clean = token.trim().toLowerCase().replace(/^core\//, '');
-  return clean === 'col' ? 'column' : clean;
-}
-
-export function isBlockAllowedInParent(
-  parentKind: NodeKind | 'root',
-  childIdOrKind: string,
-  blockSchemas: BlockCatalogItemDto[],
-): boolean {
-  const normalizedParent = normalizeConstraintToken(parentKind);
-  const normalizedChild = normalizeConstraintToken(childIdOrKind);
-  const parentSchema = blockSchemas.find(
-    item => item.status === 'active' && normalizeConstraintToken(item.block_id) === normalizedParent,
-  )?.schema;
-  if (parentSchema?.allowed_children?.length) {
-    const allowed = parentSchema.allowed_children.map(normalizeConstraintToken);
-    if (!allowed.includes(normalizedChild) && !parentSchema.allowed_children.includes(childIdOrKind)) {
-      return false;
-    }
-  }
-  const childSchema = blockSchemas.find(
-    item => item.status === 'active' && (item.block_id === childIdOrKind || normalizeConstraintToken(item.block_id) === normalizedChild),
-  )?.schema;
-  if (childSchema?.allowed_parents?.length) {
-    const allowed = childSchema.allowed_parents.map(normalizeConstraintToken);
-    if (!allowed.includes(normalizedParent) && !childSchema.allowed_parents.includes(parentKind)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/** Match BuilderEditorCore's hard document limits before offering an Add action.
- * Previewing appendNode / appendFreeformElement also accounts for large declarative schema defaults.
- * This never mutates the supplied document or consumes an Undo step. */
-export function studioCatalogAdditionLimit(
-  document: BuilderDocument,
-  parentId: string | null,
-  kind: 'section' | 'row' | 'column' | 'element',
-  elementType: InsertableElementType = 'core/heading',
-  blockSchema?: BlockSchemaV1,
-  columnCount: 1 | 2 | 3 = 1,
-): string | null {
-  const parentLoc = locate(document, parentId);
-  if (kind === 'element' && (parentId === null || parentLoc?.kind === 'section' || parentLoc?.kind === 'column')) {
-    const inserted = appendFreeformElement(document, parentId, elementType, blockSchema ? { blockSchema } : undefined);
-    if (!inserted) return __("Cannot add at this location");
-    if (allNodes(inserted.document).length > 512) return __("512-node limit");
-    return JSON.stringify(inserted.document).length > 256 * 1024 ? __("256 KiB limit") : null;
-  }
-  if (kind === 'row' && (parentId === null || parentLoc?.kind === 'section')) {
-    const rowRes = appendRowWithColumns(document, parentId, columnCount);
-    if (!rowRes) return __("Cannot create row");
-    if (allNodes(rowRes.document).length > 512) return __("512-node limit");
-    return JSON.stringify(rowRes.document).length > 256 * 1024 ? __("256 KiB limit") : null;
-  }
-  if (allNodes(document).length + 1 > 512) return __("512-node limit");
-  const inserted = appendNode(document, parentId, kind, elementType,
-    blockSchema ? { blockSchema } : undefined);
-  if (!inserted) return __("Cannot add at this location");
-  let next = inserted.document;
-  if (kind === 'row') {
-    for (let index = 0; index < columnCount; index++) {
-      const column = appendNode(next, inserted.id, 'column', elementType);
-      if (!column) return __("Cannot create row");
-      next = column.document;
-    }
-    if (columnCount > 1) {
-      const row = locate(next, inserted.id)?.node as BuilderRow | undefined;
-      if (row) row.responsive = { desktop: { columns_per_row: columnCount } };
-    }
-  }
-  return JSON.stringify(next).length > 256 * 1024 ? __("256 KiB limit") : null;
-}
+const SYMBOL_BY_CATEGORY: Record<BlockCategory, string> = {
+  layout: '▤',
+  content: 'T',
+  media: '▣',
+  interactive: '⚡',
+  marketing: '★',
+  plugin: '❖',
+};
 
 export function StudioBlockCatalog({
-  document, parentId, insertableTypes, blockSchemas = [], disabled = false,
-  onAddNode, onAddRowWithColumns, onOpenPatternLibrary, onOpenMediaPicker,
+  document,
+  parentId,
+  blockSchemas,
+  contextTarget = null,
+  disabled = false,
+  onInsertBlock,
+  onOpenPatternLibrary,
+  onOpenMediaPicker,
 }: StudioBlockCatalogProps) {
   const { __, _x } = useI18n();
-  const CORE_NAMES: Record<string, { title: string; description: string; symbol: string }> = {
-    'core/heading': { title: __("Heading"), description: __("Heading H1–H6"), symbol: 'H' },
-    'core/text': { title: _x("Text", "studio.text"), description: __("Text paragraph"), symbol: 'T' },
-    'core/image': { title: __("Image"), description: __("Image from media library"), symbol: '▣' },
-    'core/video': { title: __("Video"), description: __("MP4 video"), symbol: '▶' },
-    'core/button': { title: __("Button"), description: __("Link button"), symbol: '▭' },
-    'core/list': { title: __("Content list"), description: __("Filtered entries"), symbol: '☷' },
-    'core/contact_form': { title: __("Contact form"), description: __("Configured form"), symbol: '✉' },
-    'core/search_form': { title: __("Search form"), description: __("Site search box"), symbol: '⌕' },
-    'core/search_results': { title: __("Search results"), description: __("Paginated search results"), symbol: '▤' },
-    'core/pattern_ref': { title: __("Reusable pattern"), description: __("Reference a saved pattern"), symbol: '▦' },
-    'core/content_slot': { title: __("Content slot"), description: __("Entry content placeholder"), symbol: '◫' },
-    'core/template_part': { title: __("Template part"), description: __("Header / Footer / Part"), symbol: '▤' },
-  };
+  const [query, setQuery] = useState('');
 
   const BLOCK_CATEGORIES: Array<{ key: BlockCategory; title: string }> = [
     { key: 'layout', title: __("Layout") },
+    { key: 'content', title: __("Content") },
     { key: 'media', title: _x("Media", "studio.media") },
     { key: 'interactive', title: __("Interactive") },
-    { key: 'content', title: __("Content") },
     { key: 'marketing', title: __("Marketing") },
     { key: 'plugin', title: __("Plugin") },
   ];
 
-  const [query, setQuery] = useState('');
-  const parent = locate(document, parentId);
-  const kind: NodeKind | 'root' = parentId === null ? 'root' : parent?.kind ?? 'root';
-  const invalidParent = parentId !== null && (!parent || parent.kind === 'element');
+  const parentLoc = parentId !== null ? locate(document, parentId) : undefined;
+  const parentItem = parentLoc ? findActiveCatalogItem(blockSchemas, parentLoc.node.block_id) : undefined;
+  const parentSchema = parentItem?.schema ?? null;
+  const parentLocked = parentLoc
+    ? isLockedNode(parentLoc.node, blockSchemas) || hasLockedAncestor(document, parentLoc.node.id, blockSchemas)
+    : false;
+  const invalidParent = parentId !== null && (!parentLoc || !parentSchema?.supports_children || parentLocked);
+
+  if (invalidParent) {
+    return (
+      <section className="p-3" aria-label={_x("Add block", "studio.add_block_61")}>
+        <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {__("This container no longer exists or cannot accept child blocks.")}
+        </p>
+      </section>
+    );
+  }
+
   const nodeCount = allNodes(document).length;
-  const documentSize = JSON.stringify(document).length;
-  const libraryLimit = nodeCount >= 512 || documentSize >= 256 * 1024;
-  const addSectionLimit = kind === 'root'
-    ? studioCatalogAdditionLimit(document, null, 'section') : null;
-  const addColumnLimit = kind === 'row'
-    ? studioCatalogAdditionLimit(document, parentId, 'column') : null;
-  const supportsElements = kind === 'root' || kind === 'section' || kind === 'column' || kind === 'row';
-  const mediaLimit = (kind === 'root' || kind === 'section' || kind === 'column')
-    ? studioCatalogAdditionLimit(document, parentId, 'element', 'core/image') : null;
+  const docBytes = new TextEncoder().encode(JSON.stringify(document)).byteLength;
+  const libraryLimit = nodeCount >= MAX_BUILDER_NODES || docBytes >= MAX_BUILDER_BYTES;
+
+  const insertionReason = (schema: BlockSchema, presetKey?: string): string | null => {
+    if (!canInsertBlockAt(document, schema, parentId, blockSchemas, contextTarget, presetKey)) {
+      if (schema.id === 'core/content-slot' && countBlocksByType(document, 'core/content-slot') >= MAX_BUILDER_CONTENT_SLOTS) {
+        return __("Limit of one content slot");
+      }
+      if (schema.id === 'core/list' && countBlocksByType(document, 'core/list') >= MAX_BUILDER_LISTS) {
+        return __("Limit of eight lists");
+      }
+      if (schema.id === 'core/pattern-ref' && countBlocksByType(document, 'core/pattern-ref') >= MAX_BUILDER_PATTERN_INSTANCES) {
+        return __("Limit of 16 pattern references");
+      }
+      if ((parentLoc?.depth ?? 0) + 1 > MAX_BUILDER_DEPTH) {
+        return __("Maximum nesting depth of 8 reached");
+      }
+      return nodeCount >= MAX_BUILDER_NODES ? __("512-node limit") : __("Cannot add at this location");
+    }
+    const simulated = insertBlock(document, schema.id, parentId, undefined, blockSchemas, {
+      contextTarget,
+      presetKey,
+    });
+    if (!simulated) return __("Cannot add at this location");
+    if (!withinBuilderLimits(simulated.document)) {
+      return allNodes(simulated.document).length > MAX_BUILDER_NODES ? __("512-node limit") : __("256 KiB limit");
+    }
+    return null;
+  };
+
+  const normalized = query.trim().toLocaleLowerCase();
+  const matchesQuery = (item: BlockCatalogItemDto): boolean => {
+    if (!normalized) return true;
+    if (
+      item.schema.title.toLocaleLowerCase().includes(normalized)
+      || item.block_id.toLocaleLowerCase().includes(normalized)
+    ) {
+      return true;
+    }
+    return Boolean(item.schema.presets?.some(p => p.title.toLocaleLowerCase().includes(normalized)));
+  };
+
+  const compatibleItems = blockSchemas.filter(
+    item =>
+      item.status === 'active'
+      && item.declaration_state === 'declared'
+      && matchesContextTarget(contextTarget, item.schema.allowed_contexts)
+      && canParentAcceptChild(parentSchema, item.schema, parentId)
+      && matchesQuery(item),
+  );
+
+  const imageCatalogItem = findActiveCatalogItem(blockSchemas, 'core/image');
+  const canPickImage = Boolean(
+    imageCatalogItem
+    && matchesContextTarget(contextTarget, imageCatalogItem.schema.allowed_contexts)
+    && canParentAcceptChild(parentSchema, imageCatalogItem.schema, parentId),
+  );
+  const mediaLimit = imageCatalogItem ? insertionReason(imageCatalogItem.schema) : null;
+
   const baseButton = 'flex w-full items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 '
     + 'text-left text-sm text-slate-800 hover:border-sky-300 hover:bg-sky-50 '
     + 'focus-visible:outline-2 focus-visible:outline-sky-600 disabled:cursor-not-allowed disabled:opacity-45';
 
-  if (invalidParent) return <section className="p-3" aria-label={_x("Add block", "studio.add_block_61")}>
-    <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-      {__("This container no longer exists. Return to Page structure to choose another location.")}
-    </p>
-  </section>;
-
-  const normalized = query.trim().toLocaleLowerCase();
-  const matches = (title: string, type: string) => !normalized
-    || title.toLocaleLowerCase().includes(normalized)
-    || type.toLocaleLowerCase().includes(normalized);
-  const allowSectionAtRoot = kind === 'root' && isBlockAllowedInParent('root', 'section', blockSchemas);
-  const allowRowHere = (kind === 'root' || kind === 'section') && isBlockAllowedInParent(kind, 'row', blockSchemas);
-  const allowColumnInRow = kind === 'row' && isBlockAllowedInParent('row', 'column', blockSchemas);
-  const allowElementInCurrentParent = (type: string) => {
-    if (kind === 'row') {
-      const itemSchema = blockSchemas.find(item => item.block_id === type && item.status === 'active')?.schema;
-      if (!itemSchema?.allowed_parents?.some(p => normalizeConstraintToken(p) === 'row')) {
-        const rowSchema = blockSchemas.find(item => item.status === 'active' && normalizeConstraintToken(item.block_id) === 'row')?.schema;
-        if (!rowSchema?.allowed_children?.length) return false;
-      }
-    }
-    return isBlockAllowedInParent(kind, type, blockSchemas);
-  };
-  const core = insertableTypes
-    .filter(type => type !== 'plugin/block' && !!CORE_NAMES[type])
-    .filter(type => allowElementInCurrentParent(type) && matches(CORE_NAMES[type].title, type))
-    .map(type => ({
-      type,
-      title: CORE_NAMES[type].title,
-      description: CORE_NAMES[type].description,
-      symbol: CORE_NAMES[type].symbol,
-      limit: type === 'core/content_slot' && countElementsByType(document, type) >= 1
-        ? __("Limit of one content slot")
-        : type === 'core/list' && countElementsByType(document, type) >= 8
-          ? __("Limit of eight lists") : null,
-    }));
-  const active = blockSchemas.filter(item =>
-    item.status === 'active' && item.declaration_state === 'declared'
-    && allowElementInCurrentParent(item.block_id)
-    && matches(item.schema.title, item.block_id));
-  const capacityReason = (type: InsertableElementType) => studioCatalogAdditionLimit(
-    document, parentId, 'element', type,
-    blockSchemas.find(item => item.block_id === type)?.schema,
-  );
-
-  const renderBlock = (
-    type: InsertableElementType, title: string, description: string,
-    symbol: string, limit: string | null = null,
-  ) => {
-    const blocked = limit ?? capacityReason(type);
-    return <button key={type} type="button" disabled={disabled || !!blocked}
-    title={blocked ?? description}
-    onClick={() => onAddNode(parentId, 'element', type)}
-    className={'flex min-w-0 flex-col items-start gap-1 rounded-lg border border-slate-200 bg-white p-2.5 '
-      + 'text-left hover:border-sky-300 hover:bg-sky-50 focus-visible:outline-2 '
-      + 'focus-visible:outline-sky-600 disabled:cursor-not-allowed disabled:opacity-50'}>
-    <span className="rounded-md bg-sky-50 px-2 py-1 text-lg font-semibold text-sky-700" aria-hidden="true">
-      {symbol}</span>
-    <span className="break-words text-xs font-semibold text-slate-800">{title}</span>
-    <span className="break-words text-[11px] text-slate-500">{blocked ?? description}</span>
-  </button>;
-  };
-
-  return <section className="min-w-0 space-y-4 p-2.5" aria-label={_x("Add block", "studio.add_block_61")}>
-    {supportsElements && (
+  return (
+    <section className="min-w-0 space-y-4 p-2.5" aria-label={_x("Add block", "studio.add_block_61")}>
       <label className="block text-xs font-medium text-slate-700">
         {__("Find block or element")}
-        <input type="search" value={query} onChange={event => setQuery(event.target.value)}
+        <input
+          type="search"
+          value={query}
+          onChange={event => setQuery(event.target.value)}
           placeholder={__("Search by name or block ID…")}
-          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-sky-600" />
+          className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-sky-600"
+        />
       </label>
-    )}
 
-    {(allowSectionAtRoot || allowRowHere || allowColumnInRow) && !normalized && (
-      <div className="space-y-2">
-        <h3 className="text-xs font-semibold text-slate-600">{__("Layout")}</h3>
-        {allowSectionAtRoot && (
-          <button type="button" className={baseButton} disabled={disabled || !!addSectionLimit}
-            title={addSectionLimit ?? undefined}
-            onClick={() => onAddNode(null, 'section')}>
-            <span aria-hidden="true" className="text-2xl text-sky-600">▤</span>
-            <span><strong className="block">{__("Empty section")}</strong><span className="text-xs text-slate-500">
-              {addSectionLimit ?? __("Large layout region for the page.")}</span></span>
-          </button>
-        )}
-        {allowRowHere && ([1, 2, 3] as const).map(count => {
-          const limit = studioCatalogAdditionLimit(document, parentId, 'row', 'core/heading', undefined, count);
-          return <button key={count} type="button" disabled={disabled || !!limit} title={limit ?? undefined}
-            className={baseButton}
-            onClick={() => onAddRowWithColumns(parentId, count)}>
-            <span aria-hidden="true" className="flex w-14 shrink-0 gap-1">
-              {Array.from({ length: count }, (_, i) => <span key={i}
-                className="h-7 flex-1 rounded-sm border border-sky-300 bg-sky-100" />)}
-            </span>
-            <span>{__("Row with {{count}} columns", { count })}{limit && <small className="block text-xs text-slate-500">{limit}</small>}</span>
-          </button>;
-        })}
-        {allowColumnInRow && (
-          <button type="button" className={baseButton} disabled={disabled || !!addColumnLimit}
-            title={addColumnLimit ?? undefined}
-            onClick={() => onAddNode(parentId, 'column')}>
-            <span aria-hidden="true" className="text-2xl text-sky-600">▯</span>
-            <span>{__("Column")}{addColumnLimit && <small className="block text-xs text-slate-500">
-              {addColumnLimit}</small>}</span>
-          </button>
-        )}
-        {kind === 'root' && (
-          <button type="button" data-testid="studio-open-pattern-library"
-            className={baseButton} disabled={disabled || libraryLimit} onClick={onOpenPatternLibrary}>
-            <span aria-hidden="true" className="text-2xl text-sky-600">▦</span>
-            <span><strong className="block">{__("Choose from the pattern library…")}</strong>
-              <span className="text-xs text-slate-500">
-                {libraryLimit ? __("Document size or node limit reached") : __("Insert layout at the end of the page.")}
-              </span></span>
-          </button>
-        )}
-      </div>
-    )}
+      {(parentId === null || canPickImage) && !normalized && (
+        <div className="space-y-2">
+          {parentId === null && (
+            <button
+              type="button"
+              data-testid="studio-open-pattern-library"
+              className={baseButton}
+              disabled={disabled || libraryLimit}
+              onClick={onOpenPatternLibrary}
+            >
+              <span aria-hidden="true" className="text-2xl text-sky-600">▦</span>
+              <span>
+                <strong className="block">{__("Choose from the pattern library…")}</strong>
+                <span className="text-xs text-slate-500">
+                  {libraryLimit ? __("Document size or node limit reached") : __("Insert layout at the end of the page.")}
+                </span>
+              </span>
+            </button>
+          )}
 
-    {(kind === 'root' || kind === 'section' || kind === 'column') && (
-      <button type="button" disabled={disabled || !!mediaLimit}
-        data-testid="studio-open-media-picker"
-        title={mediaLimit ?? undefined}
-        onClick={() => onOpenMediaPicker(parentId)} className={baseButton}>
-        <span aria-hidden="true" className="text-2xl text-sky-600">▧</span>
-        <span className="text-xs font-semibold">{__("Insert image from media library…")}
-          {mediaLimit && <small className="block text-xs font-normal">{mediaLimit}</small>}
-        </span>
-      </button>
-    )}
-
-    {core.length > 0 && <div className="space-y-2">
-      <h3 className="text-xs font-semibold text-slate-600">{__("Core blocks")}</h3>
-      <div className="grid grid-cols-2 gap-2">
-        {core.map(item => renderBlock(item.type, item.title, item.description, item.symbol, item.limit))}
-      </div>
-    </div>}
-    {BLOCK_CATEGORIES.map(category => {
-      const blocks = active.filter(item => item.schema.category === category.key);
-      return blocks.length > 0 && <div className="space-y-2" key={category.key}>
-        <h3 className="text-xs font-semibold text-slate-600">{category.title}</h3>
-        <div className="grid grid-cols-2 gap-2">
-          {blocks.map(item => renderBlock(item.block_id, item.schema.title,
-            item.block_id, '▣'))}
+          {canPickImage && (
+            <button
+              type="button"
+              disabled={disabled || !!mediaLimit}
+              data-testid="studio-open-media-picker"
+              title={mediaLimit ?? undefined}
+              onClick={() => onOpenMediaPicker(parentId)}
+              className={baseButton}
+            >
+              <span aria-hidden="true" className="text-2xl text-sky-600">▧</span>
+              <span className="text-xs font-semibold">
+                {__("Insert image from media library…")}
+                {mediaLimit && <small className="block text-xs font-normal">{mediaLimit}</small>}
+              </span>
+            </button>
+          )}
         </div>
-      </div>;
-    })}
-    {core.length === 0 && active.length === 0 && !allowSectionAtRoot && !allowRowHere && !allowColumnInRow && (
-      <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-500">
-        {__("No blocks are available for this location.")}
-      </p>
-    )}
-  </section>;
+      )}
+
+      {BLOCK_CATEGORIES.map(category => {
+        const items = compatibleItems.filter(item => item.schema.category === category.key);
+        if (items.length === 0) return null;
+        return (
+          <div className="space-y-2" key={category.key}>
+            <h3 className="text-xs font-semibold text-slate-600">{category.title}</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {items.map(item => {
+                const blocked = insertionReason(item.schema);
+                const symbol = SYMBOL_BY_CATEGORY[item.schema.category];
+                const presets = item.schema.presets ?? [];
+                return (
+                  <div key={item.block_id} className={presets.length > 0 ? 'col-span-2 space-y-1.5' : ''}>
+                    <button
+                      type="button"
+                      disabled={disabled || !!blocked}
+                      title={blocked ?? item.block_id}
+                      onClick={() => onInsertBlock(parentId, item.block_id)}
+                      data-block-id={item.block_id}
+                      className="flex w-full min-w-0 flex-col items-start gap-1 rounded-lg border border-slate-200 bg-white p-2.5 text-left hover:border-sky-300 hover:bg-sky-50 focus-visible:outline-2 focus-visible:outline-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span className="rounded-md bg-sky-50 px-2 py-1 text-lg font-semibold text-sky-700" aria-hidden="true">
+                        {symbol}
+                      </span>
+                      <span className="break-words text-xs font-semibold text-slate-800">{item.schema.title}</span>
+                      <span className="break-words text-[11px] text-slate-500">{blocked ?? item.block_id}</span>
+                    </button>
+                    {presets.length > 0 && (
+                      <div className="grid grid-cols-2 gap-1.5 pl-1">
+                        {presets.map(preset => {
+                          const presetBlocked = insertionReason(item.schema, preset.key);
+                          return (
+                            <button
+                              key={`${item.block_id}:${preset.key}`}
+                              type="button"
+                              disabled={disabled || !!presetBlocked}
+                              title={presetBlocked ?? preset.title}
+                              onClick={() => onInsertBlock(parentId, item.block_id, preset.key)}
+                              data-preset-key={preset.key}
+                              className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-left text-[11px] font-medium text-slate-700 hover:border-sky-300 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {preset.title}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {compatibleItems.length === 0 && (
+        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-500">
+          {__("No blocks are available for this location.")}
+        </p>
+      )}
+    </section>
+  );
 }

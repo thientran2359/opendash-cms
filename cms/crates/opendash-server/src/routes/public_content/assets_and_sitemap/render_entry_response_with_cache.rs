@@ -217,6 +217,7 @@ pub(crate) async fn render_entry_response_with_cache(
             term_schema: None,
             content_type: Some(&ct_value),
             entry: Some(&view),
+            list_pages: Some(&list_pages),
             search: &inactive_search,
         },
         &mut budget,

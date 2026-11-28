@@ -123,19 +123,25 @@ async fn studio_search_target_blocks_diagnostics_and_public_override() {
             .any(|item| item["canonical_target_key"] == "search")
     );
 
-    // 2. Previewing core/search_results inside "home" emits diagnostic without leaking results.
+    // 2. Previewing core/search-results inside "home" emits diagnostic without leaking results.
     let home_doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "block_id": "core/section",
+            "props": {},
             "children": [{
                 "id": "row1",
+                "block_id": "core/row",
+                "props": {},
                 "children": [{
                     "id": "col1",
+                    "block_id": "core/column",
+                    "props": {},
                     "children": [
-                        { "id": "slot1", "type": "core/content_slot", "props": {} },
-                        { "id": "sf1", "type": "core/search_form", "props": { "placeholder": "Find...", "submit_label": "Go", "show_type_filter": true, "preserve_type_filter": false } },
-                        { "id": "sr1", "type": "core/search_results", "props": { "show_facets": true, "show_excerpt": true, "empty_message": "" } }
+                        { "id": "slot1", "block_id": "core/content-slot", "props": {} },
+                        { "id": "sf1", "block_id": "core/search-form", "props": { "placeholder": "Find...", "submit_label": "Go", "show_type_filter": true, "preserve_type_filter": false } },
+                        { "id": "sr1", "block_id": "core/search-results", "props": { "show_facets": true, "show_excerpt": true, "empty_message": "" } }
                     ]
                 }]
             }]
@@ -143,15 +149,21 @@ async fn studio_search_target_blocks_diagnostics_and_public_override() {
     });
     let search_doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "block_id": "core/section",
+            "props": {},
             "children": [{
                 "id": "row1",
+                "block_id": "core/row",
+                "props": {},
                 "children": [{
                     "id": "col1",
+                    "block_id": "core/column",
+                    "props": {},
                     "children": [
-                        { "id": "sf1", "type": "core/search_form", "props": { "placeholder": "Find...", "submit_label": "Go", "show_type_filter": true, "preserve_type_filter": false } },
-                        { "id": "sr1", "type": "core/search_results", "props": { "show_facets": true, "show_excerpt": true, "empty_message": "" } }
+                        { "id": "sf1", "block_id": "core/search-form", "props": { "placeholder": "Find...", "submit_label": "Go", "show_type_filter": true, "preserve_type_filter": false } },
+                        { "id": "sr1", "block_id": "core/search-results", "props": { "show_facets": true, "show_excerpt": true, "empty_message": "" } }
                     ]
                 }]
             }]

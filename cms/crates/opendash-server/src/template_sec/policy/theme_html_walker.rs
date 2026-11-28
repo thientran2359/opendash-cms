@@ -24,9 +24,14 @@ pub(crate) fn step_theme_raw_char(
                 phase,
                 quote,
                 ..
-            } if matches!(tag_name.as_str(), "svg" | "math" | "form")
-                && ch == '>'
-                && quote.is_none() =>
+            } if ch == '>'
+                && quote.is_none()
+                && (matches!(tag_name.as_str(), "svg" | "math" | "form")
+                    || (opts.forbid_style_tag
+                        && matches!(
+                            tag_name.as_str(),
+                            "foreignobject" | "a" | "button" | "summary"
+                        ))) =>
             {
                 Some((
                     tag_name.clone(),
@@ -38,7 +43,7 @@ pub(crate) fn step_theme_raw_char(
         };
         let next = step_theme_raw_char(*inner, ch, opts, depths)?;
         let depths = if let Some((tag, is_close, self_closing)) = completed_tracked_tag {
-            advance_depths(depths, &tag, is_close, self_closing)?
+            advance_depths_with_strict(depths, &tag, is_close, self_closing, opts.forbid_style_tag)?
         } else {
             depths
         };

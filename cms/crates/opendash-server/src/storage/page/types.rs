@@ -6,7 +6,7 @@ pub(super) use std::{
 };
 
 pub(super) use opendash_core::{
-    block_schema::{BlockSchemaV1, RegisteredBlockSchema},
+    block_schema::{BlockSchema, RegisteredBlockSchema, validate_block_catalog_templates},
     builder::BuilderDocument,
     builder_blocks::{
         ExtractedBlockRefs, extract_block_refs_lenient_with_schemas,
@@ -33,33 +33,79 @@ pub struct RegisteredBlockDef {
     pub revision_digest: String,
 }
 
-pub(in crate::storage) const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, &str)] = &[
+/// 23 Core Blocks: 18 `NativeRust` (`None` template) + 5 `CompiledCsec` (`Some(render.html)`).
+pub(in crate::storage) const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, Option<&str>)] = &[
+    // Layout (4 NativeRust)
     (
-        include_str!("../../builtin_blocks/spacer/block.json"),
-        include_str!("../../builtin_blocks/spacer/render.html"),
+        include_str!("../../builtin_blocks/section/block.json"),
+        None,
     ),
+    (include_str!("../../builtin_blocks/row/block.json"), None),
+    (include_str!("../../builtin_blocks/column/block.json"), None),
+    (include_str!("../../builtin_blocks/stack/block.json"), None),
+    // Core Leaf (7 NativeRust)
+    (
+        include_str!("../../builtin_blocks/heading/block.json"),
+        None,
+    ),
+    (include_str!("../../builtin_blocks/text/block.json"), None),
+    (include_str!("../../builtin_blocks/image/block.json"), None),
+    (include_str!("../../builtin_blocks/video/block.json"), None),
+    (include_str!("../../builtin_blocks/button/block.json"), None),
     (
         include_str!("../../builtin_blocks/divider/block.json"),
-        include_str!("../../builtin_blocks/divider/render.html"),
+        None,
+    ),
+    (include_str!("../../builtin_blocks/spacer/block.json"), None),
+    // Runtime & Template (7 NativeRust)
+    (include_str!("../../builtin_blocks/list/block.json"), None),
+    (
+        include_str!("../../builtin_blocks/contact-form/block.json"),
+        None,
     ),
     (
+        include_str!("../../builtin_blocks/search-form/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/search-results/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/pattern-ref/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/template-part/block.json"),
+        None,
+    ),
+    (
+        include_str!("../../builtin_blocks/content-slot/block.json"),
+        None,
+    ),
+    // CompiledCsec (5 blocks)
+    (
         include_str!("../../builtin_blocks/banner/block.json"),
-        include_str!("../../builtin_blocks/banner/render.html"),
+        Some(include_str!("../../builtin_blocks/banner/render.html")),
     ),
     (
         include_str!("../../builtin_blocks/card/block.json"),
-        include_str!("../../builtin_blocks/card/render.html"),
+        Some(include_str!("../../builtin_blocks/card/render.html")),
     ),
     (
         include_str!("../../builtin_blocks/accordion/block.json"),
-        include_str!("../../builtin_blocks/accordion/render.html"),
+        Some(include_str!("../../builtin_blocks/accordion/render.html")),
     ),
     (
-        include_str!("../../builtin_blocks/showcase/block.json"),
-        include_str!("../../builtin_blocks/showcase/render.html"),
+        include_str!("../../builtin_blocks/accordion-item/block.json"),
+        Some(include_str!(
+            "../../builtin_blocks/accordion-item/render.html"
+        )),
     ),
     (
         include_str!("../../builtin_blocks/social-follow/block.json"),
-        include_str!("../../builtin_blocks/social-follow/render.html"),
+        Some(include_str!(
+            "../../builtin_blocks/social-follow/render.html"
+        )),
     ),
 ];

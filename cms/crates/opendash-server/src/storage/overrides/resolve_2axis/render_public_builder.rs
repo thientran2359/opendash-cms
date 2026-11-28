@@ -27,31 +27,20 @@ pub(in crate::storage) async fn render_public_builder(
             parts.insert(key, rendered.html);
         }
     }
-    let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
+    let lists = builder::resolve_lists_in_tx_for_locale_with_budget(
         tx,
         document,
-        false,
-        ctx.route_entry,
+        ctx.list_pages,
         Some(ctx.render_locale),
-    )
-    .await?;
-    let effective_state =
-        builder::hydrate_binding_media_cow_in_conn(&mut **tx, ctx.state, document, &bindings)
-            .await?;
-    let lists = builder::resolve_lists_in_tx_for_locale(
-        tx,
-        document,
-        &BTreeMap::new(),
-        Some(ctx.render_locale),
+        &mut budget.render_budget,
     )
     .await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
     let empty_patterns = page::PatternResults::new();
-    let mut rendered = page::render_builder_with_budget(
-        effective_state.as_ref(),
+    let mut rendered = page::render_builder_with_budget_and_base_path(
+        ctx.state,
         document,
         false,
-        &bindings,
         &lists,
         &forms,
         Some(&page::BuilderTemplateContext {
@@ -63,6 +52,7 @@ pub(in crate::storage) async fn render_public_builder(
         false,
         RenderAnnotationScope::None,
         scope,
+        ctx.list_base_path,
         &mut budget.render_budget,
         ctx.cache,
     )?;
@@ -199,6 +189,7 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &part_refs, false).await?;
     }
     let url_policy = active_theme_url_policy_in_conn(&mut tx, active_v3, None, None, None).await?;
+    let empty_pages = BTreeMap::new();
     let header_search_view: Option<content_render::SearchView> = theme_context
         .get("search")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -221,6 +212,8 @@ pub async fn resolve_and_render_header_footer_with_context_for_locale(
         theme_context,
         route_entry: None,
         render_locale: &effective_locale,
+        list_pages: &empty_pages,
+        list_base_path: "/",
         cache,
         url_policy: &url_policy,
         fmt_cfg,

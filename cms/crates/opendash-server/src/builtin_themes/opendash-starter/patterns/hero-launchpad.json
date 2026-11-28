@@ -1,57 +1,55 @@
 {
   "schema_version": 1,
-  "sections": [
+  "blocks": [
     {
       "id": "hero-sec-1",
+      "block_id": "core/section",
       "children": [
         {
-          "id": "hero-row-1",
+          "id": "hero-banner",
+          "block_id": "core/banner",
           "children": [
             {
-              "id": "hero-col-1-1",
-              "children": [
-                {
-                  "id": "hero-banner",
-                  "type": "plugin/block",
-                  "props": {
-                    "block_id": "core/banner",
-                    "values": {
-                      "heading": "Đưa ý tưởng thành sản phẩm",
-                      "body": "<p>Thiết kế tinh gọn, tốc độ cao và dễ quản lý.</p>",
-                      "show_cta": true,
-                      "cta_label": "Bắt đầu ngay",
-                      "cta_url": "/lien-he"
-                    }
-                  }
+              "id": "hero-heading",
+              "block_id": "core/heading",
+              "props": {
+                "level": "h1",
+                "text": "Đưa ý tưởng thành sản phẩm",
+                "size": "3xl"
+              }
+            },
+            {
+              "id": "hero-body",
+              "block_id": "core/text",
+              "props": {
+                "content": "<p>Thiết kế tinh gọn, tốc độ cao và dễ quản lý.</p>"
+              }
+            },
+            {
+              "id": "hero-cta",
+              "block_id": "core/button",
+              "props": {
+                "cta": {
+                  "url": "/lien-he",
+                  "label": "Bắt đầu ngay",
+                  "new_tab": false,
+                  "nofollow": false
                 }
-              ]
+              }
             }
           ]
         },
         {
-          "id": "hero-row-2",
-          "children": [
-            {
-              "id": "hero-col-2-1",
-              "children": [
-                {
-                  "id": "hero-stats",
-                  "type": "plugin/block",
-                  "props": {
-                    "block_id": "opendash-starter/stats-bar",
-                    "values": {
-                      "stat_1_value": "100+",
-                      "stat_1_label": "Dự án",
-                      "stat_2_value": "99%",
-                      "stat_2_label": "Hài lòng",
-                      "stat_3_value": "24/7",
-                      "stat_3_label": "Đồng hành"
-                    }
-                  }
-                }
-              ]
-            }
-          ]
+          "id": "hero-stats",
+          "block_id": "opendash-starter/stats-bar",
+          "props": {
+            "stat_1_value": "100+",
+            "stat_1_label": "Dự án",
+            "stat_2_value": "99%",
+            "stat_2_label": "Hài lòng",
+            "stat_3_value": "24/7",
+            "stat_3_label": "Đồng hành"
+          }
         }
       ]
     }

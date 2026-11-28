@@ -284,7 +284,7 @@ fn icon_budget_caps_128_total_across_segments_and_charges_growth() {
 #[test]
 fn declarative_block_icon_renders_once_and_rejects_attribute_spoofing() {
     let source = "<div>{{ od_icon('arrow-right', 'w-3.5') }}</div>";
-    let schema: opendash_core::block_schema::BlockSchemaV1 =
+    let schema: opendash_core::block_schema::BlockSchema =
         serde_json::from_value(serde_json::json!({
             "schema_version": 1,
             "id": "test-icon",
@@ -307,6 +307,9 @@ fn declarative_block_icon_renders_once_and_rejects_attribute_spoofing() {
             merged_options: None,
             site_options: None,
             menus: None,
+            children_html: None,
+            children_meta: None,
+            parent_ctx: None,
             is_preview: false,
             fmt_cfg: &fmt_cfg,
         },
@@ -455,7 +458,7 @@ fn theme_url_capability_is_exact_anchor_only_and_never_inherited_by_blocks() {
 
 #[test]
 fn block_csec_global_options_bridge_enforces_typed_urls_and_forbids_shadowing() {
-    let schema: opendash_core::block_schema::BlockSchemaV1 =
+    let schema: opendash_core::block_schema::BlockSchema =
         serde_json::from_value(serde_json::json!({
             "schema_version": 1,
             "id": "demo/bridge",

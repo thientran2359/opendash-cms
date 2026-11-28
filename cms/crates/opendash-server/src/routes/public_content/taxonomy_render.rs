@@ -231,6 +231,7 @@ pub(crate) async fn render_canonical_taxonomy(
             term_schema: term_schema.as_ref(),
             content_type: Some(&ct_value),
             entry: None,
+            list_pages: None,
             search: &inactive_search,
         },
         &mut budget,

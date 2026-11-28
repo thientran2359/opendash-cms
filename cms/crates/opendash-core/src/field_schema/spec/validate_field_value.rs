@@ -16,36 +16,43 @@ pub fn validate_field_value(
 ) -> Result<(), &'static str> {
     if spec.responsive && ctx == FieldContext::StudioBlock {
         if let Some(obj) = raw_val.as_object() {
-            for k in obj.keys() {
-                if !matches!(k.as_str(), "desktop" | "tablet" | "mobile") {
-                    return Err("Giá trị responsive chỉ chấp nhận desktop, tablet, mobile.");
-                }
-            }
-            let mut has_non_empty = false;
-            for vp in obj.values() {
-                if !vp.is_null() {
-                    if !vp.as_str().is_some_and(|s| s.trim().is_empty()) {
-                        has_non_empty = true;
+            let is_flat_spacing = spec.field_type == FieldType::Spacing
+                && !obj.is_empty()
+                && obj
+                    .keys()
+                    .all(|k| matches!(k.as_str(), "top" | "right" | "bottom" | "left"));
+            if !is_flat_spacing {
+                for k in obj.keys() {
+                    if !matches!(k.as_str(), "desktop" | "tablet" | "mobile") {
+                        return Err("Giá trị responsive chỉ chấp nhận desktop, tablet, mobile.");
                     }
-                    validate_non_responsive_value(
-                        spec,
-                        ctx,
-                        vp,
-                        false,
-                        prev_visible,
-                        false,
-                        prev_val,
-                        root_specs,
-                        root_values,
-                        prev_root_values,
-                        in_root,
-                    )?;
                 }
+                let mut has_non_empty = false;
+                for vp in obj.values() {
+                    if !vp.is_null() {
+                        if !vp.as_str().is_some_and(|s| s.trim().is_empty()) {
+                            has_non_empty = true;
+                        }
+                        validate_non_responsive_value(
+                            spec,
+                            ctx,
+                            vp,
+                            false,
+                            prev_visible,
+                            false,
+                            prev_val,
+                            root_specs,
+                            root_values,
+                            prev_root_values,
+                            in_root,
+                        )?;
+                    }
+                }
+                if visible && !upgrade_exempt && spec.effective_required() && !has_non_empty {
+                    return Err("Thiếu giá trị cho trường bắt buộc.");
+                }
+                return Ok(());
             }
-            if visible && !upgrade_exempt && spec.effective_required() && !has_non_empty {
-                return Err("Thiếu giá trị cho trường bắt buộc.");
-            }
-            return Ok(());
         }
     }
     validate_non_responsive_value(

@@ -388,11 +388,11 @@ async fn e2e_page_layout_chrome_and_inline_icons_with_strict_csp() {
     let schema_token2 = editor_cfg2["schema_token"].as_str().unwrap().to_owned();
 
     let block_body = concat!(
-        "<!-- od:section {\"id\":\"sec-1\"} -->\n",
-        "<!-- od:row {\"id\":\"row-1\"} -->\n",
-        "<!-- od:column {\"id\":\"col-1\"} -->\n",
-        "<!-- od:plugin_block {\"id\":\"blk-1\",\"block_id\":\"safe-icons-e2e/badge\",\"values\":{\"label\":\"OK\"}} /-->\n",
-        "<!-- /od:column -->\n<!-- /od:row -->\n<!-- /od:section -->"
+        "<!-- od:core/section {\"id\":\"sec-1\"} -->\n",
+        "<!-- od:core/row {\"id\":\"row-1\"} -->\n",
+        "<!-- od:core/column {\"id\":\"col-1\"} -->\n",
+        "<!-- od:safe-icons-e2e/badge {\"id\":\"blk-1\",\"props\":{\"label\":\"OK\"}} /-->\n",
+        "<!-- /od:core/column -->\n<!-- /od:core/row -->\n<!-- /od:core/section -->"
     );
     let icon_page = client
         .post(format!(

@@ -238,7 +238,7 @@ pub async fn save_typed_override(
         }
         _ => {}
     }
-    validate_typed_document_in_tx(
+    let state = validate_typed_document_in_tx(
         &mut tx,
         target,
         document,
@@ -247,12 +247,7 @@ pub async fn save_typed_override(
     .await?;
     validate_part_graph_in_tx(&mut tx, target, document).await?;
 
-    let ast_json = String::from_utf8(
-        document
-            .to_json()
-            .map_err(|e| ApiError::bad_request(e.to_string()))?,
-    )
-    .map_err(|_| ApiError::bad_request("Invalid Builder UTF-8 document."))?;
+    let ast_json = normalize_template_ast_json(&state, document)?;
     let target_json = serde_json::to_string(target)?;
     let active: Option<(Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT r.theme_id, r.revision_digest

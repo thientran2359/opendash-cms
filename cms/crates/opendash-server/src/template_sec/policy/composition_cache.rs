@@ -249,3 +249,137 @@ impl CompiledCsecComposition {
         Ok(out)
     }
 }
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn flatten_composition(
+    source: &str,
+    sites: &[CompositionSite],
+    parts: &BTreeMap<String, String>,
+    part_sites: &BTreeMap<String, Vec<CompositionSite>>,
+    visiting: &mut BTreeSet<String>,
+    depth: usize,
+    expansions: &mut usize,
+    content_count: &mut usize,
+    max_part_depth: &mut usize,
+) -> Result<String, &'static str> {
+    let mut out = String::new();
+    let mut cursor = 0_usize;
+    for site in sites {
+        out.push_str(&source[cursor..site.start]);
+        match &site.call {
+            CompositionCall::Content => {
+                *content_count += 1;
+                out.push_str(CONTENT_SLOT_TOKEN);
+            }
+            CompositionCall::Part(key) => {
+                *max_part_depth = (*max_part_depth).max(depth + 1);
+                *expansions += 1;
+                if *expansions > MAX_COMPOSITION_EXPANSIONS {
+                    return Err("od_part vượt quá 32 lần mở rộng.");
+                }
+                if depth >= MAX_COMPOSITION_PART_DEPTH {
+                    return Err("Độ sâu od_part vượt giới hạn 3.");
+                }
+                if !visiting.insert(key.to_owned()) {
+                    return Err("Phát hiện vòng lặp od_part.");
+                }
+                let part = parts
+                    .get(key)
+                    .ok_or("od_part trỏ tới part không tồn tại.")?;
+                let child_sites = part_sites.get(key).ok_or("Thiếu part đã kiểm tra.")?;
+                let child = flatten_composition(
+                    part,
+                    child_sites,
+                    parts,
+                    part_sites,
+                    visiting,
+                    depth + 1,
+                    expansions,
+                    content_count,
+                    max_part_depth,
+                )?;
+                visiting.remove(key);
+                out.push_str(&child);
+            }
+        }
+        if out.len() > MAX_RENDERED_HTML_BYTES {
+            return Err("Template composition vượt giới hạn 512 KiB.");
+        }
+        cursor = site.end;
+    }
+    out.push_str(&source[cursor..]);
+    if out.len() > MAX_RENDERED_HTML_BYTES {
+        return Err("Template composition vượt giới hạn 512 KiB.");
+    }
+    Ok(out)
+}
+
+pub(crate) fn composition_sites(
+    name: &str,
+    source: &str,
+    is_part: bool,
+    policy: &ThemeUrlPolicy,
+    allow_search_form: bool,
+) -> Result<Vec<CompositionSite>, &'static str> {
+    composition_sites_with_context(
+        name,
+        source,
+        is_part,
+        !is_part && is_taxonomy_target_name(name),
+        policy,
+        allow_search_form,
+    )
+}
+
+pub(crate) fn composition_sites_with_context(
+    name: &str,
+    source: &str,
+    is_part: bool,
+    is_taxonomy_template: bool,
+    policy: &ThemeUrlPolicy,
+    allow_search_form: bool,
+) -> Result<Vec<CompositionSite>, &'static str> {
+    if source.trim().is_empty() {
+        return Err("Template không được để trống.");
+    }
+    if source.contains(CONTENT_SLOT_TOKEN)
+        || source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
+        || source.contains(BLOCK_CHILDREN_NONCE_PREFIX)
+        || source.contains(ICON_NONCE_PREFIX)
+        || source.contains(IMAGE_NONCE_PREFIX)
+        || source.contains(HOOK_NONCE_PREFIX)
+    {
+        return Err("Theme HTML chứa marker nội bộ bị cấm.");
+    }
+    let ast = parse(source, name, SyntaxConfig::default())
+        .map_err(|_| "Cú pháp theme MiniJinja không hợp lệ.")?;
+    reject_reserved_context_rebinding_for(&ast, is_taxonomy_template)?;
+    let is_full_doctype_doc = !is_part
+        && source
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("<!doctype");
+    let _ = walk_theme_ast_with_url_scopes_for(
+        &ast,
+        is_part,
+        is_full_doctype_doc,
+        is_taxonomy_template,
+        policy,
+        true,
+        allow_search_form,
+    )?;
+    let mut sites = Vec::new();
+    collect_composition_sites(&ast, source, false, &mut sites)?;
+    sites.sort_by_key(|site| site.start);
+    let mut cursor = 0;
+    for site in &sites {
+        if site.start < cursor || site.end > source.len() {
+            return Err("Vị trí od_part/od_content không hợp lệ.");
+        }
+        if is_part && matches!(site.call, CompositionCall::Content) {
+            return Err("Template part không được chứa od_content().");
+        }
+        cursor = site.end;
+    }
+    Ok(sites)
+}

@@ -157,17 +157,30 @@ async fn responsive_picture_builder_seo_preview_and_replace_version_bump_end_to_
         Some(&builder_etag),
         Some(json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "sec1",
-                "style": { "background_media_id": img_id },
+                "block_id": "core/section",
+                "props": { "bg_image": img_id },
                 "children": [{
                     "id": "row1",
+                    "block_id": "core/row",
+                    "props": {},
                     "children": [{
                         "id": "col1",
+                        "block_id": "core/column",
+                        "props": {},
                         "children": [
-                            { "id": "img1", "type": "core/image", "props": { "media_id": img_id, "alt": "Builder Core Img" } },
-                            { "id": "vid1", "type": "core/video", "props": { "media_id": vid_id, "poster_image_id": img_id, "controls": true, "muted": true } },
-                            { "id": "crd1", "type": "plugin/block", "props": { "block_id": "core/card", "values": { "title": "Card Block", "image": img_id, "body": "<p>Body</p>", "show_cta": false, "layout": "vertical" } } }
+                            { "id": "img1", "block_id": "core/image", "props": { "image": img_id, "alt": "Builder Core Img" } },
+                            { "id": "vid1", "block_id": "core/video", "props": { "video": vid_id, "poster": img_id, "controls": true, "muted": true } },
+                            {
+                                "id": "crd1",
+                                "block_id": "core/card",
+                                "props": { "image": img_id, "media_position": "top" },
+                                "children": [
+                                    { "id": "crd1-h", "block_id": "core/heading", "props": { "level": "h3", "text": "Card Block" } },
+                                    { "id": "crd1-p", "block_id": "core/text", "props": { "content": "<p>Body</p>" } }
+                                ]
+                            }
                         ]
                     }]
                 }]
@@ -271,7 +284,7 @@ async fn responsive_picture_builder_seo_preview_and_replace_version_bump_end_to_
     assert!(home_html.contains(&format!("<video src=\"/media/{vid_id}/file?v=1\"")));
     assert!(
         home_html.contains(&format!(
-            "background-image:url(\"/media/{img_id}/file?v=1\")"
+            "--od-sec-bg-img:url(\"/media/{img_id}/file?v=1\")"
         )),
         "{home_html}"
     );
@@ -329,7 +342,7 @@ async fn responsive_picture_builder_seo_preview_and_replace_version_bump_end_to_
     assert!(home_v2.contains(&format!("/media/{img_id}/variant/medium.webp?v=2 768w")));
     assert!(home_v2.contains(&format!("poster=\"/media/{img_id}/file?v=2\"")));
     assert!(home_v2.contains(&format!(
-        "background-image:url(\"/media/{img_id}/file?v=2\")"
+        "--od-sec-bg-img:url(\"/media/{img_id}/file?v=2\")"
     )));
     assert!(!home_v2.contains(&format!("/media/{img_id}/variant/medium.webp?v=1")));
 }

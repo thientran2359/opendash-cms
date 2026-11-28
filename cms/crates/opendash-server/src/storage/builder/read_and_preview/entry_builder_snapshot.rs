@@ -152,7 +152,10 @@ pub(in crate::storage) async fn entry_builder_snapshot(
     } else {
         match raw_body.as_deref() {
             Some(raw) if !raw.trim().is_empty() => {
-                let parsed = opendash_core::builder_blocks::parse_blocks_lenient_or_recover(raw);
+                let catalog =
+                    crate::storage::page::load_unified_block_catalog_in_conn(&mut **tx).await?;
+                let parsed =
+                    opendash_core::builder_blocks::parse_blocks_lenient_with_schemas(raw, &catalog);
                 (
                     Some(parsed.document),
                     parsed.diagnostics,

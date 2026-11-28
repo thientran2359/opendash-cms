@@ -5,6 +5,30 @@
   "category": "interactive",
   "icon": "chevrons-up-down",
   "render": "render.html",
+  "supports_children": true,
+  "allowed_children": ["core/accordion-item"],
+  "default_children": [
+    {
+      "block_id": "core/accordion-item",
+      "props": { "title": "Câu hỏi 1", "open_by_default": true },
+      "children": [
+        {
+          "block_id": "core/text",
+          "props": { "content": "<p>Nội dung trả lời chi tiết cho mục thứ nhất.</p>" }
+        }
+      ]
+    },
+    {
+      "block_id": "core/accordion-item",
+      "props": { "title": "Câu hỏi 2", "open_by_default": false },
+      "children": [
+        {
+          "block_id": "core/text",
+          "props": { "content": "<p>Nội dung trả lời chi tiết cho mục thứ hai.</p>" }
+        }
+      ]
+    }
+  ],
   "fields": [
     {
       "type": "select",
@@ -12,42 +36,22 @@
       "label": "Kiểu hiển thị",
       "options": [
         { "value": "bordered", "label": "Có viền" },
-        { "value": "minimal", "label": "Tối giản" }
+        { "value": "minimal", "label": "Tối giản" },
+        { "value": "separated", "label": "Tách khối" }
       ],
       "default": "bordered"
+    },
+    {
+      "type": "boolean",
+      "key": "allow_multiple",
+      "label": "Cho phép mở nhiều mục",
+      "default": false
     },
     {
       "type": "boolean",
       "key": "open_first",
       "label": "Mở sẵn mục đầu",
       "default": true
-    },
-    {
-      "type": "repeater",
-      "key": "items",
-      "label": "Danh sách mục",
-      "min_items": 1,
-      "max_items": 24,
-      "item_label_field": "title",
-      "fields": [
-        {
-          "type": "text",
-          "key": "title",
-          "label": "Tiêu đề",
-          "required": true
-        },
-        {
-          "type": "richtext",
-          "key": "content",
-          "label": "Nội dung"
-        },
-        {
-          "type": "boolean",
-          "key": "open",
-          "label": "Mở sẵn",
-          "default": false
-        }
-      ]
     }
   ]
 }

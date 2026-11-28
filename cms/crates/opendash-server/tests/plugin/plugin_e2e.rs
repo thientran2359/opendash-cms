@@ -8,11 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use opendash_core::block_schema::{BlockSchemaV1, RegisteredBlockSchema};
-use opendash_core::builder::{
-    BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps,
-    RowNode, SectionNode,
-};
+use opendash_core::block_schema::{BlockSchema, RegisteredBlockSchema};
+use opendash_core::builder::{BlockNode, BuilderContextTarget, BuilderDocument};
 use opendash_core::registry::{RegistryCatalog, ResourceOwner};
 use reqwest::Client;
 use serde_json::{Value, json};
@@ -495,34 +492,15 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     block_vals.insert("headline".into(), json!("Open Roles"));
     let doc = BuilderDocument {
         schema_version: 1,
-        sections: vec![SectionNode {
-            id: "sec-1".into(),
+        blocks: vec![BlockNode {
+            id: "el-1".into(),
+            block_id: "e2e-suite/jobs-card".into(),
+            props: block_vals,
+            children: vec![],
             meta: None,
-            responsive: None,
-            style: None,
-            children: vec![RowNode {
-                id: "row-1".into(),
-                meta: None,
-                responsive: None,
-                children: vec![ColumnNode {
-                    id: "col-1".into(),
-                    meta: None,
-                    responsive: None,
-                    children: vec![ElementNode {
-                        id: "el-1".into(),
-                        meta: None,
-                        content: ElementContent::Known(KnownElement::PluginBlock(
-                            PluginBlockProps {
-                                block_id: "e2e-suite/jobs-card".into(),
-                                values: block_vals,
-                            },
-                        )),
-                    }],
-                }],
-            }],
         }],
     };
-    let jobs_schema: BlockSchemaV1 = serde_json::from_value(json!({
+    let jobs_schema: BlockSchema = serde_json::from_value(json!({
         "schema_version": 1,
         "id": "e2e-suite/jobs-card",
         "title": "Jobs Card",
@@ -542,9 +520,12 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         },
     )
     .unwrap();
-    assert!(doc.validate_for_save_with_schemas(&reg, None).is_ok());
+    let ctx = BuilderContextTarget::EntryBody {
+        content_type: "page".into(),
+    };
+    assert!(doc.validate_for_save(&reg, &ctx, None).is_ok());
     assert!(
-        doc.validate_for_save_with_schemas(&RegistryCatalog::default(), Some(&doc))
+        doc.validate_for_save(&RegistryCatalog::default(), &ctx, Some(&doc))
             .is_ok()
     );
 

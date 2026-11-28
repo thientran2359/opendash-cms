@@ -4,7 +4,7 @@
   "title": "Khoảng trống",
   "category": "layout",
   "icon": "move-vertical",
-  "render": "render.html",
+  "render": "native",
   "fields": [
     {
       "type": "range",
@@ -15,8 +15,8 @@
       "step": 4,
       "default": 32,
       "unit": "px",
-      "css_var": "--od-spacer-h",
-      "responsive": true
+      "responsive": true,
+      "css_var": "--od-spacer-h"
     }
   ]
 }

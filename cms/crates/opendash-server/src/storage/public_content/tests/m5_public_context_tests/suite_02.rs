@@ -259,15 +259,12 @@ async fn s01_generic_builder_body_and_media_follow_capability_and_publication_wi
     let media_id = "7".repeat(64);
     let document: opendash_core::builder::BuilderDocument = serde_json::from_value(serde_json::json!({
         "schema_version": 1,
-        "sections": [{"id":"section", "children":[{"id":"row", "children":[
-            {"id":"column", "children":[
-                {"id":"heading", "type":"core/heading",
-                    "props":{"level":2,"text":"S01 generic project body"}},
-                {"id":"route-title", "type":"core/heading",
-                    "props":{"level":3,"text":"Unresolved title",
-                        "binding":{"source":{"kind":"route_context","field_key":"title"},"target":"text"}}},
-                {"id":"picture", "type":"core/image",
-                    "props":{"media_id":media_id,"alt":"Project picture"}}
+        "blocks": [{"id":"section", "block_id":"core/section", "children":[{"id":"row", "block_id":"core/row", "children":[
+            {"id":"column", "block_id":"core/column", "children":[
+                {"id":"heading", "block_id":"core/heading",
+                    "props":{"level":"h2","text":"S01 generic project body"}},
+                {"id":"picture", "block_id":"core/image",
+                    "props":{"image":media_id,"alt":"Project picture"}}
             ]}
         ]}]}]
     }))
@@ -306,9 +303,8 @@ async fn s01_generic_builder_body_and_media_follow_capability_and_publication_wi
         .unwrap()
         .unwrap();
     let body = rendered.body.unwrap().html;
+    assert_eq!(rendered.entry.title, "Builder project");
     assert!(body.contains("S01 generic project body"));
-    assert!(body.contains("Builder project"));
-    assert!(!body.contains("Unresolved title"));
     assert!(media_is_referenced(&db, &media_id).await.unwrap());
 
     // Unified `values_json["body"]` renders Builder blocks & grants public media ACL
@@ -412,8 +408,8 @@ async fn s01_one_hop_pattern_acl_and_private_cpt_follow_unified_body_without_con
     .last_insert_rowid();
     let pat_doc = serde_json::json!({
         "schema_version": 1,
-        "sections": [{"id":"s1","children":[{"id":"r1","children":[{"id":"c1","children":[
-            {"id":"img1","type":"core/image","props":{"media_id":media_id,"alt":"Pattern photo"}}
+        "blocks": [{"id":"s1","block_id":"core/section","children":[{"id":"r1","block_id":"core/row","children":[{"id":"c1","block_id":"core/column","children":[
+            {"id":"img1","block_id":"core/image","props":{"image":media_id,"alt":"Pattern photo"}}
         ]}]}]}]
     });
     sqlx::query(
@@ -434,13 +430,13 @@ async fn s01_one_hop_pattern_acl_and_private_cpt_follow_unified_body_without_con
     .unwrap();
 
     let blocks = format!(
-        "<!-- od:section {{\"id\":\"sec-1\"}} -->\n\
-         <!-- od:row {{\"id\":\"row-1\"}} -->\n\
-         <!-- od:column {{\"id\":\"col-1\"}} -->\n\
-         <!-- od:pattern_ref {{\"id\":\"pat-1\",\"pattern_id\":{pattern_id}}} /-->\n\
-         <!-- /od:column -->\n\
-         <!-- /od:row -->\n\
-         <!-- /od:section -->"
+        "<!-- od:core/section {{\"id\":\"sec-1\"}} -->\n\
+         <!-- od:core/row {{\"id\":\"row-1\"}} -->\n\
+         <!-- od:core/column {{\"id\":\"col-1\"}} -->\n\
+         <!-- od:core/pattern-ref {{\"id\":\"pat-1\",\"props\":{{\"pattern_id\":\"{pattern_id}\"}}}} /-->\n\
+         <!-- /od:core/column -->\n\
+         <!-- /od:core/row -->\n\
+         <!-- /od:core/section -->"
     );
     let parent_id = sqlx::query(
         "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode, locale, translation_group_id)

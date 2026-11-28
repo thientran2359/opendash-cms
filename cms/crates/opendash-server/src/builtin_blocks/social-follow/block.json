@@ -3,7 +3,7 @@
   "id": "core/social-follow",
   "title": "Mạng xã hội (Social Follow)",
   "category": "marketing",
-  "icon": "share",
+  "icon": "share-2",
   "render": "render.html",
   "fields": [
     {
@@ -21,48 +21,13 @@
       "open_by_default": true,
       "multi_expand": true
     },
-    {
-      "type": "boolean",
-      "key": "show_facebook",
-      "label": "Facebook",
-      "default": true
-    },
-    {
-      "type": "boolean",
-      "key": "show_youtube",
-      "label": "YouTube",
-      "default": true
-    },
-    {
-      "type": "boolean",
-      "key": "show_tiktok",
-      "label": "TikTok",
-      "default": true
-    },
-    {
-      "type": "boolean",
-      "key": "show_instagram",
-      "label": "Instagram",
-      "default": true
-    },
-    {
-      "type": "boolean",
-      "key": "show_x",
-      "label": "X (Twitter)",
-      "default": false
-    },
-    {
-      "type": "boolean",
-      "key": "show_linkedin",
-      "label": "LinkedIn",
-      "default": false
-    },
-    {
-      "type": "boolean",
-      "key": "show_email",
-      "label": "Email liên hệ",
-      "default": false
-    },
+    { "type": "boolean", "key": "show_facebook", "label": "Facebook", "default": true },
+    { "type": "boolean", "key": "show_youtube", "label": "YouTube", "default": true },
+    { "type": "boolean", "key": "show_tiktok", "label": "TikTok", "default": true },
+    { "type": "boolean", "key": "show_instagram", "label": "Instagram", "default": true },
+    { "type": "boolean", "key": "show_x", "label": "X (Twitter)", "default": false },
+    { "type": "boolean", "key": "show_linkedin", "label": "LinkedIn", "default": false },
+    { "type": "boolean", "key": "show_email", "label": "Email liên hệ", "default": false },
     {
       "type": "accordion",
       "key": "style_section",
@@ -112,8 +77,9 @@
     },
     {
       "type": "spacing",
-      "key": "box_padding",
+      "key": "padding",
       "label": "Khoảng đệm (Padding)",
+      "property": "padding",
       "unit": "px",
       "responsive": true,
       "default": { "top": 8, "right": 0, "bottom": 8, "left": 0 }

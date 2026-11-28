@@ -378,16 +378,22 @@ async fn matrix_hooks_capture_dedup_autosaves_and_lifecycle_via_http() {
         .header(header::IF_MATCH, "\"v1\"")
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "sec-1",
+                "block_id": "core/section",
+                "props": {},
                 "children": [{
                     "id": "row-1",
+                    "block_id": "core/row",
+                    "props": {},
                     "children": [{
                         "id": "col-1",
+                        "block_id": "core/column",
+                        "props": {},
                         "children": [{
                             "id": "hd-1",
-                            "type": "core/heading",
-                            "props": { "text": "Landing Hero", "level": 2 }
+                            "block_id": "core/heading",
+                            "props": { "text": "Landing Hero", "level": "h2" }
                         }]
                     }]
                 }]

@@ -165,7 +165,7 @@ pub(super) enum ThemeHtmlState {
         form_has_action: bool,
         attr_static_buf: String,
     },
-    // Only trusted Theme/Block templates track foreign-content & form nesting.
+    // Only trusted Theme/Block templates track foreign-content, form, and container nesting.
     Trusted {
         inner: Box<ThemeHtmlState>,
         depths: HtmlDepths,
@@ -177,11 +177,21 @@ pub(super) struct HtmlDepths {
     pub(super) svg: usize,
     pub(super) math: usize,
     pub(super) form: usize,
+    pub(super) foreign_object: usize,
+    pub(super) a: usize,
+    pub(super) button: usize,
+    pub(super) summary: usize,
 }
 
 impl HtmlDepths {
     pub(super) fn is_empty(self) -> bool {
-        self.svg == 0 && self.math == 0 && self.form == 0
+        self.svg == 0
+            && self.math == 0
+            && self.form == 0
+            && self.foreign_object == 0
+            && self.a == 0
+            && self.button == 0
+            && self.summary == 0
     }
 }
 

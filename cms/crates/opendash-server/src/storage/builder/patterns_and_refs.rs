@@ -1,43 +1,45 @@
 use super::*;
 
+fn collect_active_media_refs_rec(
+    nodes: &[opendash_core::builder::BlockNode],
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+    refs: &mut DocumentMediaRefs,
+) {
+    for node in nodes {
+        let Some(entry) = schemas.get(&node.block_id) else {
+            continue;
+        };
+        if entry.status != ProviderStatus::Active
+            || entry.declaration_state != DeclarationState::Declared
+        {
+            continue;
+        }
+        let mut collected = entry.descriptor.schema.collect_media_ids(&node.props);
+        if node.block_id == "core/video"
+            && let Some(poster_id) = node
+                .props
+                .get("poster")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+        {
+            collected.image_ids.remove(poster_id);
+            refs.poster_image_ids.insert(poster_id.to_owned());
+        }
+        refs.image_ids.extend(collected.image_ids);
+        refs.video_ids.extend(collected.video_ids);
+        refs.any_media_ids.extend(collected.any_ids);
+        refs.file_ids.extend(collected.file_ids);
+        collect_active_media_refs_rec(&node.children, schemas, refs);
+    }
+}
+
 pub(crate) fn extract_document_media_refs(
     document: &BuilderDocument,
     schemas: &RegistryCatalog<RegisteredBlockSchema>,
 ) -> DocumentMediaRefs {
-    let mut refs = DocumentMediaRefs {
-        image_ids: image_ids(document).into_iter().map(str::to_owned).collect(),
-        video_ids: video_ids(document).into_iter().map(str::to_owned).collect(),
-        poster_image_ids: poster_image_ids(document)
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
-        ..DocumentMediaRefs::default()
-    };
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    let ElementContent::Known(KnownElement::PluginBlock(props)) = &element.content
-                    else {
-                        continue;
-                    };
-                    let Some(entry) = schemas.get(&props.block_id) else {
-                        continue;
-                    };
-                    if entry.status != ProviderStatus::Active
-                        || entry.declaration_state != DeclarationState::Declared
-                    {
-                        continue;
-                    }
-                    let collected = entry.descriptor.schema.collect_media_ids(&props.values);
-                    refs.image_ids.extend(collected.image_ids);
-                    refs.video_ids.extend(collected.video_ids);
-                    refs.any_media_ids.extend(collected.any_ids);
-                    refs.file_ids.extend(collected.file_ids);
-                }
-            }
-        }
-    }
+    let mut refs = DocumentMediaRefs::default();
+    collect_active_media_refs_rec(&document.blocks, schemas, &mut refs);
     refs
 }
 
@@ -106,64 +108,66 @@ pub(crate) async fn resolve_document_media_refs_in_conn(
 /// separately so delete guards and public media ACL never parse client JSON.
 pub fn pattern_ids(document: &BuilderDocument) -> BTreeSet<i64> {
     let mut ids = BTreeSet::new();
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if let ElementContent::Known(KnownElement::PatternRef(pattern)) =
-                        &element.content
-                    {
-                        ids.insert(pattern.pattern_id);
-                    }
-                }
-            }
+    document.walk_blocks(|node, _| {
+        if node.block_id == "core/pattern-ref"
+            && let Some(pid) = parse_positive_i64_prop(node.props.get("pattern_id"))
+        {
+            ids.insert(pid);
         }
-    }
+    });
     ids
+}
+
+fn collect_active_pattern_refs_rec(
+    nodes: &[opendash_core::builder::BlockNode],
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+    ids: &mut BTreeSet<i64>,
+    instances: &mut Vec<(String, i64)>,
+) {
+    for node in nodes {
+        let Some(entry) = schemas.get(&node.block_id) else {
+            continue;
+        };
+        if entry.status != ProviderStatus::Active
+            || entry.declaration_state != DeclarationState::Declared
+        {
+            continue;
+        }
+        if node.block_id == "core/pattern-ref"
+            && let Some(pid) = parse_positive_i64_prop(node.props.get("pattern_id"))
+        {
+            ids.insert(pid);
+            instances.push((node.id.clone(), pid));
+        }
+        ids.extend(entry.descriptor.schema.collect_pattern_ids(&node.props));
+        collect_active_pattern_refs_rec(&node.children, schemas, ids, instances);
+    }
 }
 
 pub fn pattern_ids_with_schemas(
     document: &BuilderDocument,
     schemas: &RegistryCatalog<RegisteredBlockSchema>,
 ) -> BTreeSet<i64> {
-    let mut ids = pattern_ids(document);
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if let ElementContent::Known(KnownElement::PluginBlock(props)) =
-                        &element.content
-                        && let Some(entry) = schemas.get(&props.block_id)
-                        && entry.status == ProviderStatus::Active
-                        && entry.declaration_state == DeclarationState::Declared
-                    {
-                        ids.extend(entry.descriptor.schema.collect_pattern_ids(&props.values));
-                    }
-                }
-            }
-        }
-    }
+    let mut ids = BTreeSet::new();
+    let mut instances = Vec::new();
+    collect_active_pattern_refs_rec(&document.blocks, schemas, &mut ids, &mut instances);
     ids
 }
 
+pub(in crate::storage) fn pattern_ref_instances_with_schemas(
+    document: &BuilderDocument,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> Vec<(String, i64)> {
+    let mut ids = BTreeSet::new();
+    let mut instances = Vec::new();
+    collect_active_pattern_refs_rec(&document.blocks, schemas, &mut ids, &mut instances);
+    instances
+}
+
 pub(in crate::storage) fn node_count(document: &BuilderDocument) -> usize {
-    document
-        .sections
-        .iter()
-        .map(|section| {
-            1 + section
-                .children
-                .iter()
-                .map(|row| {
-                    1 + row
-                        .children
-                        .iter()
-                        .map(|col| 1 + col.children.len())
-                        .sum::<usize>()
-                })
-                .sum::<usize>()
-        })
-        .sum()
+    let mut count = 0usize;
+    document.walk_blocks(|_, _| count += 1);
+    count
 }
 
 /// One batched query inside the caller's read/write transaction, maximum 16

@@ -305,16 +305,19 @@ async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
 
     let doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec-1",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "el-form-1",
-                        "type": "core/contact_form",
-                        "props": { "form_id": form_id, "submit_label": "Gui" }
+                        "block_id": "core/contact-form",
+                        "props": { "form_id": form_id.to_string(), "submit_label": "Gui" }
                     }]
                 }]
             }]

@@ -306,53 +306,58 @@ pub(in crate::storage) fn template_kind_str(kind: TemplateCandidateKind) -> &'st
     }
 }
 
+fn collect_parts_and_slots_rec(
+    nodes: &[opendash_core::builder::BlockNode],
+    schemas: &opendash_core::registry::RegistryCatalog<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >,
+    parts: &mut Vec<String>,
+    slots: &mut usize,
+) {
+    for node in nodes {
+        let Some(entry) = schemas.get(&node.block_id) else {
+            continue;
+        };
+        if entry.status != ProviderStatus::Active
+            || entry.declaration_state != DeclarationState::Declared
+        {
+            continue;
+        }
+        match node.block_id.as_str() {
+            "core/content-slot" => *slots += 1,
+            "core/template-part" => {
+                if let Some(part_key) = node
+                    .props
+                    .get("part_key")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    parts.push(part_key.to_owned());
+                }
+            }
+            _ => {
+                parts.extend(
+                    entry
+                        .descriptor
+                        .schema
+                        .collect_template_part_keys(&node.props),
+                );
+            }
+        }
+        collect_parts_and_slots_rec(&node.children, schemas, parts, slots);
+    }
+}
+
 pub(in crate::storage) fn document_parts_and_slot_count_with_schemas(
     document: &BuilderDocument,
     schemas: &opendash_core::registry::RegistryCatalog<
         opendash_core::block_schema::RegisteredBlockSchema,
     >,
 ) -> ApiResult<(Vec<String>, usize)> {
-    use opendash_core::registry::{DeclarationState, ProviderStatus};
     let mut parts = Vec::new();
     let mut slots = 0;
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    match &element.content {
-                        ElementContent::Known(KnownElement::ContentSlot(_)) => slots += 1,
-                        ElementContent::Known(KnownElement::TemplatePart(props)) => {
-                            parts.push(props.part_key.clone());
-                        }
-                        ElementContent::Known(KnownElement::PluginBlock(props)) => {
-                            if let Some(entry) = schemas.get(&props.block_id)
-                                && entry.status == ProviderStatus::Active
-                                && entry.declaration_state == DeclarationState::Declared
-                            {
-                                parts.extend(
-                                    entry
-                                        .descriptor
-                                        .schema
-                                        .collect_template_part_keys(&props.values),
-                                );
-                            }
-                        }
-                        ElementContent::Unresolved(value)
-                            if matches!(
-                                value.get("type").and_then(serde_json::Value::as_str),
-                                Some("core/content_slot" | "core/template_part")
-                            ) =>
-                        {
-                            return Err(ApiError::bad_request(
-                                "Malformed content slot or template part block.",
-                            ));
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
+    collect_parts_and_slots_rec(&document.blocks, schemas, &mut parts, &mut slots);
     Ok((parts, slots))
 }
 
@@ -375,6 +380,44 @@ pub(in crate::storage) fn validate_content_slots(
     }
 }
 
+fn has_active_pattern_source_rec(
+    nodes: &[opendash_core::builder::BlockNode],
+    schemas: &opendash_core::registry::RegistryCatalog<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >,
+) -> bool {
+    nodes.iter().any(|node| {
+        let Some(entry) = schemas.get(&node.block_id) else {
+            return false;
+        };
+        if entry.status != ProviderStatus::Active
+            || entry.declaration_state != DeclarationState::Declared
+        {
+            return false;
+        }
+        node.block_id == "core/pattern-ref"
+            || entry
+                .descriptor
+                .schema
+                .has_non_empty_pattern_source_value(&node.props)
+            || has_active_pattern_source_rec(&node.children, schemas)
+    })
+}
+
+pub(in crate::storage) fn normalize_template_ast_json(
+    state: &BuilderRenderContext,
+    document: &BuilderDocument,
+) -> ApiResult<String> {
+    let schemas = state.unified_block_schemas()?;
+    let normalized = builder::strip_document_default_props(document, &schemas);
+    String::from_utf8(
+        normalized
+            .to_json()
+            .map_err(|e| ApiError::bad_request(e.to_string()))?,
+    )
+    .map_err(|_| ApiError::bad_request("Invalid Builder UTF-8 document."))
+}
+
 /// The same AST and route-binding validation is used by Save and read-only Preview.
 pub(in crate::storage) async fn validate_typed_document_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
@@ -382,63 +425,31 @@ pub(in crate::storage) async fn validate_typed_document_in_tx(
     document: &BuilderDocument,
     prior: Option<&BuilderDocument>,
 ) -> ApiResult<BuilderRenderContext> {
-    use opendash_core::registry::{DeclarationState, ProviderStatus};
-    let scoped_fields = validate_typed_target_in_tx(tx, target).await?;
+    validate_typed_target_in_tx(tx, target).await?;
     let state = builder::read_render_context_tx(tx).await?;
     let schemas = state.unified_block_schemas()?;
+    let ctx = BuilderContextTarget::Template {
+        kind: target.kind,
+        content_type: target.content_type.clone(),
+        taxonomy: target.taxonomy.clone(),
+        part_key: target.part_key.clone(),
+    };
     document
-        .validate_for_save_with_schemas(&schemas, prior)
+        .validate_for_save(&schemas, &ctx, prior)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    // S02 stores synchronized Pattern references per content entry through
-    // entry_pattern_refs. Shared template overrides have no such ownership or
-    // public-media projection, so accepting a PatternRef here would silently
-    // hide its markup on public pages. Keep these blocks entry-scoped.
-    let has_block_pattern = document.sections.iter().any(|s| {
-        s.children.iter().any(|r| {
-            r.children.iter().any(|c| {
-                c.children.iter().any(|el| {
-                    if let ElementContent::Known(KnownElement::PluginBlock(props)) = &el.content
-                        && let Some(entry) = schemas.get(&props.block_id)
-                        && entry.status == ProviderStatus::Active
-                        && entry.declaration_state == DeclarationState::Declared
-                    {
-                        entry
-                            .descriptor
-                            .schema
-                            .has_non_empty_pattern_source_value(&props.values)
-                    } else {
-                        false
-                    }
-                })
-            })
-        })
-    });
-    if !builder::pattern_ids_with_schemas(document, &schemas).is_empty() || has_block_pattern {
+    // Shared template overrides have no per-entry entry_pattern_refs ownership or
+    // public-media projection, so PatternRef remains entry-scoped.
+    if !builder::pattern_ids_with_schemas(document, &schemas).is_empty()
+        || has_active_pattern_source_rec(&document.blocks, &schemas)
+    {
         return Err(ApiError::bad_request(
             "Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.",
         ));
     }
-    let route_role = match target.kind {
-        TemplateCandidateKind::Single
-        | TemplateCandidateKind::SingleCustom
-        | TemplateCandidateKind::Singular => Some("single"),
-        TemplateCandidateKind::Home
-        | TemplateCandidateKind::Page
-        | TemplateCandidateKind::PageLayout => Some("page"),
-        _ => None,
-    };
-    document
-        .validate_route_context_for_role(route_role, scoped_fields.as_deref())
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
     let (_, slots) = document_parts_and_slot_count_with_schemas(document, &schemas)?;
     validate_content_slots(target, slots)?;
     crate::storage::fields::validate_document_block_refs_in_conn(
-        &mut **tx,
-        document,
-        prior,
-        &schemas,
-        None,
-        scoped_fields.as_deref(),
+        &mut **tx, document, prior, &schemas, None, None,
     )
     .await?;
     builder::validate_media_refs_in_tx(&mut **tx, document).await?;

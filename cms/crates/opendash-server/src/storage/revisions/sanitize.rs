@@ -1,16 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use opendash_core::block_schema::RegisteredBlockSchema;
-use opendash_core::builder::{
-    BindingTarget, BuilderDocument, ElementContent, KnownElement, valid_button_url,
-};
+use opendash_core::builder::{BlockNode, BuilderDocument};
 use opendash_core::content::{EffectiveContentSchema, FieldRole};
 use opendash_core::field_schema::{FieldSpec, FieldType, SelectOptionsSource, evaluate_conditions};
 use opendash_core::registry::{DeclarationState, ProviderStatus, RegistryCatalog};
 use opendash_core::revisions::{CanonicalRevisionPayload, MissingRefsReport};
 use serde_json::Value;
-
-use crate::storage::media::valid_media_id;
 
 use super::custom_field_refs::resolve_term_ref_taxonomy;
 use super::snapshot_queries::LiveEntryState;
@@ -24,7 +20,6 @@ struct SanitizeCtx<'a> {
     missing_forms: BTreeSet<i64>,
     missing_list_nodes: BTreeSet<&'a str>,
     missing_block_nodes: BTreeSet<&'a str>,
-    cleared_bindings: BTreeSet<&'a str>,
     missing_dynamic: BTreeMap<(&'a str, &'a str), BTreeSet<&'a str>>,
     dropped_block_fields: BTreeMap<&'a str, BTreeSet<&'a str>>,
 }
@@ -62,11 +57,6 @@ impl<'a> SanitizeCtx<'a> {
                 .collect(),
             missing_block_nodes: report
                 .missing_block_types
-                .iter()
-                .map(|m| m.node_id.as_str())
-                .collect(),
-            cleared_bindings: report
-                .cleared_binding_nodes
                 .iter()
                 .map(|m| m.node_id.as_str())
                 .collect(),
@@ -478,117 +468,58 @@ fn sanitize_builder_document(
     ctx: &SanitizeCtx<'_>,
     schemas: &RegistryCatalog<RegisteredBlockSchema>,
 ) {
-    for section in &mut doc.sections {
-        if let Some(style) = section.style.as_mut()
-            && let Some(ref bg) = style.background_media_id
-            && ctx.missing_media_ids.contains(bg.as_str())
-        {
-            style.background_media_id = None;
-        }
-        for row in &mut section.children {
-            for col in &mut row.children {
-                col.children
-                    .retain_mut(|el| sanitize_element(el, ctx, schemas));
-            }
-        }
-    }
+    doc.blocks
+        .retain_mut(|node| sanitize_block_node(node, ctx, schemas));
 }
 
-fn valid_fallback_text(value: &str, max_chars: usize, required: bool) -> bool {
-    value.chars().count() <= max_chars
-        && (!required || !value.trim().is_empty())
-        && !value
-            .chars()
-            .any(|ch| ch == '\0' || (ch.is_control() && ch != '\n' && ch != '\t'))
+fn parse_positive_i64(val: Option<&Value>) -> Option<i64> {
+    val.and_then(|v| {
+        v.as_i64()
+            .or_else(|| v.as_str().and_then(|s| s.trim().parse::<i64>().ok()))
+    })
+    .filter(|&id| id > 0)
 }
 
-fn sanitize_element(
-    el: &mut opendash_core::builder::ElementNode,
+fn sanitize_block_node(
+    node: &mut BlockNode,
     ctx: &SanitizeCtx<'_>,
     schemas: &RegistryCatalog<RegisteredBlockSchema>,
 ) -> bool {
-    if ctx.missing_block_nodes.contains(el.id.as_str())
-        || ctx.missing_list_nodes.contains(el.id.as_str())
+    if ctx.missing_block_nodes.contains(node.id.as_str())
+        || ctx.missing_list_nodes.contains(node.id.as_str())
     {
         return false;
     }
-    let ElementContent::Known(known) = &mut el.content else {
-        return true;
-    };
-    let was_binding_cleared = ctx.cleared_bindings.contains(el.id.as_str());
-    match known {
-        KnownElement::Heading(props) => {
-            if was_binding_cleared {
-                props.binding = None;
-                return (1..=6).contains(&props.level)
-                    && valid_fallback_text(&props.text, 512, true);
-            }
-            true
-        }
-        KnownElement::Text(props) => {
-            if was_binding_cleared {
-                props.binding = None;
-                let text_ok = valid_fallback_text(&props.text, 16_384, false)
-                    && (!props.rich
-                        || opendash_core::richtext::sanitize_richtext(&props.text).is_ok());
-                return text_ok;
-            }
-            true
-        }
-        KnownElement::Image(props) => {
-            if was_binding_cleared {
-                props.binding = None;
-                return !props.media_id.trim().is_empty()
-                    && valid_media_id(&props.media_id)
-                    && !ctx.missing_media_ids.contains(props.media_id.as_str());
-            }
-            let bound_media = props
-                .binding
-                .as_ref()
-                .is_some_and(|b| b.target == BindingTarget::MediaId);
-            if !bound_media && ctx.missing_media_ids.contains(props.media_id.as_str()) {
-                return false;
-            }
-            true
-        }
-        KnownElement::Video(props) => {
-            if ctx.missing_media_ids.contains(props.media_id.as_str()) {
-                return false;
-            }
-            if let Some(ref pid) = props.poster_image_id
-                && ctx.missing_media_ids.contains(pid.as_str())
-            {
-                props.poster_image_id = None;
-            }
-            true
-        }
-        KnownElement::Button(props) => {
-            if was_binding_cleared {
-                props.binding = None;
-                return valid_fallback_text(&props.label, 200, true)
-                    && valid_button_url(&props.url);
-            }
-            true
-        }
-        KnownElement::PatternRef(props) => !ctx.missing_patterns.contains(&props.pattern_id),
-        KnownElement::ContactForm(props) => !ctx.missing_forms.contains(&props.form_id),
-        KnownElement::PluginBlock(props) => {
-            let Some(entry) = schemas.get(&props.block_id) else {
-                return true;
-            };
-            if entry.status != ProviderStatus::Active
-                || entry.declaration_state != DeclarationState::Declared
-            {
-                return true;
-            }
-            clean_field_map(
-                &entry.descriptor.schema.fields,
-                Some(el.id.as_str()),
-                &mut props.values,
-                ctx,
-                true,
-            )
-        }
-        _ => true,
+    if node.block_id == "core/pattern-ref"
+        && parse_positive_i64(node.props.get("pattern_id"))
+            .is_some_and(|pid| ctx.missing_patterns.contains(&pid))
+    {
+        return false;
     }
+    if node.block_id == "core/contact-form"
+        && parse_positive_i64(node.props.get("form_id"))
+            .is_some_and(|fid| ctx.missing_forms.contains(&fid))
+    {
+        return false;
+    }
+
+    if let Some(entry) = schemas.get(&node.block_id)
+        && entry.status == ProviderStatus::Active
+        && entry.declaration_state == DeclarationState::Declared
+    {
+        let keep = clean_field_map(
+            &entry.descriptor.schema.fields,
+            Some(node.id.as_str()),
+            &mut node.props,
+            ctx,
+            true,
+        );
+        if !keep {
+            return false;
+        }
+    }
+
+    node.children
+        .retain_mut(|child| sanitize_block_node(child, ctx, schemas));
+    true
 }

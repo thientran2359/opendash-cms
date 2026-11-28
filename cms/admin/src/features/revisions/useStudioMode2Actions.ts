@@ -8,10 +8,9 @@ import type { PatternRecord } from '../../api/patterns.ts';
 import {
   EMPTY_DOCUMENT,
   allNodes,
-  isElement,
+  parsePositiveInt,
   visibleNodesInTree,
   type BuilderDocument,
-  type BuilderElement,
   type StudioBuilderClipboard,
 } from '../../builder/document.ts';
 import type { StudioBuilderView } from '../../builder/BuilderEditorCore.tsx';
@@ -171,14 +170,9 @@ export function useStudioMode2Actions(options: UseStudioMode2ActionsOptions) {
     }
 
     const refs = allNodes(entryDoc)
-      .filter(
-        node =>
-          node.kind === 'element' &&
-          isElement(node.node) &&
-          node.node.type === 'core/pattern_ref',
-      )
-      .map(node => Number((node.node as BuilderElement).props.pattern_id));
-    if (refs.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(refs).size > 16) {
+      .filter(entry => entry.node.block_id === 'core/pattern-ref')
+      .map(entry => parsePositiveInt(entry.node.props?.pattern_id));
+    if (refs.length > 16 || refs.some(id => id === null) || new Set(refs).size > 16) {
       setStatus(
         __("Each reusable pattern requires a valid pattern (up to 16 patterns per page)."),
         true,

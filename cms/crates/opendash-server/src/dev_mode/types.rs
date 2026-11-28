@@ -18,7 +18,7 @@ pub(super) use std::{
 pub(super) use opendash_core::{
     admin_extensions::AdminExtensions,
     backup::PortableRuntimeConfigV1,
-    block_schema::BlockSchemaV1,
+    block_schema::BlockSchema,
     plugin::PluginManifest,
     theme::{TemplateCandidateKind, ThemeV3Manifest, valid_v3_asset_path},
 };
@@ -60,7 +60,7 @@ pub struct DevThemeSnapshot {
     pub parts: BTreeMap<String, String>,
     pub page_layouts: BTreeMap<String, String>,
     pub l10n_catalogs: BTreeMap<String, std::sync::Arc<opendash_core::l10n::Catalog>>,
-    pub blocks: Vec<(BlockSchemaV1, String)>,
+    pub blocks: Vec<(BlockSchema, String)>,
     pub functions_js: Option<Vec<u8>>,
     pub admin_extensions: Option<AdminExtensions>,
 }
@@ -71,7 +71,7 @@ pub struct DevPluginSnapshot {
     pub manifest_json: String,
     pub admin_extensions: Option<AdminExtensions>,
     pub code_bytes: Vec<u8>,
-    pub blocks: Vec<(BlockSchemaV1, String)>,
+    pub blocks: Vec<(BlockSchema, String)>,
     pub revision_digest: String,
 }
 

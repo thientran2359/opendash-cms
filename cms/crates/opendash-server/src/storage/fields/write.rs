@@ -153,6 +153,38 @@ pub(in crate::storage) fn collect_all_options_sources_with_paths(
     }
 }
 
+fn collect_active_block_nodes<'a>(
+    nodes: &'a [opendash_core::builder::BlockNode],
+    catalog: &'a RegistryCatalog<RegisteredBlockSchema>,
+    out: &mut Vec<(
+        &'a opendash_core::builder::BlockNode,
+        &'a RegisteredBlockSchema,
+    )>,
+) {
+    for node in nodes {
+        let Some(entry) = catalog.get(&node.block_id) else {
+            continue;
+        };
+        if entry.status != ProviderStatus::Active
+            || entry.declaration_state != DeclarationState::Declared
+        {
+            continue;
+        }
+        out.push((node, &entry.descriptor));
+        collect_active_block_nodes(&node.children, catalog, out);
+    }
+}
+
+fn index_prev_nodes_rec<'a>(
+    nodes: &'a [opendash_core::builder::BlockNode],
+    out: &mut BTreeMap<String, (&'a str, &'a BTreeMap<String, Value>)>,
+) {
+    for node in nodes {
+        out.insert(node.id.clone(), (node.block_id.as_str(), &node.props));
+        index_prev_nodes_rec(&node.children, out);
+    }
+}
+
 pub async fn validate_document_block_refs_in_conn(
     conn: &mut SqliteConnection,
     document: &BuilderDocument,
@@ -163,64 +195,35 @@ pub async fn validate_document_block_refs_in_conn(
 ) -> ApiResult<()> {
     let mut prev_nodes: BTreeMap<String, (&str, &BTreeMap<String, Value>)> = BTreeMap::new();
     if let Some(prev_doc) = previous {
-        for section in &prev_doc.sections {
-            for row in &section.children {
-                for column in &row.children {
-                    for element in &column.children {
-                        if let ElementContent::Known(KnownElement::PluginBlock(props)) =
-                            &element.content
-                        {
-                            prev_nodes.insert(
-                                element.id.clone(),
-                                (props.block_id.as_str(), &props.values),
-                            );
-                        }
-                    }
-                }
-            }
-        }
+        index_prev_nodes_rec(&prev_doc.blocks, &mut prev_nodes);
     }
 
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    let ElementContent::Known(KnownElement::PluginBlock(props)) = &element.content
-                    else {
-                        continue;
-                    };
-                    let Some(entry) = catalog.get(&props.block_id) else {
-                        continue;
-                    };
-                    if entry.status != ProviderStatus::Active
-                        || entry.declaration_state != DeclarationState::Declared
-                    {
-                        continue;
-                    }
-                    let prev_vals =
-                        prev_nodes
-                            .get(&element.id)
-                            .and_then(|(prev_block_id, vals)| {
-                                (*prev_block_id == props.block_id.as_str()).then_some(*vals)
-                            });
-                    validate_relational_refs_in_conn(
-                        conn,
-                        &entry.descriptor.schema.fields,
-                        &props.values,
-                        prev_vals,
-                        required_locale,
-                    )
-                    .await?;
-                    validate_block_dynamic_options_in_tx(
-                        conn,
-                        &entry.descriptor.schema.fields,
-                        &props.values,
-                        prev_vals,
-                        allowed_context_fields,
-                    )
-                    .await?;
-                }
-            }
+    let mut active_nodes = Vec::new();
+    collect_active_block_nodes(&document.blocks, catalog, &mut active_nodes);
+
+    for (node, descriptor) in active_nodes {
+        let prev_vals = prev_nodes
+            .get(&node.id)
+            .and_then(|(prev_block_id, vals)| (*prev_block_id == node.block_id).then_some(*vals));
+        validate_relational_refs_in_conn(
+            conn,
+            &descriptor.schema.fields,
+            &node.props,
+            prev_vals,
+            required_locale,
+        )
+        .await?;
+        // Built-in core/template-part validates part_key syntax in opendash-core
+        // and degrades missing targets to non-fatal `template_part_unavailable` diagnostics.
+        if node.block_id != "core/template-part" {
+            validate_block_dynamic_options_in_tx(
+                conn,
+                &descriptor.schema.fields,
+                &node.props,
+                prev_vals,
+                allowed_context_fields,
+            )
+            .await?;
         }
     }
     Ok(())
@@ -234,8 +237,8 @@ pub async fn validate_comment_block_refs_in_conn(
     required_locale: Option<&str>,
     allowed_context_fields: Option<&[String]>,
 ) -> ApiResult<()> {
-    let doc = parse_blocks_lenient_or_recover(raw_body).document;
-    let prev_doc = previous_body.map(|b| parse_blocks_lenient_or_recover(b).document);
+    let doc = parse_blocks_lenient_with_schemas(raw_body, catalog).document;
+    let prev_doc = previous_body.map(|b| parse_blocks_lenient_with_schemas(b, catalog).document);
     validate_document_block_refs_in_conn(
         conn,
         &doc,

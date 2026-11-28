@@ -9,7 +9,7 @@ pub(super) use std::{
 
 pub(super) use opendash_core::{
     block_schema::RegisteredBlockSchema,
-    builder::{BindingSource, BuilderDocument, ElementContent, KnownElement},
+    builder::{BuilderContextTarget, BuilderDocument, parse_positive_i64_prop},
     builder_blocks::BlockDiagnostic,
     content::{
         ContentMode, ContentPublication, ContentSupport, EffectiveContentSchema,
@@ -30,15 +30,14 @@ pub(super) use crate::{
     error::{ApiError, ApiResult},
     hooks::{ContentBeforeSaveVeto, HookDispatcher},
     page::{self, RenderAnnotationScope, RenderedLayout},
+    storage::entries::{self, EntryFilters, PublishedListResult, PublishedListSort},
     storage::media::valid_media_id,
-    storage::{
-        builder_binding,
-        entries::{self, EntryFilters, PublishedListResult, PublishedListSort},
-    },
 };
 
 mod builderrendercontext;
 pub use builderrendercontext::*;
+mod list_hydration;
+pub use list_hydration::*;
 mod media_hydration;
 pub use media_hydration::*;
 mod render_entry_builder_preview;

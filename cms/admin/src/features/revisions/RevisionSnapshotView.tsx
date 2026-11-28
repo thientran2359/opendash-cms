@@ -79,7 +79,7 @@ export const RevisionSnapshotView: React.FC<RevisionSnapshotViewProps> = ({
         {detailData.builder_document && (
           <div className="rounded-lg border border-zinc-200 bg-white p-3">
             <strong>{__("Builder sections:")}</strong>{' '}
-            {detailData.builder_document.sections.length}
+            {detailData.builder_document.blocks.length}
           </div>
         )}
         {detailData.terms.length > 0 && (

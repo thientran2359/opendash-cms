@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "core/contact-form",
+  "title": "Biểu mẫu liên hệ",
+  "category": "interactive",
+  "icon": "mail",
+  "render": "native",
+  "allowed_contexts": ["*", "!theme_pattern"],
+  "fields": [
+    {
+      "type": "select",
+      "key": "form_id",
+      "label": "Chọn biểu mẫu",
+      "options_source": "contact_forms",
+      "required": true
+    },
+    {
+      "type": "text",
+      "key": "submit_label",
+      "label": "Nhãn nút gửi",
+      "max_chars": 80,
+      "default": "Gửi liên hệ"
+    },
+    {
+      "type": "select",
+      "key": "style",
+      "label": "Kiểu hiển thị",
+      "options": [
+        { "value": "default", "label": "Mặc định" },
+        { "value": "compact", "label": "Gọn" }
+      ],
+      "default": "default"
+    }
+  ]
+}

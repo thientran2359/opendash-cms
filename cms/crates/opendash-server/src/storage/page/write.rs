@@ -37,6 +37,20 @@ pub async fn ensure_embedded_core_blocks_in_conn(conn: &mut SqliteConnection) ->
         .execute(&mut *conn)
         .await?;
     }
+    let active_ids: Vec<&str> = embedded_core_block_defs()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let ids_json = serde_json::to_string(&active_ids)?;
+    sqlx::query(
+        "DELETE FROM builder_block_definitions
+          WHERE owner_kind = 'core'
+            AND owner_id = 'core'
+            AND block_id NOT IN (SELECT value FROM json_each(?))",
+    )
+    .bind(&ids_json)
+    .execute(&mut *conn)
+    .await?;
     Ok(())
 }
 
@@ -144,4 +158,41 @@ pub(crate) fn body_can_grant_media(schema: &EffectiveContentSchema) -> bool {
                 && body.definition.effective_acl().2 == PublicExposure::Public
                 && body.definition.effective_acl().0 == FieldRole::Editor
         })
+}
+
+pub(crate) fn validate_package_blocks_against_core_catalog(
+    owner: opendash_core::registry::ResourceOwner,
+    blocks: &[(opendash_core::block_schema::BlockSchema, String)],
+) -> Result<(), &'static str> {
+    if blocks.is_empty() {
+        return Ok(());
+    }
+    let mut catalog = opendash_core::registry::RegistryCatalog::<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >::new();
+    for def in super::embedded_core_block_defs().values() {
+        catalog.insert_loaded(
+            def.block_id.clone(),
+            opendash_core::registry::OwnedDescriptor {
+                owner: opendash_core::registry::ResourceOwner::Core,
+                status: opendash_core::registry::ProviderStatus::Active,
+                declaration_state: opendash_core::registry::DeclarationState::Declared,
+                descriptor: def.schema.clone(),
+            },
+        );
+    }
+    for (schema, _) in blocks {
+        catalog.insert_loaded(
+            schema.id.clone(),
+            opendash_core::registry::OwnedDescriptor {
+                owner: owner.clone(),
+                status: opendash_core::registry::ProviderStatus::Active,
+                declaration_state: opendash_core::registry::DeclarationState::Declared,
+                descriptor: opendash_core::block_schema::RegisteredBlockSchema {
+                    schema: schema.clone(),
+                },
+            },
+        );
+    }
+    opendash_core::block_schema::validate_block_catalog_templates(&catalog)
 }

@@ -35,6 +35,7 @@ impl DevOverlayConfig {
     pub fn init_global(cfg: Arc<Self>) {
         let mut guard = global_slot().write().unwrap_or_else(|e| e.into_inner());
         *guard = Some(cfg);
+        crate::page::BlockTemplateCache::global().clear();
         crate::cache::SiteCacheEpoch::global().bump();
     }
 
@@ -42,6 +43,7 @@ impl DevOverlayConfig {
     pub fn clear_global() {
         let mut guard = global_slot().write().unwrap_or_else(|e| e.into_inner());
         *guard = None;
+        crate::page::BlockTemplateCache::global().clear();
         crate::cache::SiteCacheEpoch::global().bump();
     }
 
@@ -128,6 +130,7 @@ impl DevOverlayConfig {
         if changed {
             let had_prev = map.insert(scope.to_owned(), digest.to_owned()).is_some();
             if had_prev {
+                crate::page::BlockTemplateCache::global().clear();
                 crate::cache::SiteCacheEpoch::global().bump();
             }
         }

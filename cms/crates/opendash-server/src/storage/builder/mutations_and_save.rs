@@ -1,64 +1,55 @@
 use super::*;
 
-pub fn image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
-    let mut ids = BTreeSet::new();
-    for section in &document.sections {
-        if let Some(bg_media) = section
-            .style
-            .as_ref()
-            .and_then(|s| s.background_media_id.as_deref())
-            .filter(|id| !id.is_empty())
-        {
-            ids.insert(bg_media);
-        }
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if let ElementContent::Known(KnownElement::Image(image)) = &element.content {
-                        if !image.binding.as_ref().is_some_and(|b| {
-                            b.target == opendash_core::builder::BindingTarget::MediaId
-                        }) {
-                            ids.insert(image.media_id.as_str());
-                        }
-                    }
+fn collect_media_prop_strs_rec<'a>(
+    nodes: &'a [opendash_core::builder::BlockNode],
+    match_ids: &[&str],
+    prop_keys: &[&str],
+    out: &mut BTreeSet<&'a str>,
+) {
+    for node in nodes {
+        if match_ids.contains(&node.block_id.as_str()) {
+            for key in prop_keys {
+                if let Some(val) = node
+                    .props
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                {
+                    out.insert(val);
                 }
             }
         }
+        collect_media_prop_strs_rec(&node.children, match_ids, prop_keys, out);
     }
+}
+
+pub fn image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
+    let mut ids = BTreeSet::new();
+    collect_media_prop_strs_rec(
+        &document.blocks,
+        &["core/section", "core/banner"],
+        &["bg_image"],
+        &mut ids,
+    );
+    collect_media_prop_strs_rec(
+        &document.blocks,
+        &["core/card", "core/image"],
+        &["image"],
+        &mut ids,
+    );
     ids
 }
 
 pub fn video_ids(document: &BuilderDocument) -> BTreeSet<&str> {
     let mut ids = BTreeSet::new();
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if let ElementContent::Known(KnownElement::Video(video)) = &element.content {
-                        ids.insert(video.media_id.as_str());
-                    }
-                }
-            }
-        }
-    }
+    collect_media_prop_strs_rec(&document.blocks, &["core/video"], &["video"], &mut ids);
     ids
 }
 
 pub fn poster_image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
     let mut ids = BTreeSet::new();
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if let ElementContent::Known(KnownElement::Video(video)) = &element.content
-                        && let Some(poster) = video.poster_image_id.as_deref()
-                    {
-                        ids.insert(poster);
-                    }
-                }
-            }
-        }
-    }
+    collect_media_prop_strs_rec(&document.blocks, &["core/video"], &["poster"], &mut ids);
     ids
 }
 
@@ -74,39 +65,61 @@ pub(crate) struct DocumentMediaRefs {
     pub file_ids: BTreeSet<String>,
 }
 
+fn node_list_or_pattern_in_slice(
+    nodes: &[opendash_core::builder::BlockNode],
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> bool {
+    nodes.iter().any(|node| {
+        if matches!(node.block_id.as_str(), "core/pattern-ref" | "core/list") {
+            return true;
+        }
+        if schemas.get(&node.block_id).is_some_and(|entry| {
+            entry.status == ProviderStatus::Active
+                && entry.declaration_state == DeclarationState::Declared
+                && entry
+                    .descriptor
+                    .schema
+                    .has_non_empty_pattern_source_value(&node.props)
+        }) {
+            return true;
+        }
+        node_list_or_pattern_in_slice(&node.children, schemas)
+    })
+}
+
 pub(in crate::storage) fn has_nested_pattern_or_list_with_schemas(
     document: &BuilderDocument,
     schemas: &RegistryCatalog<RegisteredBlockSchema>,
 ) -> bool {
-    document.sections.iter().any(|section| {
-        section.children.iter().any(|row| {
-            row.children.iter().any(|column| {
-                column
-                    .children
-                    .iter()
-                    .any(|element| match &element.content {
-                        ElementContent::Known(
-                            KnownElement::PatternRef(_) | KnownElement::List(_),
-                        ) => true,
-                        ElementContent::Known(KnownElement::PluginBlock(props)) => {
-                            schemas.get(&props.block_id).is_some_and(|entry| {
-                                entry.status == ProviderStatus::Active
-                                    && entry.declaration_state == DeclarationState::Declared
-                                    && entry
-                                        .descriptor
-                                        .schema
-                                        .has_non_empty_pattern_source_value(&props.values)
-                            })
-                        }
-                        ElementContent::Unresolved(raw) => matches!(
-                            raw.get("type").and_then(Value::as_str),
-                            Some("core/pattern_ref" | "core/list")
-                        ),
-                        _ => false,
-                    })
-            })
-        })
-    })
+    node_list_or_pattern_in_slice(&document.blocks, schemas)
+}
+
+fn strip_node_defaults(
+    node: &mut opendash_core::builder::BlockNode,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) {
+    if let Some(entry) = schemas.get(&node.block_id)
+        && entry.status == ProviderStatus::Active
+        && entry.declaration_state == DeclarationState::Declared
+    {
+        entry.descriptor.schema.strip_default_props(&mut node.props);
+    }
+    for child in &mut node.children {
+        strip_node_defaults(child, schemas);
+    }
+}
+
+/// Normalizes props by stripping top-level keys strictly equal to `field.default`
+/// on active, declared schemas while preserving inactive/unknown nodes verbatim.
+pub(in crate::storage) fn strip_document_default_props(
+    document: &BuilderDocument,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> BuilderDocument {
+    let mut normalized = document.clone();
+    for node in &mut normalized.blocks {
+        strip_node_defaults(node, schemas);
+    }
+    normalized
 }
 
 /// Builder documents are site-owned entry content. Their only version is the

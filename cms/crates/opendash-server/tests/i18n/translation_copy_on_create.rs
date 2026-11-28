@@ -281,15 +281,18 @@ async fn s03_copy_on_create_entry_translations_seo_terms_builder_and_lifecycle()
     // Build a block document with core/list referencing both cat_vi_id and tag_vi_only_id
     let doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "block_id": "core/section",
             "children": [{
                 "id": "row1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col1",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "list1",
-                        "type": "core/list",
+                        "block_id": "core/list",
                         "props": {
                             "type_key": "post",
                             "taxonomy_key": "category",
@@ -480,18 +483,15 @@ async fn s03_copy_on_create_entry_translations_seo_terms_builder_and_lifecycle()
     // Verify core/list block term_ids remapped to cat_en_id (tag_vi_only_id dropped)
     let en_body = en_entry["values"]["body"].as_str().unwrap();
     let parsed_en = opendash_core::builder_blocks::parse_blocks_lenient_or_recover(en_body);
-    let el = &parsed_en.document.sections[0].children[0].children[0].children[0];
-    if let opendash_core::builder::ElementContent::Known(
-        opendash_core::builder::KnownElement::List(props),
-    ) = &el.content
-    {
-        assert_eq!(props.term_id, Some(cat_en_id));
-    } else {
-        panic!(
-            "expected core/list block, got: {:#?}, en_body={en_body}, block_body={block_body}",
-            el.content
-        );
-    }
+    let el = &parsed_en.document.blocks[0].children[0].children[0].children[0];
+    assert_eq!(
+        el.block_id, "core/list",
+        "expected core/list block, got: {el:#?}, en_body={en_body}, block_body={block_body}"
+    );
+    assert_eq!(
+        el.props.get("term_id").and_then(Value::as_i64),
+        Some(cat_en_id)
+    );
 
     // Verify entry_seo copied EXCEPT canonical_url, and no routes/redirects copied
     let seo_row: (String, String, Option<String>, Option<String>, i64) = sqlx::query_as(
@@ -1170,15 +1170,18 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
     // Studio preview for selector_slug="shared-post" with preview_locale="en"
     let single_doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "block_id": "core/section",
             "children": [{
                 "id": "row1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col1",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "slot1",
-                        "type": "core/content_slot",
+                        "block_id": "core/content-slot",
                         "props": {}
                     }]
                 }]
@@ -1218,16 +1221,19 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
     // Studio preview with custom BuilderDocument containing core/list -> filters by preview_locale="en"
     let list_doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec1",
+            "block_id": "core/section",
             "children": [{
                 "id": "row1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col1",
+                    "block_id": "core/column",
                     "children": [
                         {
                             "id": "listen",
-                            "type": "core/list",
+                            "block_id": "core/list",
                             "props": {
                                 "type_key": "post",
                                 "page_size": 10
@@ -1235,7 +1241,7 @@ async fn s03_studio_preview_locale_and_binding_list_isolation() {
                         },
                         {
                             "id": "slot1",
-                            "type": "core/content_slot",
+                            "block_id": "core/content-slot",
                             "props": {}
                         }
                     ]

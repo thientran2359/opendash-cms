@@ -1,21 +1,23 @@
 {
   "schema_version": 1,
   "id": "core/card",
-  "title": "Thẻ nội dung",
+  "title": "Thẻ nội dung (Card)",
   "category": "content",
   "icon": "square",
   "render": "render.html",
-  "fields": [
+  "supports_children": true,
+  "allowed_children": ["*", "!core/section"],
+  "default_children": [
     {
-      "type": "select",
-      "key": "layout",
-      "label": "Bố cục",
-      "options": [
-        { "value": "vertical", "label": "Dọc" },
-        { "value": "horizontal", "label": "Ngang" }
-      ],
-      "default": "vertical"
+      "block_id": "core/heading",
+      "props": { "level": "h3", "text": "Tiêu đề thẻ" }
     },
+    {
+      "block_id": "core/text",
+      "props": { "content": "<p>Mô tả ngắn gọn về tính năng hoặc dịch vụ.</p>" }
+    }
+  ],
+  "fields": [
     {
       "type": "media",
       "key": "image",
@@ -23,43 +25,92 @@
       "media_kind": "image"
     },
     {
-      "type": "text",
-      "key": "title",
-      "label": "Tiêu đề",
-      "required": true,
-      "default": "Thẻ nội dung"
+      "type": "select",
+      "key": "media_position",
+      "label": "Vị trí ảnh",
+      "options": [
+        { "value": "top", "label": "Trên" },
+        { "value": "left", "label": "Trái" },
+        { "value": "right", "label": "Phải" },
+        { "value": "none", "label": "Ẩn ảnh" }
+      ],
+      "default": "top"
     },
     {
-      "type": "richtext",
-      "key": "body",
-      "label": "Nội dung"
+      "type": "select",
+      "key": "media_ratio",
+      "label": "Tỉ lệ ảnh",
+      "options": [
+        { "value": "16_9", "label": "16:9" },
+        { "value": "4_3", "label": "4:3" },
+        { "value": "1_1", "label": "1:1" },
+        { "value": "auto", "label": "Tự động" }
+      ],
+      "default": "16_9"
+    },
+    {
+      "type": "select",
+      "key": "surface_style",
+      "label": "Kiểu bề mặt",
+      "options": [
+        { "value": "flat", "label": "Phẳng" },
+        { "value": "bordered", "label": "Có viền" },
+        { "value": "elevated", "label": "Đổ bóng" }
+      ],
+      "default": "bordered"
+    },
+    {
+      "type": "select",
+      "key": "tone",
+      "label": "Sắc thái",
+      "options": [
+        { "value": "default", "label": "Mặc định" },
+        { "value": "neutral", "label": "Trung tính" },
+        { "value": "brand", "label": "Thương hiệu" },
+        { "value": "info", "label": "Thông tin" },
+        { "value": "success", "label": "Thành công" },
+        { "value": "warning", "label": "Chú ý" }
+      ],
+      "default": "default"
+    },
+    {
+      "type": "icon",
+      "key": "icon",
+      "label": "Icon (tùy chọn)"
     },
     {
       "type": "color",
       "key": "bg_color",
-      "label": "Màu nền",
+      "label": "Màu nền tùy chỉnh",
       "default": "#ffffff",
       "css_var": "--od-card-bg"
     },
     {
-      "type": "boolean",
-      "key": "show_cta",
-      "label": "Hiện nút CTA",
-      "default": false
+      "type": "select",
+      "key": "radius",
+      "label": "Bo góc",
+      "options": [
+        { "value": "none", "label": "Không" },
+        { "value": "md", "label": "Vừa" },
+        { "value": "lg", "label": "Lớn" },
+        { "value": "xl", "label": "Rất lớn" },
+        { "value": "2xl", "label": "Cực lớn" }
+      ],
+      "default": "xl"
     },
     {
-      "type": "text",
-      "key": "cta_label",
-      "label": "Nhãn nút",
-      "conditions": [[{ "field": "show_cta", "op": "eq", "value": true }]],
-      "default": "Xem chi tiết"
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm nội dung",
+      "property": "padding",
+      "unit": "px",
+      "responsive": true,
+      "default": { "top": 20, "right": 20, "bottom": 20, "left": 20 }
     },
     {
-      "type": "url",
-      "key": "cta_url",
-      "label": "Liên kết",
-      "conditions": [[{ "field": "show_cta", "op": "eq", "value": true }]],
-      "default": "#"
+      "type": "link",
+      "key": "card_link",
+      "label": "Liên kết toàn thẻ"
     }
   ]
 }

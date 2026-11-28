@@ -90,7 +90,7 @@ async fn login(http: &Client, site: &Site, username: &str, password: &str) -> (S
 }
 
 fn design(title: &str) -> Value {
-    json!({"schema_version":1,"sections":[{"id":"section","children":[{"id":"row","children":[{"id":"column","children":[{"id":"heading","type":"core/heading","props":{"level":2,"text":title}}]}]}]}]})
+    json!({"schema_version":1,"blocks":[{"id":"section","block_id":"core/section","children":[{"id":"row","block_id":"core/row","children":[{"id":"column","block_id":"core/column","children":[{"id":"heading","block_id":"core/heading","props":{"text":title}}]}]}]}]})
 }
 
 // The Builder GET/PUT/Reset contract now includes content_entries.updated_at.
@@ -169,7 +169,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     assert_eq!(initial["content_mode"], "editor");
     assert_eq!(initial["version"], 1);
     assert_eq!(
-        initial["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["text"],
+        initial["document"]["blocks"][0]["props"]["content"],
         "Original text Page A"
     );
     let wrong_type = format!("{}/api/admin/entries/post/{}/builder", site.base, ids[0]);
@@ -256,8 +256,12 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     let media = format!("{}/media/{image_id}/file", site.base);
 
     let mut document = design("Private Draft A");
-    document["sections"][0]["children"][0]["children"][0]["children"].as_array_mut().unwrap()
-        .push(json!({"id":"image","type":"core/image","props":{"media_id":image_id,"alt":"Page image"}}));
+    document["blocks"][0]["children"][0]["children"][0]["children"]
+        .as_array_mut()
+        .unwrap()
+        .push(
+            json!({"id":"image","block_id":"core/image","props":{"image":image_id,"alt":"Page image"}}),
+        );
     let preview_path = format!("{a}/preview");
     let put = |version: i64| {
         http.put(&a)
@@ -337,12 +341,12 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     );
 
     for element in [
-        json!({"id":"slot","type":"core/content_slot","props":{}}),
-        json!({"id":"part","type":"core/template_part","props":{"part_key":"header"}}),
-        json!({"id":"bad-media","type":"core/image","props":{"media_id":"missing-image","alt":"Missing"}}),
+        json!({"id":"slot","block_id":"core/content-slot","props":{}}),
+        json!({"id":"part","block_id":"core/template-part","props":{"part_key":"header"}}),
+        json!({"id":"bad-media","block_id":"core/image","props":{"image":"missing-image","alt":"Missing"}}),
     ] {
         let mut invalid = document.clone();
-        invalid["sections"][0]["children"][0]["children"][0]["children"]
+        invalid["blocks"][0]["children"][0]["children"][0]["children"]
             .as_array_mut()
             .unwrap()
             .push(element);
@@ -351,23 +355,25 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
             StatusCode::BAD_REQUEST
         );
     }
-    let mut route_bound = design("Fallback");
-    route_bound["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["binding"] =
+    let mut legacy_bound = design("Fallback");
+    legacy_bound["blocks"][0]["children"][0]["children"][0]["children"][0]["props"]["binding"] =
         json!({"source":{"kind":"route_context","field_key":"title"},"target":"text"});
-    let result = preview(&preview_path)
-        .json(&route_bound)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(result.status(), StatusCode::OK);
-    let body: Value = result.json().await.unwrap();
-    assert!(body["html"].as_str().unwrap().contains("Page A"));
-    assert!(!body["html"].as_str().unwrap().contains("Page B"));
+    assert_eq!(
+        preview(&preview_path)
+            .json(&legacy_bound)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
     let result = preview(&preview_path).json(&document).send().await.unwrap();
     assert_eq!(result.status(), StatusCode::OK);
     assert_eq!(result.headers()["cache-control"], "no-store");
     assert!(result.headers().contains_key("content-security-policy"));
-    assert!(result.text().await.unwrap().contains("Private Draft A"));
+    let html = result.text().await.unwrap();
+    assert!(html.contains("Private Draft A"));
+    assert!(!html.contains("Page B"));
     let after_preview = http
         .get(&a)
         .header("Cookie", &editor_cookie)
@@ -405,8 +411,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     assert_eq!(b_without_ts["content_mode"], "editor");
     assert_eq!(b_without_ts["version"], 1);
     assert_eq!(
-        b_without_ts["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]
-            ["text"],
+        b_without_ts["document"]["blocks"][0]["props"]["content"],
         "Original text Page B"
     );
     assert_eq!(
@@ -480,7 +485,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
 
     // Published Save is immediate; it must not change publication or body.
     let mut published_doc = document.clone();
-    published_doc["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["text"] =
+    published_doc["blocks"][0]["children"][0]["children"][0]["children"][0]["props"]["text"] =
         json!("Published edit A");
     assert_eq!(
         put(2).json(&published_doc).send().await.unwrap().status(),
@@ -587,8 +592,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         .await
         .unwrap();
     assert_eq!(
-        wrapped_after_classic["document"]["sections"][0]["children"][0]["children"][0]["children"]
-            [0]["props"]["text"],
+        wrapped_after_classic["document"]["blocks"][0]["props"]["content"],
         "Original text Page A"
     );
     assert_eq!(wrapped_after_classic["content_mode"], "editor");
@@ -625,8 +629,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     assert_eq!(reset_open["content_mode"], "editor");
     assert_eq!(reset_open["version"], 7);
     assert_eq!(
-        reset_open["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]
-            ["text"],
+        reset_open["document"]["blocks"][0]["props"]["content"],
         "Published edit A"
     );
     let flattened_entry: Value = http

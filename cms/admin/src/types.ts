@@ -20,15 +20,31 @@ export type BlockPropValue =
   | string | number | boolean | null
   | BlockPropValue[] | { [key: string]: BlockPropValue };
 export type BlockCategory = 'layout' | 'media' | 'interactive' | 'content' | 'marketing' | 'plugin';
-export interface BlockSchemaV1 {
+export interface DefaultChildSpec {
+  block_id: string;
+  props?: Record<string, unknown>;
+  children?: DefaultChildSpec[];
+}
+export interface BlockPresetSpec {
+  key: string;
+  title: string;
+  icon?: string | null;
+  props?: Record<string, unknown>;
+  children?: DefaultChildSpec[];
+}
+export interface BlockSchema {
   schema_version: 1;
   id: string;
   title: string;
   category: BlockCategory;
   icon?: string | null;
   render: string;
+  supports_children?: boolean;
   allowed_parents?: string[] | null;
   allowed_children?: string[] | null;
+  allowed_contexts?: string[] | null;
+  default_children?: DefaultChildSpec[];
+  presets?: BlockPresetSpec[];
   fields: FieldSpec[];
 }
 export interface BlockCatalogItemDto {
@@ -37,7 +53,7 @@ export interface BlockCatalogItemDto {
   owner_id: string;
   status: 'active' | 'provider_inactive';
   declaration_state: 'declared' | 'withdrawn';
-  schema: BlockSchemaV1;
+  schema: BlockSchema;
 }
 
 export interface BlockData {

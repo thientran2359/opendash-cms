@@ -443,16 +443,19 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
 
     let pat_doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "pat-sec-1",
+            "block_id": "core/section",
             "children": [{
                 "id": "pat-row-1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "pat-col-1",
+                    "block_id": "core/column",
                     "children": [{
                         "id": "pat-h1",
-                        "type": "core/heading",
-                        "props": { "level": 3, "text": "Inside Pattern Node" }
+                        "block_id": "core/heading",
+                        "props": { "level": "h3", "text": "Inside Pattern Node" }
                     }]
                 }]
             }]
@@ -475,22 +478,25 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
 
     let entry_doc = json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "entry-sec-1",
+            "block_id": "core/section",
             "children": [{
                 "id": "entry-row-1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "entry-col-1",
+                    "block_id": "core/column",
                     "children": [
                         {
                             "id": "entry-h1",
-                            "type": "core/heading",
-                            "props": { "level": 2, "text": "Editable Entry Heading" }
+                            "block_id": "core/heading",
+                            "props": { "level": "h2", "text": "Editable Entry Heading" }
                         },
                         {
                             "id": "entry-pat-ref",
-                            "type": "core/pattern_ref",
-                            "props": { "pattern_id": pat_id }
+                            "block_id": "core/pattern-ref",
+                            "props": { "pattern_id": pat_id.to_string() }
                         }
                     ]
                 }]
@@ -522,17 +528,21 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
     assert!(!mode2_html.contains("data-theme-page=\"1\" data-od-editable"));
     // Entry body nodes have data-od-editable="1"
     assert!(mode2_html.contains(
-        "<section data-node-id=\"entry-sec-1\" data-od-editable=\"1\" data-od-kind=\"section\">"
+        "data-node-id=\"entry-sec-1\" data-block-id=\"core/section\" data-od-node-scope=\"entry-entry-sec-1\" data-od-editable=\"1\" data-od-kind=\"section\">"
     ));
     assert!(mode2_html.contains(
-        "<div class=\"builder-element\" data-node-id=\"entry-h1\" data-od-editable=\"1\" data-od-kind=\"element\">"
+        "data-node-id=\"entry-h1\" data-block-id=\"core/heading\" data-od-node-scope=\"entry-entry-h1\" data-od-editable=\"1\" data-od-kind=\"block\">"
     ));
     assert!(mode2_html.contains(
-        "<div class=\"builder-element\" data-node-id=\"entry-pat-ref\" data-od-editable=\"1\" data-od-kind=\"element\">"
+        "data-node-id=\"entry-pat-ref\" data-block-id=\"core/pattern-ref\" data-od-node-scope=\"entry-entry-pat-ref\" data-od-editable=\"1\" data-od-kind=\"block\">"
     ));
     // Inner pattern nodes are rendered without data-od-editable
-    assert!(mode2_html.contains("<section data-node-id=\"pat-sec-1\">"));
-    assert!(mode2_html.contains("<div class=\"builder-element\" data-node-id=\"pat-h1\">"));
+    assert!(mode2_html.contains(&format!(
+        "data-node-id=\"pat-sec-1\" data-block-id=\"core/section\" data-od-node-scope=\"pat-{pat_id}-entry-pat-ref-pat-sec-1\">"
+    )));
+    assert!(mode2_html.contains(&format!(
+        "data-node-id=\"pat-h1\" data-block-id=\"core/heading\" data-od-node-scope=\"pat-{pat_id}-entry-pat-ref-pat-h1\">"
+    )));
 
     // 8. Save & publish page, verify Mode 1 annotated template preview isolates content_slot, and verify Public routes are clean
     let save_page = http
@@ -561,15 +571,18 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
             "preview_entry": { "type_key": "page", "entry_id": page_id },
             "document": {
                 "schema_version": 1,
-                "sections": [{
+                "blocks": [{
                     "id": "tpl-sec-1",
+                    "block_id": "core/section",
                     "children": [{
                         "id": "tpl-row-1",
+                        "block_id": "core/row",
                         "children": [{
                             "id": "tpl-col-1",
+                            "block_id": "core/column",
                             "children": [{
                                 "id": "tpl-slot",
-                                "type": "core/content_slot",
+                                "block_id": "core/content-slot",
                                 "props": {}
                             }]
                         }]
@@ -586,11 +599,15 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
         .unwrap()
         .to_owned();
     assert!(mode1_html.contains(
-        "<div class=\"builder-element\" data-node-id=\"tpl-slot\" data-od-editable=\"1\" data-od-kind=\"element\">"
+        "data-node-id=\"tpl-slot\" data-block-id=\"core/content-slot\" data-od-node-scope=\"ov-tpl-slot\" data-od-editable=\"1\" data-od-kind=\"block\">"
     ));
     // Inner entry nodes inside content_slot must NOT carry data-od-editable in Mode 1 template preview
-    assert!(mode1_html.contains("<section data-node-id=\"entry-sec-1\">"));
-    assert!(mode1_html.contains("<div class=\"builder-element\" data-node-id=\"entry-h1\">"));
+    assert!(mode1_html.contains(
+        "data-node-id=\"entry-sec-1\" data-block-id=\"core/section\" data-od-node-scope=\"entry-entry-sec-1\">"
+    ));
+    assert!(mode1_html.contains(
+        "data-node-id=\"entry-h1\" data-block-id=\"core/heading\" data-od-node-scope=\"entry-entry-h1\">"
+    ));
 
     // Publish page and configure Reading Homepage
     let pub_page = http

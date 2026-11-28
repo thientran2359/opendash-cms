@@ -169,19 +169,19 @@ async fn upload_png(http: &Client, site: &Site, cookie: &str, csrf: &str, name: 
 fn block_doc(el_id: &str, block_id: &str, values: Value) -> Value {
     json!({
         "schema_version": 1,
-        "sections": [{
+        "blocks": [{
             "id": "sec-1",
+            "block_id": "core/section",
             "children": [{
                 "id": "row-1",
+                "block_id": "core/row",
                 "children": [{
                     "id": "col-1",
+                    "block_id": "core/column",
                     "children": [{
                         "id": el_id,
-                        "type": "plugin/block",
-                        "props": {
-                            "block_id": block_id,
-                            "values": values
-                        }
+                        "block_id": block_id,
+                        "props": values
                     }]
                 }]
             }]
@@ -326,9 +326,53 @@ fn build_s03_test_theme_zip() -> Vec<u8> {
         zip.write_all(br#"<div data-form-ref="{{ fid }}">form</div>"#)
             .unwrap();
 
+        let showcase_schema = include_str!("../fixtures/showcase_block/block.json")
+            .replace("\"core/showcase\"", "\"theme-s03-test/showcase\"");
+        zip.start_file("blocks/showcase/block.json", opts).unwrap();
+        zip.write_all(showcase_schema.as_bytes()).unwrap();
+        zip.start_file("blocks/showcase/render.html", opts).unwrap();
+        zip.write_all(include_bytes!("../fixtures/showcase_block/render.html"))
+            .unwrap();
+
         zip.finish().unwrap();
     }
     buf
+}
+
+async fn install_and_activate_s03_theme(http: &Client, site: &Site, cookie: &str, csrf: &str) {
+    let theme_res = http
+        .post(format!("{}/api/admin/themes", site.base))
+        .header(header::COOKIE, cookie)
+        .header(header::ORIGIN, &site.base)
+        .header("X-CSRF-Token", csrf)
+        .header(header::CONTENT_TYPE, "application/zip")
+        .body(build_s03_test_theme_zip())
+        .send()
+        .await
+        .unwrap();
+    if theme_res.status() != StatusCode::CREATED {
+        let st = theme_res.status();
+        let txt = theme_res.text().await.unwrap();
+        panic!("theme install failed {st}: {txt}");
+    }
+    let rev_id = theme_res.json::<Value>().await.unwrap()["revision_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        admin_put(
+            http,
+            site,
+            cookie,
+            csrf,
+            "/api/admin/themes/active",
+            Some("\"v1\""),
+            &json!({ "revision_id": rev_id }),
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
 }
 
 #[tokio::test]
@@ -336,6 +380,7 @@ async fn s03_showcase_e2e_and_scoped_margin_css_public_render() {
     let site = start().await;
     let http = Client::new();
     let (cookie, csrf) = setup_and_login_admin(&http, &site).await;
+    install_and_activate_s03_theme(&http, &site, &cookie, &csrf).await;
 
     let img_cover = upload_png(&http, &site, &cookie, &csrf, "cover.png").await;
     let img_gallery = upload_png(&http, &site, &cookie, &csrf, "gallery.png").await;
@@ -492,7 +537,11 @@ async fn s03_showcase_e2e_and_scoped_margin_css_public_render() {
         &csrf,
         &format!("/api/admin/entries/page/{page_id}/builder"),
         Some("\"v1\""),
-        &block_doc("el-showcase", "core/showcase", showcase_vals.clone()),
+        &block_doc(
+            "el-showcase",
+            "theme-s03-test/showcase",
+            showcase_vals.clone(),
+        ),
     )
     .await;
     assert_eq!(save1.status(), StatusCode::OK);
@@ -510,8 +559,7 @@ async fn s03_showcase_e2e_and_scoped_margin_css_public_render() {
         .await
         .unwrap();
     assert_eq!(
-        fetched["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["values"]
-            ["reference_url"],
+        fetched["document"]["blocks"][0]["children"][0]["children"][0]["children"][0]["props"]["reference_url"],
         "https://example.com/hidden-ref"
     );
 
@@ -524,7 +572,7 @@ async fn s03_showcase_e2e_and_scoped_margin_css_public_render() {
         &csrf,
         &format!("/api/admin/entries/page/{page_id}/builder"),
         Some("\"v2\""),
-        &block_doc("el-showcase", "core/showcase", showcase_vals),
+        &block_doc("el-showcase", "theme-s03-test/showcase", showcase_vals),
     )
     .await;
     assert_eq!(save2.status(), StatusCode::OK);
@@ -591,39 +639,7 @@ async fn s03_dynamic_options_sources_overrides_patterns_file_acl_and_skip_pre_v1
     let (cookie, csrf) = setup_and_login_admin(&http, &site).await;
 
     // 1. Install and activate test v3 theme with V1 blocks.
-    let theme_res = http
-        .post(format!("{}/api/admin/themes", site.base))
-        .header(header::COOKIE, &cookie)
-        .header(header::ORIGIN, &site.base)
-        .header("X-CSRF-Token", &csrf)
-        .header(header::CONTENT_TYPE, "application/zip")
-        .body(build_s03_test_theme_zip())
-        .send()
-        .await
-        .unwrap();
-    if theme_res.status() != StatusCode::CREATED {
-        let st = theme_res.status();
-        let txt = theme_res.text().await.unwrap();
-        panic!("theme install failed {st}: {txt}");
-    }
-    let rev_id = theme_res.json::<Value>().await.unwrap()["revision_id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert_eq!(
-        admin_put(
-            &http,
-            &site,
-            &cookie,
-            &csrf,
-            "/api/admin/themes/active",
-            Some("\"v1\""),
-            &json!({ "revision_id": rev_id }),
-        )
-        .await
-        .status(),
-        StatusCode::OK
-    );
+    install_and_activate_s03_theme(&http, &site, &cookie, &csrf).await;
 
     // 2. Provision targets for all 8 options_source types + file media + entries + terms + 17 patterns.
     let file_media = upload_png(&http, &site, &cookie, &csrf, "doc.png").await;
@@ -1113,6 +1129,12 @@ async fn s03_dynamic_options_sources_overrides_patterns_file_acl_and_skip_pre_v1
     assert_eq!(catalog_res.status(), StatusCode::OK);
     let catalog_json: Value = catalog_res.json().await.unwrap();
     let items = catalog_json["items"].as_array().unwrap();
-    assert!(items.iter().any(|i| i["block_id"] == "core/showcase"));
+    assert!(items.iter().any(|i| i["block_id"] == "core/banner"));
+    assert!(!items.iter().any(|i| i["block_id"] == "core/showcase"));
+    assert!(
+        items
+            .iter()
+            .any(|i| i["block_id"] == "theme-s03-test/showcase")
+    );
     assert!(!items.iter().any(|i| i["block_id"] == "old-plugin/pre-v1"));
 }

@@ -50,53 +50,93 @@ pub(crate) fn advance_depths(
     is_close: bool,
     self_closing: bool,
 ) -> Result<HtmlDepths, &'static str> {
-    let mut next = depths;
+    advance_depths_with_strict(depths, tag_name, is_close, self_closing, false)
+}
+
+pub(crate) fn advance_depths_with_strict(
+    mut next: HtmlDepths,
+    tag_name: &str,
+    is_close: bool,
+    self_closing: bool,
+    strict_block: bool,
+) -> Result<HtmlDepths, &'static str> {
+    let step_foreign = |cur: usize,
+                        close_err: &'static str,
+                        deep_err: &'static str|
+     -> Result<usize, &'static str> {
+        if is_close {
+            cur.checked_sub(1).ok_or(close_err)
+        } else if self_closing {
+            Ok(cur)
+        } else {
+            cur.checked_add(1).filter(|d| *d <= 64).ok_or(deep_err)
+        }
+    };
+    let step_interactive = |cur: usize,
+                            close_err: &'static str,
+                            deep_err: &'static str|
+     -> Result<usize, &'static str> {
+        if is_close {
+            cur.checked_sub(1).ok_or(close_err)
+        } else {
+            cur.checked_add(1).filter(|d| *d <= 64).ok_or(deep_err)
+        }
+    };
     match tag_name {
         "svg" => {
-            next.svg = if is_close {
-                depths
-                    .svg
-                    .checked_sub(1)
-                    .ok_or("Thẻ </svg> không có thẻ mở.")?
-            } else if self_closing {
-                depths.svg
-            } else {
-                depths
-                    .svg
-                    .checked_add(1)
-                    .filter(|d| *d <= 64)
-                    .ok_or("SVG lồng nhau quá sâu.")?
-            };
+            next.svg = step_foreign(
+                next.svg,
+                "Thẻ </svg> không có thẻ mở.",
+                "SVG lồng nhau quá sâu.",
+            )?;
         }
         "math" => {
-            next.math = if is_close {
-                depths
-                    .math
-                    .checked_sub(1)
-                    .ok_or("Thẻ </math> không có thẻ mở.")?
-            } else if self_closing {
-                depths.math
-            } else {
-                depths
-                    .math
-                    .checked_add(1)
-                    .filter(|d| *d <= 64)
-                    .ok_or("MathML lồng nhau quá sâu.")?
-            };
+            next.math = step_foreign(
+                next.math,
+                "Thẻ </math> không có thẻ mở.",
+                "MathML lồng nhau quá sâu.",
+            )?;
         }
         "form" => {
             next.form = if is_close {
-                depths
-                    .form
+                next.form
                     .checked_sub(1)
                     .ok_or("Thẻ </form> không có thẻ mở.")?
             } else if self_closing {
                 return Err("Thẻ <form> không được tự đóng.");
-            } else if depths.form > 0 {
+            } else if next.form > 0 {
                 return Err("C-SEC cấm lồng thẻ <form> bên trong <form>.");
             } else {
                 1
             };
+        }
+        "foreignobject" if strict_block => {
+            next.foreign_object = step_foreign(
+                next.foreign_object,
+                "Thẻ </foreignObject> không có thẻ mở.",
+                "foreignObject lồng nhau quá sâu.",
+            )?;
+        }
+        "a" if strict_block => {
+            next.a = step_interactive(
+                next.a,
+                "Thẻ </a> không có thẻ mở.",
+                "Thẻ <a> lồng nhau quá sâu.",
+            )?;
+        }
+        "button" if strict_block => {
+            next.button = step_interactive(
+                next.button,
+                "Thẻ </button> không có thẻ mở.",
+                "Thẻ <button> lồng nhau quá sâu.",
+            )?;
+        }
+        "summary" if strict_block => {
+            next.summary = step_interactive(
+                next.summary,
+                "Thẻ </summary> không có thẻ mở.",
+                "Thẻ <summary> lồng nhau quá sâu.",
+            )?;
         }
         _ => {}
     }

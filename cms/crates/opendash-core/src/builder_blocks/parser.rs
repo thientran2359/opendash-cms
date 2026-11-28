@@ -51,80 +51,14 @@ pub fn encode_comment_json<T: Serialize>(value: &T) -> Result<String, BuilderBlo
     Ok(encoded)
 }
 
-pub(super) fn is_false(value: &bool) -> bool {
-    !*value
-}
-
-#[derive(Serialize)]
-pub(super) struct ContainerMetaRef<'a> {
-    pub(super) id: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) responsive: Option<&'a Responsive>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) style: Option<&'a SectionStyle>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) meta: Option<&'a NodeMeta>,
-}
-
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ContainerMeta {
+pub(super) struct CommentNodePayload {
     pub(super) id: String,
     #[serde(default)]
-    pub(super) responsive: Option<Responsive>,
-    #[serde(default)]
-    pub(super) style: Option<SectionStyle>,
+    pub(super) props: BTreeMap<String, Value>,
     #[serde(default)]
     pub(super) meta: Option<NodeMeta>,
-}
-
-#[derive(Serialize)]
-pub(super) struct PairedTextMetaRef<'a> {
-    pub(super) id: &'a str,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub(super) rich: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) meta: Option<&'a NodeMeta>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) binding: Option<&'a ElementBinding>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct PairedTextMeta {
-    pub(super) id: String,
-    #[serde(default)]
-    pub(super) rich: bool,
-    #[serde(default)]
-    pub(super) meta: Option<NodeMeta>,
-    #[serde(default)]
-    pub(super) binding: Option<ElementBinding>,
-}
-
-#[derive(Serialize)]
-pub(super) struct ElementWithIdRef<'a, P: Serialize> {
-    pub(super) id: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) meta: Option<&'a NodeMeta>,
-    #[serde(flatten)]
-    pub(super) props: &'a P,
-}
-
-#[derive(Serialize)]
-pub(super) struct UnresolvedRef<'a> {
-    pub(super) id: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) meta: Option<&'a NodeMeta>,
-    pub(super) raw: &'a BTreeMap<String, Value>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct UnresolvedPayload {
-    pub(super) id: String,
-    #[serde(default)]
-    pub(super) meta: Option<NodeMeta>,
-    pub(super) raw: BTreeMap<String, Value>,
 }
 
 pub(super) fn push_line(out: &mut String, line: &str) {
@@ -132,22 +66,6 @@ pub(super) fn push_line(out: &mut String, line: &str) {
         out.push('\n');
     }
     out.push_str(line);
-}
-
-pub(super) fn serialize_self_closing<P: Serialize>(
-    out: &mut String,
-    tag: &str,
-    id: &str,
-    meta: Option<&NodeMeta>,
-    props: &P,
-) -> Result<(), BuilderBlockError> {
-    let payload = encode_comment_json(&ElementWithIdRef {
-        id,
-        meta: meta.filter(|m| !m.is_empty()),
-        props,
-    })?;
-    push_line(out, &format!("<!-- od:{tag} {payload} /-->"));
-    Ok(())
 }
 
 pub(super) fn text_has_comment_boundary(text: &str) -> bool {
@@ -167,106 +85,118 @@ pub(super) fn sanitize_text_for_builder(raw: &str) -> String {
         .collect()
 }
 
-pub(super) fn decode_props_with_id<P: serde::de::DeserializeOwned>(
-    json_str: &str,
-) -> Result<(String, Option<NodeMeta>, P), &'static str> {
-    let mut map: serde_json::Map<String, Value> =
-        serde_json::from_str(json_str).map_err(|_| "Invalid block JSON payload")?;
-    let id_val = map.remove("id").ok_or("Missing block node id")?;
-    let Value::String(id) = id_val else {
-        return Err("Block node id must be a string");
-    };
-    let meta: Option<NodeMeta> = match map.remove("meta") {
-        Some(v) => serde_json::from_value(v).map_err(|_| "Invalid block meta payload")?,
-        None => None,
-    };
-    let props: P =
-        serde_json::from_value(Value::Object(map)).map_err(|_| "Invalid block props payload")?;
-    Ok((id, meta, props))
-}
-
 pub fn parse_blocks_to_builder_document(
     raw_body: &str,
 ) -> Result<ParsedBlockDocument, BuilderBlockError> {
-    parse_blocks_internal(raw_body, true)
+    parse_blocks_internal(raw_body, true, &RegistryCatalog::new())
 }
 
 pub fn parse_blocks_lenient_or_recover(raw_body: &str) -> ParsedBlockDocument {
-    parse_blocks_internal(raw_body, false).expect("lenient block parser never returns Err")
+    parse_blocks_internal(raw_body, false, &RegistryCatalog::new())
+        .expect("lenient block parser never returns Err")
 }
 
-/// Extracts human-readable plain text from an already parsed `BuilderDocument`
-/// (core heading/text/button blocks and active, declared `plugin/block` fields).
+pub fn parse_blocks_lenient_with_schemas(
+    raw_body: &str,
+    catalog: &RegistryCatalog<RegisteredBlockSchema>,
+) -> ParsedBlockDocument {
+    parse_blocks_internal(raw_body, false, catalog).expect("lenient block parser never returns Err")
+}
+
+pub fn extract_visible_text(raw_body: &str) -> String {
+    extract_visible_text_with_schemas(raw_body, &RegistryCatalog::new())
+}
+
+fn collect_visible_text_fallback(node: &BlockNode, parts: &mut Vec<String>) {
+    match node.block_id.as_str() {
+        "core/heading" => {
+            if let Some(t) = node.props.get("text").and_then(Value::as_str)
+                && !t.trim().is_empty()
+            {
+                parts.push(t.to_owned());
+            }
+        }
+        "core/text" => {
+            if let Some(c) = node.props.get("content").and_then(Value::as_str) {
+                let plain = crate::richtext::strip_richtext_to_plain(c);
+                if !plain.is_empty() {
+                    parts.push(plain);
+                }
+            }
+        }
+        "core/button" => {
+            if let Some(lbl) = node
+                .props
+                .get("cta")
+                .and_then(|c| c.get("label"))
+                .and_then(Value::as_str)
+                && !lbl.trim().is_empty()
+            {
+                parts.push(lbl.to_owned());
+            }
+        }
+        "core/accordion-item" => {
+            if let Some(t) = node.props.get("title").and_then(Value::as_str)
+                && !t.trim().is_empty()
+            {
+                parts.push(t.to_owned());
+            }
+        }
+        "core/image" => {
+            if let Some(cap) = node.props.get("caption").and_then(Value::as_str)
+                && !cap.trim().is_empty()
+            {
+                parts.push(cap.to_owned());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_visible_text_nodes(
+    nodes: &[BlockNode],
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+    parts: &mut Vec<String>,
+) {
+    for node in nodes {
+        if let Some(entry) = schemas.get(&node.block_id) {
+            if entry.status != ProviderStatus::Active
+                || entry.declaration_state != DeclarationState::Declared
+            {
+                continue;
+            }
+            let mut raw_parts = Vec::new();
+            entry
+                .descriptor
+                .schema
+                .extract_visible_text(&node.props, &mut raw_parts);
+            for raw_part in raw_parts {
+                let clean = crate::richtext::strip_richtext_to_plain(&raw_part);
+                if !clean.is_empty() {
+                    parts.push(clean);
+                }
+            }
+            collect_visible_text_nodes(&node.children, schemas, parts);
+        } else if schemas.is_empty() || node.block_id.starts_with("core/") {
+            collect_visible_text_fallback(node, parts);
+            collect_visible_text_nodes(&node.children, schemas, parts);
+        }
+    }
+}
+
+/// Extracts human-readable plain text from an already parsed V1 `BuilderDocument`,
+/// skipping inactive/withdrawn plugin/theme subtrees when a `schemas` catalog is supplied.
 pub fn extract_document_visible_text(
     doc: &BuilderDocument,
     schemas: &RegistryCatalog<RegisteredBlockSchema>,
 ) -> String {
     let mut parts = Vec::new();
-    for section in &doc.sections {
-        for row in &section.children {
-            for col in &row.children {
-                for el in &col.children {
-                    let ElementContent::Known(known) = &el.content else {
-                        continue;
-                    };
-                    match known {
-                        KnownElement::Heading(props) => {
-                            let trimmed = props.text.trim();
-                            if !trimmed.is_empty() {
-                                parts.push(trimmed.to_owned());
-                            }
-                        }
-                        KnownElement::Text(props) => {
-                            if props.rich {
-                                let clean = crate::richtext::strip_richtext_to_plain(&props.text);
-                                if !clean.is_empty() {
-                                    parts.push(clean);
-                                }
-                            } else if !props.text.trim().is_empty() {
-                                parts.push(props.text.clone());
-                            }
-                        }
-                        KnownElement::Button(props) => {
-                            let trimmed = props.label.trim();
-                            if !trimmed.is_empty() {
-                                parts.push(trimmed.to_owned());
-                            }
-                        }
-                        KnownElement::PluginBlock(props) => {
-                            if let Some(entry) = schemas.get(&props.block_id)
-                                && entry.status == ProviderStatus::Active
-                                && entry.declaration_state == DeclarationState::Declared
-                            {
-                                let mut raw_parts = Vec::new();
-                                entry
-                                    .descriptor
-                                    .schema
-                                    .extract_visible_text(&props.values, &mut raw_parts);
-                                for raw_part in raw_parts {
-                                    let clean = crate::richtext::strip_richtext_to_plain(&raw_part);
-                                    if !clean.is_empty() {
-                                        parts.push(clean);
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
+    collect_visible_text_nodes(&doc.blocks, schemas, &mut parts);
     parts.join("\n\n")
 }
 
-/// Extracts human-readable plain text from `od:text`, `od:heading`, and `od:button`
-/// blocks (used for search/bindings/reset flattening).
-pub fn extract_visible_text(raw_body: &str) -> String {
-    extract_visible_text_with_schemas(raw_body, &RegistryCatalog::new())
-}
-
-/// Extracts human-readable plain text from core blocks and active, declared
-/// `od:plugin_block` schemas (`text`, `textarea`, stripped `richtext`, and repeaters).
+/// Extracts human-readable plain text recursively across V1 `BlockNode`s, skipping
+/// inactive/withdrawn container subtrees when a non-empty `schemas` catalog is supplied.
 pub fn extract_visible_text_with_schemas(
     raw_body: &str,
     schemas: &RegistryCatalog<RegisteredBlockSchema>,

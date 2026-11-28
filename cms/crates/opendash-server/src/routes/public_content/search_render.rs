@@ -200,6 +200,7 @@ pub(crate) async fn render_search_response_for_locale(
             term_schema: None,
             content_type: None,
             entry: None,
+            list_pages: None,
             search: &search_view,
         },
         &mut budget,

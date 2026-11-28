@@ -150,7 +150,7 @@ pub async fn load_entry_render_snapshot_with_options(
     list_pages: &std::collections::BTreeMap<String, i64>,
 ) -> ApiResult<Option<PublicEntryRenderSnapshot>> {
     use crate::error::ApiError;
-    use crate::storage::{builder, builder_binding, content, overrides, theme};
+    use crate::storage::{builder, content, overrides, theme};
     use opendash_core::{
         content::{ContentSupport, FieldRole, PublicExposure},
         registry::{DeclarationState, ProviderStatus},
@@ -247,9 +247,6 @@ pub async fn load_entry_render_snapshot_with_options(
         && body_allows_public_builder
         && raw_body.is_some_and(opendash_core::builder_blocks::contains_blocks)
     {
-        let doc =
-            opendash_core::builder_blocks::parse_blocks_lenient_or_recover(raw_body.unwrap_or(""))
-                .document;
         let mut state = builder::read_render_context_for_locale_tx(
             &mut tx,
             Some(entry_locale.as_str()),
@@ -257,22 +254,20 @@ pub async fn load_entry_render_snapshot_with_options(
             Some(list_base_path),
         )
         .await?;
+        let schemas = state.unified_block_schemas()?;
+        let doc = opendash_core::builder_blocks::parse_blocks_lenient_with_schemas(
+            raw_body.unwrap_or(""),
+            &schemas,
+        )
+        .document;
         builder::hydrate_render_context_for_documents_in_conn(&mut tx, &mut state, &[&doc], false)
             .await?;
-        let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
-            &mut tx,
-            &doc,
-            false,
-            Some((&entry.content_type_key, &entry.slug)),
-            Some(entry_locale.as_str()),
-        )
-        .await?;
-        builder::hydrate_binding_media_in_conn(&mut tx, &mut state, &doc, &bindings).await?;
-        let lists = builder::resolve_lists_in_tx_for_locale(
+        let lists = builder::resolve_lists_in_tx_for_locale_with_budget(
             &mut tx,
             &doc,
             list_pages,
             Some(entry_locale.as_str()),
+            &mut render_budget,
         )
         .await?;
         let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
@@ -289,7 +284,6 @@ pub async fn load_entry_render_snapshot_with_options(
             &state,
             &doc,
             false,
-            &bindings,
             &lists,
             &forms,
             None,

@@ -218,7 +218,7 @@ async fn publish_home_with_images(
     let children: Vec<Value> = image_ids
         .iter()
         .enumerate()
-        .map(|(i, id)| json!({"id": format!("img{i}"), "type": "core/image", "props": {"media_id": id, "alt": "photo"}}))
+        .map(|(i, id)| json!({"id": format!("img{i}"), "block_id": "core/image", "props": {"image": id, "alt": "photo"}}))
         .collect();
     let save_doc = client
         .put(format!("{base}/api/admin/entries/page/{page_id}/builder"))
@@ -228,12 +228,18 @@ async fn publish_home_with_images(
         .header("if-match", b_etag)
         .json(&json!({
             "schema_version": 1,
-            "sections": [{
+            "blocks": [{
                 "id": "sec1",
+                "block_id": "core/section",
+                "props": {},
                 "children": [{
                     "id": "row1",
+                    "block_id": "core/row",
+                    "props": {},
                     "children": [{
                         "id": "col1",
+                        "block_id": "core/column",
+                        "props": {},
                         "children": children
                     }]
                 }]

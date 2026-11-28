@@ -5,110 +5,143 @@
   "category": "media",
   "icon": "image",
   "render": "render.html",
+  "supports_children": true,
+  "allowed_children": ["*", "!core/section"],
+  "default_children": [
+    {
+      "block_id": "core/heading",
+      "props": { "level": "h2", "text": "Tiêu đề Banner nổi bật" }
+    },
+    {
+      "block_id": "core/text",
+      "props": { "content": "<p>Giới thiệu ngắn gọn thông điệp chính và giá trị cốt lõi.</p>" }
+    },
+    {
+      "block_id": "core/button",
+      "props": {
+        "cta": { "url": "/lien-he", "label": "Khám phá ngay", "new_tab": false, "nofollow": false }
+      }
+    }
+  ],
   "fields": [
     {
-      "type": "accordion",
-      "key": "background_section",
-      "label": "Bố cục & Nền",
-      "open_by_default": true,
-      "multi_expand": true
+      "type": "tab",
+      "key": "tab_background",
+      "label": "Nền"
     },
     {
       "type": "media",
-      "key": "bg_media",
+      "key": "bg_image",
       "label": "Ảnh nền",
       "media_kind": "image",
       "css_var": "--od-banner-bg"
     },
     {
       "type": "color",
-      "key": "overlay_color",
+      "key": "bg_color",
+      "label": "Màu nền",
+      "default": "#0f172a",
+      "css_var": "--od-banner-bg-color"
+    },
+    {
+      "type": "color",
+      "key": "bg_overlay",
       "label": "Lớp phủ",
-      "default": "transparent",
+      "default": "#0f172a59",
       "css_var": "--od-banner-overlay"
     },
     {
       "type": "range",
-      "key": "min_height",
-      "label": "Chiều cao tối thiểu",
-      "min": 160,
-      "max": 800,
-      "default": 360,
-      "unit": "px",
-      "responsive": true,
-      "css_var": "--od-banner-h"
-    },
-    {
-      "type": "range",
-      "key": "focus_x",
+      "key": "bg_focal_x",
       "label": "Tâm ngang (%)",
       "min": 0,
       "max": 100,
+      "step": 1,
       "default": 50,
       "unit": "%",
       "css_var": "--od-banner-fx"
     },
     {
       "type": "range",
-      "key": "focus_y",
+      "key": "bg_focal_y",
       "label": "Tâm dọc (%)",
       "min": 0,
       "max": 100,
+      "step": 1,
       "default": 50,
       "unit": "%",
       "css_var": "--od-banner-fy"
     },
     {
-      "type": "accordion",
-      "key": "content_section",
-      "label": "Nội dung & CTA",
-      "open_by_default": true,
-      "multi_expand": true
+      "type": "tab",
+      "key": "tab_layout",
+      "label": "Bố cục"
+    },
+    {
+      "type": "range",
+      "key": "min_height",
+      "label": "Chiều cao tối thiểu",
+      "min": 160,
+      "max": 840,
+      "step": 8,
+      "default": 360,
+      "unit": "px",
+      "responsive": true,
+      "css_var": "--od-banner-h"
     },
     {
       "type": "select",
-      "key": "align",
-      "label": "Căn lề",
+      "key": "v_align",
+      "label": "Căn dọc",
       "options": [
-        { "value": "left", "label": "Trái" },
+        { "value": "start", "label": "Trên" },
         { "value": "center", "label": "Giữa" },
-        { "value": "right", "label": "Phải" }
+        { "value": "end", "label": "Dưới" }
       ],
-      "default": "center",
+      "default": "center"
+    },
+    {
+      "type": "select",
+      "key": "h_align",
+      "label": "Căn ngang",
+      "options": [
+        { "value": "start", "label": "Trái" },
+        { "value": "center", "label": "Giữa" },
+        { "value": "end", "label": "Phải" }
+      ],
+      "default": "center"
+    },
+    {
+      "type": "radio_buttons",
+      "key": "text_scheme",
+      "label": "Tông chữ",
+      "options": [
+        { "value": "light", "label": "Chữ sáng" },
+        { "value": "dark", "label": "Chữ tối" }
+      ],
+      "default": "light"
+    },
+    {
+      "type": "select",
+      "key": "radius",
+      "label": "Bo góc",
+      "options": [
+        { "value": "none", "label": "Không" },
+        { "value": "md", "label": "Vừa" },
+        { "value": "lg", "label": "Lớn" },
+        { "value": "xl", "label": "Rất lớn" },
+        { "value": "2xl", "label": "Cực lớn" }
+      ],
+      "default": "2xl"
+    },
+    {
+      "type": "spacing",
+      "key": "padding",
+      "label": "Đệm trong (Padding)",
+      "property": "padding",
+      "unit": "px",
       "responsive": true,
-      "css_var": "--od-banner-align"
-    },
-    {
-      "type": "text",
-      "key": "heading",
-      "label": "Tiêu đề",
-      "required": true,
-      "default": "Tiêu đề Banner"
-    },
-    {
-      "type": "richtext",
-      "key": "body",
-      "label": "Mô tả"
-    },
-    {
-      "type": "boolean",
-      "key": "show_cta",
-      "label": "Hiện nút CTA",
-      "default": true
-    },
-    {
-      "type": "text",
-      "key": "cta_label",
-      "label": "Nhãn nút",
-      "conditions": [[{ "field": "show_cta", "op": "eq", "value": true }]],
-      "default": "Khám phá"
-    },
-    {
-      "type": "url",
-      "key": "cta_url",
-      "label": "Liên kết CTA",
-      "conditions": [[{ "field": "show_cta", "op": "eq", "value": true }]],
-      "default": "#"
+      "default": { "top": 48, "right": 24, "bottom": 48, "left": 24 }
     }
   ]
 }

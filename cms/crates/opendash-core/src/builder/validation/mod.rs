@@ -1,6 +1,5 @@
 use super::*;
 
+mod checks;
 mod types;
 pub use types::*;
-mod checks;
-pub use checks::*;

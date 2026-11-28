@@ -6,13 +6,45 @@ pub(crate) struct BlockSchemaTemplateContext {
 }
 
 impl BlockSchemaTemplateContext {
-    pub(crate) fn from_schema(schema: &opendash_core::block_schema::BlockSchemaV1) -> Self {
+    pub(crate) fn from_schema(schema: &opendash_core::block_schema::BlockSchema) -> Self {
+        Self::from_schema_with_children(schema, schema.supports_children)
+    }
+
+    pub(crate) fn from_schema_with_children(
+        schema: &opendash_core::block_schema::BlockSchema,
+        supports_children: bool,
+    ) -> Self {
         let policy = ThemeUrlPolicy::from_option_specs(&[], BTreeSet::new());
         let mut root = BTreeMap::new();
         for field in &schema.fields {
             if let Some(node) = field_template_node_from_spec(field) {
                 root.insert(field.key.clone(), Some(UrlSourceKind::FieldNode(node)));
             }
+        }
+        let parent_ctx_node = FieldTemplateNode::Group(BTreeMap::from([
+            ("parent_id".to_owned(), FieldTemplateNode::Scalar),
+            ("parent_block_id".to_owned(), FieldTemplateNode::Scalar),
+            ("index".to_owned(), FieldTemplateNode::Scalar),
+            ("sibling_count".to_owned(), FieldTemplateNode::Scalar),
+            ("parent_props".to_owned(), FieldTemplateNode::ScalarMap),
+        ]));
+        root.insert(
+            "parent_ctx".to_owned(),
+            Some(UrlSourceKind::FieldNode(parent_ctx_node)),
+        );
+        if supports_children {
+            let children_meta_node = FieldTemplateNode::Repeater(BTreeMap::from([
+                ("id".to_owned(), FieldTemplateNode::Scalar),
+                ("block_id".to_owned(), FieldTemplateNode::Scalar),
+                ("index".to_owned(), FieldTemplateNode::Scalar),
+                ("title".to_owned(), FieldTemplateNode::Scalar),
+                ("icon".to_owned(), FieldTemplateNode::Icon),
+                ("open_by_default".to_owned(), FieldTemplateNode::Scalar),
+            ]));
+            root.insert(
+                "children_meta".to_owned(),
+                Some(UrlSourceKind::FieldNode(children_meta_node)),
+            );
         }
         Self {
             policy,
@@ -42,6 +74,8 @@ pub(crate) fn classify_node_and_tail(
             None
         }
         (FieldTemplateNode::Scalar, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
+        (FieldTemplateNode::ScalarMap, &[_key]) => None,
+        (FieldTemplateNode::ScalarMap, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
         (FieldTemplateNode::Icon, &["name"]) => None,
         (FieldTemplateNode::Icon, _) => Some(BlockSensitiveKind::ObjectOrNonScalar),
         (FieldTemplateNode::Richtext, &[]) => Some(BlockSensitiveKind::Richtext),
@@ -257,6 +291,60 @@ pub(crate) fn block_call_arg_touches_sensitive(
     }
 }
 
+pub(crate) fn block_stmt_touches_sensitive(
+    stmt: &Stmt<'_>,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> bool {
+    match stmt {
+        Stmt::Template(t) => t
+            .children
+            .iter()
+            .any(|c| block_stmt_touches_sensitive(c, scopes, policy)),
+        Stmt::EmitRaw(_) => false,
+        Stmt::EmitExpr(e) => block_expr_touches_sensitive(&e.expr, scopes, policy),
+        Stmt::IfCond(i) => {
+            block_expr_touches_sensitive(&i.expr, scopes, policy)
+                || i.true_body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+                || i.false_body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+        }
+        Stmt::ForLoop(f) => {
+            block_expr_touches_sensitive(&f.iter, scopes, policy)
+                || f.body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+                || f.else_body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+        }
+        Stmt::Set(s) => {
+            block_expr_touches_sensitive(&s.target, scopes, policy)
+                || block_expr_touches_sensitive(&s.expr, scopes, policy)
+        }
+        Stmt::SetBlock(sb) => {
+            block_expr_touches_sensitive(&sb.target, scopes, policy)
+                || sb
+                    .body
+                    .iter()
+                    .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+        }
+        Stmt::WithBlock(w) => {
+            w.assignments.iter().any(|(k, v)| {
+                block_expr_touches_sensitive(k, scopes, policy)
+                    || block_expr_touches_sensitive(v, scopes, policy)
+            }) || w
+                .body
+                .iter()
+                .any(|c| block_stmt_touches_sensitive(c, scopes, policy))
+        }
+        _ => true,
+    }
+}
+
 pub(crate) fn check_block_expr_restrictions(
     expr: &Expr<'_>,
     scopes: &UrlScopeStack,
@@ -267,6 +355,11 @@ pub(crate) fn check_block_expr_restrictions(
         Expr::Var(v) => {
             if v.id == "theme_options" {
                 return Err("Template block không được truy cập theme_options.");
+            }
+            if v.id == "children_html" {
+                return Err(
+                    "children_html chỉ được xuất trực tiếp dưới dạng bare {{ children_html }} ở thân Container.",
+                );
             }
             Ok(())
         }
@@ -450,9 +543,11 @@ pub(crate) fn walk_block_ast_sequence(
     mut states: BTreeSet<ThemeHtmlState>,
     mut scopes: UrlScopeStack,
     policy: &ThemeUrlPolicy,
+    walk_ctx: &mut BlockWalkContext,
 ) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
     for child in children {
-        let (next_states, next_scopes) = walk_block_ast_stmt(child, states, scopes, policy)?;
+        let (next_states, next_scopes) =
+            walk_block_ast_stmt(child, states, scopes, policy, walk_ctx)?;
         states = next_states;
         scopes = next_scopes;
         if states.len() > MAX_THEME_WALKER_STATES {

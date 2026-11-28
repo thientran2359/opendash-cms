@@ -1,8 +1,17 @@
-<article class="od-block-card od-card-layout-{{ layout }} overflow-hidden rounded-xl border border-od-border bg-od-surface shadow-sm transition duration-200" style="background-color:var(--od-card-bg,#ffffff);border:1px solid #e4e4e7;border-radius:12px;overflow:hidden;">
-  {% if image and image.url %}<div class="od-card-media overflow-hidden">{{ od_image(image, "(min-width: 1024px) 33vw, 100vw", "h-auto w-full object-cover") }}</div>{% endif %}
-  <div class="od-card-content p-5 md:p-6" style="padding:20px;">
-    <h3 class="od-card-title font-od-heading text-xl font-semibold text-od-text">{{ title }}</h3>
-    {% if body %}<div class="od-card-body od-prose mt-3 text-od-muted">{{ body }}</div>{% endif %}
-    {% if show_cta and cta_label and cta_url %}<div class="od-card-actions mt-6"><a class="od-card-cta inline-flex items-center font-semibold text-od-primary hover:underline" href="{{ cta_url }}" rel="noopener noreferrer">{{ cta_label }}</a></div>{% endif %}
+{% set pos_cls = 'flex-col md:flex-row' if media_position == 'left' else ('flex-col md:flex-row-reverse' if media_position == 'right' else 'flex-col') %}
+{% set surface_cls = 'shadow-none border-0' if surface_style == 'flat' else ('shadow-lg border border-od-border' if surface_style == 'elevated' else 'shadow-xs border border-od-border') %}
+{% set tone_cls = 'bg-slate-50 border-slate-200' if tone == 'neutral' else ('bg-blue-50 border-blue-200' if tone == 'brand' else ('bg-sky-50 border-sky-200' if tone == 'info' else ('bg-emerald-50 border-emerald-200' if tone == 'success' else ('bg-amber-50 border-amber-300' if tone == 'warning' else 'bg-od-surface')))) %}
+{% set radius_cls = 'rounded-none' if radius == 'none' else ('rounded-md' if radius == 'md' else ('rounded-lg' if radius == 'lg' else ('rounded-2xl' if radius == '2xl' else 'rounded-xl'))) %}
+{% set ratio_cls = 'aspect-video' if media_ratio == '16_9' else ('aspect-[4/3]' if media_ratio == '4_3' else ('aspect-square' if media_ratio == '1_1' else '')) %}
+<article class="od-block-card od-card-{{ media_position }} relative flex overflow-hidden transition duration-200 {{ pos_cls }} {{ surface_cls }} {{ tone_cls }} {{ radius_cls }}"{% if tone == 'default' %} style="background-color:var(--od-card-bg,#ffffff);"{% endif %}>
+  {% if card_link and card_link.url %}<a href="{{ card_link.url }}" target="{{ card_link.target }}" rel="{{ card_link.rel }}" aria-label="{{ card_link.label }}" class="od-card-stretched-link after:absolute after:inset-0 after:z-10"></a>{% endif %}
+  {% if media_position != 'none' and image and image.url %}
+  <div class="od-card-media {{ ratio_cls }} shrink-0 overflow-hidden{% if media_position == 'left' or media_position == 'right' %} md:w-2/5{% endif %}">
+    {{ od_image(image, "(min-width: 1024px) 33vw, 100vw", "h-full w-full object-cover") }}
+  </div>
+  {% endif %}
+  <div class="od-card-body flex-1 {{ padding.classes }}" data-od-spacing="padding">
+    {% if icon and icon.name %}<div class="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-od-surface-alt text-od-primary">{{ od_icon(icon.name) }}</div>{% endif %}
+    {{ children_html }}
   </div>
 </article>

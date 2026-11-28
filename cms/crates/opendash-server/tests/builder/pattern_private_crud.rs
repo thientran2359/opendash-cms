@@ -83,7 +83,7 @@ async fn login(client: &Client, site: &Site, username: &str, password: &str) -> 
 }
 
 fn ast(heading: &str) -> Value {
-    json!({"schema_version":1,"sections":[{"id":"section","children":[{"id":"row","children":[{"id":"column","children":[{"id":"heading","type":"core/heading","props":{"level":2,"text":heading}}]}]}]}]})
+    json!({"schema_version":1,"blocks":[{"id":"section","block_id":"core/section","children":[{"id":"row","block_id":"core/row","children":[{"id":"column","block_id":"core/column","children":[{"id":"heading","block_id":"core/heading","props":{"text":heading}}]}]}]}]})
 }
 
 #[tokio::test]
@@ -127,7 +127,7 @@ async fn pattern_private_crud_document_cas_and_public_fences() {
     let opened_json: Value = opened.json().await.unwrap();
     assert_eq!(opened_json["entry_id"], id);
     assert_eq!(opened_json["version"], 1);
-    assert_eq!(opened_json["document"]["sections"], json!([]));
+    assert_eq!(opened_json["document"]["blocks"], json!([]));
     let design = ast("Never Public");
     let preview = client
         .post(format!("{doc_url}/preview"))

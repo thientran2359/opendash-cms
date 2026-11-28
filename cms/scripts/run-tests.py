@@ -373,7 +373,6 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             # Builder & Studio
             "page.rs": {"builder", "theme"},
             "storage/builder.rs": {"builder"},
-            "storage/builder_binding.rs": {"builder", "content"},
             "storage/page.rs": {"builder"},
             "storage/patterns.rs": {"builder"},
             "routes/builder.rs": {"builder"},

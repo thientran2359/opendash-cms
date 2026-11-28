@@ -3,11 +3,8 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use crate::{
-    block_schema::{BlockSchemaV1, RegisteredBlockSchema},
-    builder::{
-        BUILDER_SCHEMA_VERSION, BuilderDocument, ColumnNode, ElementContent, ElementNode,
-        HeadingProps, KnownElement, PluginBlockProps, RowNode, SectionNode, TextProps,
-    },
+    block_schema::{BlockSchema, RegisteredBlockSchema},
+    builder::{BUILDER_SCHEMA_VERSION, BlockNode, BuilderDocument},
     builder_blocks::extract_document_visible_text,
     content::{
         AttachedFieldGroupSnapshot, ContentTypeDefinition, ContentTypeSettings, EditorRegion,
@@ -299,7 +296,7 @@ fn sample_schema_and_blocks() -> (
         schema_token: "tok".into(),
     };
 
-    let block_schema: BlockSchemaV1 = serde_json::from_value(json!({
+    let block_schema: BlockSchema = serde_json::from_value(json!({
         "schema_version": 1,
         "id": "core/card",
         "title": "Card",
@@ -338,47 +335,48 @@ fn extracts_acl_filtered_fields_and_builder_comment_blocks() {
 
     let doc = BuilderDocument {
         schema_version: BUILDER_SCHEMA_VERSION,
-        sections: vec![SectionNode {
-            id: "s1".into(),
+        blocks: vec![BlockNode {
+            id: "sec-1".into(),
+            block_id: "core/section".into(),
+            props: BTreeMap::new(),
             meta: None,
-            responsive: None,
-            style: None,
-            children: vec![RowNode {
-                id: "r1".into(),
+            children: vec![BlockNode {
+                id: "row-1".into(),
+                block_id: "core/row".into(),
+                props: BTreeMap::new(),
                 meta: None,
-                responsive: None,
-                children: vec![ColumnNode {
-                    id: "c1".into(),
+                children: vec![BlockNode {
+                    id: "col-1".into(),
+                    block_id: "core/column".into(),
+                    props: BTreeMap::new(),
                     meta: None,
-                    responsive: None,
                     children: vec![
-                        ElementNode {
-                            id: "h1".into(),
+                        BlockNode {
+                            id: "hd-1".into(),
+                            block_id: "core/heading".into(),
+                            props: BTreeMap::from([
+                                ("level".into(), json!("h2")),
+                                ("text".into(), json!("Tiêu đề Builder")),
+                            ]),
                             meta: None,
-                            content: ElementContent::Known(KnownElement::Heading(HeadingProps {
-                                level: 2,
-                                text: "Tiêu đề Builder".into(),
-                                binding: None,
-                            })),
+                            children: vec![],
                         },
-                        ElementNode {
-                            id: "t1".into(),
+                        BlockNode {
+                            id: "txt-1".into(),
+                            block_id: "core/text".into(),
+                            props: BTreeMap::from([(
+                                "content".into(),
+                                json!("<p>Đoạn văn</p><script>bad()</script>"),
+                            )]),
                             meta: None,
-                            content: ElementContent::Known(KnownElement::Text(TextProps {
-                                text: "<p>Đoạn văn</p><script>bad()</script>".into(),
-                                rich: true,
-                                binding: None,
-                            })),
+                            children: vec![],
                         },
-                        ElementNode {
-                            id: "p1".into(),
+                        BlockNode {
+                            id: "card-1".into(),
+                            block_id: "core/card".into(),
+                            props: card_vals,
                             meta: None,
-                            content: ElementContent::Known(KnownElement::PluginBlock(
-                                PluginBlockProps {
-                                    block_id: "core/card".into(),
-                                    values: card_vals,
-                                },
-                            )),
+                            children: vec![],
                         },
                     ],
                 }],

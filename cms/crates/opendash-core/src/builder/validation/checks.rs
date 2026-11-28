@@ -1,274 +1,298 @@
 use super::*;
+use crate::block_schema::BlockSchema;
 
-#[derive(Debug)]
-pub enum BuilderError {
-    Json(serde_json::Error),
-    Invalid(&'static str),
+struct PrevNodeInfo<'a> {
+    node: &'a BlockNode,
+    parent_id: Option<&'a str>,
+    subtree_ids: HashSet<&'a str>,
 }
 
-impl std::fmt::Display for BuilderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Json(error) => write!(f, "Invalid Builder JSON: {error}"),
-            Self::Invalid(message) => f.write_str(message),
+fn index_previous_nodes_rec<'a>(
+    nodes: &'a [BlockNode],
+    parent_id: Option<&'a str>,
+    out: &mut HashMap<&'a str, PrevNodeInfo<'a>>,
+) -> HashSet<&'a str> {
+    let mut level_subtree = HashSet::new();
+    for node in nodes {
+        let mut child_ids = index_previous_nodes_rec(&node.children, Some(node.id.as_str()), out);
+        level_subtree.insert(node.id.as_str());
+        level_subtree.extend(child_ids.iter().copied());
+        child_ids.insert(node.id.as_str());
+        out.insert(
+            node.id.as_str(),
+            PrevNodeInfo {
+                node,
+                parent_id,
+                subtree_ids: child_ids,
+            },
+        );
+    }
+    level_subtree
+}
+
+fn validate_list_cross_fields(props: &BTreeMap<String, Value>) -> Result<(), BuilderError> {
+    let type_ok = props
+        .get("type_key")
+        .and_then(Value::as_str)
+        .is_some_and(valid_content_type_key);
+    if !type_ok {
+        return Err(BuilderError::Invalid("Invalid Builder list type_key"));
+    }
+    if let Some(tax) = props.get("taxonomy_key").filter(|v| !v.is_null()) {
+        let Some(tax_key) = tax.as_str() else {
+            return Err(BuilderError::Invalid("Invalid Builder list taxonomy_key"));
+        };
+        if !tax_key.is_empty() && !valid_content_type_key(tax_key) {
+            return Err(BuilderError::Invalid("Invalid Builder list taxonomy_key"));
         }
     }
-}
-
-impl std::error::Error for BuilderError {}
-
-impl From<serde_json::Error> for BuilderError {
-    fn from(error: serde_json::Error) -> Self {
-        Self::Json(error)
+    let has_tax = props
+        .get("taxonomy_key")
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.trim().is_empty());
+    let has_term = props.get("term_id").is_some_and(|v| !v.is_null());
+    if has_tax != has_term || (has_term && parse_positive_i64_prop(props.get("term_id")).is_none())
+    {
+        return Err(BuilderError::Invalid("Invalid Builder list term_id filter"));
     }
-}
-
-pub(crate) fn validate_known_with_schemas(
-    element_id: &str,
-    element: &KnownElement,
-    catalog: &RegistryCatalog<RegisteredBlockSchema>,
-    prev_plugin_values: &HashMap<(&str, &str), &BTreeMap<String, Value>>,
-) -> Result<(), &'static str> {
-    match element {
-        KnownElement::Heading(props) => {
-            if !(1..=6).contains(&props.level)
-                || !valid_text(&props.text, 512, props.binding.is_none())
-                || !valid_binding(props.binding.as_ref(), &[BindingTarget::Text])
-            {
-                return Err("Invalid Heading level or text");
-            }
-        }
-        KnownElement::Text(props) => {
-            if !valid_text(&props.text, 16_384, false)
-                || !valid_binding(props.binding.as_ref(), &[BindingTarget::Text])
-            {
-                return Err("Invalid Text content");
-            }
-            if props.rich {
-                crate::richtext::sanitize_richtext(&props.text)
-                    .map_err(|_| "Invalid RichText HTML in core/text")?;
-            }
-        }
-        KnownElement::Image(props) => {
-            if !(valid_media_id(&props.media_id)
-                || (props.media_id.is_empty()
-                    && props
-                        .binding
-                        .as_ref()
-                        .is_some_and(|b| b.target == BindingTarget::MediaId)))
-                || !valid_text(&props.alt, 512, false)
-                || !valid_binding(
-                    props.binding.as_ref(),
-                    &[BindingTarget::MediaId, BindingTarget::Alt],
-                )
-            {
-                return Err("Invalid Image media ID or alt text");
-            }
-        }
-        KnownElement::Button(props) => {
-            if !valid_text(
-                &props.label,
-                200,
-                !props
-                    .binding
-                    .as_ref()
-                    .is_some_and(|b| b.target == BindingTarget::Label),
-            ) || !(valid_button_url(&props.url)
-                || (props.url.is_empty()
-                    && props
-                        .binding
-                        .as_ref()
-                        .is_some_and(|b| b.target == BindingTarget::Url)))
-                || !valid_binding(
-                    props.binding.as_ref(),
-                    &[BindingTarget::Label, BindingTarget::Url],
-                )
-            {
-                return Err("Invalid Button label or URL");
-            }
-        }
-        KnownElement::Legacy(_) => {
-            return Err("Legacy block descriptor unavailable");
-        }
-        KnownElement::PluginBlock(props) => {
-            if !valid_namespaced_block_id(&props.block_id) {
-                return Err("Invalid plugin block id");
-            }
-            if props.values.len() > MAX_NODE_VALUES_KEYS {
-                return Err("Plugin block props exceed limit");
-            }
-            let entry = catalog
-                .get(&props.block_id)
-                .ok_or("Unknown plugin block descriptor")?;
-            if entry.status != ProviderStatus::Active
-                || entry.declaration_state != DeclarationState::Declared
-            {
-                return Err("Plugin block provider is not active");
-            }
-            let prev_values = prev_plugin_values
-                .get(&(element_id, props.block_id.as_str()))
-                .copied();
-            entry
-                .descriptor
-                .schema
-                .validate_values(&props.values, prev_values)?;
-        }
-        KnownElement::Video(props) => {
-            if !valid_media_id(&props.media_id) {
-                return Err("Invalid Video media ID");
-            }
-            if let Some(poster) = props.poster_image_id.as_deref()
-                && !valid_media_id(poster)
-            {
-                return Err("Invalid Video poster image ID");
-            }
-        }
-        KnownElement::ContactForm(props) => {
-            let label = props.submit_label.trim();
-            if props.form_id <= 0
-                || label.is_empty()
-                || props.submit_label.chars().count() > 80
-                || props.submit_label.chars().any(char::is_control)
-            {
-                return Err("Invalid Builder contact form configuration");
-            }
-        }
-        KnownElement::SearchForm(props) => {
-            let label = props.submit_label.trim();
-            if !valid_text(&props.placeholder, 120, false)
-                || props.placeholder.chars().any(char::is_control)
-                || label.is_empty()
-                || props.submit_label.chars().count() > 64
-                || props.submit_label.chars().any(char::is_control)
-            {
-                return Err("Invalid Builder search form configuration");
-            }
-        }
-        KnownElement::SearchResults(props) => {
-            if !valid_text(&props.empty_message, 240, false)
-                || props.empty_message.chars().any(char::is_control)
-            {
-                return Err("Invalid Builder search results configuration");
-            }
-        }
-        KnownElement::ContentSlot(_) => {}
-        KnownElement::PatternRef(props) => {
-            if props.pattern_id <= 0 {
-                return Err("Invalid Pattern reference ID");
-            }
-        }
-        KnownElement::TemplatePart(props) => {
-            if !valid_kebab_segment_with_limit(&props.part_key, 64) {
-                return Err("Invalid Builder template part key");
-            }
-        }
-        KnownElement::List(props) => {
-            if !valid_content_type_key(&props.type_key)
-                || !(1..=20).contains(&props.page_size)
-                || props.category_id.is_some_and(|id| id <= 0)
-                || props.tag_id.is_some_and(|id| id <= 0)
-                || props.term_id.is_some_and(|id| id <= 0)
-                || props
-                    .taxonomy_key
-                    .as_deref()
-                    .is_some_and(|key| !valid_content_type_key(key))
-                || (props.taxonomy_key.is_some() != props.term_id.is_some())
-                || (props.taxonomy_key.is_some()
-                    && (props.category_id.is_some() || props.tag_id.is_some()))
-                || (props.include_descendants
-                    && props.category_id.is_none()
-                    && props.taxonomy_key.is_none())
-            {
-                return Err("Invalid Builder list configuration");
-            }
-        }
+    if props.get("include_descendants").and_then(Value::as_bool) == Some(true)
+        && (!has_tax || parse_positive_i64_prop(props.get("term_id")).is_none())
+    {
+        return Err(BuilderError::Invalid(
+            "include_descendants requires taxonomy_key and term_id",
+        ));
     }
     Ok(())
 }
 
-pub(crate) fn valid_binding(binding: Option<&ElementBinding>, targets: &[BindingTarget]) -> bool {
-    let Some(binding) = binding else { return true };
-    if !targets.contains(&binding.target) {
-        return false;
-    }
-    if let Some(locale) = &binding.entry_locale
-        && !crate::id::valid_lowercase_locale_code(locale)
-    {
-        return false;
-    }
-    let fixed_entry_valid = || {
-        valid_content_type_key(&binding.type_key)
-            && valid_kebab_segment_with_limit(&binding.entry_slug, 64)
-    };
-    match &binding.source {
-        BindingSource::Title => {
-            fixed_entry_valid()
-                && !matches!(binding.target, BindingTarget::MediaId | BindingTarget::Url)
+struct ValidationWalk<'a> {
+    catalog: &'a RegistryCatalog<RegisteredBlockSchema>,
+    ctx: &'a BuilderContextTarget,
+    prev_index: &'a HashMap<&'a str, PrevNodeInfo<'a>>,
+    seen_ids: HashSet<&'a str>,
+    node_count: usize,
+    content_slots: usize,
+    lists: usize,
+    pattern_refs: usize,
+}
+
+impl<'a> ValidationWalk<'a> {
+    fn visit_nodes(
+        &mut self,
+        nodes: &'a [BlockNode],
+        depth: usize,
+        parent_id: Option<&'a str>,
+        parent_schema: Option<&'a BlockSchema>,
+        inactive_ancestor_subtree: Option<&'a HashSet<&'a str>>,
+    ) -> Result<(), BuilderError> {
+        if nodes.is_empty() {
+            return Ok(());
         }
-        BindingSource::Field { key } => fixed_entry_valid() && valid_snake_key(key),
-        BindingSource::RouteContext { field_key } => {
-            let valid_key = matches!(field_key.as_str(), "title" | "slug" | "url" | "cover_url")
-                || valid_snake_key(field_key);
-            let target_ok = match field_key.as_str() {
-                "title" | "slug" => {
-                    !matches!(binding.target, BindingTarget::MediaId | BindingTarget::Url)
+        if depth > MAX_BUILDER_DEPTH {
+            return Err(BuilderError::Invalid("Builder exceeds max depth 8"));
+        }
+        for node in nodes {
+            self.node_count += 1;
+            if self.node_count > MAX_BUILDER_NODES {
+                return Err(BuilderError::Invalid("Builder exceeds 512 nodes"));
+            }
+            if !valid_package_id(&node.id) {
+                return Err(BuilderError::Invalid("Invalid Builder node ID"));
+            }
+            if !self.seen_ids.insert(node.id.as_str()) {
+                return Err(BuilderError::Invalid("Duplicate Builder node ID"));
+            }
+            if !valid_namespaced_block_id(&node.block_id) {
+                return Err(BuilderError::Invalid("Invalid Builder block_id"));
+            }
+            validate_node_meta(node.meta.as_ref())?;
+
+            match node.block_id.as_str() {
+                "core/content-slot" => {
+                    self.content_slots += 1;
+                    if self.content_slots > 1 {
+                        return Err(BuilderError::Invalid(
+                            "Builder allows at most one core/content-slot",
+                        ));
+                    }
                 }
-                "url" => matches!(
-                    binding.target,
-                    BindingTarget::Url | BindingTarget::Text | BindingTarget::Label
-                ),
-                "cover_url" => matches!(
-                    binding.target,
-                    BindingTarget::Url | BindingTarget::MediaId | BindingTarget::Text
-                ),
-                _ => true,
+                "core/list" => {
+                    self.lists += 1;
+                    if self.lists > MAX_BUILDER_LISTS_PER_REQUEST {
+                        return Err(BuilderError::Invalid("Builder exceeds 8 list blocks"));
+                    }
+                }
+                "core/pattern-ref" => {
+                    self.pattern_refs += 1;
+                    if self.pattern_refs > MAX_BUILDER_PATTERN_INSTANCES {
+                        return Err(BuilderError::Invalid(
+                            "Builder exceeds 16 pattern-ref instances",
+                        ));
+                    }
+                }
+                _ => {}
+            }
+
+            if let Some(allowed_subtree) = inactive_ancestor_subtree {
+                let prev = self
+                    .prev_index
+                    .get(node.id.as_str())
+                    .ok_or(BuilderError::Invalid(
+                        "Cannot insert node inside inactive container",
+                    ))?;
+                if !allowed_subtree.contains(node.id.as_str())
+                    || prev.node.block_id != node.block_id
+                    || prev.node.props != node.props
+                {
+                    return Err(BuilderError::Invalid(
+                        "Cannot insert or mutate node inside inactive container",
+                    ));
+                }
+                self.visit_nodes(
+                    &node.children,
+                    depth + 1,
+                    Some(node.id.as_str()),
+                    None,
+                    Some(allowed_subtree),
+                )?;
+                continue;
+            }
+
+            let active_schema = self
+                .catalog
+                .get(&node.block_id)
+                .filter(|entry| {
+                    entry.status == ProviderStatus::Active
+                        && entry.declaration_state == DeclarationState::Declared
+                })
+                .map(|entry| &entry.descriptor.schema);
+
+            let Some(schema) = active_schema else {
+                let prev = self
+                    .prev_index
+                    .get(node.id.as_str())
+                    .ok_or(BuilderError::Invalid(
+                        "Block descriptor is unavailable or inactive",
+                    ))?;
+                if prev.node.block_id != node.block_id || prev.node.props != node.props {
+                    return Err(BuilderError::Invalid(
+                        "Cannot mutate props of inactive block",
+                    ));
+                }
+                let same_parent = prev.parent_id == parent_id;
+                if !same_parent
+                    && let Some(ps) = parent_schema
+                    && !(matches_pattern_list(ps.allowed_children.as_deref(), "*")
+                        && matches_pattern_list(ps.allowed_children.as_deref(), &node.block_id))
+                {
+                    return Err(BuilderError::Invalid(
+                        "Target parent does not allow moving inactive block",
+                    ));
+                }
+                self.visit_nodes(
+                    &node.children,
+                    depth + 1,
+                    Some(node.id.as_str()),
+                    None,
+                    Some(&prev.subtree_ids),
+                )?;
+                continue;
             };
-            let scope_ok = (binding.type_key.is_empty()
-                || valid_content_type_key(&binding.type_key))
-                && (binding.entry_slug.is_empty()
-                    || valid_kebab_segment_with_limit(&binding.entry_slug, 64));
-            valid_key && target_ok && scope_ok
+
+            if !self.ctx.allows_contexts(schema.allowed_contexts.as_deref()) {
+                return Err(BuilderError::Invalid(
+                    "Block is not allowed in this Builder context",
+                ));
+            }
+            let parent_token = parent_schema.map_or("root", |ps| ps.id.as_str());
+            if !matches_pattern_list(schema.allowed_parents.as_deref(), parent_token) {
+                return Err(BuilderError::Invalid(
+                    "Block is not allowed under this parent",
+                ));
+            }
+            if let Some(ps) = parent_schema
+                && !matches_pattern_list(ps.allowed_children.as_deref(), &node.block_id)
+            {
+                return Err(BuilderError::Invalid(
+                    "Parent container forbids this child block",
+                ));
+            }
+            if !schema.supports_children && !node.children.is_empty() {
+                return Err(BuilderError::Invalid(
+                    "Leaf block cannot contain child nodes",
+                ));
+            }
+
+            let prev_props = self
+                .prev_index
+                .get(node.id.as_str())
+                .filter(|prev| prev.node.block_id == node.block_id)
+                .map(|prev| &prev.node.props);
+            schema
+                .validate_values(&node.props, prev_props)
+                .map_err(BuilderError::Invalid)?;
+
+            if node.block_id == "core/list" {
+                validate_list_cross_fields(&node.props)?;
+            } else if node.block_id == "core/pattern-ref"
+                && parse_positive_i64_prop(node.props.get("pattern_id")).is_none()
+            {
+                return Err(BuilderError::Invalid("Invalid Pattern reference ID"));
+            } else if node.block_id == "core/contact-form"
+                && parse_positive_i64_prop(node.props.get("form_id")).is_none()
+            {
+                return Err(BuilderError::Invalid("Invalid Contact Form reference ID"));
+            } else if node.block_id == "core/template-part"
+                && !node
+                    .props
+                    .get("part_key")
+                    .and_then(Value::as_str)
+                    .is_some_and(|key| valid_kebab_segment_with_limit(key, 64))
+            {
+                return Err(BuilderError::Invalid("Invalid Builder template part key"));
+            }
+
+            self.visit_nodes(
+                &node.children,
+                depth + 1,
+                Some(node.id.as_str()),
+                Some(schema),
+                None,
+            )?;
         }
+        Ok(())
     }
 }
 
-pub(crate) fn valid_media_id(value: &str) -> bool {
-    // Matches the M3 media ID *syntax*; P02 checks actual existence and ACL.
-    (1..=128).contains(&value.len())
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-}
-
-pub(crate) fn valid_text(value: &str, max_chars: usize, required: bool) -> bool {
-    value.chars().count() <= max_chars
-        && (!required || !value.trim().is_empty())
-        && !value
-            .chars()
-            .any(|ch| ch == '\0' || (ch.is_control() && ch != '\n' && ch != '\t'))
-}
-
-/// URL policy from ADR-0007: local path or absolute HTTP(S), no credentials.
-pub fn valid_button_url(value: &str) -> bool {
-    if value.is_empty()
-        || value.len() > 2048
-        || value
-            .chars()
-            .any(|ch| ch.is_whitespace() || ch.is_control())
-        || value
-            .chars()
-            .any(|ch| matches!(ch, '\\' | '<' | '>' | '"' | '\''))
-    {
-        return false;
+impl BuilderDocument {
+    /// Clean-Slate V1 single-pass recursive validation against `catalog`, `ctx`, and `previous`.
+    pub fn validate_for_save(
+        &self,
+        catalog: &RegistryCatalog<RegisteredBlockSchema>,
+        ctx: &BuilderContextTarget,
+        previous: Option<&BuilderDocument>,
+    ) -> Result<(), BuilderError> {
+        if self.schema_version != BUILDER_SCHEMA_VERSION {
+            return Err(BuilderError::Invalid(
+                "Builder AST tiền-V1 (cấu trúc sections cũ hoặc schema_version != 1) không được hỗ trợ ở Clean-Slate V1.",
+            ));
+        }
+        let mut prev_index = HashMap::new();
+        if let Some(prev) = previous {
+            index_previous_nodes_rec(&prev.blocks, None, &mut prev_index);
+        }
+        let mut walk = ValidationWalk {
+            catalog,
+            ctx,
+            prev_index: &prev_index,
+            seen_ids: HashSet::new(),
+            node_count: 0,
+            content_slots: 0,
+            lists: 0,
+            pattern_refs: 0,
+        };
+        walk.visit_nodes(&self.blocks, 1, None, None, None)?;
+        self.to_json()?;
+        Ok(())
     }
-    if value.starts_with('/') {
-        return !value.starts_with("//")
-            && Url::parse(&format!("https://builder.invalid{value}")).is_ok();
-    }
-    Url::parse(value).is_ok_and(|url| {
-        matches!(url.scheme(), "http" | "https")
-            && url.host_str().is_some()
-            && url.username().is_empty()
-            && url.password().is_none()
-    })
 }

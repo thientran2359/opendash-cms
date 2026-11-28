@@ -67,7 +67,7 @@ pub(crate) fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'stat
 pub(crate) fn collect_package_blocks(
     files: &BTreeMap<String, Vec<u8>>,
     owner_id: &str,
-) -> Result<Vec<(BlockSchemaV1, String)>, &'static str> {
+) -> Result<Vec<(BlockSchema, String)>, &'static str> {
     let mut slugs = BTreeSet::new();
     for path in files.keys().filter(|path| path.starts_with("blocks/")) {
         let Some(rest) = path.strip_prefix("blocks/") else {
@@ -103,7 +103,7 @@ pub(crate) fn collect_package_blocks(
                 .ok_or("Block thiếu render.html.")?,
         )
         .map_err(|_| "render.html phải là UTF-8 hợp lệ.")?;
-        let schema: BlockSchemaV1 =
+        let schema: BlockSchema =
             serde_json::from_str(raw_schema).map_err(|_| "block.json không đúng schema v1.")?;
         schema.validate(owner_id)?;
         if schema.id != format!("{owner_id}/{slug}") {
