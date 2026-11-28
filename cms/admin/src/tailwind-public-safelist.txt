@@ -132,3 +132,8 @@ sticky top-4 self-start after:absolute after:inset-0 after:z-10 relative z-10 z-
 aspect-[4/3] aspect-[3/4] max-w-prose bg-sky-50 border-sky-200 shadow-none
 text-start text-end md:text-start md:text-end lg:text-start lg:text-end
 text-justify md:text-justify lg:text-justify
+# Spec A2 Studio Template Blocks & Loop Engine
+line-clamp-1 line-clamp-2 line-clamp-3 line-clamp-4
+aspect-auto aspect-[3/2] aspect-[4/5]
+peer peer-checked:flex sr-only pointer-events-none md:col-start-2
+rounded-sm

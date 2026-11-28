@@ -253,7 +253,7 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
 
     // 2. Install & activate a Theme with its own CPT; verify plugin's CPT stays Active
     let theme_json = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "agency-theme",
         "version": "1.0.0",
         "name": "Agency Theme",

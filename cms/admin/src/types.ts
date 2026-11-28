@@ -19,7 +19,14 @@ export interface AuthResponse {
 export type BlockPropValue =
   | string | number | boolean | null
   | BlockPropValue[] | { [key: string]: BlockPropValue };
-export type BlockCategory = 'layout' | 'media' | 'interactive' | 'content' | 'marketing' | 'plugin';
+export type BlockCategory =
+  | 'layout'
+  | 'media'
+  | 'interactive'
+  | 'content'
+  | 'marketing'
+  | 'template'
+  | 'plugin';
 export interface DefaultChildSpec {
   block_id: string;
   props?: Record<string, unknown>;

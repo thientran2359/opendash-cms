@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
+pub(crate) fn theme_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
     if rel_path == "theme.json" {
         return Ok(V2_MAX_TEXT_BYTES);
     }
@@ -19,7 +19,7 @@ pub(crate) fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'stat
         {
             return Ok(V2_MAX_TEXT_BYTES);
         }
-        return Err("Đường dẫn blocks/<slug>/ của theme v3 không hợp lệ.");
+        return Err("Đường dẫn blocks/<slug>/ của theme v1 không hợp lệ.");
     }
     if !parent.is_empty()
         && parent.split('/').any(|segment| {
@@ -30,7 +30,7 @@ pub(crate) fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'stat
                 })
         })
     {
-        return Err("Tên thư mục theme v3 không hợp lệ.");
+        return Err("Tên thư mục theme v1 không hợp lệ.");
     }
     let is_html = name.ends_with(".html");
     let is_json = name.ends_with(".json");
@@ -39,25 +39,25 @@ pub(crate) fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'stat
         .bytes()
         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.'));
     if !safe_file_name || name.starts_with('.') || name.contains("..") {
-        return Err("Tên file theme v3 không hợp lệ.");
+        return Err("Tên file theme v1 không hợp lệ.");
     }
     match parent {
         "" | "template-part" | "page-layouts" if is_html => Ok(V2_MAX_TEXT_BYTES),
         "patterns" if is_json => Ok(V2_MAX_TEXT_BYTES),
         "languages" if is_l10n => Ok(1024 * 1024),
         _ if rel_path.starts_with("assets/") => {
-            if !valid_asset_path(rel_path) {
-                return Err("Đường dẫn assets theme v3 không đúng schema D01.");
+            if !valid_theme_asset_path(rel_path) {
+                return Err("Đường dẫn assets theme v1 không đúng schema D01.");
             }
             let ext = name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
             match ext {
                 "css" | "txt" => Ok(V2_MAX_TEXT_BYTES),
-                "js" | "mjs" | "svg" => Ok(V3_MAX_ACTIVE_ASSET_BYTES),
+                "js" | "mjs" | "svg" => Ok(MAX_ACTIVE_ASSET_BYTES),
                 "png" | "jpg" | "jpeg" | "webp" | "gif" | "woff2" => Ok(V2_MAX_RASTER_BYTES),
-                _ => Err("Định dạng assets theme v3 không được cho phép."),
+                _ => Err("Định dạng assets theme v1 không được cho phép."),
             }
         }
-        _ => Err("Gói theme v3 chứa file ngoài root hoặc bốn thư mục được phép."),
+        _ => Err("Gói theme v1 chứa file ngoài root hoặc bốn thư mục được phép."),
     }
 }
 
@@ -115,11 +115,11 @@ pub(crate) fn collect_package_blocks(
     Ok(blocks)
 }
 
-/// Read a v3 ZIP through the shared bounded, symlink-safe package reader,
+/// Read a theme V1 ZIP through the shared bounded, symlink-safe package reader,
 /// then validate manifest paths, content AST and C-SEC before persistence.
-pub fn parse_theme_zip_v3(bytes: &[u8]) -> Result<ThemeV3Package, V2ZipError> {
-    let files = read_v2_zip_entries(bytes, v3_entry_cap_and_allowlist)?;
-    validate_theme_v3_files(files)
+pub fn parse_theme_zip(bytes: &[u8]) -> Result<ThemePackage, V2ZipError> {
+    let files = read_v2_zip_entries(bytes, theme_entry_cap_and_allowlist)?;
+    validate_theme_files(files)
 }
 
 pub(super) fn zip_err_msg(err: V2ZipError) -> String {
@@ -128,7 +128,7 @@ pub(super) fn zip_err_msg(err: V2ZipError) -> String {
     }
 }
 
-pub(super) fn walk_v3_dir(
+pub(super) fn walk_theme_dir(
     dir: &Path,
     rel_prefix: &str,
     depth: usize,
@@ -172,7 +172,7 @@ pub(super) fn walk_v3_dir(
                     "Đường dẫn theme bị trùng lặp không phân biệt hoa thường: {rel_path}"
                 ));
             }
-            walk_v3_dir(
+            walk_theme_dir(
                 &entry_path,
                 &rel_path,
                 depth + 1,
@@ -182,7 +182,7 @@ pub(super) fn walk_v3_dir(
             )?;
         } else if ft.is_file() {
             if files.len() >= V2_MAX_FILES {
-                return Err("Theme v3 vượt quá giới hạn số lượng file.".to_owned());
+                return Err("Theme v1 vượt quá giới hạn số lượng file.".to_owned());
             }
             if !seen_lower.insert(rel_path.to_ascii_lowercase()) {
                 return Err(format!(
@@ -198,7 +198,7 @@ pub(super) fn walk_v3_dir(
                 continue;
             }
             validate_theme_relative_path(&rel_path).map_err(str::to_owned)?;
-            let cap = v3_entry_cap_and_allowlist(&rel_path).map_err(str::to_owned)?;
+            let cap = theme_entry_cap_and_allowlist(&rel_path).map_err(str::to_owned)?;
             if meta.len() > cap as u64 {
                 return Err(format!(
                     "File '{rel_path}' vượt quá giới hạn kích thước ({cap} bytes)."
@@ -217,7 +217,7 @@ pub(super) fn walk_v3_dir(
             }
             *decoded_total = decoded_total.saturating_add(data.len());
             if *decoded_total > V2_MAX_DECODED_BYTES {
-                return Err("Theme v3 vượt quá giới hạn tổng kích thước giải mã 32 MiB.".to_owned());
+                return Err("Theme v1 vượt quá giới hạn tổng kích thước giải mã 32 MiB.".to_owned());
             }
             files.insert(rel_path, data);
         } else {
@@ -229,7 +229,7 @@ pub(super) fn walk_v3_dir(
     Ok(())
 }
 
-pub(super) fn build_theme_check_summary(pkg: &ThemeV3Package) -> Result<ThemeCheckSummary, String> {
+pub(super) fn build_theme_check_summary(pkg: &ThemePackage) -> Result<ThemeCheckSummary, String> {
     let mut templates: Vec<String> = pkg
         .manifest
         .templates
@@ -311,10 +311,10 @@ pub fn check_theme_path(path: &Path) -> Result<ThemeCheckSummary, String> {
                 "File ZIP theme vượt quá giới hạn {V2_MAX_ZIP_BYTES} bytes."
             ));
         }
-        parse_theme_zip_v3(&bytes).map_err(zip_err_msg)?
+        parse_theme_zip(&bytes).map_err(zip_err_msg)?
     } else if meta.is_dir() {
-        let files = load_v3_files_from_dir(path)?;
-        validate_theme_v3_files(files).map_err(zip_err_msg)?
+        let files = load_theme_files_from_dir(path)?;
+        validate_theme_files(files).map_err(zip_err_msg)?
     } else {
         return Err(format!(
             "Đường dẫn '{}' không phải file hoặc thư mục hợp lệ.",

@@ -775,9 +775,9 @@ msgstr "Biến url / <media_key>_url chỉ được xuất bên trong thuộc t�
 msgid "A url option value must be a string."
 msgstr "Giá trị option kiểu url phải là chuỗi."
 
-#: server:error:themes.a_v3_theme_revision_id_is_required
-msgid "A v3 theme revision_id is required."
-msgstr "Cần revision_id theme v3."
+#: server:error:themes.a_v1_theme_revision_id_is_required
+msgid "A v1 theme revision_id is required."
+msgstr "Cần revision_id theme v1."
 
 #: admin:builder.studio_field_controls.token_accent
 msgid "Accent"
@@ -7098,7 +7098,7 @@ msgid "Homepage and reading settings affect homepage routing; select Save change
 msgstr "Cấu hình Trang chủ & Đọc ảnh hưởng định tuyến trang chủ; bấm Lưu thay đổi để áp dụng."
 
 #: server:core_l10n
-msgid "Homepage is not configured."
+msgid "Latest posts"
 msgstr "Chưa cấu hình trang chủ."
 
 #: admin:feature.seo.seopanel.homepage_seo
@@ -7438,8 +7438,8 @@ msgid "Insert a copy"
 msgstr "Chèn bản sao"
 
 #: admin:builder.builder_inspector.part_help
-msgid "Insert a reusable part from a DB override or the theme v3 parts/ folder. You can edit, change the key or delete it normally."
-msgstr "Chèn part tái sử dụng từ DB override hoặc thư mục parts/ của theme v3. Có thể sửa, thay khóa hoặc xóa bình thường."
+msgid "Insert a reusable part from a DB override or the theme v1 parts/ folder. You can edit, change the key or delete it normally."
+msgstr "Chèn part tái sử dụng từ DB override hoặc thư mục parts/ của theme v1. Có thể sửa, thay khóa hoặc xóa bình thường."
 
 #: admin:studio.insert_image_from_media_library
 msgid "Insert image from media library…"
@@ -7493,9 +7493,9 @@ msgstr "Plugins đã cài ("
 msgid "Installed themes"
 msgstr "Themes đã cài"
 
-#: admin:feature.themes.themespanel.installed_v3_revisions
-msgid "Installed v3 revisions ("
-msgstr "Các revision v3 đã cài ("
+#: admin:feature.themes.themespanel.installed_v1_revisions
+msgid "Installed v1 revisions ("
+msgstr "Các revision v1 đã cài ("
 
 #: admin:feature.plugins.pluginspanel.installing_a_zip_automatically_enables_the_plugin_if_its_id_matches_an_installed
 msgid "Installing a ZIP automatically enables the plugin. If its ID matches an installed plugin, the current version will be REPLACED and RE-ENABLED. Continue?"
@@ -7646,8 +7646,8 @@ msgid "Invalid Builder UTF-8 document."
 msgstr "Tài liệu Builder UTF-8 không hợp lệ."
 
 #: server:error:server.error
-msgid "Invalid built-in Starter Theme v3."
-msgstr "Built-in Starter Theme v3 không hợp lệ."
+msgid "Invalid built-in Starter Theme v1."
+msgstr "Built-in Starter Theme v1 không hợp lệ."
 
 #: server:error:builder.invalid_button_label_or_url
 msgid "Invalid Button label or URL"
@@ -8885,29 +8885,29 @@ msgstr "URL không hợp lệ."
 msgid "Invalid user role."
 msgstr "Vai trò người dùng không hợp lệ."
 
-#: server:error:theme.invalid_v3_theme_blocks_slug_path
-msgid "Invalid v3 theme blocks/<slug>/ path."
-msgstr "Đường dẫn blocks/<slug>/ của theme v3 không hợp lệ."
+#: server:error:theme.invalid_v1_theme_blocks_slug_path
+msgid "Invalid v1 theme blocks/<slug>/ path."
+msgstr "Đường dẫn blocks/<slug>/ của theme v1 không hợp lệ."
 
-#: server:error:theme.invalid_v3_theme_directory_name
-msgid "Invalid v3 theme directory name."
-msgstr "Tên thư mục theme v3 không hợp lệ."
+#: server:error:theme.invalid_v1_theme_directory_name
+msgid "Invalid v1 theme directory name."
+msgstr "Tên thư mục theme v1 không hợp lệ."
 
-#: server:error:theme.invalid_v3_theme_file_name
-msgid "Invalid v3 theme file name."
-msgstr "Tên file theme v3 không hợp lệ."
+#: server:error:theme.invalid_v1_theme_file_name
+msgid "Invalid v1 theme file name."
+msgstr "Tên file theme v1 không hợp lệ."
 
-#: server:error:theme.invalid_v3_theme_files_or_manifest
-msgid "Invalid v3 theme files or manifest."
-msgstr "Theme v3 files hoặc manifest không hợp lệ."
+#: server:error:theme.invalid_v1_theme_files_or_manifest
+msgid "Invalid v1 theme files or manifest."
+msgstr "Theme v1 files hoặc manifest không hợp lệ."
 
-#: server:error:server.error server:error:theme.invalid_v3_theme_manifest
-msgid "Invalid v3 theme manifest."
-msgstr "Manifest theme v3 không hợp lệ."
+#: server:error:server.error server:error:theme.invalid_v1_theme_manifest
+msgid "Invalid v1 theme manifest."
+msgstr "Manifest theme v1 không hợp lệ."
 
-#: server:error:theme.invalid_v3_theme_revision_manifest
-msgid "Invalid v3 theme revision manifest."
-msgstr "Theme revision manifest v3 không hợp lệ."
+#: server:error:theme.invalid_v1_theme_revision_manifest
+msgid "Invalid v1 theme revision manifest."
+msgstr "Theme revision manifest v1 không hợp lệ."
 
 #: server:error:request.invalid_if_match
 msgid "Invalid version in If-Match."
@@ -10454,29 +10454,29 @@ msgstr "Không có tài khoản trong trang này."
 msgid "No active theme or the active theme has no menu locations."
 msgstr "Theme hiện tại chưa kích hoạt hoặc không khai báo vùng menu."
 
-#: server:error:overrides.no_active_v3_theme_is_available_for_previewing_menu_slots
-msgid "No active v3 theme is available for previewing menu_slots."
-msgstr "Không có theme v3 đang kích hoạt để xem trước menu_slots."
+#: server:error:overrides.no_active_v1_theme_is_available_for_previewing_menu_slots
+msgid "No active v1 theme is available for previewing menu_slots."
+msgstr "Không có theme v1 đang kích hoạt để xem trước menu_slots."
 
-#: server:error:settings.no_active_v3_theme_is_available_for_previewing_theme_options
-msgid "No active v3 theme is available for previewing theme_options."
-msgstr "Không có theme v3 đang kích hoạt để xem trước theme_options."
+#: server:error:settings.no_active_v1_theme_is_available_for_previewing_theme_options
+msgid "No active v1 theme is available for previewing theme_options."
+msgstr "Không có theme v1 đang kích hoạt để xem trước theme_options."
 
-#: server:error:entries.no_active_v3_theme_is_available_for_selecting_a_layout_template
-msgid "No active v3 theme is available for selecting a layout/template."
-msgstr "Chưa có theme v3 hoạt động để chọn layout/template."
+#: server:error:entries.no_active_v1_theme_is_available_for_selecting_a_layout_template
+msgid "No active v1 theme is available for selecting a layout/template."
+msgstr "Chưa có theme v1 hoạt động để chọn layout/template."
 
-#: server:error:import.no_active_v3_theme_revision
-msgid "No active v3 theme revision."
-msgstr "Chưa có revision theme v3 đang hoạt động."
+#: server:error:import.no_active_v1_theme_revision
+msgid "No active v1 theme revision."
+msgstr "Chưa có revision theme v1 đang hoạt động."
 
-#: admin:studio.no_active_v3_theme_with_configurable_options
-msgid "No active v3 theme with configurable options."
-msgstr "Chưa có Theme v3 đang kích hoạt để cấu hình tùy chọn riêng."
+#: admin:studio.no_active_v1_theme_with_configurable_options
+msgid "No active v1 theme with configurable options."
+msgstr "Chưa có Theme v1 đang kích hoạt để cấu hình tùy chọn riêng."
 
-#: server:error:patterns.no_active_v3_theme
-msgid "No active v3 theme."
-msgstr "Không có active theme v3."
+#: server:error:patterns.no_active_v1_theme
+msgid "No active v1 theme."
+msgstr "Không có active theme v1."
 
 #: admin:fields.select.no_dynamic_items
 msgid "No available items in this source."
@@ -16242,9 +16242,9 @@ msgstr "Digest revision đã tồn tại cho một theme/version khác."
 msgid "The revision directory on disk does not match .complete or is corrupted."
 msgstr "Thư mục revision trên đĩa không khớp .complete hoặc bị hỏng."
 
-#: server:error:import.the_revision_does_not_belong_to_the_requested_theme_or_is_not_v3
-msgid "The revision does not belong to the requested theme or is not v3."
-msgstr "Revision không thuộc theme yêu cầu hoặc không phải v3."
+#: server:error:import.the_revision_does_not_belong_to_the_requested_theme_or_is_not_v1
+msgid "The revision does not belong to the requested theme or is not v1."
+msgstr "Revision không thuộc theme yêu cầu hoặc không phải v1."
 
 #: server:error:themes.the_revision_on_disk_is_missing_or_does_not_match_complete_digest
 msgid "The revision on disk is missing or does not match .complete/digest."
@@ -16962,33 +16962,33 @@ msgstr "Tên đăng nhập phải từ 3 đến 32 ký tự."
 msgid "The username must start with a letter or digit."
 msgstr "Tên đăng nhập phải bắt đầu bằng chữ cái hoặc chữ số."
 
-#: server:error:theme.the_v3_theme_assets_format_is_prohibited
-msgid "The v3 theme assets format is prohibited."
-msgstr "Định dạng assets theme v3 không được cho phép."
+#: server:error:theme.the_v1_theme_assets_format_is_prohibited
+msgid "The v1 theme assets format is prohibited."
+msgstr "Định dạng assets theme v1 không được cho phép."
 
-#: server:error:theme.the_v3_theme_assets_path_does_not_match_schema_d01
-msgid "The v3 theme assets path does not match schema D01."
-msgstr "Đường dẫn assets theme v3 không đúng schema D01."
+#: server:error:theme.the_v1_theme_assets_path_does_not_match_schema_d01
+msgid "The v1 theme assets path does not match schema D01."
+msgstr "Đường dẫn assets theme v1 không đúng schema D01."
 
-#: server:error:theme.the_v3_theme_exceeds_the_file_count_limit
-msgid "The v3 theme exceeds the file count limit."
-msgstr "Theme v3 vượt quá giới hạn số lượng file."
+#: server:error:theme.the_v1_theme_exceeds_the_file_count_limit
+msgid "The v1 theme exceeds the file count limit."
+msgstr "Theme v1 vượt quá giới hạn số lượng file."
 
-#: server:error:theme.the_v3_theme_exceeds_the_total_decoded_size_limit_of_32_mib
-msgid "The v3 theme exceeds the total decoded size limit of 32 MiB."
-msgstr "Theme v3 vượt quá giới hạn tổng kích thước giải mã 32 MiB."
+#: server:error:theme.the_v1_theme_exceeds_the_total_decoded_size_limit_of_32_mib
+msgid "The v1 theme exceeds the total decoded size limit of 32 MiB."
+msgstr "Theme v1 vượt quá giới hạn tổng kích thước giải mã 32 MiB."
 
-#: server:error:theme.the_v3_theme_manifest_json_does_not_match_theme_json
-msgid "The v3 theme manifest_json does not match theme.json."
-msgstr "Theme v3 manifest_json không khớp file theme.json."
+#: server:error:theme.the_v1_theme_manifest_json_does_not_match_theme_json
+msgid "The v1 theme manifest_json does not match theme.json."
+msgstr "Theme v1 manifest_json không khớp file theme.json."
 
-#: server:error:theme.the_v3_theme_package_contains_a_file_outside_the_root_or_four_allowed_directories
-msgid "The v3 theme package contains a file outside the root or four allowed directories."
-msgstr "Gói theme v3 chứa file ngoài root hoặc bốn thư mục được phép."
+#: server:error:theme.the_v1_theme_package_contains_a_file_outside_the_root_or_four_allowed_directories
+msgid "The v1 theme package contains a file outside the root or four allowed directories."
+msgstr "Gói theme v1 chứa file ngoài root hoặc bốn thư mục được phép."
 
-#: server:error:import.the_v3_theme_revision_does_not_exist
-msgid "The v3 theme revision does not exist."
-msgstr "Revision theme v3 không tồn tại."
+#: server:error:import.the_v1_theme_revision_does_not_exist
+msgid "The v1 theme revision does not exist."
+msgstr "Revision theme v1 không tồn tại."
 
 #: server:error:content.the_values_contain_an_undeclared_custom_field
 msgid "The values contain an undeclared custom field."
@@ -17154,13 +17154,13 @@ msgstr "Đã lưu cài đặt Theme Functions."
 msgid "Theme HTML contains a prohibited internal marker."
 msgstr "Theme HTML chứa marker nội bộ bị cấm."
 
-#: server:error:theme.theme_manifest_version_must_be_3
-msgid "Theme manifest_version must be 3"
-msgstr "manifest_version của theme phải là 3."
+#: server:error:theme.theme_manifest_version_must_be_1
+msgid "Theme manifest_version must be 1"
+msgstr "manifest_version của theme phải là 1."
 
-#: server:error:theme.theme_metadata_does_not_match_the_v3_manifest
-msgid "Theme metadata does not match the v3 manifest."
-msgstr "Theme metadata không khớp manifest v3."
+#: server:error:theme.theme_metadata_does_not_match_the_v1_manifest
+msgid "Theme metadata does not match the v1 manifest."
+msgstr "Theme metadata không khớp manifest v1."
 
 #: server:error:menu.theme_not_found
 msgid "Theme not found."
@@ -17218,13 +17218,13 @@ msgstr "Token giao diện"
 msgid "Theme URLs must contain 1–4096 Unicode characters."
 msgstr "Theme URL phải có 1–4096 ký tự Unicode."
 
-#: admin:feature.themes.themespanel.theme_v3_manifest_version_3_theme_json_templates_parts_and_declared_assets
-msgid "Theme v3 (manifest_version=3, theme.json, templates, parts and declared assets)."
-msgstr "Theme v3 (manifest_version=3, theme.json, templates, parts và assets được khai báo)."
+#: admin:feature.themes.themespanel.theme_v1_manifest_version_1_theme_json_templates_parts_and_declared_assets
+msgid "Theme v1 (manifest_version=1, theme.json, templates, parts and declared assets)."
+msgstr "Theme v1 (manifest_version=1, theme.json, templates, parts và assets được khai báo)."
 
-#: admin:feature.themes.themespanel.theme_v3_revisions
-msgid "Theme v3 revisions"
-msgstr "Revision theme v3"
+#: admin:feature.themes.themespanel.theme_v1_revisions
+msgid "Theme v1 revisions"
+msgstr "Revision theme v1"
 
 #: admin:studio.theme_specific_options
 msgid "Theme-specific options"
@@ -18038,9 +18038,9 @@ msgstr "Người dùng"
 msgid "Using a custom site base."
 msgstr "Đang dùng base tùy chỉnh của website."
 
-#: admin:feature.themes.themespanel.v3_revisions
-msgid "v3 revisions)"
-msgstr "revision v3)"
+#: admin:feature.themes.themespanel.v1_revisions
+msgid "revisions)"
+msgstr "revision)"
 
 #: server:error:server.error
 msgid "VACUUM main INTO failed while creating the snapshot."
@@ -19054,16 +19054,25 @@ msgid "This pattern contains blocks incompatible with the current target."
 msgstr "Mẫu thiết kế chứa các block không tương thích với đích hiện tại."
 
 #: admin:studio.workspace.forbids_slot
-msgid "This template must not contain core/content-slot."
-msgstr "Mẫu giao diện này không được chứa core/content-slot."
+msgid "This template must not contain Entry Content."
+msgstr "Mẫu giao diện này không được chứa khối Nội dung bài viết."
 
 #: admin:builder.editor_core.requires_slot
-msgid "This template must retain at least one core/content-slot."
-msgstr "Mẫu giao diện này phải giữ lại ít nhất một core/content-slot."
+msgid "This template must retain at least one entry content or entry display block."
+msgstr "Mẫu giao diện này phải giữ lại ít nhất một khối nội dung hoặc khối hiển thị bài viết."
 
 #: admin:studio.workspace.requires_slot
-msgid "This template requires exactly one core/content-slot."
-msgstr "Mẫu giao diện này yêu cầu đúng một core/content-slot."
+msgid "Single templates require Entry Content (max 1) or at least one Entry block."
+msgstr "Mẫu bài viết chi tiết cần khối Nội dung bài viết (tối đa 1) hoặc ít nhất một khối Entry."
+
+msgid "This template allows at most one Entry Content block."
+msgstr "Mẫu giao diện này chỉ cho phép tối đa một khối Nội dung bài viết."
+
+msgid "Template context"
+msgstr "Khối ngữ cảnh Template"
+
+msgid "Limit of one entry content block"
+msgstr "Giới hạn tối đa 1 khối Nội dung bài viết"
 
 #: server:core_l10n.search_placeholder
 msgid "Search the site..."
@@ -21449,9 +21458,97 @@ msgid "Template library"
 msgstr "Thư viện mẫu"
 
 #: admin:feature.themes.themespanel.install_v3_zip_subtitle
-msgid "Upload a Theme v3 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder."
-msgstr "Tải lên gói Theme v3 dạng ZIP. Kích hoạt theme không làm thay đổi block, trường hay dữ liệu đã lưu trong trình dựng trang."
+msgid "Upload a Theme v1 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder."
+msgstr "Tải lên gói Theme v1 dạng ZIP. Kích hoạt theme không làm thay đổi block, trường hay dữ liệu đã lưu trong trình dựng trang."
 
+#: server:error:restore.pre_v1_theme_revision_unsupported
+msgid "Backup restore archive contains unsupported pre-V1 theme revisions."
+msgstr "Bản sao khôi phục chứa theme revision tiền-V1 không được hỗ trợ."
+
+#: server:error:public.home_taxonomy_filter_unsupported
+msgid "Homepage does not support taxonomy filters."
+msgstr "Trang chủ không hỗ trợ bộ lọc taxonomy."
+
+#: server:error:preview.entry_locale_mismatch
+msgid "Preview entry does not match the selected preview locale."
+msgstr "Bài viết xem trước không khớp ngôn ngữ đang chọn."
+
+#: server:error:preview.term_not_found
+msgid "Preview taxonomy term not found."
+msgstr "Không tìm thấy term phân loại để xem trước."
+
+#: server:error:preview.term_target_mismatch
+msgid "Preview term does not match template target."
+msgstr "Term xem trước không khớp target template."
+
+#: server:error:preview.term_locale_mismatch
+msgid "Preview term does not match the selected preview locale."
+msgstr "Term xem trước không khớp ngôn ngữ đang chọn."
+
+#: server:error:page.loop_query_budget_exceeded
+msgid "List queries per request exceeded the maximum limit of 8."
+msgstr "Số lượng truy vấn danh sách trên mỗi yêu cầu vượt quá giới hạn tối đa 8."
+
+#: server:error:page.loop_item_budget_exceeded
+msgid "Loop items per request exceeded the maximum limit of 96."
+msgstr "Số lượng phần tử lặp trên mỗi yêu cầu vượt quá giới hạn tối đa 96."
+
+#: server:error:menu.load_budget_exceeded
+msgid "Menus loaded per request exceeded the maximum limit of 8."
+msgstr "Số lượng menu tải trên mỗi yêu cầu vượt quá giới hạn tối đa 8."
+
+#: server:core_l10n.related_entries
+msgid "Related posts"
+msgstr "Bài viết liên quan"
+
+#: server:core_l10n.prev_entry
+msgid "Previous post"
+msgstr "Bài trước"
+
+#: server:core_l10n.next_entry
+msgid "Next post"
+msgstr "Bài tiếp theo"
+
+#: server:core_l10n.breadcrumb_nav
+msgid "Breadcrumb"
+msgstr "Điều hướng đường dẫn"
+
+#: server:core_l10n.menu_toggle
+msgid "Toggle menu"
+msgstr "Mở menu"
+
+#: server:core_l10n.reading_time_suffix
+msgid "min read"
+msgstr "phút đọc"
+
+#: server:core_l10n.preview_draft_date_suffix
+msgid "(Draft preview)"
+msgstr "(Bản nháp xem trước)"
+
+#: server:core_l10n.posts_count_suffix
+msgid "posts"
+msgstr "bài viết"
+
+msgid "Preview entry"
+msgstr "Bài xem trước"
+
+msgid "Preview term"
+msgstr "Phân loại xem trước"
+
+msgid "Loading samples…"
+msgstr "Đang tải mẫu…"
+
+msgid "Auto (latest)"
+msgstr "Tự động (mới nhất)"
+
+msgid "Loop limits or block allowlist prevent this action."
+msgstr "Giới hạn vòng lặp hoặc danh sách block cho phép không hỗ trợ thao tác này."
+
+msgid "Customize each card (Add Loop Item)"
+msgstr "Tùy biến từng thẻ (Thêm Loop Item)"
+
+msgid "Revert to default cards"
+msgstr "Quay về thẻ mặc định"
 
 #: admin:admin-ui-ux-polish
 msgid "#{{id}} · {{slug}} · {{count}} content references"
@@ -21610,12 +21707,12 @@ msgid "ID"
 msgstr "ID"
 
 #: admin:admin-ui-ux-polish
-msgid "Installed ({{count}} v3 revisions)"
-msgstr "Đã cài đặt ({{count}} phiên bản v3)"
+msgid "Installed ({{count}} v1 revisions)"
+msgstr "Đã cài đặt ({{count}} phiên bản v1)"
 
 #: admin:admin-ui-ux-polish
-msgid "Installed v3 revisions ({{count}})"
-msgstr "Các phiên bản v3 đã cài ({{count}})"
+msgid "Installed v1 revisions ({{count}})"
+msgstr "Các phiên bản v1 đã cài ({{count}})"
 
 #: admin:admin-ui-ux-polish
 msgid "Job: {{id}} — Status: {{state}}"

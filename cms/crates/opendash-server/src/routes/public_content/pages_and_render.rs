@@ -101,7 +101,7 @@ pub(super) async fn apply_public_render_hooks(
 pub(super) async fn resolve_public_template_html(
     db: &SqlitePool,
     candidates: &[opendash_core::theme::TemplateCandidate],
-    active: Option<&theme_storage::ActiveThemeV3>,
+    active: Option<&theme_storage::ActiveTheme>,
     site_ctx: &SiteContext<'_>,
     site_opts: &BTreeMap<String, serde_json::Value>,
     theme_opts: &BTreeMap<String, serde_json::Value>,

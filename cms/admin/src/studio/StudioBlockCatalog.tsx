@@ -17,7 +17,9 @@ import {
   findActiveCatalogItem,
   hasLockedAncestor,
   insertBlock,
+  isInsideLoopItem,
   isLockedNode,
+  isLoopSchemaCompatible,
   locate,
   matchesContextTarget,
   withinBuilderLimits,
@@ -41,6 +43,7 @@ const SYMBOL_BY_CATEGORY: Record<BlockCategory, string> = {
   media: '▣',
   interactive: '⚡',
   marketing: '★',
+  template: '◈',
   plugin: '❖',
 };
 
@@ -57,14 +60,28 @@ export function StudioBlockCatalog({
   const { __, _x } = useI18n();
   const [query, setQuery] = useState('');
 
-  const BLOCK_CATEGORIES: Array<{ key: BlockCategory; title: string }> = [
-    { key: 'layout', title: __("Layout") },
-    { key: 'content', title: __("Content") },
-    { key: 'media', title: _x("Media", "studio.media") },
-    { key: 'interactive', title: __("Interactive") },
-    { key: 'marketing', title: __("Marketing") },
-    { key: 'plugin', title: __("Plugin") },
-  ];
+  const isTemplateMode = Boolean(
+    contextTarget && contextTarget.kind !== 'entry_body' && contextTarget.kind !== 'pattern',
+  );
+  const BLOCK_CATEGORIES: Array<{ key: BlockCategory; title: string }> = isTemplateMode
+    ? [
+        { key: 'template', title: __("Template context") },
+        { key: 'layout', title: __("Layout") },
+        { key: 'content', title: __("Content") },
+        { key: 'media', title: _x("Media", "studio.media") },
+        { key: 'interactive', title: __("Interactive") },
+        { key: 'marketing', title: __("Marketing") },
+        { key: 'plugin', title: __("Plugin") },
+      ]
+    : [
+        { key: 'layout', title: __("Layout") },
+        { key: 'content', title: __("Content") },
+        { key: 'media', title: _x("Media", "studio.media") },
+        { key: 'interactive', title: __("Interactive") },
+        { key: 'marketing', title: __("Marketing") },
+        { key: 'template', title: __("Template context") },
+        { key: 'plugin', title: __("Plugin") },
+      ];
 
   const parentLoc = parentId !== null ? locate(document, parentId) : undefined;
   const parentItem = parentLoc ? findActiveCatalogItem(blockSchemas, parentLoc.node.block_id) : undefined;
@@ -90,8 +107,8 @@ export function StudioBlockCatalog({
 
   const insertionReason = (schema: BlockSchema, presetKey?: string): string | null => {
     if (!canInsertBlockAt(document, schema, parentId, blockSchemas, contextTarget, presetKey)) {
-      if (schema.id === 'core/content-slot' && countBlocksByType(document, 'core/content-slot') >= MAX_BUILDER_CONTENT_SLOTS) {
-        return __("Limit of one content slot");
+      if (schema.id === 'core/entry-content' && countBlocksByType(document, 'core/entry-content') >= MAX_BUILDER_CONTENT_SLOTS) {
+        return __("Limit of one entry content block");
       }
       if (schema.id === 'core/list' && countBlocksByType(document, 'core/list') >= MAX_BUILDER_LISTS) {
         return __("Limit of eight lists");
@@ -127,20 +144,24 @@ export function StudioBlockCatalog({
     return Boolean(item.schema.presets?.some(p => p.title.toLocaleLowerCase().includes(normalized)));
   };
 
+  const insideLoop = parentId !== null && isInsideLoopItem(document, parentId);
+  const catalogContext = insideLoop ? ({ kind: 'loop_item' } as const) : contextTarget;
   const compatibleItems = blockSchemas.filter(
     item =>
       item.status === 'active'
       && item.declaration_state === 'declared'
-      && matchesContextTarget(contextTarget, item.schema.allowed_contexts)
+      && matchesContextTarget(catalogContext, item.schema.allowed_contexts)
       && canParentAcceptChild(parentSchema, item.schema, parentId)
+      && (!insideLoop || isLoopSchemaCompatible(item.schema))
       && matchesQuery(item),
   );
 
   const imageCatalogItem = findActiveCatalogItem(blockSchemas, 'core/image');
   const canPickImage = Boolean(
     imageCatalogItem
-    && matchesContextTarget(contextTarget, imageCatalogItem.schema.allowed_contexts)
-    && canParentAcceptChild(parentSchema, imageCatalogItem.schema, parentId),
+    && matchesContextTarget(catalogContext, imageCatalogItem.schema.allowed_contexts)
+    && canParentAcceptChild(parentSchema, imageCatalogItem.schema, parentId)
+    && (!insideLoop || isLoopSchemaCompatible(imageCatalogItem.schema)),
   );
   const mediaLimit = imageCatalogItem ? insertionReason(imageCatalogItem.schema) : null;
 

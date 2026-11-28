@@ -1,4 +1,4 @@
-//! Admin-only theme v3 revision install/activation/rollback,
+//! Admin-only Theme Format V1 revision install/activation/rollback,
 //! and revision-scoped `/theme/{revision_digest}/{*path}` asset serving.
 
 use super::*;
@@ -41,7 +41,7 @@ pub(super) use crate::{
             self, RevisionActivationOutcome, RevisionInstallOutcome, ThemeList, ThemeRevisionRecord,
         },
     },
-    theme::{parse_theme_zip_v3, theme_asset_mime},
+    theme::{parse_theme_zip, theme_asset_mime},
 };
 
 #[derive(Deserialize)]
@@ -59,6 +59,8 @@ pub struct TemplateOverridePreviewInput {
     #[serde(default)]
     pub(super) preview_entry: Option<overrides::TemplatePreviewEntry>,
     #[serde(default)]
+    pub(super) preview_term: Option<overrides::TemplatePreviewTerm>,
+    #[serde(default)]
     pub(super) preview_locale: Option<String>,
 }
 
@@ -72,6 +74,8 @@ pub struct StudioPreviewRequest {
     pub(super) document: Option<opendash_core::builder::BuilderDocument>,
     #[serde(default)]
     pub(super) preview_entry: Option<overrides::TemplatePreviewEntry>,
+    #[serde(default)]
+    pub(super) preview_term: Option<overrides::TemplatePreviewTerm>,
     #[serde(default)]
     pub(super) preview_annotations: bool,
     #[serde(default)]
@@ -90,7 +94,7 @@ pub struct ActivateInput {
 }
 
 #[derive(Serialize)]
-pub(super) struct ThemeV3InstallResponse {
+pub(super) struct ThemeInstallResponse {
     pub(super) revision_id: String,
     pub(super) theme_id: String,
     pub(super) version: String,

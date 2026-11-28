@@ -110,6 +110,8 @@ pub struct RichTextNonceTable {
 #[derive(Debug, Clone, Default)]
 pub struct IconNonceTable {
     pub(super) entries: Vec<(String, String)>,
+    pub(super) meta: std::collections::BTreeMap<String, (String, Option<String>)>,
+    pub(super) unique_names: std::collections::BTreeSet<String>,
 }
 
 pub const HOOK_NONCE_PREFIX: &str = "OD_HOOK_";
@@ -185,6 +187,9 @@ pub struct RenderBudget {
     pub fuel_remaining: u64,
     pub html_bytes_used: usize,
     pub builder_lists_used: usize,
+    pub collection_queries_used: usize,
+    pub loop_items_rendered: usize,
+    pub menu_loads_used: usize,
     pub locale: String,
     pub icon_nonces: IconNonceTable,
     pub image_nonces: ImageNonceTable,
@@ -200,6 +205,10 @@ pub(crate) struct PreviewCompositionBudget {
     pub fuel_remaining: u64,
     pub html_bytes_used: usize,
     pub builder_lists_used: usize,
+    pub collection_queries_used: usize,
+    pub loop_items_rendered: usize,
+    pub menu_loads_used: usize,
+    pub locale: String,
     pub expansions: usize,
     pub stack: Vec<String>,
     pub icon_nonces: IconNonceTable,
@@ -218,6 +227,10 @@ impl PreviewCompositionBudget {
             fuel_remaining: rb.fuel_remaining,
             html_bytes_used: rb.html_bytes_used,
             builder_lists_used: rb.builder_lists_used,
+            collection_queries_used: rb.collection_queries_used,
+            loop_items_rendered: rb.loop_items_rendered,
+            menu_loads_used: rb.menu_loads_used,
+            locale: rb.locale,
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: rb.icon_nonces,
@@ -232,7 +245,10 @@ impl PreviewCompositionBudget {
             fuel_remaining: self.fuel_remaining,
             html_bytes_used: self.html_bytes_used,
             builder_lists_used: self.builder_lists_used,
-            locale: "vi".to_owned(),
+            collection_queries_used: self.collection_queries_used,
+            loop_items_rendered: self.loop_items_rendered,
+            menu_loads_used: self.menu_loads_used,
+            locale: self.locale.clone(),
             icon_nonces: self.icon_nonces.clone(),
             image_nonces: self.image_nonces.clone(),
             richtext_nonces: self.richtext_nonces.clone(),
@@ -244,6 +260,10 @@ impl PreviewCompositionBudget {
         self.fuel_remaining = rb.fuel_remaining;
         self.html_bytes_used = rb.html_bytes_used;
         self.builder_lists_used = rb.builder_lists_used;
+        self.collection_queries_used = rb.collection_queries_used;
+        self.loop_items_rendered = rb.loop_items_rendered;
+        self.menu_loads_used = rb.menu_loads_used;
+        self.locale = rb.locale.clone();
         self.icon_nonces = rb.icon_nonces.clone();
         self.image_nonces = rb.image_nonces.clone();
         self.richtext_nonces = rb.richtext_nonces.clone();

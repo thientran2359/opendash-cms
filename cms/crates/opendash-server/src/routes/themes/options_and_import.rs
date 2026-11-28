@@ -15,7 +15,7 @@ pub async fn theme_install(
         return Err(ApiError::unsupported_media_type("Cần gói application/zip."));
     }
 
-    let pkg = parse_theme_zip_v3(&bytes).map_err(map_v2_zip_error)?;
+    let pkg = parse_theme_zip(&bytes).map_err(map_v2_zip_error)?;
     crate::storage::settings::parse_theme_options_schema(&pkg.manifest_json)
         .map_err(ApiError::bad_request)?;
     let provenance_json = serde_json::json!({
@@ -23,7 +23,7 @@ pub async fn theme_install(
         "zip_bytes": bytes.len(),
     })
     .to_string();
-    let outcome = theme::stage_and_commit_v3_revision(
+    let outcome = theme::stage_and_commit_revision(
         &db,
         &themes_root.0,
         &next_run_uuid(),
@@ -42,12 +42,12 @@ pub async fn theme_install(
     Ok((
         status,
         headers(None),
-        Json(ThemeV3InstallResponse {
+        Json(ThemeInstallResponse {
             revision_id: rec.revision_id,
             theme_id: rec.theme_id,
             version: rec.version,
             revision_digest: rec.revision_digest,
-            source_format: "v3",
+            source_format: "v1",
             activated: false,
         }),
     )
@@ -158,6 +158,6 @@ pub async fn theme_activate(
                 )),
             }
         }
-        _ => Err(ApiError::bad_request("Cần revision_id theme v3.")),
+        _ => Err(ApiError::bad_request("Cần revision_id theme v1.")),
     }
 }

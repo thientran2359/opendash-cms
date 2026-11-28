@@ -270,7 +270,7 @@ async fn theme_and_plugin_with_identical_ids_are_strictly_isolated() {
     }
 
     let theme_manifest = serde_json::json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "shared-id",
         "name": "Shared Theme",
         "version": "1.0.0",
@@ -283,14 +283,14 @@ async fn theme_and_plugin_with_identical_ids_are_strictly_isolated() {
     .to_string();
     sqlx::query(
         "INSERT INTO theme_packages (theme_id, display_name, source_format)
-         VALUES ('shared-id', 'Shared Theme', 'v3')",
+         VALUES ('shared-id', 'Shared Theme', 'v1')",
     )
     .execute(&db)
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO theme_revisions (revision_id, theme_id, version, revision_digest, source_format, manifest_json, file_digests_json, provenance_json)
-         VALUES ('rev-shared', 'shared-id', '1.0.0', 'dig-shared', 'v3', ?, '{}', '{}')",
+         VALUES ('rev-shared', 'shared-id', '1.0.0', 'dig-shared', 'v1', ?, '{}', '{}')",
     )
     .bind(&theme_manifest)
     .execute(&db)

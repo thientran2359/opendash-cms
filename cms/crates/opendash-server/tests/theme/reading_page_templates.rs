@@ -163,13 +163,9 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
 
     let empty = client.get(format!("{}/", site.base)).send().await.unwrap();
     assert_eq!(empty.status(), StatusCode::OK);
-    assert!(
-        empty
-            .text()
-            .await
-            .unwrap()
-            .contains("Chưa cấu hình trang chủ")
-    );
+    let empty_html = empty.text().await.unwrap();
+    assert!(empty_html.contains("Chưa có nội dung."));
+    assert!(!empty_html.contains("Chưa cấu hình trang chủ"));
 
     let (home, home_version) = create_published(
         &client,

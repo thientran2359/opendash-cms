@@ -776,7 +776,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // 7. Theme manifest field_groups & 3-level tombstone + collision check
     let theme_manifest = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "studio-theme",
         "name": "Studio Theme",
         "version": "1.0.0",
@@ -844,7 +844,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // Theme v3 colliding with existing `client_name` on portfolio -> 409 field_key_collision
     let bad_theme_manifest = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "studio-theme",
         "name": "Studio Theme",
         "version": "1.1.0",

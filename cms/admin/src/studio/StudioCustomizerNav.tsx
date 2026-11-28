@@ -2,7 +2,7 @@ import { __, useI18n } from '../i18n/index.tsx';
 import React from 'react';
 import type { AdminLocaleState } from '../api/locales.ts';
 import type { MenuRecord, MenuSlotsSnapshot } from '../api/menus.ts';
-import type { StudioTargetGroup, StudioTargetItem } from '../api/studio.ts';
+import type { StudioTargetItem } from '../api/studio.ts';
 import type {
   GeneralSettingsDraft,
   GlobalSiteOptionsSnapshot,
@@ -19,6 +19,7 @@ import { AdminAlert, AdminBadge, AdminButton } from '../components/AdminPrimitiv
 import { ThemeOptionsForm } from '../features/themes/ThemeOptionsForm.tsx';
 import type { StudioPanelId } from '../shell/router.ts';
 import { StudioMenuManager } from './StudioMenuManager.tsx';
+import { StudioTargetList, studioTargetSourceBadge } from './StudioTargetList.tsx';
 
 interface Props {
   panel: StudioPanelId;
@@ -79,6 +80,7 @@ interface Props {
   onMenuRequestHandled?: () => void;
   canvasPickSeq?: number;
   openPatternSeq?: number;
+  previewEntryTypeKey?: string | null;
 }
 
 function contextTargetForTemplate(target: TemplateTargetInput): BuilderContextTarget {
@@ -91,7 +93,6 @@ function contextTargetForTemplate(target: TemplateTargetInput): BuilderContextTa
     case 'singular': return { kind: 'singular' };
     case 'page': return { kind: 'page' };
     case 'page_layout': return { kind: 'page_layout' };
-    case 'home': return { kind: 'home' };
     case 'index': return { kind: 'index' };
     case 'not_found': return { kind: 'not_found' };
     case 'search': return { kind: 'search' };
@@ -102,29 +103,10 @@ const INPUT_CLASS =
   'h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 ' +
   'focus-visible:outline-2 focus-visible:outline-od-accent';
 
-const GROUP_ORDER: StudioTargetGroup[] = [
-  'parts',
-  'core',
-  'content_types',
-  'page_layouts',
-  'custom_templates',
-  'overrides',
-];
-
 function pageChoiceValue(id: string): number | null {
   if (!id) return null;
   const num = Number(id);
   return Number.isSafeInteger(num) && num > 0 ? num : null;
-}
-
-function sourceBadge(item: StudioTargetItem): { label: string; tone: 'success' | 'neutral' | 'warning' } {
-  if (item.effective_source.kind === 'db_override') {
-    return { label: __("Page builder override"), tone: 'success' };
-  }
-  if (item.effective_source.kind === 'active_theme') {
-    return { label: __("C-SEC theme"), tone: 'neutral' };
-  }
-  return { label: __("Core default"), tone: 'warning' };
 }
 
 export const StudioCustomizerNav: React.FC<Props> = ({
@@ -183,16 +165,9 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   onMenuRequestHandled,
   canvasPickSeq,
   openPatternSeq,
+  previewEntryTypeKey = null,
 }) => {
   const { __, _x } = useI18n();
-  const GROUP_LABELS: Record<StudioTargetGroup, string> = {
-    parts: __("Shared components (Parts)"),
-    core: __("Core templates"),
-    content_types: __("Content types (CPT)"),
-    page_layouts: __("Page layouts"),
-    custom_templates: __("Custom detail templates"),
-    overrides: __("Other database overrides"),
-  };
   const selectedTarget = selectedTargetKey
     ? targets.find(item => item.canonical_target_key === selectedTargetKey) ?? null
     : null;
@@ -367,7 +342,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
             </h2>
             {!activeThemeId ? (
               <AdminAlert tone="info">
-                {__("No active v3 theme with configurable options.")}
+                {__("No active v1 theme with configurable options.")}
               </AdminAlert>
             ) : (
               <fieldset disabled={disabled} className="min-w-0">
@@ -483,9 +458,14 @@ export const StudioCustomizerNav: React.FC<Props> = ({
 
   // panel === 'templates'
   if (selectedTarget) {
-    const badge = sourceBadge(selectedTarget);
+    const badge = studioTargetSourceBadge(selectedTarget);
     const showCreateWarning = !selectedTarget.override_id && !templateEditingEnabled;
-    const contextTypeKey = selectedTarget.target.content_type ?? (selectedTarget.target.kind === 'page' ? 'page' : null);
+    const contextTypeKey = selectedTarget.target.content_type
+      ?? (selectedTarget.target.kind === 'index'
+        ? 'post'
+        : selectedTarget.target.kind === 'page' || selectedTarget.target.kind === 'page_layout'
+          ? 'page'
+          : previewEntryTypeKey ?? null);
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-template-editor">
         <div className="space-y-2.5 px-1.5 py-2">
@@ -539,7 +519,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               contextTypeKey={contextTypeKey}
               locale={previewLocale ?? localeState?.defaultLocale?.code ?? null}
               siteTimezone={generalDraft?.timezone}
-              requiresContentSlot={selectedTarget.requires_content_slot}
+              requiresContentSlot={selectedTarget.entry_content_rule === 'required_or_entry_block'}
               diagnostics={templateDiagnostics}
               disabled={disabled}
               onMessage={onBuilderMessage}
@@ -551,48 +531,5 @@ export const StudioCustomizerNav: React.FC<Props> = ({
     );
   }
 
-  return (
-    <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-templates">
-      <div className="space-y-4 p-3">
-        {targets.length === 0 ? (
-          <p className="px-1 text-xs text-zinc-500">{__("Loading templates…")}</p>
-        ) : (
-          GROUP_ORDER.map(group => {
-            const groupItems = targets.filter(item => item.group === group);
-            if (groupItems.length === 0) return null;
-            return (
-              <div key={group} className="space-y-1">
-                <p className="px-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                  {GROUP_LABELS[group]}
-                </p>
-                <ul className="m-0 list-none space-y-1 p-0">
-                  {groupItems.map(item => {
-                    const badge = sourceBadge(item);
-                    return (
-                      <li key={item.canonical_target_key}>
-                        <button
-                          type="button"
-                          data-testid={`studio-target-${item.canonical_target_key}`}
-                          onClick={() => onSelectTarget(item.canonical_target_key)}
-                          className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-left transition-colors hover:border-zinc-300 hover:bg-zinc-50"
-                        >
-                          <span className="min-w-0">
-                            <span className="block truncate text-xs font-semibold text-zinc-900">{item.label}</span>
-                            <code className="mt-0.5 block truncate font-mono text-[10px] text-zinc-500">
-                              {item.canonical_target_key}
-                            </code>
-                          </span>
-                          <AdminBadge tone={badge.tone}>{badge.label}</AdminBadge>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
+  return <StudioTargetList targets={targets} onSelectTarget={onSelectTarget} />;
 };

@@ -18,7 +18,7 @@ fn build_zip(entries: &[(&str, &[u8], CompressionMethod)]) -> Vec<u8> {
 
 /// D01 test fixture: all ZIP entries, including empty directory entries,
 /// pass through the production bounded reader before manifest validation.
-fn build_v3_zip(manifest: serde_json::Value, entries: &[(&str, &[u8])]) -> Vec<u8> {
+fn build_theme_zip(manifest: serde_json::Value, entries: &[(&str, &[u8])]) -> Vec<u8> {
     let manifest_json = serde_json::to_vec(&manifest).unwrap();
     let mut buf = Vec::new();
     {
@@ -39,9 +39,9 @@ fn build_v3_zip(manifest: serde_json::Value, entries: &[(&str, &[u8])]) -> Vec<u
     buf
 }
 
-fn minimal_v3_manifest() -> serde_json::Value {
+fn minimal_theme_manifest() -> serde_json::Value {
     serde_json::json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "sample-theme",
         "name": "Sample",
         "version": "1.0.0"

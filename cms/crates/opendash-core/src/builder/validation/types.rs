@@ -63,6 +63,7 @@ pub enum BuilderContextTarget {
     },
     Pattern,
     ThemePattern,
+    LoopItem,
     Template {
         kind: crate::theme::TemplateCandidateKind,
         content_type: Option<String>,
@@ -111,7 +112,6 @@ impl BuilderContextTarget {
                     ..
                 }
             ),
-            "home" => matches!(self, Self::Template { kind: K::Home, .. }),
             "index" => matches!(self, Self::Template { kind: K::Index, .. }),
             "archive" => matches!(
                 self,
@@ -141,7 +141,7 @@ impl BuilderContextTarget {
                     ..
                 }
             ),
-            "loop_item" => false,
+            "loop_item" => matches!(self, Self::LoopItem),
             other => {
                 if let Some(cpt) = other.strip_prefix("entry_body:") {
                     matches!(self, Self::EntryBody { content_type } if content_type == cpt)

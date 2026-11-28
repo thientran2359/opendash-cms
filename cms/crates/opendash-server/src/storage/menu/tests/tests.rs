@@ -399,3 +399,128 @@ async fn menu_view_computes_normalize_path_active_bottom_up_ancestor_external_an
     drop(db);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn resolve_menus_by_keys_filters_locale_and_enforces_eight_menu_cap() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("opendash-s02-menu-cap-{nanos}"));
+    let db = init_db(&dir.join("cms.db")).await.unwrap();
+
+    sqlx::query("UPDATE site_locales_state SET multilingual_enabled = 1 WHERE id = 1")
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO site_locales (code, bcp47_tag, label, direction, is_default, enabled, position)
+         VALUES ('en', 'en', 'English', 'ltr', 0, 1, 1)
+         ON CONFLICT(code) DO UPDATE SET enabled = 1, deleted_at = NULL",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let vi_entry_id: i64 = sqlx::query_scalar(
+        "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
+         VALUES('page', 'gioi-thieu', 'Giới thiệu', '{}', 'draft', 'vi', 'grp-m1') RETURNING id",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    let en_entry_id: i64 = sqlx::query_scalar(
+        "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
+         VALUES('page', 'about', 'About', '{}', 'draft', 'en', 'grp-m1') RETURNING id",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE content_entries SET publication_status = 'published', published_at = datetime('now') WHERE id IN (?, ?)",
+    )
+    .bind(vi_entry_id)
+    .bind(en_entry_id)
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO permalink_route_claims(path, target_kind, target_id, locale)
+         VALUES('/gioi-thieu', 'entry', CAST(? AS TEXT), 'vi'), ('/en/about', 'entry', CAST(? AS TEXT), 'en')",
+    )
+    .bind(vi_entry_id)
+    .bind(en_entry_id)
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let mut tx = db.begin().await.unwrap();
+    let m = create_menu_in_tx(
+        &mut tx,
+        &CreateMenuInput {
+            menu_key: "top-nav".into(),
+            title: "Top Nav".into(),
+            origin_provenance: None,
+        },
+    )
+    .await
+    .unwrap();
+    replace_menu_items_in_tx(
+        &mut tx,
+        m.id,
+        m.version,
+        &[
+            MenuItemInput {
+                id: None,
+                client_key: None,
+                parent_id: None,
+                parent_client_key: None,
+                position: 0,
+                label: "VI Link".into(),
+                target_kind: MenuTargetKind::Entry,
+                target_entry_id: Some(vi_entry_id),
+                target_term_id: None,
+                external_url: None,
+            },
+            MenuItemInput {
+                id: None,
+                client_key: None,
+                parent_id: None,
+                parent_client_key: None,
+                position: 1,
+                label: "EN Link".into(),
+                target_kind: MenuTargetKind::Entry,
+                target_entry_id: Some(en_entry_id),
+                target_term_id: None,
+                external_url: None,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+
+    let en_menus = resolve_menus_by_keys_for_path_in_tx(
+        &mut tx,
+        &["top-nav".into()],
+        Some("/en/about"),
+        Some("en"),
+        0,
+    )
+    .await
+    .unwrap();
+    let top_en = en_menus.get("top-nav").unwrap();
+    assert_eq!(top_en.items.len(), 1);
+    assert_eq!(top_en.items[0].label, "EN Link");
+    assert_eq!(top_en.items[0].url, "/en/about");
+    assert!(top_en.items[0].is_active);
+
+    let overflow_keys: Vec<String> = (1..=8).map(|i| format!("m-{i}")).collect();
+    let err = resolve_menus_by_keys_for_path_in_tx(&mut tx, &overflow_keys, None, Some("en"), 1)
+        .await
+        .unwrap_err();
+    assert!(format!("{err:?}").contains("8"));
+
+    tx.commit().await.unwrap();
+    drop(db);
+    let _ = std::fs::remove_dir_all(&dir);
+}

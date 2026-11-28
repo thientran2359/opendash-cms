@@ -7,6 +7,7 @@ pub struct RootAttrs<'a> {
     pub html_id: Option<&'a str>,
     pub extra_classes: &'a [String],
     pub kind: Option<&'a str>,
+    pub is_loop_clone: bool,
 }
 
 fn is_void_or_replaced_root(tag_lower: &str) -> bool {
@@ -230,6 +231,17 @@ fn parse_attr_tokens(attr_slice: &str) -> Vec<(String, Option<String>)> {
 }
 
 fn build_wrapper_attr_suffix(attrs: &RootAttrs<'_>, is_preview: bool) -> String {
+    if attrs.is_loop_clone {
+        let mut out = format!(
+            " data-block-id=\"{}\" data-od-node-scope=\"{}\"",
+            escape_html(attrs.block_id),
+            escape_html(attrs.node_scope),
+        );
+        if is_preview {
+            out.push_str(" data-od-loop-clone=\"1\"");
+        }
+        return out;
+    }
     let mut out = format!(
         " data-node-id=\"{}\" data-block-id=\"{}\" data-od-node-scope=\"{}\"",
         escape_html(attrs.node_id),
@@ -258,12 +270,16 @@ pub fn apply_single_root_wrapper(
         }
         let mut classes = vec!["od-block-empty-preview".to_owned()];
         classes.extend(attrs.extra_classes.iter().cloned());
-        let id_attr = attrs
-            .html_id
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|id| format!(" id=\"{}\"", escape_html(id)))
-            .unwrap_or_default();
+        let id_attr = if attrs.is_loop_clone {
+            String::new()
+        } else {
+            attrs
+                .html_id
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|id| format!(" id=\"{}\"", escape_html(id)))
+                .unwrap_or_default()
+        };
         return format!(
             "<div{id_attr} class=\"{}\"{}></div>",
             escape_html(&classes.join(" ")),
@@ -272,12 +288,16 @@ pub fn apply_single_root_wrapper(
     }
 
     let Some((open_start, name_end, open_gt, _root_tag)) = single_root_span(rendered) else {
-        let id_attr = attrs
-            .html_id
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|id| format!(" id=\"{}\"", escape_html(id)))
-            .unwrap_or_default();
+        let id_attr = if attrs.is_loop_clone {
+            String::new()
+        } else {
+            attrs
+                .html_id
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|id| format!(" id=\"{}\"", escape_html(id)))
+                .unwrap_or_default()
+        };
         let class_attr = if attrs.extra_classes.is_empty() {
             String::new()
         } else {
@@ -299,7 +319,11 @@ pub fn apply_single_root_wrapper(
         .join(" ");
     let mut merged_class = false;
     let mut updated_id = false;
-    let clean_html_id = attrs.html_id.map(str::trim).filter(|s| !s.is_empty());
+    let clean_html_id = if attrs.is_loop_clone {
+        None
+    } else {
+        attrs.html_id.map(str::trim).filter(|s| !s.is_empty())
+    };
 
     for (name, val) in &mut parsed {
         if name.eq_ignore_ascii_case("class") {
@@ -337,6 +361,7 @@ pub fn apply_single_root_wrapper(
                 | "data-od-node-scope"
                 | "data-od-editable"
                 | "data-od-kind"
+                | "data-od-loop-clone"
         ) {
             continue;
         }

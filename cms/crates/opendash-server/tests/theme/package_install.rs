@@ -133,7 +133,7 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
 
     // 3. Malicious ZIP corpus rejected before touching revisions/
     let bad_manifest =
-        br#"{"manifest_version":3,"theme_id":"bad-theme","name":"Bad","version":"1.0.0","templates":[]}"#;
+        br#"{"manifest_version":1,"theme_id":"bad-theme","name":"Bad","version":"1.0.0","templates":[]}"#;
     for bad_zip in [
         build_zip(&[
             ("theme.json", bad_manifest, CompressionMethod::Stored),
@@ -214,7 +214,7 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
 
     // 5. v3 ZIP install (1.0.0) succeeds without auto-activating
     let m1 = br#"{
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "editorial-clean",
         "name": "Editorial Clean",
         "version": "1.0.0",
@@ -268,7 +268,7 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
 
     // 6. Install v3 2.0.0, then test If-Match guards + activation + rollback
     let m2 = br#"{
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "editorial-clean",
         "name": "Editorial Clean",
         "version": "2.0.0",
@@ -348,7 +348,7 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
     // revision exists. A prohibited core CPT redeclaration must be rejected
     // without changing the active selection or its CAS version.
     let m_decl = br#"{
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "editorial-clean",
         "name": "Editorial Clean",
         "version": "3.0.0",

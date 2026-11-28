@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 const MANIFEST: &str = r#"{
-    "manifest_version":3, "theme_id":"trusted-html-e2e", "name":"Trusted HTML",
+    "manifest_version":1, "theme_id":"trusted-html-e2e", "name":"Trusted HTML",
     "version":"1.0.0",
     "parts":{"header":"header.html","footer":"footer.html"},
     "templates":[{"kind":"page","file":"page.html"},{"kind":"index","file":"index.html"}],

@@ -116,6 +116,12 @@ pub(crate) fn spacing_field_tailwind_classes(
     compile_box_spacing_tailwind(prefix, d_box, t_box, m_box, allow_negative)
 }
 
+pub struct LoopBlockContext<'a> {
+    pub entry: &'a serde_json::Value,
+    pub loop_index: usize,
+    pub loop_count: usize,
+}
+
 pub struct BlockRenderInputs<'a> {
     pub hydrated_props: &'a BTreeMap<String, serde_json::Value>,
     pub local_richtext_nonces: Option<RichTextNonceTable>,
@@ -127,6 +133,7 @@ pub struct BlockRenderInputs<'a> {
     pub parent_ctx: Option<&'a serde_json::Value>,
     pub is_preview: bool,
     pub fmt_cfg: &'a RenderFormattingConfig,
+    pub loop_context: Option<LoopBlockContext<'a>>,
 }
 
 /// Pre-compiles a block template once into a reusable `Environment<'static>`
@@ -164,7 +171,12 @@ pub fn render_block_csec_compiled(
     {
         return Err("Số lượng khối RichText vượt giới hạn 128/request.");
     }
-    let node_fuel = budget.fuel_remaining.min(MAX_BLOCK_FUEL_PER_NODE);
+    let fuel_cap = if inputs.loop_context.is_some() {
+        500
+    } else {
+        MAX_BLOCK_FUEL_PER_NODE
+    };
+    let node_fuel = budget.fuel_remaining.min(fuel_cap);
 
     let mut ctx_map: BTreeMap<String, Value> = BTreeMap::new();
     for (k, v) in inputs.hydrated_props {
@@ -215,10 +227,15 @@ pub fn render_block_csec_compiled(
     if let Some(pc) = inputs.parent_ctx {
         ctx_map.insert("parent_ctx".to_owned(), json_to_safe_value(pc));
     }
+    if let Some(lc) = inputs.loop_context {
+        ctx_map.insert("entry".to_owned(), json_to_safe_value(lc.entry));
+        ctx_map.insert("loop_index".to_owned(), Value::from(lc.loop_index as u64));
+        ctx_map.insert("loop_count".to_owned(), Value::from(lc.loop_count as u64));
+    }
 
     let mut env = (**base_env).clone();
     install_dynamic_formatting_handlers(&mut env, inputs.fmt_cfg);
-    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(LocalIconBatch::default()));
     let local_images = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -272,16 +289,12 @@ pub fn render_block_csec_compiled(
     };
     budget.charge_html_bytes(charge_bytes)?;
     budget.richtext_nonces.reserve_count(local_rt_count)?;
-    let additions = local_icons
+    let batch = local_icons
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let icon_growth: usize = additions
-        .iter()
-        .map(|(n, s)| s.len().saturating_sub(n.len()))
-        .sum();
-    budget.charge_html_bytes(icon_growth)?;
-    budget.icon_nonces.extend(additions);
+    budget.charge_html_bytes(batch.bytes_delta)?;
+    budget.icon_nonces.merge_batch(batch);
     let image_additions = local_images
         .lock()
         .unwrap_or_else(|e| e.into_inner())

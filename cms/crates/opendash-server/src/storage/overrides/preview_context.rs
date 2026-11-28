@@ -16,37 +16,7 @@ pub(in crate::storage) struct PreviewRenderContext<'a> {
     pub(in crate::storage) url_policy: &'a template_sec::ThemeUrlPolicy,
     pub(in crate::storage) fmt_cfg: &'a template_sec::RenderFormattingConfig,
     pub(in crate::storage) search: Option<page::BuilderSearchData<'a>>,
-}
-
-pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> EntryView {
-    let mut terms = BTreeMap::new();
-    terms.insert("category".to_owned(), Vec::new());
-    terms.insert("tag".to_owned(), Vec::new());
-    EntryView {
-        id: 0,
-        type_key: type_key.to_owned(),
-        title: "Nội dung xem trước".to_owned(),
-        slug: "preview".to_owned(),
-        url: Some("/".to_owned()),
-        parent: None,
-        menu_order: 0,
-        created_at: String::new(),
-        updated_at: String::new(),
-        published_at: None,
-        excerpt: String::new(),
-        reading_time_minutes: 0,
-        fields: BTreeMap::new(),
-        field_list: Vec::new(),
-        cover_url: None,
-        cover_media: None,
-        terms,
-        all_terms: Vec::new(),
-        primary_category: None,
-        ext: BTreeMap::new(),
-        theme_ext: BTreeMap::new(),
-        snippet_segments: Vec::new(),
-        type_label: String::new(),
-    }
+    pub(in crate::storage) template_data: Option<&'a content_render::TemplateRenderData<'a>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -55,7 +25,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     record: &entries::ContentEntryRecord,
     effective_schema: &EffectiveContentSchema,
     actor_role: FieldRole,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     site: &SiteContext<'_>,
     site_options: &BTreeMap<String, serde_json::Value>,
     options: &BTreeMap<String, serde_json::Value>,
@@ -112,7 +82,7 @@ pub(in crate::storage) async fn build_entry_preview_context_in_tx(
         richtext_nonces,
     )
     .await?;
-    let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
+    let theme_assets = active.map(ActiveTheme::asset_url_map).unwrap_or_default();
     let empty_entries = Vec::new();
     let pagination = PaginationView::empty();
     let search_url =
@@ -158,6 +128,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
     target: &TemplateCandidate,
     document: &BuilderDocument,
     preview_entry: Option<&TemplatePreviewEntry>,
+    preview_term: Option<&TemplatePreviewTerm>,
     expected_version: Option<i64>,
     preview_locale: Option<&str>,
     cache: &page::BlockTemplateCache,
@@ -170,14 +141,16 @@ pub async fn preview_typed_override_with_cache_and_locale(
     if expected_version.is_some_and(|v| existing.as_ref().is_none_or(|r| r.version != v)) {
         return Err(ApiError::precondition_failed("Template override changed."));
     }
-    let mut state = validate_typed_document_in_tx(
+    let mut state = validate_typed_document_with_context_in_tx(
         &mut tx,
         target,
         document,
         existing.as_ref().map(|r| &r.document),
+        true,
+        Some(&effective_locale),
     )
     .await?;
-    let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
+    let active = theme::load_active_theme_in_conn(&mut tx, themes_root).await?;
     let mut budget = PreviewCompositionBudget::new();
     let url_policy =
         active_theme_url_policy_in_conn(&mut tx, active.as_ref(), Some(&key), None, None).await?;
@@ -190,6 +163,14 @@ pub async fn preview_typed_override_with_cache_and_locale(
         active.as_ref(),
         &effective_locale,
         actor_role,
+    )
+    .await?;
+    let resolved_term = resolve_preview_term_in_tx(
+        &mut tx,
+        target,
+        preview_term,
+        &effective_locale,
+        Some(&mut budget.richtext_nonces),
     )
     .await?;
     let general =
@@ -246,6 +227,11 @@ pub async fn preview_typed_override_with_cache_and_locale(
     };
     let mut body_diagnostics = Vec::new();
     let mut route = None;
+    let mut built_entry: Option<(
+        content_render::EntryView,
+        Vec<content_render::BreadcrumbItem>,
+    )> = None;
+    let mut entry_has_builder_body = false;
     let (mut theme_context, body) = if let Some((record, effective_schema)) = &entry {
         route = Some((record.content_type_key.as_str(), record.slug.as_str()));
         let built = build_entry_preview_context_in_tx(
@@ -262,13 +248,15 @@ pub async fn preview_typed_override_with_cache_and_locale(
             Some(&mut budget.richtext_nonces),
         )
         .await?;
+        let built_view = built.view;
+        let built_breadcrumbs = built.breadcrumbs;
         let definition = &effective_schema.base.descriptor;
         let raw_body_has_blocks = record
             .values
             .get("body")
             .and_then(serde_json::Value::as_str)
             .is_some_and(opendash_core::builder_blocks::contains_blocks);
-        let body = if raw_body_has_blocks
+        let builder_rendered = if raw_body_has_blocks
             && definition.settings.supports(ContentSupport::Builder)
             && record.content_type_key != "pattern"
         {
@@ -294,16 +282,16 @@ pub async fn preview_typed_override_with_cache_and_locale(
             }
         } else {
             None
-        }
-        .map(Ok)
-        .unwrap_or_else(|| {
+        };
+        entry_has_builder_body = builder_rendered.is_some();
+        let body = builder_rendered.map(Ok).unwrap_or_else(|| {
             let html = content_render::render_single_with_context_for_locale(
                 definition,
-                &built.view,
+                &built_view,
                 None,
                 &site,
                 built.archive_url.as_deref(),
-                &built.breadcrumbs,
+                &built_breadcrumbs,
                 &fmt_cfg,
                 &effective_locale,
             )?;
@@ -317,6 +305,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
             .map(|doc| doc.body_fragment)
             .map_err(|_| ApiError::bad_request("Invalid preview body."))
         })?;
+        built_entry = Some((built_view, built_breadcrumbs));
         (built.theme_context, body)
     } else {
         let custom_options =
@@ -369,6 +358,39 @@ pub async fn preview_typed_override_with_cache_and_locale(
             pagination: &preview_search_pagination,
         });
     collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[document], true).await?;
+    let surface = inspect_preview_surfaces_in_tx(
+        &mut tx,
+        target,
+        Some(document),
+        None,
+        active.as_ref(),
+        &url_policy,
+        is_canvas_target(active.as_ref(), target),
+    )
+    .await?;
+    let real_entry_ref = entry
+        .as_ref()
+        .zip(built_entry.as_ref())
+        .map(|((rec, eff), (bv, bc))| (rec, eff, bv, bc.clone()));
+    let owned_td = build_preview_template_data_in_tx(
+        &mut tx,
+        BuildPreviewTemplateDataInput {
+            target,
+            site_options: &site_options,
+            menus_by_slot: menus.clone(),
+            locale: &effective_locale,
+            actor_role,
+            surface: &surface,
+            real_entry: real_entry_ref,
+            entry_body_html: entry_has_builder_body.then(|| body.clone()),
+            entry_has_builder_body,
+            resolved_term: resolved_term.as_ref(),
+        },
+        Some(&mut budget.richtext_nonces),
+    )
+    .await?;
+    let td = owned_td.as_render_data(&site);
+    populate_template_entry_schemas_in_conn(&mut tx, &mut state, Some(&td)).await?;
     let ctx = PreviewRenderContext {
         state: &state,
         graph: &graph,
@@ -379,6 +401,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
         url_policy: &url_policy,
         fmt_cfg: &fmt_cfg,
         search: preview_search,
+        template_data: Some(&td),
     };
     let root_scope = if target.kind == TemplateCandidateKind::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
@@ -422,7 +445,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
 
 pub(in crate::storage) async fn build_preview_context_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     transient: Option<&TransientStudioOverrides>,
     locale: &str,
     richtext_nonces: Option<&mut template_sec::RichTextNonceTable>,
@@ -512,79 +535,8 @@ pub(in crate::storage) async fn build_preview_context_in_tx(
         .is_some_and(|m| !m.is_empty())
     {
         return Err(ApiError::unprocessable(
-            "Không có theme v3 đang kích hoạt để xem trước menu_slots.",
+            "Không có theme v1 đang kích hoạt để xem trước menu_slots.",
         ));
     }
     Ok((general, pub_settings, site_options, options, menus))
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(in crate::storage) async fn render_preview_named_part_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
-    key: &str,
-    state: &BuilderRenderContext,
-    active: Option<&ActiveThemeV3>,
-    theme_context: &serde_json::Value,
-    route: Option<(&str, &str)>,
-    render_locale: &str,
-    budget: &mut PreviewCompositionBudget,
-    cache: &page::BlockTemplateCache,
-) -> ApiResult<Option<RenderedLayout>> {
-    let url_policy = active_theme_url_policy_in_conn(&mut **tx, active, None, None, None).await?;
-    let fmt_cfg = template_sec::RenderFormattingConfig {
-        timezone: state.timezone.clone(),
-        ..Default::default()
-    };
-    let part_target = TemplateCandidate {
-        part_key: Some(key.to_owned()),
-        ..candidate(TemplateCandidateKind::Part)
-    };
-    let canonical = part_target.canonical_key().map_err(ApiError::bad_request)?;
-    if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
-        validate_typed_document_in_tx(tx, &part_target, &row.document, Some(&row.document)).await?;
-        let graph = preview_part_graph(tx, &part_target, &row.document, active, budget).await?;
-        let ctx = PreviewRenderContext {
-            state,
-            graph: &graph,
-            theme_context,
-            route,
-            render_locale,
-            cache,
-            url_policy: &url_policy,
-            fmt_cfg: &fmt_cfg,
-            search: None,
-        };
-        let scope = part_scope_prefix(key, budget.expansions);
-        let rendered = render_preview_builder(
-            tx,
-            &row.document,
-            None,
-            &ctx,
-            budget,
-            RenderAnnotationScope::None,
-            &scope,
-        )
-        .await?;
-        return Ok(Some(rendered));
-    }
-    if let Some(source) = active.and_then(|a| a.parts.get(key)) {
-        let edges = template_sec::preview_csec_part_keys_with_theme_urls(key, source, &url_policy)
-            .map_err(ApiError::bad_request)?;
-        let mut graph =
-            preview_part_graph_from_edges(tx, &canonical, edges, active, budget).await?;
-        graph.insert(key.to_owned(), PreviewPartSource::Theme(source.clone()));
-        let ctx = PreviewRenderContext {
-            state,
-            graph: &graph,
-            theme_context,
-            route,
-            render_locale,
-            cache,
-            url_policy: &url_policy,
-            fmt_cfg: &fmt_cfg,
-            search: None,
-        };
-        return render_preview_part(tx, key, &ctx, budget).await;
-    }
-    Ok(None)
 }

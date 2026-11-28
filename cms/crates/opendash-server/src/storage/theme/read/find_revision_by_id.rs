@@ -32,11 +32,11 @@ pub(in crate::storage) async fn find_revision_by_digest(
     row.map(row_to_revision).transpose()
 }
 
-/// Stage validated v3 theme files durably under `themes/.staging/<run_uuid>/`,
+/// Stage validated V1 theme files durably under `themes/.staging/<run_uuid>/`,
 /// atomically publish to `themes/revisions/<revision_digest>/` with `.complete` marker,
 /// and commit metadata to SQLite (`BEGIN IMMEDIATE`) without activating it.
 #[allow(clippy::too_many_arguments)]
-pub async fn stage_and_commit_v3_revision(
+pub async fn stage_and_commit_revision(
     db: &SqlitePool,
     themes_root: &Path,
     run_uuid: &str,
@@ -49,18 +49,18 @@ pub async fn stage_and_commit_v3_revision(
 ) -> ApiResult<RevisionInstallOutcome> {
     // A direct storage caller cannot bypass the ZIP manifest allowlist,
     // C-SEC composition or declared asset checks before writing to disk.
-    let validated = crate::theme::validate_theme_v3_files(files.clone())
-        .map_err(|_| ApiError::bad_request("Theme v3 files hoặc manifest không hợp lệ."))?;
+    let validated = crate::theme::validate_theme_files(files.clone())
+        .map_err(|_| ApiError::bad_request("Theme v1 files hoặc manifest không hợp lệ."))?;
     if validated.manifest_json != manifest_json {
         return Err(ApiError::bad_request(
-            "Theme v3 manifest_json không khớp file theme.json.",
+            "Theme v1 manifest_json không khớp file theme.json.",
         ));
     }
     let manifest = validated.manifest;
     if manifest.theme_id != theme_id || manifest.name != display_name || manifest.version != version
     {
         return Err(ApiError::bad_request(
-            "Theme metadata không khớp manifest v3.",
+            "Theme metadata không khớp manifest v1.",
         ));
     }
     crate::theme::parse_theme_declarations(manifest_json).map_err(ApiError::bad_request)?;
@@ -103,13 +103,13 @@ pub async fn stage_and_commit_v3_revision(
                 .bind(theme_id)
                 .fetch_optional(&mut *conn)
                 .await?;
-        if format.as_deref().is_some_and(|f| f != "v3") {
+        if format.as_deref().is_some_and(|f| f != "v1") {
             return Err(ApiError::conflict("Theme ID đang thuộc package format cũ."));
         }
         if let Some(existing) = find_revision_by_digest(&mut conn, &revision_digest).await? {
             if existing.theme_id == theme_id
                 && existing.version == version
-                && existing.source_format == ThemeSourceFormat::V3
+                && existing.source_format == ThemeSourceFormat::V1
             {
                 // An immutable revision can lose its on-disk files after a
                 // partial restore or operator accident. Re-publish those
@@ -196,13 +196,13 @@ pub async fn stage_and_commit_v3_revision(
                 .bind(theme_id)
                 .fetch_optional(&mut *conn)
                 .await?;
-        if format.as_deref().is_some_and(|f| f != "v3") {
+        if format.as_deref().is_some_and(|f| f != "v1") {
             return Err(ApiError::conflict("Theme ID đang thuộc package format cũ."));
         }
         if let Some(existing) = find_revision_by_digest(&mut conn, &revision_digest).await? {
             if existing.theme_id == theme_id
                 && existing.version == version
-                && existing.source_format == ThemeSourceFormat::V3
+                && existing.source_format == ThemeSourceFormat::V1
             {
                 return Ok(RevisionInstallOutcome::AlreadyExists(existing));
             }
@@ -224,8 +224,8 @@ pub async fn stage_and_commit_v3_revision(
         }
 
         sqlx::query(
-            "INSERT INTO theme_packages (theme_id, display_name, source_format, is_legacy)
-             VALUES (?, ?, 'v3', 0)
+            "INSERT INTO theme_packages (theme_id, display_name, source_format)
+             VALUES (?, ?, 'v1')
              ON CONFLICT(theme_id) DO NOTHING",
         )
         .bind(theme_id)
@@ -236,8 +236,8 @@ pub async fn stage_and_commit_v3_revision(
         sqlx::query(
             "INSERT INTO theme_revisions (
                 revision_id, theme_id, version, revision_digest, source_format,
-                manifest_json, file_digests_json, legacy_block_id, provenance_json
-             ) VALUES (?, ?, ?, ?, 'v3', ?, ?, NULL, ?)",
+                manifest_json, file_digests_json, provenance_json
+             ) VALUES (?, ?, ?, ?, 'v1', ?, ?, ?)",
         )
         .bind(&revision_id)
         .bind(theme_id)
@@ -292,25 +292,22 @@ pub async fn get_active_selection(db: &SqlitePool) -> ApiResult<ActiveThemeSelec
 }
 
 pub async fn list_packages(db: &SqlitePool) -> ApiResult<Vec<ThemePackageRecord>> {
-    let rows: Vec<(String, String, String, i64, String)> = sqlx::query_as(
-        "SELECT theme_id, display_name, source_format, is_legacy, created_at
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT theme_id, display_name, source_format, created_at
          FROM theme_packages
-         ORDER BY is_legacy ASC, theme_id ASC",
+         ORDER BY theme_id ASC",
     )
     .fetch_all(db)
     .await?;
     rows.into_iter()
-        .map(
-            |(theme_id, display_name, source_format, is_legacy, created_at)| {
-                Ok(ThemePackageRecord {
-                    theme_id,
-                    display_name,
-                    source_format: ThemeSourceFormat::from_db(&source_format)?,
-                    is_legacy: is_legacy != 0,
-                    created_at,
-                })
-            },
-        )
+        .map(|(theme_id, display_name, source_format, created_at)| {
+            Ok(ThemePackageRecord {
+                theme_id,
+                display_name,
+                source_format: ThemeSourceFormat::from_db(&source_format)?,
+                created_at,
+            })
+        })
         .collect()
 }
 

@@ -218,7 +218,7 @@ fn s01_cli_check_theme_and_plugin_static_js_validation() {
     let theme_dir = temp.path.join("theme-valid");
     fs::create_dir_all(&theme_dir).unwrap();
     let theme_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "js-cli-theme",
         "name": "JS CLI Theme",
         "version": "1.0.0",
@@ -418,7 +418,7 @@ async fn s01_unified_js_runtime_theme_and_plugin_e2e_isolation_seo_limits_and_sa
 
     // 2. Install & Activate Theme v3 with SAME ID ("shared-id") and NO explicit permissions
     let theme_a_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "shared-id",
         "name": "Shared ID JS Theme A",
         "version": "1.0.0",
@@ -787,7 +787,7 @@ async fn s01_unified_js_runtime_theme_and_plugin_e2e_isolation_seo_limits_and_sa
 
     // 7. Monotonic Theme Switch A -> B -> A clears theme projections & increments selection_version
     let theme_b_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "theme-b-plain",
         "name": "Theme B Plain",
         "version": "1.0.0",

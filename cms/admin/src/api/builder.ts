@@ -33,7 +33,7 @@ export interface EntryBuilderOpen {
  * The only safe persisted writer is PUT /api/admin/template-overrides with
  * optimistic If-Match, and reset is scoped to the immutable row ID. */
 export type TemplateCandidateKind =
-  | 'home' | 'page' | 'page_layout' | 'single' | 'single_custom'
+  | 'page' | 'page_layout' | 'single' | 'single_custom'
   | 'archive' | 'taxonomy' | 'singular' | 'index' | 'not_found' | 'search' | 'part';
 
 export interface TemplateTargetInput {
@@ -90,6 +90,11 @@ export function putTemplateOverride(
 export interface TemplatePreviewEntry {
   type_key: string;
   entry_id: number;
+}
+
+export interface TemplatePreviewTerm {
+  taxonomy_key: string;
+  term_id: number;
 }
 
 export interface TypedTemplateResetResult {

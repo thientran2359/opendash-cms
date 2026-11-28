@@ -8,7 +8,9 @@ import {
   type NodeMeta,
   canDeleteNode,
   findActiveCatalogItem,
+  findEnclosingList,
   hasLockedAncestor,
+  isInsideLoopItem,
   isLockedNode,
   locate,
   nodeTitle,
@@ -29,6 +31,7 @@ export interface BuilderInspectorProps {
   hideDeleteButton?: boolean;
   onChangeProps: (id: string, nextProps: Record<string, unknown>) => void;
   onChangeMeta: (id: string, patch: Partial<NodeMeta>) => void;
+  onToggleListLoopItem?: (listId: string, enable: boolean) => void;
   onDelete?: (id: string) => void;
   onApiError?: (error: unknown, fallback: string) => void;
 }
@@ -47,6 +50,7 @@ export const BuilderInspector: React.FC<BuilderInspectorProps> = ({
   hideDeleteButton = false,
   onChangeProps,
   onChangeMeta,
+  onToggleListLoopItem,
   onDelete,
   onApiError,
 }) => {
@@ -75,6 +79,21 @@ export const BuilderInspector: React.FC<BuilderInspectorProps> = ({
   const locked = isLockedNode(node, blockSchemas) || hasLockedAncestor(document, node.id, blockSchemas);
   const schema = findActiveCatalogItem(blockSchemas, node.block_id)?.schema;
   const deletable = canDeleteNode(document, node.id, { requiresContentSlot, blockCatalog: blockSchemas });
+  const inLoopItem = isInsideLoopItem(document, node.id);
+  const enclosingList = findEnclosingList(document, node.id);
+  const enclosingListType = typeof enclosingList?.node.props?.type_key === 'string'
+    ? enclosingList.node.props.type_key.trim()
+    : '';
+  const effectiveContextTypeKey = enclosingListType || contextTypeKey || undefined;
+  const isCustomListLoop = node.block_id === 'core/list'
+    && Boolean(node.children?.some(c => c.block_id === 'core/loop-item'));
+  const visibleFields = schema
+    ? (isCustomListLoop
+        ? schema.fields.filter(
+            f => !['show_image', 'show_date', 'show_excerpt', 'show_taxonomy', 'readmore_label'].includes(f.key),
+          )
+        : schema.fields)
+    : [];
 
   const commitTextMeta = (
     field: 'name' | 'html_id' | 'class_name',
@@ -133,9 +152,22 @@ export const BuilderInspector: React.FC<BuilderInspectorProps> = ({
         </div>
       ) : (
         <>
-          {schema.fields.length > 0 ? (
+          {node.block_id === 'core/list' && onToggleListLoopItem && (
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-2.5">
+              <button
+                type="button"
+                data-testid="studio-list-loop-toggle"
+                onClick={() => onToggleListLoopItem(node.id, !isCustomListLoop)}
+                className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100"
+              >
+                {isCustomListLoop ? __("Revert to default cards") : __("Customize each card (Add Loop Item)")}
+              </button>
+            </div>
+          )}
+
+          {visibleFields.length > 0 ? (
             <UnifiedFieldForm
-              fields={schema.fields}
+              fields={visibleFields}
               context="studio_block"
               layoutMode="sidebar"
               viewport={viewport}
@@ -143,7 +175,7 @@ export const BuilderInspector: React.FC<BuilderInspectorProps> = ({
               onChange={nextProps => onChangeProps(node.id, nextProps)}
               csrfToken={csrfToken}
               siteTimezone={siteTimezone}
-              contextTypeKey={contextTypeKey ?? undefined}
+              contextTypeKey={effectiveContextTypeKey}
               locale={locale ?? undefined}
               onApiError={onApiError ?? (() => {})}
             />
@@ -173,18 +205,20 @@ export const BuilderInspector: React.FC<BuilderInspectorProps> = ({
                   className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900"
                 />
               </label>
-              <label className="block space-y-1 text-xs">
-                <span className="font-medium text-slate-700">{__("HTML anchor ID")}</span>
-                <input
-                  type="text"
-                  maxLength={64}
-                  value={htmlIdInput}
-                  placeholder="hero-section"
-                  onChange={e => { setHtmlIdInput(e.target.value); commitTextMeta('html_id', e.target.value, false); }}
-                  onBlur={() => commitTextMeta('html_id', htmlIdInput, true)}
-                  className="w-full rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-900"
-                />
-              </label>
+              {!inLoopItem && (
+                <label className="block space-y-1 text-xs">
+                  <span className="font-medium text-slate-700">{__("HTML anchor ID")}</span>
+                  <input
+                    type="text"
+                    maxLength={64}
+                    value={htmlIdInput}
+                    placeholder="hero-section"
+                    onChange={e => { setHtmlIdInput(e.target.value); commitTextMeta('html_id', e.target.value, false); }}
+                    onBlur={() => commitTextMeta('html_id', htmlIdInput, true)}
+                    className="w-full rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-900"
+                  />
+                </label>
+              )}
               <label className="block space-y-1 text-xs">
                 <span className="font-medium text-slate-700">{__("CSS classes")}</span>
                 <input

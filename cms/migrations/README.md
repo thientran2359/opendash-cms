@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **61** `.sql` files numbered `0001` through `0062` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `crate::storage::MIGRATOR` (`sqlx::migrate!("../../migrations")`) in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
+`cms/migrations/` holds the forward-only SQLite schema history for OpenDash CMS: **62** `.sql` files numbered `0001` through `0063` (with `0016` skipped — no `0016_*.sql` file exists). All migrations are embedded directly into the `opendash-server` executable via `crate::storage::MIGRATOR` (`sqlx::migrate!("../../migrations")`) in [`storage/mod.rs:init_db`](../crates/opendash-server/src/storage/mod.rs) and applied automatically on startup.
 
 | Group / Milestone | Migrations | Primary Tables & Schema Objects |
 | --- | --- | --- |
@@ -34,6 +34,7 @@
 | **Public Site Search (`0060`)** | [`0060_public_site_search_fts5.sql`](0060_public_site_search_fts5.sql) | Creates SQLite FTS5 virtual table `entry_search_fts` (`content=''`, `contentless_delete=1`, `unicode61 remove_diacritics 2`, `+5` schema objects, `247 / 256` total in `sqlite_schema`), and rebuilds `template_overrides` (`+'search'`) + `operation_jobs` (`+'search_reindex'` in `CHECK` & `idx_operation_jobs_single_active_heavy`). |
 | **ACF Content Structure (`0061`)** | [`0061_acf_content_structure.sql`](0061_acf_content_structure.sql) | Clean-Slate CPTs & entry hierarchy (`parent_id`, `menu_order` + partial index), 4-tab Field Groups with DNF `location_rules_json` & polymorphic `content_field_group_targets`, taxonomy `settings_json`/`rewrite_base` + term meta (`values_json`, `seo_*`, `term_field_media_refs`, dropping `term_extension_values`), Custom Options Pages (`custom_options_pages` + `'options_page'` across `theme_option_*`), reaching `247 / 256` total objects (`+0` net `sqlite_schema` objects). |
 | **Template Override Media Ref Roles (`0062`)** | [`0062_template_override_media_ref_roles.sql`](0062_template_override_media_ref_roles.sql) | Rebuilds `template_override_media_refs` expanding `ref_role` to `('image', 'video', 'poster', 'file', 'any')` in parity with `0056` (`+0` net schema objects: stays `247 / 256`). |
+| **Clean-Slate Theme Format V1 & Adjacent Order Index (`0063`)** | [`0063_theme_v1_clean_slate_and_adjacent_index.sql`](0063_theme_v1_clean_slate_and_adjacent_index.sql) | Drops `theme_legacy_mappings` (`-4` `sqlite_schema` rows), rebuilds `theme_packages`/`theme_revisions` (`source_format = 'v1'`, `manifest_version = 1`, keeping `theme_active_selection.version`), deletes `'home'` overrides (keeping `'search'`), and adds partial index `idx_content_entries_pub_order` (`+1` object → `244 / 256` total, `0` net non-autoindex). |
 
 ## Interface
 
@@ -45,7 +46,7 @@
 ## Invariants
 
 - **Immutable applied migrations:** Never edit SQL content or change line endings (LF) of existing migration files; SQLx verifies checksums in `_sqlx_migrations` against embedded bytes.
-- **Monotonic numbering:** Every new schema change must be added as the next sequential `NNNN_<snake_case>.sql` file (`0063_*` onward; `0016` remains permanently unused).
+- **Monotonic numbering:** Every new schema change must be added as the next sequential `NNNN_<snake_case>.sql` file (`0064_*` onward; `0016` remains permanently unused).
 - **Pre-existing ownership safety:** `preflight_builtin_key_collisions` must run before `0008` so user/theme/plugin-owned `post`/`page` descriptors are never overwritten during bootstrap.
 - **Database integrity enforcement:** Triggers (`content_entries_core_insert_draft`, `taxonomy_terms_parent_*`, `content_entries_pattern_private_*`, `content_entries_mark_has_been_published_*`, and `*_locale_*` triggers from `0047`) enforce domain invariants at the SQLite layer alongside `PRAGMA foreign_keys = ON`.
 - **Storage layering:** All runtime SQL queries (`sqlx::query*`) against these tables belong in `cms/crates/opendash-server/src/storage/`, per [CORE_FOUNDATION.md](../../docs/contracts/CORE_FOUNDATION.md).

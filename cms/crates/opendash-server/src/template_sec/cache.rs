@@ -13,7 +13,7 @@ pub struct ThemeCompositionCache {
     pub(super) inner: RwLock<BTreeMap<ThemeCompositionCacheKey, Arc<CompiledCsecComposition>>>,
 }
 
-/// Validated theme v3 template, flattened into a single MiniJinja program.
+/// Validated Theme V1 template, flattened into a single MiniJinja program.
 /// This ensures every part shares the same context, fuel and output budget.
 #[derive(Debug, Clone)]
 pub struct CompiledCsecComposition {

@@ -26,14 +26,15 @@ pub(in crate::storage) async fn load_public_term_detail_in_tx(
             "SELECT t.kind, t.name, t.slug, t.description, t.sort_order,
                     t.featured_image_media_id, t.values_json, c.path
                FROM taxonomy_terms t
-               JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL
-                AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+               JOIN site_locales sl ON sl.code = t.locale AND sl.deleted_at IS NULL
+                AND (? = 1 OR (sl.enabled = 1 AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)))
                JOIN taxonomy_definitions d ON d.key = t.kind
                LEFT JOIN permalink_route_claims c
                  ON c.target_kind = 'term' AND c.target_id = CAST(t.id AS TEXT) AND c.locale = t.locale
               WHERE t.id = ? AND d.public = 1 AND d.provider_status = 'active'
                 AND d.declaration_state = 'declared'",
         )
+        .bind(i64::from(is_preview))
         .bind(term_id)
         .fetch_optional(&mut **tx)
         .await?;

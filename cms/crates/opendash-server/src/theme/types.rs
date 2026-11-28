@@ -11,7 +11,7 @@ pub(super) use opendash_core::{
     builder::{BuilderContextTarget, BuilderDocument},
     id::valid_kebab_segment_with_limit,
     registry::{DeclarationState, OwnedDescriptor, ProviderStatus, RegistryCatalog, ResourceOwner},
-    theme::{TemplateCandidateKind, ThemeV3Manifest, valid_asset_path},
+    theme::{TemplateCandidateKind, ThemeManifest, valid_theme_asset_path},
 };
 
 pub(super) use serde::{Deserialize, Serialize};
@@ -23,44 +23,43 @@ pub(super) use crate::package::{
 
 pub const MAX_ZIP_BYTES: usize = 64 * 1024;
 
-/// Parsed, validated theme v3 revision. S01 validates without activating or
-/// writing site state; storage/import transition to v3 is reserved for S02.
+/// Parsed, validated Theme Format V1 package.
 #[derive(Debug, Clone)]
-pub struct ThemeV3Package {
-    pub manifest: ThemeV3Manifest,
+pub struct ThemePackage {
+    pub manifest: ThemeManifest,
     pub manifest_json: String,
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
-// The approved v3 active asset cap is 512 KiB; retain legacy text caps.
-pub(super) const V3_MAX_ACTIVE_ASSET_BYTES: usize = 512 * 1024;
+// Active V1 JS/MJS/SVG asset cap is 512 KiB; retain shared text caps.
+pub(super) const MAX_ACTIVE_ASSET_BYTES: usize = 512 * 1024;
 
 pub(crate) const MAX_THEME_LOCALE_FILES: usize = 32;
 
 /// Revalidate direct storage callers with the same manifest, path and
 /// composition guarantees as the bounded ZIP parser.
-pub(crate) fn validate_theme_v3_files(
+pub(crate) fn validate_theme_files(
     files: BTreeMap<String, Vec<u8>>,
-) -> Result<ThemeV3Package, V2ZipError> {
+) -> Result<ThemePackage, V2ZipError> {
     if files.len() > V2_MAX_FILES {
         return Err(V2ZipError::PayloadTooLarge(
-            "Theme v3 vượt quá giới hạn file.",
+            "Theme v1 vượt quá giới hạn file.",
         ));
     }
     let mut decoded_total = 0usize;
     for (path, data) in &files {
         validate_theme_relative_path(path).map_err(V2ZipError::BadRequest)?;
-        let cap = v3_entry_cap_and_allowlist(path).map_err(V2ZipError::BadRequest)?;
+        let cap = theme_entry_cap_and_allowlist(path).map_err(V2ZipError::BadRequest)?;
         decoded_total = decoded_total.saturating_add(data.len());
         if data.len() > cap || decoded_total > V2_MAX_DECODED_BYTES {
             return Err(V2ZipError::PayloadTooLarge(
-                "Theme v3 vượt quá giới hạn kích thước file.",
+                "Theme v1 vượt quá giới hạn kích thước file.",
             ));
         }
     }
-    let manifest_json = required_v3_utf8(&files, "theme.json")?.to_owned();
-    let manifest: ThemeV3Manifest = serde_json::from_str(&manifest_json)
-        .map_err(|_| V2ZipError::BadRequest("theme.json không đúng schema theme v3."))?;
+    let manifest_json = required_theme_utf8(&files, "theme.json")?.to_owned();
+    let manifest: ThemeManifest = serde_json::from_str(&manifest_json)
+        .map_err(|_| V2ZipError::BadRequest("theme.json không đúng schema theme v1."))?;
     manifest.validate().map_err(V2ZipError::BadRequest)?;
     // Validate schema even for packages declaring no HTML templates; defaults
     // and sample option values must agree before any revision is installed.
@@ -98,7 +97,7 @@ pub(crate) fn validate_theme_v3_files(
     let has_functions_file = files.contains_key("functions.js");
     if manifest.functions.is_some() != has_functions_file {
         return Err(V2ZipError::BadRequest(
-            "Theme v3 phải khai báo 'functions' trong theme.json tương ứng với file functions.js ở root.",
+            "Theme v1 phải khai báo 'functions' trong theme.json tương ứng với file functions.js ở root.",
         ));
     }
     if let Some(func_bytes) = files.get("functions.js") {
@@ -120,11 +119,11 @@ pub(crate) fn validate_theme_v3_files(
         .collect();
     if declared_assets != actual_assets {
         return Err(V2ZipError::BadRequest(
-            "Theme v3 assets khai báo không khớp file thực tế trong ZIP.",
+            "Theme v1 assets khai báo không khớp file thực tế trong ZIP.",
         ));
     }
 
-    // Only HTML and patterns explicitly permitted by the v3 manifest may
+    // Only HTML and patterns explicitly permitted by the V1 manifest may
     // enter the package. Unreferenced executable templates are rejected.
     let mut declared = BTreeSet::from(["theme.json".to_string()]);
     if has_functions_file {
@@ -166,7 +165,7 @@ pub(crate) fn validate_theme_v3_files(
     validate_block_catalog_templates(&block_catalog).map_err(V2ZipError::BadRequest)?;
     let mut parts = BTreeMap::new();
     for (key, path) in &manifest.parts {
-        let source = required_v3_utf8(&files, path)?;
+        let source = required_theme_utf8(&files, path)?;
         declared.insert(path.clone());
         parts.insert(key.clone(), source.to_string());
     }
@@ -180,7 +179,7 @@ pub(crate) fn validate_theme_v3_files(
     }
 
     for declaration in &manifest.templates {
-        let source = required_v3_utf8(&files, &declaration.file)?;
+        let source = required_theme_utf8(&files, &declaration.file)?;
         declared.insert(declaration.file.clone());
         let canonical_key = declaration
             .canonical_key()
@@ -200,8 +199,7 @@ pub(crate) fn validate_theme_v3_files(
                 .with_taxonomy_term_fields(&declared_fields_for_taxonomy(&declarations, tax_scope));
         }
         let kind = match declaration.kind {
-            TemplateCandidateKind::Home
-            | TemplateCandidateKind::Page
+            TemplateCandidateKind::Page
             | TemplateCandidateKind::PageLayout
             | TemplateCandidateKind::Single
             | TemplateCandidateKind::SingleCustom
@@ -220,7 +218,7 @@ pub(crate) fn validate_theme_v3_files(
         .map_err(V2ZipError::BadRequest)?;
     }
     for layout in &manifest.page_layouts {
-        let source = required_v3_utf8(&files, &layout.file)?;
+        let source = required_theme_utf8(&files, &layout.file)?;
         declared.insert(layout.file.clone());
         validate_and_compile_csec_composition_with_theme_urls(
             &layout.file,
@@ -247,18 +245,18 @@ pub(crate) fn validate_theme_v3_files(
     for (path, raw) in &files {
         if path.starts_with("locales/") {
             return Err(V2ZipError::BadRequest(
-                "Theme v3 không còn hỗ trợ locales/*.json; hãy dùng languages/*.{pot,po,mo}.",
+                "Theme v1 không hỗ trợ locales/*.json; hãy dùng languages/*.{pot,po,mo}.",
             ));
         }
         if path.starts_with("languages/") {
             if !seen_lower_lang_paths.insert(path.to_ascii_lowercase()) {
                 return Err(V2ZipError::BadRequest(
-                    "Theme v3 có file languages/ trùng tên hoa/thường.",
+                    "Theme v1 có file languages/ trùng tên hoa/thường.",
                 ));
             }
             if lang_files_count >= MAX_THEME_LOCALE_FILES {
                 return Err(V2ZipError::BadRequest(
-                    "Theme v3 vượt quá giới hạn 32 file languages/.",
+                    "Theme v1 vượt quá giới hạn 32 file languages/.",
                 ));
             }
             if path.ends_with(".mo") {
@@ -281,7 +279,7 @@ pub(crate) fn validate_theme_v3_files(
                 })?;
             } else {
                 return Err(V2ZipError::BadRequest(
-                    "File trong languages/ của theme v3 phải có đuôi .pot, .po hoặc .mo.",
+                    "File trong languages/ của theme v1 phải có đuôi .pot, .po hoặc .mo.",
                 ));
             }
             lang_files_count += 1;
@@ -289,7 +287,7 @@ pub(crate) fn validate_theme_v3_files(
         }
     }
     for pattern in &manifest.patterns {
-        let source = required_v3_utf8(&files, &pattern.file)?;
+        let source = required_theme_utf8(&files, &pattern.file)?;
         declared.insert(pattern.file.clone());
         let document = BuilderDocument::from_json(source.as_bytes())
             .map_err(|_| V2ZipError::BadRequest("Theme Pattern JSON không hợp lệ."))?;
@@ -314,20 +312,20 @@ pub(crate) fn validate_theme_v3_files(
             // executable content. CSS is validated under the same C-SEC rules.
             if path.ends_with(".css") {
                 let css = std::str::from_utf8(raw)
-                    .map_err(|_| V2ZipError::BadRequest("Theme v3 CSS phải là UTF-8 hợp lệ."))?;
+                    .map_err(|_| V2ZipError::BadRequest("Theme v1 CSS phải là UTF-8 hợp lệ."))?;
                 crate::template_sec::validate_safe_css(css).map_err(V2ZipError::BadRequest)?;
             } else if path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".svg") {
                 std::str::from_utf8(raw)
-                    .map_err(|_| V2ZipError::BadRequest("Theme v3 JS/SVG phải là UTF-8 hợp lệ."))?;
+                    .map_err(|_| V2ZipError::BadRequest("Theme v1 JS/SVG phải là UTF-8 hợp lệ."))?;
             }
         } else if !declared.contains(path) {
             return Err(V2ZipError::BadRequest(
-                "Gói theme v3 có file chưa được khai báo trong theme.json.",
+                "Gói theme v1 có file chưa được khai báo trong theme.json.",
             ));
         }
     }
 
-    Ok(ThemeV3Package {
+    Ok(ThemePackage {
         manifest,
         manifest_json,
         files,

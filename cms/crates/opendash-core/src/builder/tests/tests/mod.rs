@@ -122,11 +122,11 @@ fn active_test_catalog() -> RegistryCatalog<RegisteredBlockSchema> {
         }),
         json!({
             "schema_version": 1,
-            "id": "core/content-slot",
-            "title": "Slot",
+            "id": "core/entry-content",
+            "title": "Entry Content",
             "category": "content",
             "render": "native",
-            "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "home", "index"],
+            "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "index"],
             "fields": []
         }),
     ];

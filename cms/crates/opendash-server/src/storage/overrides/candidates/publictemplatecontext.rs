@@ -4,9 +4,6 @@ use super::*;
 /// eligibility and assigned template eligibility before constructing context.
 #[derive(Debug, Clone)]
 pub enum PublicTemplateContext {
-    Home {
-        page_layout_key: Option<String>,
-    },
     Page {
         page_layout_key: Option<String>,
     },
@@ -26,13 +23,14 @@ pub enum PublicTemplateContext {
     },
     NotFound,
     Search,
+    Index,
     Part {
         part_key: String,
     },
 }
 
 pub(crate) fn is_canvas_page_layout(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     layout_key: Option<&str>,
 ) -> bool {
     let Some(layout_key) = layout_key else {
@@ -52,7 +50,7 @@ pub(crate) fn is_canvas_page_layout(
 }
 
 pub(in crate::storage) fn is_canvas_target(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     target: &TemplateCandidate,
 ) -> bool {
     target.kind == TemplateCandidateKind::PageLayout
@@ -60,7 +58,7 @@ pub(in crate::storage) fn is_canvas_target(
 }
 
 pub(in crate::storage) fn is_canvas_resolved_key(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     target_key: &str,
 ) -> bool {
     is_canvas_page_layout(active, target_key.strip_prefix("page_layout:"))
@@ -70,16 +68,6 @@ pub fn build_candidates(context: &PublicTemplateContext) -> ApiResult<Vec<Templa
     use TemplateCandidateKind as K;
     let mut result = Vec::new();
     match context {
-        PublicTemplateContext::Home { page_layout_key } => {
-            result.push(candidate(K::Home));
-            if let Some(layout_key) = page_layout_key {
-                let mut layout = candidate(K::PageLayout);
-                layout.layout_key = Some(layout_key.clone());
-                result.push(layout);
-            }
-            result.push(candidate(K::Page));
-            result.push(candidate(K::Index));
-        }
         PublicTemplateContext::Page { page_layout_key } => {
             if let Some(layout_key) = page_layout_key {
                 let mut layout = candidate(K::PageLayout);
@@ -150,6 +138,9 @@ pub fn build_candidates(context: &PublicTemplateContext) -> ApiResult<Vec<Templa
             result.push(candidate(K::Search));
             result.push(candidate(K::Index));
         }
+        PublicTemplateContext::Index => {
+            result.push(candidate(K::Index));
+        }
         PublicTemplateContext::Part { part_key } => {
             let mut part = candidate(K::Part);
             part.part_key = Some(part_key.clone());
@@ -183,29 +174,6 @@ pub(in crate::storage) async fn build_reset_candidate_chain_for_locale_in_conn(
     use TemplateCandidateKind as K;
     let mut candidates = vec![target.clone()];
     match target.kind {
-        K::Home => {
-            let effective_locale = settings::resolve_requested_locale_in_conn(conn, locale).await?;
-            let layout: Option<String> = sqlx::query_scalar(
-                "SELECT e.page_layout_key FROM site_reading_settings AS reading
-                   JOIN content_entries AS e ON e.id = reading.homepage_page_id
-                  WHERE reading.locale = ?
-                    AND e.content_type_key='page'
-                    AND e.locale = reading.locale
-                    AND e.trashed_at IS NULL
-                    AND e.publication_status='published'",
-            )
-            .bind(&effective_locale)
-            .fetch_optional(&mut *conn)
-            .await?
-            .flatten();
-            if let Some(layout_key) = layout {
-                let mut layout_candidate = candidate(K::PageLayout);
-                layout_candidate.layout_key = Some(layout_key);
-                candidates.push(layout_candidate);
-            }
-            candidates.push(candidate(K::Page));
-            candidates.push(candidate(K::Index));
-        }
         K::PageLayout => {
             candidates.push(candidate(K::Page));
             candidates.push(candidate(K::Index));
@@ -291,7 +259,6 @@ pub(in crate::storage) async fn build_reset_candidate_chain_for_locale_in_conn(
 pub(in crate::storage) fn template_kind_str(kind: TemplateCandidateKind) -> &'static str {
     use TemplateCandidateKind as K;
     match kind {
-        K::Home => "home",
         K::Page => "page",
         K::PageLayout => "page_layout",
         K::Single => "single",
@@ -306,6 +273,17 @@ pub(in crate::storage) fn template_kind_str(kind: TemplateCandidateKind) -> &'st
     }
 }
 
+const ENTRY_CONTEXT_BLOCK_IDS: &[&str] = &[
+    "core/entry-title",
+    "core/entry-featured-image",
+    "core/entry-meta",
+    "core/entry-excerpt",
+    "core/entry-terms",
+    "core/entry-field",
+    "core/entry-related",
+    "core/entry-nav",
+];
+
 fn collect_parts_and_slots_rec(
     nodes: &[opendash_core::builder::BlockNode],
     schemas: &opendash_core::registry::RegistryCatalog<
@@ -313,6 +291,7 @@ fn collect_parts_and_slots_rec(
     >,
     parts: &mut Vec<String>,
     slots: &mut usize,
+    entry_blocks: &mut usize,
 ) {
     for node in nodes {
         let Some(entry) = schemas.get(&node.block_id) else {
@@ -324,7 +303,7 @@ fn collect_parts_and_slots_rec(
             continue;
         }
         match node.block_id.as_str() {
-            "core/content-slot" => *slots += 1,
+            "core/entry-content" => *slots += 1,
             "core/template-part" => {
                 if let Some(part_key) = node
                     .props
@@ -336,7 +315,10 @@ fn collect_parts_and_slots_rec(
                     parts.push(part_key.to_owned());
                 }
             }
-            _ => {
+            id => {
+                if ENTRY_CONTEXT_BLOCK_IDS.contains(&id) {
+                    *entry_blocks += 1;
+                }
                 parts.extend(
                     entry
                         .descriptor
@@ -345,8 +327,27 @@ fn collect_parts_and_slots_rec(
                 );
             }
         }
-        collect_parts_and_slots_rec(&node.children, schemas, parts, slots);
+        collect_parts_and_slots_rec(&node.children, schemas, parts, slots, entry_blocks);
     }
+}
+
+pub(in crate::storage) fn document_slot_scan_with_schemas(
+    document: &BuilderDocument,
+    schemas: &opendash_core::registry::RegistryCatalog<
+        opendash_core::block_schema::RegisteredBlockSchema,
+    >,
+) -> ApiResult<(Vec<String>, usize, usize)> {
+    let mut parts = Vec::new();
+    let mut slots = 0;
+    let mut entry_blocks = 0;
+    collect_parts_and_slots_rec(
+        &document.blocks,
+        schemas,
+        &mut parts,
+        &mut slots,
+        &mut entry_blocks,
+    );
+    Ok((parts, slots, entry_blocks))
 }
 
 pub(in crate::storage) fn document_parts_and_slot_count_with_schemas(
@@ -355,21 +356,21 @@ pub(in crate::storage) fn document_parts_and_slot_count_with_schemas(
         opendash_core::block_schema::RegisteredBlockSchema,
     >,
 ) -> ApiResult<(Vec<String>, usize)> {
-    let mut parts = Vec::new();
-    let mut slots = 0;
-    collect_parts_and_slots_rec(&document.blocks, schemas, &mut parts, &mut slots);
+    let (parts, slots, _) = document_slot_scan_with_schemas(document, schemas)?;
     Ok((parts, slots))
 }
 
 pub(in crate::storage) fn validate_content_slots(
     target: &TemplateCandidate,
-    slots: usize,
+    entry_content_count: usize,
+    entry_context_block_count: usize,
 ) -> ApiResult<()> {
-    use TemplateCandidateKind as K;
-    let valid = match target.kind {
-        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular => slots == 1,
-        K::Index => slots <= 1,
-        K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part => slots == 0,
+    let valid = match entry_content_rule_for_target(target.kind) {
+        EntryContentRule::RequiredOrEntryBlock => {
+            entry_content_count <= 1 && (entry_content_count == 1 || entry_context_block_count >= 1)
+        }
+        EntryContentRule::OptionalMaxOne => entry_content_count <= 1,
+        EntryContentRule::Forbidden => entry_content_count == 0,
     };
     if valid {
         Ok(())
@@ -418,15 +419,17 @@ pub(in crate::storage) fn normalize_template_ast_json(
     .map_err(|_| ApiError::bad_request("Invalid Builder UTF-8 document."))
 }
 
-/// The same AST and route-binding validation is used by Save and read-only Preview.
-pub(in crate::storage) async fn validate_typed_document_in_tx(
+pub(in crate::storage) async fn validate_typed_document_with_context_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     target: &TemplateCandidate,
     document: &BuilderDocument,
     prior: Option<&BuilderDocument>,
+    is_preview: bool,
+    requested_locale: Option<&str>,
 ) -> ApiResult<BuilderRenderContext> {
     validate_typed_target_in_tx(tx, target).await?;
-    let state = builder::read_render_context_tx(tx).await?;
+    let state =
+        builder::read_render_context_for_locale_tx(tx, requested_locale, is_preview, None).await?;
     let schemas = state.unified_block_schemas()?;
     let ctx = BuilderContextTarget::Template {
         kind: target.kind,
@@ -446,12 +449,22 @@ pub(in crate::storage) async fn validate_typed_document_in_tx(
             "Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.",
         ));
     }
-    let (_, slots) = document_parts_and_slot_count_with_schemas(document, &schemas)?;
-    validate_content_slots(target, slots)?;
+    let (_, slots, entry_blocks) = document_slot_scan_with_schemas(document, &schemas)?;
+    validate_content_slots(target, slots, entry_blocks)?;
     crate::storage::fields::validate_document_block_refs_in_conn(
         &mut **tx, document, prior, &schemas, None, None,
     )
     .await?;
     builder::validate_media_refs_in_tx(&mut **tx, document).await?;
     Ok(state)
+}
+
+/// The same AST and route-binding validation is used by Save and read-only Preview.
+pub(in crate::storage) async fn validate_typed_document_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    prior: Option<&BuilderDocument>,
+) -> ApiResult<BuilderRenderContext> {
+    validate_typed_document_with_context_in_tx(tx, target, document, prior, false, None).await
 }

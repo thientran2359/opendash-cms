@@ -237,13 +237,14 @@ export function getEffectiveTermConfig(id: number, signal?: AbortSignal): Promis
 }
 
 export function listTaxonomyTerms(
-  kind: TaxonomyKind,
+  kind: TaxonomyKind = 'category',
   limit = 100,
   offset = 0,
   signal?: AbortSignal,
   locale?: string | null,
 ): Promise<TaxonomyTermPage> {
-  const query = new URLSearchParams({ kind, limit: String(limit), offset: String(offset) });
+  const resolvedKind = kind?.trim() || 'category';
+  const query = new URLSearchParams({ kind: resolvedKind, limit: String(limit), offset: String(offset) });
   if (locale) query.set('locale', locale);
   return requestJson<TaxonomyTermPage>(`${termsPath}?${query}`, {
     signal,

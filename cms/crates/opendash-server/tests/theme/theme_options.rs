@@ -239,11 +239,11 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
 
     // 3. Install & activate Theme A with 5 option types
     let manifest_a = br#"{
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "theme-alpha",
         "name": "Theme Alpha",
         "version": "1.0.0",
-        "templates": [{ "kind": "home", "file": "home.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
         "options": [
             { "key": "banner_text", "label": "Banner", "type": "text", "default": "Welcome", "public": true },
             { "key": "cols", "label": "Columns", "type": "number", "default": 3, "min": 1, "max": 6, "public": true },
@@ -257,7 +257,7 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
         ("theme.json", manifest_a, CompressionMethod::Deflated),
         ("header.html", b"<header>{% if options.show_banner %}<span>{{ options.banner_text }}</span>{% endif %}</header>", CompressionMethod::Deflated),
         ("footer.html", b"<footer data-tone=\"{{ options.tone }}\">Cols:{{ options.cols }}</footer>", CompressionMethod::Deflated),
-        ("home.html", b"<main>Home{{ od_content() }}</main>", CompressionMethod::Deflated),
+        ("index.html", b"<main>Home{{ od_content() }}</main>", CompressionMethod::Deflated),
     ]);
     let inst_a = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -414,8 +414,8 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
 
     // 7. Switch Theme A -> B: media ACL immediately revoked (404), then B -> A restores saved values & ACL (200)
     let zip_b = build_zip(&[
-        ("theme.json", br#"{"manifest_version":3,"theme_id":"theme-beta","name":"Theme Beta","version":"1.0.0","templates": [{ "kind": "home", "file": "home.html" }]}"#, CompressionMethod::Deflated),
-        ("home.html", b"<main>Beta{{ od_content() }}</main>", CompressionMethod::Deflated),
+        ("theme.json", br#"{"manifest_version":1,"theme_id":"theme-beta","name":"Theme Beta","version":"1.0.0","templates": [{ "kind": "index", "file": "index.html" }]}"#, CompressionMethod::Deflated),
+        ("index.html", b"<main>Beta{{ od_content() }}</main>", CompressionMethod::Deflated),
     ]);
     let inst_b = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -479,11 +479,11 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
 
     // 8. Incompatible option type on Theme A v2.0.0 -> 409 Conflict when activating
     let manifest_a_bad = br#"{
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "theme-alpha",
         "name": "Theme Alpha",
         "version": "2.0.0",
-        "templates": [{ "kind": "home", "file": "home.html" }],
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "options": [
             { "key": "banner_text", "label": "Banner", "type": "number", "default": 1, "public": true }
         ]
@@ -491,7 +491,7 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
     let zip_a_bad = build_zip(&[
         ("theme.json", manifest_a_bad, CompressionMethod::Deflated),
         (
-            "home.html",
+            "index.html",
             b"<main>Home 2{{ od_content() }}</main>",
             CompressionMethod::Deflated,
         ),

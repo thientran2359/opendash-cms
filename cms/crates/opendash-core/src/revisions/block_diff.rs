@@ -71,7 +71,8 @@ fn default_label_for_node(node: &BlockNode) -> String {
         "core/contact-form" => "Contact Form".to_owned(),
         "core/search-form" => "Search Form".to_owned(),
         "core/search-results" => "Search Results".to_owned(),
-        "core/content-slot" => "Content Slot".to_owned(),
+        "core/entry-content" => "Entry Content".to_owned(),
+        "core/loop-item" => "Loop Item".to_owned(),
         "core/pattern-ref" => node
             .props
             .get("pattern_id")

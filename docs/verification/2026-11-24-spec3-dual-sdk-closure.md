@@ -33,7 +33,7 @@
 
 1. **`F-01` (`Blocker` -> RESOLVED):** Đồng bộ [`cms/sdk/README.md`](../../cms/sdk/README.md) để ghi rõ `contentGet()` trả chuỗi JSON envelope đầy đủ (`{"ok":true,"data":{"entry":{...}|null}}`) giống `contentList()`/`taxonomyList()` và khớp [`cms/sdk/as/opendash.ts`](../../cms/sdk/as/opendash.ts).
 2. **`F-02` (`Major` -> RESOLVED):** Bổ sung `pub locale: Option<String>` vào `ContentSaveInput` ([`types.rs`](../../cms/crates/opendash-plugin-sdk/src/types.rs)) và `MockHost` ([`mock.rs`](../../cms/crates/opendash-plugin-sdk/src/mock.rs)) kèm test round-trip tại [`lib.rs`](../../cms/crates/opendash-plugin-sdk/src/lib.rs).
-3. **`F-04`, `F-05`, `F-06`, `N-01`, `N-02`, `N-04` (`RESOLVED`):** Sửa `clamp(1, 100)` trên `MockHost` `KvList`/`TaxonomyList`; thêm `content_get` fallback cho `slug` và chỉnh `timeout_ms: Some(2000)` trong [`rust-seo-plugin/src/lib.rs`](../../cms/examples/plugins/rust-seo-plugin/src/lib.rs); hỗ trợ `process.argv[2]` trong `test_sdk_v11.mjs`; dùng truy cập 2 bước `current_locale = locale | default({})` trong [`sample-theme-v3/single.html`](../../cms/examples/themes/sample-theme-v3/single.html); đồng bộ spec & `SITEMAP.md`.
+3. **`F-04`, `F-05`, `F-06`, `N-01`, `N-02`, `N-04` (`RESOLVED`):** Sửa `clamp(1, 100)` trên `MockHost` `KvList`/`TaxonomyList`; thêm `content_get` fallback cho `slug` và chỉnh `timeout_ms: Some(2000)` trong [`rust-seo-plugin/src/lib.rs`](../../cms/examples/plugins/rust-seo-plugin/src/lib.rs); hỗ trợ `process.argv[2]` trong `test_sdk_v11.mjs`; dùng truy cập 2 bước `current_locale = locale | default({})` trong [`sample-theme/single.html`](../../cms/examples/themes/sample-theme/single.html); đồng bộ spec & `SITEMAP.md`.
 
 ---
 

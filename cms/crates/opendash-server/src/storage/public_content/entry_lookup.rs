@@ -175,7 +175,7 @@ pub async fn load_entry_render_snapshot_with_options(
     .remove(&entry.id)
     .unwrap_or_default();
     let active = match themes_root {
-        Some(root) => theme::load_active_theme_v3_in_conn(&mut tx, root).await?,
+        Some(root) => theme::load_active_theme_in_conn(&mut tx, root).await?,
         None => None,
     };
     let context = if entry.content_type_key == "page" {
@@ -454,90 +454,6 @@ pub(in crate::storage) async fn list_taxonomy_published_in_tx(
         .await?;
     let entries = decode_hydrated_entry_rows(rows)?;
     Ok(TaxonomyPublishedPage { entries, total })
-}
-
-/// Fetches up to `limit` (clamped <= 20) published entries in the same CPT and locale
-/// sharing at least one public, active, declared, CPT-eligible taxonomy term.
-pub async fn query_related_entries(
-    db: &SqlitePool,
-    entry_id: i64,
-    type_key: &str,
-    limit: usize,
-) -> ApiResult<Vec<crate::content_render::EntryView>> {
-    let clamped = (limit.min(20)) as i64;
-    if clamped == 0 {
-        return Ok(Vec::new());
-    }
-    let mut tx = db.begin().await?;
-    let Some(source_locale): Option<String> = sqlx::query_scalar(
-        "SELECT locale FROM content_entries WHERE id = ? AND trashed_at IS NULL",
-    )
-    .bind(entry_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    else {
-        tx.commit().await?;
-        return Ok(Vec::new());
-    };
-    let rows: Vec<HydratedEntrySqlRow> = sqlx::query_as(
-        "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
-                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
-                e.primary_category_term_id, e.locale, e.parent_id, e.menu_order
-           FROM content_entries e
-           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-           JOIN content_types t ON t.key = e.content_type_key
-           LEFT JOIN content_type_taxonomy_overrides override
-             ON override.content_type_key = e.content_type_key
-          WHERE e.content_type_key = ?
-            AND e.locale = ?
-            AND e.id != ?
-            AND e.trashed_at IS NULL
-            AND e.publication_status = 'published'
-            AND e.content_type_key != 'pattern'
-            AND t.provider_status = 'active'
-            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
-            AND EXISTS (
-                SELECT 1
-                  FROM entry_terms et1
-                  JOIN entry_terms et2 ON et2.term_id = et1.term_id
-                  JOIN taxonomy_terms tt ON tt.id = et1.term_id
-                  JOIN taxonomy_definitions d ON d.key = tt.kind
-                 WHERE et1.entry_id = ?
-                   AND et2.entry_id = e.id
-                   AND tt.locale = e.locale
-                   AND d.public = 1
-                   AND d.provider_status = 'active'
-                   AND d.declaration_state = 'declared'
-                   AND (
-                       (override.content_type_key IS NOT NULL AND EXISTS (
-                           SELECT 1 FROM json_each(override.taxonomies_json) sel
-                            WHERE sel.value = tt.kind
-                       ))
-                       OR
-                       (override.content_type_key IS NULL AND EXISTS (
-                           SELECT 1 FROM content_type_taxonomy_eligibility el
-                            WHERE el.content_type_key = e.content_type_key
-                              AND el.taxonomy_kind = tt.kind
-                              AND el.provider_status = 'active'
-                              AND el.declaration_state = 'declared'
-                       ))
-                   )
-            )
-          ORDER BY COALESCE(e.published_at, e.updated_at) DESC, e.id DESC
-          LIMIT ?",
-    )
-    .bind(type_key)
-    .bind(&source_locale)
-    .bind(entry_id)
-    .bind(entry_id)
-    .bind(clamped)
-    .fetch_all(&mut *tx)
-    .await?;
-
-    let records = decode_hydrated_entry_rows(rows)?;
-    let out = hydrate_entry_views_in_conn(&mut tx, records).await?;
-    tx.commit().await?;
-    Ok(out)
 }
 
 /// Fetches up to `limit` (clamped <= 20) recent published `post` entries in the given

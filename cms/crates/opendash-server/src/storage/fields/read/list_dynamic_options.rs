@@ -38,7 +38,7 @@ pub async fn list_dynamic_options_in_conn(
                 .collect())
         }
         SelectOptionsSource::MenuSlots => {
-            let Some(active) = load_active_theme_v3_in_conn(conn, themes_root).await? else {
+            let Some(active) = load_active_theme_in_conn(conn, themes_root).await? else {
                 return Ok(Vec::new());
             };
             let labels = collect_menu_slot_labels(active.manifest.menus.as_ref());
@@ -186,7 +186,7 @@ pub async fn list_dynamic_options_in_conn(
             Ok(items)
         }
         SelectOptionsSource::TemplateParts => {
-            let Some(active) = load_active_theme_v3_in_conn(conn, themes_root).await? else {
+            let Some(active) = load_active_theme_in_conn(conn, themes_root).await? else {
                 return Ok(Vec::new());
             };
             Ok(active

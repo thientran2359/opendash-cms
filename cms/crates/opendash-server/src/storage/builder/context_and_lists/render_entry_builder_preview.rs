@@ -59,11 +59,12 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_budget(
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
     hydrate_render_context_for_documents_in_conn(&mut **tx, state, &[document], true).await?;
-    let lists = resolve_lists_in_tx_for_locale_with_budget(
+    let lists = resolve_lists_in_tx_for_locale_with_budget_and_preview(
         tx,
         document,
         &BTreeMap::new(),
         Some(current.locale.as_str()),
+        true,
         budget,
     )
     .await?;
@@ -75,6 +76,7 @@ pub(in crate::storage) async fn render_entry_builder_preview_with_budget(
         content_html: None,
         parts: &parts,
         search: None,
+        template_data: None,
     });
     let scope = if current.opened.type_key == "pattern" {
         format!("pat_{}", current.opened.entry_id)

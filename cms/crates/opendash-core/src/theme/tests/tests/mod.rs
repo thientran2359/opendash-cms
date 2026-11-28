@@ -14,9 +14,9 @@ fn template(kind: TemplateCandidateKind, file: &str) -> ThemeTemplateDecl {
     }
 }
 
-fn v3_manifest() -> ThemeV3Manifest {
-    ThemeV3Manifest {
-        manifest_version: 3,
+fn theme_manifest() -> ThemeManifest {
+    ThemeManifest {
+        manifest_version: THEME_MANIFEST_VERSION,
         theme_id: "ocean-theme".into(),
         name: "Ocean Theme".into(),
         version: "1.2.3-beta.1".into(),
@@ -61,8 +61,8 @@ fn v3_manifest() -> ThemeV3Manifest {
     }
 }
 
-fn enqueue_manifest() -> ThemeV3Manifest {
-    let mut value = serde_json::to_value(v3_manifest()).unwrap();
+fn enqueue_manifest() -> ThemeManifest {
+    let mut value = serde_json::to_value(theme_manifest()).unwrap();
     value["assets"] = json!([
         "assets/base.css",
         "assets/layout.css",

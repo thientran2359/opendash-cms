@@ -118,6 +118,9 @@ pub(crate) fn step_theme_raw_char(
             Ok(ThemeHtmlState::Doctype)
         }
         ThemeHtmlState::Comment(sub) => {
+            if sub == CommentScanSubState::Dash2Bang && ascii == Some(b'>') {
+                return Err("Template cấm đóng HTML comment bằng `--!>`.");
+            }
             let next = match ascii {
                 Some(b) => step_comment_substate(sub, b),
                 None => Some(CommentScanSubState::Body),

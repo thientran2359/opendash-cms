@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "core/entry-content",
+  "title": "Nội dung bài (Entry Content)",
+  "category": "template",
+  "icon": "book-open",
+  "render": "native",
+  "allowed_contexts": ["single", "single_custom", "singular", "page", "page_layout", "index"],
+  "fields": [
+    {
+      "type": "radio_buttons",
+      "key": "prose_style",
+      "label": "Định dạng văn bản (Prose)",
+      "options": [
+        { "value": "default", "label": "Tiêu chuẩn" },
+        { "value": "wide", "label": "Rộng" },
+        { "value": "none", "label": "Không bọc" }
+      ],
+      "default": "default"
+    },
+    {
+      "type": "boolean",
+      "key": "fallback_to_fields",
+      "label": "Hiển thị danh sách trường nếu trống",
+      "default": false
+    }
+  ]
+}

@@ -19,7 +19,7 @@ pub async fn plan_sample_import(
         (None, Some(active_rid)) => active_rid.clone(),
         (None, None) => {
             return Err(ApiError::not_found(
-                "Chưa có revision theme v3 đang hoạt động.",
+                "Chưa có revision theme v1 đang hoạt động.",
             ));
         }
     };
@@ -27,16 +27,16 @@ pub async fn plan_sample_import(
     let rev = find_revision_by_id(db, &target_rev_id)
         .await?
         .ok_or_else(|| ApiError::not_found("Revision theme chưa được cài đặt."))?;
-    if rev.theme_id != theme_id || rev.source_format != ThemeSourceFormat::V3 {
+    if rev.theme_id != theme_id || rev.source_format != ThemeSourceFormat::V1 {
         return Err(ApiError::not_found(
-            "Revision không thuộc theme yêu cầu hoặc không phải v3.",
+            "Revision không thuộc theme yêu cầu hoặc không phải v1.",
         ));
     }
 
     let option_schema = settings::parse_theme_options_schema(&rev.manifest_json)
         .map_err(ApiError::unprocessable)?;
-    let manifest: ThemeV3Manifest = serde_json::from_str(&rev.manifest_json)
-        .map_err(|_| ApiError::internal("Manifest theme v3 không hợp lệ."))?;
+    let manifest: ThemeManifest = serde_json::from_str(&rev.manifest_json)
+        .map_err(|_| ApiError::internal("Manifest theme v1 không hợp lệ."))?;
     manifest.validate().map_err(ApiError::internal)?;
     let Some(raw_sample) = manifest.sample else {
         return Err(ApiError::not_found(

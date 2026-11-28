@@ -155,7 +155,7 @@ impl PluginManager {
         let built = match snap_opt {
             None => None,
             Some(snap) => {
-                let parsed: opendash_core::theme::ThemeV3Manifest =
+                let parsed: opendash_core::theme::ThemeManifest =
                     match serde_json::from_str(&snap.manifest_json) {
                         Ok(m) => m,
                         Err(e) => {

@@ -15,7 +15,6 @@ import {
 import { getStudioTargets, postStudioPreview, type StudioTargetItem, type TransientStudioOverrides } from '../api/studio.ts';
 import { saveThemeOptions } from '../api/themes.ts';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
-import { BuilderPreviewFrame } from '../builder/BuilderPreviewFrame.tsx';
 import {
   EMPTY_DOCUMENT, VALID_TEMPLATE_PART_KEY, allNodes, countBlocksByType,
   createStarterTemplateDocument, locate, visibleNodesInTree,
@@ -26,6 +25,7 @@ import { useStudioMode2Revisions } from '../features/revisions/useStudioMode2Rev
 import type { ParsedRoute, StudioPanelId } from '../shell/router.ts';
 import type { AuthUser } from '../types.ts';
 import { StudioCustomizerNav } from './StudioCustomizerNav.tsx';
+import { StudioMobileViewTabs, StudioPreviewPane } from './StudioPreviewPane.tsx';
 import { StudioSidebarHeader } from './StudioSidebarHeader.tsx';
 import { StudioSidebarFooter } from './StudioSidebarFooter.tsx';
 import type { StudioMenuRequest } from './StudioBlockTree.tsx';
@@ -134,6 +134,8 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [activeThemeName, setActiveThemeName] = useState<string | null>(null);
   const [targets, setTargets] = useState<StudioTargetItem[]>([]);
   const [selectedTargetKey, setSelectedTargetKey] = useState<string | null>(route.studioTemplateKey ?? null);
+  const [previewEntry, setPreviewEntry] = useState<builderApi.TemplatePreviewEntry | null>(null);
+  const [previewTerm, setPreviewTerm] = useState<builderApi.TemplatePreviewTerm | null>(null);
 
   const [generalSaved, setGeneralSaved] = useState<GeneralSettings | null>(null);
   const [generalDraft, setGeneralDraft] = useState<GeneralSettingsDraft | null>(null);
@@ -253,6 +255,8 @@ export const StudioWorkspace: React.FC<Props> = ({
     setThemeOptionsDirty(false);
     setThemeOptionsVersion(null);
     setTemplateEditingEnabled(false);
+    setPreviewEntry(null);
+    setPreviewTerm(null);
     setTemplateDoc(EMPTY_DOCUMENT);
     setTemplateSavedDoc(EMPTY_DOCUMENT);
     setEntryDoc(EMPTY_DOCUMENT);
@@ -362,7 +366,10 @@ export const StudioWorkspace: React.FC<Props> = ({
     } else {
       const targetInfo = items.find(t => t.canonical_target_key === targetKey);
       const starter = createStarterTemplateDocument({
-        includeContentSlot: Boolean(targetInfo?.requires_content_slot),
+        includeContentSlot:
+          targetInfo?.entry_content_rule === 'required_or_entry_block'
+          || targetInfo?.target.kind === 'page'
+          || targetInfo?.target.kind === 'page_layout',
       });
       setTemplateEditingEnabled(false);
       setTemplateSavedVersion(null);
@@ -668,7 +675,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   // Debounced 250ms Live Preview (read-only)
   const previewTargetCandidate = isMode2
     ? null
-    : (selectedTarget?.target ?? targets.find(t => t.canonical_target_key === 'home')?.target ?? targets[0]?.target ?? null);
+    : (selectedTarget?.target ?? targets.find(t => t.canonical_target_key === 'index')?.target ?? targets[0]?.target ?? null);
 
   useEffect(() => {
     if (!active || !user || !csrfToken) return;
@@ -720,6 +727,8 @@ export const StudioWorkspace: React.FC<Props> = ({
         {
           target: previewTargetCandidate,
           document: editingSelectedTemplate ? templateDoc : null,
+          preview_entry: previewEntry ?? undefined,
+          preview_term: previewTerm ?? undefined,
           preview_annotations: editingSelectedTemplate,
           preview_locale: effectivePreviewLocale || undefined,
           transient,
@@ -771,6 +780,8 @@ export const StudioWorkspace: React.FC<Props> = ({
     menuSlotsDraft,
     menuPreviewSeq,
     effectivePreviewLocale,
+    previewEntry,
+    previewTerm,
     previewLocaleInvalid,
     localeDraftConflict,
     localeReloadPending,
@@ -783,6 +794,8 @@ export const StudioWorkspace: React.FC<Props> = ({
         return;
       }
     }
+    setPreviewEntry(null);
+    setPreviewTerm(null);
     setSelectedTargetKey(nextKey);
     setTemplateDiagnostics([]);
     hydrateTemplateTarget(nextKey, targets, overrideDocs);
@@ -808,12 +821,18 @@ export const StudioWorkspace: React.FC<Props> = ({
     }
 
     if (templateDirty && selectedTarget) {
-      if (selectedTarget.requires_content_slot && countBlocksByType(templateDoc, 'core/content-slot') !== 1) {
-        setStatus(__("This template requires exactly one core/content-slot."), true);
+      const slotCount = countBlocksByType(templateDoc, 'core/entry-content');
+      const hasEntryBlock = allNodes(templateDoc).some(n => n.node.block_id.startsWith('core/entry-'));
+      if (selectedTarget.entry_content_rule === 'required_or_entry_block') {
+        if (slotCount > 1 || (slotCount === 0 && !hasEntryBlock)) {
+          setStatus(__("Single templates require Entry Content (max 1) or at least one Entry block."), true);
+          return;
+        }
+      } else if (selectedTarget.entry_content_rule === 'optional_max_one' && slotCount > 1) {
+        setStatus(__("This template allows at most one Entry Content block."), true);
         return;
-      }
-      if (selectedTarget.forbids_content_slot && countBlocksByType(templateDoc, 'core/content-slot') > 0) {
-        setStatus(__("This template must not contain core/content-slot."), true);
+      } else if (selectedTarget.entry_content_rule === 'forbidden' && slotCount > 0) {
+        setStatus(__("This template must not contain Entry Content."), true);
         return;
       }
       const badPart = allNodes(templateDoc).some(
@@ -1076,26 +1095,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-zinc-100 text-zinc-900" data-testid="studio-workspace">
-      <div className="flex items-center gap-1 border-b border-zinc-200 bg-white px-3 py-1.5 md:hidden" role="tablist" aria-label={__("Studio mobile view")}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mobilePane === 'controls'}
-          onClick={() => setMobilePane('controls')}
-          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mobilePane === 'controls' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-700'}`}
-        >
-          {__("Controls")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mobilePane === 'preview'}
-          onClick={() => setMobilePane('preview')}
-          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mobilePane === 'preview' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-700'}`}
-        >
-          {__("Preview")}
-        </button>
-      </div>
+      <StudioMobileViewTabs mobilePane={mobilePane} onMobilePaneChange={setMobilePane} />
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside
           className={`min-h-0 w-full shrink-0 flex-col overflow-hidden border-b border-zinc-200 bg-white md:flex md:h-full md:w-[320px] md:border-r md:border-b-0 ${mobilePane === 'controls' ? 'flex flex-1 md:flex-none' : 'hidden'}`}
@@ -1175,6 +1175,8 @@ export const StudioWorkspace: React.FC<Props> = ({
                     setThemeOptionsDraft(null);
                     setThemeOptionsDirty(false);
                   }
+                  setPreviewEntry(null);
+                  setPreviewTerm(null);
                   setPreviewLocale(next);
                   setLocaleReloadPending(true);
                   setLoading(true);
@@ -1268,6 +1270,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               onMenuRequestHandled={() => setMenuRequest(null)}
               canvasPickSeq={canvasPickSeq}
               openPatternSeq={patternRequestSeq}
+              previewEntryTypeKey={previewEntry?.type_key ?? null}
               panel={panel}
               onPanelChange={handlePanelChange}
               localeState={localeState}
@@ -1354,39 +1357,30 @@ export const StudioWorkspace: React.FC<Props> = ({
           />
         </aside>
 
-        {(() => {
-          const PreviewTag: 'main' | 'div' = active ? 'main' : 'div';
-          return (
-        <PreviewTag className={`min-w-0 flex-1 flex-col overflow-hidden md:flex ${mobilePane === 'preview' ? 'flex' : 'hidden'} ${viewport === 'desktop' ? 'bg-white' : 'bg-zinc-200/70'}`}>
-          <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-4')}>
-            {previewHtml ? (
-              <BuilderPreviewFrame
-                html={previewHtml}
-                viewport={viewport}
-                interactive={isMode2 || Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled)}
-                selectedId={activeSelectedId}
-                document={activeDoc}
-                onSelectNode={handleCanvasPick}
-                onEditNode={handleCanvasEdit}
-                onOpenNodeMenu={handleCanvasMenu}
-                onApiError={onApiError}
-                title={isMode2 ? __("Content preview") : __("Website preview")}
-                className="h-full w-full"
-                frameClassName={
-                  viewport === 'desktop'
-                    ? '!h-full !w-full !border-0 !rounded-none !shadow-none'
-                    : '!h-full min-h-[540px] !border border-zinc-300 rounded-lg shadow-sm'
-                }
-              />
-            ) : (
-              <div className="flex h-full min-h-[360px] items-center justify-center bg-white p-8 text-center text-sm text-zinc-500">
-                {loading || previewLoading ? __("Preparing live preview…") : __("No preview content for this target yet.")}
-              </div>
-            )}
-          </div>
-        </PreviewTag>
-          );
-        })()}
+        <StudioPreviewPane
+          active={active}
+          mobilePane={mobilePane}
+          viewport={viewport}
+          loading={loading}
+          previewLoading={previewLoading}
+          previewHtml={previewHtml}
+          isMode2={isMode2}
+          panel={panel}
+          selectedTarget={selectedTarget}
+          templateEditingEnabled={templateEditingEnabled}
+          activeSelectedId={activeSelectedId}
+          activeDoc={activeDoc}
+          effectivePreviewLocale={effectivePreviewLocale}
+          previewEntry={previewEntry}
+          previewTerm={previewTerm}
+          onChangePreviewEntry={setPreviewEntry}
+          onChangePreviewTerm={setPreviewTerm}
+          disableSamplePicker={loading || saving || !csrfToken}
+          onSelectNode={handleCanvasPick}
+          onEditNode={handleCanvasEdit}
+          onOpenNodeMenu={handleCanvasMenu}
+          onApiError={onApiError}
+        />
       </div>
     </div>
   );

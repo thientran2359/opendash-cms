@@ -139,7 +139,7 @@ async fn studio_search_target_blocks_diagnostics_and_public_override() {
                     "block_id": "core/column",
                     "props": {},
                     "children": [
-                        { "id": "slot1", "block_id": "core/content-slot", "props": {} },
+                        { "id": "slot1", "block_id": "core/entry-content", "props": {} },
                         { "id": "sf1", "block_id": "core/search-form", "props": { "placeholder": "Find...", "submit_label": "Go", "show_type_filter": true, "preserve_type_filter": false } },
                         { "id": "sr1", "block_id": "core/search-results", "props": { "show_facets": true, "show_excerpt": true, "empty_message": "" } }
                     ]
@@ -175,7 +175,7 @@ async fn studio_search_target_blocks_diagnostics_and_public_override() {
         .header(header::ORIGIN, &site.base)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
-            "target": { "kind": "home" },
+            "target": { "kind": "index" },
             "document": home_doc,
             "preview_annotations": true
         }))

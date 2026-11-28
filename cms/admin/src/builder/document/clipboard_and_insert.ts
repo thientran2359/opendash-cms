@@ -32,6 +32,7 @@ import {
   preservesAnchors,
   withinBuilderLimits,
 } from './validation.ts';
+import { validateLoopInvariants } from './loop_validation.ts';
 
 /** Build initial props from FieldSpec defaults, skipping UI-only layout fields. */
 export function initialBlockProps(fields: readonly FieldSpec[]): Record<string, unknown> {
@@ -125,6 +126,7 @@ export function insertBlock(
     contextTarget?: BuilderContextTarget | null;
     presetKey?: string;
     propsOverride?: Record<string, unknown>;
+    childrenSpecs?: readonly DefaultChildSpec[];
   },
 ): { document: BuilderDocument; id: string } | null {
   const item = findActiveCatalogItem(blockCatalog, blockId);
@@ -137,6 +139,7 @@ export function insertBlock(
       blockCatalog,
       options?.contextTarget,
       options?.presetKey,
+      options?.childrenSpecs,
     )
   ) {
     return null;
@@ -164,10 +167,11 @@ export function insertBlock(
 
   const ok = withinBuilderLimits(next)
     && countBlocksByType(next, 'core/list') <= MAX_BUILDER_LISTS
-    && countBlocksByType(next, 'core/content-slot') <= MAX_BUILDER_CONTENT_SLOTS
+    && countBlocksByType(next, 'core/entry-content') <= MAX_BUILDER_CONTENT_SLOTS
     && countBlocksByType(next, 'core/pattern-ref') <= MAX_BUILDER_PATTERN_INSTANCES
     && distinctPatternIdCount(next, blockCatalog) <= MAX_BUILDER_PATTERN_INSTANCES
-    && preservesAnchors(document, next, undefined, blockCatalog);
+    && preservesAnchors(document, next, undefined, blockCatalog)
+    && validateLoopInvariants(next, blockCatalog);
   return ok ? { document: next, id: node.id } : null;
 }
 
@@ -181,7 +185,7 @@ export function duplicateNode(
     !source
     || hasLockedAncestor(document, id, blockCatalog)
     || isProtectedNode(document, id, blockCatalog)
-    || countDescendantBlocksByType(document, id, 'core/content-slot') > 0
+    || countDescendantBlocksByType(document, id, 'core/entry-content') > 0
   ) {
     return null;
   }
@@ -224,7 +228,8 @@ export function duplicateNode(
 
   const ok = withinBuilderLimits(next)
     && distinctPatternIdCount(next, blockCatalog) <= MAX_BUILDER_PATTERN_INSTANCES
-    && preservesAnchors(document, next, undefined, blockCatalog);
+    && preservesAnchors(document, next, undefined, blockCatalog)
+    && validateLoopInvariants(next, blockCatalog);
   return ok ? { document: next, id: copy.id } : null;
 }
 
@@ -238,7 +243,7 @@ export function copyNodeOptions(
     !item
     || isLockedNode(item.node, blockCatalog)
     || hasLockedAncestor(document, id, blockCatalog)
-    || item.node.block_id === 'core/content-slot'
+    || item.node.block_id === 'core/entry-content'
   ) {
     return null;
   }
@@ -275,7 +280,7 @@ export function canPasteOptions(
   const locked = typeof lockedOrCatalog === 'boolean'
     ? lockedOrCatalog
     : isLockedNode(node, lockedOrCatalog);
-  if (locked || node.block_id === 'core/content-slot') return false;
+  if (locked || node.block_id === 'core/entry-content') return false;
   return node.block_id === clipboard.block_id;
 }
 

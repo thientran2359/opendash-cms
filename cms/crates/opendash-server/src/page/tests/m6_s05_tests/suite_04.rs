@@ -157,6 +157,7 @@ fn slot_table_and_single_root_wrapper_behave_linearly_and_safely() {
         html_id: Some("hero-id"),
         extra_classes: &extra,
         kind: Some("block"),
+        is_loop_clone: false,
     };
 
     let merged = apply_single_root_wrapper(

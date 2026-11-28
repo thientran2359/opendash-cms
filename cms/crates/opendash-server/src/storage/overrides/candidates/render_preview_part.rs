@@ -89,7 +89,7 @@ pub(in crate::storage) async fn render_preview_part(
 
 pub(in crate::storage) fn build_placeholder_preview_theme_context(
     target: &TemplateCandidate,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     site: &SiteContext<'_>,
     site_options: &BTreeMap<String, serde_json::Value>,
     options: &BTreeMap<String, serde_json::Value>,
@@ -99,7 +99,7 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
 ) -> ApiResult<serde_json::Value> {
     use TemplateCandidateKind as K;
     let route_kind = route_kind_for_candidate(target.kind);
-    let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
+    let theme_assets = active.map(ActiveTheme::asset_url_map).unwrap_or_default();
     let sample_entries = if target.kind == K::Search {
         content_render::SearchView::preview_sample_entries(preview_locale)
     } else {
@@ -109,16 +109,16 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
 
     let archive_url: Option<&str> = match target.kind {
         K::Single | K::SingleCustom | K::Singular | K::Index | K::Archive => Some("/posts"),
-        K::Home | K::Page | K::PageLayout | K::Taxonomy | K::NotFound | K::Search | K::Part => None,
+        K::Page | K::PageLayout | K::Taxonomy | K::NotFound | K::Search | K::Part => None,
     };
 
     let placeholder_entry = matches!(
         target.kind,
-        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
+        K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
     )
     .then(|| {
         let ct_key = target.content_type.as_deref().unwrap_or(
-            if matches!(target.kind, K::Home | K::Page | K::PageLayout) {
+            if matches!(target.kind, K::Page | K::PageLayout) {
                 "page"
             } else {
                 "post"
@@ -129,16 +129,16 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
 
     let ct_value: Option<serde_json::Value> = if matches!(
         target.kind,
-        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
+        K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
     ) {
         let ct_key = target.content_type.as_deref().unwrap_or(
-            if matches!(target.kind, K::Home | K::Page | K::PageLayout) {
+            if matches!(target.kind, K::Page | K::PageLayout) {
                 "page"
             } else {
                 "post"
             },
         );
-        let label = if matches!(target.kind, K::Home | K::Page | K::PageLayout) {
+        let label = if matches!(target.kind, K::Page | K::PageLayout) {
             "Trang"
         } else {
             "Bài viết"
@@ -177,7 +177,7 @@ pub(in crate::storage) fn build_placeholder_preview_theme_context(
         });
 
     let breadcrumbs = match target.kind {
-        K::Home => content_render::home_breadcrumbs(
+        K::Index => content_render::home_breadcrumbs(
             content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
             Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
         ),
@@ -268,7 +268,7 @@ pub(in crate::storage) async fn resolve_preview_entry(
     tx: &mut Transaction<'_, Sqlite>,
     target: &TemplateCandidate,
     sample: Option<&TemplatePreviewEntry>,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     preview_locale: &str,
     actor_role: FieldRole,
 ) -> ApiResult<Option<(entries::ContentEntryRecord, EffectiveContentSchema)>> {
@@ -305,7 +305,7 @@ pub(in crate::storage) async fn resolve_preview_entry(
         return Err(ApiError::not_found("Preview entry not found."));
     }
     let valid = match target.kind {
-        K::Home | K::Page | K::PageLayout => type_key == "page",
+        K::Page | K::PageLayout => type_key == "page",
         K::Single => {
             type_key != "page"
                 && target.content_type.as_ref().is_none_or(|t| t == &type_key)
@@ -333,6 +333,11 @@ pub(in crate::storage) async fn resolve_preview_entry(
     let mut entry = entries::get_entry_in_tx(tx, &type_key, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Preview entry not found."))?;
+    if entry.locale != preview_locale {
+        return Err(ApiError::bad_request(
+            "Bài viết xem trước không khớp ngôn ngữ đang chọn.",
+        ));
+    }
     if target.kind == K::Single
         && target
             .selector_slug
@@ -357,15 +362,14 @@ pub(in crate::storage) async fn resolve_preview_entry(
 pub async fn inspect_public_surfaces_and_precompile(
     db: &SqlitePool,
     resolution: &TemplateResolution,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     url_policy: &template_sec::ThemeUrlPolicy,
 ) -> ApiResult<PublicSurfaceInspection> {
     let mut tx = db.begin().await?;
     let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut *tx).await?;
     let mut precompiled_body = None;
     let mut precompiled_shell = PrecompiledPublicShell::default();
-    let mut uses_related_entries = false;
-    let mut uses_recent_posts = false;
+    let mut acc = SurfaceScanAcc::default();
 
     let body_canvas_layout = match resolution {
         TemplateResolution::DbOverride(record) => {
@@ -378,8 +382,7 @@ pub async fn inspect_public_surfaces_and_precompile(
                 active,
                 url_policy,
                 &schemas,
-                &mut uses_related_entries,
-                &mut uses_recent_posts,
+                &mut acc,
             )
             .await?;
             is_canvas_target(active, &record.target)
@@ -407,12 +410,14 @@ pub async fn inspect_public_surfaces_and_precompile(
                 .map(Arc::new)
             }
             .map_err(ApiError::internal)?;
-            uses_related_entries |= compiled.uses_related_entries;
-            uses_recent_posts |= compiled.uses_recent_posts;
+            acc.merge_theme_compiled(&compiled);
             precompiled_body = Some(compiled);
             is_canvas_resolved_key(active, target_key)
         }
-        TemplateResolution::CoreFallback => false,
+        TemplateResolution::CoreFallback => {
+            acc.loop_projection = opendash_core::builder::LoopProjection::all();
+            false
+        }
     };
 
     let mut shell_part_present = false;
@@ -426,8 +431,7 @@ pub async fn inspect_public_surfaces_and_precompile(
             active,
             &part_url_policy,
             &schemas,
-            &mut uses_related_entries,
-            &mut uses_recent_posts,
+            &mut acc,
         )
         .await?;
         let (has_footer, compiled_footer) = inspect_part_slot_in_tx(
@@ -438,8 +442,7 @@ pub async fn inspect_public_surfaces_and_precompile(
             active,
             &part_url_policy,
             &schemas,
-            &mut uses_related_entries,
-            &mut uses_recent_posts,
+            &mut acc,
         )
         .await?;
         shell_part_present = has_header || has_footer;
@@ -450,26 +453,98 @@ pub async fn inspect_public_surfaces_and_precompile(
     tx.commit().await?;
     let has_shell_or_theme =
         !matches!(resolution, TemplateResolution::CoreFallback) || shell_part_present;
-    Ok(PublicSurfaceInspection {
-        precompiled_body,
-        precompiled_shell,
-        uses_related_entries,
-        uses_recent_posts,
-        has_shell_or_theme,
-    })
+    Ok(acc.into_inspection(precompiled_body, precompiled_shell, has_shell_or_theme))
 }
 
-pub(in crate::storage) fn target_requires_and_forbids_slot(
+pub(in crate::storage) fn entry_content_rule_for_target(
     kind: TemplateCandidateKind,
-) -> (bool, bool) {
+) -> EntryContentRule {
     use TemplateCandidateKind as K;
-    let requires = matches!(
-        kind,
-        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular
-    );
-    let forbids = matches!(
-        kind,
-        K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part
-    );
-    (requires, forbids)
+    match kind {
+        K::Single | K::SingleCustom | K::Singular => EntryContentRule::RequiredOrEntryBlock,
+        K::Page | K::PageLayout | K::Index => EntryContentRule::OptionalMaxOne,
+        K::Archive | K::Taxonomy | K::NotFound | K::Search | K::Part => EntryContentRule::Forbidden,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::storage) async fn render_preview_named_part_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    state: &BuilderRenderContext,
+    active: Option<&ActiveTheme>,
+    theme_context: &serde_json::Value,
+    route: Option<(&str, &str)>,
+    render_locale: &str,
+    template_data: Option<&content_render::TemplateRenderData<'_>>,
+    budget: &mut PreviewCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<Option<RenderedLayout>> {
+    let url_policy = active_theme_url_policy_in_conn(&mut **tx, active, None, None, None).await?;
+    let fmt_cfg = template_sec::RenderFormattingConfig {
+        timezone: state.timezone.clone(),
+        ..Default::default()
+    };
+    let part_target = TemplateCandidate {
+        part_key: Some(key.to_owned()),
+        ..candidate(TemplateCandidateKind::Part)
+    };
+    let canonical = part_target.canonical_key().map_err(ApiError::bad_request)?;
+    if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
+        validate_typed_document_with_context_in_tx(
+            tx,
+            &part_target,
+            &row.document,
+            Some(&row.document),
+            true,
+            Some(render_locale),
+        )
+        .await?;
+        let graph = preview_part_graph(tx, &part_target, &row.document, active, budget).await?;
+        let ctx = PreviewRenderContext {
+            state,
+            graph: &graph,
+            theme_context,
+            route,
+            render_locale,
+            cache,
+            url_policy: &url_policy,
+            fmt_cfg: &fmt_cfg,
+            search: None,
+            template_data,
+        };
+        let scope = part_scope_prefix(key, budget.expansions);
+        let rendered = render_preview_builder(
+            tx,
+            &row.document,
+            None,
+            &ctx,
+            budget,
+            RenderAnnotationScope::None,
+            &scope,
+        )
+        .await?;
+        return Ok(Some(rendered));
+    }
+    if let Some(source) = active.and_then(|a| a.parts.get(key)) {
+        let edges = template_sec::preview_csec_part_keys_with_theme_urls(key, source, &url_policy)
+            .map_err(ApiError::bad_request)?;
+        let mut graph =
+            preview_part_graph_from_edges(tx, &canonical, edges, active, budget).await?;
+        graph.insert(key.to_owned(), PreviewPartSource::Theme(source.clone()));
+        let ctx = PreviewRenderContext {
+            state,
+            graph: &graph,
+            theme_context,
+            route,
+            render_locale,
+            cache,
+            url_policy: &url_policy,
+            fmt_cfg: &fmt_cfg,
+            search: None,
+            template_data,
+        };
+        return render_preview_part(tx, key, &ctx, budget).await;
+    }
+    Ok(None)
 }

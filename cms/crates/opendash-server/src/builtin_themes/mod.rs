@@ -8,7 +8,7 @@ pub const STARTER_THEME_ID: &str = "opendash-starter";
 pub const STARTER_THEME_NAME: &str = "OpenDash Starter";
 pub const STARTER_THEME_VERSION: &str = "1.0.0";
 
-/// Immutable embedded Starter V1 theme resources, validated using the same v3
+/// Immutable embedded Starter V1 theme resources, validated using the same
 /// boundary as uploaded packages before publishing an on-disk revision.
 pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
     BTreeMap::from([
@@ -51,10 +51,6 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
         (
             "header.html".to_owned(),
             include_bytes!("opendash-starter/header.html").to_vec(),
-        ),
-        (
-            "home.html".to_owned(),
-            include_bytes!("opendash-starter/home.html").to_vec(),
         ),
         (
             "index.html".to_owned(),

@@ -22,7 +22,7 @@ pub fn render_default_content_with_config(
         .map_err(|_| "Không thể render template nội dung.")
 }
 
-pub(super) fn required_v3_utf8<'a>(
+pub(super) fn required_theme_utf8<'a>(
     files: &'a BTreeMap<String, Vec<u8>>,
     path: &str,
 ) -> Result<&'a str, V2ZipError> {
@@ -30,16 +30,16 @@ pub(super) fn required_v3_utf8<'a>(
         "Thiếu file theme được khai báo trong theme.json.",
     ))?;
     let source = std::str::from_utf8(bytes)
-        .map_err(|_| V2ZipError::BadRequest("File theme v3 phải là UTF-8 hợp lệ."))?;
+        .map_err(|_| V2ZipError::BadRequest("File theme v1 phải là UTF-8 hợp lệ."))?;
     if source.trim().is_empty() {
         return Err(V2ZipError::BadRequest(
-            "File theme v3 được khai báo không được để trống.",
+            "File theme v1 được khai báo không được để trống.",
         ));
     }
     Ok(source)
 }
 
-pub fn load_v3_files_from_dir(root: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
+pub fn load_theme_files_from_dir(root: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
     let meta = std::fs::metadata(root)
         .map_err(|e| format!("Không thể truy cập thư mục theme '{}': {e}", root.display()))?;
     if !meta.is_dir() {
@@ -51,16 +51,16 @@ pub fn load_v3_files_from_dir(root: &Path) -> Result<BTreeMap<String, Vec<u8>>, 
     let mut files = BTreeMap::new();
     let mut seen_lower = BTreeSet::new();
     let mut decoded_total = 0usize;
-    walk_v3_dir(root, "", 0, &mut files, &mut seen_lower, &mut decoded_total)?;
+    walk_theme_dir(root, "", 0, &mut files, &mut seen_lower, &mut decoded_total)?;
     Ok(files)
 }
 
-/// Parses and validates `declarations` (and optional top-level `field_groups`) from a v3 theme manifest.
+/// Parses and validates `declarations` (and optional top-level `field_groups`) from a V1 theme manifest.
 /// Rejects unknown fields, invalid CPT/field schemas, duplicate keys, and any
 /// undeclared taxonomy associations and duplicate keys.
 pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations, &'static str> {
     let val: serde_json::Value =
-        serde_json::from_str(manifest_json).map_err(|_| "Manifest theme v3 không hợp lệ.")?;
+        serde_json::from_str(manifest_json).map_err(|_| "Manifest theme v1 không hợp lệ.")?;
     let mut raw_decl = match val.get("declarations").cloned() {
         Some(v) if !v.is_null() => v,
         _ => serde_json::json!({}),
@@ -151,7 +151,7 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
 }
 
 pub fn cpt_scope_for_target_key<'a>(
-    manifest: &'a ThemeV3Manifest,
+    manifest: &'a ThemeManifest,
     target_key: &'a str,
 ) -> Option<&'a str> {
     if let Some(rest) = target_key.strip_prefix("single:type:") {

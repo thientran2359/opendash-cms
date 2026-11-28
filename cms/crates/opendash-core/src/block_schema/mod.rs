@@ -40,6 +40,7 @@ pub enum BlockCategory {
     Interactive,
     Content,
     Marketing,
+    Template,
     Plugin,
 }
 
@@ -101,6 +102,29 @@ impl BlockSchema {
     /// Phase 1 local validation of a block schema declaration under `expected_owner_prefix`.
     pub fn validate(&self, expected_owner_prefix: &str) -> Result<(), &'static str> {
         validate::validate_block_schema(self, expected_owner_prefix)
+    }
+
+    /// Returns true iff this non-core block may safely render inside `core/loop-item`.
+    pub fn is_loop_schema_compatible(&self) -> bool {
+        fn has_disallowed_loop_field(fields: &[FieldSpec]) -> bool {
+            use crate::field_schema::FieldType;
+            fields.iter().any(|field| {
+                matches!(
+                    field.field_type,
+                    FieldType::Repeater
+                        | FieldType::Richtext
+                        | FieldType::Gallery
+                        | FieldType::EntryRef
+                        | FieldType::TermRef
+                ) || field.options_source.is_some()
+                    || has_disallowed_loop_field(&field.fields)
+            })
+        }
+
+        let explicit_loop = self.allowed_contexts.as_ref().is_some_and(|tokens| {
+            tokens.iter().any(|t| t == "loop_item") && !tokens.iter().any(|t| t == "!loop_item")
+        });
+        explicit_loop && !self.supports_children && !has_disallowed_loop_field(&self.fields)
     }
 
     /// Re-hydrates missing prop keys using top-level `field.default` values without

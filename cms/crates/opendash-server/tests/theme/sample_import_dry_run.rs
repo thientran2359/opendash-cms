@@ -148,12 +148,12 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
 
     // Install & activate theme with sample manifest
     let manifest = serde_json::to_vec(&json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "sample-theme",
         "name": "Sample Theme",
         "version": "1.0.0",
         "assets": ["assets/hero.png", "assets/logo.png"],
-        "templates": [{ "kind": "home", "file": "home.html" }],
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "options": [
             { "key": "brand_title", "label": "Brand", "type": "text", "default": "OpenDash", "public": true }
         ],
@@ -203,7 +203,7 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
     .unwrap();
     let zip = build_zip(&[
         ("theme.json", &manifest),
-        ("home.html", b"<main>Home{{ od_content() }}</main>"),
+        ("index.html", b"<main>Home{{ od_content() }}</main>"),
         ("assets/hero.png", b"\x89PNG\r\n\x1a\nHERO"),
         ("assets/logo.png", b"\x89PNG\r\n\x1a\nLOGO"),
     ]);

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Pure-Rust domain crate (`Cargo.toml` dependencies: `serde`, `serde_json`, `url` only; zero SQL, HTTP, filesystem I/O, or Wasm runtime code). Defines canonical identifiers, ownership-aware registry catalogs, lifecycle hook/filter envelopes, unified field schemas (`field_schema.rs`), content-type schemas, responsive media variants & `srcset` rendering contracts (`media/`), the unified recursive Builder AST V1 (`BuilderDocument { schema_version: 1, blocks: Vec<BlockNode> }`) and its `<!-- od:... -->` comment-block codec, declarative block schemas, RichText HTML sanitization, SVG icons, theme v3 manifests, plugin v1–v3 manifests, typed admin extensions, contact forms, CMS UI language catalog, gettext localization (`l10n`), manual redirect/404 normalization & CSV codec (`redirects/`), and backup/restore manifest contracts across the 19 modules exported by [`src/lib.rs`](src/lib.rs).
+Pure-Rust domain crate (`Cargo.toml` dependencies: `serde`, `serde_json`, `url` only; zero SQL, HTTP, filesystem I/O, or Wasm runtime code). Defines canonical identifiers, ownership-aware registry catalogs, lifecycle hook/filter envelopes, unified field schemas (`field_schema.rs`), content-type schemas, responsive media variants & `srcset` rendering contracts (`media/`), the unified recursive Builder AST V1 (`BuilderDocument { schema_version: 1, blocks: Vec<BlockNode> }`) and its `<!-- od:... -->` comment-block codec, declarative block schemas, RichText HTML sanitization, SVG icons, theme v1 manifests, plugin v1–v3 manifests, typed admin extensions, contact forms, CMS UI language catalog, gettext localization (`l10n`), manual redirect/404 normalization & CSV codec (`redirects/`), and backup/restore manifest contracts across the 19 modules exported by [`src/lib.rs`](src/lib.rs).
 
 See [Core Foundation](../../../docs/contracts/CORE_FOUNDATION.md) and [CMS Architecture](../../../docs/architecture/CMS_ARCHITECTURE.md) for cross-crate boundaries.
 
@@ -33,7 +33,7 @@ See [Core Foundation](../../../docs/contracts/CORE_FOUNDATION.md) and [CMS Archi
 - **RichText Sanitizer** ([`src/richtext.rs`](src/richtext/mod.rs)):
   - `[richtext.rs:sanitize_richtext]`, `[richtext.rs:strip_richtext_to_plain]`, and `[richtext.rs:decode_html5_entities]`.
 - **Theme & Plugin Manifests** ([`src/theme.rs`](src/theme/mod.rs), [`src/plugin.rs`](src/plugin/mod.rs)):
-  - `[theme.rs:ThemeV3Manifest]`, `[theme.rs:ThemeTemplateDecl]`, `[theme.rs:TemplateCandidate]`, `[theme.rs:TemplateCandidateKind]`, `[theme.rs:PageLayoutDecl]`, `[theme.rs:ThemePatternDecl]`, and `[theme.rs:valid_v3_asset_path]`.
+  - `[theme.rs:ThemeManifest]`, `[theme.rs:THEME_MANIFEST_VERSION]`, `[theme.rs:ThemeTemplateDecl]`, `[theme.rs:TemplateCandidate]`, `[theme.rs:TemplateCandidateKind]`, `[theme.rs:PageLayoutDecl]`, `[theme.rs:ThemePatternDecl]`, and `[theme.rs:valid_theme_asset_path]`.
   - `[plugin.rs:PluginManifest]`, `[plugin.rs:PluginPermissions]`, `[plugin.rs:ScopedFieldGrant]`, `[plugin.rs:NetworkScopeGrant]`, `[plugin.rs:PluginActionDeclaration]`, `[plugin.rs:plugin_can_read_field]`, `[plugin.rs:plugin_can_write_field]`, and `[plugin.rs:PLUGIN_ABI_VERSION]`.
 - **Admin Extensions, Contact Forms, i18n & Backup** ([`src/admin_extensions.rs`](src/admin_extensions.rs), [`src/contact.rs`](src/contact.rs), [`src/i18n.rs`](src/i18n.rs), [`src/backup.rs`](src/backup.rs)):
   - `[admin_extensions.rs:AdminExtensions]`, `[admin_extensions.rs:AdminColumn]`, `[admin_extensions.rs:AdminTermPanel]`, and `[admin_extensions.rs:AdminExtensions::validate]`.

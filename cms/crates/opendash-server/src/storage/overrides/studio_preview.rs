@@ -102,9 +102,7 @@ pub(in crate::storage) fn row_to_record(row: OverrideRow) -> ApiResult<TemplateO
     let document = BuilderDocument::from_json(row.4.as_bytes())
         .map_err(|_| ApiError::internal("Template override AST trong DB không hợp lệ."))?;
     let role = match target.kind {
-        TemplateCandidateKind::Home
-        | TemplateCandidateKind::Page
-        | TemplateCandidateKind::PageLayout => "page",
+        TemplateCandidateKind::Page | TemplateCandidateKind::PageLayout => "page",
         TemplateCandidateKind::Single
         | TemplateCandidateKind::SingleCustom
         | TemplateCandidateKind::Singular => "single",
@@ -313,6 +311,13 @@ pub struct TemplatePreviewEntry {
     pub entry_id: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplatePreviewTerm {
+    pub taxonomy_key: String,
+    pub term_id: i64,
+}
+
 pub(in crate::storage) fn part_scope_prefix(key: &str, expansion_idx: usize) -> String {
     match key {
         "header" => "hdr".to_owned(),
@@ -353,7 +358,6 @@ pub(in crate::storage) fn normalized_origin(public_origin: Option<&str>) -> &str
 
 pub(in crate::storage) fn route_kind_for_candidate(kind: TemplateCandidateKind) -> &'static str {
     match kind {
-        TemplateCandidateKind::Home => "home",
         TemplateCandidateKind::Page | TemplateCandidateKind::PageLayout => "page",
         TemplateCandidateKind::Single
         | TemplateCandidateKind::SingleCustom
@@ -370,7 +374,7 @@ pub(in crate::storage) fn route_kind_for_candidate(kind: TemplateCandidateKind) 
 /// Previews need the theme's styles, while scripts are reserved for the public
 /// page. The source manifest and digest are already verified by theme storage.
 pub(in crate::storage) fn preview_enqueued_styles(
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     route: EnqueueCondition,
 ) -> ResolvedEnqueuedAssets {
     let Some(active) = active else {
@@ -384,7 +388,6 @@ pub(in crate::storage) fn preview_enqueued_styles(
 
 pub(in crate::storage) fn preview_condition(kind: TemplateCandidateKind) -> EnqueueCondition {
     match kind {
-        TemplateCandidateKind::Home => EnqueueCondition::Home,
         TemplateCandidateKind::Page | TemplateCandidateKind::PageLayout => EnqueueCondition::Page,
         TemplateCandidateKind::Single
         | TemplateCandidateKind::SingleCustom
@@ -439,6 +442,14 @@ pub struct TransientStudioOverrides {
     pub menu_slots: Option<BTreeMap<String, Option<i64>>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryContentRule {
+    RequiredOrEntryBlock,
+    OptionalMaxOne,
+    Forbidden,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct StudioTargetItem {
     pub canonical_target_key: String,
@@ -448,8 +459,7 @@ pub struct StudioTargetItem {
     pub override_id: Option<i64>,
     pub version: Option<i64>,
     pub effective_source: EffectiveSourceDescriptor,
-    pub requires_content_slot: bool,
-    pub forbids_content_slot: bool,
+    pub entry_content_rule: EntryContentRule,
     pub has_theme_source: bool,
 }
 
@@ -464,7 +474,7 @@ pub(in crate::storage) fn push_studio_target_item(
     items: &mut Vec<StudioTargetItem>,
     seen: &mut BTreeSet<String>,
     overrides_map: &BTreeMap<String, &TemplateOverrideRecord>,
-    active: Option<&ActiveThemeV3>,
+    active: Option<&ActiveTheme>,
     target: TemplateCandidate,
     label: String,
     group: &'static str,
@@ -493,8 +503,7 @@ pub(in crate::storage) fn push_studio_target_item(
     } else {
         TemplateResolution::CoreFallback.effective_source()
     };
-    let (requires_content_slot, forbids_content_slot) =
-        target_requires_and_forbids_slot(target.kind);
+    let entry_content_rule = entry_content_rule_for_target(target.kind);
     items.push(StudioTargetItem {
         canonical_target_key: key,
         label,
@@ -503,8 +512,7 @@ pub(in crate::storage) fn push_studio_target_item(
         override_id: existing.map(|r| r.id),
         version: existing.map(|r| r.version),
         effective_source,
-        requires_content_slot,
-        forbids_content_slot,
+        entry_content_rule,
         has_theme_source,
     });
     Ok(())

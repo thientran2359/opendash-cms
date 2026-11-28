@@ -198,7 +198,7 @@ fn sample_png_bytes() -> Vec<u8> {
 
 fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
     let mut manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "theme-ergo-v3",
         "name": "Theme Ergonomics E2E",
         "version": version,
@@ -208,7 +208,6 @@ fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
             "card": "template-part/card.html"
         },
         "templates": [
-            { "kind": "home", "file": "home.html" },
             { "kind": "page", "file": "page.html" },
             { "kind": "single", "file": "single.html" },
             { "kind": "single", "content_type": "post", "file": "single-post.html" },
@@ -273,14 +272,9 @@ fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
 
     let card_html = br#"<div class="od-card">{{ entry.title }}</div>"#;
 
-    let home_html = br#"<main data-tpl="home">
-<nav data-bc>{% for b in breadcrumbs %}<span data-bc-cur="{{ b.is_current }}">{{ b.name }}</span>{% endfor %}</nav>
-<p data-opt>{{ options.banner_text }}</p>
-<div class="slot">{{ od_content() }}</div>
-</main>"#;
-
     let page_html = br#"<main data-tpl="page">
 <nav data-bc>{% for b in breadcrumbs %}<span data-bc-cur="{{ b.is_current }}">{{ b.name }}</span>{% endfor %}</nav>
+<p data-opt>{{ options.banner_text }}</p>
 <h1>{{ entry.title }}</h1>
 <div class="slot">{{ od_content() }}</div>
 </main>"#;
@@ -322,7 +316,7 @@ fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
 </main>"#;
 
     let index_html =
-        br#"<main data-tpl="index">{% for e in entries %}<a href="{{ e.url }}">{{ e.title }}</a>{% endfor %}</main>"#;
+        br#"<main data-tpl="index"><p data-opt>{{ options.banner_text }}</p>{% for e in entries %}<a href="{{ e.url }}">{{ e.title }}</a>{% endfor %}</main>"#;
 
     build_zip_from_entries(&[
         ("theme.json", manifest_str.as_bytes()),
@@ -331,7 +325,6 @@ fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
         ("header.html", header_html),
         ("footer.html", footer_html),
         ("template-part/card.html", card_html),
-        ("home.html", home_html),
         ("page.html", page_html),
         ("single.html", single_html),
         ("single-post.html", single_post_html),
@@ -1062,11 +1055,11 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
     let admin = setup_and_login_admin(&http, &site).await;
 
     let base_manifest = json!({
-        "manifest_version": 3,
+        "manifest_version": 1,
         "theme_id": "bypass-probe",
         "name": "Bypass Probe",
         "version": "1.0.0",
-        "templates": [{ "kind": "home", "file": "home.html" }],
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "assets": ["assets/theme.css"],
         "options": [
             { "key": "banner_text", "label": "Banner", "type": "text", "default": "x", "public": true },
@@ -1124,7 +1117,7 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
         ("html_comment_bang_close", r#"<!-- bad --!>"#),
         (
             "set_block_unused_script_smuggling",
-            r#"{% set unused %}<script>alert(1)</script>{% endset %}<p>ok</p>"#,
+            r#"{% set unused %}<script>alert("{{ options.banner_text }}")</script>{% endset %}<p>ok</p>"#,
         ),
         (
             "with_block_shadowing_url_scope",
@@ -1144,7 +1137,7 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
         ),
         (
             "conditional_attr_splitting",
-            r#"<a data-x="{% if options.flag %}{{ entry.url }}{% else %}https://evil.example{% endif %}" href="https://evil.example">x</a>"#,
+            r#"<a data-x="{% if options.flag %}a" href="{{ options.banner_text }}"{% else %}b"{% endif %}>x</a>"#,
         ),
         ("closing_link_void_tag", r#"</link><p>x</p>"#),
         ("closing_meta_void_tag", r#"</meta><p>x</p>"#),
@@ -1169,7 +1162,7 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
         let zip = build_zip_from_entries(&[
             ("theme.json", base_manifest.as_bytes()),
             ("assets/theme.css", b"body { color: #000; }"),
-            ("home.html", html_payload.as_bytes()),
+            ("index.html", html_payload.as_bytes()),
         ]);
         let res = upload_theme_zip(&http, &site, &admin, zip).await;
         assert_eq!(
@@ -1200,7 +1193,7 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
         let zip = build_zip_from_entries(&[
             ("theme.json", manifest_bytes.as_bytes()),
             ("assets/theme.css", b"body { color: #000; }"),
-            ("home.html", tpl.as_bytes()),
+            ("index.html", tpl.as_bytes()),
         ]);
         let up = upload_theme_zip(&http, &site, &admin, zip).await;
         assert_eq!(up.status(), StatusCode::CREATED, "upload valid AST {name}");
@@ -1238,7 +1231,7 @@ async fn theme_ergonomics_csec_anti_bypass_matrix_rejects_all_vectors() {
             Method::POST,
             "/api/admin/studio/preview",
             None,
-            Some(json!({ "target": { "kind": "home" } })),
+            Some(json!({ "target": { "kind": "index" } })),
         )
         .await;
         assert!(
@@ -1321,7 +1314,7 @@ fn cli_check_theme_validates_starter_zips_and_error_cases() {
     fs::create_dir_all(&bad_dir).unwrap();
     fs::write(
         bad_dir.join("theme.json"),
-        br#"{"manifest_version":3,"theme_id":"bad-h","name":"Bad","version":"1.0.0"}"#,
+        br#"{"manifest_version":1,"theme_id":"bad-h","name":"Bad","version":"1.0.0"}"#,
     )
     .unwrap();
     fs::write(bad_dir.join(".secret"), b"nope").unwrap();

@@ -28,40 +28,58 @@ pub struct SitemapRouteList {
 const INDEXABLE_ROUTES_UNION: &str = r#"
 WITH indexable AS (
     SELECT 1 AS route_kind,
-           e.id AS stable_id,
+           COALESCE(e.id, 0) AS stable_id,
            '' AS archive_key,
-           reading.locale AS locale,
-           COALESCE(
-             claims.path,
-             CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
-           ) AS canonical_path,
-           e.updated_at AS lastmod
-      FROM site_reading_settings reading
-      JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-      JOIN content_entries e ON e.id = reading.homepage_page_id
-      JOIN content_types t ON t.key = e.content_type_key
+           sl.code AS locale,
+           CASE
+             WHEN reading.homepage_page_id IS NULL THEN
+               CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
+             ELSE COALESCE(
+               claims.path,
+               CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
+             )
+           END AS canonical_path,
+           CASE WHEN reading.homepage_page_id IS NULL THEN NULL ELSE e.updated_at END AS lastmod
+      FROM site_locales sl
+      LEFT JOIN site_reading_settings reading ON reading.locale = sl.code
+      LEFT JOIN content_entries e ON e.id = reading.homepage_page_id
+      LEFT JOIN content_types t ON t.key = e.content_type_key
       LEFT JOIN permalink_route_claims claims
         ON claims.target_kind = 'entry'
        AND claims.target_id = CAST(e.id AS TEXT)
-       AND claims.locale = reading.locale
+       AND claims.locale = sl.code
       LEFT JOIN entry_seo s ON s.entry_id = e.id
-      LEFT JOIN site_home_seo h ON h.locale = reading.locale
-     WHERE e.content_type_key = 'page'
-       AND e.locale = reading.locale
-       AND e.trashed_at IS NULL
-       AND e.publication_status = 'published'
-       AND t.provider_status = 'active'
-       AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
-       AND COALESCE(s.noindex, h.noindex, 0) = 0
+      LEFT JOIN site_home_seo h ON h.locale = sl.code
+     WHERE sl.enabled = 1
+       AND sl.deleted_at IS NULL
+       AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+       AND COALESCE(h.noindex, 0) = 0
        AND (
-         COALESCE(s.canonical_url, h.canonical_url) IS NULL
-         OR COALESCE(s.canonical_url, h.canonical_url) = (
-           rtrim(?1, '/') || COALESCE(
-             claims.path,
-             CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
-           )
+         reading.homepage_page_id IS NULL
+         OR (
+           e.id IS NOT NULL
+           AND e.content_type_key = 'page'
+           AND e.locale = sl.code
+           AND e.trashed_at IS NULL
+           AND e.publication_status = 'published'
+           AND t.provider_status = 'active'
+           AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+           AND COALESCE(s.noindex, 0) = 0
          )
-         OR (sl.is_default = 1 AND COALESCE(s.canonical_url, h.canonical_url) = rtrim(?1, '/'))
+       )
+       AND (
+         (CASE WHEN reading.homepage_page_id IS NULL THEN h.canonical_url ELSE COALESCE(s.canonical_url, h.canonical_url) END) IS NULL
+         OR (CASE WHEN reading.homepage_page_id IS NULL THEN h.canonical_url ELSE COALESCE(s.canonical_url, h.canonical_url) END) = (
+           rtrim(?1, '/') || CASE
+             WHEN reading.homepage_page_id IS NULL THEN
+               CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
+             ELSE COALESCE(
+               claims.path,
+               CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
+             )
+           END
+         )
+         OR (sl.is_default = 1 AND (CASE WHEN reading.homepage_page_id IS NULL THEN h.canonical_url ELSE COALESCE(s.canonical_url, h.canonical_url) END) = rtrim(?1, '/'))
        )
 
     UNION ALL
@@ -254,24 +272,44 @@ pub async fn list_indexable_routes_in_tx(
 
         if has_home {
             let homes: Vec<(String, i64, String, Option<String>)> = sqlx::query_as(
-                "SELECT sl.bcp47_tag, sl.is_default, claims.path, COALESCE(s.canonical_url, h.canonical_url)
-                   FROM site_reading_settings reading
-                   JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
-                   JOIN content_entries e ON e.id = reading.homepage_page_id
-                   JOIN content_types t ON t.key = e.content_type_key
-                   JOIN permalink_route_claims claims
+                "SELECT sl.bcp47_tag,
+                        sl.is_default,
+                        CASE
+                          WHEN reading.homepage_page_id IS NULL THEN
+                            CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
+                          ELSE COALESCE(
+                            claims.path,
+                            CASE WHEN sl.is_default = 1 THEN '/' ELSE '/' || sl.code END
+                          )
+                        END,
+                        CASE WHEN reading.homepage_page_id IS NULL THEN h.canonical_url ELSE COALESCE(s.canonical_url, h.canonical_url) END
+                   FROM site_locales sl
+                   LEFT JOIN site_reading_settings reading ON reading.locale = sl.code
+                   LEFT JOIN content_entries e ON e.id = reading.homepage_page_id
+                   LEFT JOIN content_types t ON t.key = e.content_type_key
+                   LEFT JOIN permalink_route_claims claims
                      ON claims.target_kind = 'entry'
                     AND claims.target_id = CAST(e.id AS TEXT)
-                    AND claims.locale = reading.locale
+                    AND claims.locale = sl.code
                    LEFT JOIN entry_seo s ON s.entry_id = e.id
-                   LEFT JOIN site_home_seo h ON h.locale = reading.locale
-                  WHERE e.content_type_key = 'page'
-                    AND e.locale = reading.locale
-                    AND e.trashed_at IS NULL
-                    AND e.publication_status = 'published'
-                    AND t.provider_status = 'active'
-                    AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
-                    AND COALESCE(s.noindex, h.noindex, 0) = 0
+                   LEFT JOIN site_home_seo h ON h.locale = sl.code
+                  WHERE sl.enabled = 1
+                    AND sl.deleted_at IS NULL
+                    AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
+                    AND COALESCE(h.noindex, 0) = 0
+                    AND (
+                      reading.homepage_page_id IS NULL
+                      OR (
+                        e.id IS NOT NULL
+                        AND e.content_type_key = 'page'
+                        AND e.locale = sl.code
+                        AND e.trashed_at IS NULL
+                        AND e.publication_status = 'published'
+                        AND t.provider_status = 'active'
+                        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+                        AND COALESCE(s.noindex, 0) = 0
+                      )
+                    )
                   ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
             )
             .fetch_all(&mut *conn)
