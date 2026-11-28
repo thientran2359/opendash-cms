@@ -430,13 +430,26 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
             "key": "case_study",
-            "label": "Case Study",
-            "fields": [{ "key": "client_name", "label": "Client", "type": "text", "required": true }]
+            "label": "Case Study"
         }))
         .send()
         .await
         .unwrap();
     assert_eq!(ct_resp.status(), StatusCode::CREATED);
+    let fg_resp = client
+        .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+        .header(header::COOKIE, &cookie)
+        .header("X-CSRF-Token", &csrf)
+        .json(&json!({
+            "local_key": "case_study_fields",
+            "title": "Case Study Fields",
+            "target_types": ["case_study"],
+            "fields": [{ "key": "client_name", "label": "Client", "type": "text", "required": true }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fg_resp.status(), StatusCode::CREATED);
 
     let cpt_entry_resp = client
         .post(format!(

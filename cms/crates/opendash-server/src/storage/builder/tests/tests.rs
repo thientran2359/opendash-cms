@@ -128,13 +128,71 @@ async fn entry_builder_enforces_body_min_edit_role_and_private_exposure_media_ac
         .unwrap();
     crate::storage::MIGRATOR.run(&db).await.unwrap();
 
+    // Private CPT without `body` capability blocks Builder read/save (`check_entry_body_edit_acl`),
+    // and synthetic Admin-only `body` proves both edit-ACL rejection and non-public media grant.
     sqlx::query(
         r#"INSERT INTO content_types(key, definition_json, owner_kind)
-           VALUES('secret_doc', '{"key":"secret_doc","label":"Secret","fields":[{"key":"body","label":"Body","type":"richtext","required":false,"acl":{"min_view_role":"admin","min_edit_role":"admin","public_exposure":"private"}}],"settings":{"public":true,"has_archive":false,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
+           VALUES('secret_no_builder', '{"key":"secret_no_builder","label":"NoBuilder","settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":[]}}', 'user')"#,
     )
     .execute(&db)
     .await
     .unwrap();
+    let no_builder_id = sqlx::query(
+        "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
+         VALUES('secret_no_builder', 'nb-1', 'NB 1', '{}', 'draft', 'vi', 'eg-' || lower(hex(randomblob(8))))",
+    )
+    .execute(&db)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    sqlx::query(
+        r#"INSERT INTO content_types(key, definition_json, owner_kind)
+           VALUES('secret_doc', '{"key":"secret_doc","label":"Secret","settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let mut body_spec = opendash_core::field_schema::FieldSpec::new(
+        opendash_core::field_schema::FieldType::Richtext,
+        "body",
+        "Body",
+    );
+    body_spec.acl = Some(opendash_core::field_schema::FieldAcl::canonical(
+        opendash_core::content::FieldRole::Admin,
+        opendash_core::content::FieldRole::Admin,
+        opendash_core::content::PublicExposure::Private,
+    ));
+    let mut eff_fields = std::collections::BTreeMap::new();
+    eff_fields.insert(
+        "body".to_owned(),
+        opendash_core::content::EffectiveFieldEntry {
+            definition: body_spec,
+            owner: opendash_core::registry::ResourceOwner::Core,
+            source_id: "base:secret_doc".into(),
+            effective_status: opendash_core::content::EffectiveFieldStatus::Active,
+        },
+    );
+    let restricted_schema = opendash_core::content::EffectiveContentSchema {
+        base: opendash_core::registry::OwnedDescriptor {
+            descriptor: opendash_core::content::ContentTypeDefinition {
+                key: "secret_doc".into(),
+                label: "Secret".into(),
+                singular_label: None,
+                description: None,
+                settings: opendash_core::content::ContentTypeSettings::default(),
+            },
+            owner: opendash_core::registry::ResourceOwner::User,
+            status: opendash_core::registry::ProviderStatus::Active,
+            declaration_state: opendash_core::registry::DeclarationState::Declared,
+        },
+        base_version: 1,
+        attached_groups: Vec::new(),
+        effective_fields: eff_fields,
+        ui_fields: Vec::new(),
+        schema_token: String::new(),
+    };
 
     let admin_id = sqlx::query(
         "INSERT INTO users(username, password_hash, role) VALUES('admin1', 'hash', 'admin')",
@@ -183,6 +241,19 @@ async fn entry_builder_enforces_body_min_edit_role_and_private_exposure_media_ac
         token_hash: "ed_h".into(),
     };
 
+    assert_eq!(
+        crate::storage::builder::mutations_and_save::check_entry_body_edit_acl(
+            &restricted_schema,
+            &editor_ctx,
+        )
+        .unwrap_err()
+        .0,
+        axum::http::StatusCode::FORBIDDEN
+    );
+    assert!(
+        !crate::storage::builder::mutations_and_save::body_allows_public_refs(&restricted_schema)
+    );
+
     let media_id = "6".repeat(64);
     sqlx::query(
         "INSERT INTO media_assets(id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height)
@@ -202,7 +273,7 @@ async fn entry_builder_enforces_body_min_edit_role_and_private_exposure_media_ac
     .last_insert_rowid();
 
     assert_eq!(
-        read_entry_builder(&db, &editor_ctx, "secret_doc", entry_id)
+        read_entry_builder(&db, &editor_ctx, "secret_no_builder", no_builder_id)
             .await
             .unwrap_err()
             .0,
@@ -219,11 +290,21 @@ async fn entry_builder_enforces_body_min_edit_role_and_private_exposure_media_ac
     let plugins = std::sync::Arc::new(crate::plugin::PluginManager::new(db.clone(), false));
     let hooks = HookDispatcher::new(plugins);
 
-    match save_entry_builder(&db, &editor_ctx, &hooks, "secret_doc", entry_id, 1, &doc).await {
+    match save_entry_builder(
+        &db,
+        &editor_ctx,
+        &hooks,
+        "secret_no_builder",
+        no_builder_id,
+        1,
+        &doc,
+    )
+    .await
+    {
         Err(EntryBuilderMutationError::Api(err)) => {
             assert_eq!(err.0, axum::http::StatusCode::FORBIDDEN);
         }
-        other => panic!("expected 403 forbidden for Editor, got {other:?}"),
+        other => panic!("expected 403 forbidden for Editor without builder support, got {other:?}"),
     }
 
     let saved = save_entry_builder(&db, &admin_ctx, &hooks, "secret_doc", entry_id, 1, &doc)

@@ -1,6 +1,8 @@
 import React from 'react';
 import { __, _x } from '../i18n/index.tsx';
-import type { OwnedContentType } from '../features/content/types.ts';
+import type { OwnedContentTypeWithSettings } from '../api/content.ts';
+import { CoreIconSvg } from '../components/CoreIcon.tsx';
+import { lookupCoreIconPaths } from '../fields/icons.ts';
 import {
   isRouteAllowed,
   isViewAllowed,
@@ -9,6 +11,15 @@ import {
   type AdminView,
   type ParsedRoute,
 } from './router.ts';
+
+export interface OptionsPageMenuItem {
+  page_key: string;
+  menu_label: string;
+  parent_menu?: 'content' | 'appearance' | 'system' | 'settings' | 'top_level';
+  menu_icon?: string | null;
+  menu_position: number;
+  min_edit_role: 'admin' | 'editor';
+}
 
 export {
   isRouteAllowed,
@@ -40,13 +51,31 @@ export interface ParentMenuItem {
 }
 
 export function buildMenuTree(
-  cptTypes: OwnedContentType[],
-  isAdmin: boolean,
+  cptTypes: OwnedContentTypeWithSettings[],
+  isAdmin: boolean = true,
   cptTaxonomies: Record<string, Array<{ key: string; label: string }>> = {},
+  optionsPages: OptionsPageMenuItem[] = [],
 ): ParentMenuItem[] {
-  const customTypes = cptTypes.filter(
-    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section' && ct.descriptor.key !== 'pattern',
-  );
+  const customTypes = cptTypes
+    .filter(
+      ct =>
+        ct.descriptor.key !== 'post' &&
+        ct.descriptor.key !== 'page' &&
+        ct.descriptor.key !== 'section' &&
+        ct.descriptor.key !== 'pattern' &&
+        ct.descriptor.settings?.show_in_menu !== false,
+    )
+    .slice()
+    .sort((a, b) => {
+      const posA = a.descriptor.settings?.menu_position ?? 50;
+      const posB = b.descriptor.settings?.menu_position ?? 50;
+      if (posA !== posB) return posA - posB;
+      return a.descriptor.label.localeCompare(b.descriptor.label);
+    });
+  const visibleOptionsPages = optionsPages
+    .filter(page => isAdmin || page.min_edit_role === 'editor')
+    .slice()
+    .sort((a, b) => a.menu_position - b.menu_position || a.menu_label.localeCompare(b.menu_label));
   return [
     { id: 'dashboard', label: _x("Dashboard", "shell.dashboard"), icon: 'dashboard', hash: '#/dashboard' },
     {
@@ -73,21 +102,38 @@ export function buildMenuTree(
         { label: __("Add new page"), hash: '#/pages/new' },
       ],
     },
-    ...customTypes.map(ct => ({
-      id: `cpt:${ct.descriptor.key}`,
-      label: ct.descriptor.label,
-      icon: 'content',
-      hash: `#/cpt/${ct.descriptor.key}`,
-      group: 'content' as const,
-      children: [
-        { label: __("All {{label}}", { label: ct.descriptor.label }), hash: `#/cpt/${ct.descriptor.key}` },
-        { label: __("Add new"), hash: `#/cpt/${ct.descriptor.key}/new` },
-        ...(cptTaxonomies[ct.descriptor.key] ?? []).map(tax => ({
-          label: tax.label,
-          hash: `#/cpt/${encodeURIComponent(ct.descriptor.key)}/taxonomy/${encodeURIComponent(tax.key)}`,
-        })),
-      ],
-    })),
+    ...customTypes.map(ct => {
+      const displayLabel = ct.descriptor.settings?.menu_name?.trim() || ct.descriptor.label;
+      return {
+        id: `cpt:${ct.descriptor.key}`,
+        label: displayLabel,
+        icon: ct.descriptor.settings?.menu_icon?.trim() || 'content',
+        hash: `#/cpt/${ct.descriptor.key}`,
+        group: 'content' as const,
+        children: [
+          { label: __("All {{label}}", { label: displayLabel }), hash: `#/cpt/${ct.descriptor.key}` },
+          { label: __("Add new"), hash: `#/cpt/${ct.descriptor.key}/new` },
+          ...(cptTaxonomies[ct.descriptor.key] ?? []).map(tax => ({
+            label: tax.label,
+            hash: `#/cpt/${encodeURIComponent(ct.descriptor.key)}/taxonomy/${encodeURIComponent(tax.key)}`,
+          })),
+        ],
+      };
+    }),
+    ...visibleOptionsPages
+      .filter(page => !(page.parent_menu === 'settings' && isAdmin))
+      .map(page => ({
+        id: `options:${page.page_key}`,
+        label: page.menu_label,
+        icon: page.menu_icon?.trim() || 'settings',
+        hash: `#/options/${encodeURIComponent(page.page_key)}`,
+        group: (page.parent_menu === 'appearance'
+          ? 'appearance'
+          : page.parent_menu === 'system' || page.parent_menu === 'settings'
+            ? 'system'
+            : 'content') as 'content' | 'appearance' | 'system',
+        adminOnly: page.min_edit_role === 'admin',
+      })),
     {
       id: 'media',
       label: __("Media library"),
@@ -99,16 +145,8 @@ export function buildMenuTree(
       id: 'contact',
       label: __("Contact"),
       icon: 'mail',
-      hash: '#/settings/contact',
+      hash: '#/contact',
       group: 'content',
-      adminOnly: true,
-    },
-    {
-      id: 'studio',
-      label: __("Customize appearance"),
-      icon: 'builder',
-      hash: '#/studio',
-      group: 'appearance',
       adminOnly: true,
     },
     {
@@ -120,31 +158,50 @@ export function buildMenuTree(
       adminOnly: true,
       children: [
         { label: __("Installed themes"), hash: '#/appearance/themes' },
-        { label: __("Install theme"), hash: '#/appearance/library' },
+        { label: __("Install theme"), hash: '#/appearance/themes/install' },
       ],
+    },
+    {
+      id: 'studio',
+      label: __("Customize appearance"),
+      icon: 'builder',
+      hash: '#/studio',
+      group: 'appearance',
+      adminOnly: true,
+    },
+    {
+      id: 'menus',
+      label: __("Menus"),
+      icon: 'menus',
+      hash: '#/studio?panel=menus',
+      group: 'appearance',
+      adminOnly: true,
     },
     {
       id: 'patterns',
       label: __("Patterns"),
-      icon: 'content',
+      icon: 'patterns',
       hash: '#/patterns',
       group: 'appearance',
       adminOnly: true,
       children: [
         { label: __("All patterns"), hash: '#/patterns' },
         { label: __("Add pattern"), hash: '#/patterns/new' },
+        { label: __("Template library"), hash: '#/appearance/library' },
       ],
     },
     {
       id: 'schema',
       label: __("Content structure"),
       icon: 'schema',
-      hash: '#/appearance/content-types',
+      hash: '#/content-structure/content-types',
       group: 'system',
       adminOnly: true,
       children: [
-        { label: __("Content types & fields"), hash: '#/appearance/content-types' },
-        { label: __("Custom taxonomies"), hash: '#/taxonomy/definitions' },
+        { label: __("Content types"), hash: '#/content-structure/content-types' },
+        { label: __("Taxonomies"), hash: '#/content-structure/taxonomies' },
+        { label: __("Field groups"), hash: '#/content-structure/field-groups' },
+        { label: __("Options pages"), hash: '#/content-structure/options-pages' },
       ],
     },
     {
@@ -163,25 +220,25 @@ export function buildMenuTree(
       id: 'users',
       label: __("Users"),
       icon: 'users',
-      hash: isAdmin ? '#/users' : '#/users/profile',
+      hash: '#/users',
       group: 'system',
+      adminOnly: true,
       children: [
         { label: __("All users"), hash: '#/users', adminOnly: true },
         { label: __("Add user"), hash: '#/users/new', adminOnly: true },
-        { label: __("My profile"), hash: '#/users/profile' },
       ],
     },
     {
       id: 'tools',
       label: __("Tools"),
       icon: 'tools',
-      hash: '#/tools/backup',
+      hash: '#/tools/redirects',
       group: 'system',
       adminOnly: true,
       children: [
+        { label: __("Redirects & 404"), hash: '#/tools/redirects' },
         { label: __("Backup & restore"), hash: '#/tools/backup' },
         { label: __("Media reconciliation"), hash: '#/tools/media-reconcile' },
-        { label: __("Redirects & 404"), hash: '#/tools/redirects' },
         { label: __("Search index"), hash: '#/tools/search' },
         { label: __("System health"), hash: '#/tools/health' },
       ],
@@ -195,17 +252,28 @@ export function buildMenuTree(
       adminOnly: true,
       children: [
         { label: __("General"), hash: '#/settings/general' },
-        { label: __("Multilingual"), hash: '#/settings/multilingual', adminOnly: true },
         { label: __("Homepage & posts"), hash: '#/settings/reading' },
         { label: __("Permalinks"), hash: '#/settings/permalinks' },
-        { label: __("SEO"), hash: '#/settings/seo' },
+        { label: __("Homepage SEO"), hash: '#/settings/seo' },
+        { label: __("Multilingual"), hash: '#/settings/multilingual', adminOnly: true },
         { label: __("Email notifications (SMTP)"), hash: '#/settings/smtp' },
+        ...(isAdmin
+          ? visibleOptionsPages
+              .filter(page => page.parent_menu === 'settings')
+              .map(page => ({
+                label: page.menu_label,
+                hash: `#/options/${encodeURIComponent(page.page_key)}`,
+              }))
+          : []),
       ],
     },
   ];
 }
 
 export function NavIcon({ name }: { name: string }) {
+  if (lookupCoreIconPaths(name)) {
+    return <CoreIconSvg name={name} size={19} />;
+  }
   const paths: Record<string, React.ReactNode> = {
     dashboard: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
     posts: <><path d="M8 3h9l4 4v14H8z" /><path d="M17 3v5h4M11 12h7M11 16h7M3 7v14" /></>,
@@ -214,6 +282,8 @@ export function NavIcon({ name }: { name: string }) {
     media: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8" cy="9" r="1.5" /><path d="m4 17 5-5 4 3 3-4 5 6" /></>,
     mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>,
     builder: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M9 11h12" /></>,
+    menus: <><path d="M4 6h16M4 12h16M4 18h10" /><circle cx="19" cy="18" r="1.5" /></>,
+    patterns: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="4" rx="1" /><rect x="13" y="9" width="8" height="12" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /></>,
     themes: <><path d="M12 3 3 8l9 5 9-5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5" /></>,
     palette: <><circle cx="12" cy="12" r="9" /><circle cx="9" cy="10" r="1" /><circle cx="14" cy="9" r="1" /><circle cx="16" cy="13" r="1" /><circle cx="10" cy="15" r="1" /></>,
     schema: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6" /></>,

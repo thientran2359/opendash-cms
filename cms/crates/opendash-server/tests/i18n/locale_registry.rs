@@ -461,13 +461,17 @@ async fn migration_0047_fresh_and_populated_preserves_data_sequences_and_trigger
     assert_eq!(term_grp, format!("tg-{child_cat}"));
     assert_eq!(term_parent, Some(parent_cat));
 
-    let ext_val: String = sqlx::query_scalar(
-        "SELECT values_json FROM term_extension_values WHERE term_id=? AND owner_kind='theme'",
-    )
-    .bind(parent_cat)
-    .fetch_one(&db)
-    .await
-    .unwrap();
+    let legacy_term_table: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE name='term_extension_values'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(legacy_term_table, 0);
+    let ext_val: String = sqlx::query_scalar("SELECT values_json FROM taxonomy_terms WHERE id=?")
+        .bind(parent_cat)
+        .fetch_one(&db)
+        .await
+        .unwrap();
     assert_eq!(ext_val, r#"{"color":"blue"}"#);
 
     let (home_seo_loc, home_seo_og, home_seo_ver): (String, Option<String>, i64) =

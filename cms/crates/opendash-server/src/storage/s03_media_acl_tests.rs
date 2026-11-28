@@ -194,15 +194,10 @@ async fn plugin_media_public_read_rechecks_body_policy_with_stale_pattern_refere
             .unwrap();
     let mut definition: opendash_core::content::ContentTypeDefinition =
         serde_json::from_str(&definition_raw).unwrap();
-    let body = definition
-        .fields
-        .iter_mut()
-        .find(|field| field.key == "body")
-        .unwrap();
-    body.acl = Some(opendash_core::field_schema::FieldAcl {
-        public_exposure: Some(PublicExposure::Private),
-        ..Default::default()
-    });
+    definition
+        .settings
+        .supports
+        .retain(|s| *s != opendash_core::content::ContentSupport::Builder);
     sqlx::query("UPDATE content_types SET definition_json=? WHERE key='page'")
         .bind(serde_json::to_string(&definition).unwrap())
         .execute(&db)
@@ -226,14 +221,9 @@ async fn plugin_media_public_read_rechecks_body_policy_with_stale_pattern_refere
         .await
         .unwrap();
     definition
-        .fields
-        .iter_mut()
-        .find(|field| field.key == "body")
-        .unwrap()
-        .acl = Some(opendash_core::field_schema::FieldAcl {
-        public_exposure: Some(PublicExposure::Public),
-        ..Default::default()
-    });
+        .settings
+        .supports
+        .push(opendash_core::content::ContentSupport::Builder);
     sqlx::query("UPDATE content_types SET definition_json=? WHERE key='page'")
         .bind(serde_json::to_string(&definition).unwrap())
         .execute(&db)

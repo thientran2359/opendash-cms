@@ -129,6 +129,17 @@ pub(in crate::storage) async fn apply_lifecycle_in_tx(
                     "entry_already_trashed: Nội dung đã nằm trong Thùng rác.",
                 ));
             }
+            let has_active_children: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM content_entries WHERE parent_id = ? AND trashed_at IS NULL)",
+            )
+            .bind(row.id)
+            .fetch_one(&mut **tx)
+            .await?;
+            if has_active_children != 0 {
+                return Err(ApiError::conflict(
+                    "cannot_trash_entry_with_children: Không thể chuyển vào Thùng rác khi vẫn còn mục con đang hoạt động.",
+                ));
+            }
             if row.type_key == "page" {
                 let assigned_locale: Option<String> = sqlx::query_scalar(
                     "SELECT locale FROM site_reading_settings
@@ -199,6 +210,7 @@ pub(in crate::storage) async fn apply_lifecycle_in_tx(
                 publication_after: Some(row.publication_status),
                 trashed_at,
                 published_at,
+                detached_parent_id: None,
             })
         }
         LifecycleOperation::Restore => {
@@ -248,6 +260,30 @@ pub(in crate::storage) async fn apply_lifecycle_in_tx(
 
             validate_restore_compatibility_in_tx(tx, &row, &effective).await?;
 
+            let current_parent_id: Option<i64> = sqlx::query_scalar(
+                "SELECT parent_id FROM content_entries WHERE content_type_key = ? AND id = ?",
+            )
+            .bind(&row.type_key)
+            .bind(row.id)
+            .fetch_one(&mut **tx)
+            .await?;
+            let detached_parent_id = match current_parent_id {
+                Some(pid) => {
+                    let parent_valid = crate::storage::entries::validate_entry_parent_in_conn(
+                        &mut **tx,
+                        &row.type_key,
+                        &effective.base.descriptor.settings,
+                        &row.locale,
+                        Some(row.id),
+                        Some(pid),
+                    )
+                    .await
+                    .is_ok();
+                    if parent_valid { None } else { Some(pid) }
+                }
+                None => None,
+            };
+
             let was_ever_published: i64 = sqlx::query_scalar(
                 "SELECT has_been_published FROM content_entries WHERE content_type_key = ? AND id = ?",
             )
@@ -266,6 +302,7 @@ pub(in crate::storage) async fn apply_lifecycle_in_tx(
             let updated = sqlx::query(
                 "UPDATE content_entries
                     SET trashed_at = NULL,
+                        parent_id = CASE WHEN ? = 1 THEN NULL ELSE parent_id END,
                         publication_status = ?,
                         published_at = CASE
                             WHEN ? = 'published' THEN COALESCE(published_at, datetime('now'))
@@ -275,6 +312,7 @@ pub(in crate::storage) async fn apply_lifecycle_in_tx(
                         updated_at = datetime('now')
                   WHERE content_type_key = ? AND id = ? AND version = ? AND trashed_at IS NOT NULL",
             )
+            .bind(i64::from(detached_parent_id.is_some()))
             .bind(next_status)
             .bind(next_status)
             .bind(&row.type_key)
@@ -286,6 +324,41 @@ pub(in crate::storage) async fn apply_lifecycle_in_tx(
                 return Err(ApiError::precondition_failed(
                     "Phiên bản nội dung đã thay đổi trước khi khôi phục.",
                 ));
+            }
+
+            if next_status == "published" {
+                let term_ids: Vec<i64> = sqlx::query_scalar(
+                    "SELECT term_id FROM entry_terms WHERE entry_id = ? ORDER BY term_id ASC",
+                )
+                .bind(row.id)
+                .fetch_all(&mut **tx)
+                .await?;
+                let (layout, custom): (Option<String>, Option<String>) = sqlx::query_as(
+                    "SELECT page_layout_key, custom_template_key FROM content_entries WHERE id = ?",
+                )
+                .bind(row.id)
+                .fetch_one(&mut **tx)
+                .await?;
+                let loc_ctx = crate::storage::entries::build_entry_location_ctx_in_conn(
+                    &mut **tx,
+                    &row.type_key,
+                    Some(row.id),
+                    &row.locale,
+                    opendash_core::content::FieldRole::Admin,
+                    layout,
+                    custom,
+                    &term_ids,
+                )
+                .await?;
+                crate::storage::entries::enforce_taxonomy_publish_rules_in_tx(
+                    tx,
+                    &row.type_key,
+                    row.id,
+                    &row.locale,
+                    Some(&effective),
+                    Some(&loc_ctx),
+                )
+                .await?;
             }
 
             crate::storage::seo::sync_entry_seo_media_ref_in_tx(tx, row.id).await?;
@@ -324,12 +397,24 @@ pub(in crate::storage) async fn apply_lifecycle_in_tx(
                 publication_after: Some(publication_after),
                 trashed_at,
                 published_at,
+                detached_parent_id,
             })
         }
         LifecycleOperation::Purge => {
             if row.trashed_at.is_none() {
                 return Err(ApiError::conflict(
                     "entry_not_trashed: Chỉ có thể xóa vĩnh viễn nội dung đã nằm trong Thùng rác.",
+                ));
+            }
+            let has_children: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM content_entries WHERE parent_id = ?)",
+            )
+            .bind(row.id)
+            .fetch_one(&mut **tx)
+            .await?;
+            if has_children != 0 {
+                return Err(ApiError::conflict(
+                    "cannot_purge_entry_with_children: Không thể xóa vĩnh viễn khi vẫn còn mục con tham chiếu tới mục này.",
                 ));
             }
             let confirmed = matches!(

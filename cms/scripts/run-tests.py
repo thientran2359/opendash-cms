@@ -94,11 +94,13 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::entry_lifecycle",
             "storage::entry_table",
             "storage::fields",
+            "storage::options_pages",
             "storage::revisions",
             "storage::search",
             "storage::taxonomy",
             "routes::entries",
             "routes::fields",
+            "routes::options_pages",
             "routes::revisions",
             "routes::taxonomy",
         ),
@@ -147,6 +149,7 @@ GROUPS: tuple[GroupSpec, ...] = (
             "storage::settings",
             "storage::builder::s03_media_acl_tests",
             "routes::media",
+            "routes::options_pages",
             "routes::search",
             "routes::settings",
         ),
@@ -160,8 +163,10 @@ GROUPS: tuple[GroupSpec, ...] = (
             "paths::",
             "secrets::",
             "storage::operations",
+            "storage::options_pages",
             "storage::auth",
             "routes::operations",
+            "routes::options_pages",
             "routes::search",
         ),
     ),
@@ -324,7 +329,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             (("entry", "content", "taxonomy", "field", "lifecycle", "trash", "search", "fts", "fts5", "revision", "autosave"), "content"),
             (("builder", "pattern", "section", "block"), "builder"),
             (("i18n", "multilingual", "locale"), "i18n"),
-            (("permalink", "redirect", "404", "seo", "menu", "media", "responsive", "variant", "contact", "smtp", "option", "setting"), "site-media-seo"),
+            (("permalink", "redirect", "404", "seo", "menu", "media", "responsive", "variant", "contact", "smtp", "option", "setting", "acf_content_structure"), "site-media-seo"),
             (("backup", "operation", "maintenance", "restore", "job", "replace"), "ops"),
         )
         matched_any = False
@@ -384,8 +389,6 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "routes/content.rs": {"content"},
             "routes/entries.rs": {"content"},
             "routes/fields.rs": {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"},
-            "routes/taxonomy.rs": {"content"},
-            "routes/taxonomy_tests.rs": {"content"},
             "routes/dashboard.rs": {"content"},
             "search.rs": {"content"},
             "revisions.rs": {"content"},
@@ -424,6 +427,7 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             "routes/contact.rs": {"site-media-seo"},
             "routes/media.rs": {"site-media-seo"},
             "routes/menu.rs": {"site-media-seo"},
+            "routes/options_pages.rs": {"theme", "content", "site-media-seo", "ops"},
             "routes/seo.rs": {"site-media-seo"},
             "routes/search.rs": {"site-media-seo", "theme", "ops"},
             "routes/sitemap.rs": {"site-media-seo"},
@@ -472,6 +476,8 @@ def classify_changed_file(rel: str) -> tuple[set[str], set[str], bool, bool]:
             ("storage/entry_table/", {"content"}),
             ("storage/fields/", {"theme", "builder", "content", "plugin", "i18n", "site-media-seo"}),
             ("storage/taxonomy/", {"content"}),
+            ("storage/options_pages/", {"theme", "content", "site-media-seo", "ops"}),
+            ("routes/taxonomy/", {"content"}),
             ("routes/entries/", {"content"}),
             ("search/", {"content"}),
             ("storage/search/", {"content"}),
@@ -1131,6 +1137,18 @@ class RunTestsSelfTest(unittest.TestCase):
         )
         self.assertFalse(media_plan.run_all_workspace)
         self.assertEqual(set(media_plan.groups), {"theme", "site-media-seo"})
+
+        acf_plan = build_plan_from_files(
+            ["cms/migrations/0061_acf_content_structure.sql"], all_tests
+        )
+        self.assertFalse(acf_plan.run_all_workspace)
+        self.assertEqual(set(acf_plan.groups), {"theme", "content", "site-media-seo"})
+
+        opt_plan = build_plan_from_files(
+            ["cms/crates/opendash-server/src/routes/options_pages.rs"], all_tests
+        )
+        self.assertFalse(opt_plan.run_all_workspace)
+        self.assertEqual(set(opt_plan.groups), {"theme", "content", "site-media-seo", "ops"})
 
     def test_build_cargo_commands_applies_test_filter(self) -> None:
         all_tests = discover_integration_tests()

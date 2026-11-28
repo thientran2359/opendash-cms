@@ -234,11 +234,16 @@ fn build_ergo_theme_zip(version: &str, declare_portfolio: bool) -> Vec<u8> {
             "content_types": [{
                 "key": "portfolio",
                 "label": "Portfolio",
+                "taxonomies": ["category", "tag"]
+            }],
+            "field_groups": [{
+                "local_key": "portfolio_fields",
+                "title": "Portfolio Fields",
+                "target_types": ["portfolio"],
                 "fields": [
                     { "key": "summary", "label": "Summary", "type": "text", "required": false },
                     { "key": "price", "label": "Price", "type": "number", "required": false }
-                ],
-                "taxonomies": ["category", "tag"]
+                ]
             }]
         });
     }

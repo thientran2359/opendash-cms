@@ -6,7 +6,6 @@ fn custom_type_accepts_explicit_publication_and_visibility_settings() {
     let input: ContentTypeDefinitionInput = serde_json::from_value(json!({
         "key": "press_release",
         "label": "Press release",
-        "fields": [],
         "settings": {
             "public": false,
             "has_archive": false,
@@ -24,7 +23,7 @@ fn custom_type_accepts_explicit_publication_and_visibility_settings() {
 #[test]
 fn old_cpt_without_settings_defaults_to_immediate_public_archive() {
     let legacy: ContentTypeDefinitionInput = serde_json::from_value(json!({
-        "key": "old_cpt", "label": "Legacy", "fields": []
+        "key": "old_cpt", "label": "Legacy"
     }))
     .unwrap();
     let value = serde_json::to_value(legacy.into_canonical().unwrap()).unwrap();
@@ -36,7 +35,7 @@ fn old_cpt_without_settings_defaults_to_immediate_public_archive() {
 #[test]
 fn settings_deny_unknown_keys_and_duplicate_supports() {
     let input = json!({
-        "key": "news_c1", "label": "News", "fields": [],
+        "key": "news_c1", "label": "News",
         "settings": {
             "public": true, "has_archive": true, "publication": "draft_publish",
             "supports": ["editor", "featured_image"], "unexpected": "x"
@@ -44,7 +43,7 @@ fn settings_deny_unknown_keys_and_duplicate_supports() {
     });
     assert!(serde_json::from_value::<ContentTypeDefinitionInput>(input).is_err());
     let duplicate = serde_json::from_value::<ContentTypeDefinitionInput>(json!({
-        "key": "news_c1", "label": "News", "fields": [],
+        "key": "news_c1", "label": "News",
         "settings": {
             "public": true, "has_archive": true, "publication": "draft_publish",
             "supports": ["editor", "editor"]
@@ -57,7 +56,7 @@ fn settings_deny_unknown_keys_and_duplicate_supports() {
 #[test]
 fn builtin_status_mode_is_immutable_even_if_requested_on_create() {
     let legacy: ContentTypeDefinitionInput = serde_json::from_value(json!({
-        "key": "post", "label": "Bài viết", "fields": []
+        "key": "post", "label": "Bài viết"
     }))
     .unwrap();
     let default = legacy.into_canonical().unwrap();
@@ -67,7 +66,7 @@ fn builtin_status_mode_is_immutable_even_if_requested_on_create() {
     );
 
     let attempt: ContentTypeDefinitionInput = serde_json::from_value(json!({
-        "key": "page", "label": "Trang", "fields": [],
+        "key": "page", "label": "Trang",
         "settings": {
             "public": true, "has_archive": true,
             "publication": "immediate", "supports": []
@@ -81,7 +80,7 @@ fn builtin_status_mode_is_immutable_even_if_requested_on_create() {
 fn provider_declarations_accept_policy_but_legacy_omission_remains_optional() {
     let manifest: CntDeclarations = serde_json::from_value(json!({
         "content_types": [{
-            "key": "news_c1", "label": "News", "fields": [], "taxonomies": [],
+            "key": "news_c1", "label": "News", "taxonomies": [],
             "settings": {"public": false, "has_archive": false,
                          "publication": "draft_publish", "supports": ["featured_image", "editor"]}
         }]

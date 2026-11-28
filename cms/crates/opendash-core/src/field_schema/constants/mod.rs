@@ -24,6 +24,8 @@ pub(crate) use crate::{
 
 mod limits;
 pub use limits::*;
+mod validate_context_caps;
+pub(crate) use validate_context_caps::*;
 mod validate_single_spec;
 pub use validate_single_spec::*;
 mod validate_non_responsive;

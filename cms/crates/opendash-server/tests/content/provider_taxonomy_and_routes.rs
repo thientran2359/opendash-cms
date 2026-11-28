@@ -171,7 +171,7 @@ fn theme_zip(theme_id: &str, version: &str, with_declarations: bool) -> Vec<u8> 
             }],
             "content_types": [{
                 "key":"theme_listing_c4","label":"C4 theme listing",
-                "fields":[],"taxonomies":["theme_genre_c4"],
+                "taxonomies":["theme_genre_c4"],
                 "settings":{
                     "public":true,"has_archive":true,
                     "publication":"draft_publish","supports":["editor"]
@@ -346,7 +346,7 @@ fn provider_manifest() -> Value {
         "declarations":{
             "taxonomy_definitions":[{"key":TAX, "label":"C4 genre",
                 "hierarchical":false, "public":true, "rewrite_base":"genres-c4"}],
-            "content_types":[{"key":CPT,"label":"C4 listing","fields":[],
+            "content_types":[{"key":CPT,"label":"C4 listing",
                 "taxonomies":[TAX],"rewrite_base":"listings-c4",
                 "settings":{"public":true,"has_archive":true,
                     "publication":"draft_publish","supports":["editor"]}}]
@@ -1963,9 +1963,10 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     // Responsive Media & Replace S01 adds 0058 (`media_variants` + `media_replace_jobs` + `'media_regenerate'`),
     // Revisions & Autosave adds 0059 (`entry_revisions` + `entry_autosaves`),
     // Public Site Search S01 adds 0060 (`entry_search_fts` + `'search'`/`'search_reindex'`),
-    // and Studio Unified Recursive AST adds 0061 (`template_override_media_ref_roles`);
+    // and Studio Unified Recursive AST adds 0062 (`template_override_media_ref_roles`);
+    // and ACF Content Structure adds 0061 (`content_field_groups.domain/location_rules_json`, `custom_options_pages`, term meta);
     // the 0040→0041 permalink preservation assertions above must still hold.
-    assert_eq!(migration_version, 61);
+    assert_eq!(migration_version, 62);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

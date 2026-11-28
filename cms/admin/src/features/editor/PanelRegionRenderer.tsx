@@ -28,6 +28,7 @@ export interface PanelRegionRendererProps {
   actionBusy: Record<string, boolean>;
   entryId: number | null;
   userId: number | null;
+  userRole?: 'admin' | 'editor';
   termIds: number[];
   primaryCategoryTermId: number | null;
   publicPath: string | null;
@@ -42,6 +43,13 @@ export interface PanelRegionRendererProps {
   templatePanelNode?: React.ReactNode;
   locale?: string | null;
   translationPanelNode?: React.ReactNode;
+  isHierarchical?: boolean;
+  supportsMenuOrder?: boolean;
+  parentId?: number | null;
+  menuOrder?: number;
+  parentOptions?: Array<{ id: number; title: string; parent_id?: number | null }>;
+  onParentIdChange?: (id: number | null) => void;
+  onMenuOrderChange?: (order: number) => void;
   onToggleCollapse: (panelId: string) => void;
   onTitleChange: (title: string) => void;
   onSlugChange: (slug: string) => void;
@@ -86,6 +94,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   actionBusy,
   entryId,
   userId,
+  userRole = 'editor',
   termIds,
   primaryCategoryTermId,
   publicPath,
@@ -100,6 +109,13 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   templatePanelNode,
   locale,
   translationPanelNode,
+  isHierarchical = false,
+  supportsMenuOrder = false,
+  parentId = null,
+  menuOrder = 0,
+  parentOptions = [],
+  onParentIdChange,
+  onMenuOrderChange,
   onToggleCollapse,
   onTitleChange,
   onSlugChange,
@@ -131,12 +147,14 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
     : `/${slug || '...'}`;
 
   const renderPanelBody = (proj: EffectivePanelProjection) => {
+    const labelPlacement = proj.panel.presentation?.label_placement ?? 'top';
     const renderSlice = (fieldKeys: readonly string[], usePanelFields = false) => (
       <PanelFieldSliceForm
         config={config}
         proj={proj}
         fieldKeys={fieldKeys}
         usePanelFields={usePanelFields}
+        labelPlacement={labelPlacement}
         values={values}
         clearedFields={clearedFields}
         fieldErrors={fieldErrors}
@@ -315,15 +333,11 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
             </div>
           );
         }
-        case 'base_fields':
-          return (
-            <div className="space-y-3">
-              {(proj.panel_fields?.length ?? 0) === 0 && proj.field_keys.length === 0 ? (
-                <p className="text-xs text-slate-500">{__("No unassigned base fields.")}</p>
-              ) : (
-                renderSlice(proj.field_keys, true)
-              )}
-            </div>
+        case 'excerpt':
+          return config.effective_fields.excerpt ? (
+            renderSlice(['excerpt'])
+          ) : (
+            <p className="text-xs text-slate-500">{__("Excerpt field is not enabled.")}</p>
           );
         case 'seo':
           return (
@@ -388,15 +402,56 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
             />
           );
         case 'page_attributes':
-          return templatePanelNode ? (
-            <div>{templatePanelNode}</div>
-          ) : (
-            <p className="text-xs text-zinc-500">{__("No extension properties.")}</p>
+          return (
+            <div className="space-y-3" data-testid="page-attributes-panel">
+              {isHierarchical && (
+                <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-parent-selector">
+                  <span>{__("Parent entry")}</span>
+                  <select
+                    id="entry-parent-selector"
+                    className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                    value={parentId ?? ''}
+                    disabled={saving}
+                    onChange={e => onParentIdChange?.(e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">{__("(No parent — top level)")}</option>
+                    {parentOptions
+                      .filter(opt => opt.id !== entryId)
+                      .map(opt => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.title} (#{opt.id})
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+              {(supportsMenuOrder || isHierarchical) && (
+                <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-menu-order-input">
+                  <span>{__("Order")}</span>
+                  <input
+                    id="entry-menu-order-input"
+                    type="number"
+                    step={1}
+                    className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                    value={menuOrder}
+                    disabled={saving}
+                    onChange={e => {
+                      const val = Number.parseInt(e.target.value, 10);
+                      onMenuOrderChange?.(Number.isFinite(val) ? val : 0);
+                    }}
+                  />
+                </label>
+              )}
+              {templatePanelNode && <div>{templatePanelNode}</div>}
+              {!isHierarchical && !supportsMenuOrder && !templatePanelNode && (
+                <p className="text-xs text-zinc-500">{__("No extension properties.")}</p>
+              )}
+            </div>
           );
         case 'taxonomies':
           return config.taxonomies.length > 0 ? (
             <div data-testid="single-edit-terms">
-              <TermPicker userId={userId} selectedIds={termIds} disabled={saving}
+              <TermPicker userId={userId} userRole={userRole} csrfToken={csrfToken} selectedIds={termIds} disabled={saving}
                 typeKey={config.type_key} locale={locale} allowedKinds={config.taxonomies}
                 variant="cards"
                 primaryCategoryTermId={config.type_key === 'post' && config.taxonomies.includes('category')
@@ -411,7 +466,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
       }
     }
 
-    if (kind.kind === 'base_fields_slice' || kind.kind === 'content_fields') {
+    if (kind.kind === 'content_fields') {
       const groupedKeys = new Set(proj.subgroups.flatMap(sg => sg.field_keys));
       const ungroupedKeys = proj.field_keys.filter(k => !groupedKeys.has(k));
       return (
@@ -493,13 +548,16 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
         .map(proj => {
           const isCollapsed = collapsedPanels[proj.panel.panel_id] ?? proj.placement.collapsed_by_default;
           const isChromelessPanel =
-            proj.panel.kind.kind === 'core_built_in' &&
-            (proj.panel.kind.core_key === 'title_slug' || proj.panel.kind.core_key === 'taxonomies');
+            (proj.panel.kind.kind === 'core_built_in' &&
+              (proj.panel.kind.core_key === 'title_slug' || proj.panel.kind.core_key === 'taxonomies')) ||
+            (proj.panel.kind.kind === 'content_fields' &&
+              proj.panel.presentation?.style === 'seamless');
           return (
             <section
               key={proj.panel.panel_id}
               className={isChromelessPanel ? '' : 'rounded-xl border border-zinc-200 bg-white p-4 shadow-2xs'}
               data-panel-id={proj.panel.panel_id}
+              data-panel-style={proj.panel.presentation?.style ?? 'card'}
             >
               {!isChromelessPanel && (
                 <div className="flex items-center justify-between gap-2">

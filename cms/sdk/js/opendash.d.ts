@@ -53,6 +53,8 @@ export interface OdEntryRecord {
   status: string;
   version: number;
   locale: string;
+  parent_id?: number | null;
+  menu_order?: number;
   values: Record<string, unknown>;
   term_ids: number[];
 }
@@ -88,6 +90,8 @@ export interface OdTaxonomyTerm {
   slug: string;
   name: string;
   parent_id: number | null;
+  description?: string;
+  sort_order?: number;
 }
 
 export interface OdMediaVariantView {

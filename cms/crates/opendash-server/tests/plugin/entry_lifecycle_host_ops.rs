@@ -338,7 +338,6 @@ async fn s02_plugin_trash_read_restore_purge_confirmation_and_security_fences() 
             .json(&json!({
                 "key": "item",
                 "label": "Item",
-                "fields": [],
                 "settings": {"public": true, "has_archive": false, "publication": "immediate", "supports": ["editor"]}
             }))
             .send()

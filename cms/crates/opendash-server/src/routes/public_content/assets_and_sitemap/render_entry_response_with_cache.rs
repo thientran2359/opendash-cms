@@ -168,6 +168,13 @@ pub(crate) async fn render_entry_response_with_cache(
     entry_render_budget.locale = entry_locale.clone();
     let mut budget = overrides::PublicCompositionBudget::with_render_budget(entry_render_budget);
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
+    let custom_opts = crate::storage::options_pages::load_active_custom_options_public(
+        &db,
+        Some(&entry_locale),
+        false,
+        Some(&mut budget.render_budget.richtext_nonces),
+    )
+    .await?;
     let locale_ctx = seo::build_theme_locale_context(
         &db,
         Some(&entry_locale),
@@ -198,6 +205,7 @@ pub(crate) async fn render_entry_response_with_cache(
             route_path: Some(&canonical_path_for_seo),
             entry_id: Some(entry.id),
             entry_type_key: Some(&type_key),
+            custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
             archive_url: archive_path.as_deref(),
@@ -205,6 +213,8 @@ pub(crate) async fn render_entry_response_with_cache(
             next_url: None,
             entries: &empty_entries,
             taxonomy: None,
+            term: None,
+            term_schema: None,
             content_type: Some(&ct_value),
             entry: Some(&view),
             list_pages: Some(&list_pages),

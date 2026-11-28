@@ -82,6 +82,7 @@ export function TaxonomyPage({
   const [filterLocale, setFilterLocale] = useState('all');
   const [page, setPage] = useState(0);
   const admin = user?.role === 'admin';
+  const canCreateTerms = admin || Boolean(definition?.settings?.editor_can_create_terms);
   const listHash = cptTypeKey
     ? `#/cpt/${encodeURIComponent(cptTypeKey)}/taxonomy/${encodeURIComponent(kind)}`
     : kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
@@ -163,11 +164,13 @@ export function TaxonomyPage({
             <p className="mt-0.5 text-xs text-amber-700">{__("Taxonomy is inactive; saved terms remain visible.")}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <AdminButton variant="secondary" size="sm" disabled={busy}
-            onClick={() => onNavigateHash('#/taxonomy/definitions')}>{__("Taxonomy definitions")}</AdminButton>
+          {admin && (
+            <AdminButton variant="secondary" size="sm" disabled={busy}
+              onClick={() => onNavigateHash('#/content-structure/taxonomies')}>{__("Taxonomy definitions")}</AdminButton>
+          )}
           <AdminButton variant="secondary" size="sm" disabled={loading || busy}
             onClick={() => void refresh()}>{__("Refresh")}</AdminButton>
-          {admin && routeMode === 'edit' && (
+          {canCreateTerms && routeMode === 'edit' && (
             <AdminButton variant="primary" size="sm" disabled={busy || loading || !definition || definition.provider_status !== 'active' || definition.declaration_state !== 'declared'}
               onClick={() => onNavigateHash(listHash)}>{__("+ Add new")}</AdminButton>
           )}
@@ -246,7 +249,8 @@ export function TaxonomyPage({
                             </span>
                           )}
                         </h3>
-                        <p className="break-all text-xs text-zinc-500">/{term.slug} · ID #{term.id} · v{term.version}</p>
+                        <p className="break-all text-xs text-zinc-500">/{term.slug} · ID #{term.id} · v{term.version}{typeof term.sort_order === 'number' && term.sort_order !== 0 ? ` · #${term.sort_order}` : ''}</p>
+                        {term.description && <p className="line-clamp-2 text-xs text-zinc-600">{term.description}</p>}
                         {definition?.hierarchical && <p className="text-xs text-zinc-500">
                           {term.parent_id === null ? __("Root category") : __("Parent: {{parent}}", { parent: byId.get(term.parent_id)?.name ?? `#${term.parent_id}` })} {__("· Level")}{' '}{depth + 1}
                         </p>}
@@ -296,7 +300,7 @@ export function TaxonomyPage({
               onSaved={() => void refresh()}
               onCancelEdit={() => onNavigateHash(listHash)}
             />
-          ) : admin ? (
+          ) : canCreateTerms ? (
             <TermEditPage
               key={`new-${kind}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
               embedded

@@ -110,6 +110,10 @@ pub struct CanonicalRevisionPayload {
     pub page_layout_key: Option<String>,
     pub custom_template_key: Option<String>,
     pub seo: Option<CanonicalRevisionSeo>,
+    #[serde(default)]
+    pub parent_id: Option<i64>,
+    #[serde(default)]
+    pub menu_order: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,6 +252,10 @@ pub struct RevisionDiffPayload {
     pub layout_diff: Option<ScalarChange<Option<String>>>,
     pub template_diff: Option<ScalarChange<Option<String>>>,
     pub seo_diff: Option<Vec<FieldDiffItem>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_diff: Option<ScalarChange<Option<i64>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub menu_order_diff: Option<ScalarChange<i32>>,
     pub has_hidden_admin_changes: bool,
 }
 
@@ -310,6 +318,8 @@ pub struct MissingRefsReport {
     pub missing_block_types: Vec<MissingBlockTypeRef>,
     pub cleared_binding_nodes: Vec<ClearedBindingNode>,
     pub missing_templates: Vec<MissingTemplateRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<i64>,
     pub dropped_field_keys: Vec<String>,
     pub dropped_block_field_keys: Vec<DroppedBlockFieldKey>,
     pub non_editable_fields: Vec<String>,
@@ -327,5 +337,6 @@ impl MissingRefsReport {
             || !self.missing_block_types.is_empty()
             || !self.cleared_binding_nodes.is_empty()
             || !self.missing_templates.is_empty()
+            || self.parent_id.is_some()
     }
 }

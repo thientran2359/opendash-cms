@@ -156,6 +156,8 @@ fn assert_core_builtins(cts: &[Value]) {
         json!({
             "public": false,
             "has_archive": false,
+            "exclude_from_sitemap": true,
+            "show_in_menu": false,
             "publication": "immediate",
             "supports": ["builder"]
         })
@@ -203,17 +205,15 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
         .header("If-Match", "\"v1\"")
-        .json(
-            &json!({"key":"pattern", "label":"Public Pattern", "fields":[],
+        .json(&json!({"key":"pattern", "label":"Public Pattern",
             "settings":{"public":true,"has_archive":true,"publication":"draft_publish",
-                "supports":["editor","featured_image"]}}),
-        )
+                "supports":["editor","featured_image"]}}))
         .send()
         .await
         .unwrap();
     assert_eq!(mutate_section.status(), StatusCode::FORBIDDEN);
 
-    // 2. AC-05a Case 1: Base CPT field missing public_exposure -> normalized to "public"
+    // 2. AC-05a Case 1: User Field Group missing public_exposure -> normalized to "public"
     let create_cpt = client
         .post(format!("{}/api/admin/content-types", srv.base_url))
         .header("Cookie", &admin_cookie)
@@ -221,7 +221,24 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
             "key": "portfolio",
-            "label": "Dự án",
+            "label": "Dự án"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_cpt.status(), StatusCode::CREATED);
+    let created_cpt: Value = create_cpt.json().await.unwrap();
+    assert_eq!(created_cpt["version"], 1);
+
+    let create_base_fg = client
+        .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+        .header("Cookie", &admin_cookie)
+        .header("Origin", &srv.base_url)
+        .header("X-CSRF-Token", &admin_csrf)
+        .json(&json!({
+            "local_key": "portfolio_base",
+            "title": "Thông tin chính",
+            "target_types": ["portfolio"],
             "fields": [
                 { "key": "client_name", "label": "Khách hàng", "type": "text", "required": true },
                 { "key": "budget", "label": "Ngân sách", "type": "number", "required": false }
@@ -230,14 +247,28 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .send()
         .await
         .unwrap();
-    assert_eq!(create_cpt.status(), StatusCode::CREATED);
-    let created_cpt: Value = create_cpt.json().await.unwrap();
-    assert_eq!(created_cpt["version"], 1);
+    assert_eq!(create_base_fg.status(), StatusCode::CREATED);
+    let created_base_fg: Value = create_base_fg.json().await.unwrap();
     assert!(
-        created_cpt["descriptor"]["fields"][0]["acl"].is_null()
-            || created_cpt["descriptor"]["fields"][0]["acl"]["public_exposure"] == "public"
+        created_base_fg["fields"][0]["acl"].is_null()
+            || created_base_fg["fields"][0]["acl"]["public_exposure"] == "public"
     );
-    let old_schema_token = created_cpt["schema_token"].as_str().unwrap().to_string();
+    let cts_before: Vec<Value> = client
+        .get(format!("{}/api/admin/content-types", srv.base_url))
+        .header("Cookie", &admin_cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let old_schema_token = cts_before
+        .iter()
+        .find(|c| c["descriptor"]["key"] == "portfolio")
+        .unwrap()["schema_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Create an entry so has_existing_entries = true for portfolio
     let create_entry = client
@@ -269,7 +300,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &ed_csrf)
             .header("If-Match", "\"v1\"")
-            .json(&json!({ "key": "portfolio", "label": "Hack", "fields": [] }))
+            .json(&json!({ "key": "portfolio", "label": "Hack" }))
             .send()
             .await
             .unwrap()
@@ -285,7 +316,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
             .header("Cookie", &admin_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &admin_csrf)
-            .json(&json!({ "key": "portfolio", "label": "Dự án", "fields": [] }))
+            .json(&json!({ "key": "portfolio", "label": "Dự án" }))
             .send()
             .await
             .unwrap()
@@ -294,17 +325,17 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     );
     assert_eq!(
         client
-            .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+            .put(format!(
+                "{}/api/admin/content-types/portfolio",
+                srv.base_url
+            ))
             .header("Cookie", &admin_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &admin_csrf)
             .header("If-Match", "\"v99\"")
             .json(&json!({
                 "key": "portfolio",
-                "label": "Dự án",
-                "fields": [
-                    { "key": "client_name", "label": "Khách hàng", "type": "text", "required": true }
-                ]
+                "label": "Dự án"
             }))
             .send()
             .await
@@ -365,13 +396,14 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // AC-03d: required: true + min_edit_role: admin without default_value -> 422 admin_required_field_missing_default
     let req_admin_missing = client
-        .post(format!("{}/api/admin/content-types", srv.base_url))
+        .post(format!("{}/api/admin/content-field-groups", srv.base_url))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
-            "key": "bad_cpt",
-            "label": "Bad CPT",
+            "local_key": "bad_req_fg",
+            "title": "Bad Req",
+            "target_types": ["portfolio"],
             "fields": [{
                 "key": "internal_code",
                 "label": "Internal Code",
@@ -396,7 +428,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // Attempt PUT changing min_edit_role -> admin WITHOUT default_value -> 422 admin_required_field_missing_default
     let e_fail = client
         .put(format!(
-            "{}/api/admin/content-types/portfolio",
+            "{}/api/admin/content-field-groups/user:portfolio_base",
             srv.base_url
         ))
         .header("Cookie", &admin_cookie)
@@ -404,8 +436,9 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .header("X-CSRF-Token", &admin_csrf)
         .header("If-Match", "\"v1\"")
         .json(&json!({
-            "key": "portfolio",
-            "label": "Dự án",
+            "local_key": "portfolio_base",
+            "title": "Thông tin chính",
+            "target_types": ["portfolio"],
             "fields": [
                 {
                     "key": "client_name",
@@ -432,7 +465,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // Now provide valid default_value -> 200 OK (version becomes 2)
     let e_ok = client
         .put(format!(
-            "{}/api/admin/content-types/portfolio",
+            "{}/api/admin/content-field-groups/user:portfolio_base",
             srv.base_url
         ))
         .header("Cookie", &admin_cookie)
@@ -440,8 +473,9 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .header("X-CSRF-Token", &admin_csrf)
         .header("If-Match", "\"v1\"")
         .json(&json!({
-            "key": "portfolio",
-            "label": "Dự án",
+            "local_key": "portfolio_base",
+            "title": "Thông tin chính",
+            "target_types": ["portfolio"],
             "fields": [
                 {
                     "key": "client_name",
@@ -458,8 +492,21 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .await
         .unwrap();
     assert_eq!(e_ok.status(), StatusCode::OK);
-    let updated_cpt: Value = e_ok.json().await.unwrap();
-    assert_eq!(updated_cpt["version"], 2);
+    let updated_fg: Value = e_ok.json().await.unwrap();
+    assert_eq!(updated_fg["version"], 2);
+    let cts_mid: Vec<Value> = client
+        .get(format!("{}/api/admin/content-types", srv.base_url))
+        .header("Cookie", &admin_cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let updated_cpt = cts_mid
+        .iter()
+        .find(|c| c["descriptor"]["key"] == "portfolio")
+        .unwrap();
     assert_ne!(
         updated_cpt["schema_token"].as_str().unwrap(),
         old_schema_token
@@ -468,7 +515,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // AC-03f: Try removing default_value while required=true, min_edit_role=admin -> 422 admin_required_field_missing_default
     let f_fail = client
         .put(format!(
-            "{}/api/admin/content-types/portfolio",
+            "{}/api/admin/content-field-groups/user:portfolio_base",
             srv.base_url
         ))
         .header("Cookie", &admin_cookie)
@@ -476,8 +523,9 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .header("X-CSRF-Token", &admin_csrf)
         .header("If-Match", "\"v2\"")
         .json(&json!({
-            "key": "portfolio",
-            "label": "Dự án",
+            "local_key": "portfolio_base",
+            "title": "Thông tin chính",
+            "target_types": ["portfolio"],
             "fields": [
                 {
                     "key": "client_name",
@@ -503,14 +551,18 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // AC-02: Try turning optional field `budget` into required=true (even with default_value) -> 409 incompatible_schema_change
     let opt_to_req = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-field-groups/user:portfolio_base",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
         .header("If-Match", "\"v2\"")
         .json(&json!({
-            "key": "portfolio",
-            "label": "Dự án",
+            "local_key": "portfolio_base",
+            "title": "Thông tin chính",
+            "target_types": ["portfolio"],
             "fields": [
                 {
                     "key": "client_name",
@@ -602,9 +654,9 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
             .contains("field_key_collision")
     );
 
-    let collide_cpt_put = client
+    let collide_fg_put = client
         .put(format!(
-            "{}/api/admin/content-types/portfolio",
+            "{}/api/admin/content-field-groups/user:portfolio_base",
             srv.base_url
         ))
         .header("Cookie", &admin_cookie)
@@ -612,8 +664,9 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .header("X-CSRF-Token", &admin_csrf)
         .header("If-Match", "\"v2\"")
         .json(&json!({
-            "key": "portfolio",
-            "label": "Dự án",
+            "local_key": "portfolio_base",
+            "title": "Thông tin chính",
+            "target_types": ["portfolio"],
             "fields": [
                 {
                     "key": "client_name",
@@ -630,9 +683,9 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .send()
         .await
         .unwrap();
-    assert_eq!(collide_cpt_put.status(), StatusCode::CONFLICT);
+    assert_eq!(collide_fg_put.status(), StatusCode::CONFLICT);
     assert!(
-        collide_cpt_put
+        collide_fg_put
             .text()
             .await
             .unwrap()
@@ -642,7 +695,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // AC-01b: User PUT trying to remove `budget` completely when entries exist -> 409 cannot_remove_field_with_data
     let remove_with_data = client
         .put(format!(
-            "{}/api/admin/content-types/portfolio",
+            "{}/api/admin/content-field-groups/user:portfolio_base",
             srv.base_url
         ))
         .header("Cookie", &admin_cookie)
@@ -650,8 +703,9 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .header("X-CSRF-Token", &admin_csrf)
         .header("If-Match", "\"v2\"")
         .json(&json!({
-            "key": "portfolio",
-            "label": "Dự án",
+            "local_key": "portfolio_base",
+            "title": "Thông tin chính",
+            "target_types": ["portfolio"],
             "fields": [
                 {
                     "key": "client_name",
@@ -694,11 +748,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .iter()
         .find(|c| c["descriptor"]["key"] == "portfolio")
         .unwrap();
-    assert_eq!(portfolio2["version"], 2);
-    assert_eq!(
-        portfolio2["descriptor"]["fields"][0]["acl"]["public_exposure"],
-        "public"
-    );
+    assert_eq!(portfolio2["version"], 1);
 
     let fgs2: Vec<Value> = client
         .get(format!("{}/api/admin/content-field-groups", srv2.base_url))
@@ -709,10 +759,20 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .json()
         .await
         .unwrap();
-    assert_eq!(fgs2.len(), 1);
-    assert_eq!(fgs2[0]["fields"][0]["acl"]["public_exposure"], "private");
-    assert_eq!(fgs2[0]["fields"][1]["acl"]["public_exposure"], "public");
-    assert_eq!(fgs2[0]["fields"][2]["acl"]["public_exposure"], "public");
+    assert_eq!(fgs2.len(), 2);
+    let base_fg2 = fgs2
+        .iter()
+        .find(|g| g["group_id"] == "user:portfolio_base")
+        .unwrap();
+    assert_eq!(base_fg2["version"], 2);
+    assert_eq!(base_fg2["fields"][0]["acl"]["public_exposure"], "public");
+    let proj_fg2 = fgs2
+        .iter()
+        .find(|g| g["group_id"] == "user:project_meta")
+        .unwrap();
+    assert_eq!(proj_fg2["fields"][0]["acl"]["public_exposure"], "private");
+    assert_eq!(proj_fg2["fields"][1]["acl"]["public_exposure"], "public");
+    assert_eq!(proj_fg2["fields"][2]["acl"]["public_exposure"], "public");
 
     // 7. Theme manifest field_groups & 3-level tombstone + collision check
     let theme_manifest = serde_json::to_vec(&json!({
@@ -900,7 +960,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|t| t["type_key"] == "page")
+        .find(|t| t["target_key"] == "page")
         .expect("page target tombstone must be preserved");
     assert_eq!(page_target["association_state"], "withdrawn");
 

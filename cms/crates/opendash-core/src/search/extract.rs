@@ -13,7 +13,7 @@ use crate::{
     },
     content::{EffectiveContentSchema, EffectiveFieldStatus},
     field_schema::{FieldRole, FieldSpec, FieldType, PublicExposure},
-    registry::RegistryCatalog,
+    registry::{RegistryCatalog, ResourceOwner},
     richtext::strip_richtext_to_plain,
 };
 
@@ -196,9 +196,26 @@ fn extract_nested_object(
 fn ordered_schema_keys(effective_schema: &EffectiveContentSchema) -> Vec<&str> {
     let mut seen = BTreeSet::new();
     let mut ordered = Vec::with_capacity(effective_schema.effective_fields.len());
-    for field in &effective_schema.base.descriptor.fields {
-        if seen.insert(field.key.as_str()) {
-            ordered.push(field.key.as_str());
+    for core_key in [
+        "summary",
+        "excerpt",
+        "description",
+        "featured_image",
+        "body",
+    ] {
+        if let Some((k, _)) = effective_schema
+            .effective_fields
+            .iter()
+            .find(|(k, fe)| k.as_str() == core_key && fe.owner == ResourceOwner::Core)
+        {
+            if seen.insert(k.as_str()) {
+                ordered.push(k.as_str());
+            }
+        }
+    }
+    for (k, fe) in &effective_schema.effective_fields {
+        if fe.owner == ResourceOwner::Core && seen.insert(k.as_str()) {
+            ordered.push(k.as_str());
         }
     }
     for group in &effective_schema.attached_groups {

@@ -50,6 +50,10 @@ pub fn canonical_json_value(value: &Value) -> Value {
     }
 }
 
+fn is_zero_i32(v: &i32) -> bool {
+    *v == 0
+}
+
 #[derive(Serialize)]
 struct CanonicalHashEnvelope {
     title: String,
@@ -61,6 +65,10 @@ struct CanonicalHashEnvelope {
     page_layout_key: Option<String>,
     custom_template_key: Option<String>,
     seo: Option<CanonicalRevisionSeo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_id: Option<i64>,
+    #[serde(skip_serializing_if = "is_zero_i32")]
+    menu_order: i32,
 }
 
 pub fn canonical_revision_json(payload: &CanonicalRevisionPayload) -> String {
@@ -99,6 +107,8 @@ pub fn canonical_revision_json(payload: &CanonicalRevisionPayload) -> String {
             .filter(|s| !s.is_empty())
             .map(ToOwned::to_owned),
         seo,
+        parent_id: payload.parent_id,
+        menu_order: payload.menu_order,
     };
     serde_json::to_string(&envelope).unwrap_or_default()
 }

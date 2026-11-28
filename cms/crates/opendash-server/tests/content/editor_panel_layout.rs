@@ -150,7 +150,7 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     assert_eq!(ed_resp.status(), StatusCode::CREATED);
     let (ed_cookie, ed_csrf) = login(&client, &srv.base_url, "editor1", "EditorPassword123!").await;
 
-    // 1. Create CPT `project` with 4 base fields (covering required+editor, admin-edit, admin-view)
+    // 1. Create CPT `project` + Field Groups covering required+editor, admin-edit, and admin-view
     let create_cpt = client
         .post(format!("{}/api/admin/content-types", srv.base_url))
         .header("Cookie", &admin_cookie)
@@ -158,7 +158,25 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
             "key": "project",
-            "label": "Dự án",
+            "label": "Dự án"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let create_cpt_status = create_cpt.status();
+    let create_cpt_text = create_cpt.text().await.unwrap();
+    assert_eq!(
+        create_cpt_status,
+        StatusCode::CREATED,
+        "create_cpt failed: {create_cpt_text}"
+    );
+    for fg_payload in [
+        json!({
+            "local_key": "project_info",
+            "title": "Thông tin dự án",
+            "target_types": ["project"],
+            "default_region": "main_bottom",
+            "default_order": 50,
             "fields": [
                 {
                     "key": "client_name",
@@ -173,13 +191,34 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
                     "type": "number",
                     "required": false,
                     "acl": {"min_view_role": "editor", "min_edit_role": "admin"}
-                },
+                }
+            ]
+        }),
+        json!({
+            "local_key": "project_status",
+            "title": "Tiến độ",
+            "target_types": ["project"],
+            "default_region": "main_bottom",
+            "default_order": 55,
+            "fields": [
                 {
                     "key": "completion_date",
                     "label": "Ngày hoàn thành",
                     "type": "date",
                     "required": false
-                },
+                }
+            ]
+        }),
+        json!({
+            "local_key": "project_internal",
+            "title": "Nội bộ Admin",
+            "location": [[
+                { "param": "content_type", "op": "eq", "value": "project" },
+                { "param": "user_role", "op": "eq", "value": "admin" }
+            ]],
+            "default_region": "sidebar",
+            "default_order": 90,
+            "fields": [
                 {
                     "key": "internal_note",
                     "label": "Ghi chú nội bộ",
@@ -188,19 +227,35 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
                     "acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}
                 }
             ]
-        }))
+        }),
+    ] {
+        let r = client
+            .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+            .header("Cookie", &admin_cookie)
+            .header("Origin", &srv.base_url)
+            .header("X-CSRF-Token", &admin_csrf)
+            .json(&fg_payload)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::CREATED);
+    }
+    let cts_init: Vec<Value> = client
+        .get(format!("{}/api/admin/content-types", srv.base_url))
+        .header("Cookie", &admin_cookie)
         .send()
         .await
+        .unwrap()
+        .json()
+        .await
         .unwrap();
-    let create_cpt_status = create_cpt.status();
-    let create_cpt_text = create_cpt.text().await.unwrap();
-    assert_eq!(
-        create_cpt_status,
-        StatusCode::CREATED,
-        "create_cpt failed: {create_cpt_text}"
-    );
-    let cpt_created: Value = serde_json::from_str(&create_cpt_text).unwrap();
-    let initial_schema_token = cpt_created["schema_token"].as_str().unwrap().to_string();
+    let initial_schema_token = cts_init
+        .iter()
+        .find(|c| c["descriptor"]["key"] == "project")
+        .unwrap()["schema_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // 2. Editor gets 403 on GET & PUT /editor-layout
     let ed_get_layout = client
@@ -227,7 +282,6 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
             "schema_version": 1,
             "type_key": "project",
             "version": 0,
-            "base_field_panels": [],
             "regions": {
                 "main_top": [],
                 "main_primary": [],
@@ -258,15 +312,24 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     let v0_body: Value = get_v0.json().await.unwrap();
     assert_eq!(v0_body["version"], 0);
 
-    // 4. PUT /editor-layout partitioning base fields into `layout:project_info` & `layout:project_status`
-    //    while leaving `internal_note` unassigned (falls back to `core:base_fields`).
+    // 4. PUT /editor-layout moving `user:project_info` to main_top (order 25) and `user:project_status` to sidebar (order 35)
     let mut layout_put_payload = v0_body["layout"].clone();
-    layout_put_payload["base_field_panels"] = json!([
-        {
-            "panel_id": "layout:project_info",
-            "title": "Thông tin dự án",
-            "collapsible": true,
-            "field_keys": ["client_name", "budget"],
+    for reg in ["main_top", "main_primary", "main_bottom", "sidebar"] {
+        layout_put_payload["regions"][reg]
+            .as_array_mut()
+            .unwrap()
+            .retain(|p| {
+                p["panel_id"] != "user:project_info" && p["panel_id"] != "user:project_status"
+            });
+    }
+    layout_put_payload["regions"]["main_top"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "panel_id": "user:project_info",
+            "order": 25,
+            "enabled": true,
+            "collapsed_by_default": false,
             "subgroups": [
                 {
                     "subgroup_id": "commercial",
@@ -274,31 +337,12 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
                     "field_keys": ["client_name", "budget"]
                 }
             ]
-        },
-        {
-            "panel_id": "layout:project_status",
-            "title": "Tiến độ",
-            "collapsible": true,
-            "field_keys": ["completion_date"],
-            "subgroups": []
-        }
-    ]);
-    // Put layout:project_info in main_top, layout:project_status in sidebar
-    layout_put_payload["regions"]["main_top"]
-        .as_array_mut()
-        .unwrap()
-        .push(json!({
-            "panel_id": "layout:project_info",
-            "order": 25,
-            "enabled": true,
-            "collapsed_by_default": false,
-            "subgroups": []
         }));
     layout_put_payload["regions"]["sidebar"]
         .as_array_mut()
         .unwrap()
         .push(json!({
-            "panel_id": "layout:project_status",
+            "panel_id": "user:project_status",
             "order": 35,
             "enabled": true,
             "collapsed_by_default": false,
@@ -326,19 +370,7 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     let v1_body: Value = put_v1.json().await.unwrap();
     assert_eq!(v1_body["version"], 1);
 
-    // Verify `layout:project_info` and `layout:project_status` appear in `v1_body["panels"]`
-    let info_panel = v1_body["panels"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|p| p["panel_id"] == "layout:project_info")
-        .unwrap();
-    assert_eq!(
-        info_panel["kind"]["field_keys"],
-        json!(["client_name", "budget"])
-    );
-
-    // Verify CPT schema_token and definition_json were NOT altered
+    // Verify CPT schema_token was NOT altered by layout save
     let cts_after: Vec<Value> = client
         .get(format!("{}/api/admin/content-types", srv.base_url))
         .header("Cookie", &admin_cookie)
@@ -353,13 +385,6 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
         .find(|c| c["descriptor"]["key"] == "project")
         .unwrap();
     assert_eq!(project_after["schema_token"], initial_schema_token);
-    assert_eq!(
-        project_after["descriptor"]["fields"]
-            .as_array()
-            .unwrap()
-            .len(),
-        4
-    );
 
     // Verify stale If-Match "v0" returns 409 Conflict
     let stale_put = client
@@ -405,10 +430,10 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
         .unwrap();
     assert_eq!(bad_region_resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
-    // (b) Disabling `layout:project_info` which contains `client_name` (`required: true, min_edit_role: Editor`)
+    // (b) Disabling `user:project_info` which contains `client_name` (`required: true, min_edit_role: Editor`)
     let mut hide_required = v1_body["layout"].clone();
     for p in hide_required["regions"]["main_top"].as_array_mut().unwrap() {
-        if p["panel_id"] == "layout:project_info" {
+        if p["panel_id"] == "user:project_info" {
             p["enabled"] = json!(false);
         }
     }
@@ -429,9 +454,18 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     let hide_req_err = hide_req_resp.text().await.unwrap();
     assert!(hide_req_err.contains("required_field_hidden_or_inaccessible"));
 
-    // (c) Duplicate base field across two base_field_panels
+    // (c) Duplicate panel_id across two regions
     let mut dup_field = v1_body["layout"].clone();
-    dup_field["base_field_panels"][1]["field_keys"] = json!(["completion_date", "client_name"]);
+    dup_field["regions"]["sidebar"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "panel_id": "user:project_info",
+            "order": 99,
+            "enabled": true,
+            "collapsed_by_default": false,
+            "subgroups": []
+        }));
     let dup_resp = client
         .put(format!(
             "{}/api/admin/content-types/project/editor-layout",
@@ -629,12 +663,12 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     assert!(
         main_top
             .iter()
-            .any(|p| p["panel_id"] == "layout:project_info" && p["order"] == 25)
+            .any(|p| p["panel_id"] == "user:project_info" && p["order"] == 25)
     );
     assert!(
         sidebar
             .iter()
-            .any(|p| p["panel_id"] == "layout:project_status" && p["order"] == 35)
+            .any(|p| p["panel_id"] == "user:project_status" && p["order"] == 35)
     );
     assert!(
         main_bottom
@@ -694,12 +728,11 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     let adm_fields = adm_cfg["effective_fields"].as_object().unwrap();
     assert!(adm_fields.get("internal_note").is_some());
     assert_eq!(adm_fields["budget"]["editable"], true);
-    // Verify `core:base_fields` in Admin's projection only has the unassigned `internal_note`
-    let adm_base_panel = adm_cfg["regions"]["main_primary"]
+    let adm_internal_panel = adm_cfg["regions"]["sidebar"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|p| p["panel"]["panel_id"] == "core:base_fields")
+        .find(|p| p["panel"]["panel_id"] == "user:project_internal")
         .unwrap();
-    assert_eq!(adm_base_panel["field_keys"], json!(["internal_note"]));
+    assert_eq!(adm_internal_panel["field_keys"], json!(["internal_note"]));
 }

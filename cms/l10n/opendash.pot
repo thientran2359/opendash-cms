@@ -19999,3 +19999,1363 @@ msgstr ""
 #: admin:feature.operations.reconcile.showing_first_50
 msgid "Showing first 50 of {{value1}} orphaned candidates."
 msgstr ""
+
+#: admin:api.content
+msgid "Could not delete the content type."
+msgstr ""
+
+#: admin:api.content
+msgid "Could not update field group active state."
+msgstr ""
+
+#: admin:api.content
+msgid "Could not permanently delete the field group."
+msgstr ""
+
+#: admin:api.locales
+msgid "Could not load language packs."
+msgstr ""
+
+#: admin:api.locales
+msgid "Could not upload language pack."
+msgstr ""
+
+#: admin:api.locales
+msgid "Could not delete language pack."
+msgstr ""
+
+#: admin:api.optionsPages
+msgid "Could not load custom options pages."
+msgstr ""
+
+#: admin:api.optionsPages
+msgid "Options page not found."
+msgstr ""
+
+#: admin:api.optionsPages
+msgid "Could not create options page."
+msgstr ""
+
+#: admin:api.optionsPages
+msgid "Could not update options page."
+msgstr ""
+
+#: admin:api.optionsPages
+msgid "Could not delete options page."
+msgstr ""
+
+#: admin:api.optionsPages
+msgid "Could not load options page values."
+msgstr ""
+
+#: admin:api.optionsPages
+msgid "Could not save options page values."
+msgstr ""
+
+#: admin:builder.BuilderBindingFields
+msgid "Could not load fields for the content type; saved binding is preserved."
+msgstr ""
+
+#: admin:builder.BuilderBindingFields
+msgid "Your session expired while looking up fields."
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Added list column slot."
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Removed column {{value1}}."
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Moved column to position {{value1}}."
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Admin table columns (list_columns)"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Configure extra columns shown in the Entry List table (Private field columns are filtered by role)."
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "+ Add column"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "No extra list columns configured yet."
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Column {{value1}} type"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Custom field"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Menu order"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Parent entry"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Column {{value1}} taxonomy key"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Column {{value1}} field key"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "field_key"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "System column key"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Column {{value1}} display label"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Optional heading override"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Move column {{value1}} up"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Move column {{value1}} down"
+msgstr ""
+
+#: admin:features.content.ContentTypeColumnsEditor
+msgid "Remove column {{value1}}"
+msgstr ""
+
+#: admin:features.content.ContentTypeDeleteModal
+msgid "Delete content type {{value1}}?"
+msgstr ""
+
+#: admin:features.content.ContentTypeDeleteModal
+msgid "You are deleting CPT"
+msgstr ""
+
+#: admin:features.content.ContentTypeDeleteModal
+msgid "Content types that still have active or trashed entries cannot be deleted until all entries are purged."
+msgstr ""
+
+#: admin:features.content.ContentTypeDeleteModal
+msgid "Cancel"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Items per archive page must be between 1 and 100."
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu position must be between 0 and 1000."
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Rewrite base must use lowercase letters, numbers, and hyphens only (no slashes or placeholders)."
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Excerpt (excerpt)"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu order (menu_order)"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Custom template selector"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Define CPT identity, hierarchy, capabilities and menu visibility. Custom fields are attached separately via Field Groups."
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Plural display name *"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Projects"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Singular label"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Description"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Short description for editors and admin tools"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Hierarchical parent-child tree (hierarchical)"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Exclude from sitemap.xml"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Publish immediately (immediate)"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Save draft / Publish"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "URL rewrite base"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Archive posts per page"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Default archive sort"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Newest published"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Newest created"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Recently updated"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Title (A-Z)"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu order ascending"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Sidebar menu visibility"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Show in admin sidebar"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu label override"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Menu icon"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Position (0-1000)"
+msgstr ""
+
+#: admin:features.content.ContentTypeForm
+msgid "Attach taxonomies"
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Pattern is a private content type and its configuration cannot be changed."
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Configuration:"
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Delete content type"
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "This CPT is declared by a theme or plugin. Only route rewrite base can be overridden here; see the Taxonomies tab for taxonomy eligibility."
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Visibility, archive & routing"
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Items per archive page"
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Leave empty to use default CPT key; %taxonomy% placeholders are not used on custom CPT rewrite bases."
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Toggling features off hides their UI while preserving existing saved data."
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Sidebar menu"
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Menu label"
+msgstr ""
+
+#: admin:features.content.ContentTypeGeneralPanel
+msgid "Menu position"
+msgstr ""
+
+#: admin:features.content.ContentTypeSchemaSettings
+msgid "Deleted CPT {{value1}}."
+msgstr ""
+
+#: admin:features.content.ContentTypeSchemaSettings
+msgid "Overview & settings"
+msgstr ""
+
+#: admin:features.content.ContentTypeSchemaSettings
+msgid "Supports"
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Moved panel {{value1}} to {{value2}}."
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Added subgroup {{value1}}."
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Move panel {{value1}} up"
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Move panel {{value1}} down"
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Collapsed"
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Subgroups ({{value1}})"
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "New subgroup title…"
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "+ Add subgroup"
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Remove subgroup"
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "No active fields available to assign."
+msgstr ""
+
+#: admin:features.content.EditorLayoutConfigurator
+msgid "Drag or reorder core and field-group panels across the four editor regions, toggle default collapse state, and organize subgroups."
+msgstr ""
+
+#: admin:features.content.EntryListColumns
+msgid "Parent"
+msgstr ""
+
+#: admin:features.content.QuickEditForm
+msgid "Parent #{{value1}}"
+msgstr ""
+
+#: admin:features.content.QuickEditForm
+msgid "Top level"
+msgstr ""
+
+#: admin:features.content.QuickEditForm
+msgid "Order {{value1}}"
+msgstr ""
+
+#: admin:features.editor.PanelRegionRenderer
+msgid "Excerpt field is not enabled."
+msgstr ""
+
+#: admin:features.editor.PanelRegionRenderer
+msgid "(No parent — top level)"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Add at least one sibling data field to configure conditional logic."
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Enable conditional logic (DNF: OR of AND groups)"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Show if"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "OR if"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Remove group"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Condition target field"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Condition operator"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Condition value"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Yes / True"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "No / False"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "a, b, c"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "Value"
+msgstr ""
+
+#: admin:features.field-groups.FieldConditionalLogicEditor
+msgid "+ Add OR condition group"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Added field {{value1}}."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Group title is required."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Local key must be lowercase snake_case starting with a letter."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Field group must define between 1 and 64 data fields."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Admin-only location rules cannot include public fields; set exposure to Private."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "sync_entry_terms cannot be used alongside an entry_taxonomy location rule."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Could not save field group."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Edit field group"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Active"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Inactive"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "This field group is owned by a theme or plugin and is read-only here."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Configure fields, location display targets, presentation style and conditional rules."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Save field group"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Location rules restrict this group to Admin only. Change public fields to Private in Presentation & Access."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "A term_ref field with sync_entry_terms enabled cannot be combined with an entry_taxonomy location rule."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Group title *"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Local key *"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Active group"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Drag cards or use ↑/↓ buttons to set editor display order."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "+ Add field"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Reordered field {{value1}}."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Moved field to position {{value1}}."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Group presentation settings"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Editor region"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Order (-1000..1000)"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Box style"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Card (Standard)"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Seamless (No box)"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Label placement"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Top aligned"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Left aligned"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Collapsible panel"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupEditorPage
+msgid "Collapsed by default"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Updated active state for {{value1}}."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Permanently deleted field group {{value1}}."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Withdrew field group {{value1}}."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Could not remove field group."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Your session expired while deleting the field group."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Structure / Field groups"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Create reusable field groups targeting content types, taxonomy terms, or custom options pages."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Filter by domain"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Options Page"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Search field groups"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Search title or key…"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Loading field groups…"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "No matching field groups found."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Field groups table"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Title & key"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Domain"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Withdrawn"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Edit"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Withdraw"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Purge"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Permanently delete {{value1}}?"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsListPage
+msgid "Purging removes the field group definition permanently (?purge=true) once all stored references are safe or empty."
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsWorkspace
+msgid "Loading field group…"
+msgstr ""
+
+#: admin:features.field-groups.FieldGroupsWorkspace
+msgid "Field group \"{{value1}}\" was not found."
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Untitled field"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Move field {{value1}} up"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Move field {{value1}} down"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Field setting sections"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Validation"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Presentation & Access"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Conditional Logic"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Field label *"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Field type"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Instructions"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Placeholder"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Default value (string or JSON)"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Choices (value|Label or value|Label|icon per line)"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Dynamic options source"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Static choices above"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Multiple select"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Allow empty option"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Rich text toolbar"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Standard"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Minimal"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Target content types (comma-separated)"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Allow multiple entries"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Taxonomy key"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Picker UI style"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Auto (follows taxonomy)"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Checklist"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Tag input"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Dropdown select"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Radio buttons"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Multiple terms"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Sync to entry taxonomy"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "True label"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "False label"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Tone"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Message text"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Nested sub-fields"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Added sub-field."
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "+ Add sub-field"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Min chars"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Max chars"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Min value"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Max value"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "UI layout elements do not store data or run validation."
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Grid width (%)"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "CSS custom var"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Role access (View / Edit)"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Editor views & edits"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Editor views, Admin edits"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Admin only"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Public hydration exposure"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Public (rendered in themes)"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Private (Admin/Editor only)"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Show in list column"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Responsive"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Rule value"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "All content types (all)"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "All taxonomies (all)"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Homepage (homepage)"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Posts Page (posts_page)"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Administrator (admin)"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Options page target"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Location rules"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Taxonomy Term"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Every rule within a group uses AND; multiple groups use OR. Rules inside a group cannot mix Content, Term, and Options Page targets."
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Show this field group if"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "OR"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Remove OR group"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Location parameter"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "Location operator"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "is equal to"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "is not equal to"
+msgstr ""
+
+#: admin:features.field-groups.LocationRulesBuilder
+msgid "+ Add rule group (OR)"
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Saved options for {{value1}} (v{{value2}})."
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Options changed concurrently (412/409). Your edits are kept; reload before saving."
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "You do not have permission to edit this options page."
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Options page {{value1}} was not found."
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Back to options pages"
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Manage options pages"
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Switch language and discard unsaved changes in this tab?"
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Loading options…"
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "No active field groups are attached to options_page = custom:{{value1}} yet."
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "Fallback ({{value1}})"
+msgstr ""
+
+#: admin:features.options-pages.CustomOptionsPageView
+msgid "All changes saved"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Discard unsaved changes to this options page?"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Options page key must be snake_case (1 to 64 characters)."
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Options page title is required."
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Saved options page {{value1}} (v{{value2}})."
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Options page changed concurrently (412). Reload and try again."
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Could not save options page."
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Deleted options page {{value1}}."
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Content Structure / Options Pages"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Options pages"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Create custom settings screens attached to Admin navigation and bind field groups via location rules."
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "+ Add options page"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "No custom options pages defined yet."
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Menu"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Open screen"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Configure"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Create options page"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Configure {{value1}}"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Page title *"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Page key *"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Sidebar menu label *"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Parent menu group"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "System -> Settings"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Top-level sidebar section"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Minimum edit role"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Editor & Admin"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "This options page is provider-managed. Only its assigned field group values can be edited."
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Save options page"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Delete options page {{value1}}?"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Also permanently purge all saved option values for this page"
+msgstr ""
+
+#: admin:features.options-pages.OptionsPagesListPage
+msgid "Confirm delete"
+msgstr ""
+#: admin:features.settings.LanguagePacksPanel
+msgid "Uploaded language pack for {{domain}} ({{locale}})."
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Removed custom language pack for {{domain}} ({{locale}})."
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Gettext language packs (.po / .mo)"
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Upload custom .po or .mo translation files for OpenDash Core, the active theme, or installed plugins. Uploaded .po files are compiled to .mo automatically."
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Text domain"
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Translation file (.po / .mo)"
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Upload pack"
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Loading language packs..."
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "{{count}} reference strings"
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "No custom or bundled language packs installed."
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Locale"
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Coverage"
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgctxt "l10n.pack.delete"
+msgid "Delete override"
+msgstr ""
+
+#: admin:features.settings.LanguagePacksPanel
+msgid "Built-in"
+msgstr ""
+
+#: admin:features.settings.MultilingualSettingsPage
+msgid "Language packs"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Optional singular name"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Lowercase kebab-case archive prefix. Leave empty to use the taxonomy key."
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Editor & picker behavior"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Selection mode"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Single term only"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Picker style"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Auto (by hierarchy)"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Tags chips"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Default fallback term on publish"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "None (no automatic default)"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Term #{{value1}} (not loaded)"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Require at least one term when publishing"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Allow Editors to create new terms"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Show taxonomy submenu in Admin sidebar"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Show column by default in entry list table"
+msgstr ""
+
+#: admin:features.taxonomy.TaxonomySettingsPanel
+msgid "Attach to content types"
+msgstr ""
+
+#: admin:features.taxonomy.TermEditPage
+msgid "Server version changed {{value1}}. Keep edited input and continue with v{{value2}}?"
+msgstr ""
+
+#: admin:features.taxonomy.TermEditPage
+msgid "Updated baseline version v{{value1}}; edited input is retained."
+msgstr ""
+
+#: admin:features.taxonomy.TermEditPage
+msgid "Sort order"
+msgstr ""
+
+#: admin:features.taxonomy.TermEditPage
+msgid "Server data changed (412/409). Your edits are retained."
+msgstr ""
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Name cannot be empty."
+msgstr ""
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Slug must start with a-z and contain only lowercase letters, numbers, and hyphens."
+msgstr ""
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Could not create term."
+msgstr ""
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Add new {{value1}}"
+msgstr ""
+
+#: admin:features.taxonomy.TermInlineCreateModal
+msgid "Create term"
+msgstr ""
+
+#: admin:features.taxonomy.TermMetaFieldGroups
+msgid "Term custom fields"
+msgstr ""
+
+#: admin:features.taxonomy.TermPicker
+msgid "Required before publish"
+msgstr ""
+
+#: admin:features.taxonomy.TermPickerGroupBody
+msgid "— None —"
+msgstr ""
+
+#: admin:features.taxonomy.TermPickerGroupBody
+msgid "+ Choose term to add…"
+msgstr ""
+
+#: admin:features.taxonomy.TermPickerGroupBody
+msgid "Clear selection"
+msgstr ""
+
+#: admin:features.taxonomy.TermPickerGroupBody
+msgid "+ Add {{value1}}"
+msgstr ""
+
+#: admin:features.taxonomy.TermSeoFields
+msgid "Only admins can modify archive SEO metadata for terms."
+msgstr ""
+
+#: admin:features.taxonomy.TermSeoFields
+msgid "Change OG image"
+msgstr ""
+
+#: admin:features.taxonomy.TermSeoFields
+msgid "Choose OG image"
+msgstr ""
+
+#: admin:features.taxonomy.TermSeoFields
+msgid "SHA-256 media ID"
+msgstr ""
+
+#: admin:shell.AdminShell
+msgid "Content types"
+msgstr ""
+
+#: admin:shell.AdminShell
+msgid "Taxonomies"
+msgstr ""
+
+#: admin:shell.AdminShell
+msgid "Options page"
+msgstr ""
+
+#: admin:features.field-groups.FieldSpecEditorCard
+msgid "Translatable (multilingual)"
+msgstr ""
+
+#: admin:shell.install
+msgid "Install"
+msgstr ""
+
+#: admin:shell.template_library
+msgid "Template library"
+msgstr ""
+
+#: admin:feature.themes.themespanel.install_v3_zip_subtitle
+msgid "Upload a Theme v3 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder."
+msgstr ""

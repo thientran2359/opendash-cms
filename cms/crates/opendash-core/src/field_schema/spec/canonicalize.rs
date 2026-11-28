@@ -294,30 +294,31 @@ pub fn normalize_field_specs_for_scope(
     ctx: FieldContext,
     scope: FieldScopeKind,
 ) -> Result<(), &'static str> {
-    if !matches!(ctx, FieldContext::Content | FieldContext::Term) {
-        return Err("normalize_field_specs_for_scope chỉ áp dụng cho Content và Term.");
-    }
-    if scope == FieldScopeKind::TermPanelField && ctx != FieldContext::Term {
-        return Err("TermPanelField yêu cầu context FieldContext::Term.");
+    if !matches!(
+        ctx,
+        FieldContext::Content | FieldContext::Term | FieldContext::Options
+    ) {
+        return Err("normalize_field_specs_for_scope chỉ áp dụng cho Content, Term và Options.");
     }
     canonicalize_field_specs(specs);
     let (default_view, default_edit, default_pub) = match scope {
         FieldScopeKind::BaseCptField | FieldScopeKind::UserFieldGroup => {
             (FieldRole::Editor, FieldRole::Editor, PublicExposure::Public)
         }
-        FieldScopeKind::ExtensionGroupField | FieldScopeKind::TermPanelField => (
+        FieldScopeKind::ExtensionGroupField => (
             FieldRole::Editor,
             FieldRole::Editor,
             PublicExposure::Private,
         ),
     };
-    normalize_acl_recursive(specs, scope, default_view, default_edit, default_pub)?;
+    normalize_acl_recursive(specs, ctx, true, default_view, default_edit, default_pub)?;
     validate_field_specs(specs, ctx)
 }
 
 pub(crate) fn normalize_acl_recursive(
     specs: &mut [FieldSpec],
-    scope: FieldScopeKind,
+    ctx: FieldContext,
+    is_top_level: bool,
     default_view: FieldRole,
     default_edit: FieldRole,
     default_pub: PublicExposure,
@@ -332,7 +333,16 @@ pub(crate) fn normalize_acl_recursive(
         let existing = spec.acl.take().unwrap_or_default();
         let min_view_role = existing.min_view_role.unwrap_or(default_view);
         let min_edit_role = existing.min_edit_role.unwrap_or(default_edit);
-        let public_exposure = existing.public_exposure.unwrap_or(default_pub);
+        let effective_default_pub = if ctx == FieldContext::Options && is_top_level {
+            if spec.public {
+                PublicExposure::Public
+            } else {
+                PublicExposure::Private
+            }
+        } else {
+            default_pub
+        };
+        let public_exposure = existing.public_exposure.unwrap_or(effective_default_pub);
 
         if min_edit_role < min_view_role {
             return Err("invalid_field_acl: min_edit_role không được thấp hơn min_view_role.");
@@ -342,8 +352,20 @@ pub(crate) fn normalize_acl_recursive(
                 "invalid_field_acl: Trường có min_view_role = admin không được đặt public_exposure = public.",
             );
         }
-        if scope == FieldScopeKind::TermPanelField && public_exposure == PublicExposure::Public {
-            return Err("TermPanelField không hỗ trợ public_exposure = public ở Đợt 1.");
+        if ctx == FieldContext::Options && is_top_level {
+            if spec.public
+                && (min_view_role == FieldRole::Admin
+                    || existing.public_exposure == Some(PublicExposure::Private))
+            {
+                return Err(
+                    "invalid_field_acl: Trường Options bật public = true phải có min_view_role = editor và không được đặt public_exposure = private.",
+                );
+            }
+            if !spec.public && existing.public_exposure == Some(PublicExposure::Public) {
+                return Err(
+                    "invalid_field_acl: Trường Options tắt public = false không được đặt public_exposure = public.",
+                );
+            }
         }
         spec.acl = Some(FieldAcl::canonical(
             min_view_role,
@@ -364,7 +386,8 @@ pub(crate) fn normalize_acl_recursive(
         if !spec.fields.is_empty() {
             normalize_acl_recursive(
                 &mut spec.fields,
-                scope,
+                ctx,
+                false,
                 min_view_role,
                 min_edit_role,
                 public_exposure,

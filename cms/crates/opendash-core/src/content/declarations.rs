@@ -22,7 +22,7 @@ pub fn merge_package_redeclared_fields(
 
 /// Syntax shared by CPT and taxonomy rewrite defaults. Route root reservations,
 /// namespace collisions, and site overrides belong to the C3 storage resolver.
-pub(super) fn validate_provider_rewrite_base(base: Option<&str>) -> Result<(), &'static str> {
+pub fn validate_provider_rewrite_base(base: Option<&str>) -> Result<(), &'static str> {
     if let Some(base) = base {
         let segments: Vec<&str> = base.split('/').collect();
         if segments.len() > 3
@@ -41,8 +41,10 @@ pub(super) fn validate_provider_rewrite_base(base: Option<&str>) -> Result<(), &
 pub struct ContentTypeDeclaration {
     pub key: String,
     pub label: String,
-    #[serde(default)]
-    pub fields: Vec<crate::field_schema::FieldSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singular_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
     /// Omission preserves existing provider-owned settings on package re-install.

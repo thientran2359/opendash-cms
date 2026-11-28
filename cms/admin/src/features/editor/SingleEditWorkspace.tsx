@@ -6,12 +6,14 @@ import {
   effectiveContentTypeSettings,
   getContentEntry,
   getEffectiveEditorConfig,
+  listContentEntries,
   listContentTypes,
   trashContentEntry,
-  type ContentTypeSettings,
   type EffectiveEditorConfigWithSettings,
   updateEntryComposite,
 } from '../../api/content.ts';
+import { getReadingSettings } from '../../api/settings.ts';
+import { listAllTaxonomyTerms, resolveTaxonomyTermLabels } from '../../api/taxonomy.ts';
 import { runPluginAction } from '../../api/plugins.ts';
 import { isRestoreEntryOutcome, type RestoreRevisionResponse } from '../../api/revisions.ts';
 import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
@@ -19,14 +21,18 @@ import { ApiClientError } from '../../api/client.ts';
 import { getActiveThemeLayouts, type ThemeLayoutCatalog } from '../../api/themes.ts';
 import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../../api/locales.ts';
 import type { AuthUser, PluginLifecycleConfirmation as PluginLifecycleConfirmationDto } from '../../types.ts';
-import type { ContentFieldValue, EffectiveEditorConfigProjection, EffectivePanelProjection, TranslationLinkSummary } from '../content/types.ts';
+import type { ContentEntryRecord, ContentFieldValue, TranslationLinkSummary } from '../content/types.ts';
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
 import { SingleEditBuilderPromptDialog } from './SingleEditBuilderPromptDialog.tsx';
 import { SingleEditTranslationsPanel } from './SingleEditTranslationsPanel.tsx';
-import { matchesMediaPickerKind, validateRequiredEditorFields } from './editorFieldValidation.ts';
+import {
+  displayEditorConfigWithActiveKeys,
+  matchesMediaPickerKind,
+  supportAllowsField,
+  validateRequiredEditorFields,
+} from './editorFieldValidation.ts';
 import { useSiteTimezone } from '../../fields/useSiteTimezone.ts';
-import { isUiOnlyFieldType } from '../../fields/helpers.ts';
 import { MediaPicker } from '../media/MediaPicker.tsx';
 import { EntryListPage, entryTableHash, parseEntryTableHash, safePublicPath } from '../content/EntryListPage.tsx';
 import { PluginLifecycleConfirmation } from '../plugins/PluginLifecycleConfirmation.tsx';
@@ -73,61 +79,6 @@ function slugFromTitle(title: string): string {
   return s && /^[a-z]/.test(s) ? s : `item-${Date.now().toString(36).slice(-4)}`;
 }
 
-function supportAllowsField(typeKey: string, key: string, settings: ContentTypeSettings): boolean {
-  if (key === 'featured_image' && typeKey !== 'section' && typeKey !== 'pattern') {
-    return settings.supports.includes('featured_image');
-  }
-  if (typeKey !== 'post' && typeKey !== 'page') return true;
-  if (key === 'body') return settings.supports.includes('editor') || settings.supports.includes('builder');
-  return true;
-}
-
-/** Restrict UI affordances without removing values from the saved entry/draft. */
-function displayEditorConfig(
-  config: EffectiveEditorConfigWithSettings,
-  settings: ContentTypeSettings,
-): EffectiveEditorConfigProjection {
-  const typeKey = config.type_key;
-  const projectPanels = (panels: EffectivePanelProjection[]): EffectivePanelProjection[] =>
-    panels.filter(({ panel }) => {
-      if (panel.kind.kind !== 'core_built_in') return true;
-      if (panel.kind.core_key === 'body_editor') {
-        return settings.supports.includes('editor') || settings.supports.includes('builder');
-      }
-      if (panel.kind.core_key === 'featured_image') return settings.supports.includes('featured_image');
-      return true;
-    }).map(panel => ({
-      ...panel,
-      field_keys: panel.field_keys.filter(key => supportAllowsField(typeKey, key, settings)),
-      panel_fields: panel.panel_fields?.filter(spec => isUiOnlyFieldType(spec.type) || supportAllowsField(typeKey, spec.key, settings)),
-      subgroups: panel.subgroups.map(group => ({
-        ...group,
-        field_keys: group.field_keys.filter(key => supportAllowsField(typeKey, key, settings)),
-      })).filter(group => group.field_keys.length > 0),
-    })).filter(panel => {
-      if (panel.panel.kind.kind === 'base_fields_slice' || panel.panel.kind.kind === 'content_fields') {
-        return panel.field_keys.length > 0;
-      }
-      if (panel.panel.kind.kind === 'core_built_in' && panel.panel.kind.core_key === 'base_fields') {
-        return panel.field_keys.length > 0;
-      }
-      return true;
-    });
-
-  return {
-    ...config,
-    effective_fields: Object.fromEntries(
-      Object.entries(config.effective_fields).filter(([key]) => supportAllowsField(typeKey, key, settings)),
-    ),
-    regions: {
-      main_top: projectPanels(config.regions.main_top),
-      main_primary: projectPanels(config.regions.main_primary),
-      main_bottom: projectPanels(config.regions.main_bottom),
-      sidebar: projectPanels(config.regions.sidebar),
-    },
-  };
-}
-
 export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   typeKey,
   mode,
@@ -167,6 +118,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [clearedFields, setClearedFields] = useState<string[]>([]);
   const [termIds, setTermIds] = useState<number[]>([]);
   const [primaryCategoryTermId, setPrimaryCategoryTermId] = useState<number | null>(null);
+  const [parentId, setParentId] = useState<number | null>(null);
+  const [menuOrder, setMenuOrder] = useState<number>(0);
+  const [parentCandidates, setParentCandidates] = useState<ContentEntryRecord[]>([]);
+  const [readingSettings, setReadingSettings] = useState<{ homepage_page_id: number | null; posts_page_id: number | null } | null>(null);
+  const [termKindById, setTermKindById] = useState<Map<number, string>>(() => new Map());
   const [customPath, setCustomPath] = useState('');
   const [themeLayouts, setThemeLayouts] = useState<ThemeLayoutCatalog | null>(null);
   const [selectedThemeKey, setSelectedThemeKey] = useState<string | null>(null);
@@ -210,10 +166,38 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const canWriteSeoRef = useRef(true);
 
   const settings = config ? effectiveContentTypeSettings(typeKey, config.settings) : null;
-  const editorConfig = useMemo(
-    () => config && settings ? displayEditorConfig(config, settings) : null,
-    [config],
+  const entryTermPairs = useMemo(
+    () =>
+      termIds
+        .map(id => {
+          const kind = termKindById.get(id);
+          return kind ? ([kind, id] as const) : null;
+        })
+        .filter((pair): pair is readonly [string, number] => pair !== null),
+    [termIds, termKindById],
   );
+  const editorProjection = useMemo(() => {
+    if (!config || !settings) return null;
+    const specialPage =
+      typeKey === 'page' && entryId !== null
+        ? entryId === readingSettings?.homepage_page_id
+          ? 'homepage'
+          : entryId === readingSettings?.posts_page_id
+            ? 'posts_page'
+            : null
+        : null;
+    return displayEditorConfigWithActiveKeys(config, settings, {
+      content_type: typeKey,
+      page_layout: typeKey === 'page' ? selectedThemeKey : null,
+      custom_template: typeKey !== 'page' ? selectedThemeKey : null,
+      special_page: specialPage,
+      entry_term_pairs: entryTermPairs,
+      entry_id: entryId,
+      user_role: user?.role === 'admin' ? 'admin' : 'editor',
+    });
+  }, [config, settings, typeKey, entryId, readingSettings, selectedThemeKey, entryTermPairs, user?.role]);
+  const editorConfig = editorProjection?.projected ?? null;
+  const activeFieldKeys = editorProjection?.activeFieldKeys;
 
   const tabUuid = useRef(Math.random().toString(36).slice(2, 10));
   const draftKey = editorDraftStore.makeDraftKey(typeKey, entryId, draftUuid ?? tabUuid.current);
@@ -273,6 +257,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     setClearedFields(payload.cleared_fields);
     setTermIds(payload.term_ids);
     setPrimaryCategoryTermId(payload.primary_category_term_id);
+    setParentId(payload.parent_id ?? null);
+    setMenuOrder(payload.menu_order ?? 0);
     setCustomPath(payload.custom_path ?? '');
     setSeoTitle(payload.seo?.title ?? '');
     setSeoDescription(payload.seo?.description ?? '');
@@ -427,6 +413,17 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           if (cause instanceof ApiClientError && (cause.status === 401 || cause.status === 403)) throw cause;
           layoutUnavailable = true;
         }
+        const [readingSnap, ...taxLists] = await Promise.all([
+          typeKey === 'page' && user?.role === 'admin' ? getReadingSettings().catch(() => null) : Promise.resolve(null),
+          ...freshCfg.taxonomies.map(tax => listAllTaxonomyTerms(tax).catch(() => [])),
+        ]);
+        if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
+        setReadingSettings(readingSnap);
+        const kindMap = new Map<number, string>();
+        for (const list of taxLists) {
+          for (const term of list) kindMap.set(term.id, term.kind);
+        }
+        setTermKindById(kindMap);
         let seoReadable = true;
         if (mode === 'edit' && entryId !== null) {
           // Route/SEO can be forbidden after same-user role downgrade. Never
@@ -473,6 +470,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             content_mode: rec.content_mode,
             values: allowedValues, cleared_fields: [], term_ids: rec.term_ids ?? [],
             primary_category_term_id: rec.primary_category_term_id ?? null,
+            parent_id: rec.parent_id ?? null,
+            menu_order: rec.menu_order ?? 0,
             page_layout_key: pageLayoutKey,
             custom_template_key: customTemplateKey,
             custom_path: routeSnap?.custom_path ?? '',
@@ -497,6 +496,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               ? 'draft' : 'published',
             content_mode: 'editor',
             values: {}, cleared_fields: [], term_ids: [], primary_category_term_id: null,
+            parent_id: null, menu_order: 0,
             page_layout_key: null,
             custom_template_key: null,
             custom_path: '', seo: emptySeo,
@@ -563,6 +563,35 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     };
   }, [typeKey, mode, entryId, draftKey, siteInstanceId, user?.id, user?.role, authGeneration]);
 
+  useEffect(() => {
+    if (!user || isPattern || mode === 'list' || !settings?.hierarchical) {
+      setParentCandidates([]);
+      return;
+    }
+    let alive = true;
+    void listContentEntries(typeKey, 100, 0, {}, entryLocale || undefined)
+      .then(rows => { if (alive) setParentCandidates(rows); })
+      .catch(() => { if (alive) setParentCandidates([]); });
+    return () => { alive = false; };
+  }, [typeKey, mode, entryLocale, settings?.hierarchical, isPattern, user?.id]);
+
+  useEffect(() => {
+    const missing = termIds.filter(id => !termKindById.has(id));
+    if (missing.length === 0) return;
+    let alive = true;
+    void resolveTaxonomyTermLabels(missing)
+      .then(items => {
+        if (!alive) return;
+        setTermKindById(prev => {
+          const next = new Map(prev);
+          for (const item of items) next.set(item.id, item.kind);
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [termIds, termKindById]);
+
   const expandPanelContainingField = (fieldKey: string) => {
     if (!config) return;
     const allRegions = [
@@ -625,7 +654,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     Object.assign(
       nextErrors,
       validateRequiredEditorFields(config, typeKey, effectiveSettings, snapshot, (label) =>
-        __("Field \"{{value1}}\" is required.", { value1: label })),
+        __("Field \"{{value1}}\" is required.", { value1: label }), activeFieldKeys),
     );
 
     if (Object.keys(nextErrors).length > 0) {
@@ -641,10 +670,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     setSaving(true);
     setStatusNote(null);
 
-    // Send ONLY editable fields (never send read-only fields -> Omitted = Preserve)
+    // Send ONLY active editable fields (hidden LocationRules/read-only fields stay omitted to preserve DB values).
     const submitValues: Record<string, ContentFieldValue> = {};
     for (const [fk, eff] of Object.entries(config.effective_fields)) {
-      if (!eff.editable || !supportAllowsField(typeKey, fk, effectiveSettings)) continue;
+      if ((activeFieldKeys && !activeFieldKeys.has(fk)) || !eff.editable || !supportAllowsField(typeKey, fk, effectiveSettings)) {
+        continue;
+      }
       if (snapshot.cleared_fields.includes(fk)) {
         submitValues[fk] = null;
       } else if (fk in snapshot.values) {
@@ -674,6 +705,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         ...(typeKey === 'post' && config.taxonomies.includes('category')
           && baselineRef.current?.primary_category_term_id !== snapshot.primary_category_term_id
           ? { primary_category_term_id: snapshot.primary_category_term_id } : {}),
+        ...(effectiveSettings.hierarchical && (baselineRef.current?.parent_id !== snapshot.parent_id || snapshot.parent_id != null)
+          ? { parent_id: snapshot.parent_id ?? null } : {}),
+        ...((effectiveSettings.hierarchical || effectiveSettings.supports.includes('menu_order')) && baselineRef.current?.menu_order !== snapshot.menu_order
+          ? { menu_order: snapshot.menu_order ?? 0 } : {}),
         ...(entryId === null ? { auto_unique_slug: true } : {}),
         ...(entryId === null && localeState.hasMultipleLocales && entryLocale ? { locale: entryLocale } : {}),
         ...(canWriteRouteRef.current ? {
@@ -709,6 +744,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         content_mode: res.entry.content_mode,
         values: res.entry.values, cleared_fields: [], term_ids: res.entry.term_ids ?? snapshot.term_ids,
         primary_category_term_id: res.entry.primary_category_term_id ?? null,
+        parent_id: res.entry.parent_id ?? null,
+        menu_order: res.entry.menu_order ?? 0,
         page_layout_key: pageLayoutKey,
         custom_template_key: customTemplateKey,
         custom_path: res.custom_path ?? '',
@@ -963,7 +1000,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       csrfToken={csrfToken}
       onLocaleChange={nextLocale => {
         setEntryLocale(nextLocale);
-        persistDraftPatch({ locale: nextLocale });
+        if (settings?.hierarchical) {
+          setParentId(null);
+          persistDraftPatch({ locale: nextLocale, parent_id: null });
+        } else {
+          persistDraftPatch({ locale: nextLocale });
+        }
       }}
       onApiError={onApiError}
       onNavigateHash={onNavigateHash}
@@ -1086,6 +1128,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         actionBusy={actionBusy}
         entryId={entryId}
         userId={user?.id ?? null}
+        userRole={user?.role}
         termIds={termIds}
         primaryCategoryTermId={primaryCategoryTermId}
         publicPath={publicPath}
@@ -1116,6 +1159,19 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         templatePanelNode={templatePanelNode}
         translationPanelNode={translationPanelNode}
         locale={localeState.hasMultipleLocales && !isPattern ? (entryLocale || defaultLocaleCode || undefined) : undefined}
+        isHierarchical={Boolean(settings?.hierarchical)}
+        supportsMenuOrder={Boolean(settings?.supports.includes('menu_order'))}
+        parentId={parentId}
+        menuOrder={menuOrder}
+        parentOptions={parentCandidates}
+        onParentIdChange={nextParentId => {
+          setParentId(nextParentId);
+          persistDraftPatch({ parent_id: nextParentId });
+        }}
+        onMenuOrderChange={nextOrder => {
+          setMenuOrder(nextOrder);
+          persistDraftPatch({ menu_order: nextOrder });
+        }}
         csrfToken={csrfToken}
         siteTimezone={siteTimezone}
         saving={saving}

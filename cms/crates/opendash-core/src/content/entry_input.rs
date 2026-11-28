@@ -30,6 +30,21 @@ pub enum PatchField<T> {
     Set(T),
 }
 
+impl<T> PatchField<T> {
+    pub fn is_omitted(&self) -> bool {
+        matches!(self, Self::Omitted)
+    }
+}
+
+impl<T: Serialize> Serialize for PatchField<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Omitted | Self::Clear => serializer.serialize_none(),
+            Self::Set(val) => val.serialize(serializer),
+        }
+    }
+}
+
 pub fn deserialize_patch_field<'de, D, T>(deserializer: D) -> Result<PatchField<T>, D::Error>
 where
     D: serde::Deserializer<'de>,

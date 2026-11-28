@@ -394,8 +394,7 @@ async fn s03_metadata_patch_validation_dates_dst_taxonomy_and_invariants() {
         .json(&json!({
             "key": "item",
             "label": "Items",
-            "settings": { "public": true, "has_archive": true, "publication": "immediate", "supports": ["editor"] },
-            "fields": [{ "key": "body", "label": "Body", "type": "richtext", "required": false, "options": [] }]
+            "settings": { "public": true, "has_archive": true, "publication": "immediate", "supports": ["editor"] }
         }))
         .send()
         .await

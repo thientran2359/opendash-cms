@@ -105,6 +105,8 @@ pub(in crate::storage) struct FullEntryDbRow {
     pub(in crate::storage) custom_template_key: Option<String>,
     pub(in crate::storage) content_mode: String,
     pub(in crate::storage) primary_category_term_id: Option<i64>,
+    pub(in crate::storage) parent_id: Option<i64>,
+    pub(in crate::storage) menu_order: i32,
     pub(in crate::storage) locale: String,
     pub(in crate::storage) translation_group_id: String,
 }

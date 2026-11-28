@@ -1,7 +1,22 @@
 use super::*;
 
-pub(in crate::storage) fn definition(row: DefinitionRow) -> ApiResult<TaxonomyDefinition> {
-    let (key, label, hierarchical, public, version, owner_kind, owner_id, provider, state) = row;
+pub(in crate::storage) fn definition_with_cpts(
+    row: DefinitionRow,
+    content_types: Vec<String>,
+) -> ApiResult<TaxonomyDefinition> {
+    let (
+        key,
+        label,
+        hierarchical,
+        public,
+        settings_json,
+        rewrite_base,
+        version,
+        owner_kind,
+        owner_id,
+        provider,
+        state,
+    ) = row;
     let owner = match (owner_kind.as_str(), owner_id) {
         ("core", None) => ResourceOwner::Core,
         ("user", None) => ResourceOwner::User,
@@ -27,11 +42,21 @@ pub(in crate::storage) fn definition(row: DefinitionRow) -> ApiResult<TaxonomyDe
             ));
         }
     };
+    let settings: opendash_core::content::TaxonomySettings =
+        if settings_json == "{}" || settings_json.trim().is_empty() {
+            Default::default()
+        } else {
+            serde_json::from_str(&settings_json)
+                .map_err(|_| ApiError::internal("settings_json của taxonomy không hợp lệ."))?
+        };
     Ok(TaxonomyDefinition {
         key,
         label,
         hierarchical: hierarchical != 0,
         public: public != 0,
+        settings,
+        rewrite_base,
+        content_types,
         version,
         owner,
         provider_status,
@@ -39,40 +64,55 @@ pub(in crate::storage) fn definition(row: DefinitionRow) -> ApiResult<TaxonomyDe
     })
 }
 
+pub(in crate::storage) fn definition(row: DefinitionRow) -> ApiResult<TaxonomyDefinition> {
+    definition_with_cpts(row, Vec::new())
+}
+
+const DEF_SELECT: &str = "SELECT key, label, hierarchical, public, settings_json, rewrite_base, version, owner_kind, owner_id, provider_status, declaration_state FROM taxonomy_definitions";
+
+pub(in crate::storage) async fn definition_in_conn(
+    conn: &mut SqliteConnection,
+    key: &str,
+) -> ApiResult<Option<TaxonomyDefinition>> {
+    let sql = format!("{DEF_SELECT} WHERE key = ?");
+    let row: Option<DefinitionRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(key)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(mutation_error)?;
+    let Some(r) = row else {
+        return Ok(None);
+    };
+    let mut cpts_map = super::meta::load_taxonomy_content_types_map_in_conn(conn).await?;
+    let cpts = cpts_map.remove(key).unwrap_or_default();
+    Ok(Some(definition_with_cpts(r, cpts)?))
+}
+
 pub(in crate::storage) async fn definition_in_write(
     tx: &mut Transaction<'_, Sqlite>,
     key: &str,
 ) -> ApiResult<Option<TaxonomyDefinition>> {
-    let row: Option<DefinitionRow> = sqlx::query_as(
-        "SELECT key, label, hierarchical, public, version, owner_kind, owner_id,
-                provider_status, declaration_state FROM taxonomy_definitions WHERE key = ?",
-    )
-    .bind(key)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(mutation_error)?;
-    row.map(definition).transpose()
+    definition_in_conn(&mut **tx, key).await
 }
 
 pub async fn list_definitions(db: &SqlitePool) -> ApiResult<Vec<TaxonomyDefinition>> {
-    let rows: Vec<DefinitionRow> = sqlx::query_as(
-        "SELECT key, label, hierarchical, public, version, owner_kind, owner_id,
-                provider_status, declaration_state FROM taxonomy_definitions ORDER BY key",
-    )
-    .fetch_all(db)
-    .await?;
-    rows.into_iter().map(definition).collect()
+    let mut conn = db.acquire().await?;
+    let sql = format!("{DEF_SELECT} ORDER BY key");
+    let rows: Vec<DefinitionRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut cpts_map = super::meta::load_taxonomy_content_types_map_in_conn(&mut conn).await?;
+    rows.into_iter()
+        .map(|r| {
+            let cpts = cpts_map.remove(&r.0).unwrap_or_default();
+            definition_with_cpts(r, cpts)
+        })
+        .collect()
 }
 
 pub async fn get_definition(db: &SqlitePool, key: &str) -> ApiResult<Option<TaxonomyDefinition>> {
-    let row: Option<DefinitionRow> = sqlx::query_as(
-        "SELECT key, label, hierarchical, public, version, owner_kind, owner_id,
-                provider_status, declaration_state FROM taxonomy_definitions WHERE key = ?",
-    )
-    .bind(key)
-    .fetch_optional(db)
-    .await?;
-    row.map(definition).transpose()
+    let mut conn = db.acquire().await?;
+    definition_in_conn(&mut conn, key).await
 }
 
 pub async fn sync_provider_definitions_in_tx(
@@ -89,28 +129,19 @@ pub async fn sync_provider_definitions_in_tx(
     let mut declared = std::collections::BTreeSet::new();
     let mut changed_keys = std::collections::BTreeSet::new();
     for taxonomy in declarations {
-        let input = TaxonomyDefinitionInput {
-            key: taxonomy.key.clone(),
-            label: taxonomy.label.clone(),
-            hierarchical: taxonomy.hierarchical,
-            public: taxonomy.public,
-        };
-        input.validate().map_err(ApiError::bad_request)?;
+        taxonomy.validate().map_err(ApiError::bad_request)?;
         if !declared.insert(taxonomy.key.as_str()) {
             return Err(ApiError::bad_request(
                 "Provider khai báo taxonomy trùng key.",
             ));
         }
         ensure_non_reserved_taxonomy_key_in_tx(&mut *conn, &taxonomy.key).await?;
-        let existing: Option<DefinitionRow> = sqlx::query_as(
-            "SELECT key,label,hierarchical,public,version,owner_kind,owner_id,
-                    provider_status,declaration_state FROM taxonomy_definitions WHERE key=?",
-        )
-        .bind(&taxonomy.key)
-        .fetch_optional(&mut *conn)
-        .await?;
-        if let Some(row) = existing {
-            let current = definition(row)?;
+        let mut settings = taxonomy.settings.clone().unwrap_or_default();
+        settings
+            .validate_and_normalize()
+            .map_err(ApiError::bad_request)?;
+        let settings_json = serde_json::to_string(&settings)?;
+        if let Some(current) = definition_in_conn(conn, &taxonomy.key).await? {
             if current.owner
                 != match owner_kind {
                     "theme" => ResourceOwner::Theme(owner_id.to_owned()),
@@ -133,17 +164,21 @@ pub async fn sync_provider_definitions_in_tx(
             let changed = current.label != taxonomy.label
                 || current.hierarchical != taxonomy.hierarchical
                 || current.public != taxonomy.public
+                || current.settings != settings
+                || current.rewrite_base != taxonomy.rewrite_base
                 || current.provider_status != ProviderStatus::Active
                 || current.declaration_state != DeclarationState::Declared;
             if changed {
                 sqlx::query(
-                    "UPDATE taxonomy_definitions SET label=?,hierarchical=?,public=?,
+                    "UPDATE taxonomy_definitions SET label=?,hierarchical=?,public=?,settings_json=?,rewrite_base=?,
                      provider_status='active',declaration_state='declared',version=version+1
                      WHERE key=?",
                 )
                 .bind(&taxonomy.label)
                 .bind(i64::from(taxonomy.hierarchical))
                 .bind(i64::from(taxonomy.public))
+                .bind(&settings_json)
+                .bind(&taxonomy.rewrite_base)
                 .bind(&taxonomy.key)
                 .execute(&mut *conn)
                 .await?;
@@ -158,13 +193,15 @@ pub async fn sync_provider_definitions_in_tx(
             }
             sqlx::query(
                 "INSERT INTO taxonomy_definitions
-                 (key,label,hierarchical,public,owner_kind,owner_id)
-                 VALUES (?,?,?,?,?,?)",
+                 (key,label,hierarchical,public,settings_json,rewrite_base,owner_kind,owner_id)
+                 VALUES (?,?,?,?,?,?,?,?)",
             )
             .bind(&taxonomy.key)
             .bind(&taxonomy.label)
             .bind(i64::from(taxonomy.hierarchical))
             .bind(i64::from(taxonomy.public))
+            .bind(&settings_json)
+            .bind(&taxonomy.rewrite_base)
             .bind(owner_kind)
             .bind(owner_id)
             .execute(&mut *conn)
@@ -266,6 +303,19 @@ pub async fn create_definition(
     input: &TaxonomyDefinitionInput,
 ) -> ApiResult<TaxonomyDefinition> {
     input.validate().map_err(ApiError::bad_request)?;
+    let mut settings = input.settings.clone().unwrap_or_default();
+    settings
+        .validate_and_normalize()
+        .map_err(ApiError::bad_request)?;
+    let settings_json = serde_json::to_string(&settings)?;
+    let rw_col: Option<String> = match &input.rewrite_base {
+        opendash_core::content::PatchField::Set(s) => {
+            Some(s.trim().to_owned()).filter(|x| !x.is_empty())
+        }
+        opendash_core::content::PatchField::Clear | opendash_core::content::PatchField::Omitted => {
+            None
+        }
+    };
     let mut tx = begin_admin_write(db, actor, false).await?;
     ensure_non_reserved_taxonomy_key_in_tx(&mut tx, &input.key).await?;
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM taxonomy_definitions")
@@ -278,17 +328,29 @@ pub async fn create_definition(
     if definition_in_write(&mut tx, &input.key).await?.is_some() {
         return Err(ApiError::conflict("Khóa taxonomy đã được đăng ký."));
     }
+    if let Some(ref cpts) = input.content_types {
+        super::meta::sync_taxonomy_content_types_in_tx(&mut tx, &input.key, cpts).await?;
+    }
     sqlx::query(
-        "INSERT INTO taxonomy_definitions (key,label,hierarchical,public,owner_kind)
-         VALUES (?,?,?,?, 'user')",
+        "INSERT INTO taxonomy_definitions (key,label,hierarchical,public,settings_json,rewrite_base,owner_kind)
+         VALUES (?,?,?,?,?,?, 'user')",
     )
     .bind(&input.key)
     .bind(&input.label)
     .bind(i64::from(input.hierarchical))
     .bind(i64::from(input.public))
+    .bind(&settings_json)
+    .bind(&rw_col)
     .execute(&mut *tx)
     .await
     .map_err(mutation_error)?;
+    crate::storage::permalinks::set_site_rewrite_override_in_tx(
+        &mut tx,
+        "taxonomy",
+        &input.key,
+        &input.rewrite_base,
+    )
+    .await?;
     let created = definition_in_write(&mut tx, &input.key)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể đọc taxonomy vừa tạo."))?;
@@ -338,16 +400,54 @@ pub async fn patch_definition(
             return Err(ApiError::conflict("Taxonomy còn term có parent."));
         }
     }
+    if let Some(ref cpts) = input.content_types {
+        if matches!(current.owner, ResourceOwner::Core) && matches!(key, "category" | "post_tag") {
+            // Allow linking additional CPTs to core category/post_tag cleanly
+        }
+        super::meta::sync_taxonomy_content_types_in_tx(&mut tx, key, cpts).await?;
+    }
+    let mut next_settings = input
+        .settings
+        .clone()
+        .unwrap_or_else(|| current.settings.clone());
+    next_settings
+        .validate_and_normalize()
+        .map_err(ApiError::bad_request)?;
+    if let Some(def_tid) = next_settings.default_term_id {
+        let valid_term: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM taxonomy_terms WHERE id = ? AND kind = ?)",
+        )
+        .bind(def_tid)
+        .bind(key)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(mutation_error)?;
+        if !valid_term {
+            return Err(ApiError::bad_request(
+                "default_term_id không tồn tại hoặc không thuộc taxonomy này.",
+            ));
+        }
+    }
+    let settings_json = serde_json::to_string(&next_settings)?;
+    let next_rewrite = match &input.rewrite_base {
+        opendash_core::content::PatchField::Omitted => current.rewrite_base.clone(),
+        opendash_core::content::PatchField::Clear => None,
+        opendash_core::content::PatchField::Set(s) => {
+            Some(s.trim().to_owned()).filter(|v| !v.is_empty())
+        }
+    };
     let label = input.label.as_deref().unwrap_or(&current.label);
     let public = input.public.unwrap_or(current.public);
     let rows = sqlx::query(
         "UPDATE taxonomy_definitions
-            SET label=?, hierarchical=?, public=?, version=version+1
+            SET label=?, hierarchical=?, public=?, settings_json=?, rewrite_base=?, version=version+1
           WHERE key=? AND version=?",
     )
     .bind(label)
     .bind(i64::from(hierarchical))
     .bind(i64::from(public))
+    .bind(&settings_json)
+    .bind(&next_rewrite)
     .bind(key)
     .bind(expected_version)
     .execute(&mut *tx)
@@ -358,6 +458,33 @@ pub async fn patch_definition(
         return Err(ApiError::precondition_failed(
             "Taxonomy đã thay đổi, hãy tải lại.",
         ));
+    }
+    crate::storage::permalinks::set_site_rewrite_override_in_tx(
+        &mut tx,
+        "taxonomy",
+        key,
+        &input.rewrite_base,
+    )
+    .await?;
+    if current.public && !public {
+        sqlx::query(
+            "DELETE FROM seo_public_media_refs
+              WHERE source_kind = 'term_seo'
+                AND source_id IN (SELECT id FROM taxonomy_terms WHERE kind = ?)",
+        )
+        .bind(key)
+        .execute(&mut *tx)
+        .await?;
+    } else if !current.public && public {
+        sqlx::query(
+            "INSERT OR IGNORE INTO seo_public_media_refs (source_kind, source_id, media_id)
+             SELECT 'term_seo', id, seo_og_image_id
+               FROM taxonomy_terms
+              WHERE kind = ? AND seo_og_image_id IS NOT NULL",
+        )
+        .bind(key)
+        .execute(&mut *tx)
+        .await?;
     }
     let updated = definition_in_write(&mut tx, key)
         .await?
@@ -404,6 +531,21 @@ pub async fn delete_definition(
             "Taxonomy đang được dùng bởi term hoặc content type.",
         ));
     }
+    if crate::storage::content::table_exists_in_tx(&mut tx, "content_field_group_targets").await? {
+        sqlx::query(
+            "DELETE FROM content_field_group_targets WHERE target_kind = 'taxonomy_term' AND target_key = ?",
+        )
+        .bind(key)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let _ = crate::storage::permalinks::set_site_rewrite_override_in_tx(
+        &mut tx,
+        "taxonomy",
+        key,
+        &opendash_core::content::PatchField::Clear,
+    )
+    .await;
     sqlx::query("DELETE FROM taxonomy_definitions WHERE key=? AND version=?")
         .bind(key)
         .bind(expected_version)
@@ -455,64 +597,4 @@ pub(in crate::storage) async fn begin_admin_write<'a>(
         }
         Some(_) => Ok(tx),
     }
-}
-
-pub async fn delete_term(
-    db: &SqlitePool,
-    actor: &SessionContext,
-    id: i64,
-    expected_version: i64,
-) -> ApiResult<()> {
-    let mut tx = begin_admin_write(db, actor, false).await?;
-    current_term(&mut tx, id, expected_version).await?;
-    let children: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM taxonomy_terms WHERE parent_id = ?")
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(mutation_error)?;
-    if children != 0 {
-        return Err(ApiError::conflict(
-            "Category còn mục con. Hãy chuyển mục con trước.",
-        ));
-    }
-    // P10 creates entry_terms in its own migration. After that migration the
-    // same deletion path checks dependencies explicitly, while FK RESTRICT
-    // remains the database's final guard against concurrent entry updates.
-    let has_memberships: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'entry_terms'",
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(mutation_error)?;
-    if has_memberships != 0 {
-        let linked_entries: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM entry_terms WHERE term_id = ?")
-                .bind(id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(mutation_error)?;
-        if linked_entries != 0 {
-            return Err(ApiError::conflict(
-                "Term đang được gắn vào nội dung. Hãy gỡ liên kết trước.",
-            ));
-        }
-    }
-    let affected = sqlx::query("DELETE FROM taxonomy_terms WHERE id = ? AND version = ?")
-        .bind(id)
-        .bind(expected_version)
-        .execute(&mut *tx)
-        .await
-        .map_err(mutation_error)?
-        .rows_affected();
-    if affected != 1 {
-        return Err(ApiError::precondition_failed(
-            "Term đã thay đổi, hãy tải lại.",
-        ));
-    }
-    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
-    crate::storage::search::sync_entries_for_term_in_conn(&mut tx, id).await?;
-    tx.commit().await.map_err(mutation_error)?;
-    crate::cache::SiteCacheEpoch::global().bump();
-    Ok(())
 }

@@ -152,11 +152,12 @@ pub(in crate::storage) async fn validate_term_ids_for_locale(
             return Err(ApiError::bad_request("Số term của taxonomy vượt giới hạn."));
         }
     }
+    enforce_taxonomy_selection_mode_in_conn(&mut **tx, type_key, &counts).await?;
     Ok(())
 }
 
 /// Shared category/tag AND predicates for the old archives and new list
-/// blocks. Only an internal enum can select the ORDER BY direction.
+/// blocks. Only an internal enum can select the ORDER BY clause.
 pub(in crate::storage) async fn query_entries_filtered(
     tx: &mut Transaction<'_, Sqlite>,
     type_key: &str,
@@ -167,20 +168,28 @@ pub(in crate::storage) async fn query_entries_filtered(
     enforce_public_locale: bool,
     sort: PublishedListSort,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
-    let direction = match sort {
-        PublishedListSort::IdDesc => "DESC",
-        PublishedListSort::IdAsc => "ASC",
+    let order_by = match sort {
+        PublishedListSort::IdDesc => "e.id DESC",
+        PublishedListSort::IdAsc => "e.id ASC",
+        PublishedListSort::PublishedAtDesc => {
+            "COALESCE(e.published_at, e.created_at) DESC, e.id DESC"
+        }
+        PublishedListSort::CreatedAtDesc => "e.created_at DESC, e.id DESC",
+        PublishedListSort::UpdatedAtDesc => "e.updated_at DESC, e.id DESC",
+        PublishedListSort::TitleAsc => "e.title COLLATE NOCASE ASC, e.id ASC",
+        PublishedListSort::MenuOrderAsc => "e.menu_order ASC, e.id ASC",
     };
-    // Audited dynamic SQL: direction is a closed Rust enum mapped to one of
-    // two literal keywords; all user-controlled values remain bound params.
+    // Audited dynamic SQL: order_by is a closed Rust enum mapped to static literals;
+    // all user-controlled values remain bound params.
     let statement = format!(
         "{FILTERED_ENTRIES_CTE_AND_FROM}
          SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json, e.publication_status,
                 e.version, e.created_at, e.updated_at, e.published_at,
                 e.page_layout_key, e.custom_template_key, e.content_mode,
-                e.primary_category_term_id, e.locale, e.translation_group_id
+                e.primary_category_term_id, e.parent_id, e.menu_order,
+                e.locale, e.translation_group_id
           {FILTERED_ENTRIES_WHERE}
-          ORDER BY e.id {direction} LIMIT ? OFFSET ?"
+          ORDER BY {order_by} LIMIT ? OFFSET ?"
     );
     let rows: Vec<FullEntryDbRow> = sqlx::query_as(sqlx::AssertSqlSafe(statement))
         .bind(filters.category_id)
@@ -233,6 +242,8 @@ pub(in crate::storage) async fn query_entries_filtered(
         record.page_layout_key = row.page_layout_key;
         record.custom_template_key = row.custom_template_key;
         record.primary_category_term_id = row.primary_category_term_id;
+        record.parent_id = row.parent_id;
+        record.menu_order = row.menu_order;
         record.content_mode = match row.content_mode.as_str() {
             "editor" => ContentMode::Editor,
             "builder" => ContentMode::Builder,

@@ -59,6 +59,7 @@ pub(crate) fn validate_scope_specs<'a>(
     leaf_data_count: &mut usize,
 ) -> Result<(), &'static str> {
     let mut seen_keys = BTreeSet::new();
+    let mut seen_sync_taxonomies = BTreeSet::new();
     let sibling_map = build_scope_lookup_map(specs);
     let in_group = group_depth > 0;
 
@@ -74,6 +75,14 @@ pub(crate) fn validate_scope_specs<'a>(
         }
         if !ctx.supports_type(spec.field_type) {
             return Err("Kiểu field không được hỗ trợ trong ngữ cảnh này.");
+        }
+        if spec.sync_entry_terms
+            && let Some(tax) = spec.taxonomy.as_deref()
+            && !seen_sync_taxonomies.insert(tax)
+        {
+            return Err(
+                "duplicate_sync_entry_terms_taxonomy: Mỗi phân loại chỉ được đồng bộ tối đa bởi một trường term_ref trên cùng loại nội dung.",
+            );
         }
 
         validate_single_field_spec(
@@ -135,7 +144,10 @@ pub(crate) fn validate_conditions<'a>(
                     "conditions không được tham chiếu field UI layout, secret, spacing, group, repeater hoặc responsive.",
                 );
             }
-            if matches!(ctx, FieldContext::Content | FieldContext::Term) {
+            if matches!(
+                ctx,
+                FieldContext::Content | FieldContext::Term | FieldContext::Options
+            ) {
                 let (target_view, _, _) = target.effective_acl();
                 let (owner_view, _, _) = owner.effective_acl();
                 if target_view > owner_view {

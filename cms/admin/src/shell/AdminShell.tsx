@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/index.tsx';
 import type { AuthUser } from '../types.ts';
-import type { OwnedContentType } from '../features/content/types.ts';
+import type { OwnedContentTypeWithSettings } from '../api/content.ts';
 import { AuthPanel } from './AuthPanel.tsx';
 import {
+  isPlainLeftClick,
   isRouteAllowed,
   isViewAllowed,
   parseAdminRoute,
@@ -21,7 +22,12 @@ export {
   type ParsedRoute,
 };
 
-import { buildMenuTree, NavIcon, type NavigationGroup } from './AdminShellMenu';
+import {
+  buildMenuTree,
+  NavIcon,
+  type NavigationGroup,
+  type OptionsPageMenuItem,
+} from './AdminShellMenu';
 
 interface AdminShellProps {
   user: AuthUser | null;
@@ -37,8 +43,9 @@ interface AdminShellProps {
   onLogout: () => void;
   route: ParsedRoute;
   routeForbidden: boolean;
-  cptTypes: OwnedContentType[];
+  cptTypes: OwnedContentTypeWithSettings[];
   cptTaxonomies?: Record<string, Array<{ key: string; label: string }>>;
+  optionsPages?: OptionsPageMenuItem[];
   onNavigateHash: (hash: string) => void;
   hasUnsavedChanges: boolean;
   devMode?: boolean;
@@ -48,10 +55,13 @@ interface AdminShellProps {
   onSyncDevManifest?: () => void;
   contentContent: React.ReactNode;
   schemaSettingsContent: React.ReactNode;
+  contentStructureContent?: React.ReactNode;
+  optionsPageContent?: React.ReactNode;
   postsContent: React.ReactNode;
   pagesContent: React.ReactNode;
   patternsContent: React.ReactNode;
   mediaContent: React.ReactNode;
+  contactContent: React.ReactNode;
   taxonomyContent: React.ReactNode;
   dashboardContent: React.ReactNode;
   pluginsContent: React.ReactNode;
@@ -67,41 +77,55 @@ interface AdminShellProps {
 export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
-  route, routeForbidden, cptTypes, cptTaxonomies, onNavigateHash, hasUnsavedChanges,
+  route, routeForbidden, cptTypes, cptTaxonomies, optionsPages = [], onNavigateHash, hasUnsavedChanges,
   devMode = false, devTheme = null, devPlugins = [], devSyncing = false, onSyncDevManifest,
-  contentContent, schemaSettingsContent,
-  postsContent, pagesContent, patternsContent, mediaContent, taxonomyContent, dashboardContent,
+  contentContent, schemaSettingsContent, contentStructureContent, optionsPageContent,
+  postsContent, pagesContent, patternsContent, mediaContent, contactContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
   libraryContent, studioContent,
 }) => {
   const { __, _x, setSection } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const menuTree = buildMenuTree(cptTypes, user?.role === 'admin', cptTaxonomies);
+  const menuTree = buildMenuTree(cptTypes, user?.role === 'admin', cptTaxonomies, optionsPages);
+  const visibleMenu = menuTree.filter(item => !item.adminOnly || user?.role === 'admin');
   const activeParentId =
-    route.view === 'cpt' && route.typeKey
-      ? `cpt:${route.typeKey}`
-      : route.view === 'taxonomy'
-        ? (route.typeKey
-          ? `cpt:${route.typeKey}`
-          : route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
-            ? 'schema' : 'posts')
-        : route.view === 'profile'
-          ? 'users'
-          : route.view === 'studio' || route.view === 'studio-entry'
-            ? 'studio'
-            : route.view === 'themes'
-              ? 'themes'
-              : route.view === 'settings' && route.sub === 'content-types'
-                ? 'schema'
-                : route.view === 'settings' && route.sub === 'contact'
-                  ? 'contact'
-                  : route.view;
+    route.view === 'contact'
+      ? 'contact'
+      : route.view === 'cpt' && route.typeKey
+        ? `cpt:${route.typeKey}`
+        : route.view === 'content-structure'
+          ? 'schema'
+          : route.view === 'options-page'
+            ? (route.typeKey ? `options:${route.typeKey}` : 'schema')
+            : route.view === 'taxonomy'
+              ? (route.typeKey
+                ? `cpt:${route.typeKey}`
+                : route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
+                  ? 'schema' : 'posts')
+              : route.view === 'profile'
+                ? 'profile'
+                : route.view === 'studio' || route.view === 'studio-entry'
+                  ? (route.studioPanel === 'menus' ? 'menus' : 'studio')
+                  : route.view === 'themes'
+                    ? (route.sub === 'library' ? 'patterns' : 'themes')
+                    : route.view === 'settings' && route.sub === 'content-types'
+                      ? 'schema'
+                      : route.view === 'settings' && route.sub === 'contact'
+                        ? 'contact'
+                        : route.view;
+  const activeParent = visibleMenu.find(m => m.id === activeParentId);
+  const activeParentHasChildren = Boolean(
+    activeParent?.children?.some(c => !c.adminOnly || user?.role === 'admin'),
+  );
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>(() =>
+    activeParentHasChildren ? { [activeParentId]: true } : {},
+  );
 
   useEffect(() => {
-    setOpenMenuId(activeParentId);
-  }, [activeParentId]);
+    if (!activeParentHasChildren) return;
+    setExpandedMenus(prev => (prev[activeParentId] ? prev : { ...prev, [activeParentId]: true }));
+  }, [activeParentId, activeParentHasChildren]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -123,7 +147,6 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     setMobileOpen(false);
   };
 
-  const visibleMenu = menuTree.filter(item => !item.adminOnly || user?.role === 'admin');
   const groupOrder: { id: string; label: string | null; match: NavigationGroup | null }[] = [
     { id: 'dashboard', label: null, match: null },
     { id: 'content', label: __("Content"), match: 'content' },
@@ -134,22 +157,29 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     ...group,
     items: visibleMenu.filter(item => (item.group ?? null) === group.match),
   })).filter(group => group.items.length > 0);
-  const activeParent = visibleMenu.find(m => m.id === activeParentId);
   const activeGroupLabel = groupOrder.find(g => g.match === (activeParent?.group ?? null))?.label;
   // Legacy deep links keep rendering their canonical feature; highlighting
   // follows the resolved route, not a potentially obsolete URL spelling.
   const selectedNavHash =
-    route.view === 'themes' ? `#/appearance/${route.sub}` :
+    route.view === 'content-structure' ? `#/content-structure/${route.sub}` :
+    route.view === 'options-page' && route.typeKey ? `#/options/${encodeURIComponent(route.typeKey)}` :
+    route.view === 'themes'
+      ? (route.sub === 'install'
+        ? '#/appearance/themes/install'
+        : route.sub === 'library'
+          ? '#/appearance/library'
+          : '#/appearance/themes') :
     route.view === 'taxonomy'
       ? (route.typeKey && route.taxonomyKind
         ? `#/cpt/${encodeURIComponent(route.typeKey)}/taxonomy/${encodeURIComponent(route.taxonomyKind)}`
         : route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
-          ? '#/taxonomy/definitions' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
+          ? '#/content-structure/taxonomies' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
+    route.view === 'contact' ? '#/contact' :
     route.view === 'profile' ? '#/users/profile' :
-    route.view === 'studio' ? '#/studio' :
+    route.view === 'studio' ? (route.studioPanel === 'menus' ? '#/studio?panel=menus' : '#/studio') :
     route.view === 'tools' ? (route.sub === '404-log' ? '#/tools/redirects' : `#/tools/${route.sub}`) :
     route.view === 'settings'
-      ? (route.sub === 'content-types' ? '#/appearance/content-types' : `#/settings/${route.sub}`) :
+      ? (route.sub === 'content-types' ? '#/content-structure/content-types' : `#/settings/${route.sub}`) :
     route.view === 'media' ? '#/media' :
     route.view === 'plugins' ? (route.sub === 'install' ? '#/plugins/install' : '#/plugins') :
     route.view === 'users' ? (route.sub === 'new' ? '#/users/new' : '#/users') :
@@ -157,14 +187,15 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const activeChild = activeParent?.children?.find(child => child.hash === selectedNavHash);
   const subLabels: Record<string, string> = {
     list: __("List"), new: __("Add new"), edit: _x("Edit", "shell.edit"), library: __("Library"),
-    general: __("General"), multilingual: __("Multilingual"), reading: __("Homepage & posts"), permalinks: __("Permalinks"), seo: __("SEO"), contact: __("Contact"), smtp: __("Email notifications (SMTP)"),
-    'content-types': __("Content types & fields"), themes: __("Themes"), menus: __("Menus"),
+    general: __("General"), multilingual: __("Multilingual"), reading: __("Homepage & posts"), permalinks: __("Permalinks"), seo: __("Homepage SEO"), forms: __("Contact"), inbox: __("Contact"), contact: __("Contact"), smtp: __("Email notifications (SMTP)"),
+    'content-types': __("Content types"), taxonomies: __("Taxonomies"), 'field-groups': __("Field groups"), 'options-pages': __("Options pages"), view: __("Options page"),
+    themes: __("Themes"), menus: __("Menus"),
     definitions: __("Custom taxonomies"), terms: _x("Terms", "shell.terms"),
     options: __("Theme options"), health: __("System health"),
     'media-reconcile': __("Media reconciliation"), backup: __("Backup & restore"),
     redirects: __("Redirects & 404"), '404-log': __("Redirects & 404 Log"),
     search: __("Search index"),
-    install: __("Settings"), profile: __("My profile"),
+    install: __("Install"), profile: __("My profile"),
   };
   const pageTitle = routeForbidden
     ? __("403 Access denied")
@@ -248,46 +279,76 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 {group.label && <p className="od-nav-group-title">{group.label}</p>}
                 {group.items.map(item => {
                   const isActiveParent = activeParentId === item.id;
-                  const isExpanded = openMenuId === item.id || isActiveParent;
                   const visibleChildren = (item.children ?? []).filter(
                     c => !c.adminOnly || user?.role === 'admin',
                   );
+                  const hasChildren = visibleChildren.length > 0;
+                  const isExpanded = hasChildren && Boolean(expandedMenus[item.id]);
+                  const linkClass = 'od-nav-link w-full justify-between no-underline ' + (isActiveParent ? 'od-nav-link-active' : '');
                   return (
                     <div key={item.id} className="mb-0.5">
-                      <button
-                        type="button"
-                        className={'od-nav-link w-full justify-between ' + (isActiveParent ? 'od-nav-link-active' : '')}
-                        data-menu-id={item.id}
-                        aria-expanded={visibleChildren.length > 0 ? isExpanded : undefined}
-                        disabled={item.disabled}
-                        title={item.disabled ? __("Unavailable — will be enabled when the feature is complete") : undefined}
-                        onClick={() => {
-                          if (visibleChildren.length > 0) {
-                            setOpenMenuId(isExpanded ? null : item.id);
-                          }
-                          if (!item.disabled) navigate(item.hash);
-                        }}
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <NavIcon name={item.icon} />
-                          <span className="truncate">{item.label}</span>
-                          {item.disabled && <span className="od-nav-coming-soon">{__("Coming soon")}</span>}
-                        </span>
-                        {visibleChildren.length > 0 && (
-                          <span className="text-[11px] text-zinc-400" aria-hidden="true">
-                            {isExpanded ? '▾' : '▸'}
+                      {hasChildren || item.disabled ? (
+                        <button
+                          type="button"
+                          className={linkClass}
+                          data-menu-id={item.id}
+                          aria-expanded={hasChildren ? isExpanded : undefined}
+                          aria-controls={hasChildren ? `od-nav-sub-${item.id}` : undefined}
+                          disabled={item.disabled}
+                          title={item.disabled ? __("Unavailable — will be enabled when the feature is complete") : undefined}
+                          onClick={() => {
+                            if (item.disabled) return;
+                            if (hasChildren) {
+                              setExpandedMenus(prev => ({ ...prev, [item.id]: !isExpanded }));
+                            } else {
+                              navigate(item.hash);
+                            }
+                          }}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <NavIcon name={item.icon} />
+                            <span className="truncate">{item.label}</span>
+                            {item.disabled && <span className="od-nav-coming-soon">{__("Coming soon")}</span>}
                           </span>
-                        )}
-                      </button>
-                      {visibleChildren.length > 0 && isExpanded && (
-                        <div className="mt-0.5 ml-5 flex flex-col gap-0.5 border-l border-zinc-200 pl-2.5">
+                          {hasChildren && (
+                            <span className="text-[11px] text-zinc-400" aria-hidden="true">
+                              {isExpanded ? '▾' : '▸'}
+                            </span>
+                          )}
+                        </button>
+                      ) : (
+                        <a
+                          href={item.hash}
+                          className={linkClass}
+                          data-menu-id={item.id}
+                          aria-current={isActiveParent ? 'page' : undefined}
+                          onClick={e => {
+                            if (isPlainLeftClick(e)) {
+                              e.preventDefault();
+                              navigate(item.hash);
+                            }
+                          }}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <NavIcon name={item.icon} />
+                            <span className="truncate">{item.label}</span>
+                          </span>
+                        </a>
+                      )}
+                      {hasChildren && isExpanded && (
+                        <div id={`od-nav-sub-${item.id}`} className="mt-0.5 ml-5 flex flex-col gap-0.5 border-l border-zinc-200 pl-2.5">
                           {visibleChildren.map(sub => {
                             const isSubActive = selectedNavHash === sub.hash;
                             return (
                               sub.disabled
                                 ? <span key={sub.hash} className="od-nav-sub-disabled" aria-disabled="true">{__("{{label}} · Coming soon", { label: sub.label })}</span>
                                 : <a key={sub.hash} href={sub.hash}
-                                  onClick={e => { e.preventDefault(); navigate(sub.hash); }}
+                                  onClick={e => {
+                                    if (isPlainLeftClick(e)) {
+                                      e.preventDefault();
+                                      navigate(sub.hash);
+                                    }
+                                  }}
                                   aria-current={isSubActive ? 'page' : undefined}
                                   className={
                                   'rounded-md px-2 py-1 text-xs no-underline transition-colors ' +
@@ -305,7 +366,39 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               </div>)}
             </div>
           </nav>
-          <div className="od-sidebar-bottom px-4 py-2.5 text-[11px]">{__("OpenDash · Admin")}</div>
+          <div className="od-sidebar-bottom px-2.5 py-2">
+            {user ? (
+              <a
+                href="#/users/profile"
+                data-testid="sidebar-profile-link"
+                aria-current={route.view === 'profile' ? 'page' : undefined}
+                onClick={e => {
+                  if (isPlainLeftClick(e)) {
+                    e.preventDefault();
+                    navigate('#/users/profile');
+                  }
+                }}
+                className={
+                  'od-sidebar-profile flex items-center gap-2.5 rounded-md px-2 py-1.5 no-underline transition-colors ' +
+                  (route.view === 'profile'
+                    ? 'bg-blue-50 font-semibold text-od-accent'
+                    : 'text-zinc-700 hover:bg-zinc-200/60 hover:text-zinc-950')
+                }
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-bold uppercase text-zinc-700" aria-hidden="true">
+                  {(user.username.trim().charAt(0) || 'U').toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-semibold leading-tight text-zinc-900">{user.username}</span>
+                  <span className="block truncate text-[11px] leading-tight text-zinc-500">
+                    {user.role === 'admin' ? __("Admin") : __("Editor")} · {__("My profile")}
+                  </span>
+                </span>
+              </a>
+            ) : (
+              <div className="px-1.5 py-0.5 text-[11px]">{__("OpenDash · Admin")}</div>
+            )}
+          </div>
         </aside>
 
         <div className="od-workspace min-w-0">
@@ -349,6 +442,9 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 statusMessage={statusMessage} isError={isError} isProcessing={isProcessing}
                 onUsernameChange={onUsernameChange} onPasswordChange={onPasswordChange}
                 onSetup={onSetup} onLogin={onLogin} onLogout={onLogout}
+                profileHref="#/users/profile"
+                isProfileActive={route.view === 'profile'}
+                onNavigateProfile={() => navigate('#/users/profile')}
               />}
             </div>
           </header>
@@ -420,8 +516,9 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 <section className={user && route.view === 'posts' ? `od-editor-panel${postsLegacy}` : 'hidden'} aria-label={__("Posts")} aria-hidden={!user || route.view !== 'posts'}>{postsContent}</section>
                 <section className={user && route.view === 'pages' ? `od-editor-panel${pagesLegacy}` : 'hidden'} aria-label={__("Pages")} aria-hidden={!user || route.view !== 'pages'}>{pagesContent}</section>
                 {user && route.view === 'media' && mediaContent}
+                {user?.role === 'admin' && route.view === 'contact' && <div className="od-admin-card min-w-0">{contactContent}</div>}
                 {user && route.view === 'taxonomy' && <div className="od-admin-card min-w-0 max-w-full">{taxonomyContent}</div>}
-                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'themes' && <div className="od-admin-card min-w-0">{themesContent}</div>}
+                {user?.role === 'admin' && route.view === 'themes' && (route.sub === 'themes' || route.sub === 'install') && <div className="od-admin-card min-w-0">{themesContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' && <div className="od-legacy-scope">{libraryContent}</div>}
                 {user?.role === 'admin' && route.view === 'patterns' && <div className="od-legacy-scope">{patternsContent}</div>}
 
@@ -435,6 +532,14 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 </section>
                 {user && route.view === 'profile' && <div className="od-admin-card min-w-0">{profileContent}</div>}
                 {user?.role === 'admin' && route.view === 'tools' && <div className="od-admin-card min-w-0">{toolsContent}</div>}
+                {user?.role === 'admin' && route.view === 'content-structure' && (
+                  <div className="od-admin-card min-w-0">
+                    {contentStructureContent ?? schemaSettingsContent}
+                  </div>
+                )}
+                {user && route.view === 'options-page' && (
+                  <div className="od-admin-card min-w-0">{optionsPageContent}</div>
+                )}
                 {user?.role === 'admin' && route.view === 'settings' && (
                   <div className="od-admin-card min-w-0">
                     {route.sub === 'content-types' ? schemaSettingsContent : settingsContent}

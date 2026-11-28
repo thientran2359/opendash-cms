@@ -6,12 +6,14 @@ fn build_public_theme_context_includes_all_strict_base_keys() {
     let opts = BTreeMap::new();
     let assets = BTreeMap::new();
     let menus = BTreeMap::new();
+    let custom_opts = BTreeMap::new();
     let pagination = PaginationView::empty();
     let search = SearchView::inactive("/");
     let ctx = build_public_theme_context(PublicThemeContextInput {
         site: &DEFAULT_SITE,
         site_options: &site_opts,
         options: &opts,
+        custom_options: &custom_opts,
         theme_assets: &assets,
         menus: &menus,
         route_kind: "home",
@@ -25,6 +27,7 @@ fn build_public_theme_context_includes_all_strict_base_keys() {
         related_entries: &[],
         recent_posts: &[],
         taxonomy: None,
+        term: None,
         content_type: None,
         entry: None,
         search: &search,
@@ -35,6 +38,7 @@ fn build_public_theme_context_includes_all_strict_base_keys() {
         "site_options",
         "options",
         "theme_options",
+        "custom_options",
         "theme_assets",
         "menus",
         "route",
@@ -47,6 +51,7 @@ fn build_public_theme_context_includes_all_strict_base_keys() {
         "related_entries",
         "recent_posts",
         "taxonomy",
+        "term",
         "content_type",
         "entry",
         "search",

@@ -154,11 +154,18 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
                 {
                     "key": "portfolio",
                     "label": "Portfolio",
+                    "taxonomies": ["category", "tag"]
+                }
+            ],
+            "field_groups": [
+                {
+                    "local_key": "portfolio_fields",
+                    "title": "Portfolio Fields",
+                    "target_types": ["portfolio"],
                     "fields": [
                         { "key": "client", "label": "Client", "type": "text", "required": true },
                         { "key": "budget", "label": "Budget", "type": "number", "required": false }
-                    ],
-                    "taxonomies": ["category", "tag"]
+                    ]
                 }
             ]
         },
@@ -568,12 +575,19 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
                 {
                     "key": "portfolio",
                     "label": "Portfolio",
+                    "taxonomies": ["category", "tag"]
+                }
+            ],
+            "field_groups": [
+                {
+                    "local_key": "portfolio_fields",
+                    "title": "Portfolio Fields",
+                    "target_types": ["portfolio"],
                     "fields": [
                         { "key": "client", "label": "Client", "type": "text", "required": true },
                         { "key": "budget", "label": "Budget", "type": "number", "required": false },
                         { "key": "year", "label": "Year", "type": "number", "required": false }
-                    ],
-                    "taxonomies": ["category", "tag"]
+                    ]
                 }
             ]
         },

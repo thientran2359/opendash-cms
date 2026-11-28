@@ -7,6 +7,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
     mut scopes: UrlScopeStack,
     is_part: bool,
     is_full_doctype_doc: bool,
+    is_taxonomy_template: bool,
     policy: &ThemeUrlPolicy,
     allow_trusted_theme_markup: bool,
     allow_search_form: bool,
@@ -19,6 +20,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
             scopes,
             is_part,
             is_full_doctype_doc,
+            is_taxonomy_template,
             policy,
             allow_trusted_theme_markup,
             allow_search_form,
@@ -258,6 +260,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 scopes.clone(),
                 is_part,
                 is_full_doctype_doc,
+                is_taxonomy_template,
                 policy,
                 allow_trusted_theme_markup,
                 allow_search_form,
@@ -269,6 +272,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 scopes,
                 is_part,
                 is_full_doctype_doc,
+                is_taxonomy_template,
                 policy,
                 allow_trusted_theme_markup,
                 allow_search_form,
@@ -304,6 +308,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 scopes,
                 is_part,
                 is_full_doctype_doc,
+                is_taxonomy_template,
                 policy,
                 allow_trusted_theme_markup,
                 allow_search_form,
@@ -349,6 +354,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 scopes.clone(),
                 is_part,
                 is_full_doctype_doc,
+                is_taxonomy_template,
                 policy,
                 allow_trusted_theme_markup,
                 allow_search_form,
@@ -382,6 +388,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 scopes.clone(),
                 is_part,
                 is_full_doctype_doc,
+                is_taxonomy_template,
                 policy,
                 allow_trusted_theme_markup,
                 allow_search_form,
@@ -411,6 +418,9 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                 }
             }
             if target_idents.iter().any(|id| id == "term") {
+                if is_taxonomy_template {
+                    return Err("C-SEC cấm gán lại biến ngữ cảnh `term` trong template taxonomy.");
+                }
                 let valid_term_loop = matches!(&f.target, Expr::Var(v) if v.id == "term")
                     && matches!(
                         iter_kind,
@@ -446,6 +456,7 @@ pub(crate) fn walk_theme_stmt_with_url_scopes(
                     loop_scopes.clone(),
                     is_part,
                     is_full_doctype_doc,
+                    is_taxonomy_template,
                     policy,
                     allow_trusted_theme_markup,
                     allow_search_form,

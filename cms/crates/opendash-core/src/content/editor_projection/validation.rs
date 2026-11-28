@@ -66,13 +66,3 @@ pub(crate) fn valid_iso_date(value: &str) -> bool {
     };
     year > 0 && day > 0 && day <= days_in_month
 }
-
-/// Compatibility helper used by legacy callers.
-pub fn check_base_fields_compatibility(
-    existing: &[crate::field_schema::FieldSpec],
-    incoming: &[crate::field_schema::FieldSpec],
-    has_existing_entries: bool,
-) -> Result<(), &'static str> {
-    crate::field_schema::check_schema_compatibility(existing, incoming, has_existing_entries)
-        .map_err(|_| "incompatible_schema_change: Không thể thay đổi schema không tương thích khi đã có dữ liệu.")
-}

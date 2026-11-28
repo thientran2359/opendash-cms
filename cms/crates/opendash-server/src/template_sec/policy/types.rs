@@ -120,6 +120,8 @@ pub struct ThemeUrlPolicy {
     pub(crate) site_options_tree: BTreeMap<String, FieldTemplateNode>,
     pub(crate) options_tree: BTreeMap<String, FieldTemplateNode>,
     pub(crate) entry_field_nodes: BTreeMap<String, FieldTemplateNode>,
+    pub(crate) taxonomy_term_nodes: BTreeMap<String, FieldTemplateNode>,
+    pub(crate) custom_options_nodes: BTreeMap<String, BTreeMap<String, FieldTemplateNode>>,
 }
 
 impl ThemeUrlPolicy {
@@ -135,6 +137,8 @@ impl ThemeUrlPolicy {
             site_options_tree: BTreeMap::new(),
             options_tree: BTreeMap::new(),
             entry_field_nodes: BTreeMap::new(),
+            taxonomy_term_nodes: BTreeMap::new(),
+            custom_options_nodes: BTreeMap::new(),
         }
     }
 
@@ -177,12 +181,15 @@ impl ThemeUrlPolicy {
             site_options_tree,
             options_tree,
             entry_field_nodes: BTreeMap::new(),
+            taxonomy_term_nodes: BTreeMap::new(),
+            custom_options_nodes: BTreeMap::new(),
         }
     }
 
     pub(crate) fn without_cpt_entry_fields(&self) -> Self {
         let mut copy = self.clone();
         copy.entry_field_nodes.clear();
+        copy.taxonomy_term_nodes.clear();
         copy
     }
 
@@ -203,6 +210,65 @@ impl ThemeUrlPolicy {
         copy
     }
 
+    pub(crate) fn with_taxonomy_term_fields(
+        &self,
+        fields: &[opendash_core::field_schema::FieldSpec],
+    ) -> Self {
+        let mut copy = self.clone();
+        copy.taxonomy_term_nodes.clear();
+        let vis = opendash_core::field_schema::HydrationVisibility::ContentPublic {
+            max_view_role: opendash_core::content::FieldRole::Editor,
+        };
+        for spec in fields {
+            if let Some(node) = field_template_node_from_spec_with_visibility(spec, vis) {
+                copy.taxonomy_term_nodes.insert(spec.key.clone(), node);
+            }
+        }
+        copy
+    }
+
+    pub(crate) fn with_custom_options_pages(
+        &self,
+        pages: &BTreeMap<String, Vec<opendash_core::field_schema::FieldSpec>>,
+    ) -> Self {
+        let mut copy = self.clone();
+        copy.custom_options_nodes.clear();
+        let vis = opendash_core::field_schema::HydrationVisibility::OptionsPublicOnly;
+        for (page_key, specs) in pages {
+            let mut nodes = BTreeMap::new();
+            for spec in specs {
+                if let Some(node) = field_template_node_from_spec_with_visibility(spec, vis) {
+                    nodes.insert(spec.key.clone(), node);
+                }
+            }
+            copy.custom_options_nodes.insert(page_key.clone(), nodes);
+        }
+        copy
+    }
+
+    pub(crate) fn with_extra_site_and_theme_options(
+        &self,
+        extra_site: &[opendash_core::field_schema::FieldSpec],
+        extra_theme: &[opendash_core::field_schema::FieldSpec],
+    ) -> Self {
+        let mut copy = self.clone();
+        let vis = opendash_core::field_schema::HydrationVisibility::OptionsPublicOnly;
+        for spec in extra_site {
+            if let Some(node) = field_template_node_from_spec_with_visibility(spec, vis) {
+                copy.site_options_tree
+                    .entry(spec.key.clone())
+                    .or_insert_with(|| node.clone());
+                copy.options_tree.entry(spec.key.clone()).or_insert(node);
+            }
+        }
+        for spec in extra_theme {
+            if let Some(node) = field_template_node_from_spec_with_visibility(spec, vis) {
+                copy.options_tree.entry(spec.key.clone()).or_insert(node);
+            }
+        }
+        copy
+    }
+
     pub(crate) fn allows_cite_href(&self, expr: &str) -> bool {
         self.permitted_href_expressions.contains(expr)
     }
@@ -216,10 +282,27 @@ impl ThemeUrlPolicy {
     }
 
     pub(crate) fn entry_fields_fingerprint(&self) -> String {
-        if self.entry_field_nodes.is_empty() {
-            return String::new();
+        if self.entry_field_nodes.is_empty()
+            && self.taxonomy_term_nodes.is_empty()
+            && self.custom_options_nodes.is_empty()
+        {
+            return format!(
+                "so={}|to={}",
+                self.site_options_tree.len(),
+                self.options_tree.len()
+            );
         }
-        format!("{:?}", self.entry_field_nodes)
+        use sha2::{Digest, Sha256};
+        let payload = format!(
+            "{:?}|{:?}|{:?}|{:?}|{:?}",
+            self.entry_field_nodes,
+            self.taxonomy_term_nodes,
+            self.custom_options_nodes,
+            self.site_options_tree,
+            self.options_tree
+        );
+        let digest = Sha256::digest(payload.as_bytes());
+        format!("{digest:x}")
     }
 }
 

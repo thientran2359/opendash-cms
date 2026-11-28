@@ -28,13 +28,20 @@
         "format": "link",
         "order": 15
       }
-    ],
-    "term_panels": [
+    ]
+  },
+  "declarations": {
+    "field_groups": [
       {
         "local_key": "theme_notes",
-        "label": "Theme Notes",
-        "kind": "category",
-        "order": 10,
+        "title": "Theme Notes",
+        "location": [
+          [
+            { "param": "taxonomy_term", "op": "eq", "value": "category" },
+            { "param": "user_role", "op": "eq", "value": "admin" }
+          ]
+        ],
+        "presentation": { "region": "main_bottom", "order": 10 },
         "fields": [
           {
             "key": "caption",

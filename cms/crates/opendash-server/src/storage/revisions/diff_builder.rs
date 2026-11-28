@@ -131,6 +131,14 @@ pub(super) async fn build_revision_diff(
             after: to.custom_template_key.clone(),
         });
     let seo_diff = build_seo_diff(from.seo.as_ref(), to.seo.as_ref());
+    let parent_diff = (from.parent_id != to.parent_id).then(|| ScalarChange {
+        before: from.parent_id,
+        after: to.parent_id,
+    });
+    let menu_order_diff = (from.menu_order != to.menu_order).then(|| ScalarChange {
+        before: from.menu_order,
+        after: to.menu_order,
+    });
 
     Ok(RevisionDiffPayload {
         title_diff,
@@ -142,6 +150,8 @@ pub(super) async fn build_revision_diff(
         layout_diff,
         template_diff,
         seo_diff,
+        parent_diff,
+        menu_order_diff,
         has_hidden_admin_changes,
     })
 }

@@ -19,6 +19,7 @@ pub(crate) const RESERVED_CONTEXT_VARS: &[&str] = &[
     "options",
     "site_options",
     "theme_options",
+    "custom_options",
     "theme_assets",
     "site",
     "menus",
@@ -45,65 +46,84 @@ pub(crate) const RESERVED_CONTEXT_VARS: &[&str] = &[
 ];
 
 pub(crate) fn binds_reserved_context(expr: &Expr<'_>) -> bool {
+    binds_reserved_context_for(expr, false)
+}
+
+pub(crate) fn binds_reserved_context_for(expr: &Expr<'_>, is_taxonomy_template: bool) -> bool {
     match expr {
-        Expr::Var(var) => RESERVED_CONTEXT_VARS.contains(&var.id),
-        Expr::Tuple(tuple) => tuple.items.iter().any(binds_reserved_context),
-        Expr::List(list) => list.items.iter().any(binds_reserved_context),
+        Expr::Var(var) => {
+            RESERVED_CONTEXT_VARS.contains(&var.id) || (is_taxonomy_template && var.id == "term")
+        }
+        Expr::Tuple(tuple) => tuple
+            .items
+            .iter()
+            .any(|item| binds_reserved_context_for(item, is_taxonomy_template)),
+        Expr::List(list) => list
+            .items
+            .iter()
+            .any(|item| binds_reserved_context_for(item, is_taxonomy_template)),
         // Attribute and subscript assignments are forbidden rather than
         // allowing a mutable binding to masquerade as a reserved context root.
-        Expr::GetAttr(attr) => binds_reserved_context(&attr.expr),
-        Expr::GetItem(item) => binds_reserved_context(&item.expr),
+        Expr::GetAttr(attr) => binds_reserved_context_for(&attr.expr, is_taxonomy_template),
+        Expr::GetItem(item) => binds_reserved_context_for(&item.expr, is_taxonomy_template),
         _ => false,
     }
 }
 
 pub(crate) fn reject_reserved_context_rebinding(stmt: &Stmt<'_>) -> Result<(), &'static str> {
+    reject_reserved_context_rebinding_for(stmt, false)
+}
+
+pub(crate) fn reject_reserved_context_rebinding_for(
+    stmt: &Stmt<'_>,
+    is_taxonomy_template: bool,
+) -> Result<(), &'static str> {
     let forbidden = || Err("C-SEC cấm gán lại biến ngữ cảnh hệ thống trong theme.");
     match stmt {
         Stmt::Template(t) => t
             .children
             .iter()
-            .try_for_each(reject_reserved_context_rebinding),
+            .try_for_each(|s| reject_reserved_context_rebinding_for(s, is_taxonomy_template)),
         Stmt::ForLoop(f) => {
-            if binds_reserved_context(&f.target) {
+            if binds_reserved_context_for(&f.target, is_taxonomy_template) {
                 return forbidden();
             }
             f.body
                 .iter()
                 .chain(&f.else_body)
-                .try_for_each(reject_reserved_context_rebinding)
+                .try_for_each(|s| reject_reserved_context_rebinding_for(s, is_taxonomy_template))
         }
         Stmt::WithBlock(w) => {
             if w.assignments
                 .iter()
-                .any(|(key, _)| binds_reserved_context(key))
+                .any(|(key, _)| binds_reserved_context_for(key, is_taxonomy_template))
             {
                 return forbidden();
             }
             w.body
                 .iter()
-                .try_for_each(reject_reserved_context_rebinding)
+                .try_for_each(|s| reject_reserved_context_rebinding_for(s, is_taxonomy_template))
         }
         Stmt::Set(s) => {
-            if binds_reserved_context(&s.target) {
+            if binds_reserved_context_for(&s.target, is_taxonomy_template) {
                 forbidden()
             } else {
                 Ok(())
             }
         }
         Stmt::SetBlock(sb) => {
-            if binds_reserved_context(&sb.target) {
+            if binds_reserved_context_for(&sb.target, is_taxonomy_template) {
                 return forbidden();
             }
             sb.body
                 .iter()
-                .try_for_each(reject_reserved_context_rebinding)
+                .try_for_each(|s| reject_reserved_context_rebinding_for(s, is_taxonomy_template))
         }
         Stmt::IfCond(i) => i
             .true_body
             .iter()
             .chain(&i.false_body)
-            .try_for_each(reject_reserved_context_rebinding),
+            .try_for_each(|s| reject_reserved_context_rebinding_for(s, is_taxonomy_template)),
         _ => Ok(()),
     }
 }

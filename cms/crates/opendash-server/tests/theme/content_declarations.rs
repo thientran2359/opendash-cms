@@ -188,6 +188,12 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                 "content_types": [{
                     "key": "portfolio",
                     "label": "Portfolio",
+                    "taxonomies": ["category", "tag"]
+                }],
+                "field_groups": [{
+                    "local_key": "portfolio_fields",
+                    "title": "Portfolio Fields",
+                    "target_types": ["portfolio"],
                     "fields": [
                         { "key": "client", "label": "Client", "type": "text", "required": false },
                         {
@@ -200,8 +206,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                                 { "value": "live", "label": "Live" }
                             ]
                         }
-                    ],
-                    "taxonomies": ["category", "tag"]
+                    ]
                 }]
             }
         }),
@@ -312,6 +317,12 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                 "content_types": [{
                     "key": "portfolio",
                     "label": "Portfolio Showcase",
+                    "taxonomies": ["category", "tag"]
+                }],
+                "field_groups": [{
+                    "local_key": "portfolio_fields",
+                    "title": "Portfolio Fields",
+                    "target_types": ["portfolio"],
                     "fields": [
                         { "key": "client", "label": "Client Name", "type": "text", "required": false },
                         {
@@ -325,8 +336,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
                             ]
                         },
                         { "key": "summary", "label": "Summary", "type": "textarea", "required": false }
-                    ],
-                    "taxonomies": ["category", "tag"]
+                    ]
                 }]
             }
         }),
@@ -351,7 +361,12 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
             "declarations": {
                 "content_types": [{
                     "key": "portfolio",
-                    "label": "Portfolio",
+                    "label": "Portfolio"
+                }],
+                "field_groups": [{
+                    "local_key": "portfolio_fields",
+                    "title": "Portfolio Fields",
+                    "target_types": ["portfolio"],
                     "fields": [
                         { "key": "client", "label": "Client", "type": "number", "required": false },
                         {
@@ -392,7 +407,12 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
             "declarations": {
                 "content_types": [{
                     "key": "portfolio",
-                    "label": "Portfolio",
+                    "label": "Portfolio"
+                }],
+                "field_groups": [{
+                    "local_key": "portfolio_fields",
+                    "title": "Portfolio Fields",
+                    "target_types": ["portfolio"],
                     "fields": [
                         { "key": "client", "label": "Client", "type": "text", "required": false },
                         {
@@ -434,7 +454,12 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
             "declarations": {
                 "content_types": [{
                     "key": "portfolio",
-                    "label": "Portfolio",
+                    "label": "Portfolio"
+                }],
+                "field_groups": [{
+                    "local_key": "portfolio_fields",
+                    "title": "Portfolio Fields",
+                    "target_types": ["portfolio"],
                     "fields": [
                         { "key": "client", "label": "Client", "type": "text", "required": false },
                         {

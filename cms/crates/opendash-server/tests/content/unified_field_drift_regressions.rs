@@ -223,28 +223,38 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
     let (editor, editor_csrf) =
         login(&client, &site, "editor_term", "Local-Editor-Term-123456!").await;
 
-    // Seed plugin + two term panels: one UI-only (skipped) and one ordered panel
-    sqlx::query("INSERT INTO plugins(id,version,name,manifest_json,wasm_blob) VALUES ('term-ext','1.0.0','TermExt','{}',X'00')")
-        .execute(&db)
+    // Create two Term field groups attached to `category`: one inactive (skipped) and one active ordered group.
+    let inactive_fg = client
+        .post(format!("{}/api/admin/content-field-groups", site.base))
+        .header("Cookie", &admin)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &admin_csrf)
+        .json(&json!({
+            "local_key": "ui_only",
+            "title": "UI Only Inactive",
+            "active": false,
+            "location": [[{"param": "taxonomy_term", "op": "eq", "value": "category"}]],
+            "presentation": {"region": "main_bottom", "order": 1, "collapsible": true},
+            "fields": [
+                {"key": "info_msg", "label": "Ghi chú", "type": "message", "body": "Thông tin bổ sung"},
+                {"key": "inactive_note", "label": "Ghi chú phụ", "type": "text"}
+            ]
+        }))
+        .send()
         .await
         .unwrap();
-    let ui_only_decl = json!({
-        "kind": "term_panel",
-        "config": {
-            "local_key": "ui_only",
-            "label": "UI Only",
-            "kind": "category",
-            "order": 1,
-            "fields": [{"key": "info_msg", "label": "Ghi chú", "type": "message", "body": "Thông tin bổ sung"}]
-        }
-    });
-    let ordered_decl = json!({
-        "kind": "term_panel",
-        "config": {
+    assert_eq!(inactive_fg.status(), StatusCode::CREATED);
+
+    let ordered_fg = client
+        .post(format!("{}/api/admin/content-field-groups", site.base))
+        .header("Cookie", &admin)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &admin_csrf)
+        .json(&json!({
             "local_key": "seo_meta",
-            "label": "Mở rộng",
-            "kind": "category",
-            "order": 2,
+            "title": "Mở rộng",
+            "location": [[{"param": "taxonomy_term", "op": "eq", "value": "category"}]],
+            "presentation": {"region": "main_bottom", "order": 2, "collapsible": true},
             "fields": [
                 {"key": "tab_intro", "label": "Tổng quan", "type": "tab"},
                 {"key": "zeta_note", "label": "Ghi chú Z", "type": "text", "acl": {"min_view_role": "editor", "min_edit_role": "editor"}},
@@ -252,16 +262,11 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
                 {"key": "hero_img", "label": "Ảnh", "type": "media", "media_kind": "image"},
                 {"key": "ref_post", "label": "Bài ghim", "type": "entry_ref", "target_types": ["post"]}
             ]
-        }
-    });
-    for (lk, decl) in [("ui_only", ui_only_decl), ("seo_meta", ordered_decl)] {
-        sqlx::query("INSERT INTO admin_extensions(owner_kind,owner_id,local_key,declaration_json) VALUES ('plugin','term-ext',?,?)")
-            .bind(lk)
-            .bind(decl.to_string())
-            .execute(&db)
-            .await
-            .unwrap();
-    }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ordered_fg.status(), StatusCode::CREATED);
 
     let cfg_resp = client
         .get(format!(
@@ -274,10 +279,9 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
         .unwrap();
     assert_eq!(cfg_resp.status(), StatusCode::OK);
     let cfg: Value = cfg_resp.json().await.unwrap();
-    assert_eq!(cfg["panels"].as_array().unwrap().len(), 1);
-    let panel = &cfg["panels"][0];
-    let panel_key = "plugin/term-ext/seo_meta";
-    assert_eq!(panel["key"], panel_key);
+    assert_eq!(cfg["groups"].as_array().unwrap().len(), 1);
+    let panel = &cfg["groups"][0];
+    assert_eq!(panel["group_id"], "user:seo_meta");
     let keys: Vec<&str> = panel["fields"]
         .as_array()
         .unwrap()
@@ -304,7 +308,7 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
         .header("Origin", &site.base)
         .header("X-CSRF-Token", &editor_csrf)
         .header("If-Match", format!("\"v{term_ver}\""))
-        .json(&json!({"extensions": {panel_key: {"admin_lock": "x"}}, "schema_token": "0".repeat(64)}))
+        .json(&json!({"values": {"admin_lock": "x"}, "schema_token": format!("sha256:{}", "0".repeat(64))}))
         .send()
         .await
         .unwrap();
@@ -317,13 +321,13 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
         .header("Origin", &site.base)
         .header("X-CSRF-Token", &editor_csrf)
         .header("If-Match", format!("\"v{term_ver}\""))
-        .json(&json!({"extensions": {panel_key: {"ref_post": en_post_id}}, "schema_token": schema_token}))
+        .json(&json!({"values": {"ref_post": en_post_id}, "schema_token": schema_token}))
         .send()
         .await
         .unwrap();
     assert_eq!(wrong_loc.status(), StatusCode::BAD_REQUEST);
 
-    // Save valid term extension values (image media + same-locale EntryRef + text).
+    // Save valid term field group values (image media + same-locale EntryRef + text).
     let ok_patch = client
         .patch(format!("{}/api/admin/taxonomy/terms/{term_id}", site.base))
         .header("Cookie", &editor)
@@ -331,7 +335,7 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
         .header("X-CSRF-Token", &editor_csrf)
         .header("If-Match", format!("\"v{term_ver}\""))
         .json(&json!({
-            "extensions": {panel_key: {"zeta_note": "first", "hero_img": img_id, "ref_post": vi_post_id}},
+            "values": {"zeta_note": "first", "hero_img": img_id, "ref_post": vi_post_id},
             "schema_token": schema_token
         }))
         .send()
@@ -342,9 +346,9 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
         .as_i64()
         .unwrap();
 
-    // Inject stale key into term_extension_values JSON -> subsequent valid edit still succeeds.
+    // Inject stale key into taxonomy_terms.values_json -> subsequent valid edit still succeeds.
     sqlx::query(
-        "UPDATE term_extension_values SET values_json = json_set(values_json, '$.legacy_removed_key', 'stale') WHERE term_id = ? AND local_key = 'seo_meta'",
+        "UPDATE taxonomy_terms SET values_json = json_set(values_json, '$.legacy_removed_key', 'stale') WHERE id = ?",
     )
     .bind(term_id)
     .execute(&db)
@@ -357,7 +361,7 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
         .header("X-CSRF-Token", &editor_csrf)
         .header("If-Match", format!("\"v{term_ver}\""))
         .json(&json!({
-            "extensions": {panel_key: {"zeta_note": "second"}},
+            "values": {"zeta_note": "second"},
             "schema_token": schema_token
         }))
         .send()
@@ -365,7 +369,7 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
         .unwrap();
     assert_eq!(ok_after_stale.status(), StatusCode::OK);
 
-    // F-16: Deleting media pinned inside term_extension_values fails with 409 pin conflict.
+    // F-16: Deleting media pinned inside taxonomy_terms.values_json/term_field_media_refs fails with 409 pin conflict.
     let del_pinned = client
         .delete(format!("{}/api/admin/media/{img_id}", site.base))
         .header("Cookie", &admin)
@@ -377,7 +381,7 @@ async fn f02_f16_term_extensions_order_read_only_acl_validation_and_media_pin() 
         .unwrap();
     assert_eq!(del_pinned.status(), StatusCode::CONFLICT);
     let pin_body: Value = del_pinned.json().await.unwrap();
-    assert_eq!(pin_body["pins"]["pins"][0]["source_kind"], "term_extension");
+    assert_eq!(pin_body["pins"]["pins"][0]["source_kind"], "term_meta");
 }
 
 #[tokio::test]
@@ -454,7 +458,21 @@ async fn f08_f11_entry_relational_refs_across_groups_and_private_context_options
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
             "key": "case_study",
-            "label": "Case Study",
+            "label": "Case Study"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_cpt.status(), StatusCode::CREATED);
+    let create_base_fg = client
+        .post(format!("{}/api/admin/content-field-groups", site.base))
+        .header("Cookie", &admin)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .json(&json!({
+            "local_key": "case_base_fields",
+            "title": "Case Base Fields",
+            "target_types": ["case_study"],
             "fields": [
                 {"key": "featured_post", "label": "Bài nổi bật", "type": "entry_ref", "target_types": ["post"]},
                 {"key": "secret_note", "label": "Ghi chú riêng", "type": "text", "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "private"}}
@@ -463,7 +481,7 @@ async fn f08_f11_entry_relational_refs_across_groups_and_private_context_options
         .send()
         .await
         .unwrap();
-    assert_eq!(create_cpt.status(), StatusCode::CREATED);
+    assert_eq!(create_base_fg.status(), StatusCode::CREATED);
 
     let create_fg = client
         .post(format!("{}/api/admin/content-field-groups", site.base))

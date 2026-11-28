@@ -309,8 +309,7 @@ async fn s01_writer_hooks_sync_fts5_across_entry_lifecycle_and_schema_mutations(
             .json(&json!({
                 "key": "guide",
                 "label": "Guide",
-                "settings": {"public": true, "has_archive": true, "publication": "immediate", "supports": ["editor"]},
-                "fields": [{"key": "body", "label": "Body", "type": "richtext"}]
+                "settings": {"public": true, "has_archive": true, "publication": "immediate", "supports": ["editor"]}
             }))
             .send()
             .await
@@ -488,8 +487,7 @@ async fn s01_writer_hooks_sync_fts5_across_entry_lifecycle_and_schema_mutations(
             .json(&json!({
                 "key": "guide",
                 "label": "Guide",
-                "settings": {"public": false, "has_archive": false, "publication": "immediate", "supports": ["editor"]},
-                "fields": [{"key": "body", "label": "Body", "type": "richtext"}]
+                "settings": {"public": false, "has_archive": false, "publication": "immediate", "supports": ["editor"]}
             }))
             .send()
             .await
@@ -508,8 +506,7 @@ async fn s01_writer_hooks_sync_fts5_across_entry_lifecycle_and_schema_mutations(
             .json(&json!({
                 "key": "guide",
                 "label": "Guide",
-                "settings": {"public": true, "has_archive": true, "publication": "immediate", "supports": ["editor"]},
-                "fields": [{"key": "body", "label": "Body", "type": "richtext"}]
+                "settings": {"public": true, "has_archive": true, "publication": "immediate", "supports": ["editor"]}
             }))
             .send()
             .await

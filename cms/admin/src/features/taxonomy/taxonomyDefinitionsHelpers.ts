@@ -1,6 +1,11 @@
 import type { AuthUser } from '../../types.ts';
-import type { TaxonomyDefinition } from '../../api/taxonomy.ts';
+import type {
+  TaxonomyDefinition,
+  TaxonomySelectionMode,
+  TaxonomySettings,
+} from '../../api/taxonomy.ts';
 import { ApiClientError, requestJson } from '../../api/client.ts';
+import type { TermPickerStyle } from '../../fields/types.ts';
 import { __ } from '../../i18n/index.tsx';
 
 export type TaxonomyDefsTabId = 'definitions' | 'eligibility';
@@ -13,9 +18,27 @@ export interface Props {
   onApiError: (error: unknown, fallback: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
   onNavigateHash: (hash: string) => void;
+  onDefinitionsChanged?: () => void;
 }
 
-export interface FormValues { key: string; label: string; hierarchical: boolean; public: boolean }
+export interface FormValues {
+  key: string;
+  label: string;
+  hierarchical: boolean;
+  public: boolean;
+  rewrite_base: string;
+  singular_label: string;
+  description: string;
+  selection_mode: TaxonomySelectionMode;
+  picker_style: TermPickerStyle;
+  default_term_id: number | null;
+  required_on_publish: boolean;
+  editor_can_create_terms: boolean;
+  show_in_menu: boolean;
+  show_admin_column: boolean;
+  content_types: string[];
+}
+
 export interface DefinitionsDraft {
   activeKey: string;
   form: FormValues;
@@ -29,43 +52,97 @@ export interface DefinitionsDraft {
   eligibilityConflict: boolean;
 }
 
-// Session-only memory. A 401 unmounts AdminShell's taxonomy screen; retaining
-// drafts here avoids browser storage and prevents another account/site reading
-// an old form. App must pass its authenticated siteInstanceId to enable it.
 export const definitionDrafts = new Map<string, DefinitionsDraft>();
 export const draftScope = (siteInstanceId: string | undefined, user: AuthUser | null): string | null =>
   siteInstanceId && siteInstanceId !== 'default-site' && user
     ? JSON.stringify([siteInstanceId, user.id, user.role]) : null;
 export const keysEqual = (a: string[], b: string[]): boolean =>
   [...a].sort().join('\u0000') === [...b].sort().join('\u0000');
+
 export interface ConfiguredTaxonomies {
   taxonomies: string[];
   has_override: boolean;
   effective: string[];
-  /** CPT version from the same SQLite read transaction as taxonomies. */
   type_version: number;
 }
+
 export const getConfiguredTaxonomies = async (typeKey: string, signal?: AbortSignal): Promise<ConfiguredTaxonomies> => {
   const configured: ConfiguredTaxonomies = await requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
     signal, defaultErrorMessage: __("Could not load saved taxonomy configuration."),
   });
-  // Fail closed if the server has not deployed the atomic snapshot contract.
   if (!Number.isSafeInteger(configured.type_version) || configured.type_version < 1) {
     throw new Error(__("The server did not return type_version from the same taxonomy snapshot; saving is unsafe."));
   }
   return configured;
 };
-// Both the site override and the provider defaults are persisted selections.
-// `effective` omits inactive providers, which would otherwise be silently
-// lost when a user saves a new explicit override.
-export const selectedKeys = (config: ConfiguredTaxonomies): string[] =>
-  config.taxonomies;
 
-export const blank = (): FormValues => ({ key: '', label: '', hierarchical: false, public: true });
-export const fromDefinition = (definition: TaxonomyDefinition): FormValues => ({
-  key: definition.key, label: definition.label,
-  hierarchical: definition.hierarchical, public: definition.public,
+export const selectedKeys = (config: ConfiguredTaxonomies): string[] => config.taxonomies;
+
+export const DEFAULT_TAXONOMY_SETTINGS: Required<TaxonomySettings> = {
+  singular_label: null,
+  description: '',
+  selection_mode: 'multiple',
+  picker_style: 'auto',
+  default_term_id: null,
+  required_on_publish: false,
+  editor_can_create_terms: false,
+  show_in_menu: true,
+  show_admin_column: false,
+};
+
+export const blank = (): FormValues => ({
+  key: '',
+  label: '',
+  hierarchical: false,
+  public: true,
+  rewrite_base: '',
+  singular_label: '',
+  description: '',
+  selection_mode: 'multiple',
+  picker_style: 'auto',
+  default_term_id: null,
+  required_on_publish: false,
+  editor_can_create_terms: false,
+  show_in_menu: true,
+  show_admin_column: false,
+  content_types: [],
 });
+
+export const fromDefinition = (definition: TaxonomyDefinition): FormValues => {
+  const s = definition.settings ?? {};
+  return {
+    key: definition.key,
+    label: definition.label,
+    hierarchical: definition.hierarchical,
+    public: definition.public,
+    rewrite_base: definition.rewrite_base ?? '',
+    singular_label: s.singular_label ?? '',
+    description: s.description ?? '',
+    selection_mode: s.selection_mode ?? 'multiple',
+    picker_style: s.picker_style ?? 'auto',
+    default_term_id: s.default_term_id ?? null,
+    required_on_publish: Boolean(s.required_on_publish),
+    editor_can_create_terms: Boolean(s.editor_can_create_terms),
+    show_in_menu: s.show_in_menu ?? true,
+    show_admin_column: Boolean(s.show_admin_column),
+    content_types: [...(definition.content_types ?? [])].sort(),
+  };
+};
+
+export function settingsFromForm(form: FormValues): TaxonomySettings {
+  return {
+    singular_label: form.singular_label.trim() || null,
+    description: form.description,
+    selection_mode: form.selection_mode,
+    picker_style: form.picker_style,
+    default_term_id: form.default_term_id,
+    required_on_publish: form.required_on_publish,
+    editor_can_create_terms: form.editor_can_create_terms,
+    show_in_menu: form.show_in_menu,
+    show_admin_column: form.show_admin_column,
+  };
+}
+
 export const fieldClass = 'mt-1 h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 disabled:opacity-50';
 export const buttonClass = 'inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50';
 
@@ -83,5 +160,3 @@ export function termsHash(key: string): string {
   if (key === 'tag') return '#/posts/tags';
   return `#/taxonomy/${encodeURIComponent(key)}/terms`;
 }
-
-/** Definitions and membership configuration live alongside content schema, away from the term editor. */

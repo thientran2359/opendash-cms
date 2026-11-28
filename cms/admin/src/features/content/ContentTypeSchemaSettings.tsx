@@ -2,12 +2,13 @@ import { __, _x, useI18n } from '../../i18n/index.tsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createContentType,
+  deleteContentType,
   effectiveContentTypeSettings,
   listContentTypes,
   purgeContentEntry,
   queryRetainedTrashTable,
   updateContentType,
-  type ContentPublicationPolicy,
+  type ContentListColumn,
   type ContentSupport,
   type ContentTypeDefinitionWithSettings,
   type ContentTypeSettings,
@@ -21,8 +22,10 @@ import {
   ContentTypeForm, isContentTypeCreationDraftDirty,
   type ContentTypeCreationDraft,
 } from './ContentTypeForm.tsx';
+import { ContentTypeGeneralPanel } from './ContentTypeGeneralPanel.tsx';
+import { ContentTypeDeleteModal } from './ContentTypeDeleteModal.tsx';
+import { ContentTypeRetainedTrashPanel } from './ContentTypeRetainedTrashPanel.tsx';
 import { EditorLayoutConfigurator } from './EditorLayoutConfigurator.tsx';
-import { FieldGroupsManager } from './FieldGroupsManager.tsx';
 import {
   AdminAlert,
   AdminBadge,
@@ -32,7 +35,7 @@ import {
   type AdminTabItem,
 } from '../../components/AdminPrimitives.tsx';
 
-type ContentTypeTabId = 'overview' | 'taxonomies' | 'field_groups' | 'layout';
+type ContentTypeTabId = 'overview' | 'taxonomies' | 'layout';
 
 interface ContentTypeSchemaSettingsProps {
   /** Passed by App from its authenticated server session; RAM recovery is off without these. */
@@ -66,8 +69,14 @@ interface SavedCptSettingsDraft {
   /** Version of the server CPT before the user's unsaved edits. */
   baseVersion: number;
   baselineLabel: string;
+  baselineSingularLabel: string;
+  baselineDescription: string;
+  baselineRewriteBase: string;
   baselineSettings: ContentTypeSettings;
   label: string;
+  singularLabel: string;
+  description: string;
+  rewriteBase: string;
   settings: ContentTypeSettings;
   stale: boolean;
 }
@@ -85,13 +94,34 @@ const scopeKey = (siteId: string | undefined, user: AuthUser | null | undefined,
 const createCptDraftMemory = new Map<string, ContentTypeCreationDraft>();
 const sameKeys = (left: string[], right: string[]): boolean =>
   [...left].sort().join('\u0000') === [...right].sort().join('\u0000');
-const copySettings = (value: ContentTypeSettings): ContentTypeSettings =>
-  ({ ...value, supports: [...value.supports] });
+const copyColumns = (cols?: ContentListColumn[]): ContentListColumn[] =>
+  (cols ?? []).map(c => ({ ...c }));
+const copySettings = (value: ContentTypeSettings): ContentTypeSettings => ({
+  ...value,
+  supports: [...value.supports],
+  list_columns: copyColumns(value.list_columns),
+});
 const settingsDiffer = (
-  label: string, value: ContentTypeSettings, baselineLabel: string, baseline: ContentTypeSettings,
-): boolean => label !== baselineLabel || value.public !== baseline.public ||
-  value.has_archive !== baseline.has_archive || value.publication !== baseline.publication ||
-  !sameKeys(value.supports, baseline.supports);
+  meta: { label: string; singularLabel: string; description: string; rewriteBase: string; settings: ContentTypeSettings },
+  base: { label: string; singularLabel: string; description: string; rewriteBase: string; settings: ContentTypeSettings },
+): boolean =>
+  meta.label !== base.label ||
+  meta.singularLabel !== base.singularLabel ||
+  meta.description !== base.description ||
+  meta.rewriteBase !== base.rewriteBase ||
+  meta.settings.public !== base.settings.public ||
+  meta.settings.has_archive !== base.settings.has_archive ||
+  Boolean(meta.settings.hierarchical) !== Boolean(base.settings.hierarchical) ||
+  (meta.settings.archive_per_page ?? 12) !== (base.settings.archive_per_page ?? 12) ||
+  (meta.settings.default_sort ?? 'published_at_desc') !== (base.settings.default_sort ?? 'published_at_desc') ||
+  Boolean(meta.settings.exclude_from_sitemap) !== Boolean(base.settings.exclude_from_sitemap) ||
+  (meta.settings.menu_name ?? '') !== (base.settings.menu_name ?? '') ||
+  (meta.settings.menu_icon ?? '') !== (base.settings.menu_icon ?? '') ||
+  (meta.settings.menu_position ?? 50) !== (base.settings.menu_position ?? 50) ||
+  (meta.settings.show_in_menu !== false) !== (base.settings.show_in_menu !== false) ||
+  JSON.stringify(meta.settings.list_columns ?? []) !== JSON.stringify(base.settings.list_columns ?? []) ||
+  meta.settings.publication !== base.settings.publication ||
+  !sameKeys(meta.settings.supports, base.settings.supports);
 
 // This worker owns one TSX file only. Prime has equivalent helpers in its newer
 // api/content.ts; use the canonical routes here without changing shared APIs.
@@ -143,6 +173,9 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   const createDirty = createDirtyState.scope === createScope ? createDirtyState.dirty
     : Boolean(createScope && createCptDraftMemory.has(createScope));
   const [editLabel, setEditLabel] = useState('');
+  const [editSingularLabel, setEditSingularLabel] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editRewriteBase, setEditRewriteBase] = useState('');
   const [editSettings, setEditSettings] = useState<ContentTypeSettings>(
     effectiveContentTypeSettings('post'),
   );
@@ -150,14 +183,18 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsStale, setSettingsStale] = useState(false);
   const [settingsError, setSettingsError] = useState('');
+  const [availableTaxonomies, setAvailableTaxonomies] = useState<TaxonomyDefinition[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingCpt, setDeletingCpt] = useState(false);
+  const [deleteCptError, setDeleteCptError] = useState('');
   const [createNoticeState, setCreateNoticeState] = useState<{
     scope: string | null; message: string;
   } | null>(null);
   const createNotice = createNoticeState?.scope === createScope ? createNoticeState.message : '';
   const [revision, setRevision] = useState(0);
   const [activeTab, setActiveTab] = useState<ContentTypeTabId>('overview');
-  const [fieldGroupCount, setFieldGroupCount] = useState<number>(0);
   const [layoutVersion, setLayoutVersion] = useState<number | null>(null);
+  const [layoutDirty, setLayoutDirty] = useState(false);
   const [taxonomyState, setTaxonomyState] = useState<LoadedTaxonomyState | null>(null);
   const [taxonomyDraft, setTaxonomyDraft] = useState<string[]>([]);
   const [taxonomyBusy, setTaxonomyBusy] = useState(false);
@@ -336,47 +373,85 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     activeType.owner.kind === 'user'
     || (activeType.owner.kind === 'core' && isBuiltin)
   ));
-  // Site-owned CPT taxonomy associations are independent of provider-owned
-  // schema editing. Admin may override plugin/theme CPT eligibility without
-  // modifying the provider's schema; Pattern and Editors remain restricted.
+  const canEditAnyOverview = Boolean(activeType && !isPattern && (canEditSettings || activeType.owner.kind === 'theme' || activeType.owner.kind === 'plugin'));
   const canEditTaxonomies = Boolean(activeType && !isPattern && user?.role === 'admin');
   const canonicalSettings = activeType
     ? effectiveContentTypeSettings(activeKey, activeType.descriptor.settings)
     : null;
-  const settingsChanged = draftIdentity.startsWith(`${activeKey}:`) && canonicalSettings !== null &&
-    settingsDiffer(editLabel, editSettings, activeType?.descriptor.label ?? '', canonicalSettings);
+  const baselineMeta = activeType && canonicalSettings ? {
+    label: activeType.descriptor.label,
+    singularLabel: activeType.descriptor.singular_label ?? '',
+    description: activeType.descriptor.description ?? '',
+    rewriteBase: activeType.rewrite_base ?? '',
+    settings: canonicalSettings,
+  } : null;
+  const currentMeta = {
+    label: editLabel,
+    singularLabel: editSingularLabel,
+    description: editDescription,
+    rewriteBase: editRewriteBase,
+    settings: editSettings,
+  };
+  const settingsChanged = draftIdentity.startsWith(`${activeKey}:`) && baselineMeta !== null &&
+    settingsDiffer(currentMeta, baselineMeta);
   const taxonomyLoaded = taxonomyState?.identity === currentIdentity ? taxonomyState : null;
   const taxonomyChanged = Boolean(taxonomyLoaded && !sameKeys(taxonomyDraft, taxonomyLoaded.applied));
   const settingsDirtyRef = useRef(false);
-  settingsDirtyRef.current = Boolean(settingsChanged || taxonomyChanged);
+  settingsDirtyRef.current = Boolean(settingsChanged || taxonomyChanged || layoutDirty);
 
-  const persistSettingsInput = (nextLabel: string, nextSettings: ContentTypeSettings) => {
-    if (!selectedScope || !activeType || !canonicalSettings) return;
+  const persistSettingsInput = (nextMeta: typeof currentMeta) => {
+    if (!selectedScope || !activeType || !baselineMeta) return;
     const previous = settingsDraftMemory.get(selectedScope);
-    const changed = settingsDiffer(nextLabel, nextSettings, activeType.descriptor.label, canonicalSettings);
-    // This synchronous guard also protects a create POST that resolves in the
-    // same turn as an unrelated settings input, before React has re-rendered.
-    settingsDirtyRef.current = changed || settingsStale || taxonomyChanged;
+    const changed = settingsDiffer(nextMeta, baselineMeta);
+    settingsDirtyRef.current = changed || settingsStale || taxonomyChanged || layoutDirty;
     if (!changed && !settingsStale) {
       settingsDraftMemory.delete(selectedScope);
       return;
     }
     settingsDraftMemory.set(selectedScope, {
       baseVersion: previous?.baseVersion ?? activeType.version,
-      baselineLabel: previous?.baselineLabel ?? activeType.descriptor.label,
-      baselineSettings: copySettings(previous?.baselineSettings ?? canonicalSettings),
-      label: nextLabel, settings: copySettings(nextSettings),
+      baselineLabel: previous?.baselineLabel ?? baselineMeta.label,
+      baselineSingularLabel: previous?.baselineSingularLabel ?? baselineMeta.singularLabel,
+      baselineDescription: previous?.baselineDescription ?? baselineMeta.description,
+      baselineRewriteBase: previous?.baselineRewriteBase ?? baselineMeta.rewriteBase,
+      baselineSettings: copySettings(previous?.baselineSettings ?? baselineMeta.settings),
+      label: nextMeta.label,
+      singularLabel: nextMeta.singularLabel,
+      description: nextMeta.description,
+      rewriteBase: nextMeta.rewriteBase,
+      settings: copySettings(nextMeta.settings),
       stale: previous?.stale ?? settingsStale,
     });
   };
   const changeEditLabel = (label: string) => {
-    persistSettingsInput(label, editSettings);
-    setEditLabel(label); setSettingsError('');
+    const next = { ...currentMeta, label };
+    persistSettingsInput(next);
+    setEditLabel(label);
+    setSettingsError('');
+  };
+  const changeEditSingularLabel = (singularLabel: string) => {
+    const next = { ...currentMeta, singularLabel };
+    persistSettingsInput(next);
+    setEditSingularLabel(singularLabel);
+    setSettingsError('');
+  };
+  const changeEditDescription = (description: string) => {
+    const next = { ...currentMeta, description };
+    persistSettingsInput(next);
+    setEditDescription(description);
+    setSettingsError('');
+  };
+  const changeEditRewriteBase = (rewriteBase: string) => {
+    const next = { ...currentMeta, rewriteBase };
+    persistSettingsInput(next);
+    setEditRewriteBase(rewriteBase);
+    setSettingsError('');
   };
   const changeEditSettings = (patch: Partial<ContentTypeSettings>) => {
-    const next = { ...editSettings, ...patch };
-    persistSettingsInput(editLabel, next);
-    setEditSettings(next); setSettingsError('');
+    const nextSettings = { ...editSettings, ...patch };
+    persistSettingsInput({ ...currentMeta, settings: nextSettings });
+    setEditSettings(nextSettings);
+    setSettingsError('');
   };
 
   const rememberTaxonomyDraft = (state: LoadedTaxonomyState, next: string[], scope = selectedScope) => {
@@ -396,9 +471,17 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   }, [selectedScope, taxonomyLoaded, taxonomyDraft]);
 
   useEffect(() => {
-    onDirtyChange?.(createDirty || settingsChanged || taxonomyChanged);
+    onDirtyChange?.(createDirty || settingsChanged || taxonomyChanged || layoutDirty);
     return () => onDirtyChange?.(false);
-  }, [createDirty, settingsChanged, taxonomyChanged, onDirtyChange]);
+  }, [createDirty, settingsChanged, taxonomyChanged, layoutDirty, onDirtyChange]);
+
+  useEffect(() => {
+    let active = true;
+    void listTaxonomyDefinitions().then(defs => {
+      if (active) setAvailableTaxonomies(defs);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [revision]);
 
   useEffect(() => {
     if (!currentIdentity || !activeKey || isPattern) {
@@ -566,20 +649,27 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   };
 
   useEffect(() => {
+    setDeleteDialogOpen(false);
+    setDeleteCptError('');
+    setLayoutDirty(false);
     if (activeType) {
       const saved = selectedScope ? settingsDraftMemory.get(selectedScope) : null;
       if (saved) {
-        // 401 unmount must not throw away incomplete settings changes. A CPT
-        // version change cannot silently borrow a new CAS token for old input.
         setDraftIdentity(`${activeType.descriptor.key}:${saved.baseVersion}`);
         setEditLabel(saved.label);
-        setEditSettings({ ...saved.settings, supports: [...saved.settings.supports] });
+        setEditSingularLabel(saved.singularLabel);
+        setEditDescription(saved.description);
+        setEditRewriteBase(saved.rewriteBase);
+        setEditSettings(copySettings(saved.settings));
         const stale = saved.stale || saved.baseVersion !== activeType.version;
         setSettingsStale(stale);
         if (stale) setSettingsError(__("The CPT version changed. Your input is retained; review the latest version before saving."));
       } else {
         setDraftIdentity(`${activeType.descriptor.key}:${activeType.version}`);
         setEditLabel(activeType.descriptor.label);
+        setEditSingularLabel(activeType.descriptor.singular_label ?? '');
+        setEditDescription(activeType.descriptor.description ?? '');
+        setEditRewriteBase(activeType.rewrite_base ?? '');
         setEditSettings(effectiveContentTypeSettings(activeType.descriptor.key, activeType.descriptor.settings));
         setSettingsStale(false);
         setSettingsError('');
@@ -652,26 +742,32 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
 
   const handleUpdateSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeType || !canEditSettings || draftIdentity !== currentIdentity
+    if (!activeType || !canEditAnyOverview || draftIdentity !== currentIdentity
       || settingsStale || !csrfToken || savingSettings || taxonomyBusy) return;
     const requestScope = selectedScope;
     const savedAtSubmit = requestScope ? settingsDraftMemory.get(requestScope) : undefined;
     setSavingSettings(true);
     setSettingsError('');
     try {
-      // Saving CPT settings also changes the schema CAS. Preserve any taxonomy
-      // selection under its original version, so the next load requires rebase.
       if (taxonomyLoaded && taxonomyChanged) rememberTaxonomyDraft(taxonomyLoaded, taxonomyDraft);
+      const isUserOwned = activeType.owner.kind === 'user';
       await updateContentType(
         activeType.descriptor.key,
         activeType.version,
         {
-          ...activeType.descriptor,
-          label: activeType.owner.kind === 'user' ? editLabel.trim() : activeType.descriptor.label,
-          settings: {
-            ...editSettings,
-            publication: isBuiltin ? 'draft_publish' : editSettings.publication,
-          },
+          key: activeType.descriptor.key,
+          label: isUserOwned ? editLabel.trim() : activeType.descriptor.label,
+          ...(isUserOwned ? {
+            singular_label: editSingularLabel.trim() || null,
+            description: editDescription.trim() || null,
+          } : {}),
+          ...(!isBuiltin ? { rewrite_base: editRewriteBase.trim() || null } : {}),
+          ...(canEditSettings ? {
+            settings: {
+              ...editSettings,
+              publication: isBuiltin ? 'draft_publish' : editSettings.publication,
+            },
+          } : {}),
         },
         csrfToken,
       );
@@ -692,11 +788,45 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         setSettingsError(__("The configuration changed elsewhere (412). Your input is retained; load the latest version before saving again."));
       } else if (err instanceof ApiClientError && err.status === 409) {
         setSettingsError(__("Configuration conflict (409): {{value1}}. Your current input is retained.", { value1: err.message }));
+      } else if (err instanceof ApiClientError && err.status === 400) {
+        setSettingsError(err.message);
       } else {
         onApiError(err, __("Could not update the content type."));
       }
     } finally {
       if (mountedRef.current && latestScopeRef.current === requestScope) setSavingSettings(false);
+    }
+  };
+
+  const handleDeleteCpt = async () => {
+    if (!activeType || activeType.owner.kind !== 'user' || !csrfToken || deletingCpt) return;
+    setDeletingCpt(true);
+    setDeleteCptError('');
+    try {
+      await deleteContentType(activeType.descriptor.key, activeType.version, csrfToken);
+      if (!mountedRef.current) return;
+      if (selectedScope) {
+        settingsDraftMemory.delete(selectedScope);
+        taxonomyDraftMemory.delete(selectedScope);
+      }
+      setDeleteDialogOpen(false);
+      setCreateNoticeState({
+        scope: createScope,
+        message: __("Deleted CPT {{value1}}.", { value1: activeType.descriptor.key }),
+      });
+      onSelectTypeKey(null);
+      setRevision(r => r + 1);
+      onContentTypesChanged();
+    } catch (err) {
+      if (!mountedRef.current) return;
+      if (err instanceof ApiClientError && (err.status === 409 || err.status === 412 || err.status === 400)) {
+        setDeleteCptError(err.message);
+      } else {
+        setDeleteCptError(err instanceof Error ? err.message : __("Could not delete the content type."));
+        onApiError(err, __("Could not delete the content type."));
+      }
+    } finally {
+      if (mountedRef.current) setDeletingCpt(false);
     }
   };
 
@@ -718,18 +848,29 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         return;
       }
       const newSettings = effectiveContentTypeSettings(activeKey, fresh.descriptor.settings);
+      const freshSingular = fresh.descriptor.singular_label ?? '';
+      const freshDesc = fresh.descriptor.description ?? '';
+      const freshRewrite = fresh.rewrite_base ?? '';
       const prev = saved.baselineSettings;
       const changed = {
         label: saved.label !== saved.baselineLabel,
+        singularLabel: saved.singularLabel !== saved.baselineSingularLabel,
+        description: saved.description !== saved.baselineDescription,
+        rewriteBase: saved.rewriteBase !== saved.baselineRewriteBase,
         public: saved.settings.public !== prev.public,
         has_archive: saved.settings.has_archive !== prev.has_archive,
+        hierarchical: Boolean(saved.settings.hierarchical) !== Boolean(prev.hierarchical),
         publication: saved.settings.publication !== prev.publication,
         supports: !sameKeys(saved.settings.supports, prev.supports),
       };
       const conflicts = [
         ...(changed.label && fresh.descriptor.label !== saved.baselineLabel ? ['label'] : []),
+        ...(changed.singularLabel && freshSingular !== saved.baselineSingularLabel ? ['singular_label'] : []),
+        ...(changed.description && freshDesc !== saved.baselineDescription ? ['description'] : []),
+        ...(changed.rewriteBase && freshRewrite !== saved.baselineRewriteBase ? ['rewrite_base'] : []),
         ...(changed.public && newSettings.public !== prev.public ? ['public'] : []),
         ...(changed.has_archive && newSettings.has_archive !== prev.has_archive ? ['has_archive'] : []),
+        ...(changed.hierarchical && Boolean(newSettings.hierarchical) !== Boolean(prev.hierarchical) ? ['hierarchical'] : []),
         ...(changed.publication && newSettings.publication !== prev.publication ? ['publication'] : []),
         ...(changed.supports && !sameKeys(newSettings.supports, prev.supports) ? ['supports'] : []),
       ];
@@ -737,19 +878,38 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         __("The server also changed {{value1}}. Keep your current values when reviewing the latest CPT?", { value1: conflicts.join(', ') }),
       )) return;
       const mergedSettings: ContentTypeSettings = {
+        ...newSettings,
         public: changed.public ? saved.settings.public : newSettings.public,
         has_archive: changed.has_archive ? saved.settings.has_archive : newSettings.has_archive,
+        hierarchical: changed.hierarchical ? saved.settings.hierarchical : newSettings.hierarchical,
         publication: changed.publication ? saved.settings.publication : newSettings.publication,
         supports: [...(changed.supports ? saved.settings.supports : newSettings.supports)],
+        list_columns: copyColumns(saved.settings.list_columns),
       };
       const mergedLabel = changed.label ? saved.label : fresh.descriptor.label;
+      const mergedSingular = changed.singularLabel ? saved.singularLabel : freshSingular;
+      const mergedDesc = changed.description ? saved.description : freshDesc;
+      const mergedRewrite = changed.rewriteBase ? saved.rewriteBase : freshRewrite;
       settingsDraftMemory.set(requestScope, {
-        baseVersion: fresh.version, baselineLabel: fresh.descriptor.label,
-        baselineSettings: copySettings(newSettings), label: mergedLabel,
-        settings: copySettings(mergedSettings), stale: false,
+        baseVersion: fresh.version,
+        baselineLabel: fresh.descriptor.label,
+        baselineSingularLabel: freshSingular,
+        baselineDescription: freshDesc,
+        baselineRewriteBase: freshRewrite,
+        baselineSettings: copySettings(newSettings),
+        label: mergedLabel,
+        singularLabel: mergedSingular,
+        description: mergedDesc,
+        rewriteBase: mergedRewrite,
+        settings: copySettings(mergedSettings),
+        stale: false,
       });
       setContentTypes(types);
-      setEditLabel(mergedLabel); setEditSettings(mergedSettings);
+      setEditLabel(mergedLabel);
+      setEditSingularLabel(mergedSingular);
+      setEditDescription(mergedDesc);
+      setEditRewriteBase(mergedRewrite);
+      setEditSettings(mergedSettings);
       setDraftIdentity(`${activeKey}:${fresh.version}`);
       setSettingsStale(false);
       setSettingsError(__("Reviewed the latest CPT version; your changes are retained. Review before saving."));
@@ -785,6 +945,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
           <ContentTypeForm
             key={createScope ?? 'unverified-identity'}
             disabled={!csrfToken}
+            availableTaxonomies={availableTaxonomies}
             onCreate={handleCreate}
             initialDraft={createScope ? createCptDraftMemory.get(createScope) ?? null : null}
             onDraftChange={onCreateDraftChange}
@@ -833,7 +994,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         const cptTabs: AdminTabItem<ContentTypeTabId>[] = [
           {
             id: 'overview',
-            label: __("Overview & schema"),
+            label: __("Overview & settings"),
             dirty: settingsChanged || settingsStale,
           },
           {
@@ -843,14 +1004,10 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
             dirty: Boolean(taxonomyChanged || taxonomyLoaded?.stale),
           },
           {
-            id: 'field_groups',
-            label: __("Field groups"),
-            badge: fieldGroupCount,
-          },
-          {
             id: 'layout',
             label: __("Editor layout"),
             badge: layoutVersion !== null ? `v${layoutVersion}` : undefined,
+            dirty: layoutDirty,
           },
         ];
 
@@ -881,15 +1038,19 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                     {canonicalSettings?.has_archive && (
                       <AdminBadge tone="neutral">{__("Archive")}</AdminBadge>
                     )}
+                    {canonicalSettings?.hierarchical && (
+                      <AdminBadge tone="neutral">{__("Hierarchical")}</AdminBadge>
+                    )}
                   </div>
                   <p className="mt-1 text-xs text-zinc-500">
                     {__("Key")}: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> · {__("· Owner:")}{' '}{activeType.owner.kind}
+                    {activeType.rewrite_base ? <> · <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">/{activeType.rewrite_base}/</code></> : null}
                   </p>
                 </div>
                 <div className="text-xs text-zinc-600">
-                  {__("Base fields")} ({activeType.descriptor.fields.length}):{' '}
+                  {__("Supports")} ({canonicalSettings?.supports.length ?? 0}):{' '}
                   <span className="font-mono text-zinc-700">
-                    {activeType.descriptor.fields.map(f => f.key).join(', ') || _x("None", "feature.content")}
+                    {canonicalSettings?.supports.join(', ') || _x("None", "feature.content")}
                   </span>
                 </div>
               </div>
@@ -910,263 +1071,76 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
               id="content-type-panel-overview"
               labelledBy="content-type-tab-overview"
             >
-              <div className="rounded-xl border border-zinc-200 bg-white p-5">
-                <h4 className="text-sm font-semibold text-zinc-950">
-                  {__("Schema information:")}{' '}{activeType.descriptor.label}
-                </h4>
-                {canEditSettings ? (
-                  <form onSubmit={handleUpdateSettings} className="mt-4 space-y-4" aria-label={__("Content type configuration")}>
-                    {activeType.owner.kind === 'user' && (
-                      <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-                        <span>{__("Display name")}</span>
-                        <input type="text" value={editLabel} required maxLength={100}
-                          disabled={!csrfToken || savingSettings} onChange={event => changeEditLabel(event.target.value)}
-                          className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent" />
-                      </label>
-                    )}
-                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                      <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
-                        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{__("Public visibility")}</legend>
-                        <label className="flex items-center gap-2 text-sm text-zinc-800">
-                          <input type="checkbox" checked={editSettings.public}
-                            disabled={!csrfToken || savingSettings}
-                            onChange={event => changeEditSettings({ public: event.target.checked })} />
-                          {__("Public content (public)")}
-                        </label>
-                        <label className="flex items-center gap-2 text-sm text-zinc-800">
-                          <input type="checkbox" checked={editSettings.has_archive}
-                            disabled={!csrfToken || savingSettings}
-                            onChange={event => changeEditSettings({ has_archive: event.target.checked })} />
-                          {__("Enable archive (has_archive)")}
-                        </label>
-                        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-                          <span>{__("Publishing workflow")}</span>
-                          <select className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-                            value={editSettings.publication} disabled={!csrfToken || savingSettings || isBuiltin}
-                            onChange={event => changeEditSettings({
-                              publication: event.target.value as ContentPublicationPolicy,
-                            })}>
-                            <option value="immediate">{__("Save publishes immediately (immediate)")}</option>
-                            <option value="draft_publish">{__("Save draft / Publish (draft_publish)")}</option>
-                          </select>
-                        </label>
-                        {isBuiltin && <p className="text-xs text-zinc-500">{__("Posts and pages always use Save draft / Publish.")}</p>}
-                      </fieldset>
+              <ContentTypeGeneralPanel
+                activeType={activeType}
+                isBuiltin={isBuiltin}
+                isPattern={isPattern}
+                canEditSettings={canEditSettings}
+                canEditMetadata={activeType.owner.kind === 'user'}
+                csrfToken={csrfToken}
+                savingSettings={savingSettings}
+                taxonomyBusy={taxonomyBusy}
+                settingsChanged={settingsChanged}
+                settingsStale={settingsStale}
+                settingsError={settingsError}
+                editLabel={editLabel}
+                editSingularLabel={editSingularLabel}
+                editDescription={editDescription}
+                editRewriteBase={editRewriteBase}
+                editSettings={editSettings}
+                availableTaxonomies={availableTaxonomies}
+                onChangeLabel={changeEditLabel}
+                onChangeSingularLabel={changeEditSingularLabel}
+                onChangeDescription={changeEditDescription}
+                onChangeRewriteBase={changeEditRewriteBase}
+                onChangeSettings={changeEditSettings}
+                onToggleSupport={toggleSupport}
+                onSubmit={handleUpdateSettings}
+                onRebase={() => void rebaseSettingsDraft()}
+                onReloadFromServer={() => {
+                  if (selectedScope) settingsDraftMemory.delete(selectedScope);
+                  setSettingsStale(false);
+                  if (activeType && canonicalSettings) {
+                    setEditLabel(activeType.descriptor.label);
+                    setEditSingularLabel(activeType.descriptor.singular_label ?? '');
+                    setEditDescription(activeType.descriptor.description ?? '');
+                    setEditRewriteBase(activeType.rewrite_base ?? '');
+                    setEditSettings(copySettings(canonicalSettings));
+                    setDraftIdentity(currentIdentity);
+                  }
+                  setRevision(r => r + 1);
+                  setSettingsError('');
+                }}
+                onRequestDelete={activeType.owner.kind === 'user' ? () => {
+                  setDeleteCptError('');
+                  setDeleteDialogOpen(true);
+                } : undefined}
+              />
 
-                      <div className="space-y-4">
-                        <fieldset className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
-                          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{__("Editor screen features")}</legend>
-                          <label className="flex items-center gap-2 text-sm text-zinc-800">
-                            <input type="checkbox" checked={editSettings.supports.includes('editor')}
-                              disabled={!csrfToken || savingSettings}
-                              onChange={event => toggleSupport('editor', event.target.checked)} />
-                            {__("Editor (editor)")}
-                          </label>
-                          <label className="flex items-center gap-2 text-sm text-zinc-800">
-                            <input type="checkbox" checked={editSettings.supports.includes('featured_image')}
-                              disabled={!csrfToken || savingSettings}
-                              onChange={event => toggleSupport('featured_image', event.target.checked)} />
-                            {__("Featured image (featured_image)")}
-                          </label>
-                          <label className="flex items-center gap-2 text-sm text-zinc-800">
-                            <input type="checkbox" checked={editSettings.supports.includes('builder')}
-                              disabled={!csrfToken || savingSettings}
-                              onChange={event => toggleSupport('builder', event.target.checked)} />
-                            {__("Visual Builder (builder)")}
-                          </label>
-                          <p className="text-xs text-zinc-500">{__("Enable Builder to design individual entries. Disabling a feature does not delete saved text, images or Builder designs.")}</p>
-                        </fieldset>
-
-                        <div className="rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-700">
-                            {__("Base fields")} ({activeType.descriptor.fields.length})
-                          </div>
-                          {activeType.descriptor.fields.length === 0 ? (
-                            <p className="mt-1.5 text-xs text-zinc-500">{_x("None", "feature.content")}</p>
-                          ) : (
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {activeType.descriptor.fields.map(field => (
-                                <span
-                                  key={field.key}
-                                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
-                                >
-                                  <span className="font-medium text-zinc-900">{field.label}</span>
-                                  <code className="font-mono text-[11px] text-zinc-500">{field.key}</code>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {settingsError && <AdminAlert tone="error">{settingsError}</AdminAlert>}
-                    {settingsStale && <AdminAlert tone="warning" role="alert" className="space-y-2">
-                      <p>{__("The CPT version changed. Your input is retained but cannot be saved with the old CAS token.")}</p>
-                      <AdminButton variant="secondary" size="sm"
-                        disabled={savingSettings || taxonomyBusy} onClick={() => void rebaseSettingsDraft()}>
-                        {__("Review latest CPT and keep current changes")}
-                      </AdminButton>
-                    </AdminAlert>}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <AdminButton type="submit" variant="primary" size="md"
-                        disabled={!settingsChanged || settingsStale || !csrfToken || savingSettings || taxonomyBusy}>
-                        {savingSettings ? __("Saving...") : __("Save configuration")}
-                      </AdminButton>
-                      <AdminButton variant="secondary" size="md" disabled={savingSettings || taxonomyBusy}
-                        onClick={() => {
-                          if (selectedScope) settingsDraftMemory.delete(selectedScope);
-                          setSettingsStale(false);
-                          if (activeType && canonicalSettings) {
-                            setEditLabel(activeType.descriptor.label);
-                            setEditSettings(copySettings(canonicalSettings));
-                            setDraftIdentity(currentIdentity);
-                          }
-                          setRevision(r => r + 1);
-                          setSettingsError('');
-                        }}>
-                        {__("Reload from server (discard edits)")}
-                      </AdminButton>
-                    </div>
-                  </form>
-                ) : (
-                  <p className="mt-3 text-sm text-zinc-600">
-                    {isPattern ? __("Pattern is a private content type and its public configuration cannot be changed.")
-                      : __("This configuration is provider-owned and read-only here.")}
-                  </p>
-                )}
-              </div>
+              <ContentTypeDeleteModal
+                open={deleteDialogOpen}
+                typeKey={activeType.descriptor.key}
+                label={activeType.descriptor.label}
+                busy={deletingCpt}
+                error={deleteCptError}
+                onConfirm={() => void handleDeleteCpt()}
+                onCancel={() => setDeleteDialogOpen(false)}
+              />
 
               {isDormantOrdinaryCpt && (
-                <section
-                  className="mt-4 rounded-xl border border-amber-200 bg-white p-5 space-y-3"
-                  data-testid="retained-trash-maintenance"
-                  aria-label={__("Retained Trash Maintenance")}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <h4 className="text-sm font-semibold text-zinc-950">
-                        {__("Retained Trash Maintenance")}
-                        {retainedTrash?.key === activeKey ? ` (${retainedTrash.data.total})` : ''}
-                      </h4>
-                      <p className="mt-1 text-xs text-zinc-600">
-                        {__("Metadata-only view for trashed entries retained under this inactive or withdrawn content type. Administrators may permanently delete retained Trash rows here.")}
-                      </p>
-                      <p className="mt-1 text-xs text-amber-800">
-                        {__("To restore entries instead of purging them, re-enable the content type provider first.")}
-                      </p>
-                    </div>
-                    <AdminButton
-                      variant="secondary"
-                      size="sm"
-                      disabled={retainedTrashLoading || retainedTrashBusyId !== null}
-                      onClick={() => setRetainedTrashReloadTick(n => n + 1)}
-                    >
-                      {__("Reload")}
-                    </AdminButton>
-                  </div>
-
-                  {retainedTrashProviderActive && (
-                    <AdminAlert tone="info" className="flex flex-wrap items-center justify-between gap-2">
-                      <span>{__("This content type is now active. Manage its entries in the ordinary Trash view.")}</span>
-                      <a
-                        href={activeKey === 'post' ? '#/posts?status=trash' : activeKey === 'page' ? '#/pages?status=trash' : `#/cpt/${encodeURIComponent(activeKey)}?status=trash`}
-                        className="font-medium text-od-accent underline"
-                      >
-                        {__("Open Trash")}
-                      </a>
-                    </AdminAlert>
-                  )}
-
-                  {retainedTrashError && <AdminAlert tone="error">{retainedTrashError}</AdminAlert>}
-
-                  {retainedTrashLoading && (
-                    <p role="status" className="text-xs text-zinc-500">
-                      {__("Loading retained Trash entries...")}
-                    </p>
-                  )}
-
-                  {!retainedTrashLoading && retainedTrash?.key === activeKey && retainedTrash.data.items.length === 0 && !retainedTrashError && (
-                    <p className="rounded-lg border border-dashed border-zinc-200 p-4 text-xs text-zinc-500">
-                      {__("No retained Trash entries for this content type.")}
-                    </p>
-                  )}
-
-                  {retainedTrash?.key === activeKey && retainedTrash.data.items.length > 0 && (
-                    <div className="space-y-3">
-                      <div className="overflow-x-auto rounded-lg border border-zinc-200">
-                        <table className="w-full table-auto text-left text-xs">
-                          <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
-                            <tr>
-                              <th className="px-3 py-2">{__("Title")}</th>
-                              <th className="px-3 py-2">{__("Language")}</th>
-                              <th className="px-3 py-2">{__("Status")}</th>
-                              <th className="px-3 py-2">{__("Trashed date")}</th>
-                              <th className="px-3 py-2 text-right">{__("Delete")}</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-zinc-100">
-                            {retainedTrash.data.items.map(row => (
-                              <tr key={row.id} data-retained-trash-id={row.id}>
-                                <td className="px-3 py-2">
-                                  <span className="font-medium text-zinc-900">{row.title}</span>{' '}
-                                  <span className="font-mono text-zinc-500">#{row.id} · /{row.slug}</span>
-                                </td>
-                                <td className="px-3 py-2 font-mono text-zinc-700">{row.locale ?? '—'}</td>
-                                <td className="px-3 py-2">
-                                  <AdminBadge tone="neutral">
-                                    {row.publication_status === 'published'
-                                      ? __("Published")
-                                      : __("Draft")}
-                                  </AdminBadge>
-                                </td>
-                                <td className="px-3 py-2 font-mono text-zinc-600">
-                                  {row.trashed_at ? `${row.trashed_at.slice(0, 16)} UTC` : '—'}
-                                </td>
-                                <td className="px-3 py-2 text-right">
-                                  <AdminButton
-                                    variant="danger"
-                                    size="sm"
-                                    disabled={!csrfToken || retainedTrashBusyId !== null}
-                                    data-testid={`retained-trash-purge-${row.id}`}
-                                    onClick={() => void handlePurgeRetainedRow(row)}
-                                  >
-                                    {__("Delete permanently")}
-                                  </AdminButton>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      {retainedTrash.data.total > 20 && (
-                        <div className="flex items-center justify-between text-xs text-zinc-600">
-                          <span>
-                            {retainedTrashOffset + 1}–{Math.min(retainedTrashOffset + retainedTrash.data.items.length, retainedTrash.data.total)} / {retainedTrash.data.total}
-                          </span>
-                          <div className="flex gap-2">
-                            <AdminButton
-                              variant="secondary"
-                              size="sm"
-                              disabled={retainedTrashLoading || retainedTrashOffset === 0}
-                              onClick={() => setRetainedTrashOffset(o => Math.max(0, o - 20))}
-                            >
-                              {__("Previous page")}
-                            </AdminButton>
-                            <AdminButton
-                              variant="secondary"
-                              size="sm"
-                              disabled={retainedTrashLoading || retainedTrashOffset + 20 >= retainedTrash.data.total}
-                              onClick={() => setRetainedTrashOffset(o => o + 20)}
-                            >
-                              {__("Next page")}
-                            </AdminButton>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </section>
+                <ContentTypeRetainedTrashPanel
+                  activeKey={activeKey}
+                  csrfToken={csrfToken}
+                  retainedTrash={retainedTrash}
+                  retainedTrashOffset={retainedTrashOffset}
+                  retainedTrashLoading={retainedTrashLoading}
+                  retainedTrashError={retainedTrashError}
+                  retainedTrashProviderActive={retainedTrashProviderActive}
+                  retainedTrashBusyId={retainedTrashBusyId}
+                  onReload={() => setRetainedTrashReloadTick(n => n + 1)}
+                  onChangeOffset={setRetainedTrashOffset}
+                  onPurgeRow={row => void handlePurgeRetainedRow(row)}
+                />
               )}
             </AdminTabPanel>
 
@@ -1265,30 +1239,16 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
             </AdminTabPanel>
 
             <AdminTabPanel
-              active={activeTab === 'field_groups'}
-              id="content-type-panel-field_groups"
-              labelledBy="content-type-tab-field_groups"
-            >
-              <FieldGroupsManager
-                typeKey={activeType.descriptor.key}
-                csrfToken={csrfToken}
-                onApiError={onApiError}
-                onChanged={() => setRevision(r => r + 1)}
-                onCountChange={setFieldGroupCount}
-              />
-            </AdminTabPanel>
-
-            <AdminTabPanel
               active={activeTab === 'layout'}
               id="content-type-panel-layout"
               labelledBy="content-type-tab-layout"
             >
               <EditorLayoutConfigurator
                 typeKey={activeType.descriptor.key}
-                baseFields={activeType.descriptor.fields}
                 csrfToken={csrfToken}
                 onApiError={onApiError}
                 onVersionChange={setLayoutVersion}
+                onDirtyChange={setLayoutDirty}
               />
             </AdminTabPanel>
           </div>

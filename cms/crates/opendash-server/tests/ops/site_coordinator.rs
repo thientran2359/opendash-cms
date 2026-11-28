@@ -85,7 +85,7 @@ impl Drop for RunningServer {
 
 async fn wait_ready(base_url: &str) {
     let client = Client::new();
-    for _ in 0..80 {
+    for _ in 0..160 {
         if let Ok(resp) = client.get(format!("{base_url}/api/health")).send().await {
             if resp.status() == StatusCode::OK {
                 return;

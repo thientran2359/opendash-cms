@@ -228,7 +228,7 @@ async fn resolve_merged_public_options_with_overrides_in_conn_with_options(
         is_preview,
         tag_media_provenance,
     };
-    let site_options = crate::field_hydrate::hydrate_field_values(
+    let mut site_options = crate::field_hydrate::hydrate_field_values(
         &global_fields,
         &global_raw,
         &ctx,
@@ -237,17 +237,47 @@ async fn resolve_merged_public_options_with_overrides_in_conn_with_options(
     )
     .map_err(ApiError::internal)?;
 
+    if crate::storage::content::table_exists_in_tx(conn, "content_field_groups").await? {
+        let extra_global = crate::storage::options_pages::load_public_options_page_values_in_conn(
+            conn,
+            "site_global",
+            requested_locale,
+            is_preview,
+            richtext_nonces.as_deref_mut(),
+        )
+        .await?;
+        for (k, v) in extra_global {
+            site_options.entry(k).or_insert(v);
+        }
+    }
+
     let mut merged = site_options.clone();
     if !theme_specs.is_empty() {
         let theme_hydrated = crate::field_hydrate::hydrate_field_values(
             &theme_specs,
             &theme_raw,
             &ctx,
-            richtext_nonces,
+            richtext_nonces.as_deref_mut(),
             crate::field_hydrate::HydrationVisibility::OptionsPublicOnly,
         )
         .map_err(ApiError::internal)?;
         merged.extend(theme_hydrated);
+    }
+    if let Some((theme_id, _)) = active_theme
+        && crate::storage::content::table_exists_in_tx(conn, "content_field_groups").await?
+    {
+        let page_ref = format!("theme:{theme_id}");
+        let extra_theme = crate::storage::options_pages::load_public_options_page_values_in_conn(
+            conn,
+            &page_ref,
+            requested_locale,
+            is_preview,
+            richtext_nonces,
+        )
+        .await?;
+        for (k, v) in extra_theme {
+            merged.entry(k).or_insert(v);
+        }
     }
 
     Ok((site_options, merged))

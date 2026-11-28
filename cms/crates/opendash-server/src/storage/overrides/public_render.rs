@@ -230,7 +230,14 @@ pub async fn render_resolved_public_builder_with_query_and_search_for_locale(
     .await?;
     collect_db_docs_and_hydrate_state_in_tx(&mut tx, &mut state, &[&record.document], false)
         .await?;
-    let url_policy = active_theme_url_policy(active)?;
+    let url_policy = active_theme_url_policy_in_conn(
+        &mut tx,
+        active,
+        Some(&record.canonical_target_key),
+        None,
+        None,
+    )
+    .await?;
     let domain = active.map(|a| {
         a.manifest
             .text_domain
@@ -281,11 +288,12 @@ pub async fn render_resolved_public_builder_with_query_and_search_for_locale(
     Ok(rendered)
 }
 
-pub(in crate::storage) fn render_csec_template_for_preview(
+#[allow(clippy::too_many_arguments)]
+pub(in crate::storage) fn render_csec_template_for_preview_with_policy(
     target_key: &str,
     html: &str,
     active: Option<&ActiveThemeV3>,
-    db_schema: Option<&EffectiveContentSchema>,
+    url_policy: &template_sec::ThemeUrlPolicy,
     theme_context: &serde_json::Value,
     slot_html: Option<&str>,
     budget: &mut PublicCompositionBudget,
@@ -294,7 +302,6 @@ pub(in crate::storage) fn render_csec_template_for_preview(
     let kind = csec_content_kind_for_target_key(target_key);
     let empty_parts = BTreeMap::new();
     let parts = active.map(|v| &v.parts).unwrap_or(&empty_parts);
-    let url_policy = active_theme_url_policy_for_target(active, Some(target_key), db_schema)?;
     let composition = if let Some(active) = active {
         template_sec::ThemeCompositionCache::global().get_or_compile(
             &active.revision_digest,
@@ -302,15 +309,11 @@ pub(in crate::storage) fn render_csec_template_for_preview(
             html,
             parts,
             kind,
-            &url_policy,
+            url_policy,
         )
     } else {
         template_sec::validate_and_compile_csec_composition_with_theme_urls(
-            target_key,
-            html,
-            parts,
-            kind,
-            &url_policy,
+            target_key, html, parts, kind, url_policy,
         )
         .map(Arc::new)
     }

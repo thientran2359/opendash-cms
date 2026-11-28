@@ -232,7 +232,24 @@ async fn s04_broadened_cpt_bulk_taxonomy_lifecycle_mixed_cas_and_privacy_diag() 
                 "has_archive": true,
                 "publication": "draft_publish",
                 "supports": ["editor"]
-            },
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_article.status(), StatusCode::CREATED);
+    let article_ct_ver = create_article.json::<Value>().await.unwrap()["version"]
+        .as_i64()
+        .unwrap();
+    let create_article_fg = client
+        .post(format!("{}/api/admin/content-field-groups", site.base))
+        .header("Origin", &site.base)
+        .header(header::COOKIE, &admin_cookie)
+        .header("X-CSRF-Token", &admin_csrf)
+        .json(&json!({
+            "local_key": "article_fields",
+            "title": "Article Fields",
+            "target_types": ["article"],
             "fields": [
                 {"key": "summary", "label": "Summary", "type": "text"},
                 {"key": "cover", "label": "Cover", "type": "media"},
@@ -247,10 +264,7 @@ async fn s04_broadened_cpt_bulk_taxonomy_lifecycle_mixed_cas_and_privacy_diag() 
         .send()
         .await
         .unwrap();
-    assert_eq!(create_article.status(), StatusCode::CREATED);
-    let article_ct_ver = create_article.json::<Value>().await.unwrap()["version"]
-        .as_i64()
-        .unwrap();
+    assert_eq!(create_article_fg.status(), StatusCode::CREATED);
     let elig_put = client
         .put(format!(
             "{}/api/admin/taxonomy/eligibility/article",
@@ -282,13 +296,27 @@ async fn s04_broadened_cpt_bulk_taxonomy_lifecycle_mixed_cas_and_privacy_diag() 
                 "has_archive": true,
                 "publication": "immediate",
                 "supports": ["editor"]
-            },
-            "fields": [{"key": "sku", "label": "SKU", "type": "text"}]
+            }
         }))
         .send()
         .await
         .unwrap();
     assert_eq!(create_catalog.status(), StatusCode::CREATED);
+    let create_catalog_fg = client
+        .post(format!("{}/api/admin/content-field-groups", site.base))
+        .header("Origin", &site.base)
+        .header(header::COOKIE, &admin_cookie)
+        .header("X-CSRF-Token", &admin_csrf)
+        .json(&json!({
+            "local_key": "catalog_fields",
+            "title": "Catalog Fields",
+            "target_types": ["catalog"],
+            "fields": [{"key": "sku", "label": "SKU", "type": "text"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_catalog_fg.status(), StatusCode::CREATED);
 
     // Create terms in default locale (vi): cat_a, tag_keep, tag_bulk, tag_alt.
     let mut term_ids = std::collections::BTreeMap::<String, i64>::new();

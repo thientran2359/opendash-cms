@@ -1,116 +1,5 @@
 use super::*;
 
-/// An Admin contribution action is never invoked from a table read. On
-/// explicit POST the server reads the CURRENT entry, checks the registered
-/// owner/action and actor-visible column, then creates the input itself.
-/// Client row JSON or arbitrary action payloads are not accepted.
-pub async fn entry_table_provider_action(
-    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
-    State(db): State<SqlitePool>,
-    State(plugins): State<Arc<crate::plugin::PluginManager>>,
-    State(content_registry): State<
-        Arc<
-            tokio::sync::RwLock<
-                opendash_core::registry::RegistryCatalog<
-                    opendash_core::content::ContentTypeDefinition,
-                >,
-            >,
-        >,
-    >,
-    State(hooks): State<Arc<HookDispatcher>>,
-    headers: HeaderMap,
-    Path((type_key, id, plugin_id, action_id)): Path<(String, i64, String, String)>,
-    body: Bytes,
-) -> ApiResult<Response> {
-    let actor = require_session_with_csrf(&headers, &db).await?;
-    if !body.is_empty() {
-        return Err(ApiError::bad_request(
-            "Row action tự đọc dữ liệu mới nhất; không chấp nhận JSON hàng do client gửi.",
-        ));
-    }
-    valid_type_key(&type_key)?;
-    if id < 1 {
-        return Err(ApiError::bad_request("ID nội dung không hợp lệ."));
-    }
-    let version = expected_version(&headers)?;
-    let role = if actor.user.role == crate::auth::Role::Admin {
-        opendash_core::content::FieldRole::Admin
-    } else {
-        opendash_core::content::FieldRole::Editor
-    };
-    let config = crate::storage::admin_extensions::effective_list(&db, &type_key, role).await?;
-    if !config.columns.iter().any(|col| {
-        col.owner_kind == "plugin"
-            && col.owner_id == plugin_id
-            && col.action_id.as_deref() == Some(&action_id)
-    }) {
-        return Err(ApiError::forbidden(
-            "Action không thuộc cột hiệu lực hoặc không đủ quyền.",
-        ));
-    }
-    crate::storage::entry_lifecycle::ensure_active_entry_version(&db, &type_key, id, version)
-        .await?;
-    let record = entry_storage::get_entry(&db, &type_key, id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
-    if record.version != version {
-        return Err(ApiError::precondition_failed(
-            "Nội dung đã thay đổi trước khi chạy action; hãy tải lại hàng.",
-        ));
-    }
-    // The action manager additionally applies its manifest scoped grants to
-    // top-level values and performs the role-generation fence during Wasm.
-    let input = json!({
-        "type_key": type_key,
-        "entry_id": record.id,
-        "entry_version": record.version,
-        "title": record.title,
-        "slug": record.slug,
-        "term_ids": record.term_ids,
-        "values": record.values,
-    });
-    let correlation_id = format!("row-{}", crate::auth::generate_random_token());
-    let origin = crate::plugin::lifecycle_confirmation::LifecycleActionOrigin::ProviderRow {
-        type_key: type_key.clone(),
-        entry_id: record.id,
-    };
-    let maint_epoch = lease.maintenance_epoch();
-    match plugins
-        .execute_plugin_action(
-            &plugin_id,
-            &action_id,
-            &actor,
-            input,
-            &content_registry,
-            &hooks,
-            correlation_id,
-            origin,
-            maint_epoch,
-        )
-        .await
-    {
-        Ok(outcome) => {
-            hooks.enqueue_plugin_action_hooks(
-                execution_principal_for_actor(&actor),
-                outcome.committed.as_ref(),
-                lease,
-            );
-            Ok((
-                StatusCode::OK,
-                [(header::CACHE_CONTROL, "no-store")],
-                Json(outcome.response),
-            )
-                .into_response())
-        }
-        Err((status, response)) => Ok((
-            status,
-            [(header::CACHE_CONTROL, "no-store")],
-            Json(response),
-        )
-            .into_response()),
-    }
-}
-
 pub async fn entry_list(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
@@ -200,23 +89,35 @@ pub async fn entry_create(
     Json(mut input): Json<ContentEntryInput>,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
-    let mut schema = content_schema(&db, &type_key).await?;
+    let schema = content_schema(&db, &type_key).await?;
     let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
     let preflight_schema_token = effective.as_ref().map(|e| e.schema_token.clone());
-    if let Some(eff) = &effective
-        && !schema.fields.iter().any(|f| f.key == "body")
-        && let Some(body_fe) = eff.effective_fields.get("body")
-    {
-        schema.fields.push(body_fe.definition.clone());
-    }
-    input
-        .validate_against(&schema)
-        .map_err(ApiError::bad_request)?;
-    media_storage::require_existing_references(&db, &schema, &input).await?;
+    let actor_role = actor_field_role(&actor);
     let candidate_locale =
         crate::storage::settings::resolve_requested_locale(&db, input.locale.as_deref()).await?;
-    let actor_role = actor_field_role(&actor);
     if let Some(eff) = &effective {
+        entry_storage::check_entry_role_gate_before_lookup(
+            eff,
+            &type_key,
+            actor_role,
+            &input.values,
+        )?;
+        let mut conn = db.acquire().await?;
+        let loc_ctx = entry_storage::build_entry_location_ctx_in_conn(
+            &mut conn,
+            &type_key,
+            None,
+            &candidate_locale,
+            actor_role,
+            None,
+            None,
+            input.term_ids.as_deref().unwrap_or(&[]),
+        )
+        .await?;
+        input
+            .validate_against_effective(eff, &loc_ctx)
+            .map_err(ApiError::bad_request)?;
+        media_storage::require_existing_effective_references(&db, eff, &input.values).await?;
         let prepare_payload = json!({
             "operation": "create",
             "type_key": &type_key,
@@ -231,13 +132,27 @@ pub async fn entry_create(
             .dispatch_content_prepare_save(&type_key, actor_role, eff, prepare_payload)
             .await?;
         if apply_prepare_save_patch_to_entry_input(&mut input, patch) {
+            entry_storage::check_entry_role_gate_before_lookup(
+                eff,
+                &type_key,
+                actor_role,
+                &input.values,
+            )?;
+            let mut conn2 = db.acquire().await?;
+            let loc_ctx2 = entry_storage::build_entry_location_ctx_in_conn(
+                &mut conn2,
+                &type_key,
+                None,
+                &candidate_locale,
+                actor_role,
+                None,
+                None,
+                input.term_ids.as_deref().unwrap_or(&[]),
+            )
+            .await?;
             input
-                .validate_against(&schema)
+                .validate_against_effective(eff, &loc_ctx2)
                 .map_err(ApiError::unprocessable)?;
-            input
-                .validate_against_effective(eff)
-                .map_err(ApiError::unprocessable)?;
-            media_storage::require_existing_references(&db, &schema, &input).await?;
             media_storage::require_existing_effective_references(&db, eff, &input.values).await?;
         }
     }
@@ -330,19 +245,18 @@ pub async fn entry_update(
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     let version = expected_version(&headers)?;
-    let mut schema = content_schema(&db, &type_key).await?;
+    let schema = content_schema(&db, &type_key).await?;
     let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
     let preflight_schema_token = effective.as_ref().map(|e| e.schema_token.clone());
-    if let Some(eff) = &effective
-        && !schema.fields.iter().any(|f| f.key == "body")
-        && let Some(body_fe) = eff.effective_fields.get("body")
-    {
-        schema.fields.push(body_fe.definition.clone());
+    let actor_role = actor_field_role(&actor);
+    if let Some(eff) = &effective {
+        entry_storage::check_entry_role_gate_before_lookup(
+            eff,
+            &type_key,
+            actor_role,
+            &input.values,
+        )?;
     }
-    input
-        .validate_against(&schema)
-        .map_err(ApiError::bad_request)?;
-    media_storage::require_existing_references(&db, &schema, &input).await?;
     let preflight =
         crate::storage::entry_lifecycle::ensure_active_entry_version(&db, &type_key, id, version)
             .await?;
@@ -354,8 +268,37 @@ pub async fn entry_update(
             "Không thể đổi ngôn ngữ của nội dung đã tạo.",
         ));
     }
-    let actor_role = actor_field_role(&actor);
     if let Some(eff) = &effective {
+        let entry_locale = existing_meta
+            .as_ref()
+            .map(|(l, _)| l.as_str())
+            .unwrap_or("vi");
+        let existing_record = entry_storage::get_entry(&db, &type_key, id).await?;
+        let ctx_terms = input
+            .term_ids
+            .as_deref()
+            .or_else(|| existing_record.as_ref().map(|r| r.term_ids.as_slice()))
+            .unwrap_or(&[]);
+        let mut conn = db.acquire().await?;
+        let loc_ctx = entry_storage::build_entry_location_ctx_in_conn(
+            &mut conn,
+            &type_key,
+            Some(id),
+            entry_locale,
+            actor_role,
+            existing_record
+                .as_ref()
+                .and_then(|r| r.page_layout_key.clone()),
+            existing_record
+                .as_ref()
+                .and_then(|r| r.custom_template_key.clone()),
+            ctx_terms,
+        )
+        .await?;
+        input
+            .validate_against_effective(eff, &loc_ctx)
+            .map_err(ApiError::bad_request)?;
+        media_storage::require_existing_effective_references(&db, eff, &input.values).await?;
         let prepare_payload = json!({
             "operation": "update",
             "type_key": &type_key,
@@ -370,13 +313,36 @@ pub async fn entry_update(
             .dispatch_content_prepare_save(&type_key, actor_role, eff, prepare_payload)
             .await?;
         if apply_prepare_save_patch_to_entry_input(&mut input, patch) {
+            entry_storage::check_entry_role_gate_before_lookup(
+                eff,
+                &type_key,
+                actor_role,
+                &input.values,
+            )?;
+            let mut conn2 = db.acquire().await?;
+            let ctx_terms2 = input
+                .term_ids
+                .as_deref()
+                .or_else(|| existing_record.as_ref().map(|r| r.term_ids.as_slice()))
+                .unwrap_or(&[]);
+            let loc_ctx2 = entry_storage::build_entry_location_ctx_in_conn(
+                &mut conn2,
+                &type_key,
+                Some(id),
+                entry_locale,
+                actor_role,
+                existing_record
+                    .as_ref()
+                    .and_then(|r| r.page_layout_key.clone()),
+                existing_record
+                    .as_ref()
+                    .and_then(|r| r.custom_template_key.clone()),
+                ctx_terms2,
+            )
+            .await?;
             input
-                .validate_against(&schema)
+                .validate_against_effective(eff, &loc_ctx2)
                 .map_err(ApiError::unprocessable)?;
-            input
-                .validate_against_effective(eff)
-                .map_err(ApiError::unprocessable)?;
-            media_storage::require_existing_references(&db, &schema, &input).await?;
             media_storage::require_existing_effective_references(&db, eff, &input.values).await?;
         }
     }

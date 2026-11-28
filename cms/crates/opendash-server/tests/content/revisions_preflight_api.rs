@@ -230,12 +230,6 @@ async fn missing_refs_preflight_required_veto_acl_and_error_precedence() {
     let cpt_body = json!({
         "key": "story",
         "label": "Stories",
-        "fields": [
-            { "key": "cover", "label": "Cover", "type": "media", "required": false },
-            { "key": "req_photo", "label": "Required Photo", "type": "media", "required": true },
-            { "key": "admin_secret", "label": "Admin Secret", "type": "text",
-              "acl": { "min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private" } }
-        ],
         "settings": { "public": false, "has_archive": false, "publication": "draft_publish", "supports": ["editor", "featured_image"] }
     });
     assert_eq!(
@@ -247,6 +241,31 @@ async fn missing_refs_preflight_required_veto_acl_and_error_precedence() {
             "/api/admin/content-types",
             None,
             Some(cpt_body)
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    let fg_body = json!({
+        "local_key": "story_fields",
+        "title": "Story Fields",
+        "target_types": ["story"],
+        "fields": [
+            { "key": "cover", "label": "Cover", "type": "media", "required": false },
+            { "key": "req_photo", "label": "Required Photo", "type": "media", "required": true },
+            { "key": "admin_secret", "label": "Admin Secret", "type": "text",
+              "acl": { "min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private" } }
+        ]
+    });
+    assert_eq!(
+        api(
+            &http,
+            &site,
+            Some(&admin),
+            Method::POST,
+            "/api/admin/content-field-groups",
+            None,
+            Some(fg_body)
         )
         .await
         .status(),
@@ -597,8 +616,26 @@ async fn missing_refs_preflight_required_veto_acl_and_error_precedence() {
             Some(json!({
                 "key": "headline_note",
                 "label": "Headline Notes",
-                "fields": [{ "key": "summary", "label": "Summary", "type": "text" }],
                 "settings": { "public": false, "has_archive": false, "publication": "draft_publish", "supports": [] }
+            }))
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        api(
+            &http,
+            &site,
+            Some(&admin),
+            Method::POST,
+            "/api/admin/content-field-groups",
+            None,
+            Some(json!({
+                "local_key": "headline_note_fields",
+                "title": "Headline Note Fields",
+                "target_types": ["headline_note"],
+                "fields": [{ "key": "summary", "label": "Summary", "type": "text" }]
             }))
         )
         .await

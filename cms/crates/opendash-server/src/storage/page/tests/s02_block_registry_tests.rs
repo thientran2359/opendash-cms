@@ -235,14 +235,9 @@ async fn provider_toggle_resyncs_media_acl_without_erasing_saved_homepage() {
     let mut page_definition: opendash_core::content::ContentTypeDefinition =
         serde_json::from_str(&raw_page_definition).unwrap();
     page_definition
-        .fields
-        .iter_mut()
-        .find(|field| field.key == "body")
-        .unwrap()
-        .acl = Some(opendash_core::field_schema::FieldAcl {
-        public_exposure: Some(PublicExposure::Private),
-        ..Default::default()
-    });
+        .settings
+        .supports
+        .retain(|s| *s != opendash_core::content::ContentSupport::Builder);
     sqlx::query("UPDATE content_types SET definition_json = ? WHERE key = 'page'")
         .bind(serde_json::to_string(&page_definition).unwrap())
         .execute(&mut *conn)

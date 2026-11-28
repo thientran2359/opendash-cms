@@ -259,7 +259,7 @@ pub async fn check_theme_options_compatibility(
     .await?;
 
     let locale_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_locale_values WHERE theme_id = ?",
+        "SELECT option_key, value_json FROM theme_option_locale_values WHERE owner_kind = 'theme' AND owner_id = ?",
     )
     .bind(theme_id)
     .fetch_all(db)

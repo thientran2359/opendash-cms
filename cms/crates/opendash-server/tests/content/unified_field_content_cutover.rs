@@ -33,10 +33,13 @@ async fn migration_0056_upgrades_baseline_0001_with_zero_schema_delta_and_under_
             .await
             .unwrap();
     let post_json: Value = serde_json::from_str(&post_def).unwrap();
-    assert_eq!(post_json["fields"][0]["type"], "richtext");
-    assert_eq!(post_json["fields"][1]["type"], "media");
-    assert_eq!(post_json["fields"][1]["media_kind"], "image");
+    assert!(post_json.get("fields").is_none());
+    assert_eq!(
+        post_json["settings"]["supports"],
+        json!(["editor", "featured_image"])
+    );
     assert!(post_json["settings"].is_object());
+    serde_json::from_value::<opendash_core::content::ContentTypeDefinition>(post_json).unwrap();
 
     let pattern_def: String =
         sqlx::query_scalar("SELECT definition_json FROM content_types WHERE key = 'pattern'")
@@ -44,5 +47,6 @@ async fn migration_0056_upgrades_baseline_0001_with_zero_schema_delta_and_under_
             .await
             .unwrap();
     let pattern_json: Value = serde_json::from_str(&pattern_def).unwrap();
-    assert_eq!(pattern_json["fields"], json!([]));
+    assert!(pattern_json.get("fields").is_none());
+    serde_json::from_value::<opendash_core::content::ContentTypeDefinition>(pattern_json).unwrap();
 }

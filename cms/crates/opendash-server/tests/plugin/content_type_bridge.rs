@@ -199,7 +199,14 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
             "content_types": [
                 {
                     "key": "job_posting",
-                    "label": "Job Posting",
+                    "label": "Job Posting"
+                }
+            ],
+            "field_groups": [
+                {
+                    "local_key": "job_posting_fields",
+                    "title": "Job Posting Fields",
+                    "target_types": ["job_posting"],
                     "fields": [
                         { "key": "company", "label": "Company", "type": "text", "required": true },
                         { "key": "salary", "label": "Salary", "type": "number", "required": false }
@@ -255,8 +262,7 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
             "content_types": [
                 {
                     "key": "case_study",
-                    "label": "Case Study",
-                    "fields": []
+                    "label": "Case Study"
                 }
             ]
         }
@@ -410,7 +416,7 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
         "declarations": {
             "content_types": [
                 {
-                    "key": "post", "label": "Hijacked Post", "fields": [],
+                    "key": "post", "label": "Hijacked Post",
                     "settings": {
                         "public": true,
                         "has_archive": true,
@@ -442,7 +448,7 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
         "name": "Other",
         "declarations": {
             "content_types": [
-                { "key": "job_posting", "label": "Stolen Job", "fields": [] }
+                { "key": "job_posting", "label": "Stolen Job" }
             ]
         }
     })
@@ -470,7 +476,14 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
             "content_types": [
                 {
                     "key": "job_posting",
-                    "label": "Job Posting",
+                    "label": "Job Posting"
+                }
+            ],
+            "field_groups": [
+                {
+                    "local_key": "job_posting_fields",
+                    "title": "Job Posting Fields",
+                    "target_types": ["job_posting"],
                     "fields": [
                         { "key": "company", "label": "Company", "type": "text", "required": true },
                         { "key": "salary", "label": "Salary", "type": "boolean", "required": false }

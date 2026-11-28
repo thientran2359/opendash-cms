@@ -226,5 +226,6 @@ pub(in crate::storage) async fn physical_delete_cleanup_in_tx(
         publication_after: None,
         trashed_at: row.trashed_at.clone(),
         published_at: row.published_at.clone(),
+        detached_parent_id: None,
     })
 }

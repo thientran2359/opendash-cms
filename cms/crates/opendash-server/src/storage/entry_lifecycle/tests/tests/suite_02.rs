@@ -110,14 +110,6 @@ async fn reading_page_guard_bidirectional_and_immediate_restore_schema_and_local
     let imm_input: ContentTypeDefinitionInput = serde_json::from_value(serde_json::json!({
         "key": "notice",
         "label": "Notice",
-        "fields": [{
-            "key": "summary",
-            "label": "Summary",
-            "type": "text",
-            "required": false,
-            "options": [],
-            "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public"}
-        }],
         "settings": {
             "public": true,
             "has_archive": true,
@@ -127,6 +119,24 @@ async fn reading_page_guard_bidirectional_and_immediate_restore_schema_and_local
     }))
     .unwrap();
     crate::storage::content::insert_user_content_type(&pool, &imm_input)
+        .await
+        .unwrap();
+    let fg_input: opendash_core::content::UserFieldGroupInput =
+        serde_json::from_value(serde_json::json!({
+            "local_key": "notice_fields",
+            "title": "Notice Fields",
+            "target_types": ["notice"],
+            "fields": [{
+                "key": "summary",
+                "label": "Summary",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "acl": {"min_view_role": "editor", "min_edit_role": "editor", "public_exposure": "public"}
+            }]
+        }))
+        .unwrap();
+    crate::storage::content::create_user_field_group(&pool, &fg_input)
         .await
         .unwrap();
     let notice_id = seed_entry(

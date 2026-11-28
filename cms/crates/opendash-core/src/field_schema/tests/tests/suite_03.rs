@@ -93,6 +93,21 @@ fn context_attribute_isolation_blocks_misplaced_flags() {
         FieldRole::Editor,
         PublicExposure::Private,
     ));
+    assert!(
+        validate_field_specs(std::slice::from_ref(&f_acl), FieldContext::OwnerSettings).is_err()
+    );
+    assert!(validate_field_specs(std::slice::from_ref(&f_acl), FieldContext::StudioBlock).is_err());
+    // Options allows acl when synchronized 1:1 with `public`
+    assert!(validate_field_specs(std::slice::from_ref(&f_acl), FieldContext::Options).is_ok());
+    f_acl.public = true;
+    assert!(validate_field_specs(std::slice::from_ref(&f_acl), FieldContext::Options).is_err());
+    f_acl.acl = Some(FieldAcl::canonical(
+        FieldRole::Editor,
+        FieldRole::Editor,
+        PublicExposure::Public,
+    ));
+    assert!(validate_field_specs(std::slice::from_ref(&f_acl), FieldContext::Options).is_ok());
+    f_acl.public = false;
     assert!(validate_field_specs(&[f_acl], FieldContext::Options).is_err());
 
     let mut f_pub = FieldSpec::new(FieldType::Text, "p", "P");

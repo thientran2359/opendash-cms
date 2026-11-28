@@ -147,7 +147,7 @@ async fn s02_http_trash_restore_purge_legacy_delete_and_rbac() {
     let (editor_cookie, editor_csrf) =
         login(&client, &site.base, "editor1", "EditorPassword123!").await;
 
-    // Create an immediate-mode public CPT `product`
+    // Create an immediate-mode public CPT `product` + FieldGroup
     let mk_cpt = client
         .post(format!("{}/api/admin/content-types", site.base))
         .header(header::COOKIE, &admin_cookie)
@@ -156,7 +156,6 @@ async fn s02_http_trash_restore_purge_legacy_delete_and_rbac() {
         .json(&json!({
             "key": "product",
             "label": "Product",
-            "fields": [{"key": "sku", "label": "SKU", "type": "text", "required": false}],
             "settings": {
                 "public": true,
                 "has_archive": true,
@@ -168,6 +167,21 @@ async fn s02_http_trash_restore_purge_legacy_delete_and_rbac() {
         .await
         .unwrap();
     assert_eq!(mk_cpt.status(), StatusCode::CREATED);
+    let mk_fg = client
+        .post(format!("{}/api/admin/content-field-groups", site.base))
+        .header(header::COOKIE, &admin_cookie)
+        .header("Origin", &site.base)
+        .header("X-CSRF-Token", &admin_csrf)
+        .json(&json!({
+            "local_key": "product_fields",
+            "title": "Product Fields",
+            "target_types": ["product"],
+            "fields": [{"key": "sku", "label": "SKU", "type": "text", "required": false}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(mk_fg.status(), StatusCode::CREATED);
 
     // 1. Create and publish a Post; verify published_at retained across Trash -> Restore -> Draft
     let post_create = client
@@ -673,7 +687,6 @@ async fn s02_dormant_retained_trash_maintenance_and_locale_guards() {
             .json(&json!({
                 "key": "catalog",
                 "label": "Catalog",
-                "fields": [],
                 "settings": {"public": true, "has_archive": false, "publication": "draft_publish", "supports": ["editor"]}
             }))
             .send()

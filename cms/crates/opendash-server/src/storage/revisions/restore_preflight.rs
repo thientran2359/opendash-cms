@@ -274,7 +274,7 @@ async fn load_valid_category_ids_for_terms(
 }
 
 fn support_allows_field(type_key: &str, key: &str, settings: &ContentTypeSettings) -> bool {
-    if !matches!(type_key, "post" | "page") {
+    if matches!(type_key, "pattern" | "section") {
         return true;
     }
     match key {
@@ -282,6 +282,7 @@ fn support_allows_field(type_key: &str, key: &str, settings: &ContentTypeSetting
             settings.supports(ContentSupport::Editor) || settings.supports(ContentSupport::Builder)
         }
         "featured_image" => settings.supports(ContentSupport::FeaturedImage),
+        "excerpt" => settings.supports(ContentSupport::Excerpt),
         _ => true,
     }
 }
@@ -313,10 +314,34 @@ async fn validate_sanitized_candidate_in_tx(
         return Ok(());
     }
 
+    entries::validate_entry_parent_in_conn(
+        &mut **tx,
+        &live.content_type_key,
+        &live.effective.base.descriptor.settings,
+        &live.locale,
+        Some(live.id),
+        payload.parent_id,
+    )
+    .await
+    .map_err(|e| map_validation_api_err(e, Some("parent_id")))?;
+
+    let loc_ctx = entries::build_entry_location_ctx_in_conn(
+        &mut **tx,
+        &live.content_type_key,
+        Some(live.id),
+        &live.locale,
+        caller_role,
+        payload.page_layout_key.clone(),
+        payload.custom_template_key.clone(),
+        &payload.term_ids,
+    )
+    .await?;
+
     let mut req_missing = BTreeMap::new();
     for (k, fe) in &live.effective.effective_fields {
         if is_field_editable(fe, caller_role)
             && fe.effective_required()
+            && live.effective.is_field_active_in_context(fe, &loc_ctx)
             && support_allows_field(
                 &live.content_type_key,
                 k,
@@ -349,7 +374,7 @@ async fn validate_sanitized_candidate_in_tx(
         term_ids: Some(payload.term_ids.clone()),
     };
     candidate_input
-        .validate_against_effective(&live.effective)
+        .validate_against_effective(&live.effective, &loc_ctx)
         .map_err(|msg| veto_err("restore_validation_failed", msg, BTreeMap::new()))?;
 
     entries::verify_supported_values(

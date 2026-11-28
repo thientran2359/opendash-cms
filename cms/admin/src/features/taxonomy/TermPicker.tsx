@@ -9,6 +9,8 @@ import {
   type TaxonomyKind,
   type TaxonomyTerm,
 } from '../../api/taxonomy.ts';
+import { TermInlineCreateModal } from './TermInlineCreateModal.tsx';
+import { TermPickerGroupBody } from './TermPickerGroupBody.tsx';
 
 interface TermsProps {
   userId: number | null;
@@ -27,6 +29,8 @@ interface TermPickerProps extends TermsProps {
   allowedKinds?: TaxonomyKind[];
   /** 'cards' renders each taxonomy as its own standalone sidebar card (WordPress-style). */
   variant?: 'default' | 'cards';
+  userRole?: 'admin' | 'editor';
+  csrfToken?: string | null;
 }
 
 interface TermFiltersProps extends TermsProps {
@@ -128,7 +132,8 @@ function useTermOptions(userId: number | null, typeKey: string | undefined,
 
 /** Native checkboxes preserve keyboard navigation and leave unknown saved IDs removable. */
 export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onChange,
-  primaryCategoryTermId = null, onPrimaryCategoryChange, onApiError, allowedKinds, variant = 'default' }: TermPickerProps) {
+  primaryCategoryTermId = null, onPrimaryCategoryChange, onApiError, allowedKinds, variant = 'default',
+  userRole = 'editor', csrfToken = null }: TermPickerProps) {
   useI18n();
   const { definitions, byKind, loading, error, reload } = useTermOptions(userId, typeKey, onApiError, allowedKinds, locale);
   const searchId = useId();
@@ -136,6 +141,7 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
   const [searchByKind, setSearchByKind] = useState<Record<string, string>>({});
   const [collapsedKinds, setCollapsedKinds] = useState<Record<string, boolean>>({});
   const [selectionError, setSelectionError] = useState('');
+  const [inlineCreateKind, setInlineCreateKind] = useState<string | null>(null);
   const allTerms = useMemo(() => Object.values(byKind).flat(), [byKind]);
   const known = useMemo(() => new Map(allTerms.map(term => [term.id, term])), [allTerms]);
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -174,15 +180,50 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
       .sort((a, b) => a - b));
   };
 
+  const selectExclusiveTerm = (kind: string, termId: number | null) => {
+    const kindIds = new Set((byKind[kind] ?? []).map(t => t.id));
+    const withoutKind = selectedIds.filter(id => !kindIds.has(id));
+    if (kind === 'category' && primaryCategoryTermId && kindIds.has(primaryCategoryTermId) && primaryCategoryTermId !== termId) {
+      onPrimaryCategoryChange?.(null);
+    }
+    setSelectionError('');
+    onChange([...new Set(termId !== null ? [...withoutKind, termId] : withoutKind)].sort((a, b) => a - b));
+  };
+
   const groups = definitions.map(definition => ({
     kind: definition.key,
     title: definition.label,
     hierarchical: definition.hierarchical,
+    definition,
     terms: definition.hierarchical ? termTree(byKind[definition.key] ?? [])
       : [...(byKind[definition.key] ?? [])].sort(sortTerms).map(term => ({ term, depth: 0 })),
     count: counts[definition.key] ?? 0,
   }));
+  const inlineCreateDef = definitions.find(d => d.key === inlineCreateKind) ?? null;
+  const canInlineCreate = (def: TaxonomyDefinition) =>
+    Boolean(csrfToken) && (userRole === 'admin' || Boolean(def.settings?.editor_can_create_terms));
   const selectedTags = (byKind.tag ?? []).filter(term => selected.has(term.id));
+
+  const inlineCreateModal = (
+    <TermInlineCreateModal
+      open={inlineCreateDef !== null}
+      definition={inlineCreateDef}
+      existingTerms={inlineCreateDef ? (byKind[inlineCreateDef.key] ?? []) : []}
+      locale={locale}
+      csrfToken={csrfToken}
+      onClose={() => setInlineCreateKind(null)}
+      onApiError={onApiError}
+      onCreated={created => {
+        setInlineCreateKind(null);
+        reload();
+        if (inlineCreateDef?.settings?.selection_mode === 'single') {
+          selectExclusiveTerm(created.kind, created.id);
+        } else {
+          onChange([...new Set([...selectedIds, created.id])].sort((a, b) => a - b));
+        }
+      }}
+    />
+  );
 
   if (variant === 'cards') {
     return (
@@ -217,9 +258,14 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
-                  <h3 className="text-sm font-semibold text-zinc-900">{group.title}</h3>
+                  <h3 className="text-sm font-semibold text-zinc-900">
+                    {group.title}
+                    {group.definition.settings?.required_on_publish && (
+                      <span className="ml-0.5 text-rose-600" title={__("Required before publish")}>*</span>
+                    )}
+                  </h3>
                   <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600">
-                    {group.count}/{maxTerms(group.kind)}
+                    {group.definition.settings?.selection_mode === 'single' ? `${group.count}/1` : `${group.count}/${maxTerms(group.kind)}`}
                   </span>
                 </div>
                 <button
@@ -232,70 +278,25 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
                 </button>
               </div>
               {!isCollapsed && (
-                <div className="mt-3 space-y-2.5">
-                  {group.terms.length > 5 && (
-                    <input
-                      type="search"
-                      aria-label={__("Search in {{value1}}", { value1: group.title })}
-                      value={searchByKind[group.kind] ?? ''}
-                      onChange={event => setSearchByKind(prev => ({ ...prev, [group.kind]: event.target.value }))}
-                      placeholder={__("Search {{value1}}...", { value1: group.title.toLowerCase() })}
-                      disabled={disabled}
-                      className="h-8 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50"
-                    />
-                  )}
-                  {!group.hierarchical && pickedInGroup.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5" role="list" aria-label={__("{{value1}} selected", { value1: group.title })}>
-                      {pickedInGroup.map(({ term }) => (
-                        <span key={term.id} role="listitem" className="inline-flex items-center gap-1 rounded-full bg-od-accent-soft px-2 py-0.5 text-xs font-medium text-od-accent">
-                          <span>{term.name}</span>
-                          <button
-                            type="button"
-                            aria-label={__("Remove {{value1}}", { value1: term.name })}
-                            disabled={disabled}
-                            className="rounded-full px-0.5 font-bold hover:bg-white/60 disabled:opacity-50"
-                            onClick={() => toggle(term.id, false)}
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
-                    {visible.map(({ term, depth }) => (
-                      <div key={term.id} className="flex min-w-0 items-center justify-between gap-2 rounded-md px-1.5 py-1 text-sm text-zinc-800 hover:bg-zinc-50">
-                        <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
-                          <input
-                            type="checkbox"
-                            className="shrink-0"
-                            checked={selected.has(term.id)}
-                            onChange={event => toggle(term.id, event.target.checked)}
-                            disabled={disabled || loading || Boolean(error) || (!selected.has(term.id) && (group.count >= maxTerms(group.kind) || selected.size >= 96))}
-                          />
-                          <span className="min-w-0 truncate" style={{ paddingLeft: `${Math.min(depth, 6) * 12}px` }} title={`${term.name} (${term.slug})`}>
-                            {term.name}
-                          </span>
-                        </label>
-                        {typeKey === 'post' && group.kind === 'category' && selected.has(term.id) && onPrimaryCategoryChange && (
-                          <button
-                            type="button"
-                            data-testid={`set-primary-term-${term.id}`}
-                            aria-pressed={primaryCategoryTermId === term.id}
-                            disabled={disabled || loading || Boolean(error)}
-                            onClick={() => onPrimaryCategoryChange(term.id)}
-                            className="shrink-0 rounded-md border border-zinc-200 px-2 py-0.5 text-[11px] font-medium text-od-accent hover:bg-od-accent-soft disabled:opacity-50"
-                          >
-                            {primaryCategoryTermId === term.id ? _x("Primary", "feature.taxonomy") : __("Set as primary")}
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {!loading && visible.length === 0 && (
-                      <p className="py-1 text-xs text-zinc-500">{q ? _x("No matching items.", "feature.taxonomy") : __("No items yet.")}</p>
-                    )}
-                  </div>
-                </div>
+                <TermPickerGroupBody
+                  group={group}
+                  visible={visible}
+                  pickedInGroup={pickedInGroup}
+                  selected={selected}
+                  maxForKind={maxTerms(group.kind)}
+                  totalSelectedCount={selected.size}
+                  searchQuery={searchByKind[group.kind] ?? ''}
+                  loading={loading}
+                  disabled={disabled}
+                  hasError={Boolean(error)}
+                  primaryCategoryTermId={typeKey === 'post' ? primaryCategoryTermId : null}
+                  onSearchChange={val => setSearchByKind(prev => ({ ...prev, [group.kind]: val }))}
+                  onToggleTerm={toggle}
+                  onSelectExclusiveTerm={selectExclusiveTerm}
+                  onPrimaryCategoryChange={typeKey === 'post' ? onPrimaryCategoryChange : undefined}
+                  canInlineCreate={canInlineCreate(group.definition)}
+                  onOpenInlineCreate={() => setInlineCreateKind(group.kind)}
+                />
               )}
             </section>
           );
@@ -318,6 +319,7 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
             </div>
           </section>
         )}
+        {inlineCreateModal}
       </div>
     );
   }
@@ -360,26 +362,31 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
           const visible = group.terms.filter(({ term }) =>
             !normalizedSearch || term.name.toLocaleLowerCase(bcp47).includes(normalizedSearch) ||
             term.slug.toLocaleLowerCase(bcp47).includes(normalizedSearch));
+          const pickedInGroup = group.terms.filter(({ term }) => selected.has(term.id));
           return (
             <fieldset key={group.kind} disabled={disabled} className="min-w-0 rounded-lg border border-slate-200 p-3">
               <legend className="px-1 text-sm font-semibold text-slate-800">
-                {group.title} ({group.count}/{maxTerms(group.kind)})
+                {group.title} ({group.definition.settings?.selection_mode === 'single' ? `${group.count}/1` : `${group.count}/${maxTerms(group.kind)}`})
               </legend>
-              <div className="max-h-56 space-y-1 overflow-y-auto">
-                {visible.map(({ term, depth }) => (
-                  <label key={term.id} className="flex min-w-0 cursor-pointer items-start gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50">
-                    <input type="checkbox" className="mt-1 accent-blue-600" checked={selected.has(term.id)}
-                      onChange={event => toggle(term.id, event.target.checked)}
-                      disabled={disabled || loading || Boolean(error) || (!selected.has(term.id) && (group.count >= maxTerms(group.kind) || selected.size >= 96))} />
-                    <span className="min-w-0 break-words" style={{ paddingLeft: `${Math.min(depth, 8) * 10}px` }}>
-                      <span>{term.name}</span> <span className="text-slate-500">({term.slug})</span>
-                    </span>
-                  </label>
-                ))}
-                {!loading && visible.length === 0 && (
-                  <p className="text-sm text-slate-500">{normalizedSearch ? _x("No matching items.", "feature.taxonomy") : __("No items yet.")}</p>
-                )}
-              </div>
+              <TermPickerGroupBody
+                group={group}
+                visible={visible}
+                pickedInGroup={pickedInGroup}
+                selected={selected}
+                maxForKind={maxTerms(group.kind)}
+                totalSelectedCount={selected.size}
+                searchQuery={search}
+                loading={loading}
+                disabled={disabled}
+                hasError={Boolean(error)}
+                primaryCategoryTermId={typeKey === 'post' ? primaryCategoryTermId : null}
+                onSearchChange={setSearch}
+                onToggleTerm={toggle}
+                onSelectExclusiveTerm={selectExclusiveTerm}
+                onPrimaryCategoryChange={typeKey === 'post' ? onPrimaryCategoryChange : undefined}
+                canInlineCreate={canInlineCreate(group.definition)}
+                onOpenInlineCreate={() => setInlineCreateKind(group.kind)}
+              />
             </fieldset>
           );
         })}
@@ -403,6 +410,7 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
         </fieldset>
       )}
       <p className="text-xs text-slate-600">{__("Only existing items can be associated. Unsaved selections do not change site data until you save.")}</p>
+      {inlineCreateModal}
     </section>
   );
 }

@@ -14,6 +14,7 @@ pub mod media_lifecycle;
 pub mod media_refs;
 pub mod menu;
 pub mod operations;
+pub mod options_pages;
 pub mod overrides;
 pub mod page;
 pub mod patterns;

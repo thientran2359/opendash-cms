@@ -9,7 +9,8 @@ fn provider_declarations(taxonomies: &[&str]) -> CntDeclarations {
         content_types: vec![ContentTypeDeclaration {
             key: "provider_books_cas".to_owned(),
             label: "Provider books".to_owned(),
-            fields: vec![],
+            singular_label: None,
+            description: None,
             taxonomies: taxonomies.iter().map(|s| (*s).to_owned()).collect(),
             settings: None,
             rewrite_base: None,
@@ -17,6 +18,7 @@ fn provider_declarations(taxonomies: &[&str]) -> CntDeclarations {
         taxonomy_definitions: vec![],
         taxonomy_eligibility: vec![],
         field_groups: vec![],
+        options_pages: vec![],
     }
 }
 
@@ -139,6 +141,7 @@ async fn provider_redeclaration_advances_taxonomy_cas_once_only_when_changed() {
             taxonomies: vec!["category".into(), "tag".into()],
         }],
         field_groups: vec![],
+        options_pages: vec![],
     };
     let mut tx = db.begin().await.unwrap();
     sync_plugin_cnt_declarations_in_tx(&mut tx, "provider_cas_test", &eligibility_only)

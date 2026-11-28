@@ -1,7 +1,5 @@
 import { __, _x, useI18n } from '../../i18n/index.tsx';
 import type { EntryTableRow } from '../content/types.ts';
-import type { FieldSpec } from '../../fields/types.ts';
-import { UnifiedFieldForm } from '../../fields/UnifiedFieldForm.tsx';
 
 /** Declarative server-projected configuration only: no HTML/JS/CSS injection. */
 export interface ProviderColumn {
@@ -18,23 +16,6 @@ export interface ProviderColumn {
 export interface EffectiveListConfig {
   schema_version: 1;
   columns: ProviderColumn[];
-}
-
-export interface EffectiveTermPanel {
-  key: string;
-  label: string;
-  order: number;
-  fields: FieldSpec[];
-  read_only_keys?: string[];
-}
-
-export type TermExtensionValues = Record<string, Record<string, unknown>>;
-
-export interface EffectiveTermConfig {
-  schema_version: 1;
-  schema_token: string;
-  panels: EffectiveTermPanel[];
-  extensions: TermExtensionValues;
 }
 
 /** A path is safe only if it cannot resolve outside this origin. */
@@ -84,46 +65,4 @@ export function AdminColumnCell({
         aria-label={__("Run {{value1}} for item #{{value2}}", { value1: column.label, value2: row.id })}>{__("Run")}</button>}
     </span>
   );
-}
-
-
-
-export function AdminTermPanels({
-  config, values, disabled, onChange, csrfToken = null, locale = null, siteTimezone = 'UTC', onApiError,
-}: {
-  config: EffectiveTermConfig;
-  values: TermExtensionValues;
-  disabled: boolean;
-  onChange: (panelKey: string, key: string, value: unknown) => void;
-  csrfToken?: string | null;
-  locale?: string | null;
-  siteTimezone?: string;
-  onApiError?: (err: unknown, fallback: string) => void;
-}) {
-  useI18n();
-  if (!config.panels.length) return null;
-  return <div className="space-y-4" aria-label={__("Provider extension fields")} data-testid="term-extension-panels">
-    {config.panels.map(panel => <fieldset key={panel.key} className="space-y-3 rounded-xl border border-slate-200 p-4"
-      data-provider-panel={panel.key}>
-      <legend className="px-1 text-sm font-semibold text-slate-900">{panel.label}</legend>
-      <UnifiedFieldForm
-        context="term"
-        fields={panel.fields}
-        values={values[panel.key] ?? {}}
-        onChange={next => {
-          for (const field of panel.fields) {
-            if (field.key in next && next[field.key] !== values[panel.key]?.[field.key]) {
-              onChange(panel.key, field.key, next[field.key]);
-            }
-          }
-        }}
-        csrfToken={csrfToken}
-        locale={locale}
-        siteTimezone={siteTimezone}
-        disabled={disabled}
-        readOnlyKeys={new Set(panel.read_only_keys ?? [])}
-        onApiError={onApiError ?? (() => {})}
-      />
-    </fieldset>)}
-  </div>;
 }

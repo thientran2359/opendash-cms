@@ -26,3 +26,5 @@ pub use declarations::*;
 mod editor_panels;
 pub use editor_panels::*;
 mod panel_fields;
+mod panel_projection;
+pub use panel_projection::*;

@@ -2,62 +2,19 @@ use super::*;
 
 impl EffectiveContentSchema {
     /// Assembles the unified `EffectiveContentSchema` for a `type_key` and enforces `Rule COMPAT-1`
-    /// (global `field_key` uniqueness across base fields and all attached groups, including
-    /// `provider_inactive` and `withdrawn` groups, targets, and fields).
+    /// (global `field_key` uniqueness across Core-managed keys and all attached groups, including
+    /// `active == false`, `provider_inactive` and `withdrawn` groups/fields).
     pub fn assemble(
         base: OwnedDescriptor<ContentTypeDefinition>,
         base_version: i64,
         mut attached_groups: Vec<AttachedFieldGroupSnapshot>,
     ) -> Result<Self, SchemaTransitionError> {
         attached_groups.sort_by(|a, b| a.group_id.cmp(&b.group_id));
-        let is_builtin = matches!(base.descriptor.key.as_str(), "post" | "page");
-        let mut effective_fields = BTreeMap::new();
+        let is_private_reusable = matches!(base.descriptor.key.as_str(), "section" | "pattern");
+        let mut effective_fields: BTreeMap<String, EffectiveFieldEntry> = BTreeMap::new();
         let mut ui_fields = Vec::new();
+        let mut seen_sync_taxonomies: HashSet<String> = HashSet::new();
         let base_source_id = format!("base:{}", base.descriptor.key);
-
-        if let Err(e) = crate::field_schema::validate_field_specs(
-            &base.descriptor.fields,
-            crate::field_schema::FieldContext::Content,
-        ) {
-            return Err(classify_validation_error(e));
-        }
-        for field in &base.descriptor.fields {
-            if field.is_ui_only() {
-                ui_fields.push(field.clone());
-                continue;
-            }
-            if !is_builtin && RESERVED_ENTRY_KEYS.contains(&field.key.as_str()) {
-                return Err(SchemaTransitionError::FieldKeyCollision(format!(
-                    "Trường '{}' trùng với khóa hệ thống được bảo vệ.",
-                    field.key
-                )));
-            }
-            let effective_status =
-                if base.declaration_state == DeclarationState::Withdrawn || field.is_withdrawn() {
-                    EffectiveFieldStatus::Withdrawn
-                } else if base.status != ProviderStatus::Active {
-                    EffectiveFieldStatus::ProviderInactive
-                } else {
-                    EffectiveFieldStatus::Active
-                };
-            if effective_fields
-                .insert(
-                    field.key.clone(),
-                    EffectiveFieldEntry {
-                        definition: field.clone(),
-                        owner: base.owner.clone(),
-                        source_id: base_source_id.clone(),
-                        effective_status,
-                    },
-                )
-                .is_some()
-            {
-                return Err(SchemaTransitionError::FieldKeyCollision(format!(
-                    "Trùng khóa custom field '{}' trong loại nội dung '{}'.",
-                    field.key, base.descriptor.key
-                )));
-            }
-        }
 
         for group in &attached_groups {
             if let Err(e) = crate::field_schema::validate_field_specs(
@@ -65,6 +22,14 @@ impl EffectiveContentSchema {
                 crate::field_schema::FieldContext::Content,
             ) {
                 return Err(classify_validation_error(e));
+            }
+            if group.fields.iter().any(|f| f.sync_entry_terms)
+                && location_rules_have_param(&group.location, LocationParam::EntryTaxonomy)
+            {
+                return Err(SchemaTransitionError::SyncEntryTermsLocationCycle(format!(
+                    "Nhóm '{}' không thể bật sync_entry_terms khi dùng rule entry_taxonomy.",
+                    group.group_id
+                )));
             }
             for field in &group.fields {
                 if field.is_ui_only() {
@@ -93,6 +58,18 @@ impl EffectiveContentSchema {
                 } else {
                     EffectiveFieldStatus::Active
                 };
+                if effective_status != EffectiveFieldStatus::Withdrawn
+                    && field.sync_entry_terms
+                    && let Some(tax) = field.taxonomy.as_deref()
+                    && !seen_sync_taxonomies.insert(tax.to_owned())
+                {
+                    return Err(SchemaTransitionError::DuplicateSyncEntryTermsTaxonomy(
+                        format!(
+                            "Phân loại '{tax}' chỉ được đồng bộ bởi tối đa một trường term_ref trên '{}'.",
+                            base.descriptor.key
+                        ),
+                    ));
+                }
                 effective_fields.insert(
                     field.key.clone(),
                     EffectiveFieldEntry {
@@ -105,50 +82,71 @@ impl EffectiveContentSchema {
             }
         }
 
-        if !is_builtin
-            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
-            && !effective_fields.contains_key("featured_image")
-        {
-            let mut fi_spec = crate::field_schema::FieldSpec::new(
-                crate::field_schema::FieldType::Media,
-                "featured_image",
-                "Ảnh đại diện",
-            );
-            fi_spec.media_kind = Some(crate::field_schema::MediaFieldKind::Image);
-            effective_fields.insert(
-                "featured_image".into(),
-                EffectiveFieldEntry {
-                    definition: fi_spec,
-                    owner: ResourceOwner::Core,
-                    source_id: base_source_id.clone(),
-                    effective_status: EffectiveFieldStatus::Active,
-                },
-            );
-        }
-
-        if !is_builtin
-            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
-            && base.descriptor.settings.supports(ContentSupport::Builder)
-        {
-            if let Some(existing_body) = effective_fields.get("body") {
-                if existing_body.definition.field_type != crate::field_schema::FieldType::Richtext {
-                    return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
-                        "Trường 'body' trên loại nội dung '{}' phải có kiểu richtext khi bật ContentSupport::Builder.",
-                        base.descriptor.key
-                    )));
-                }
-            } else {
-                let body_spec = crate::field_schema::FieldSpec::new(
+        if !is_private_reusable {
+            let settings = &base.descriptor.settings;
+            if settings.supports(ContentSupport::Editor)
+                || settings.supports(ContentSupport::Builder)
+            {
+                let mut body_spec = crate::field_schema::FieldSpec::new(
                     crate::field_schema::FieldType::Richtext,
                     "body",
                     "Nội dung",
                 );
+                body_spec.acl = Some(crate::field_schema::FieldAcl::canonical(
+                    FieldRole::Editor,
+                    FieldRole::Editor,
+                    PublicExposure::Public,
+                ));
                 effective_fields.insert(
                     "body".into(),
                     EffectiveFieldEntry {
                         definition: body_spec,
                         owner: ResourceOwner::Core,
                         source_id: base_source_id.clone(),
+                        effective_status: EffectiveFieldStatus::Active,
+                    },
+                );
+            }
+            if settings.supports(ContentSupport::FeaturedImage) {
+                let mut fi_spec = crate::field_schema::FieldSpec::new(
+                    crate::field_schema::FieldType::Media,
+                    "featured_image",
+                    "Ảnh đại diện",
+                );
+                fi_spec.media_kind = Some(crate::field_schema::MediaFieldKind::Image);
+                fi_spec.acl = Some(crate::field_schema::FieldAcl::canonical(
+                    FieldRole::Editor,
+                    FieldRole::Editor,
+                    PublicExposure::Public,
+                ));
+                effective_fields.insert(
+                    "featured_image".into(),
+                    EffectiveFieldEntry {
+                        definition: fi_spec,
+                        owner: ResourceOwner::Core,
+                        source_id: base_source_id.clone(),
+                        effective_status: EffectiveFieldStatus::Active,
+                    },
+                );
+            }
+            if settings.supports(ContentSupport::Excerpt) {
+                let mut exc_spec = crate::field_schema::FieldSpec::new(
+                    crate::field_schema::FieldType::Textarea,
+                    "excerpt",
+                    "Tóm tắt",
+                );
+                exc_spec.max_chars = Some(1000);
+                exc_spec.acl = Some(crate::field_schema::FieldAcl::canonical(
+                    FieldRole::Editor,
+                    FieldRole::Editor,
+                    PublicExposure::Public,
+                ));
+                effective_fields.insert(
+                    "excerpt".into(),
+                    EffectiveFieldEntry {
+                        definition: exc_spec,
+                        owner: ResourceOwner::Core,
+                        source_id: base_source_id,
                         effective_status: EffectiveFieldStatus::Active,
                     },
                 );
@@ -163,6 +161,34 @@ impl EffectiveContentSchema {
             ui_fields,
             schema_token: String::new(),
         })
+    }
+
+    pub fn is_field_active_in_context(
+        &self,
+        entry: &EffectiveFieldEntry,
+        loc_ctx: &LocationEvalContext,
+    ) -> bool {
+        if entry.owner == ResourceOwner::Core {
+            return true;
+        }
+        self.attached_groups
+            .iter()
+            .find(|g| g.group_id == entry.source_id)
+            .is_some_and(|g| g.active && evaluate_location_rules(&g.location, loc_ctx))
+    }
+
+    pub fn is_group_admin_only(&self, source_id: &str) -> bool {
+        self.attached_groups
+            .iter()
+            .find(|g| g.group_id == source_id)
+            .is_some_and(|g| {
+                !group_allows_role_for_target(
+                    &g.location,
+                    "content_type",
+                    &self.base.descriptor.key,
+                    FieldRole::Editor,
+                )
+            })
     }
 
     /// Produces a deterministic canonical JSON string for computing `schema_token` (`sha256:<64-hex>`).
@@ -183,12 +209,13 @@ impl EffectiveContentSchema {
             "base_type": {
                 "key": self.base.descriptor.key,
                 "label": self.base.descriptor.label,
+                "singular_label": self.base.descriptor.singular_label,
+                "description": self.base.descriptor.description,
                 "owner": self.base.owner,
                 "provider_status": self.base.status,
                 "declaration_state": self.base.declaration_state,
                 "version": self.base_version,
                 "taxonomies": sorted_tax,
-                "fields": self.base.descriptor.fields,
                 "settings": self.base.descriptor.settings,
             },
             "attached_groups": self.attached_groups.iter().map(|g| {
@@ -197,6 +224,10 @@ impl EffectiveContentSchema {
                     "owner": g.owner,
                     "status": g.status,
                     "association_state": g.association_state,
+                    "active": g.active,
+                    "domain": g.domain,
+                    "location": g.location,
+                    "presentation": g.presentation,
                     "version": g.version,
                     "fields": g.fields,
                 })
@@ -220,16 +251,10 @@ pub fn verify_effective_schema_transition(
     if let Some(old) = old_effective {
         let mut old_specs = Vec::new();
         for (old_key, old_entry) in &old.effective_fields {
-            // Allow removing the synthetic core-injected `body` field when a custom CPT disables Builder.
+            // Core-managed `supports` fields (`body`, `featured_image`, `excerpt`) may be toggled off freely.
             if !new_effective.effective_fields.contains_key(old_key)
-                && old_key == "body"
                 && old_entry.owner == ResourceOwner::Core
-                && !matches!(old.base.descriptor.key.as_str(), "post" | "page")
-                && !new_effective
-                    .base
-                    .descriptor
-                    .settings
-                    .supports(ContentSupport::Builder)
+                && CORE_MANAGED_ENTRY_KEYS.contains(&old_key.as_str())
             {
                 continue;
             }
@@ -262,12 +287,12 @@ pub fn verify_effective_schema_transition(
                 "Trường '{key}' có min_view_role = admin không được đặt public_exposure = public."
             )));
         }
-        if let Some(ref def_val) = entry.definition.default {
-            if !valid_default_value(&entry.definition, def_val) {
-                return Err(SchemaTransitionError::InvalidFieldDefault(format!(
-                    "Trường '{key}' có default không hợp lệ hoặc bị cấm."
-                )));
-            }
+        if let Some(ref def_val) = entry.definition.default
+            && !valid_default_value(&entry.definition, def_val)
+        {
+            return Err(SchemaTransitionError::InvalidFieldDefault(format!(
+                "Trường '{key}' có default không hợp lệ hoặc bị cấm."
+            )));
         }
         if entry.effective_required()
             && min_edit_role == FieldRole::Admin
@@ -282,4 +307,68 @@ pub fn verify_effective_schema_transition(
     }
 
     Ok(())
+}
+
+impl ContentEntryInput {
+    pub fn validate_against_effective(
+        &self,
+        effective: &EffectiveContentSchema,
+        loc_ctx: &LocationEvalContext,
+    ) -> Result<(), &'static str> {
+        if self.title.trim().is_empty()
+            || self.title.chars().count() > 200
+            || self.title.chars().any(char::is_control)
+        {
+            return Err("Tiêu đề nội dung không hợp lệ.");
+        }
+        if !valid_kebab_segment_with_limit(&self.slug, 64) {
+            return Err("Slug nội dung không hợp lệ.");
+        }
+        if let Some(ids) = &self.term_ids
+            && (ids.len() > 96
+                || ids.iter().any(|id| *id <= 0)
+                || ids.iter().copied().collect::<HashSet<_>>().len() != ids.len())
+        {
+            return Err("term_ids phải là danh sách ID dương, duy nhất (tối đa 96).");
+        }
+        for key in self.values.keys() {
+            if !effective.effective_fields.contains_key(key) {
+                return Err("Giá trị chứa custom field chưa được khai báo.");
+            }
+        }
+        let root_specs: Vec<crate::field_schema::FieldSpec> = effective
+            .effective_fields
+            .values()
+            .map(|e| e.definition.clone())
+            .chain(effective.ui_fields.iter().cloned())
+            .collect();
+        for (key, entry) in &effective.effective_fields {
+            let group_active = effective.is_field_active_in_context(entry, loc_ctx);
+            let visible = group_active
+                && crate::field_schema::evaluate_conditions(
+                    entry.definition.conditions.as_ref(),
+                    &root_specs,
+                    &self.values,
+                    &root_specs,
+                    &self.values,
+                );
+            let value = self.values.get(key).unwrap_or(&Value::Null);
+            if value.is_null() {
+                if visible && entry.effective_required() {
+                    return Err("Thiếu custom field bắt buộc.");
+                }
+                continue;
+            }
+            if !valid_field_value_in_context(
+                &entry.definition,
+                value,
+                &root_specs,
+                &self.values,
+                visible,
+            ) {
+                return Err("Giá trị custom field không đúng kiểu hoặc vượt giới hạn.");
+            }
+        }
+        Ok(())
+    }
 }

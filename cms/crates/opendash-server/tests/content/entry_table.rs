@@ -244,20 +244,33 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
     }
     // Real effective field roles: an Editor can see public_note, while an
     // admin-only field and a private-public-exposure field never reach them.
-    let descriptor = json!({
-        "key":"table_acl","label":"Table ACL",
-        "fields":[
-            {"key":"public_note","label":"Visible","type":"text"},
-            {"key":"admin_secret","label":"Admin only","type":"text","acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}},
-            {"key":"private_note","label":"Private","type":"text","acl":{"public_exposure":"private"}}
-        ]
-    });
+    let descriptor = json!({"key":"table_acl","label":"Table ACL"});
     sqlx::query(
         "INSERT INTO content_types
         (key,definition_json,owner_kind,provider_status,declaration_state,version)
         VALUES('table_acl',?,'user','active','declared',1)",
     )
     .bind(descriptor.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let fg_fields = json!([
+        {"key":"public_note","label":"Visible","type":"text"},
+        {"key":"admin_secret","label":"Admin only","type":"text","acl": {"min_view_role": "admin", "min_edit_role": "admin", "public_exposure": "private"}},
+        {"key":"private_note","label":"Private","type":"text","acl":{"public_exposure":"private"}}
+    ]);
+    sqlx::query(
+        "INSERT INTO content_field_groups
+        (group_id,owner_kind,owner_id,local_key,title,description,fields_json,domain,location_rules_json,presentation_json,active,status,version)
+        VALUES('user:table_acl_fields','user',NULL,'table_acl_fields','Table ACL Fields','',?,'content','[[{\"param\":\"content_type\",\"op\":\"eq\",\"value\":\"table_acl\"}]]','{\"region\":\"main_bottom\",\"order\":10,\"collapsible\":true,\"collapsed_by_default\":false,\"style\":\"card\",\"label_placement\":\"top\"}',1,'active',1)",
+    )
+    .bind(fg_fields.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO content_field_group_targets(group_id,target_kind,target_key,association_state) VALUES('user:table_acl_fields','content_type','table_acl','declared')",
+    )
     .execute(&mut *tx)
     .await
     .unwrap();

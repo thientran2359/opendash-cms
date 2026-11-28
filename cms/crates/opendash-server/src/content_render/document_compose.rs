@@ -1,33 +1,5 @@
 use super::*;
 
-pub fn build_public_theme_context(input: PublicThemeContextInput<'_>) -> ApiResult<Value> {
-    let payload = SerializedThemeContext {
-        site: input.site,
-        site_options: input.site_options,
-        options: input.options,
-        theme_options: input.options,
-        theme_assets: input.theme_assets,
-        menus: input.menus,
-        route: SerializedRouteContext {
-            kind: input.route_kind,
-            path: input.route_path,
-        },
-        breadcrumbs: input.breadcrumbs,
-        pagination: input.pagination,
-        archive_url: input.archive_url,
-        previous_url: input.previous_url,
-        next_url: input.next_url,
-        entries: input.entries,
-        related_entries: input.related_entries,
-        recent_posts: input.recent_posts,
-        taxonomy: input.taxonomy,
-        content_type: input.content_type,
-        entry: input.entry,
-        search: input.search,
-    };
-    serde_json::to_value(payload).map_err(|err| ApiError::internal(err.to_string()))
-}
-
 pub(super) fn escape_html_attr(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for ch in raw.chars() {

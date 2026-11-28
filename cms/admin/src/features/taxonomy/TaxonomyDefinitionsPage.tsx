@@ -5,8 +5,8 @@ import type { OwnedContentTypeWithSettings } from '../../api/content.ts';
 import { ApiClientError } from '../../api/client.ts';
 import {
   createTaxonomyDefinition, deleteTaxonomyDefinition, getTaxonomyDefinition,
-  listTaxonomyDefinitions, updateTaxonomyDefinition, updateTaxonomyEligibility,
-  type TaxonomyDefinition,
+  listAllTaxonomyTerms, listTaxonomyDefinitions, updateTaxonomyDefinition, updateTaxonomyEligibility,
+  type TaxonomyDefinition, type TaxonomyDefinitionChanges, type TaxonomyTerm,
 } from '../../api/taxonomy.ts';
 import {
   AdminAlert,
@@ -17,11 +17,12 @@ import {
 
 import {
   type TaxonomyDefsTabId, type Props, type FormValues, type DefinitionsDraft,
-  definitionDrafts, draftScope, keysEqual,   getConfiguredTaxonomies, selectedKeys, blank, fromDefinition,
-  fieldClass, buttonClass, failure, termsHash,
+  definitionDrafts, draftScope, keysEqual, getConfiguredTaxonomies, selectedKeys, blank, fromDefinition,
+  settingsFromForm, fieldClass, buttonClass, failure, termsHash,
 } from './taxonomyDefinitionsHelpers.ts';
+import { TaxonomySettingsPanel } from './TaxonomySettingsPanel.tsx';
 
-export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApiError, onDirtyChange, onNavigateHash }: Props) {
+export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApiError, onDirtyChange, onNavigateHash, onDefinitionsChanged }: Props) {
   useI18n();
   const scope = draftScope(siteInstanceId, user);
   const mountedRef = useRef(true);
@@ -52,6 +53,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   const [eligibilityConflict, setEligibilityConflict] = useState(recovered?.eligibilityConflict ?? false);
   const [configuredEffective, setConfiguredEffective] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<TaxonomyDefsTabId>('definitions');
+  const [activeTerms, setActiveTerms] = useState<TaxonomyTerm[]>([]);
   const onErrorRef = useRef(onApiError);
   onErrorRef.current = onApiError;
   const reportDirtyRef = useRef(onDirtyChange);
@@ -94,10 +96,22 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   }, [scope, dirty, loading, eligibilityLoading, activeKey, form, baseline, active?.version, conflict,
     typeKey, eligible, eligibilityBaseline, eligibilityTypeVersion, eligibilityConflict]);
 
+  useEffect(() => {
+    if (!user || !activeKey || activeKey === '__new__') { setActiveTerms([]); return; }
+    const c = new AbortController();
+    void listAllTaxonomyTerms(activeKey, c.signal)
+      .then(items => { if (!c.signal.aborted && mountedRef.current) setActiveTerms(items); })
+      .catch(() => { if (!c.signal.aborted && mountedRef.current) setActiveTerms([]); });
+    return () => c.abort();
+  }, [activeKey, user?.id]);
+
   useEffect(() => () => {
     // Explicit route navigation has its own dirty confirmation in App. A 401
     // leaves this hash untouched, so it retains the account-scoped draft.
-    if (scope && window.location.hash.split('?')[0] !== '#/taxonomy/definitions') definitionDrafts.delete(scope);
+    const currentPath = window.location.hash.split('?')[0];
+    if (scope && currentPath !== '#/content-structure/taxonomies' && currentPath !== '#/taxonomy/definitions') {
+      definitionDrafts.delete(scope);
+    }
   }, [scope]);
 
   const reload = async (signal?: AbortSignal) => {
@@ -196,16 +210,14 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       const server = fromDefinition(latest);
       const changed = (Object.keys(form) as Array<keyof FormValues>)
         .filter(field => field !== 'key' && !(latest.owner.kind === 'core' && field === 'hierarchical') &&
-          form[field] !== baseline[field]);
-      const overlaps = changed.filter(field => server[field] !== baseline[field]);
+          JSON.stringify(form[field]) !== JSON.stringify(baseline[field]));
+      const overlaps = changed.filter(field => JSON.stringify(server[field]) !== JSON.stringify(baseline[field]));
       if (overlaps.length && !window.confirm(
         __("The server also changed {{value1}}. Keep current values and try saving against the latest version?", { value1: overlaps.join(', ') }),
       )) return;
       const next = { ...server };
       for (const field of changed) {
-        if (field === 'label') next.label = form.label;
-        if (field === 'hierarchical') next.hierarchical = form.hierarchical;
-        if (field === 'public') next.public = form.public;
+        Object.assign(next, { [field]: form[field] });
       }
       setDefinitions(previous => [...previous.filter(item => item.key !== activeKey), latest]);
       setBaseline(server); setForm(next); setConflict(false);
@@ -270,11 +282,16 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     if (isNew && (form.key.length > 64 || !/^[a-z][a-z0-9_]*$/.test(form.key))) {
       setError(__("Taxonomy key must be a valid lowercase identifier.")); return;
     }
-    const changes = {
+    const settingsChanged = JSON.stringify(settingsFromForm(form)) !== JSON.stringify(settingsFromForm(baseline));
+    const normRewrite = form.rewrite_base.trim() || null;
+    const baseRewrite = baseline.rewrite_base.trim() || null;
+    const changes: TaxonomyDefinitionChanges = {
       ...(label !== baseline.label ? { label } : {}),
-      ...(active?.owner.kind !== 'core' && form.hierarchical !== baseline.hierarchical
-        ? { hierarchical: form.hierarchical } : {}),
+      ...(active?.owner.kind !== 'core' && form.hierarchical !== baseline.hierarchical ? { hierarchical: form.hierarchical } : {}),
       ...(form.public !== baseline.public ? { public: form.public } : {}),
+      ...(settingsChanged ? { settings: settingsFromForm(form) } : {}),
+      ...(!keysEqual(form.content_types, baseline.content_types) ? { content_types: form.content_types } : {}),
+      ...(normRewrite !== baseRewrite ? { rewrite_base: normRewrite } : {}),
     };
     if (!isNew && Object.keys(changes).length === 0) {
       setForm(baseline);
@@ -284,8 +301,9 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     setBusy(true); setError(''); setNotice('');
     try {
       const updated = isNew
-        ? await createTaxonomyDefinition({ key: form.key, label, hierarchical: form.hierarchical, public: form.public }, csrfToken)
+        ? await createTaxonomyDefinition({ key: form.key, label, hierarchical: form.hierarchical, public: form.public, settings: settingsFromForm(form), ...(form.content_types.length ? { content_types: form.content_types } : {}), ...(normRewrite ? { rewrite_base: normRewrite } : {}) }, csrfToken)
         : await updateTaxonomyDefinition(active!.key, active!.version, changes, csrfToken);
+      onDefinitionsChanged?.();
       if (!mountedRef.current) return;
       setActiveKey(updated.key); setBaseline(fromDefinition(updated)); setForm(fromDefinition(updated));
       setDefinitions(previous => [...previous.filter(item => item.key !== updated.key), updated]);
@@ -490,6 +508,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
             <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.public}
               disabled={busy || !canEdit} onChange={event => setForm(previous => ({ ...previous, public: event.target.checked }))}/>
               {__("Allow public visibility")}</label>
+            <TaxonomySettingsPanel isNew={isNew} form={form} allContentTypes={types} termsForDefaultSelect={activeTerms} disabled={busy || !canEdit} onPatch={patch => setForm(prev => ({ ...prev, ...patch }))} />
             {active && active.owner.kind !== 'user' && <p className="text-xs text-zinc-500">{active.owner.kind === 'core'
               ? __("Core taxonomies retain their key and hierarchy mode.")
               : __("The definition is provider-managed. Only the provider can edit or delete it.")}</p>}

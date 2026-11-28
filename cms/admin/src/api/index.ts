@@ -9,13 +9,37 @@ export type { HomepagePreview, BuilderDiagnostic } from './builder.ts';
 export { getThemes, installTheme } from './themes.ts';
 export { getPlugins, installPlugin, runPlugin, disablePlugin, enablePlugin } from './plugins.ts';
 export {
-  listTaxonomyTerms, createTaxonomyTerm, updateTaxonomyTerm, deleteTaxonomyTerm,
+  listTaxonomyTerms,
+  getEffectiveTermConfig,
+  getNewTermEffectiveConfig,
+  createTaxonomyTerm,
+  updateTaxonomyTerm,
+  deleteTaxonomyTerm,
 } from './taxonomy.ts';
 export type {
-  TaxonomyKind, TaxonomyTerm, TaxonomyTermPage, TaxonomyTermInput, TaxonomyTermChanges,
+  TaxonomyKind,
+  TaxonomySelectionMode,
+  TaxonomySettings,
+  TaxonomyDefinition,
+  TaxonomyDefinitionInput,
+  TaxonomyDefinitionChanges,
+  TermSeoInput,
+  TermFieldGroupView,
+  EffectiveTermEditorConfig,
+  TaxonomyTerm,
+  TaxonomyTermPage,
+  TaxonomyTermInput,
+  TaxonomyTermChanges,
 } from './taxonomy.ts';
+export * from './optionsPages.ts';
 export {
-  listMenus, createMenu, getMenu, updateMenu, deleteMenu, getMenuSlots, putMenuSlots,
+  getMenuSlots,
+  putMenuSlots,
+  listMenus,
+  createMenu,
+  getMenu,
+  updateMenu,
+  deleteMenu,
 } from './menus.ts';
 export type {
   MenuTargetKind, MenuRecord, MenuItemRecord, MenuWithItems, MenuListPage,
@@ -27,6 +51,16 @@ export {
 export type {
   EntryRouteSnapshot, SeoMetadataInput, EntrySeoSnapshot, HomeSeoSnapshot,
 } from './seo.ts';
+export type {
+  ContentSupport,
+  ContentPublicationPolicy,
+  ContentDefaultSort,
+  ContentListColumnKind,
+  ContentListColumn,
+  ContentTypeSettings,
+  ContentTypeDefinitionWithSettings,
+  OwnedContentTypeWithSettings,
+} from './content.ts';
 export * from './contact.ts';
 export * from './smtp.ts';
 export * from './operations.ts';

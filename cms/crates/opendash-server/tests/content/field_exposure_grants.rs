@@ -401,16 +401,30 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
     )
     .await;
 
-    // Create CPT `portfolio` with Public + Private fields
+    // Create CPT `portfolio` + FieldGroup with Public + Private fields
     assert_eq!(
         client
             .post(format!("{}/api/admin/content-types", srv.base_url))
             .header("Cookie", &admin_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &admin_csrf)
+            .json(&json!({ "key": "portfolio", "label": "Dự án" }))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        client
+            .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+            .header("Cookie", &admin_cookie)
+            .header("Origin", &srv.base_url)
+            .header("X-CSRF-Token", &admin_csrf)
             .json(&json!({
-                "key": "portfolio",
-                "label": "Dự án",
+                "local_key": "portfolio_fields",
+                "title": "Portfolio Fields",
+                "target_types": ["portfolio"],
                 "fields": [
                     { "key": "pub_summary", "label": "Tóm tắt công khai", "type": "text", "acl": {"public_exposure": "public"} },
                     { "key": "pub_photo", "label": "Ảnh công khai", "type": "media", "acl": {"public_exposure": "public"} },
@@ -704,9 +718,23 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
             .header("Cookie", &admin_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &admin_csrf)
+            .json(&json!({ "key": "deal", "label": "Giao dịch" }))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        client
+            .post(format!("{}/api/admin/content-field-groups", srv.base_url))
+            .header("Cookie", &admin_cookie)
+            .header("Origin", &srv.base_url)
+            .header("X-CSRF-Token", &admin_csrf)
             .json(&json!({
-                "key": "deal",
-                "label": "Giao dịch",
+                "local_key": "deal_fields",
+                "title": "Deal Fields",
+                "target_types": ["deal"],
                 "fields": [
                     { "key": "deal_title", "label": "Tên", "type": "text", "required": true },
                     {

@@ -299,11 +299,18 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
                 {
                     "key": "job_posting",
                     "label": "Job Posting",
+                    "taxonomies": ["category", "tag"]
+                }
+            ],
+            "field_groups": [
+                {
+                    "local_key": "job_posting_fields",
+                    "title": "Job Posting Fields",
+                    "target_types": ["job_posting"],
                     "fields": [
                         { "key": "company", "label": "Company", "type": "text", "required": true },
                         { "key": "salary", "label": "Salary", "type": "number", "required": false }
-                    ],
-                    "taxonomies": ["category", "tag"]
+                    ]
                 }
             ]
         },
@@ -547,13 +554,13 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
             .await
             .unwrap();
         sqlx::query(
-            "INSERT INTO theme_option_versions (theme_id, owner_kind, owner_id, version) VALUES ('e2e-suite', 'plugin', 'e2e-suite', 1)",
+            "INSERT INTO theme_option_versions (owner_kind, owner_id, version) VALUES ('plugin', 'e2e-suite', 1)",
         )
         .execute(&pool)
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json) VALUES ('e2e-suite', 'plugin', 'e2e-suite', 'board_title', '\"OpenDash Careers\"')",
+            "INSERT INTO theme_option_values (owner_kind, owner_id, option_key, value_json) VALUES ('plugin', 'e2e-suite', 'board_title', '\"OpenDash Careers\"')",
         )
         .execute(&pool)
         .await

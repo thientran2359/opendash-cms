@@ -477,9 +477,9 @@ async fn multilingual_toggle_delete_revive_and_atomic_orphan_purge() {
         .execute(&db)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO theme_option_locale_values(theme_id,locale,option_key,value_json) VALUES('s02-test','en','heading','\"Hello\"')")
+    sqlx::query("INSERT INTO theme_option_locale_values(owner_kind,owner_id,theme_id,locale,option_key,value_json) VALUES('theme','s02-test','s02-test','en','heading','\"Hello\"')")
         .execute(&db).await.unwrap();
-    sqlx::query("INSERT INTO theme_option_locale_versions(theme_id,locale,version) VALUES('s02-test','en',3)")
+    sqlx::query("INSERT INTO theme_option_locale_versions(owner_kind,owner_id,theme_id,locale,version) VALUES('theme','s02-test','s02-test','en',3)")
         .execute(&db).await.unwrap();
     sqlx::query(
         "INSERT INTO site_reading_settings(locale,homepage_page_id,version) VALUES('en',?,2)",

@@ -73,11 +73,16 @@ pub(crate) fn validate_theme_v3_files(
         crate::storage::import::validate_sample_option_values(&sample, &option_schema)
             .map_err(V2ZipError::BadRequest)?;
     }
-    let url_policy = crate::storage::settings::theme_url_policy(&manifest_json)
+    let base_url_policy = crate::storage::settings::theme_url_policy(&manifest_json)
         .map_err(V2ZipError::BadRequest)?;
     let blocks =
         collect_package_blocks(&files, &manifest.theme_id).map_err(V2ZipError::BadRequest)?;
     let declarations = parse_theme_declarations(&manifest_json).map_err(V2ZipError::BadRequest)?;
+    let (extra_site_opts, extra_theme_opts) =
+        declared_extra_site_and_theme_options_fields(&declarations, &manifest.theme_id);
+    let url_policy = base_url_policy
+        .with_custom_options_pages(&declared_custom_options_pages_fields(&declarations))
+        .with_extra_site_and_theme_options(&extra_site_opts, &extra_theme_opts);
     let theme_action_ids: Vec<String> = manifest
         .functions
         .as_ref()
@@ -167,7 +172,8 @@ pub(crate) fn validate_theme_v3_files(
     }
 
     use crate::template_sec::{
-        CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
+        CsecContentKind, validate_and_compile_csec_composition_with_context,
+        validate_and_compile_csec_composition_with_theme_urls,
     };
     if let Some(td) = manifest.text_domain.as_deref() {
         opendash_core::l10n::validate_extension_text_domain(td).map_err(V2ZipError::BadRequest)?;
@@ -179,15 +185,20 @@ pub(crate) fn validate_theme_v3_files(
         let canonical_key = declaration
             .canonical_key()
             .map_err(V2ZipError::BadRequest)?;
-        let cpt_policy;
-        let tpl_policy = match cpt_scope_for_target_key(&manifest, &canonical_key) {
-            Some(cpt) => {
-                cpt_policy =
-                    url_policy.with_cpt_entry_fields(&declared_fields_for_cpt(&declarations, cpt));
-                &cpt_policy
-            }
-            None => &url_policy,
-        };
+        let mut tpl_policy = url_policy.clone();
+        if let Some(cpt) = cpt_scope_for_target_key(&manifest, &canonical_key) {
+            tpl_policy =
+                tpl_policy.with_cpt_entry_fields(&declared_fields_for_cpt(&declarations, cpt));
+        }
+        let is_taxonomy = declaration.kind == TemplateCandidateKind::Taxonomy;
+        if is_taxonomy {
+            let tax_scope = declaration
+                .taxonomy
+                .as_deref()
+                .or_else(|| taxonomy_scope_for_target_key(&canonical_key));
+            tpl_policy = tpl_policy
+                .with_taxonomy_term_fields(&declared_fields_for_taxonomy(&declarations, tax_scope));
+        }
         let kind = match declaration.kind {
             TemplateCandidateKind::Home
             | TemplateCandidateKind::Page
@@ -198,12 +209,13 @@ pub(crate) fn validate_theme_v3_files(
             TemplateCandidateKind::Index => CsecContentKind::Index,
             _ => CsecContentKind::NonEntry,
         };
-        validate_and_compile_csec_composition_with_theme_urls(
+        validate_and_compile_csec_composition_with_context(
             &declaration.file,
             source,
             &parts,
             kind,
-            tpl_policy,
+            &tpl_policy,
+            is_taxonomy,
         )
         .map_err(V2ZipError::BadRequest)?;
     }
@@ -351,6 +363,8 @@ pub struct ThemeDeclarations {
     pub taxonomy_definitions: Vec<opendash_core::content::TaxonomyDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub field_groups: Vec<opendash_core::content::ManifestFieldGroupInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options_pages: Vec<opendash_core::content::CustomOptionsPageDeclaration>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -358,8 +372,10 @@ pub struct ThemeDeclarations {
 pub struct ThemeContentTypeDeclaration {
     pub key: String,
     pub label: String,
-    #[serde(default)]
-    pub fields: Vec<opendash_core::field_schema::FieldSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singular_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

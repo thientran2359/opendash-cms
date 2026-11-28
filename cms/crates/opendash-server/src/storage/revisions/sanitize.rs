@@ -120,6 +120,9 @@ pub(super) fn sanitize_snapshot_for_restore(
                 _ => {}
             }
         }
+        if report.parent_id.is_some() || !live.effective.base.descriptor.settings.hierarchical {
+            payload.parent_id = None;
+        }
     }
 
     if let Some(ref mut builder_doc) = doc

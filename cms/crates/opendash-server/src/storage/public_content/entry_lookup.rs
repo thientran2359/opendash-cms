@@ -24,6 +24,8 @@ pub(in crate::storage) type HydratedEntrySqlRow = (
     Option<String>,
     Option<i64>,
     String,
+    Option<i64>,
+    i32,
 );
 
 pub(in crate::storage) fn decode_hydrated_entry_rows(
@@ -32,33 +34,27 @@ pub(in crate::storage) fn decode_hydrated_entry_rows(
     let mut records = Vec::with_capacity(rows.len());
     for (
         id,
-        content_type_key,
+        tk,
         slug,
         title,
         values_json,
-        publication_status,
-        version,
-        created_at,
-        updated_at,
-        published_at,
-        primary_category_term_id,
+        status,
+        ver,
+        cat,
+        uat,
+        pat,
+        primary_cat,
         locale,
+        parent_id,
+        menu_order,
     ) in rows
     {
-        let mut record = decode_row((
-            id,
-            content_type_key,
-            slug,
-            title,
-            values_json,
-            publication_status,
-            version,
-            created_at,
-            updated_at,
-            published_at,
-        ))?;
-        record.primary_category_term_id = primary_category_term_id;
+        let mut record =
+            decode_row((id, tk, slug, title, values_json, status, ver, cat, uat, pat))?;
+        record.primary_category_term_id = primary_cat;
         record.locale = locale;
+        record.parent_id = parent_id;
+        record.menu_order = menu_order;
         records.push(record);
     }
     Ok(records)
@@ -364,7 +360,7 @@ pub(in crate::storage) async fn list_taxonomy_published_in_tx(
         )
         SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
-               e.primary_category_term_id, e.locale
+               e.primary_category_term_id, e.locale, e.parent_id, e.menu_order
           FROM content_entries e
           JOIN content_types t ON t.key = e.content_type_key
           LEFT JOIN content_type_taxonomy_overrides override
@@ -486,7 +482,7 @@ pub async fn query_related_entries(
     let rows: Vec<HydratedEntrySqlRow> = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
-                e.primary_category_term_id, e.locale
+                e.primary_category_term_id, e.locale, e.parent_id, e.menu_order
            FROM content_entries e
            JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types t ON t.key = e.content_type_key
@@ -564,7 +560,7 @@ pub async fn query_recent_posts(
     let rows: Vec<HydratedEntrySqlRow> = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
-                e.primary_category_term_id, e.locale
+                e.primary_category_term_id, e.locale, e.parent_id, e.menu_order
            FROM content_entries e
            JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types t ON t.key = e.content_type_key

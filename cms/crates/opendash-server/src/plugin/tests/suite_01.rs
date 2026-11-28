@@ -1814,10 +1814,10 @@ mod tests {
         .unwrap();
 
         sqlx::query(
-            "INSERT INTO theme_option_values (theme_id, option_key, value_json, owner_kind, owner_id)
-             VALUES ('s01-ops', 'api_token', ?, 'plugin', 's01-ops'),
-                    ('s01-ops', 'secret_key', '\"should-be-redacted\"', 'plugin', 's01-ops'),
-                    ('s01-ops', 'mode', '\"fast\"', 'plugin', 's01-ops')",
+            "INSERT INTO theme_option_values (option_key, value_json, owner_kind, owner_id)
+             VALUES ('api_token', ?, 'plugin', 's01-ops'),
+                    ('secret_key', '\"should-be-redacted\"', 'plugin', 's01-ops'),
+                    ('mode', '\"fast\"', 'plugin', 's01-ops')",
         )
         .bind(json!({ "secret_ref": secret_ref.as_str(), "configured": true }).to_string())
         .execute(&db)
@@ -2067,8 +2067,8 @@ mod tests {
         .unwrap();
 
         sqlx::query(
-            "INSERT INTO theme_option_values (theme_id, option_key, value_json, owner_kind, owner_id)
-             VALUES ('s01-policy', 'k', ?, 'plugin', 's01-policy')",
+            "INSERT INTO theme_option_values (option_key, value_json, owner_kind, owner_id)
+             VALUES ('k', ?, 'plugin', 's01-policy')",
         )
         .bind(json!({ "secret_ref": secret_ref.as_str(), "configured": true }).to_string())
         .execute(&db)

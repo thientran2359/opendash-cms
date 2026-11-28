@@ -42,18 +42,48 @@ fn f10_f15_effective_schema_transition_enforces_acl_tightening_and_type_guards()
         descriptor: ContentTypeDefinition {
             key: "landing".into(),
             label: "Landing".into(),
-            fields: vec![hero.clone(), picks.clone(), subtitle.clone()],
+            singular_label: None,
+            description: None,
             settings: ContentTypeSettings::default(),
         },
     };
-    let eff_v1 = EffectiveContentSchema::assemble(base_v1.clone(), 1, vec![]).unwrap();
+    let mk_group = |fields: Vec<FieldSpec>| {
+        vec![AttachedFieldGroupSnapshot {
+            group_id: "user:landing_fields".into(),
+            owner: ResourceOwner::User,
+            local_key: "landing_fields".into(),
+            title: "Landing Fields".into(),
+            description: String::new(),
+            domain: FieldGroupDomain::Content,
+            location: vec![vec![LocationRule {
+                param: LocationParam::ContentType,
+                op: LocationOp::Eq,
+                value: "landing".into(),
+            }]],
+            presentation: FieldGroupPresentation::default(),
+            active: true,
+            fields,
+            status: FieldGroupStatus::Active,
+            association_state: DeclarationState::Declared,
+            version: 1,
+        }]
+    };
+    let eff_v1 = EffectiveContentSchema::assemble(
+        base_v1.clone(),
+        1,
+        mk_group(vec![hero.clone(), picks.clone(), subtitle.clone()]),
+    )
+    .unwrap();
 
     // F-15: Narrowing media_kind Any -> Image fails when entries exist.
     let mut hero_narrow = hero.clone();
     hero_narrow.media_kind = Some(MediaFieldKind::Image);
-    let mut narrow_base = base_v1.clone();
-    narrow_base.descriptor.fields = vec![hero_narrow, picks.clone(), subtitle.clone()];
-    let eff_narrow = EffectiveContentSchema::assemble(narrow_base, 2, vec![]).unwrap();
+    let eff_narrow = EffectiveContentSchema::assemble(
+        base_v1.clone(),
+        2,
+        mk_group(vec![hero_narrow, picks.clone(), subtitle.clone()]),
+    )
+    .unwrap();
     assert!(matches!(
         verify_effective_schema_transition(Some(&eff_v1), &eff_narrow, true),
         Err(SchemaTransitionError::IncompatibleSchemaChange(_))
@@ -62,9 +92,12 @@ fn f10_f15_effective_schema_transition_enforces_acl_tightening_and_type_guards()
     // F-15: Flipping multiple on EntryRef fails when entries exist.
     let mut picks_single = picks.clone();
     picks_single.multiple = false;
-    let mut flipped_base = base_v1.clone();
-    flipped_base.descriptor.fields = vec![hero.clone(), picks_single, subtitle.clone()];
-    let eff_flipped = EffectiveContentSchema::assemble(flipped_base, 2, vec![]).unwrap();
+    let eff_flipped = EffectiveContentSchema::assemble(
+        base_v1.clone(),
+        2,
+        mk_group(vec![hero.clone(), picks_single, subtitle.clone()]),
+    )
+    .unwrap();
     assert!(matches!(
         verify_effective_schema_transition(Some(&eff_v1), &eff_flipped, true),
         Err(SchemaTransitionError::IncompatibleSchemaChange(_))
@@ -73,9 +106,12 @@ fn f10_f15_effective_schema_transition_enforces_acl_tightening_and_type_guards()
     // F-10: Tightening required false -> true fails when entries exist.
     let mut sub_req = subtitle.clone();
     sub_req.required = true;
-    let mut tight_base = base_v1.clone();
-    tight_base.descriptor.fields = vec![hero.clone(), picks.clone(), sub_req];
-    let eff_tight = EffectiveContentSchema::assemble(tight_base, 2, vec![]).unwrap();
+    let eff_tight = EffectiveContentSchema::assemble(
+        base_v1.clone(),
+        2,
+        mk_group(vec![hero.clone(), picks.clone(), sub_req]),
+    )
+    .unwrap();
     assert!(matches!(
         verify_effective_schema_transition(Some(&eff_v1), &eff_tight, true),
         Err(SchemaTransitionError::IncompatibleSchemaChange(_))
@@ -89,10 +125,12 @@ fn f10_f15_effective_schema_transition_enforces_acl_tightening_and_type_guards()
         min_edit_role: Some(FieldRole::Admin),
         public_exposure: Some(PublicExposure::Private),
     });
-    let mut bad_acl_base = base_v1;
-    bad_acl_base.descriptor.fields = vec![hero, picks, subtitle, admin_req];
     assert!(matches!(
-        EffectiveContentSchema::assemble(bad_acl_base, 2, vec![]),
+        EffectiveContentSchema::assemble(
+            base_v1,
+            2,
+            mk_group(vec![hero, picks, subtitle, admin_req])
+        ),
         Err(SchemaTransitionError::AdminRequiredFieldMissingDefault(_))
     ));
 }
@@ -117,16 +155,36 @@ fn f12_project_effective_editor_config_keeps_ui_only_panel_fields_in_order() {
         descriptor: ContentTypeDefinition {
             key: "service".into(),
             label: "Dịch vụ".into(),
-            fields: vec![tab, visible_text, hidden_admin, msg],
+            singular_label: None,
+            description: None,
             settings: ContentTypeSettings::default(),
         },
     };
-    let eff = EffectiveContentSchema::assemble(base, 1, vec![]).unwrap();
+    let group = AttachedFieldGroupSnapshot {
+        group_id: "user:service_meta".into(),
+        owner: ResourceOwner::User,
+        local_key: "service_meta".into(),
+        title: "Thông tin dịch vụ".into(),
+        description: String::new(),
+        domain: FieldGroupDomain::Content,
+        location: vec![vec![LocationRule {
+            param: LocationParam::ContentType,
+            op: LocationOp::Eq,
+            value: "service".into(),
+        }]],
+        presentation: FieldGroupPresentation::default(),
+        active: true,
+        fields: vec![tab, visible_text, hidden_admin, msg],
+        status: FieldGroupStatus::Active,
+        association_state: DeclarationState::Declared,
+        version: 1,
+    };
+    let eff = EffectiveContentSchema::assemble(base, 1, vec![group]).unwrap();
     let panels = build_core_and_group_panels(&eff, false, &[]);
     let (layout, all_panels) = resolve_and_validate_editor_layout(&eff, panels, None, 1).unwrap();
     let projected =
         project_effective_editor_config(&eff, &layout, &all_panels, &[], FieldRole::Editor);
-    let base_panel = [
+    let fg_panel = [
         &projected.regions.main_top,
         &projected.regions.main_primary,
         &projected.regions.main_bottom,
@@ -134,9 +192,9 @@ fn f12_project_effective_editor_config_keeps_ui_only_panel_fields_in_order() {
     ]
     .into_iter()
     .flat_map(|r| r.iter())
-    .find(|p| p.panel.panel_id == "core:base_fields")
-    .expect("core:base_fields present");
-    let keys: Vec<&str> = base_panel
+    .find(|p| p.panel.panel_id == "user:service_meta")
+    .expect("user:service_meta present");
+    let keys: Vec<&str> = fg_panel
         .panel_fields
         .iter()
         .map(|f| f.key.as_str())
@@ -149,12 +207,14 @@ fn f14_content_type_validate_allows_non_public_builder_and_rejects_duplicate_sup
     let non_public_builder = ContentTypeDefinition {
         key: "internal_doc".into(),
         label: "Tài liệu nội bộ".into(),
-        fields: vec![],
+        singular_label: None,
+        description: None,
         settings: ContentTypeSettings {
             public: false,
             has_archive: false,
             publication: ContentPublication::DraftPublish,
             supports: vec![ContentSupport::Builder],
+            ..ContentTypeSettings::default()
         },
     };
     non_public_builder.validate().unwrap();

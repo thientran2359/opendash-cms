@@ -151,6 +151,13 @@ pub(crate) async fn render_search_response_for_locale(
     };
     let mut budget = overrides::PublicCompositionBudget::default();
     budget.render_budget.richtext_nonces.extend(richtext_nonces);
+    let custom_opts = crate::storage::options_pages::load_active_custom_options_public(
+        db,
+        Some(&resolved_locale),
+        false,
+        Some(&mut budget.render_budget.richtext_nonces),
+    )
+    .await?;
     budget.set_locale_context(active.as_ref(), &resolved_locale, locale_ctx);
 
     let l10n = content_render::core_l10n(&resolved_locale);
@@ -181,6 +188,7 @@ pub(crate) async fn render_search_response_for_locale(
             route_path: Some(&search_url),
             entry_id: None,
             entry_type_key: None,
+            custom_options: &custom_opts,
             breadcrumbs: &breadcrumbs,
             pagination: &pagination,
             archive_url: None,
@@ -188,6 +196,8 @@ pub(crate) async fn render_search_response_for_locale(
             next_url: next_url.as_deref(),
             entries: &entries,
             taxonomy: None,
+            term: None,
+            term_schema: None,
             content_type: None,
             entry: None,
             list_pages: None,
