@@ -21,6 +21,12 @@ pub async fn preview_studio_with_cache_and_locale(
         settings::resolve_requested_locale_in_conn(&mut *tx, preview_locale).await?;
     validate_typed_target_in_tx(&mut tx, target).await?;
     let active = theme::load_active_theme_in_conn(&mut tx, themes_root).await?;
+    validate_transient_options_pages_refs_in_conn(
+        &mut tx,
+        active.as_ref().map(|a| a.manifest.theme_id.as_str()),
+        transient.and_then(|t| t.options_pages.as_ref()),
+    )
+    .await?;
     let url_policy =
         active_theme_url_policy_in_conn(&mut tx, active.as_ref(), Some(&key), None, None).await?;
     let mut state =
@@ -104,6 +110,8 @@ pub async fn preview_studio_with_cache_and_locale(
             &options,
             &menus,
             route_kind_for_candidate(target.kind),
+            &effective_locale,
+            transient,
             Some(&mut shared_rb.richtext_nonces),
         )
         .await?;
@@ -167,10 +175,11 @@ pub async fn preview_studio_with_cache_and_locale(
         (built.theme_context, body)
     } else {
         let custom_options =
-            crate::storage::options_pages::load_active_custom_options_public_in_conn(
+            crate::storage::options_pages::load_active_custom_options_public_with_overrides_in_conn(
                 &mut tx,
                 Some(&effective_locale),
                 true,
+                transient.and_then(|t| t.options_pages.as_ref()),
                 Some(&mut shared_rb.richtext_nonces),
             )
             .await?;
@@ -461,8 +470,8 @@ pub async fn preview_studio_with_cache_and_locale(
                 } else {
                     format!(
                         "<main><h1>{}</h1><p>{}</p>{}</main>",
-                        escape_preview_text(&general.site_title),
-                        escape_preview_text(&general.tagline),
+                        super::escape_preview_text(&general.site_title),
+                        super::escape_preview_text(&general.tagline),
                         slot_fragment
                     )
                 }
@@ -548,21 +557,6 @@ pub async fn preview_studio_with_cache_and_locale(
         html: full_html,
         diagnostics,
     })
-}
-
-pub(in crate::storage) fn escape_preview_text(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
 }
 
 #[allow(clippy::too_many_arguments)]

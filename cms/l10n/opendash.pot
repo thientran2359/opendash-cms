@@ -21991,3 +21991,48 @@ msgstr ""
 #: core:studio-interactive-blocks
 msgid "Popup: Set a valid ID (letters, digits, - or _)."
 msgstr ""
+
+msgid "Appearance -> Customize Studio"
+msgstr ""
+
+msgid "Custom options pages"
+msgstr ""
+
+msgid "Customize Studio"
+msgstr ""
+
+msgid "Global site options, theme options and custom options pages"
+msgstr ""
+
+msgid "Global values (default language only)"
+msgstr ""
+
+msgid "Open full-width form"
+msgstr ""
+
+msgid "Open in Studio"
+msgstr ""
+
+msgid "Opens inside Customize Studio with live preview for Admins; Editors use the standalone form."
+msgstr ""
+
+msgid "Options"
+msgstr ""
+
+msgid "Options group was not found."
+msgstr ""
+
+msgid "Options schema or provider state changed (409). Your unsaved changes are retained; reload before saving."
+msgstr ""
+
+msgid "Options section was not found."
+msgstr ""
+
+msgid "Templates"
+msgstr ""
+
+msgid "Theme: {{id}}"
+msgstr ""
+
+msgid "This options page is currently inactive and cannot be edited or live-previewed."
+msgstr ""

@@ -70,6 +70,8 @@ pub(in crate::storage) async fn wrap_entry_body_in_preview_shell_in_tx_with_budg
         &options,
         &menus,
         shell_route_kind,
+        &record.locale,
+        None,
         Some(&mut entry_render_budget.richtext_nonces),
     )
     .await?;

@@ -1,5 +1,6 @@
 mod candidates;
 mod preview_context;
+mod preview_options;
 mod preview_samples;
 mod public_render;
 mod resolve_2axis;
@@ -10,6 +11,7 @@ mod theme_policy;
 
 pub use candidates::*;
 pub use preview_context::*;
+pub use preview_options::*;
 pub(in crate::storage) use preview_samples::*;
 pub use public_render::*;
 pub use resolve_2axis::*;

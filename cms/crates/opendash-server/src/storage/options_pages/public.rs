@@ -4,7 +4,10 @@ use opendash_core::{
     content::{
         FieldRole, LocationEvalContext, evaluate_location_rules, is_restricted_to_admin_only,
     },
-    field_schema::{FieldSpec, HydrationVisibility, default_value_for_field_spec},
+    field_schema::{
+        FieldContext, FieldSpec, FieldType, HydrationVisibility, collect_media_ids,
+        default_value_for_field_spec, validate_field_values,
+    },
     registry::DeclarationState,
 };
 use serde_json::Value;
@@ -16,8 +19,132 @@ use crate::error::{ApiError, ApiResult};
 use crate::storage::content::table_exists_in_tx;
 use crate::storage::settings::{
     get_default_locale_code_in_conn, load_owner_option_maps_in_conn,
-    resolve_requested_locale_in_conn,
+    resolve_requested_locale_in_conn, validate_url_or_link_spec_strict,
 };
+
+fn map_validation_err_to_unprocessable(err: ApiError) -> ApiError {
+    if err.0 == axum::http::StatusCode::BAD_REQUEST {
+        ApiError(axum::http::StatusCode::UNPROCESSABLE_ENTITY, err.1)
+    } else {
+        err
+    }
+}
+
+fn reject_disallowed_nested_transient_keys(
+    spec: &FieldSpec,
+    value: &Value,
+    vis: HydrationVisibility,
+) -> Result<(), &'static str> {
+    let child_vis = vis.child_visibility();
+    match spec.field_type {
+        FieldType::Group => {
+            if let Some(obj) = value.as_object() {
+                for (k, child_val) in obj {
+                    let Some(sub) = spec.fields.iter().find(|f| f.key == *k) else {
+                        return Err("Trường con không tồn tại trong schema.");
+                    };
+                    if !child_vis.allows(sub) {
+                        return Err("Trường con không được phép xem trước công khai.");
+                    }
+                    reject_disallowed_nested_transient_keys(sub, child_val, child_vis)?;
+                }
+            }
+        }
+        FieldType::Repeater => {
+            if let Some(items) = value.as_array() {
+                for item in items {
+                    if let Some(obj) = item.as_object() {
+                        for (k, child_val) in obj {
+                            let Some(sub) = spec.fields.iter().find(|f| f.key == *k) else {
+                                return Err("Trường con của repeater không tồn tại trong schema.");
+                            };
+                            if !child_vis.allows(sub) {
+                                return Err(
+                                    "Trường con của repeater không được phép xem trước công khai.",
+                                );
+                            }
+                            reject_disallowed_nested_transient_keys(sub, child_val, child_vis)?;
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn validate_and_apply_options_page_transient_in_conn(
+    conn: &mut SqliteConnection,
+    all_specs: &[FieldSpec],
+    reserved_builtin_keys: Option<&BTreeSet<String>>,
+    raw: &mut BTreeMap<String, Value>,
+    ov: &BTreeMap<String, Value>,
+    target_locale: &str,
+    default_locale: &str,
+) -> ApiResult<()> {
+    if ov.is_empty() {
+        return Ok(());
+    }
+    let is_secondary = target_locale != default_locale;
+    let public_spec_map: BTreeMap<&str, &FieldSpec> = all_specs
+        .iter()
+        .filter(|s| HydrationVisibility::OptionsPublicOnly.allows(s))
+        .map(|s| (s.key.as_str(), s))
+        .collect();
+    for (k, v) in ov {
+        if reserved_builtin_keys.is_some_and(|r| r.contains(k)) {
+            return Err(ApiError::unprocessable(
+                "Option key trùng khóa sẵn có không thể ghi đè xem trước qua options_pages.",
+            ));
+        }
+        let Some(&spec) = public_spec_map.get(k.as_str()) else {
+            return Err(ApiError::unprocessable(
+                "Option key không tồn tại hoặc không được phép xem trước công khai.",
+            ));
+        };
+        if is_secondary && !spec.translatable {
+            return Err(ApiError::unprocessable(
+                "Không thể xem trước thay đổi cho trường không đa ngôn ngữ trên ngôn ngữ phụ.",
+            ));
+        }
+        reject_disallowed_nested_transient_keys(spec, v, HydrationVisibility::OptionsPublicOnly)
+            .map_err(ApiError::unprocessable)?;
+        validate_url_or_link_spec_strict(spec, v).map_err(ApiError::unprocessable)?;
+    }
+
+    let mut merged = raw.clone();
+    for (k, v) in ov {
+        merged.insert(k.clone(), v.clone());
+    }
+    validate_field_values(all_specs, FieldContext::Options, &merged, Some(raw))
+        .map_err(ApiError::unprocessable)?;
+
+    let ov_specs: Vec<FieldSpec> = ov
+        .keys()
+        .filter_map(|k| public_spec_map.get(k.as_str()).map(|s| (*s).clone()))
+        .collect();
+    let ov_media = collect_media_ids(&ov_specs, ov);
+    crate::storage::fields::verify_collected_media_ids_in_conn(conn, &ov_media)
+        .await
+        .map_err(map_validation_err_to_unprocessable)?;
+    let req_loc = is_secondary.then_some(target_locale);
+    crate::storage::fields::validate_relational_refs_in_conn(
+        conn,
+        all_specs,
+        &merged,
+        Some(raw),
+        req_loc,
+    )
+    .await
+    .map_err(map_validation_err_to_unprocessable)?;
+
+    for (k, v) in ov {
+        raw.insert(k.clone(), v.clone());
+    }
+    Ok(())
+}
 
 pub(in crate::storage) async fn load_public_options_page_values_in_conn(
     conn: &mut SqliteConnection,
@@ -26,16 +153,52 @@ pub(in crate::storage) async fn load_public_options_page_values_in_conn(
     is_preview: bool,
     richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
 ) -> ApiResult<BTreeMap<String, Value>> {
+    load_public_options_page_values_with_override_in_conn(
+        conn,
+        page_ref,
+        requested_locale,
+        is_preview,
+        None,
+        None,
+        richtext_nonces,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::storage) async fn load_public_options_page_values_with_override_in_conn(
+    conn: &mut SqliteConnection,
+    page_ref: &str,
+    requested_locale: Option<&str>,
+    is_preview: bool,
+    transient_override: Option<&BTreeMap<String, Value>>,
+    reserved_builtin_keys: Option<&BTreeSet<String>>,
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<BTreeMap<String, Value>> {
+    let has_non_empty_override = transient_override.is_some_and(|m| !m.is_empty());
     if page_ref != "site_global" && !page_ref.starts_with("theme:") {
         let Some(page_key) = page_ref.strip_prefix("custom:") else {
+            if has_non_empty_override {
+                return Err(ApiError::unprocessable(
+                    "page_ref options_pages không hợp lệ.",
+                ));
+            }
             return Ok(BTreeMap::new());
         };
         let Some(page) = get_options_page_in_conn(conn, page_key).await? else {
+            if has_non_empty_override {
+                return Err(ApiError::unprocessable("Trang tùy chọn không tồn tại."));
+            }
             return Ok(BTreeMap::new());
         };
         if page.provider_status != opendash_core::registry::ProviderStatus::Active
             || page.declaration_state != DeclarationState::Declared
         {
+            if has_non_empty_override {
+                return Err(ApiError::unprocessable(
+                    "Trang tùy chọn không đang hoạt động.",
+                ));
+            }
             return Ok(BTreeMap::new());
         }
     }
@@ -57,6 +220,11 @@ pub(in crate::storage) async fn load_public_options_page_values_in_conn(
         }
     }
     if specs.is_empty() {
+        if has_non_empty_override {
+            return Err(ApiError::unprocessable(
+                "Không có field group công khai nào gắn với options_page để xem trước.",
+            ));
+        }
         return Ok(BTreeMap::new());
     }
     let (global_map, locale_map) = load_owner_option_maps_in_conn(
@@ -86,6 +254,18 @@ pub(in crate::storage) async fn load_public_options_page_values_in_conn(
                 .unwrap_or_else(|| default_value_for_field_spec(spec))
         };
         raw.insert(spec.key.clone(), val);
+    }
+    if let Some(ov) = transient_override {
+        validate_and_apply_options_page_transient_in_conn(
+            conn,
+            &specs,
+            reserved_builtin_keys,
+            &mut raw,
+            ov,
+            &target_locale,
+            &default_locale,
+        )
+        .await?;
     }
 
     let mut media_ids = BTreeSet::new();
@@ -146,9 +326,36 @@ pub(in crate::storage) async fn load_active_custom_options_public_in_conn(
     conn: &mut SqliteConnection,
     requested_locale: Option<&str>,
     is_preview: bool,
+    richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
+) -> ApiResult<BTreeMap<String, Value>> {
+    load_active_custom_options_public_with_overrides_in_conn(
+        conn,
+        requested_locale,
+        is_preview,
+        None,
+        richtext_nonces,
+    )
+    .await
+}
+
+pub(in crate::storage) async fn load_active_custom_options_public_with_overrides_in_conn(
+    conn: &mut SqliteConnection,
+    requested_locale: Option<&str>,
+    is_preview: bool,
+    transient_options_pages: Option<&BTreeMap<String, BTreeMap<String, Value>>>,
     mut richtext_nonces: Option<&mut crate::template_sec::RichTextNonceTable>,
 ) -> ApiResult<BTreeMap<String, Value>> {
+    let custom_transient_keys: Vec<&String> = transient_options_pages
+        .into_iter()
+        .flat_map(|m| m.keys())
+        .filter(|k| k.starts_with("custom:"))
+        .collect();
     if !table_exists_in_tx(conn, "custom_options_pages").await? {
+        if !custom_transient_keys.is_empty() {
+            return Err(ApiError::unprocessable(
+                "Bảng custom_options_pages chưa sẵn sàng để xem trước.",
+            ));
+        }
         return Ok(BTreeMap::new());
     }
     let page_keys: Vec<String> = sqlx::query_scalar(
@@ -158,6 +365,18 @@ pub(in crate::storage) async fn load_active_custom_options_public_in_conn(
     )
     .fetch_all(&mut *conn)
     .await?;
+    for page_ref in &custom_transient_keys {
+        let Some(k) = page_ref.strip_prefix("custom:") else {
+            return Err(ApiError::unprocessable(
+                "page_ref custom options không hợp lệ.",
+            ));
+        };
+        if !page_keys.iter().any(|active_k| active_k == k) {
+            return Err(ApiError::unprocessable(
+                "Trang tùy chọn không tồn tại hoặc không đang hoạt động.",
+            ));
+        }
+    }
     if page_keys.is_empty() {
         return Ok(BTreeMap::new());
     }
@@ -181,11 +400,7 @@ pub(in crate::storage) async fn load_active_custom_options_public_in_conn(
                 && !is_restricted_to_admin_only(&grp.location)
                 && evaluate_location_rules(&grp.location, &eval_ctx)
             {
-                for spec in grp.fields {
-                    if HydrationVisibility::OptionsPublicOnly.allows(&spec) {
-                        specs.push(spec);
-                    }
-                }
+                specs.extend(grp.fields);
             }
         }
         all_page_refs.push(page_ref);
@@ -262,6 +477,18 @@ pub(in crate::storage) async fn load_active_custom_options_public_in_conn(
                     .unwrap_or_else(|| default_value_for_field_spec(spec))
             };
             raw.insert(spec.key.clone(), val);
+        }
+        if let Some(ov) = transient_options_pages.and_then(|m| m.get(&page_ref)) {
+            validate_and_apply_options_page_transient_in_conn(
+                conn,
+                specs,
+                None,
+                &mut raw,
+                ov,
+                &target_locale,
+                &default_locale,
+            )
+            .await?;
         }
         crate::field_hydrate::collect_hydration_ids(
             specs,

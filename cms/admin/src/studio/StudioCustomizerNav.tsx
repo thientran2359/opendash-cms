@@ -10,20 +10,23 @@ import type {
   ReadingSettingsDraft,
 } from '../api/settings.ts';
 import type { TemplateTargetInput } from '../api/builder.ts';
-import type { FieldSpec } from '../fields/types.ts';
-import { UnifiedFieldForm } from '../fields/UnifiedFieldForm.tsx';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderEditorCore.tsx';
 import type { StudioMenuRequest } from './StudioBlockTree.tsx';
 import type { BuilderContextTarget, BuilderDocument, BuilderViewport, StudioBuilderClipboard } from '../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../components/AdminPrimitives.tsx';
-import { ThemeOptionsForm } from '../features/themes/ThemeOptionsForm.tsx';
-import type { StudioPanelId } from '../shell/router.ts';
+import type { OptionsPageMenuItem } from '../shell/AdminShellMenu.tsx';
+import type { StudioOptionsScope, StudioPanelId } from '../shell/router.ts';
 import { StudioMenuManager } from './StudioMenuManager.tsx';
+import { StudioOptionsPanel } from './StudioOptionsPanel.tsx';
+import type { StudioOptionsState } from './useStudioOptionsState.ts';
 import { StudioTargetList, studioTargetSourceBadge } from './StudioTargetList.tsx';
 
 interface Props {
   panel: StudioPanelId;
   onPanelChange: (panel: StudioPanelId) => void;
+  optionsRoute: StudioOptionsScope;
+  onOptionsRouteChange: (next: StudioOptionsScope) => void;
+  onNavigateHash: (hash: string) => void;
   localeState?: AdminLocaleState;
   previewLocale?: string;
   activeThemeId: string | null;
@@ -35,14 +38,9 @@ interface Props {
   globalOptionsSnapshot: GlobalSiteOptionsSnapshot | null;
   globalOptionsDraft: Record<string, unknown> | null;
   globalOptionsDirty: boolean;
-  onGlobalOptionsChange: (values: Record<string, unknown>) => void;
-  themeOptionsDraft: Record<string, unknown> | null;
-  themeOptionsDirty: boolean;
-  themeOptionsReloadToken: number;
-  onThemeOptionsChange: (
-    values: Record<string, unknown>,
-    meta: { version: number; dirty: boolean; fields: FieldSpec[] },
-  ) => void;
+  onGlobalOptionsChange: (partial: Record<string, unknown>) => void;
+  optionsState: StudioOptionsState;
+  appearanceOptionsPages: OptionsPageMenuItem[];
   menuSlots: MenuSlotsSnapshot | null;
   menuSlotsDraft: Record<string, number | null> | null;
   menuSlotsDirty: boolean;
@@ -112,6 +110,9 @@ function pageChoiceValue(id: string): number | null {
 export const StudioCustomizerNav: React.FC<Props> = ({
   panel,
   onPanelChange,
+  optionsRoute,
+  onOptionsRouteChange,
+  onNavigateHash,
   localeState,
   previewLocale,
   activeThemeId,
@@ -124,10 +125,8 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   globalOptionsDraft,
   globalOptionsDirty,
   onGlobalOptionsChange,
-  themeOptionsDraft,
-  themeOptionsDirty,
-  themeOptionsReloadToken,
-  onThemeOptionsChange,
+  optionsState,
+  appearanceOptionsPages,
   menuSlots,
   menuSlotsDraft,
   menuSlotsDirty,
@@ -175,7 +174,12 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   if (panel === 'root') {
     const customizerItems: Array<{ id: StudioPanelId; label: string; desc: string; dirty: boolean }> = [
       { id: 'identity', label: __("Site identity"), desc: __("Website title, tagline and timezone"), dirty: generalDirty },
-      { id: 'theme-options', label: __("Appearance options"), desc: __("Social media, branding and theme options"), dirty: globalOptionsDirty || themeOptionsDirty },
+      {
+        id: 'options',
+        label: __("Options"),
+        desc: __("Global site options, theme options and custom options pages"),
+        dirty: globalOptionsDirty || optionsState.themeDirty || optionsState.anyOptionsPagesDirty,
+      },
       { id: 'menus', label: __("Menus and locations"), desc: __("Create and edit menus and assign display locations"), dirty: menuSlotsDirty },
       { id: 'reading', label: __("Homepage and reading"), desc: __("Choose a static homepage and posts page"), dirty: readingDirty },
     ];
@@ -299,71 +303,26 @@ export const StudioCustomizerNav: React.FC<Props> = ({
     );
   }
 
-  if (panel === 'theme-options') {
+  if (panel === 'options') {
     return (
-      <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-theme-options">
-        <div className="space-y-5 p-4">
-          <section className="space-y-3" data-testid="global-site-options-section">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-800">
-                  {__("Global site options")}
-                </h2>
-                <p className="mt-0.5 text-[11px] text-zinc-500">
-                  {__("Shared across blocks and retained when changing themes.")}
-                </p>
-              </div>
-              {globalOptionsSnapshot && (
-                <AdminBadge tone="neutral">v{globalOptionsSnapshot.version}</AdminBadge>
-              )}
-            </div>
-            {globalOptionsSnapshot ? (
-              <UnifiedFieldForm
-                fields={globalOptionsSnapshot.fields}
-                context="options"
-                layoutMode="sidebar"
-                values={globalOptionsDraft ?? globalOptionsSnapshot.values ?? {}}
-                savedValues={globalOptionsSnapshot.values}
-                onChange={onGlobalOptionsChange}
-                viewport={viewport}
-                siteTimezone={generalDraft?.timezone}
-                csrfToken={csrfToken}
-                onApiError={onApiError}
-                disabled={disabled}
-              />
-            ) : (
-              <p className="text-xs text-zinc-500">{__("Loading global site options…")}</p>
-            )}
-          </section>
-
-          <section className="space-y-3 border-t border-zinc-200 pt-4" data-testid="theme-specific-options-section">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-800">
-              {__("Theme-specific options")}
-            </h2>
-            {!activeThemeId ? (
-              <AdminAlert tone="info">
-                {__("No active v1 theme with configurable options.")}
-              </AdminAlert>
-            ) : (
-              <fieldset disabled={disabled} className="min-w-0">
-              <ThemeOptionsForm
-                key={JSON.stringify([activeThemeId, previewLocale, themeOptionsReloadToken])}
-                themeId={activeThemeId}
-                csrfToken={csrfToken}
-                viewport={viewport}
-                locale={previewLocale}
-                localeState={localeState}
-                onApiError={onApiError}
-                hideSubmitButton
-                externalValues={themeOptionsDraft}
-                reloadToken={themeOptionsReloadToken}
-                onValuesChange={onThemeOptionsChange}
-              />
-              </fieldset>
-            )}
-          </section>
-        </div>
-      </div>
+      <StudioOptionsPanel
+        optionsRoute={optionsRoute}
+        onOptionsRouteChange={onOptionsRouteChange}
+        onNavigateHash={onNavigateHash}
+        localeState={localeState}
+        previewLocale={previewLocale}
+        activeThemeId={activeThemeId}
+        siteTimezone={generalDraft?.timezone}
+        csrfToken={csrfToken}
+        viewport={viewport}
+        disabled={disabled}
+        globalOptionsSnapshot={globalOptionsSnapshot}
+        globalOptionsDraft={globalOptionsDraft}
+        onGlobalOptionsChange={onGlobalOptionsChange}
+        optionsState={optionsState}
+        appearanceOptionsPages={appearanceOptionsPages}
+        onApiError={onApiError}
+      />
     );
   }
 

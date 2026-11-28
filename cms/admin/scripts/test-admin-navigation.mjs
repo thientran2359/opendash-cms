@@ -123,8 +123,74 @@ test('themes install route separates from Template Library (#/appearance/library
     sub: 'menus',
     studioPanel: 'menus',
     rawHash: '#/appearance/menus',
-    redirectHash: '#/studio?panel=menus',
+    redirectHash: '#/studio/menus',
   });
+  assert.deepEqual(parseAdminRoute('#/appearance/options'), {
+    view: 'studio',
+    sub: 'options',
+    studioPanel: 'options',
+    studioOptionsRoute: { kind: 'index' },
+    rawHash: '#/appearance/options',
+    redirectHash: '#/studio/options',
+  });
+});
+
+test('Studio path sub-routes and legacy single-pass redirects parse cleanly', () => {
+  assert.deepEqual(parseAdminRoute('#/studio/identity'), {
+    view: 'studio',
+    sub: 'identity',
+    studioPanel: 'identity',
+    rawHash: '#/studio/identity',
+  });
+  assert.deepEqual(parseAdminRoute('#/studio/options'), {
+    view: 'studio',
+    sub: 'options',
+    studioPanel: 'options',
+    studioOptionsRoute: { kind: 'index' },
+    rawHash: '#/studio/options',
+  });
+  assert.deepEqual(parseAdminRoute('#/studio/options/global/acc_social_links'), {
+    view: 'studio',
+    sub: 'options',
+    studioPanel: 'options',
+    studioOptionsRoute: { kind: 'global', section: 'acc_social_links' },
+    rawHash: '#/studio/options/global/acc_social_links',
+  });
+  assert.deepEqual(parseAdminRoute('#/studio/options/theme'), {
+    view: 'studio',
+    sub: 'options',
+    studioPanel: 'options',
+    studioOptionsRoute: { kind: 'theme' },
+    rawHash: '#/studio/options/theme',
+  });
+  assert.deepEqual(parseAdminRoute('#/studio/options/custom/optheme_options'), {
+    view: 'studio',
+    sub: 'options',
+    studioPanel: 'options',
+    studioOptionsRoute: { kind: 'custom', pageKey: 'optheme_options' },
+    rawHash: '#/studio/options/custom/optheme_options',
+  });
+  assert.deepEqual(parseAdminRoute('#/studio/options/custom/optheme_options/site%3Abrand_grp'), {
+    view: 'studio',
+    sub: 'options',
+    studioPanel: 'options',
+    studioOptionsRoute: { kind: 'custom', pageKey: 'optheme_options', groupId: 'site:brand_grp' },
+    rawHash: '#/studio/options/custom/optheme_options/site%3Abrand_grp',
+  });
+  assert.deepEqual(parseAdminRoute('#/studio/templates/part%3Aheader'), {
+    view: 'studio',
+    sub: 'templates',
+    studioPanel: 'templates',
+    studioTemplateKey: 'part:header',
+    rawHash: '#/studio/templates/part%3Aheader',
+  });
+  // Legacy query & builder single-pass redirects
+  assert.equal(parseAdminRoute('#/studio?panel=theme-options').redirectHash, '#/studio/options');
+  assert.equal(parseAdminRoute('#/studio?panel=menus').redirectHash, '#/studio/menus');
+  assert.equal(parseAdminRoute('#/studio?panel=templates&template=part:header').redirectHash, '#/studio/templates/part%3Aheader');
+  assert.equal(parseAdminRoute('#/builder?template=header').redirectHash, '#/studio/templates/part%3Aheader');
+  // Malformed URI encoding never throws and marks sub as invalid
+  assert.equal(parseAdminRoute('#/studio/options/custom/%E0%A4%A').sub, 'invalid');
 });
 
 test('content-structure canonical routes and legacy aliases parse cleanly', () => {
@@ -185,6 +251,9 @@ test('RBAC blocks editor from contact, themes install, library, content-structur
     '#/appearance/themes/install',
     '#/appearance/library',
     '#/studio',
+    '#/studio/options',
+    '#/studio/options/custom/optheme_options',
+    '#/studio/menus',
     '#/studio?panel=menus',
     '#/patterns',
     '#/content-structure/content-types',
@@ -225,7 +294,37 @@ test('buildMenuTree matches reorganized IA order, icons, groups, and clean Edito
     ],
   };
 
-  const fullTree = buildMenuTree(sampleCpts, true, sampleTaxonomies);
+  const sampleOptionsPages = [
+    {
+      page_key: 'optheme_options',
+      menu_label: 'OPTheme options',
+      parent_menu: 'appearance',
+      menu_position: 10,
+      min_edit_role: 'admin',
+      provider_status: 'active',
+      declaration_state: 'declared',
+    },
+    {
+      page_key: 'editor_banner',
+      menu_label: 'Editor Banner',
+      parent_menu: 'appearance',
+      menu_position: 20,
+      min_edit_role: 'editor',
+      provider_status: 'active',
+      declaration_state: 'declared',
+    },
+    {
+      page_key: 'inactive_theme_page',
+      menu_label: 'Inactive Page',
+      parent_menu: 'appearance',
+      menu_position: 30,
+      min_edit_role: 'admin',
+      provider_status: 'provider_inactive',
+      declaration_state: 'declared',
+    },
+  ];
+
+  const fullTree = buildMenuTree(sampleCpts, true, sampleTaxonomies, sampleOptionsPages);
   assert.deepEqual(
     fullTree.map(item => item.id),
     [
@@ -237,7 +336,6 @@ test('buildMenuTree matches reorganized IA order, icons, groups, and clean Edito
       'contact',
       'themes',
       'studio',
-      'menus',
       'patterns',
       'schema',
       'plugins',
@@ -247,18 +345,24 @@ test('buildMenuTree matches reorganized IA order, icons, groups, and clean Edito
     ],
   );
 
-  // Verify Appearance ordering & honest targets
+  // Verify Appearance ordering, Customize Studio submenu & active-only appearance options pages
   const appearance = fullTree.filter(item => item.group === 'appearance');
-  assert.deepEqual(appearance.map(item => item.id), ['themes', 'studio', 'menus', 'patterns']);
+  assert.deepEqual(appearance.map(item => item.id), ['themes', 'studio', 'patterns']);
   assert.deepEqual(appearance[0].children, [
     { label: 'Installed themes', hash: '#/appearance/themes' },
     { label: 'Install theme', hash: '#/appearance/themes/install' },
   ]);
-  assert.equal(appearance[2].hash, '#/studio?panel=menus');
-  assert.equal(appearance[2].icon, 'menus');
-  assert.equal(appearance[2].children, undefined);
-  assert.equal(appearance[3].icon, 'patterns');
-  assert.deepEqual(appearance[3].children, [
+  assert.equal(appearance[1].label, 'Customize Studio');
+  assert.deepEqual(appearance[1].children, [
+    { label: 'Site identity', hash: '#/studio/identity' },
+    { label: 'Options', hash: '#/studio/options' },
+    { label: 'Menus', hash: '#/studio/menus' },
+    { label: 'OPTheme options', hash: '#/studio/options/custom/optheme_options' },
+    { label: 'Editor Banner', hash: '#/studio/options/custom/editor_banner' },
+    { label: 'Templates', hash: '#/studio/templates' },
+  ]);
+  assert.equal(appearance[2].icon, 'patterns');
+  assert.deepEqual(appearance[2].children, [
     { label: 'All patterns', hash: '#/patterns' },
     { label: 'Add pattern', hash: '#/patterns/new' },
     { label: 'Template library', hash: '#/appearance/library' },
@@ -303,11 +407,16 @@ test('buildMenuTree matches reorganized IA order, icons, groups, and clean Edito
     ],
   );
 
-  // Verify Editor sees ONLY ungrouped Dashboard + Content (excluding Contact); zero Appearance/System items
-  const editorVisible = fullTree.filter(item => !item.adminOnly);
+  // Verify Editor sees ONLY ungrouped Dashboard + Content (excluding Contact); zero Appearance/System items;
+  // appearance options page granted min_edit_role='editor' falls back cleanly into Content -> #/options/:key.
+  const editorTree = buildMenuTree(sampleCpts, false, sampleTaxonomies, sampleOptionsPages);
+  const editorVisible = editorTree.filter(item => !item.adminOnly);
   assert.deepEqual(
     editorVisible.map(item => item.id),
-    ['dashboard', 'posts', 'pages', 'cpt:project', 'media'],
+    ['dashboard', 'posts', 'pages', 'cpt:project', 'options:editor_banner', 'media'],
   );
+  const editorBanner = editorVisible.find(item => item.id === 'options:editor_banner');
+  assert.equal(editorBanner.hash, '#/options/editor_banner');
+  assert.equal(editorBanner.group, 'content');
   assert.equal(editorVisible.some(item => item.group === 'system' || item.group === 'appearance'), false);
 });

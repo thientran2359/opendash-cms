@@ -22010,3 +22010,48 @@ msgstr "Đóng hộp thoại"
 #: core:studio-interactive-blocks
 msgid "Popup: Set a valid ID (letters, digits, - or _)."
 msgstr "Popup: Hãy đặt ID hợp lệ (chữ, số, - hoặc _)."
+
+msgid "Appearance -> Customize Studio"
+msgstr "Giao diện -> Tùy chỉnh Studio"
+
+msgid "Custom options pages"
+msgstr "Trang tùy chọn tùy chỉnh"
+
+msgid "Customize Studio"
+msgstr "Tùy chỉnh Studio"
+
+msgid "Global site options, theme options and custom options pages"
+msgstr "Tùy chọn toàn trang, tùy chọn giao diện và trang tùy chọn tùy chỉnh"
+
+msgid "Global values (default language only)"
+msgstr "Giá trị toàn trang (chỉ ngôn ngữ mặc định)"
+
+msgid "Open full-width form"
+msgstr "Mở biểu mẫu toàn trang"
+
+msgid "Open in Studio"
+msgstr "Mở trong Studio"
+
+msgid "Opens inside Customize Studio with live preview for Admins; Editors use the standalone form."
+msgstr "Mở trực tiếp trong Tùy chỉnh Studio kèm xem trước cho Quản trị viên; Biên tập viên dùng biểu mẫu riêng."
+
+msgid "Options"
+msgstr "Tùy chọn"
+
+msgid "Options group was not found."
+msgstr "Không tìm thấy nhóm tùy chọn."
+
+msgid "Options schema or provider state changed (409). Your unsaved changes are retained; reload before saving."
+msgstr "Cấu trúc tùy chọn hoặc trạng thái gói mở rộng đã thay đổi (409). Bản nháp chưa lưu được giữ lại; vui lòng tải lại trước khi lưu."
+
+msgid "Options section was not found."
+msgstr "Không tìm thấy mục tùy chọn."
+
+msgid "Templates"
+msgstr "Mẫu giao diện"
+
+msgid "Theme: {{id}}"
+msgstr "Giao diện: {{id}}"
+
+msgid "This options page is currently inactive and cannot be edited or live-previewed."
+msgstr "Trang tùy chọn này hiện không hoạt động nên không thể chỉnh sửa hoặc xem trước trực tiếp."

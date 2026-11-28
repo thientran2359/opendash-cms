@@ -102,7 +102,7 @@ export const StudioPreviewPane: React.FC<StudioPreviewPaneProps> = ({
           disabled={disableSamplePicker}
         />
       )}
-      <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-4')}>
+      <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-0 sm:p-4')}>
         {previewHtml ? (
           <BuilderPreviewFrame
             html={previewHtml}

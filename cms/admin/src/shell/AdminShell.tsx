@@ -24,6 +24,7 @@ export {
 
 import {
   buildMenuTree,
+  isActiveDeclaredOptionsPage,
   NavIcon,
   type NavigationGroup,
   type OptionsPageMenuItem,
@@ -91,6 +92,9 @@ export const AdminShell: React.FC<AdminShellProps> = ({
 
   const menuTree = buildMenuTree(cptTypes, user?.role === 'admin', cptTaxonomies, optionsPages);
   const visibleMenu = menuTree.filter(item => !item.adminOnly || user?.role === 'admin');
+  const activeOptionsPageMeta = route.view === 'options-page' && route.typeKey
+    ? optionsPages.find(page => page.page_key === route.typeKey) ?? null
+    : null;
   const activeParentId =
     route.view === 'contact'
       ? 'contact'
@@ -99,7 +103,11 @@ export const AdminShell: React.FC<AdminShellProps> = ({
         : route.view === 'content-structure'
           ? 'schema'
           : route.view === 'options-page'
-            ? (route.typeKey ? `options:${route.typeKey}` : 'schema')
+            ? (user?.role === 'admin' && activeOptionsPageMeta?.parent_menu === 'appearance' && isActiveDeclaredOptionsPage(activeOptionsPageMeta)
+              ? 'studio'
+              : user?.role === 'admin' && activeOptionsPageMeta?.parent_menu === 'settings'
+                ? 'settings'
+                : route.typeKey ? `options:${route.typeKey}` : 'schema')
             : route.view === 'taxonomy'
               ? (route.typeKey
                 ? `cpt:${route.typeKey}`
@@ -108,7 +116,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               : route.view === 'profile'
                 ? 'profile'
                 : route.view === 'studio' || route.view === 'studio-entry'
-                  ? (route.studioPanel === 'menus' ? 'menus' : 'studio')
+                  ? 'studio'
                   : route.view === 'themes'
                     ? (route.sub === 'library' ? 'patterns' : 'themes')
                     : route.view === 'settings' && route.sub === 'content-types'
@@ -164,7 +172,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   // follows the resolved route, not a potentially obsolete URL spelling.
   const selectedNavHash =
     route.view === 'content-structure' ? `#/content-structure/${route.sub}` :
-    route.view === 'options-page' && route.typeKey ? `#/options/${encodeURIComponent(route.typeKey)}` :
+    route.view === 'options-page' && route.typeKey
+      ? (user?.role === 'admin' && activeOptionsPageMeta?.parent_menu === 'appearance' && isActiveDeclaredOptionsPage(activeOptionsPageMeta)
+        ? `#/studio/options/custom/${encodeURIComponent(route.typeKey)}`
+        : `#/options/${encodeURIComponent(route.typeKey)}`) :
     route.view === 'themes'
       ? (route.sub === 'install'
         ? '#/appearance/themes/install'
@@ -178,7 +189,18 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           ? '#/content-structure/taxonomies' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
     route.view === 'contact' ? '#/contact' :
     route.view === 'profile' ? '#/users/profile' :
-    route.view === 'studio' ? (route.studioPanel === 'menus' ? '#/studio?panel=menus' : '#/studio') :
+    route.view === 'studio'
+      ? (route.studioPanel === 'identity'
+        ? '#/studio/identity'
+        : route.studioPanel === 'menus'
+          ? '#/studio/menus'
+          : route.studioPanel === 'templates'
+            ? '#/studio/templates'
+            : route.studioPanel === 'options'
+              ? (route.studioOptionsRoute?.kind === 'custom'
+                ? `#/studio/options/custom/${encodeURIComponent(route.studioOptionsRoute.pageKey)}`
+                : '#/studio/options')
+              : '#/studio') :
     route.view === 'tools' ? (route.sub === '404-log' ? '#/tools/redirects' : `#/tools/${route.sub}`) :
     route.view === 'settings'
       ? (route.sub === 'content-types' ? '#/content-structure/content-types' : `#/settings/${route.sub}`) :
