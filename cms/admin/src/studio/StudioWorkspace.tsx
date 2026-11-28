@@ -94,8 +94,12 @@ export const StudioWorkspace: React.FC<Props> = ({
   const isPatternEntry = isMode2 && entryTypeKey === 'pattern';
 
   // Shared UI & preview state
-  const [viewport, setViewport] = useState<BuilderViewport>('desktop');
+  const [viewport, setViewport] = useState<BuilderViewport>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 768 ? 'mobile' : 'desktop',
+  );
+  const [mobilePane, setMobilePane] = useState<'controls' | 'preview'>('controls');
   const [loading, setLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [previewHtml, setPreviewHtml] = useState('');
@@ -672,6 +676,8 @@ export const StudioWorkspace: React.FC<Props> = ({
     if (isMode2 && (!entryTypeKey || entryId === null || entryVersion === null || entryTrashedBlocked)) return;
 
     const seq = ++previewSeqRef.current;
+    const delay = previewHtml ? 250 : 0;
+    setPreviewLoading(true);
     const timer = window.setTimeout(() => {
       previewAbortRef.current?.abort();
       const controller = new AbortController();
@@ -692,11 +698,17 @@ export const StudioWorkspace: React.FC<Props> = ({
               return;
             }
             onApiError(cause, __("Cannot create a page builder preview."));
+          })
+          .finally(() => {
+            if (!controller.signal.aborted && seq === previewSeqRef.current) setPreviewLoading(false);
           });
         return;
       }
 
-      if (!previewTargetCandidate) return;
+      if (!previewTargetCandidate) {
+        setPreviewLoading(false);
+        return;
+      }
       const transient: TransientStudioOverrides = {};
       if (!localeDraftConflict && generalDirty && generalDraft) transient.general = generalDraft;
       if (!localeDraftConflict && globalOptionsDirty && globalOptionsDraft) transient.global_options = globalOptionsDraft;
@@ -727,8 +739,11 @@ export const StudioWorkspace: React.FC<Props> = ({
           } else {
             onApiError(cause, __("Cannot preview appearance customization."));
           }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted && seq === previewSeqRef.current) setPreviewLoading(false);
         });
-    }, 250);
+    }, delay);
 
     return () => {
       window.clearTimeout(timer);
@@ -1061,9 +1076,29 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-zinc-100 text-zinc-900" data-testid="studio-workspace">
+      <div className="flex items-center gap-1 border-b border-zinc-200 bg-white px-3 py-1.5 md:hidden" role="tablist" aria-label={__("Studio mobile view")}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobilePane === 'controls'}
+          onClick={() => setMobilePane('controls')}
+          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mobilePane === 'controls' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-700'}`}
+        >
+          {__("Controls")}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobilePane === 'preview'}
+          onClick={() => setMobilePane('preview')}
+          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mobilePane === 'preview' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-700'}`}
+        >
+          {__("Preview")}
+        </button>
+      </div>
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside
-          className="flex max-h-[50vh] w-full shrink-0 flex-col overflow-hidden border-b border-zinc-200 bg-white md:max-h-none md:h-full md:w-[320px] md:border-r md:border-b-0"
+          className={`min-h-0 w-full shrink-0 flex-col overflow-hidden border-b border-zinc-200 bg-white md:flex md:h-full md:w-[320px] md:border-r md:border-b-0 ${mobilePane === 'controls' ? 'flex flex-1 md:flex-none' : 'hidden'}`}
           aria-label={isMode2 ? __("Page builder content panel") : __("Studio customization panel")}
         >
           <StudioSidebarHeader
@@ -1162,7 +1197,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               data-testid="studio-sidebar-alert"
               className="flex items-center justify-between gap-2 border-b border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-800"
             >
-              <span className="min-w-0 flex-1 truncate" title={entryTrashedBlocked ? __("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio.") : localeDraftConflict || previewLocaleInvalid ? __("The preview language changed or is no longer available. Drafts are retained; reload to switch languages.") : localeReloadPending ? __("Reload the preview language successfully before saving. Your draft is retained until then.") : notice || __("Data version conflict.")}>
+              <span className="min-w-0 flex-1 break-words leading-snug">
                 {entryTrashedBlocked ? __("This entry is in Trash (409). Restore it from Trash before editing or saving in Studio.") : localeDraftConflict || previewLocaleInvalid ? __("The preview language changed or is no longer available. Drafts are retained; reload to switch languages.") : localeReloadPending ? __("Reload the preview language successfully before saving. Your draft is retained until then.") : error && notice ? notice : __("Data changed on the server (412).")}
               </span>
               {entryTrashedBlocked && !isPatternEntry ? (
@@ -1322,7 +1357,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         {(() => {
           const PreviewTag: 'main' | 'div' = active ? 'main' : 'div';
           return (
-        <PreviewTag className={'flex min-w-0 flex-1 flex-col overflow-hidden ' + (viewport === 'desktop' ? 'bg-white' : 'bg-zinc-200/70')}>
+        <PreviewTag className={`min-w-0 flex-1 flex-col overflow-hidden md:flex ${mobilePane === 'preview' ? 'flex' : 'hidden'} ${viewport === 'desktop' ? 'bg-white' : 'bg-zinc-200/70'}`}>
           <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-4')}>
             {previewHtml ? (
               <BuilderPreviewFrame
@@ -1345,7 +1380,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               />
             ) : (
               <div className="flex h-full min-h-[360px] items-center justify-center bg-white p-8 text-center text-sm text-zinc-500">
-                {loading ? __("Preparing live preview…") : __("No preview content for this target yet.")}
+                {loading || previewLoading ? __("Preparing live preview…") : __("No preview content for this target yet.")}
               </div>
             )}
           </div>

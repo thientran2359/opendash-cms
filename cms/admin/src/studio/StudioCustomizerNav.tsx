@@ -226,7 +226,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                         <span>{item.label}</span>
                         {item.dirty && <span className="h-2 w-2 rounded-full bg-amber-500" title={__("Unsaved changes")} />}
                       </span>
-                      <span className="mt-0.5 block truncate text-xs text-zinc-500">{item.desc}</span>
+                      <span className="mt-0.5 block text-xs leading-snug text-zinc-500">{item.desc}</span>
                     </span>
                     <span className="text-zinc-400" aria-hidden="true">›</span>
                   </button>
@@ -250,7 +250,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                   <span>{__("Templates and page builder")}</span>
                   {templateDirty && <span className="h-2 w-2 rounded-full bg-amber-500" title={__("Template has unsaved changes")} />}
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-zinc-500">
+                <span className="mt-0.5 block text-xs leading-snug text-zinc-500">
                   {__("Header, Footer, Page Layout, Single & Archive")}
                 </span>
               </span>

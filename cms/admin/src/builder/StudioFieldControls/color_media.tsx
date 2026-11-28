@@ -87,17 +87,17 @@ export function ColorSwatchControl({
             className="h-8 w-8 cursor-pointer border-0 bg-transparent p-0"
           />
         </label>
-
-        <input
-          id={inputId}
-          type="text"
-          value={value}
-          disabled={disabled}
-          placeholder={__("#hex or var(--od-token-...)")}
-          onChange={e => onChange(e.target.value)}
-          className="h-7 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 font-mono text-[11px] text-zinc-800 focus-visible:outline-2 focus-visible:outline-sky-600"
-        />
       </div>
+
+      <input
+        id={inputId}
+        type="text"
+        value={value}
+        disabled={disabled}
+        placeholder={__("#hex or var(--od-token-...)")}
+        onChange={e => onChange(e.target.value)}
+        className="h-8 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-xs text-zinc-800 focus-visible:outline-2 focus-visible:outline-sky-600"
+      />
 
       {showTokens && (
         <div className="flex flex-wrap gap-1 pt-0.5">
