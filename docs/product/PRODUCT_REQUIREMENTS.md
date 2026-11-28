@@ -26,9 +26,9 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 ## 3. Điều hướng Admin & Màn hình Single Edit
 
 - **Điều hướng 3 nhóm có nhãn** (tham chiếu chi tiết tại [Admin Navigation & Edit Screen](ADMIN_NAVIGATION_AND_EDIT_SCREEN.md)):
-  - **Nội dung:** `Tổng quan` (Dashboard), `Bài viết` (danh sách, thêm mới, chuyên mục, thẻ), `Trang`, `Thư viện media` (ảnh & video độc lập), `Liên hệ` và các CPT đang hoạt động.
-  - **Giao diện:** `Tùy chỉnh giao diện` (**OpenDash Studio**: Theme Options, Menus, Reading Settings, Template Visual Builder), `Theme` (Themes đã cài, Cài theme), `Patterns` (Pattern CPT riêng tư).
-  - **Hệ thống:** `Cấu trúc nội dung` (`Loại nội dung (CPT)`, `Taxonomy tùy chỉnh`, `Nhóm trường (Field Groups)` tách biệt hoàn toàn khỏi màn nhập liệu entry/term), `Plugins`, `Người dùng / Hồ sơ của tôi`, `Công cụ` (Sao lưu & Phục hồi, Đối soát media, Chuyển hướng & 404, Tình trạng hệ thống; dự kiến bổ sung `Chỉ mục tìm kiếm` theo [public-site-search.md](../designs/public-site-search.md) đang trình duyệt), `Cài đặt` (Tổng quát, Đa ngôn ngữ, Trang chủ & Bài viết, Đường dẫn tĩnh, SEO website, Thông báo Email SMTP).
+  - **Nội dung:** `Tổng quan` (Dashboard), `Bài viết` (danh sách, thêm mới, chuyên mục, thẻ), `Trang`, `Thư viện media` (ảnh & video độc lập), `Liên hệ` (`#/contact`, Admin) và các CPT đang hoạt động.
+  - **Giao diện:** `Theme` (Themes đã cài, Cài theme riêng), `Tùy chỉnh giao diện` (**OpenDash Studio**: Theme Options, Menus, Reading Settings, Template Visual Builder), `Menus` (lối vào trực tiếp `#/studio?panel=menus`), `Patterns` (Pattern CPT riêng tư & Thư viện mẫu cục bộ `#/appearance/library`).
+  - **Hệ thống:** `Cấu trúc nội dung` (`Loại nội dung (CPT)` tại `#/content-structure/content-types`, `Taxonomy tùy chỉnh` tại `#/content-structure/taxonomies`, tách biệt hoàn toàn khỏi màn nhập liệu entry/term), `Plugins`, `Người dùng` (chỉ Admin; `Hồ sơ của tôi` gắn cố định ở topbar & chân sidebar cho mọi vai trò để `Editor` không thấy nhóm `Hệ thống`), `Công cụ` (Chuyển hướng & 404, Sao lưu & Phục hồi, Đối soát media, Chỉ mục tìm kiếm `#/tools/search`, Tình trạng hệ thống), `Cài đặt` (Tổng quát, Trang chủ & Bài viết, Đường dẫn tĩnh, SEO trang chủ, Đa ngôn ngữ, Thông báo Email SMTP).
 - **Màn hình Single Edit:** Chia vùng cố định (`header_bar` do Core sở hữu, `main_top`, `main_primary`, `main_bottom`, `sidebar`; tự động xếp thành 1 cột trên mobile `< 1024px`). Các field nhóm mở rộng và core tham gia chung một lần Lưu nguyên tử (`CompositeEntrySaveInput`).
 
 ## 4. Visual Builder và Theme

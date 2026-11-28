@@ -3,6 +3,7 @@ import { useI18n } from '../i18n/index.tsx';
 import { AdminButton } from '../components/AdminPrimitives.tsx';
 import { TextInput } from '../components/FormPrimitives.tsx';
 import { AuthUser } from '../types.ts';
+import { isPlainLeftClick } from './router.ts';
 
 interface AuthPanelProps {
   user: AuthUser | null;
@@ -16,6 +17,9 @@ interface AuthPanelProps {
   onSetup: () => void;
   onLogin: () => void;
   onLogout: () => void;
+  profileHref?: string;
+  isProfileActive?: boolean;
+  onNavigateProfile?: () => void;
 }
 
 const AUTH_INPUT_CLASS =
@@ -35,6 +39,9 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   onSetup,
   onLogin,
   onLogout,
+  profileHref = '#/users/profile',
+  isProfileActive = false,
+  onNavigateProfile,
 }) => {
   const { __ } = useI18n();
   return (
@@ -91,9 +98,26 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
         </form>
       ) : (
         <div id="user-panel" className="flex items-center gap-3">
-          <span id="user-info" className="text-xs font-medium text-zinc-600">
-            {user.username} <span className="text-zinc-400">({user.role === 'admin' ? __("Admin") : __("Editor")})</span>
-          </span>
+          <a
+            id="user-info"
+            href={profileHref}
+            data-testid="topbar-profile-link"
+            aria-current={isProfileActive ? 'page' : undefined}
+            title={__("My profile")}
+            onClick={event => {
+              if (onNavigateProfile && isPlainLeftClick(event)) {
+                event.preventDefault();
+                onNavigateProfile();
+              }
+            }}
+            className={
+              'od-topbar-profile rounded-md px-2 py-1 text-xs font-medium no-underline transition-colors ' +
+              (isProfileActive ? 'bg-blue-50 font-semibold text-od-accent' : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950')
+            }
+          >
+            <span>{user.username}</span>{' '}
+            <span className="text-zinc-400">({user.role === 'admin' ? __("Admin") : __("Editor")})</span>
+          </a>
           <AdminButton
             id="auth-logout"
             variant="secondary"

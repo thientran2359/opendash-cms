@@ -8,6 +8,7 @@
     "build:public-tailwind": "node ./scripts/build-public-tailwind.mjs",
     "test:fields": "node ./scripts/test-field-engine.mjs",
     "test:media-preview": "node ./scripts/test-responsive-media-preview.mjs",
+    "test:nav": "node ./scripts/test-admin-navigation.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "vite",
     "preview": "vite preview"

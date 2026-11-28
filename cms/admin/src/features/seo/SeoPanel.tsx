@@ -110,7 +110,14 @@ export function SeoPanel({
           <p className="mt-0.5 text-sm text-zinc-600">{__("Public metadata for the homepage (")}<code className="text-xs">v{version}</code>).
           </p>
         </div>
-        <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={load}>{__("Reload")}</AdminButton>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href="#/tools/redirects"
+            data-testid="seo-redirects-link"
+            className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 no-underline hover:bg-zinc-50"
+          >{__("Redirects & 404")}</a>
+          <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={load}>{__("Reload")}</AdminButton>
+        </div>
       </div>
       <LocaleTabs
         localeState={localeState}

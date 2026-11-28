@@ -164,6 +164,13 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
           <p id="od-media-upload-help">{__("JPEG/PNG/WebP images (≤ 8 MiB) and H.264/AAC MP4 videos (≤ 100 MiB). Select multiple files at once.")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {user.role === 'admin' && (
+            <a
+              href="#/tools/media-reconcile"
+              data-testid="media-reconcile-link"
+              className="od-media-secondary inline-flex items-center no-underline"
+            >{__("Media reconciliation")}</a>
+          )}
           <button type="button" className="od-media-secondary" onClick={refresh} disabled={loading || uploading}>{__("Reload")}</button>
           <button
             className="od-media-upload"

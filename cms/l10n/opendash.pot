@@ -19879,3 +19879,15 @@ msgstr ""
 #: admin:feature.operations.reconcile.showing_first_50
 msgid "Showing first 50 of {{value1}} orphaned candidates."
 msgstr ""
+
+#: admin:shell.install
+msgid "Install"
+msgstr ""
+
+#: admin:shell.template_library
+msgid "Template library"
+msgstr ""
+
+#: admin:feature.themes.themespanel.install_v3_zip_subtitle
+msgid "Upload a Theme v3 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder."
+msgstr ""

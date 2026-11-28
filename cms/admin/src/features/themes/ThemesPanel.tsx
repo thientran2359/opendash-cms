@@ -26,6 +26,7 @@ import {
 } from '../shared/OwnerOptionsForm.tsx';
 
 interface Props {
+  mode?: 'list' | 'install';
   csrfToken: string | null;
   devTheme?: string | null;
   themeRevision?: number;
@@ -35,6 +36,7 @@ interface Props {
 }
 
 export const ThemesPanel: React.FC<Props> = ({
+  mode = 'list',
   csrfToken,
   devTheme = null,
   themeRevision = 0,
@@ -109,6 +111,11 @@ export const ThemesPanel: React.FC<Props> = ({
     void refresh();
     return () => { mounted.current = false; };
   }, [themeRevision]);
+
+  useEffect(() => {
+    setNotice('');
+    setError('');
+  }, [mode]);
 
   const handleSaveThemeFunctions = async () => {
     if (!fnSettings || !fnSettings.has_functions || !csrfToken || fnSaving) return;
@@ -213,22 +220,52 @@ export const ThemesPanel: React.FC<Props> = ({
     : null;
 
   return (
-    <section className="min-w-0 space-y-5" aria-label={__("Manage themes")} data-testid="themes-panel">
+    <section className="min-w-0 space-y-5" aria-label={mode === 'install' ? __("Install theme") : __("Installed themes")} data-testid="themes-panel">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">{__("Appearance / Themes")}</p>
-          <h2 className="mt-1.5 text-xl font-bold tracking-tight text-zinc-950">{__("Manage themes")}</h2>
-          <p className="mt-1 text-sm text-zinc-600">{__("Activating a theme does not change blocks, fields or data saved in the builder.")}</p>
+          <h2 className="mt-1.5 text-xl font-bold tracking-tight text-zinc-950">
+            {mode === 'install' ? __("Install theme") : __("Installed themes")}
+          </h2>
+          <p className="mt-1 text-sm text-zinc-600">
+            {mode === 'install'
+              ? __("Upload a Theme v3 ZIP package. Activating a theme does not change blocks, fields or data saved in the builder.")
+              : __("Activating a theme does not change blocks, fields or data saved in the builder.")}
+          </p>
         </div>
-        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>{__("Reload list")}</AdminButton>
+        <div className="flex flex-wrap items-center gap-2">
+          {mode === 'install' ? (
+            <a
+              href="#/appearance/themes"
+              data-testid="themes-installed-link"
+              className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 no-underline transition-colors hover:bg-zinc-50"
+            >
+              {__("Installed themes")}
+            </a>
+          ) : (
+            <>
+              <a
+                href="#/appearance/themes/install"
+                data-testid="themes-install-link"
+                className="inline-flex h-8 items-center rounded-md bg-od-accent px-3 text-xs font-medium text-white no-underline transition-colors hover:bg-od-accent-hover"
+              >
+                {__("Install theme")}
+              </a>
+              <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>{__("Reload list")}</AdminButton>
+            </>
+          )}
+        </div>
       </div>
-      <label className="block rounded-xl border border-dashed border-zinc-300 bg-zinc-50/70 p-4 transition-colors hover:border-od-accent/60 hover:bg-od-accent-soft/25">
-        <span className="block text-sm font-semibold text-zinc-900">{__("Install theme from ZIP")}</span>
-        <span className="mt-0.5 block text-xs text-zinc-600">{__("Theme v3 (manifest_version=3, theme.json, templates, parts and declared assets).")}</span>
-        <input data-testid="themes-upload" type="file" accept=".zip,application/zip" onChange={upload} disabled={!csrfToken || busy} className="mt-3 block max-w-full text-sm text-zinc-700 file:mr-3 file:rounded-md file:border file:border-zinc-300 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-zinc-800 hover:file:bg-zinc-50" />
-      </label>
+      {mode === 'install' && (
+        <label className="block max-w-2xl rounded-xl border border-dashed border-zinc-300 bg-zinc-50/70 p-4 transition-colors hover:border-od-accent/60 hover:bg-od-accent-soft/25">
+          <span className="block text-sm font-semibold text-zinc-900">{__("Install theme from ZIP")}</span>
+          <span className="mt-0.5 block text-xs text-zinc-600">{__("Theme v3 (manifest_version=3, theme.json, templates, parts and declared assets).")}</span>
+          <input data-testid="themes-upload" type="file" accept=".zip,application/zip" onChange={upload} disabled={!csrfToken || busy} className="mt-3 block max-w-full text-sm text-zinc-700 file:mr-3 file:rounded-md file:border file:border-zinc-300 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-zinc-800 hover:file:bg-zinc-50" />
+        </label>
+      )}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      {mode === 'list' && <>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-2.5">
         <h3 className="text-base font-semibold text-zinc-900">{__("Installed (")}{v3Revisions.length}{' '}{__("v3 revisions)")}</h3>
         {!loading && data && (
@@ -474,6 +511,7 @@ export const ThemesPanel: React.FC<Props> = ({
           )}
         </>
       )}
+      </>}
     </section>
   );
 };

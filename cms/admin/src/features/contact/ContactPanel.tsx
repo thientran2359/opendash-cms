@@ -22,6 +22,7 @@ type ContactTabId = 'forms' | 'inbox';
 
 interface Props {
   csrfToken: string | null;
+  initialTab?: ContactTabId;
   onApiError: (error: unknown) => void;
 }
 
@@ -33,7 +34,7 @@ function defaultFields(): ContactFormField[] {
   ];
 }
 
-export function ContactPanel({ csrfToken, onApiError }: Props) {
+export function ContactPanel({ csrfToken, initialTab = 'forms', onApiError }: Props) {
   const { __, _x } = useI18n();
   const [forms, setForms] = useState<ContactFormRecord[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -47,7 +48,11 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
   const [ackDupRisk, setAckDupRisk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const [activeTab, setActiveTab] = useState<ContactTabId>('forms');
+  const [activeTab, setActiveTab] = useState<ContactTabId>(initialTab);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   const loadAll = async (filterFormId?: number) => {
     try {
@@ -173,14 +178,21 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
           <h2 className="text-base font-semibold text-zinc-950">{__("Contact forms & inbox")}</h2>
           <p className="mt-0.5 text-sm text-zinc-600">{__("Design safe contact forms (no public JavaScript) and view incoming messages.")}</p>
         </div>
-        <button
-          type="button"
-          className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
-          onClick={() => {
-            selectForm(null);
-            setActiveTab('forms');
-          }}
-        >{__("+ New form")}</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href="#/settings/smtp"
+            data-testid="contact-smtp-link"
+            className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 no-underline hover:bg-zinc-50"
+          >{__("Email notifications (SMTP)")}</a>
+          <button
+            type="button"
+            className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
+            onClick={() => {
+              selectForm(null);
+              setActiveTab('forms');
+            }}
+          >{__("+ New form")}</button>
+        </div>
       </div>
 
       {notice && <p className="mt-3 rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p>}
