@@ -8,6 +8,7 @@ pub async fn preview_studio_with_cache_and_locale(
     target: &TemplateCandidate,
     document: Option<&BuilderDocument>,
     preview_entry: Option<&TemplatePreviewEntry>,
+    preview_term: Option<&TemplatePreviewTerm>,
     preview_annotations: bool,
     transient: Option<&TransientStudioOverrides>,
     preview_locale: Option<&str>,
@@ -71,6 +72,8 @@ pub async fn preview_studio_with_cache_and_locale(
         actor_role,
     )
     .await?;
+    let _resolved_term =
+        resolve_preview_term_in_tx(&mut tx, target, preview_term, &effective_locale, None).await?;
 
     let mut diagnostics = Vec::new();
     let mut has_active_contact_form = false;
@@ -515,6 +518,7 @@ pub async fn preview_studio_with_cache(
         target,
         document,
         preview_entry,
+        None,
         preview_annotations,
         transient,
         None,

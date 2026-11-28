@@ -174,8 +174,8 @@ pub(super) fn build_entry_view_with_defs(
     let mut first_image_cover_url: Option<String> = None;
     let mut first_image_cover_media: Option<Value> = None;
     let mut public_values = BTreeMap::new();
+    let mut richtext_html = BTreeMap::new();
     let mut fields = Vec::with_capacity(ordered_defs.len());
-
     let mut excerpt_plain: Option<String> = None;
     let mut summary_plain: Option<String> = None;
     let mut body_plain: Option<String> = None;
@@ -200,27 +200,32 @@ pub(super) fn build_entry_view_with_defs(
                 value.as_str().unwrap_or(""),
             ))
         } else if let Some(ctx) = hydration_ctx {
-            crate::field_hydrate::hydrate_field_value(
+            crate::field_hydrate::hydrate_field_value_with_richtext(
                 definition,
                 raw_opt,
                 ctx,
                 richtext_nonces.as_deref_mut(),
                 vis,
+                Some(&mut richtext_html),
+                None,
             )
             .unwrap_or(Value::Null)
         } else {
-            // Pure unit/fallback mode without a DB hydration snapshot:
-            // preserve Value::Null for missing fields and hydrate inline V1 shapes.
+            // Pure unit/fallback mode without a DB hydration snapshot.
             match definition.field_type {
                 FieldType::Media => pure_media_fallback(value).unwrap_or(Value::Null),
                 FieldType::Gallery => Value::Array(
-                    value
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(pure_media_fallback)
-                        .collect(),
+                    value.as_array().into_iter().flatten().filter_map(pure_media_fallback).collect(),
                 ),
+                FieldType::Richtext => {
+                    if let Some(raw_str) = value.as_str().filter(|s| !s.trim().is_empty())
+                        && let Ok(clean) = opendash_core::richtext::sanitize_richtext(raw_str)
+                        && !clean.is_empty()
+                    {
+                        richtext_html.insert(definition.key.clone(), clean);
+                    }
+                    value.clone()
+                }
                 FieldType::Link | FieldType::Group | FieldType::Repeater if !value.is_null() => {
                     crate::field_hydrate::hydrate_field_value_stateless(definition, raw_opt, vis)
                         .unwrap_or(Value::Null)
@@ -358,7 +363,9 @@ pub(super) fn build_entry_view_with_defs(
         fields: public_values,
         field_list: fields,
         cover_url,
+        cover: cover_media.as_ref().and_then(HydratedMedia::from_value),
         cover_media,
+        richtext_html,
         terms: terms_map,
         all_terms,
         primary_category,

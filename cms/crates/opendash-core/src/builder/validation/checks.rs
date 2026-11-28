@@ -76,6 +76,12 @@ struct ValidationWalk<'a> {
     pattern_refs: usize,
 }
 
+#[derive(Default)]
+struct LoopCounters {
+    nodes: usize,
+    third_party: usize,
+}
+
 impl<'a> ValidationWalk<'a> {
     fn visit_nodes(
         &mut self,
@@ -84,6 +90,7 @@ impl<'a> ValidationWalk<'a> {
         parent_id: Option<&'a str>,
         parent_schema: Option<&'a BlockSchema>,
         inactive_ancestor_subtree: Option<&'a HashSet<&'a str>>,
+        mut loop_scope: Option<(&mut LoopCounters, usize)>,
     ) -> Result<(), BuilderError> {
         if nodes.is_empty() {
             return Ok(());
@@ -106,13 +113,36 @@ impl<'a> ValidationWalk<'a> {
                 return Err(BuilderError::Invalid("Invalid Builder block_id"));
             }
             validate_node_meta(node.meta.as_ref())?;
+            if (node.block_id == "core/loop-item" || loop_scope.is_some())
+                && node
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.html_id.as_deref())
+                    .is_some_and(|s| !s.is_empty())
+            {
+                return Err(BuilderError::Invalid("Loop item nodes cannot declare html_id"));
+            }
+
+            if let Some((lc, rel_depth)) = loop_scope.as_mut().map(|(lc, rd)| (&mut **lc, *rd)) {
+                if rel_depth > MAX_LOOP_ITEM_REL_DEPTH {
+                    return Err(BuilderError::Invalid(
+                        "Loop item exceeds max relative depth 4",
+                    ));
+                }
+                lc.nodes += 1;
+                if lc.nodes > MAX_LOOP_ITEM_NODES {
+                    return Err(BuilderError::Invalid(
+                        "Loop item exceeds max 16 descendant nodes",
+                    ));
+                }
+            }
 
             match node.block_id.as_str() {
-                "core/content-slot" => {
+                "core/content-slot" | "core/entry-content" => {
                     self.content_slots += 1;
                     if self.content_slots > 1 {
                         return Err(BuilderError::Invalid(
-                            "Builder allows at most one core/content-slot",
+                            "Builder allows at most one core/entry-content",
                         ));
                     }
                 }
@@ -148,12 +178,14 @@ impl<'a> ValidationWalk<'a> {
                         "Cannot insert or mutate node inside inactive container",
                     ));
                 }
+                let next_loop = loop_scope.as_mut().map(|(lc, rd)| (&mut **lc, *rd + 1));
                 self.visit_nodes(
                     &node.children,
                     depth + 1,
                     Some(node.id.as_str()),
                     None,
                     Some(allowed_subtree),
+                    next_loop,
                 )?;
                 continue;
             }
@@ -189,17 +221,45 @@ impl<'a> ValidationWalk<'a> {
                         "Target parent does not allow moving inactive block",
                     ));
                 }
+                let next_loop = loop_scope.as_mut().map(|(lc, rd)| (&mut **lc, *rd + 1));
                 self.visit_nodes(
                     &node.children,
                     depth + 1,
                     Some(node.id.as_str()),
                     None,
                     Some(&prev.subtree_ids),
+                    next_loop,
                 )?;
                 continue;
             };
 
-            if !self.ctx.allows_contexts(schema.allowed_contexts.as_deref()) {
+            let effective_ctx = if loop_scope.is_some() {
+                &BuilderContextTarget::LoopItem
+            } else {
+                self.ctx
+            };
+            if let Some((lc, _)) = loop_scope.as_mut().map(|(lc, rd)| (&mut **lc, *rd)) {
+                if node.block_id.starts_with("core/") {
+                    if !LOOP_ITEM_CORE_ALLOWLIST.contains(&node.block_id.as_str()) {
+                        return Err(BuilderError::Invalid(
+                            "Block is not allowed inside core/loop-item",
+                        ));
+                    }
+                } else {
+                    if !schema.is_loop_schema_compatible() {
+                        return Err(BuilderError::Invalid(
+                            "Third-party block is not compatible with core/loop-item",
+                        ));
+                    }
+                    lc.third_party += 1;
+                    if lc.third_party > MAX_THIRD_PARTY_BLOCKS_IN_LOOP {
+                        return Err(BuilderError::Invalid(
+                            "Loop item exceeds max 2 third-party blocks",
+                        ));
+                    }
+                }
+            }
+            if !effective_ctx.allows_contexts(schema.allowed_contexts.as_deref()) {
                 return Err(BuilderError::Invalid(
                     "Block is not allowed in this Builder context",
                 ));
@@ -252,13 +312,43 @@ impl<'a> ValidationWalk<'a> {
                 return Err(BuilderError::Invalid("Invalid Builder template part key"));
             }
 
-            self.visit_nodes(
-                &node.children,
-                depth + 1,
-                Some(node.id.as_str()),
-                Some(schema),
-                None,
-            )?;
+            if let Some((_, min_loop, max_loop)) = LOOP_PARENT_CARDINALITY
+                .iter()
+                .find(|(id, _, _)| *id == node.block_id.as_str())
+            {
+                let loop_cnt = node
+                    .children
+                    .iter()
+                    .filter(|c| c.block_id == "core/loop-item")
+                    .count();
+                if loop_cnt < *min_loop || loop_cnt > *max_loop {
+                    return Err(BuilderError::Invalid(
+                        "Invalid core/loop-item child cardinality for loop container",
+                    ));
+                }
+            }
+
+            if node.block_id == "core/loop-item" {
+                let mut child_loop_counters = LoopCounters::default();
+                self.visit_nodes(
+                    &node.children,
+                    depth + 1,
+                    Some(node.id.as_str()),
+                    Some(schema),
+                    None,
+                    Some((&mut child_loop_counters, 1)),
+                )?;
+            } else {
+                let next_loop = loop_scope.as_mut().map(|(lc, rd)| (&mut **lc, *rd + 1));
+                self.visit_nodes(
+                    &node.children,
+                    depth + 1,
+                    Some(node.id.as_str()),
+                    Some(schema),
+                    None,
+                    next_loop,
+                )?;
+            }
         }
         Ok(())
     }
@@ -291,7 +381,7 @@ impl BuilderDocument {
             lists: 0,
             pattern_refs: 0,
         };
-        walk.visit_nodes(&self.blocks, 1, None, None, None)?;
+        walk.visit_nodes(&self.blocks, 1, None, None, None, None)?;
         self.to_json()?;
         Ok(())
     }

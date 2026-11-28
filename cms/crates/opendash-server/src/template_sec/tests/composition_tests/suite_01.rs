@@ -175,9 +175,7 @@ fn icon_security_validation_rejects_unsafe_contexts() {
 #[test]
 fn icon_nonce_rejects_attribute_and_style_and_duplicate_substitution() {
     let nonce = "OD_ICON_0123456789abcdef0123456789abcdef".to_owned();
-    let table = IconNonceTable {
-        entries: vec![(nonce.clone(), "<svg/>".to_owned())],
-    };
+    let table = IconNonceTable::from_test_entries(vec![(nonce.clone(), "<svg/>".to_owned())]);
     assert!(
         table
             .substitute_into_document(format!("<p>{nonce}</p>"))
@@ -491,4 +489,38 @@ fn block_csec_global_options_bridge_enforces_typed_urls_and_forbids_shadowing() 
             "{forbidden}"
         );
     }
+}
+
+#[test]
+fn icon_symbol_dedupe_and_unique_usage_caps() {
+    let compiled = validate_and_compile_csec_composition(
+        "p",
+        "<main>{{ od_icon('check') }}{{ od_icon('arrow-right') }}{{ od_icon('arrow-right') }}</main>",
+        &BTreeMap::new(),
+        CsecContentKind::NonEntry,
+    )
+    .unwrap();
+    let mut budget = RenderBudget::new();
+    let html = compiled
+        .render_with_config_and_budget(
+            Value::from(()),
+            None,
+            &mut budget,
+            &RenderFormattingConfig::default(),
+        )
+        .unwrap();
+    let out = budget
+        .icon_nonces
+        .substitute_into_document(format!("<html><body>{html}</body></html>"))
+        .unwrap();
+    assert!(!out.contains("id=\"od-sym-check\""));
+    assert!(out.contains("<symbol id=\"od-sym-arrow-right\" viewBox=\"0 0 24 24\">"));
+    assert_eq!(out.matches("<use href=\"#od-sym-arrow-right\"></use>").count(), 2);
+
+    let mut unique_cap = IconNonceTable::default();
+    for idx in 0..MAX_UNIQUE_ICONS_PER_REQUEST {
+        unique_cap.unique_names.insert(format!("synthetic-{idx}"));
+    }
+    let mut bytes_used = 0usize;
+    assert!(unique_cap.register_icon("check", None, &mut bytes_used).is_err());
 }

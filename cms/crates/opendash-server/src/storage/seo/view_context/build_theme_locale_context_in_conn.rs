@@ -25,22 +25,22 @@ pub(crate) async fn resolve_locale_search_url_in_conn(
     ))
 }
 
-pub(crate) async fn build_theme_locale_context_in_conn(
+pub(crate) async fn build_locale_render_context_in_conn(
     conn: &mut SqliteConnection,
     current_locale: Option<&str>,
     target: ThemeLocaleTarget<'_>,
-) -> ApiResult<serde_json::Value> {
+) -> ApiResult<crate::content_render::LocaleRenderContext> {
     let enabled = settings::list_enabled_locales_in_conn(conn).await?;
     if enabled.is_empty() {
-        return Ok(serde_json::json!({
-            "code": "vi",
-            "bcp47_tag": "vi",
-            "label": "Tiếng Việt",
-            "direction": "ltr",
-            "home_url": "/",
-            "search_url": "/",
-            "alternates": [],
-        }));
+        return Ok(crate::content_render::LocaleRenderContext {
+            code: "vi".to_owned(),
+            bcp47_tag: "vi".to_owned(),
+            label: "Tiếng Việt".to_owned(),
+            direction: "ltr".to_owned(),
+            home_url: "/".to_owned(),
+            search_url: "/".to_owned(),
+            alternates: Vec::new(),
+        });
     }
     let default_code = enabled
         .iter()
@@ -178,7 +178,7 @@ pub(crate) async fn build_theme_locale_context_in_conn(
         ThemeLocaleTarget::None => {}
     }
 
-    let alternates: Vec<serde_json::Value> = enabled
+    let alternates: Vec<crate::content_render::LocaleAlternateItem> = enabled
         .iter()
         .map(|loc| {
             let home_url =
@@ -187,26 +187,35 @@ pub(crate) async fn build_theme_locale_context_in_conn(
                 Some(path) => (path.clone(), true),
                 None => (home_url, false),
             };
-            serde_json::json!({
-                "code": loc.code,
-                "bcp47_tag": loc.bcp47_tag,
-                "label": loc.label,
-                "url": url,
-                "is_current": loc.code == current.code,
-                "has_translation": has_translation,
-            })
+            crate::content_render::LocaleAlternateItem {
+                code: loc.code.clone(),
+                bcp47_tag: loc.bcp47_tag.clone(),
+                label: loc.label.clone(),
+                url,
+                is_current: loc.code == current.code,
+                has_translation,
+            }
         })
         .collect();
 
     let base_locale_url =
         crate::storage::permalinks::prefix_for_locale(&current.code, &default_code, "/");
-    Ok(serde_json::json!({
-        "code": current.code,
-        "bcp47_tag": current.bcp47_tag,
-        "label": current.label,
-        "direction": current.direction,
-        "home_url": base_locale_url,
-        "search_url": base_locale_url,
-        "alternates": alternates,
-    }))
+    Ok(crate::content_render::LocaleRenderContext {
+        code: current.code.clone(),
+        bcp47_tag: current.bcp47_tag.clone(),
+        label: current.label.clone(),
+        direction: current.direction.clone(),
+        home_url: base_locale_url.clone(),
+        search_url: base_locale_url,
+        alternates,
+    })
+}
+
+pub(crate) async fn build_theme_locale_context_in_conn(
+    conn: &mut SqliteConnection,
+    current_locale: Option<&str>,
+    target: ThemeLocaleTarget<'_>,
+) -> ApiResult<serde_json::Value> {
+    let ctx = build_locale_render_context_in_conn(conn, current_locale, target).await?;
+    Ok(serde_json::to_value(ctx)?)
 }

@@ -192,6 +192,21 @@ pub fn render_core_icon_svg(name: &str, class: Option<&str>) -> Option<String> {
     ))
 }
 
+pub fn render_core_icon_symbol(name: &str) -> Option<String> {
+    let paths = lookup_core_icon_paths(name)?;
+    Some(format!(
+        "<symbol id=\"od-sym-{name}\" viewBox=\"0 0 24 24\">{paths}</symbol>"
+    ))
+}
+
+pub fn render_core_icon_use(name: &str, class: Option<&str>) -> Option<String> {
+    lookup_core_icon_paths(name)?;
+    let class = class.unwrap_or("od-icon inline-block w-5 h-5 align-middle");
+    valid_icon_class_attr(class).then(|| format!(
+        "<svg viewBox=\"0 0 24 24\" class=\"{class}\" aria-hidden=\"true\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><use href=\"#od-sym-{name}\"/></svg>"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,5 +258,19 @@ mod tests {
         }
         assert!(render_core_icon_svg("missing", None).is_none());
         assert!(render_core_icon_svg("calendar", Some("x\" onclick=\"alert(1)")).is_none());
+    }
+
+    #[test]
+    fn symbol_and_use_markup_preserve_viewbox_and_validate_class() {
+        let sym = render_core_icon_symbol("star").unwrap();
+        assert!(sym.contains("id=\"od-sym-star\""));
+        assert!(sym.contains("viewBox=\"0 0 24 24\""));
+        let use_svg = render_core_icon_use("star", Some("w-4 h-4")).unwrap();
+        assert!(use_svg.contains("viewBox=\"0 0 24 24\""));
+        assert!(use_svg.contains("href=\"#od-sym-star\""));
+        assert!(use_svg.contains("aria-hidden=\"true\""));
+        assert!(render_core_icon_symbol("missing").is_none());
+        assert!(render_core_icon_use("missing", None).is_none());
+        assert!(render_core_icon_use("star", Some("bad\"onclick")).is_none());
     }
 }

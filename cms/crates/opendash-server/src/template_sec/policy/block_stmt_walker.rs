@@ -11,11 +11,15 @@ pub(crate) fn walk_block_ast_stmt(
         Stmt::Template(t) => walk_block_ast_sequence(&t.children, states, scopes, policy, walk_ctx),
         Stmt::EmitRaw(raw) => {
             let mut next_states = BTreeSet::new();
+            let step_options = HtmlStepOptions {
+                allow_trusted_theme_markup: !walk_ctx.forbid_trusted_markup,
+                ..BLOCK_HTML_STEP_OPTIONS
+            };
             for initial in states {
                 let mut cur = initial;
                 for ch in raw.raw.chars() {
                     let depths = cur.depths();
-                    cur = step_theme_raw_char(cur, ch, BLOCK_HTML_STEP_OPTIONS, depths)?;
+                    cur = step_theme_raw_char(cur, ch, step_options, depths)?;
                 }
                 next_states.insert(cur);
             }
@@ -89,6 +93,9 @@ pub(crate) fn walk_block_ast_stmt(
                 return Ok((states, scopes));
             }
             if let Some((_, arg_expr)) = parse_od_hook_call(&e.expr)? {
+                if walk_ctx.forbid_od_hook {
+                    return Err("Template block ngữ cảnh loop_item cấm gọi od_hook().");
+                }
                 if states.iter().any(|s| s.inner() != &ThemeHtmlState::Body) {
                     return Err("od_hook() chỉ được xuất trong thân HTML của block.");
                 }
@@ -521,8 +528,14 @@ pub fn validate_block_template_csec_with_children(
         .map_err(|_| "Cú pháp MiniJinja của template block không hợp lệ.")?;
     validate_stmt_with_icons_ext(&ast, true, true, false)?;
 
+    let is_loop_item_block = schema
+        .allowed_contexts
+        .as_deref()
+        .is_some_and(|tokens| tokens.iter().any(|t| t == "loop_item"));
     let mut walk_ctx = BlockWalkContext {
         supports_children,
+        forbid_od_hook: is_loop_item_block,
+        forbid_trusted_markup: is_loop_item_block,
         ..BlockWalkContext::default()
     };
     let (final_states, _) = walk_block_ast_stmt(

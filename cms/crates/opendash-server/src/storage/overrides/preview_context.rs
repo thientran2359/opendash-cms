@@ -18,37 +18,6 @@ pub(in crate::storage) struct PreviewRenderContext<'a> {
     pub(in crate::storage) search: Option<page::BuilderSearchData<'a>>,
 }
 
-pub(in crate::storage) fn build_placeholder_preview_entry(type_key: &str) -> EntryView {
-    let mut terms = BTreeMap::new();
-    terms.insert("category".to_owned(), Vec::new());
-    terms.insert("tag".to_owned(), Vec::new());
-    EntryView {
-        id: 0,
-        type_key: type_key.to_owned(),
-        title: "Nội dung xem trước".to_owned(),
-        slug: "preview".to_owned(),
-        url: Some("/".to_owned()),
-        parent: None,
-        menu_order: 0,
-        created_at: String::new(),
-        updated_at: String::new(),
-        published_at: None,
-        excerpt: String::new(),
-        reading_time_minutes: 0,
-        fields: BTreeMap::new(),
-        field_list: Vec::new(),
-        cover_url: None,
-        cover_media: None,
-        terms,
-        all_terms: Vec::new(),
-        primary_category: None,
-        ext: BTreeMap::new(),
-        theme_ext: BTreeMap::new(),
-        snippet_segments: Vec::new(),
-        type_label: String::new(),
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(in crate::storage) async fn build_entry_preview_context_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
@@ -158,6 +127,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
     target: &TemplateCandidate,
     document: &BuilderDocument,
     preview_entry: Option<&TemplatePreviewEntry>,
+    preview_term: Option<&TemplatePreviewTerm>,
     expected_version: Option<i64>,
     preview_locale: Option<&str>,
     cache: &page::BlockTemplateCache,
@@ -190,6 +160,14 @@ pub async fn preview_typed_override_with_cache_and_locale(
         active.as_ref(),
         &effective_locale,
         actor_role,
+    )
+    .await?;
+    let _resolved_term = resolve_preview_term_in_tx(
+        &mut tx,
+        target,
+        preview_term,
+        &effective_locale,
+        Some(&mut budget.richtext_nonces),
     )
     .await?;
     let general =

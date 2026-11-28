@@ -166,7 +166,7 @@ impl CompiledCsecComposition {
             self.source.clone()
         };
         let mut env = restricted_environment_with_config(fmt_cfg);
-        let local = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let local = std::sync::Arc::new(std::sync::Mutex::new(LocalIconBatch::default()));
         let local_images = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -224,13 +224,9 @@ impl CompiledCsecComposition {
         } else {
             shell.to_owned()
         };
-        let additions = local.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let icon_growth: usize = additions
-            .iter()
-            .map(|(n, s)| s.len().saturating_sub(n.len()))
-            .sum();
-        budget.charge_html_bytes(icon_growth)?;
-        budget.icon_nonces.extend(additions);
+        let batch = local.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        budget.charge_html_bytes(batch.bytes_delta)?;
+        budget.icon_nonces.merge_batch(batch);
         let image_additions = local_images
             .lock()
             .unwrap_or_else(|e| e.into_inner())

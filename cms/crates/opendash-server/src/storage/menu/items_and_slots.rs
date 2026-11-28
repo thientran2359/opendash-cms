@@ -71,7 +71,13 @@ pub(in crate::storage) async fn resolve_slot_menus_for_locale_and_path_in_tx(
     let assignments = list_slot_assignments_for_locale_in_tx(conn, theme_id, locale).await?;
     let mut out = BTreeMap::new();
     for (slot_key, menu_id) in assignments {
-        if let Some(view) = resolve_menu_view_for_path_in_tx(conn, menu_id, current_path).await? {
+        if out.len() >= opendash_core::builder::MAX_MENU_LOADS_PER_REQUEST {
+            break;
+        }
+        if let Some(view) =
+            resolve_menu_view_for_locale_and_path_in_tx(conn, menu_id, current_path, Some(locale))
+                .await?
+        {
             out.insert(slot_key, view);
         }
     }

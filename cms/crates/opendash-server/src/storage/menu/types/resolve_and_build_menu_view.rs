@@ -8,6 +8,27 @@ pub(in crate::storage) async fn resolve_and_build_menu_view(
     current_path: Option<&str>,
     strict_preview_missing_id: bool,
 ) -> ApiResult<MenuViewModel> {
+    resolve_and_build_menu_view_for_locale(
+        conn,
+        menu,
+        preview_title,
+        items,
+        current_path,
+        strict_preview_missing_id,
+        None,
+    )
+    .await
+}
+
+pub(in crate::storage) async fn resolve_and_build_menu_view_for_locale(
+    conn: &mut SqliteConnection,
+    menu: MenuRecord,
+    preview_title: Option<String>,
+    items: Vec<AbstractMenuItem>,
+    current_path: Option<&str>,
+    strict_preview_missing_id: bool,
+    locale_filter: Option<&str>,
+) -> ApiResult<MenuViewModel> {
     let mut entry_ids = Vec::new();
     let mut term_ids = Vec::new();
     for item in &items {
@@ -28,13 +49,22 @@ pub(in crate::storage) async fn resolve_and_build_menu_view(
     let entry_urls = if entry_ids.is_empty() {
         BTreeMap::new()
     } else {
-        crate::storage::seo::resolve_public_entry_paths_by_entry_ids_in_conn(conn, &entry_ids)
-            .await?
+        crate::storage::seo::resolve_public_entry_paths_by_entry_ids_for_locale_in_conn(
+            conn,
+            &entry_ids,
+            locale_filter,
+        )
+        .await?
     };
     let term_urls = if term_ids.is_empty() {
         BTreeMap::new()
     } else {
-        crate::storage::permalinks::batch_canonical_term_paths_in_tx(conn, &term_ids).await?
+        crate::storage::permalinks::batch_canonical_term_paths_for_locale_in_tx(
+            conn,
+            &term_ids,
+            locale_filter,
+        )
+        .await?
     };
 
     let normalized_current = current_path.map(normalize_menu_path);
@@ -184,6 +214,15 @@ pub async fn resolve_menu_view_for_path_in_tx(
     menu_id: i64,
     current_path: Option<&str>,
 ) -> ApiResult<Option<MenuViewModel>> {
+    resolve_menu_view_for_locale_and_path_in_tx(conn, menu_id, current_path, None).await
+}
+
+pub async fn resolve_menu_view_for_locale_and_path_in_tx(
+    conn: &mut SqliteConnection,
+    menu_id: i64,
+    current_path: Option<&str>,
+    locale_filter: Option<&str>,
+) -> ApiResult<Option<MenuViewModel>> {
     let Some(with_items) = get_menu_in_tx(conn, menu_id).await? else {
         return Ok(None);
     };
@@ -200,8 +239,16 @@ pub async fn resolve_menu_view_for_path_in_tx(
             external_url: item.external_url,
         })
         .collect();
-    let view = resolve_and_build_menu_view(conn, with_items.menu, None, items, current_path, false)
-        .await?;
+    let view = resolve_and_build_menu_view_for_locale(
+        conn,
+        with_items.menu,
+        None,
+        items,
+        current_path,
+        false,
+        locale_filter,
+    )
+    .await?;
     Ok(Some(view))
 }
 

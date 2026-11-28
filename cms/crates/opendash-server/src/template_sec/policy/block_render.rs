@@ -218,7 +218,7 @@ pub fn render_block_csec_compiled(
 
     let mut env = (**base_env).clone();
     install_dynamic_formatting_handlers(&mut env, inputs.fmt_cfg);
-    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(LocalIconBatch::default()));
     let local_images = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -272,16 +272,12 @@ pub fn render_block_csec_compiled(
     };
     budget.charge_html_bytes(charge_bytes)?;
     budget.richtext_nonces.reserve_count(local_rt_count)?;
-    let additions = local_icons
+    let batch = local_icons
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let icon_growth: usize = additions
-        .iter()
-        .map(|(n, s)| s.len().saturating_sub(n.len()))
-        .sum();
-    budget.charge_html_bytes(icon_growth)?;
-    budget.icon_nonces.extend(additions);
+    budget.charge_html_bytes(batch.bytes_delta)?;
+    budget.icon_nonces.merge_batch(batch);
     let image_additions = local_images
         .lock()
         .unwrap_or_else(|e| e.into_inner())

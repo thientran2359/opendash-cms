@@ -333,6 +333,11 @@ pub(in crate::storage) async fn resolve_preview_entry(
     let mut entry = entries::get_entry_in_tx(tx, &type_key, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Preview entry not found."))?;
+    if entry.locale != preview_locale {
+        return Err(ApiError::bad_request(
+            "Bài viết xem trước không khớp ngôn ngữ đang chọn.",
+        ));
+    }
     if target.kind == K::Single
         && target
             .selector_slug
@@ -364,8 +369,7 @@ pub async fn inspect_public_surfaces_and_precompile(
     let schemas = crate::storage::page::load_unified_block_catalog_in_conn(&mut *tx).await?;
     let mut precompiled_body = None;
     let mut precompiled_shell = PrecompiledPublicShell::default();
-    let mut uses_related_entries = false;
-    let mut uses_recent_posts = false;
+    let mut acc = SurfaceScanAcc::default();
 
     let body_canvas_layout = match resolution {
         TemplateResolution::DbOverride(record) => {
@@ -378,8 +382,7 @@ pub async fn inspect_public_surfaces_and_precompile(
                 active,
                 url_policy,
                 &schemas,
-                &mut uses_related_entries,
-                &mut uses_recent_posts,
+                &mut acc,
             )
             .await?;
             is_canvas_target(active, &record.target)
@@ -407,12 +410,14 @@ pub async fn inspect_public_surfaces_and_precompile(
                 .map(Arc::new)
             }
             .map_err(ApiError::internal)?;
-            uses_related_entries |= compiled.uses_related_entries;
-            uses_recent_posts |= compiled.uses_recent_posts;
+            acc.merge_theme_compiled(&compiled);
             precompiled_body = Some(compiled);
             is_canvas_resolved_key(active, target_key)
         }
-        TemplateResolution::CoreFallback => false,
+        TemplateResolution::CoreFallback => {
+            acc.loop_projection = opendash_core::builder::LoopProjection::all();
+            false
+        }
     };
 
     let mut shell_part_present = false;
@@ -426,8 +431,7 @@ pub async fn inspect_public_surfaces_and_precompile(
             active,
             &part_url_policy,
             &schemas,
-            &mut uses_related_entries,
-            &mut uses_recent_posts,
+            &mut acc,
         )
         .await?;
         let (has_footer, compiled_footer) = inspect_part_slot_in_tx(
@@ -438,8 +442,7 @@ pub async fn inspect_public_surfaces_and_precompile(
             active,
             &part_url_policy,
             &schemas,
-            &mut uses_related_entries,
-            &mut uses_recent_posts,
+            &mut acc,
         )
         .await?;
         shell_part_present = has_header || has_footer;
@@ -450,13 +453,7 @@ pub async fn inspect_public_surfaces_and_precompile(
     tx.commit().await?;
     let has_shell_or_theme =
         !matches!(resolution, TemplateResolution::CoreFallback) || shell_part_present;
-    Ok(PublicSurfaceInspection {
-        precompiled_body,
-        precompiled_shell,
-        uses_related_entries,
-        uses_recent_posts,
-        has_shell_or_theme,
-    })
+    Ok(acc.into_inspection(precompiled_body, precompiled_shell, has_shell_or_theme))
 }
 
 pub(in crate::storage) fn target_requires_and_forbids_slot(

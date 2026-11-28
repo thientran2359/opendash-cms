@@ -232,6 +232,68 @@ pub async fn resolve_all_menus_for_locale_and_path_in_conn(
     Ok(out)
 }
 
+/// Resolves up to `MAX_MENU_LOADS_PER_REQUEST` (`<= 8` combined with `already_loaded`)
+/// menus by key for the active locale, blocking excess loads before running SQL.
+pub async fn resolve_menus_by_keys_for_path_in_tx(
+    conn: &mut SqliteConnection,
+    menu_keys: &[String],
+    current_path: Option<&str>,
+    locale: Option<&str>,
+    already_loaded: usize,
+) -> ApiResult<BTreeMap<String, MenuViewModel>> {
+    let mut unique_keys = Vec::new();
+    let mut seen = BTreeSet::new();
+    for raw_key in menu_keys {
+        let trimmed = raw_key.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        validate_menu_key(trimmed)?;
+        if seen.insert(trimmed.to_owned()) {
+            unique_keys.push(trimmed.to_owned());
+        }
+    }
+    if already_loaded.saturating_add(unique_keys.len())
+        > opendash_core::builder::MAX_MENU_LOADS_PER_REQUEST
+    {
+        return Err(ApiError::bad_request(
+            "Số lượng menu tải trên mỗi yêu cầu vượt quá giới hạn tối đa 8.",
+        ));
+    }
+    if unique_keys.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let resolved_locale = match locale {
+        Some(loc) => loc.to_owned(),
+        None => crate::storage::settings::get_default_locale_code_in_conn(&mut *conn).await?,
+    };
+    let keys_json = serde_json::to_string(&unique_keys)?;
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, menu_key
+           FROM site_menus
+          WHERE menu_key IN (SELECT value FROM json_each(?))
+          ORDER BY id ASC",
+    )
+    .bind(keys_json)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    let mut out = BTreeMap::new();
+    for (menu_id, menu_key) in rows {
+        if let Some(view) = resolve_menu_view_for_locale_and_path_in_tx(
+            conn,
+            menu_id,
+            current_path,
+            Some(&resolved_locale),
+        )
+        .await?
+        {
+            out.insert(menu_key, view);
+        }
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MenuSlotsSnapshot {
     pub theme_id: String,

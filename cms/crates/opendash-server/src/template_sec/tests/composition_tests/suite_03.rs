@@ -499,3 +499,35 @@ fn container_block_csec_enforces_safe_body_nesting_balanced_if_and_budget() {
     }
     assert!(budget.charge_builder_list().is_err());
 }
+
+#[test]
+fn loop_item_block_csec_forbids_od_hook_script_and_event_handlers() {
+    use opendash_core::block_schema::BlockSchema;
+    use serde_json::json;
+
+    let schema: BlockSchema = serde_json::from_value(json!({
+        "schema_version": 1,
+        "id": "demo/loop-card",
+        "title": "Loop Card",
+        "category": "template",
+        "allowed_contexts": ["loop_item"],
+        "render": "render.html",
+        "fields": [
+            { "type": "text", "key": "label", "label": "Label" }
+        ]
+    }))
+    .unwrap();
+
+    validate_block_template_csec("demo/loop-card", "<div>{{ props.label }}</div>", &schema)
+        .unwrap();
+    for bad in [
+        "<div>{{ od_hook('card_extra') }}</div>",
+        "<script>alert(1)</script><div>{{ props.label }}</div>",
+        "<div onclick=\"alert(1)\">{{ props.label }}</div>",
+    ] {
+        assert!(
+            validate_block_template_csec("demo/loop-card", bad, &schema).is_err(),
+            "{bad}"
+        );
+    }
+}

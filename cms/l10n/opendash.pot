@@ -21366,3 +21366,63 @@ msgstr ""
 #: server:error:public.home_taxonomy_filter_unsupported
 msgid "Homepage does not support taxonomy filters."
 msgstr ""
+
+#: server:error:preview.entry_locale_mismatch
+msgid "Preview entry does not match the selected preview locale."
+msgstr ""
+
+#: server:error:preview.term_not_found
+msgid "Preview taxonomy term not found."
+msgstr ""
+
+#: server:error:preview.term_target_mismatch
+msgid "Preview term does not match template target."
+msgstr ""
+
+#: server:error:preview.term_locale_mismatch
+msgid "Preview term does not match the selected preview locale."
+msgstr ""
+
+#: server:error:page.loop_query_budget_exceeded
+msgid "List queries per request exceeded the maximum limit of 8."
+msgstr ""
+
+#: server:error:page.loop_item_budget_exceeded
+msgid "Loop items per request exceeded the maximum limit of 96."
+msgstr ""
+
+#: server:error:menu.load_budget_exceeded
+msgid "Menus loaded per request exceeded the maximum limit of 8."
+msgstr ""
+
+#: server:core_l10n.related_entries
+msgid "Related posts"
+msgstr ""
+
+#: server:core_l10n.prev_entry
+msgid "Previous post"
+msgstr ""
+
+#: server:core_l10n.next_entry
+msgid "Next post"
+msgstr ""
+
+#: server:core_l10n.breadcrumb_nav
+msgid "Breadcrumb"
+msgstr ""
+
+#: server:core_l10n.menu_toggle
+msgid "Toggle menu"
+msgstr ""
+
+#: server:core_l10n.reading_time_suffix
+msgid "min read"
+msgstr ""
+
+#: server:core_l10n.preview_draft_date_suffix
+msgid "(Draft preview)"
+msgstr ""
+
+#: server:core_l10n.posts_count_suffix
+msgid "posts"
+msgstr ""

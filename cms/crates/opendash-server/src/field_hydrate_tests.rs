@@ -433,4 +433,34 @@ fn content_public_visibility_filters_nested_private_and_admin_group_repeater_chi
     assert!(!row.contains_key("priv_secret"));
     assert!(!row.contains_key("priv_rep_rt"));
     assert!(nonces.is_empty());
+
+    let mut rt_nonces = RichTextNonceTable::default();
+    let mut rt_html = BTreeMap::new();
+    let rt_specs: Vec<FieldSpec> = serde_json::from_value(json!([
+        { "type": "richtext", "key": "bio", "label": "Bio", "public": true },
+        { "type": "group", "key": "meta", "label": "Meta", "public": true, "fields": [
+            { "type": "richtext", "key": "note", "label": "Note" }
+        ]}
+    ]))
+    .unwrap();
+    let rt_raw = BTreeMap::from([
+        ("bio".into(), json!("<p>Top<script>x</script></p>")),
+        ("meta".into(), json!({ "note": "<p>Nested</p>" })),
+    ]);
+    let hydrated_rt = hydrate_field_values_with_richtext(
+        &rt_specs,
+        &rt_raw,
+        &ctx,
+        Some(&mut rt_nonces),
+        vis,
+        Some(&mut rt_html),
+        None,
+    )
+    .unwrap();
+    assert!(hydrated_rt["bio"].as_str().unwrap().starts_with("OD_RICHTEXT_"));
+    assert_eq!(rt_html.get("bio").map(String::as_str), Some("<p>Top</p>"));
+    assert_eq!(
+        rt_html.get("meta.note").map(String::as_str),
+        Some("<p>Nested</p>")
+    );
 }

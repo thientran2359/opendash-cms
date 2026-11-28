@@ -59,6 +59,8 @@ pub struct TemplateOverridePreviewInput {
     #[serde(default)]
     pub(super) preview_entry: Option<overrides::TemplatePreviewEntry>,
     #[serde(default)]
+    pub(super) preview_term: Option<overrides::TemplatePreviewTerm>,
+    #[serde(default)]
     pub(super) preview_locale: Option<String>,
 }
 
@@ -72,6 +74,8 @@ pub struct StudioPreviewRequest {
     pub(super) document: Option<opendash_core::builder::BuilderDocument>,
     #[serde(default)]
     pub(super) preview_entry: Option<overrides::TemplatePreviewEntry>,
+    #[serde(default)]
+    pub(super) preview_term: Option<overrides::TemplatePreviewTerm>,
     #[serde(default)]
     pub(super) preview_annotations: bool,
     #[serde(default)]

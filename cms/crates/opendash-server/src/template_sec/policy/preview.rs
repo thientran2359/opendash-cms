@@ -6,6 +6,9 @@ impl Default for RenderBudget {
             fuel_remaining: TEMPLATE_FUEL_LIMIT,
             html_bytes_used: 0,
             builder_lists_used: 0,
+            collection_queries_used: 0,
+            loop_items_rendered: 0,
+            menu_loads_used: 0,
             locale: "vi".to_owned(),
             icon_nonces: IconNonceTable::default(),
             image_nonces: ImageNonceTable::default(),
@@ -43,6 +46,10 @@ impl Default for PreviewCompositionBudget {
             fuel_remaining: TEMPLATE_FUEL_LIMIT,
             html_bytes_used: 0,
             builder_lists_used: 0,
+            collection_queries_used: 0,
+            loop_items_rendered: 0,
+            menu_loads_used: 0,
+            locale: "vi".to_owned(),
             expansions: 0,
             stack: Vec::new(),
             icon_nonces: IconNonceTable::default(),
@@ -168,7 +175,7 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
     // cannot detect markup or syntax introduced by concatenation.
     validate_template_csec_with_usage_flags(name, &program, policy, true, true, true)?;
     let mut env = restricted_environment_with_config(fmt_cfg);
-    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let local_icons = std::sync::Arc::new(std::sync::Mutex::new(LocalIconBatch::default()));
     let local_images = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let local_hooks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -218,19 +225,15 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
     }
     validate_html_and_css_context(shell, true, true, true)?;
     let out = insert_preview_fragments(shell, &compiler.nonces)?;
-    let additions = local_icons
+    let batch = local_icons
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let icon_growth: usize = additions
-        .iter()
-        .map(|(n, s)| s.len().saturating_sub(n.len()))
-        .sum();
-    budget.html_bytes_used = budget.html_bytes_used.saturating_add(icon_growth);
+    budget.html_bytes_used = budget.html_bytes_used.saturating_add(batch.bytes_delta);
     if budget.html_bytes_used > MAX_RENDERED_HTML_BYTES {
         return Err("HTML preview chứa icon vượt giới hạn 512 KiB.");
     }
-    budget.icon_nonces.extend(additions);
+    budget.icon_nonces.merge_batch(batch);
     let image_additions = local_images
         .lock()
         .unwrap_or_else(|e| e.into_inner())

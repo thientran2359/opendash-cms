@@ -72,8 +72,7 @@ pub(in crate::storage) async fn inspect_part_slot_in_tx(
     schemas: &opendash_core::registry::RegistryCatalog<
         opendash_core::block_schema::RegisteredBlockSchema,
     >,
-    uses_related_entries: &mut bool,
-    uses_recent_posts: &mut bool,
+    acc: &mut SurfaceScanAcc,
 ) -> ApiResult<(bool, Option<Arc<template_sec::CompiledCsecComposition>>)> {
     let target = TemplateCandidate {
         part_key: Some(key.to_owned()),
@@ -83,11 +82,18 @@ pub(in crate::storage) async fn inspect_part_slot_in_tx(
     if stack.contains(&canonical) || depth > 3 {
         return Err(ApiError::internal("Template part cycle or depth limit."));
     }
+    acc.part_expansions += 1;
+    if acc.part_expansions > 32 {
+        return Err(ApiError::internal("Template parts exceed 32 expansions."));
+    }
+    if let Some(cached) = acc.inspected_parts.get(&canonical) {
+        return Ok((true, cached.clone()));
+    }
     if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
         let (_, slots) = document_parts_and_slot_count_with_schemas(&row.document, schemas)?;
         validate_content_slots(&target, slots)?;
         let mut next_stack = stack.to_vec();
-        next_stack.push(canonical);
+        next_stack.push(canonical.clone());
         Box::pin(inspect_db_document_surfaces_in_tx(
             tx,
             &row.document,
@@ -96,10 +102,10 @@ pub(in crate::storage) async fn inspect_part_slot_in_tx(
             active,
             url_policy,
             schemas,
-            uses_related_entries,
-            uses_recent_posts,
+            acc,
         ))
         .await?;
+        acc.inspected_parts.insert(canonical, None);
         return Ok((true, None));
     }
     let Some(active) = active else {
@@ -121,8 +127,9 @@ pub(in crate::storage) async fn inspect_part_slot_in_tx(
     if depth + compiled.max_part_depth > 3 {
         return Err(ApiError::internal("Template part depth exceeds 3."));
     }
-    *uses_related_entries |= compiled.uses_related_entries;
-    *uses_recent_posts |= compiled.uses_recent_posts;
+    acc.merge_theme_compiled(&compiled);
+    acc.inspected_parts
+        .insert(canonical, Some(compiled.clone()));
     Ok((true, Some(compiled)))
 }
 
@@ -137,9 +144,9 @@ pub(in crate::storage) async fn inspect_db_document_surfaces_in_tx(
     schemas: &opendash_core::registry::RegistryCatalog<
         opendash_core::block_schema::RegisteredBlockSchema,
     >,
-    uses_related_entries: &mut bool,
-    uses_recent_posts: &mut bool,
+    acc: &mut SurfaceScanAcc,
 ) -> ApiResult<()> {
+    inspect_document_template_requirements(document, acc);
     for key in document_parts_and_slot_count_with_schemas(document, schemas)?.0 {
         Box::pin(inspect_part_slot_in_tx(
             tx,
@@ -149,8 +156,7 @@ pub(in crate::storage) async fn inspect_db_document_surfaces_in_tx(
             active,
             url_policy,
             schemas,
-            uses_related_entries,
-            uses_recent_posts,
+            acc,
         ))
         .await?;
     }

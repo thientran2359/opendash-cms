@@ -311,6 +311,13 @@ pub struct TemplatePreviewEntry {
     pub entry_id: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplatePreviewTerm {
+    pub taxonomy_key: String,
+    pub term_id: i64,
+}
+
 pub(in crate::storage) fn part_scope_prefix(key: &str, expansion_idx: usize) -> String {
     match key {
         "header" => "hdr".to_owned(),

@@ -52,6 +52,7 @@ pub async fn list_studio_targets(
         (K::Page, "Trang mặc định (Page)"),
         (K::Single, "Chi tiết bài viết (Single)"),
         (K::Archive, "Danh sách lưu trữ (Archive)"),
+        (K::Taxonomy, "Phân loại (Mặc định)"),
         (K::Search, "Trang tìm kiếm (Search)"),
         (K::Index, "Index dự phòng (Index)"),
     ] {
@@ -100,6 +101,30 @@ pub async fn list_studio_targets(
                 "content_types",
             )?;
         }
+    }
+
+    let public_taxonomies: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, label
+           FROM taxonomy_definitions
+          WHERE public = 1
+            AND provider_status = 'active'
+            AND declaration_state = 'declared'
+          ORDER BY key ASC",
+    )
+    .fetch_all(db)
+    .await?;
+    for (tax_key, tax_label) in public_taxonomies {
+        let mut tax_target = candidate(K::Taxonomy);
+        tax_target.taxonomy = Some(tax_key);
+        push_studio_target_item(
+            &mut items,
+            &mut seen,
+            &overrides_map,
+            active.as_ref(),
+            tax_target,
+            format!("Phân loại: {tax_label}"),
+            "taxonomies",
+        )?;
     }
 
     if let Some(ref theme) = active {
