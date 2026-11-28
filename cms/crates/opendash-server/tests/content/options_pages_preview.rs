@@ -79,7 +79,7 @@ async fn studio_preview_transient_options_pages_live_updates_and_fail_closes() {
                         {"param": "user_role", "op": "eq", "value": "admin"}
                     ]],
                     "fields": [
-                        {"key": "admin_flag", "label": "Admin Flag", "type": "text", "public": true}
+                        {"key": "admin_flag", "label": "Admin Flag", "type": "text", "public": false}
                     ]
                 },
                 {
@@ -94,36 +94,39 @@ async fn studio_preview_transient_options_pages_live_updates_and_fail_closes() {
         }
     }))
     .unwrap();
-    let home_html = b"<main><h1>{{ custom_options.brand_banner.headline | default('NONE') }}</h1><p>{{ custom_options.brand_banner.cta_group.label | default('') }}</p><aside>{{ site_options.promo_bar | default('NO-PROMO') }}</aside></main>";
+    let home_html = b"<main><h1>{{ custom_options.brand_banner.headline | default('NONE') }}</h1><p>{{ custom_options.brand_banner.cta_group.label | default('') }}</p><aside>{{ options.promo_bar | default('NO-PROMO') }}</aside>{{ od_content() }}</main>";
+    let index_html = b"<main>Index</main>";
     let zip = build_zip(&[
         ("theme.json", &manifest),
-        ("templates/home.html", home_html),
-        ("templates/index.html", home_html),
+        ("home.html", home_html),
+        ("index.html", index_html),
     ]);
     let up = client
-        .post(format!("{}/api/admin/themes/upload", srv.base))
+        .post(format!("{}/api/admin/themes", srv.base))
         .header("Cookie", &admin)
+        .header("Origin", &srv.base)
         .header("X-CSRF-Token", &csrf)
         .header("Content-Type", "application/zip")
         .body(zip)
         .send()
         .await
         .unwrap();
+    let up_status = up.status();
+    let up_text = up.text().await.unwrap();
     assert_eq!(
-        up.status(),
+        up_status,
         StatusCode::CREATED,
-        "{}",
-        up.text().await.unwrap()
+        "theme install failed: {up_text}"
     );
-    let up_body: Value = up.json().await.unwrap();
+    let up_body: Value = serde_json::from_str(&up_text).unwrap();
     let rev_id = up_body["revision_id"].as_str().unwrap();
     let act = api_json(
         &client,
-        reqwest::Method::POST,
-        &format!("{}/api/admin/themes/studio-opt-theme/activate", srv.base),
+        reqwest::Method::PUT,
+        &format!("{}/api/admin/themes/active", srv.base),
         &admin,
         Some(&csrf),
-        None,
+        Some("\"v1\""),
         Some(json!({"revision_id": rev_id})),
     )
     .await;
