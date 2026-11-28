@@ -11,6 +11,8 @@ interface AuthPanelProps {
   authPassword: string;
   statusMessage: string;
   isError: boolean;
+  statusErrorCode?: string | null;
+  onDismissStatus?: () => void;
   isProcessing: boolean;
   onUsernameChange: (username: string) => void;
   onPasswordChange: (password: string) => void;
@@ -20,6 +22,7 @@ interface AuthPanelProps {
   profileHref?: string;
   isProfileActive?: boolean;
   onNavigateProfile?: () => void;
+  onNavigateHash?: (hash: string) => void;
 }
 
 const AUTH_INPUT_CLASS =
@@ -33,6 +36,8 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   authPassword,
   statusMessage,
   isError,
+  statusErrorCode,
+  onDismissStatus,
   isProcessing,
   onUsernameChange,
   onPasswordChange,
@@ -42,6 +47,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   profileHref = '#/users/profile',
   isProfileActive = false,
   onNavigateProfile,
+  onNavigateHash,
 }) => {
   const { __ } = useI18n();
   return (
@@ -129,17 +135,49 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
           </AdminButton>
         </div>
       )}
-      <p
-        id="status"
-        role="status"
-        className={
-          isError
-            ? 'error mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700'
-            : 'success mt-3 text-xs text-zinc-500'
-        }
-      >
-        {statusMessage}
-      </p>
+      {statusMessage ? (
+        <div
+          id="status"
+          role={isError ? 'alert' : 'status'}
+          className={
+            isError
+              ? 'error mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700'
+              : 'success mt-3 text-xs text-zinc-500'
+          }
+        >
+          <span className="min-w-0 break-words">{statusMessage}</span>
+          {isError && (
+            <span className="flex shrink-0 items-center gap-2">
+              {user?.role === 'admin' && statusErrorCode?.startsWith('media.') && (
+                <a
+                  href="#/tools/media-reconcile"
+                  onClick={event => {
+                    if (onNavigateHash && isPlainLeftClick(event)) {
+                      event.preventDefault();
+                      onNavigateHash('#/tools/media-reconcile');
+                    }
+                  }}
+                  className="underline hover:text-rose-900"
+                >
+                  {__("Media reconciliation")}
+                </a>
+              )}
+              {onDismissStatus && (
+                <button
+                  type="button"
+                  onClick={onDismissStatus}
+                  aria-label={__("Dismiss status message")}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded text-rose-600 hover:bg-rose-100"
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          )}
+        </div>
+      ) : (
+        <p id="status" role="status" className="sr-only" />
+      )}
     </div>
   );
 };

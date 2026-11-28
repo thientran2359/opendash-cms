@@ -10,6 +10,7 @@ import {
   type RecoveryStatus,
 } from '../../api/operations.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { UploadFileButton } from '../../components/UploadFileButton.tsx';
 
 interface RestorePanelProps {
   csrfToken: string | null;
@@ -61,10 +62,13 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
             setErrorMsg(job.error_message || __("Restore failed."));
           }
         })
-        .catch(() => {});
+        .catch((err) => {
+          setErrorMsg(err instanceof Error ? err.message : __("Lost connection while checking restore job status."));
+          onApiError(err);
+        });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [activeJob]);
+  }, [activeJob, onApiError]);
 
   const handleRestoreUploadAndRun = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,7 +151,8 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
           </div>
           <div>{__("Site root:")}{' '}<code className="font-mono">{recovery.site_root}</code></div>
           {recovery.ready_marker && (
-            <div>{__("READY.json generation:")}{' '}<code className="font-mono">{recovery.ready_marker.job_id}</code>{' '}{__("(files:")}{' '}{recovery.ready_marker.file_count})
+            <div>
+              {__("READY.json generation: {{jobId}} (files: {{count}})", { jobId: recovery.ready_marker.job_id, count: recovery.ready_marker.file_count })}
             </div>
           )}
         </div>
@@ -178,15 +183,17 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
       <form onSubmit={handleRestoreUploadAndRun} className="max-w-2xl space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
         <div className="text-sm font-semibold text-zinc-900">{__("Restore from .odbackup.age package")}</div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+          <div className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
             <span>{__("Backup file (.odbackup.age)")}</span>
-            <input
-              type="file"
+            <UploadFileButton
               accept=".age,.odbackup.age"
+              disabled={busy}
+              buttonLabel={__("Choose backup file")}
+              selectedFileName={selectedFile?.name ?? null}
+              ariaLabel={__("Backup file (.odbackup.age)")}
               onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
-              className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-xs text-zinc-800"
             />
-          </label>
+          </div>
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
             <span>{__("Decryption passphrase")}</span>
             <input
@@ -217,7 +224,7 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
 
       {activeJob && (
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
-          <div>{__("Job:")}{' '}<code className="font-mono">{activeJob.id}</code>{' '}{__("— Status:")}{' '}<strong>{activeJob.state}</strong></div>
+          <div>{__("Job: {{id}} — Status: {{state}}", { id: activeJob.id, state: activeJob.state })}</div>
           {activeJob.summary_json && (
             <pre className="mt-1.5 overflow-x-auto text-[11px] text-zinc-600">{activeJob.summary_json}</pre>
           )}

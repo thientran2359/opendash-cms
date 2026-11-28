@@ -47,13 +47,12 @@ export const SingleEditTranslationModal: React.FC<SingleEditTranslationModalProp
     >
       {targetLocale && (
         <>
-          <h1
+          <h2
             id="create-translation-modal-title"
             className="text-base font-semibold text-zinc-900"
           >
-            {__("Create translation (")}
-            {targetLocale})
-          </h1>
+            {__("Create translation ({{locale}})", { locale: targetLocale })}
+          </h2>
           <p className="text-xs text-zinc-600">
             {__(
               "The system copies content, custom fields, matching-language taxonomy terms and referenced media to a new draft translation.",

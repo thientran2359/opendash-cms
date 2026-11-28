@@ -437,7 +437,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     {error && <AdminAlert tone="error">{error}</AdminAlert>}
     {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
     {missingDefinition && <AdminAlert tone="warning" role="alert">
-      {__("Taxonomy")} {activeKey} {__("was deleted or is no longer accessible. Your input remains visible below for copying; it cannot be saved to the missing definition.")}
+      {__("Taxonomy {{key}} was deleted or is no longer accessible. Your input remains visible below for copying; it cannot be saved to the missing definition.", { key: activeKey })}
     </AdminAlert>}
     {loading && <p role="status" className="text-xs text-zinc-500">{__("Loading taxonomies…")}</p>}
     <AdminTabs
@@ -468,7 +468,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-zinc-950">{__("Definitions (")}{definitions.length}/64)</h3>
+            <h3 className="text-sm font-semibold text-zinc-950">{__("Definitions ({{count}}/64)", { count: definitions.length })}</h3>
             {user.role === 'admin' && <AdminButton variant="primary" size="sm" disabled={busy || definitions.length >= 64}
               onClick={() => choose('__new__')}>{__("+ Add taxonomy")}</AdminButton>}
           </div>
@@ -478,7 +478,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
                 <p className="break-words text-sm font-semibold text-zinc-950">{item.label} <span className="font-normal text-zinc-500">({item.key})</span></p>
                 <p className="mt-0.5 text-xs text-zinc-500">{item.hierarchical ? __("Hierarchical") : __("Flat")} · {item.public ? __("Public") : __("Private")} · {item.owner.kind} · v{item.version}</p>
                 {item.provider_status !== 'active' || item.declaration_state !== 'declared' ?
-                  <p className="mt-0.5 text-xs text-amber-800">{__("Provider")} {item.provider_status}{__(", declaration")}{' '}{item.declaration_state}{__("; data is retained.")}</p> : null}
+                  <p className="mt-0.5 text-xs text-amber-800">{__("Provider {{status}}, declaration {{state}}; data is retained.", { status: item.provider_status, state: item.declaration_state })}</p> : null}
               </div>
               <div className="flex gap-1.5">
                 <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => choose(item.key)}>{__("Configuration")}</AdminButton>

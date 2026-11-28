@@ -120,12 +120,14 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
         labelledBy="template-library-tab-patterns"
       >
         <section className="space-y-3" aria-label={__("Local patterns")}>
-          <h3 className="font-semibold">{__("Synced patterns (")}{patterns.length})</h3>
+          <h3 className="font-semibold">{__("Synced patterns ({{count}})", { count: patterns.length })}</h3>
           <p className="text-sm text-slate-600">{__("Add a Reusable Pattern block from Visual Builder and choose a pattern. Editing the original updates every reference.")}</p>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {patterns.map(item => <article key={item.id} className="min-w-0 rounded-lg border border-slate-200 p-3">
               <h4 className="break-words font-medium">{item.title}</h4>
-              <p className="mt-1 break-words text-xs text-slate-500">#{item.id} · {item.slug} · {item.referencing_count} {__("content references")}</p>
+              <p className="mt-1 break-words text-xs text-slate-500">
+                {__("#{{id}} · {{slug}} · {{count}} content references", { id: item.id, slug: item.slug, count: item.referencing_count })}
+              </p>
               <button type="button" className="btn-secondary mt-3" onClick={() => onNavigateHash(`#/patterns/${item.id}/edit`)}>{__("Open pattern")}</button>
             </article>)}
           </div>
@@ -140,14 +142,24 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
       >
         <section className="space-y-3" aria-label={__("Local theme templates")}>
           <h3 className="font-semibold">{_x("Active theme templates", "feature.library")}</h3>
-          <p className="text-sm text-slate-600">{__("Theme:")} {catalog.active_theme_id ?? _x("None", "feature.library")} · {catalog.theme_state}</p>
+          <p className="text-sm text-slate-600">
+            {__("Theme: {{theme}} · {{state}}", { theme: catalog.active_theme_id ?? _x("None", "feature.library"), state: catalog.theme_state })}
+          </p>
           <div className="space-y-2.5">
             {catalog.theme_templates.map(item => <article key={item.role} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
               <div className="min-w-0"><strong>{item.role}</strong>
-                <p className="break-all text-xs text-slate-500">{__("Revision")}: {item.revision_id} · {item.revision_digest.slice(0, 12)}</p>
+                <p className="break-all text-xs text-slate-500">
+                  {__("Revision: {{id}} · {{digest}}", { id: item.revision_id, digest: item.revision_digest.slice(0, 12) })}
+                </p>
                 {item.reason && <p className="text-xs text-amber-800">{item.reason}</p>}
               </div>
-              {item.can_apply && <span className="text-xs text-slate-600">{_x("Active theme templates", "feature.library")}</span>}
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => onNavigateHash(`#/studio?panel=templates&template=${encodeURIComponent(item.role)}`)}
+              >
+                {__("Customize in Studio")}
+              </button>
             </article>)}
           </div>
           {!catalog.theme_templates.length && <p className="text-sm text-slate-600">{__("The theme does not provide valid local role templates. The Pattern CPT is stored separately and preserved.")}</p>}
@@ -159,14 +171,18 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
         labelledBy="template-library-tab-overrides"
       >
         <section className="space-y-3" aria-label={__("Site template overrides")}>
-          <h3 className="font-semibold">{__("Site template overrides")} ({overrides.length})</h3>
+          <h3 className="font-semibold">{__("Site template overrides ({{count}})", { count: overrides.length })}</h3>
           <p className="text-sm text-slate-600">{__("Site-owned AST takes precedence over a theme template for the same target. Resetting that target reveals the next theme/core source without affecting other templates.")}</p>
           <div className="space-y-2.5">
             {overrides.map(item => <article key={item.id} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
               <div className="min-w-0">
                 <strong className="break-all">{item.canonical_target_key}</strong>
-                <p className="text-xs text-slate-600">{__("Version v")}{item.version} · {item.effective_source?.label ?? __("Site override")}</p>
-                <p className="break-all text-xs text-slate-500">{__("Original theme:")}{' '}{item.base_theme_id ?? 'Core'} · {item.base_revision_digest?.slice(0, 12) ?? __("No revision")}</p>
+                <p className="text-xs text-slate-600">
+                  {__("Version v{{version}} · {{source}}", { version: item.version, source: item.effective_source?.label ?? __("Site override") })}
+                </p>
+                <p className="break-all text-xs text-slate-500">
+                  {__("Original theme: {{theme}} · {{digest}}", { theme: item.base_theme_id ?? 'Core', digest: item.base_revision_digest?.slice(0, 12) ?? __("No revision") })}
+                </p>
               </div>
               <button type="button" className="btn-secondary" disabled={!!applying || loading} onClick={() => void resetSiteOverride(item)}>
                 {applying === item.canonical_target_key ? __("Resetting…") : __("Reset override")}

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { deleteFieldGroup, setFieldGroupActive } from '../../api/content.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { ConfirmDialog } from '../../components/ConfirmDialog.tsx';
 import { __, useI18n } from '../../i18n/index.tsx';
 import type { FieldGroupDomain, FieldGroupRecord } from '../content/types.ts';
 
@@ -33,6 +34,7 @@ export const FieldGroupsListPage: React.FC<FieldGroupsListPageProps> = ({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [purgeTarget, setPurgeTarget] = useState<FieldGroupRecord | null>(null);
+  const [withdrawTarget, setWithdrawTarget] = useState<FieldGroupRecord | null>(null);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
 
   useEffect(() => {
@@ -215,7 +217,7 @@ export const FieldGroupsListPage: React.FC<FieldGroupsListPageProps> = ({
                         {isUser && g.status === 'active' && (
                           <AdminButton type="button" variant="danger" size="sm"
                             disabled={!csrfToken || busyId === g.group_id}
-                            onClick={() => void handleWithdraw(g, false)}>
+                            onClick={() => setWithdrawTarget(g)}>
                             {__("Withdraw")}
                           </AdminButton>
                         )}
@@ -237,6 +239,22 @@ export const FieldGroupsListPage: React.FC<FieldGroupsListPageProps> = ({
         </div>
       )}
 
+      <ConfirmDialog
+        open={Boolean(withdrawTarget)}
+        title={__("Withdraw field group {{value1}}?", { value1: withdrawTarget?.title ?? '' })}
+        description={__("Withdrawing detaches this field group from active editors while preserving existing stored values until purged.")}
+        confirmLabel={busyId ? __("Withdrawing…") : __("Withdraw")}
+        busy={Boolean(busyId)}
+        testId="confirm-withdraw-group-dialog"
+        onCancel={() => setWithdrawTarget(null)}
+        onConfirm={() => {
+          if (!withdrawTarget) return;
+          const target = withdrawTarget;
+          setWithdrawTarget(null);
+          void handleWithdraw(target, false);
+        }}
+      />
+
       <dialog
         ref={dialogRef}
         aria-labelledby="purge-group-dialog-title"
@@ -248,9 +266,9 @@ export const FieldGroupsListPage: React.FC<FieldGroupsListPageProps> = ({
       >
         {purgeTarget && (
           <div className="space-y-4">
-            <h3 id="purge-group-dialog-title" className="text-base font-semibold text-zinc-950">
+            <h2 id="purge-group-dialog-title" className="text-base font-semibold text-zinc-950">
               {__("Permanently delete {{value1}}?", { value1: purgeTarget.title })}
-            </h3>
+            </h2>
             <p className="text-sm text-zinc-600">
               {__("Purging removes the field group definition permanently (?purge=true) once all stored references are safe or empty.")}
             </p>

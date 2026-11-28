@@ -50,9 +50,31 @@ export function NotFoundLogPanel({
   const [sort, setSort] = React.useState<NotFoundSort>('hits_desc');
   const [selectedIds, setSelectedIds] = React.useState<number[]>([]);
   const [clearOpen, setClearOpen] = React.useState(false);
+  const clearMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; linkToRedirects?: boolean } | null>(null);
   const [formError, setFormError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!clearOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setClearOpen(false);
+      }
+    };
+    const onMouseDown = (event: MouseEvent) => {
+      if (clearMenuRef.current && !clearMenuRef.current.contains(event.target as Node)) {
+        setClearOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('mousedown', onMouseDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('mousedown', onMouseDown);
+    };
+  }, [clearOpen]);
 
   const restored = user ? getRedirectsDraft(siteInstanceId, user.id) : undefined;
   const restoredFor404 =
@@ -106,6 +128,7 @@ export function NotFoundLogPanel({
   }, [initialTab, loadLogs, refreshRevision]);
 
   const handleOpenCreateFrom404 = (item: NotFoundLogItem) => {
+    setClearOpen(false);
     setFormError(null);
     persistDraft({
       modalMode: 'from_404',
@@ -280,20 +303,23 @@ export function NotFoundLogPanel({
               {__('Delete selected ({{count}})', { count: selectedIds.length })}
             </AdminButton>
           )}
-          <div className="relative">
+          <div className="relative" ref={clearMenuRef}>
             <AdminButton
               variant="secondary"
               size="sm"
               disabled={busy}
+              aria-expanded={clearOpen}
+              aria-haspopup="menu"
               onClick={() => setClearOpen((v) => !v)}
               data-testid="not-found-clear-btn"
             >
               {__('Clear log')}
             </AdminButton>
             {clearOpen && (
-              <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg">
+              <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg">
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     void handleClear(30);
                   }}
@@ -303,6 +329,7 @@ export function NotFoundLogPanel({
                 </button>
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     void handleClear(null);
                   }}
@@ -324,6 +351,7 @@ export function NotFoundLogPanel({
                 <input
                   type="checkbox"
                   checked={allOnPageSelected}
+                  aria-label={__('Select all 404 logs on this page')}
                   onChange={(e) => {
                     if (!data) return;
                     setSelectedIds(e.target.checked ? data.items.map((i) => i.id) : []);
@@ -352,6 +380,7 @@ export function NotFoundLogPanel({
                     <input
                       type="checkbox"
                       checked={selectedIds.includes(item.id)}
+                      aria-label={__('Select 404 log {{path}}', { path: item.path })}
                       onChange={(e) => {
                         setSelectedIds((prev) =>
                           e.target.checked ? [...prev, item.id] : prev.filter((id) => id !== item.id),

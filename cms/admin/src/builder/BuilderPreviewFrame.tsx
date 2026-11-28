@@ -285,7 +285,8 @@ export async function preparePreviewMarkup(
       ':where([data-od-editable="1"]){position:relative;cursor:pointer;transition:outline-color .1s ease;}',
       '[data-od-editable="1"][data-od-hover="1"]{outline:1px dashed #2563eb;outline-offset:-1px;}',
       '[data-od-editable="1"][data-od-selected="1"]{outline:2px solid #2563eb;outline-offset:-1px;}',
-      '.od-canvas-gear{position:absolute;top:4px;right:4px;z-index:20;display:flex;align-items:center;justify-content:center;width:24px;height:24px;box-sizing:border-box;margin:0 !important;padding:0;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#334155;opacity:.8;cursor:pointer;line-height:1;}',
+      '.od-canvas-gear{position:absolute;top:4px;right:4px;z-index:20;display:flex;align-items:center;justify-content:center;width:24px;height:24px;box-sizing:border-box;margin:0 !important;padding:0;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#334155;opacity:0;box-shadow:0 1px 3px rgba(15,23,42,.12);cursor:pointer;line-height:1;transition:opacity .12s ease;}',
+      ':where([data-od-editable="1"]:hover, [data-od-editable="1"][data-od-hover="1"], [data-od-editable="1"][data-od-selected="1"]) > .od-canvas-gear, .od-canvas-gear:focus-visible{opacity:.95;}',
       ':where([data-od-kind="section"]) > .od-canvas-gear{left:4px;right:auto;z-index:15;}',
       ':where([data-od-selected="1"]) > .od-canvas-gear{background:#2563eb;border-color:#2563eb;color:#fff;opacity:1;}',
     ].join('\n');

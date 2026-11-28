@@ -36,6 +36,7 @@ const TEXTAREA_CLASS =
 interface Props {
   csrfToken: string | null;
   onApiError?: (error: unknown) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   localeState?: AdminLocaleState;
   onLocalesChanged?: () => void | Promise<void>;
 }
@@ -68,6 +69,7 @@ function messageFor(error: unknown): string {
 export function GeneralSettingsPanel({
   csrfToken,
   onApiError,
+  onDirtyChange,
   localeState = EMPTY_ADMIN_LOCALE_STATE,
   onLocalesChanged,
 }: Props) {
@@ -149,6 +151,10 @@ export function GeneralSettingsPanel({
     draft.timezone !== saved.timezone ||
     draft.cms_locale !== saved.cms_locale
   ));
+  useEffect(() => {
+    onDirtyChange?.(dirty || publicDirty);
+  }, [dirty, publicDirty, onDirtyChange]);
+  useEffect(() => () => { onDirtyChange?.(false); }, [onDirtyChange]);
   const hasLegacyTimezone = Boolean(draft && catalog && !catalog.items.includes(draft.timezone));
   const preview = useMemo(() => {
     if (!draft) return null;
@@ -217,7 +223,11 @@ export function GeneralSettingsPanel({
         <LocaleTabs
           localeState={localeState}
           activeLocale={effectiveLocale ?? defaultLocaleCode}
-          onSelectLocale={(code) => { if (!saving) setActiveLocale(code); }}
+          onSelectLocale={(code) => {
+            if (saving || code === (effectiveLocale ?? defaultLocaleCode)) return;
+            if (dirty && !window.confirm(__("Switch language and discard unsaved changes in this tab?"))) return;
+            setActiveLocale(code);
+          }}
           testId="general-locale-tabs"
         />
         {loading && <p role="status" className="text-sm text-zinc-500">{__("Loading settings and time zones…")}</p>}

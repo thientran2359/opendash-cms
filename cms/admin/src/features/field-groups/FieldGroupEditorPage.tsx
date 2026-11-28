@@ -73,9 +73,12 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
   const [presentation, setPresentation] = useState<FieldGroupPresentation>(
     () => structuredClone(seed?.presentation ?? DEFAULT_PRESENTATION),
   );
-  const [fields, setFields] = useState<FieldSpec[]>(
+  const [orderInput, setOrderInput] = useState(() => String((seed?.presentation ?? DEFAULT_PRESENTATION).order));
+  const initialFields = React.useMemo<FieldSpec[]>(
     () => structuredClone(seed?.fields ?? [createBlankFieldSpec([], false)]),
+    [seed?.group_id, seed?.version, duplicateSource?.group_id],
   );
+  const [fields, setFields] = useState<FieldSpec[]>(() => structuredClone(initialFields));
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -90,9 +93,9 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
         active: seed?.active ?? true,
         location: seed?.location ?? [[{ param: 'content_type', op: 'eq', value: 'post' }]],
         presentation: seed?.presentation ?? DEFAULT_PRESENTATION,
-        fields: seed?.fields ?? [],
+        fields: initialFields,
       }),
-    [seed?.group_id, seed?.version, duplicateSource?.group_id],
+    [seed?.group_id, seed?.version, duplicateSource?.group_id, initialFields],
   );
 
   const dirty =
@@ -195,6 +198,9 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
                   : __("Create field group")}
             </h2>
             {existing && <AdminBadge tone="neutral">{existing.group_id} · v{existing.version}</AdminBadge>}
+            {existing && existing.status !== 'active' && (
+              <AdminBadge tone="warning">{__("Withdrawn")}</AdminBadge>
+            )}
             <AdminBadge tone={active ? 'success' : 'neutral'}>{active ? __("Active") : __("Inactive")}</AdminBadge>
           </div>
           <p className="mt-0.5 text-xs text-zinc-600">
@@ -352,9 +358,20 @@ export const FieldGroupEditorPage: React.FC<FieldGroupEditorPageProps> = ({
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
             <span>{__("Order (-1000..1000)")}</span>
-            <input type="number" min={-1000} max={1000} className={INPUT_CLASS} value={presentation.order}
+            <input type="number" min={-1000} max={1000} className={INPUT_CLASS} value={orderInput}
               disabled={isReadOnlyProvider || saving}
-              onChange={e => setPresentation(p => ({ ...p, order: Number(e.target.value) || 0 }))} />
+              onChange={e => {
+                const raw = e.target.value;
+                setOrderInput(raw);
+                if (raw.trim() !== '' && Number.isFinite(Number(raw))) {
+                  setPresentation(p => ({ ...p, order: Math.max(-1000, Math.min(1000, Math.trunc(Number(raw)))) }));
+                }
+              }}
+              onBlur={() => {
+                if (orderInput.trim() === '' || !Number.isFinite(Number(orderInput))) {
+                  setOrderInput(String(presentation.order));
+                }
+              }} />
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
             <span>{__("Box style")}</span>
