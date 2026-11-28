@@ -41,6 +41,8 @@ const CORE_DIRS: &[&str] = &[
     "accordion",
     "accordion-item",
     "social-follow",
+    "search-form",
+    "search-results",
 ];
 
 pub(super) struct Site(Child, PathBuf, pub(super) String);
@@ -282,7 +284,7 @@ fn core_catalog_tailwind_budget_and_ast_v1_invariants() {
     }
     assert_eq!(
         (native_count, csec_count, catalog.iter().count()),
-        (16, 5, 21)
+        (18, 5, 23)
     );
     validate_block_catalog_templates(&catalog).unwrap();
 

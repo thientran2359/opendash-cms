@@ -4,6 +4,7 @@
 * **Status:** Approved
 * **Date:** 2026-11-26 *(Rebased lên `main@e6d9199` ngày 2026-11-27)*
 * **Baseline SHA:** `e6d9199`
+* **Implementation Sync Note (2026-11-28):** Đã đồng bộ `origin/main@3553f20` (PR #627–#631 dùng `0058`–`0061`), đổi số migration của Spec A1 từ `0058` sang `0062_template_override_media_ref_roles.sql` (`+0` net `sqlite_schema` objects, được Owner phê duyệt), và mở rộng danh mục lõi từ `21` lên `23` Core Blocks (`18 NativeRust + 5 CompiledCsec`, bổ sung `core/search-form` & `core/search-results` từ PR #629 chuẩn kebab-case).
 * **Approved By:** Owner
 * **Approval Evidence:** Chủ dự án phê duyệt trực tiếp Spec A1 ngày 2026-11-26 (`"Mình đồng ý với spec A1"` và nhấn Approve trên tài liệu) sau khi hoàn tất 4/4 Goldfish review độc lập (`0 Blocker / 0 Major` tồn đọng), đồng bộ Clean-Slate V1 (`schema_version: 1`, `BlockSchema`, `data-builder-version="1"`, `opendash-starter 1.0.0`, migration `0057`), và cập nhật đường dẫn modular/gettext theo `main@9e17cca` (giữ nguyên 100% kiến trúc & hành vi đã duyệt).
 * **Goldfish Review:** Completed (4 independent zero-context reviewers: `egm-design`, `egm-codebase-details`, `egm-implementation-readiness`, `egm-comprehension` — 22 Blocker, 25 Major, 9 Minor, 4 Nit across reviewers; 100% resolved before Owner approval)

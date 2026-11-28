@@ -1,6 +1,6 @@
 # OpenDash — Hợp đồng Bộ khung Lõi (Core Kernel) & Quy chuẩn Code (v1.2)
 
-- **Phiên bản:** `1.5` (cập nhật đồng bộ codebase `0001`–`0058`, bổ sung Unified JS Runtime, Render Hooks, Scoped Custom Routes, Dev Live-Edit theo [`unified-js-runtime-render-hooks-and-dev-mode.md`](../designs/unified-js-runtime-render-hooks-and-dev-mode.md), Entry Lifecycle / Quick Edit / Bulk Actions theo [`entry-lifecycle-bulk-quick-edit.md`](../designs/entry-lifecycle-bulk-quick-edit.md), và Ảnh Responsive / Tối ưu WebP / Replace Media theo [`responsive-media-and-replace.md`](../designs/responsive-media-and-replace.md))
+- **Phiên bản:** `1.5` (cập nhật đồng bộ codebase `0001`–`0062`, bổ sung Unified JS Runtime, Render Hooks, Scoped Custom Routes, Dev Live-Edit theo [`unified-js-runtime-render-hooks-and-dev-mode.md`](../designs/unified-js-runtime-render-hooks-and-dev-mode.md), Entry Lifecycle / Quick Edit / Bulk Actions theo [`entry-lifecycle-bulk-quick-edit.md`](../designs/entry-lifecycle-bulk-quick-edit.md), và Ảnh Responsive / Tối ưu WebP / Replace Media theo [`responsive-media-and-replace.md`](../designs/responsive-media-and-replace.md))
 - **Trạng thái:** `AGREED` · `implemented`
 - **Tài liệu liên quan:** [Yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md) · [Kiến trúc CMS](../architecture/CMS_ARCHITECTURE.md) · [Plugin ABI v1](PLUGIN_ABI.md) · [M8 Writer Inventory](M8_WRITER_INVENTORY.md)
 
