@@ -25,7 +25,7 @@ Active `features/*` subdirectories (20 directories on disk; no per-subdirectory 
 - `shared/`: `[OwnerOptionsForm.tsx:OwnerOptionsForm]`, `[OwnerOptionsForm.tsx:OwnerKind]`, `[OwnerOptionsForm.tsx:OwnerOptionsFormProps]`, `[OwnerOptionsForm.tsx:sameOwnerOptionValues]`, `[OwnerOptionsForm.tsx:isSecretConfiguredValue]`, `[OwnerOptionsForm.tsx:isClearSecretMarker]`, `[OwnerOptionsForm.tsx:normalizeOwnerValuesForFields]`, and `[OwnerOptionsForm.tsx:buildOwnerOptionsSubmitPayload]` shared between theme and plugin option screens.
 - `system/`: `[GeneralSettingsPanel.tsx:GeneralSettingsPanel]` (`site_title`, `tagline`, `timezone`, `cms_locale`, public origin/indexing) and `[SystemStatus.tsx:SystemStatus]`.
 - `taxonomy/`: `[TaxonomyDefinitionsPage.tsx:TaxonomyDefinitionsPage]`, `[TaxonomyPage.tsx:TaxonomyPage]`, `[TermEditPage.tsx:TermEditPage]`, `[TermPicker.tsx:TermPicker]`, and `[TermPicker.tsx:TermFilters]`.
-- `themes/`: `[ThemesPanel.tsx:ThemesPanel]` (Theme v3 ZIP install, revision activation, selective sample-data dry-run/execute) and `[ThemeOptionsForm.tsx:ThemeOptionsForm]`.
+- `themes/`: `[ThemesPanel.tsx:ThemesPanel]` (Theme v3 ZIP install, revision activation, selective sample-data dry-run/execute; theme options editing lives in [OpenDash Studio](../studio/README.md)).
 - `users/`: `[UsersPanel.tsx:UsersPanel]` and `[UserProfilePanel.tsx:UserProfilePanel]`.
 
 ## Invariants

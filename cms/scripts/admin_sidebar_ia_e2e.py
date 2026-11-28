@@ -98,7 +98,6 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                         "contact",
                         "themes",
                         "studio",
-                        "menus",
                         "patterns",
                         "schema",
                         "plugins",
@@ -140,11 +139,12 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     )
                     checks.append("cuj1_themes_install_vs_installed_and_patterns_library")
 
-                    # CUJ 2: Direct Menus leaf, Contact canonical/alias + bidirectional SMTP, SEO -> Redirects, Media -> Reconcile.
-                    menus_link = nav.locator('a[href="#/studio?panel=menus"]')
+                    # CUJ 2: Customize Studio -> Menus submenu, Contact canonical/alias + bidirectional SMTP, SEO -> Redirects, Media -> Reconcile.
+                    nav.locator('button[data-menu-id="studio"]').click()
+                    menus_link = nav.locator('a[href="#/studio/menus"]')
                     expect(menus_link).to_be_visible()
                     menus_link.click()
-                    expect(page).to_have_url(base + "/admin/#/studio?panel=menus")
+                    expect(page).to_have_url(base + "/admin/#/studio/menus")
                     expect(page.get_by_test_id("studio-panel-menus")).to_be_visible(timeout=20000)
 
                     page.goto(base + "/admin/#/settings/contact", wait_until="domcontentloaded")
@@ -229,7 +229,10 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path, checks: list[str]) -> dic
                     # Switch CMS locale to Vietnamese and verify translated sidebar & new labels.
                     set_cms_locale(ctx, base, csrf, "vi")
                     page.reload(wait_until="domcontentloaded")
-                    expect(nav.locator('a[href="#/studio?panel=menus"]')).to_have_text("Menus", timeout=15000)
+                    studio_btn = nav.locator('button[data-menu-id="studio"]')
+                    expect(studio_btn).to_contain_text("Tùy chỉnh Studio", timeout=15000)
+                    studio_btn.click()
+                    expect(nav.locator('a[href="#/studio/menus"]')).to_have_text("Menus", timeout=15000)
                     nav.locator('button[data-menu-id="themes"]').click()
                     expect(nav.locator('a[href="#/appearance/themes/install"]')).to_have_text("Cài theme")
                     nav.locator('button[data-menu-id="patterns"]').click()

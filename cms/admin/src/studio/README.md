@@ -6,10 +6,11 @@ Fullscreen visual customization and page-building workspace (`#/studio` and `#/s
 
 ## Interface
 
-- **Workspace Orchestrator (`StudioWorkspace.tsx`):**
-  - `[StudioWorkspace.tsx:StudioWorkspace]`: Coordinates Mode 1 (`route.view === 'studio'`, Admin-only customizer & typed template overrides) and Mode 2 (`route.view === 'studio-entry'`, entry builder), `50`-step Undo/Redo history, `250 ms` debounced live preview (`[../api/studio.ts:postStudioPreview]` / `[../api/builder.ts:previewEntryBuilder]`), preview locale switching, `412` conflict handling, and `401` draft quarantine.
-- **Customizer Navigation (`StudioCustomizerNav.tsx`):**
-  - `[StudioCustomizerNav.tsx:StudioCustomizerNav]`: Renders Mode 1 sub-panels (`'root'`, `'identity'`, `'theme-options'`, `'menus'`, `'reading'`, `'templates'`), grouped template target list (`parts`, `core`, `content_types`, `page_layouts`, `custom_templates`, `overrides`), and `[../builder/BuilderEditorCore.tsx:BuilderEditorCore]` once a template override is initialized.
+- **Workspace Orchestrator (`StudioWorkspace.tsx`, `useStudioMode1Controller.ts`, `useStudioOptionsState.ts`):**
+  - `[StudioWorkspace.tsx:StudioWorkspace]`: Coordinates Mode 1 (`route.view === 'studio'`, Admin-only customizer & typed template overrides) and Mode 2 (`route.view === 'studio-entry'`, entry builder), 2-way URL sub-route sync (`#/studio/{identity,options/...,menus,reading,templates/...}`), `50`-step Undo/Redo history, `250 ms` debounced live preview (`[../api/studio.ts:postStudioPreview]` incl. fail-closed `transient.options_pages` / `[../api/builder.ts:previewEntryBuilder]`), preview locale switching, `409`/`412` conflict handling, and `401` draft quarantine.
+  - `[useStudioOptionsState.ts:useStudioOptionsState]` & `[useStudioMode1Controller.ts:useStudioMode1Controller]`: Manage theme options, attached `site_global`/`theme:<id>` groups, lazy-loaded `appearance` Custom Options Pages, recursive public-preview sanitization, and per-domain baseline commits.
+- **Customizer Navigation & Options Sub-Router (`StudioCustomizerNav.tsx`, `StudioOptionsPanel.tsx`, `studioOptionsSections.ts`):**
+  - `[StudioCustomizerNav.tsx:StudioCustomizerNav]`: Renders Mode 1 root & sub-panels (`'root'`, `'identity'`, `'options'`, `'menus'`, `'reading'`, `'templates'`), delegating `'options'` to `[StudioOptionsPanel.tsx:StudioOptionsPanel]` (3-level zero-accordion drill-down over Global site options, Theme options, and `appearance` Custom Options Pages via `[studioOptionsSections.ts:partitionFieldSections]`), grouped template targets, and `[../builder/BuilderEditorCore.tsx:BuilderEditorCore]`.
 - **Menu Manager (`StudioMenuManager.tsx`):**
   - `[StudioMenuManager.tsx:StudioMenuManager]`: Two-level sidebar editor for theme menu slot assignments (`getMenuSlots` / `putMenuSlots`) and menu/item CRUD (`createMenu`, `getMenu`, `updateMenu`, `deleteMenu`) with hierarchical indentation (up to depth 7) targeting published entries, public taxonomy terms, or external URLs.
 - **Sidebar Builder Controls (`StudioBlockTree.tsx`, `StudioBlockCatalog.tsx`, `StudioSidebarHeader.tsx`, `StudioSidebarFooter.tsx`):**

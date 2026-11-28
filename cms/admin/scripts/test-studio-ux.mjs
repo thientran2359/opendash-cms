@@ -393,18 +393,88 @@ test('setNodeMeta, cloneWithFreshNodeIds, and createStarterTemplateDocument roun
   assert.equal(Object.hasOwn(clearedMeta.blocks[0], 'meta'), false);
 });
 
-test('unified appearance routes redirect #/appearance/options and #/appearance/menus into Studio panels', async () => {
-  const routerSource = await readFile(new URL('../src/shell/router.ts', import.meta.url), 'utf8');
-  const { code: routerCode } = await transform(routerSource, { loader: 'ts', format: 'esm', target: 'es2022' });
-  const { parseAdminRoute } = await import(`data:text/javascript;base64,${Buffer.from(routerCode).toString('base64')}`);
+test('unified appearance routes redirect #/appearance/options and #/appearance/menus into canonical Studio sub-routes', async () => {
+  const { outputFiles: [routerOut] } = await build({
+    entryPoints: [fileURLToPath(new URL('../src/shell/router.ts', import.meta.url))],
+    bundle: true,
+    write: false,
+    platform: 'node',
+    format: 'esm',
+    target: 'es2022',
+  });
+  const { parseAdminRoute } = await import(`data:text/javascript;base64,${Buffer.from(routerOut.text).toString('base64')}`);
 
   const optsRoute = parseAdminRoute('#/appearance/options');
   assert.equal(optsRoute.view, 'studio');
-  assert.equal(optsRoute.studioPanel, 'theme-options');
-  assert.equal(optsRoute.redirectHash, '#/studio?panel=theme-options');
+  assert.equal(optsRoute.studioPanel, 'options');
+  assert.deepEqual(optsRoute.studioOptionsRoute, { kind: 'index' });
+  assert.equal(optsRoute.redirectHash, '#/studio/options');
 
   const menusRoute = parseAdminRoute('#/appearance/menus');
   assert.equal(menusRoute.view, 'studio');
   assert.equal(menusRoute.studioPanel, 'menus');
-  assert.equal(menusRoute.redirectHash, '#/studio?panel=menus');
+  assert.equal(menusRoute.redirectHash, '#/studio/menus');
+});
+
+test('partitionFieldSections, stripNonPublicPreviewValues, buildStudioHash, and resolveStudioBackTarget work cleanly', async () => {
+  const { outputFiles: [secOut] } = await build({
+    entryPoints: [fileURLToPath(new URL('../src/studio/studioOptionsSections.ts', import.meta.url))],
+    bundle: true,
+    write: false,
+    platform: 'node',
+    format: 'esm',
+    target: 'es2022',
+  });
+  const {
+    partitionFieldSections,
+    stripNonPublicPreviewValues,
+    buildStudioHash,
+    resolveStudioBackTarget,
+  } = await import(`data:text/javascript;base64,${Buffer.from(secOut.text).toString('base64')}`);
+
+  const globalFields = [
+    { type: 'accordion', key: 'acc_social_links', label: 'Social links' },
+    { type: 'url', key: 'social_facebook', label: 'Facebook', public: true },
+    { type: 'accordion', key: 'acc_brand_contact', label: 'Brand & Contact' },
+    { type: 'text', key: 'contact_phone', label: 'Phone', public: true },
+  ];
+  const sections = partitionFieldSections(globalFields, 'Global');
+  assert.equal(sections.length, 2);
+  assert.deepEqual(sections.map(s => s.key), ['acc_social_links', 'acc_brand_contact']);
+  assert.equal(sections[0].fields.some(f => f.type === 'accordion'), false);
+  assert.equal(sections[1].fields[0].key, 'contact_phone');
+
+  // Nested private/secret fields inside public Group/Repeater are stripped recursively
+  const specs = [
+    { type: 'text', key: 'headline', label: 'Headline', public: true },
+    { type: 'secret', key: 'api_key', label: 'API Key', public: true },
+    { type: 'text', key: 'private_note', label: 'Private', public: false },
+    {
+      type: 'group',
+      key: 'cta',
+      label: 'CTA',
+      public: true,
+      fields: [
+        { type: 'text', key: 'label', label: 'Label' },
+        { type: 'text', key: 'admin_token', label: 'Token', acl: { min_view_role: 'admin', public_exposure: 'private' } },
+      ],
+    },
+  ];
+  const safe = stripNonPublicPreviewValues(specs, {
+    headline: 'Hello',
+    api_key: 'sk-secret',
+    private_note: 'hidden',
+    cta: { label: 'Click', admin_token: 'leak' },
+  });
+  assert.deepEqual(safe, { headline: 'Hello', cta: { label: 'Click' } });
+
+  assert.equal(buildStudioHash('options', { kind: 'custom', pageKey: 'optheme_options', groupId: 'site:g1' }), '#/studio/options/custom/optheme_options/site%3Ag1');
+  assert.deepEqual(
+    resolveStudioBackTarget('options', { kind: 'custom', pageKey: 'optheme_options', groupId: 'site:g1' }, null, { themeSectionCount: 1, customGroupCount: 2 }),
+    { kind: 'custom_page', hash: '#/studio/options/custom/optheme_options' },
+  );
+  assert.deepEqual(
+    resolveStudioBackTarget('options', { kind: 'global', section: 'acc_social_links' }, null),
+    { kind: 'options', hash: '#/studio/options' },
+  );
 });
